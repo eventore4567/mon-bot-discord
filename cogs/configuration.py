@@ -639,6 +639,7 @@ class SetupView(discord.ui.View):
         self.logs_created: list[discord.TextChannel] = []
         self.managers: dict[int, str] = dict(existing_managers or {})
         self.security_choices: dict[str, int] = dict(existing_security or {field: 0 for field in AUTOMOD_TOGGLE_LABELS})
+        self.security_touched = False  # True dès qu'on clique un préréglage ou qu'on change le menu de filtres
         self.page = 0
         self.render_page()
 
@@ -853,6 +854,7 @@ class SetupView(discord.ui.View):
             automod_cog = self.bot.get_cog("Automod")
             if automod_cog:
                 automod_cog.automod_cache.pop(self.guild_id, None)
+            self.security_touched = True
             self.render_page()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
         return callback
@@ -867,6 +869,7 @@ class SetupView(discord.ui.View):
             automod_cog = self.bot.get_cog("Automod")
             if automod_cog:
                 automod_cog.automod_cache.pop(self.guild_id, None)
+            self.security_touched = True
             self.render_page()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
         return callback
@@ -885,7 +888,10 @@ class SetupView(discord.ui.View):
         await interaction.response.send_modal(SetupTextModal(self))
 
     async def _finish(self, interaction: discord.Interaction):
-        if not self.choices and not self.level_role_additions and not self.logs_created and not self.managers:
+        if (
+            not self.choices and not self.level_role_additions and not self.logs_created
+            and not self.managers and not self.security_touched
+        ):
             return await interaction.response.send_message("Vous n'avez rien configuré pour l'instant.", ephemeral=True)
         for field, value in self.choices.items():
             await self.bot.db.set_guild_config(self.guild_id, field, value)
@@ -898,8 +904,9 @@ class SetupView(discord.ui.View):
             lines.append(f"✅ {len(self.logs_created)} salon(s) de logs (déjà créés)")
         if self.managers:
             lines.append(f"✅ {len(self.managers)} gestionnaire(s) du bot (déjà enregistrés)")
-        active_filters = sum(1 for v in self.security_choices.values() if v)
-        lines.append(f"✅ Sécurité : {active_filters}/{len(AUTOMOD_TOGGLE_LABELS)} filtre(s) actif(s) (déjà enregistrés)")
+        if self.security_touched:
+            active_filters = sum(1 for v in self.security_choices.values() if v)
+            lines.append(f"✅ Sécurité : {active_filters}/{len(AUTOMOD_TOGGLE_LABELS)} filtre(s) actif(s) (déjà enregistrés)")
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(
