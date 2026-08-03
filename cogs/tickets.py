@@ -1,11 +1,15 @@
 """
 Cog TICKETS.
-/ticket /ticket-close /ticket-reopen /ticket-delete /ticket-claim /ticket-unclaim
+/ticket /ticket-close /ticket-reopen /ticket-claim /ticket-unclaim
 /ticket-add /ticket-remove /ticket-rename /ticket-priority /ticket-category
 /ticket-transcript /ticket-transfer /ticket-note /ticket-info /ticket-panel
 /ticket-stats /ticket-rating /ticket-remind /ticket-archive
+
+Fermer un ticket (bouton "Fermer", sans commande) programme automatiquement sa
+suppression après un court délai — plus besoin de commande dédiée pour supprimer.
 """
 
+import asyncio
 import io
 import discord
 from discord import app_commands
@@ -15,6 +19,72 @@ from utils import embeds, checks
 from database.db import now
 
 PRIORITIES = ["basse", "normale", "haute", "urgente"]
+TICKET_AUTO_DELETE_DELAY = 20  # secondes avant suppression automatique après fermeture
+
+
+TICKET_CATEGORIES = [
+    ("support", "🛠️", "Support technique", "Un bug ou un souci technique"),
+    ("facturation", "💳", "Facturation", "Une question sur un paiement / achat"),
+    ("signalement", "🚨", "Signalement", "Signaler un membre ou un problème"),
+    ("partenariat", "🤝", "Partenariat", "Une proposition de partenariat"),
+    ("autre", "❓", "Autre demande", "Tout ce qui ne rentre pas ailleurs"),
+]
+
+
+class TicketDetailsModal(discord.ui.Modal, title="🎫 Détails du ticket"):
+    """Formulaire affiché juste après le choix de la catégorie : on demande la priorité et une
+    description, pour que le staff ait tout de suite le contexte au lieu de devoir le redemander."""
+
+    priorite = discord.ui.TextInput(
+        label="Priorité (basse / normale / haute / urgente)",
+        placeholder="normale",
+        required=False,
+        max_length=10,
+    )
+    description = discord.ui.TextInput(
+        label="Décrivez votre problème en détail",
+        style=discord.TextStyle.paragraph,
+        placeholder="Expliquez votre demande le plus précisément possible...",
+        required=True,
+        max_length=1000,
+    )
+
+    def __init__(self, category: str):
+        super().__init__()
+        self.category = category
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cog: "Tickets" = interaction.client.get_cog("Tickets")
+        priority = (self.priorite.value or "normale").strip().lower()
+        if priority not in PRIORITIES:
+            priority = "normale"
+        await cog.create_ticket(
+            interaction,
+            category=self.category,
+            description=self.description.value.strip(),
+            priority=priority,
+        )
+
+
+class TicketCategorySelect(discord.ui.Select):
+    """Menu déroulant du panneau de tickets : on choisit d'abord la catégorie, puis un
+    formulaire (priorité + description) s'ouvre pour compléter la demande."""
+
+    def __init__(self):
+        options = [
+            discord.SelectOption(label=label, value=value, emoji=emoji, description=desc)
+            for value, emoji, label, desc in TICKET_CATEGORIES
+        ]
+        super().__init__(
+            placeholder="📂 Choisissez une catégorie pour ouvrir un ticket...",
+            options=options,
+            custom_id="ticket_panel_select",
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(TicketDetailsModal(category=self.values[0]))
 
 
 class TicketPanelView(discord.ui.View):
@@ -22,28 +92,30 @@ class TicketPanelView(discord.ui.View):
 
     def __init__(self):
         super().__init__(timeout=None)
-
-    @discord.ui.button(label="Créer un ticket", style=discord.ButtonStyle.primary, emoji="🎫", custom_id="ticket_panel_create")
-    async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cog: "Tickets" = interaction.client.get_cog("Tickets")
-        await cog.create_ticket(interaction, category="general")
+        self.add_item(TicketCategorySelect())
 
 
 class TicketControlView(discord.ui.View):
-    """Vue persistante affichée dans chaque salon de ticket (fermer / claim / transcript)."""
+    """Vue persistante affichée dans chaque salon de ticket (fermer / claim / transcript).
+    Fermer ne demande aucune commande : le bouton suffit, et programme la suppression automatique."""
 
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="ticket_close_btn")
+    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="ticket_close_btn", row=0)
     async def close_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog: "Tickets" = interaction.client.get_cog("Tickets")
         await cog.close_ticket(interaction, interaction.channel)
 
-    @discord.ui.button(label="Prendre en charge", style=discord.ButtonStyle.secondary, emoji="🙋", custom_id="ticket_claim_btn")
+    @discord.ui.button(label="Prendre en charge", style=discord.ButtonStyle.secondary, emoji="🙋", custom_id="ticket_claim_btn", row=0)
     async def claim_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog: "Tickets" = interaction.client.get_cog("Tickets")
         await cog.claim_ticket(interaction, interaction.channel, interaction.user)
+
+    @discord.ui.button(label="Transcript", style=discord.ButtonStyle.secondary, emoji="📄", custom_id="ticket_transcript_btn", row=0)
+    async def transcript_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog: "Tickets" = interaction.client.get_cog("Tickets")
+        await cog.send_transcript(interaction, interaction.channel)
 
 
 class Tickets(commands.Cog):
@@ -68,7 +140,13 @@ class Tickets(commands.Cog):
 
     # ---------------------------------------------------------------- CRÉATION
 
-    async def create_ticket(self, interaction: discord.Interaction, category: str = "general"):
+    async def create_ticket(
+        self,
+        interaction: discord.Interaction,
+        category: str = "general",
+        description: str | None = None,
+        priority: str = "normale",
+    ):
         guild = interaction.guild
         user = interaction.user
         await interaction.response.defer(ephemeral=True)
@@ -103,18 +181,20 @@ class Tickets(commands.Cog):
         )
 
         await self.bot.db.execute(
-            "INSERT INTO tickets (guild_id, channel_id, user_id, status, category, priority, created_at) VALUES (?, ?, ?, 'ouvert', ?, 'normale', ?)",
-            (guild.id, channel.id, user.id, category, now()),
+            "INSERT INTO tickets (guild_id, channel_id, user_id, status, category, priority, created_at) VALUES (?, ?, ?, 'ouvert', ?, ?, ?)",
+            (guild.id, channel.id, user.id, category, priority, now()),
         )
 
-        e = embeds.neutral("🎫 Nouveau ticket", f"Bonjour {user.mention}, un membre du staff vous répondra bientôt.\nDécrivez votre problème en détail.")
-        e.add_field(name="Catégorie", value=category, inline=True)
-        e.add_field(name="Priorité", value="normale", inline=True)
+        e = embeds.brand("🎫 Nouveau ticket", f"Bonjour {user.mention}, un membre du staff vous répondra bientôt.")
+        e.add_field(name="📂 Catégorie", value=category, inline=True)
+        e.add_field(name="🚦 Priorité", value=priority, inline=True)
+        if description:
+            e.add_field(name="📝 Description", value=description[:1000], inline=False)
         await channel.send(content=user.mention, embed=e, view=TicketControlView())
 
         await interaction.followup.send(embed=embeds.success(f"Votre ticket a été créé : {channel.mention}"), ephemeral=True)
 
-        log_e = embeds.neutral("🎫 Ticket ouvert", f"**Membre :** {user.mention}\n**Salon :** {channel.mention}")
+        log_e = embeds.neutral("🎫 Ticket ouvert", f"**Membre :** {user.mention}\n**Salon :** {channel.mention}\n**Catégorie :** {category}\n**Priorité :** {priority}")
         await self.log_action(guild, log_e)
 
     @commands.hybrid_command(name="ticket", description="Créer un nouveau ticket de support.")
@@ -141,7 +221,14 @@ class Tickets(commands.Cog):
     @commands.hybrid_command(name="ticket-panel", description="Poster le panneau de création de tickets dans ce salon.")
     @checks.is_owner_or_admin()
     async def ticket_panel(self, ctx: commands.Context):
-        e = embeds.neutral("🎫 Support - Ouvrir un ticket", "Cliquez sur le bouton ci-dessous pour créer un ticket privé avec l'équipe de support.")
+        e = embeds.brand(
+            "🎫 Support — Ouvrir un ticket",
+            "Choisissez une catégorie dans le menu ci-dessous pour ouvrir un ticket privé avec l'équipe "
+            "de support. Un court formulaire vous demandera ensuite la priorité et une description, pour "
+            "que le staff ait tout de suite le contexte.",
+        )
+        categories_list = "\n".join(f"{emoji} **{label}** — {desc}" for _, emoji, label, desc in TICKET_CATEGORIES)
+        e.add_field(name="📂 Catégories disponibles", value=categories_list, inline=False)
         msg = await ctx.send(embed=e, view=TicketPanelView())
         await self.bot.db.execute(
             "INSERT INTO ticket_panels (guild_id, channel_id, message_id) VALUES (?, ?, ?)",
@@ -160,9 +247,28 @@ class Tickets(commands.Cog):
             overwrite = channel.overwrites_for(owner)
             overwrite.send_messages = False
             await channel.set_permissions(owner, overwrite=overwrite)
-        await self._reply(interaction_or_ctx, embeds.success("🔒 Le ticket a été fermé. Utilisez `/ticket-reopen` pour le rouvrir ou `/ticket-delete` pour le supprimer."))
-        e = embeds.neutral("🔒 Ticket fermé", f"Salon : {channel.mention}")
+        await self._reply(
+            interaction_or_ctx,
+            embeds.success(
+                f"🔒 Le ticket a été fermé. Il sera supprimé automatiquement dans **{TICKET_AUTO_DELETE_DELAY} secondes** — "
+                "utilisez `+ticket-reopen` avant ça si vous changez d'avis."
+            ),
+        )
+        e = embeds.neutral("🔒 Ticket fermé", f"Salon : {channel.mention} (suppression automatique programmée)")
         await self.log_action(channel.guild, e)
+        # Suppression automatique : plus besoin de commande dédiée pour supprimer un ticket fermé.
+        asyncio.create_task(self._auto_delete(channel, ticket["id"]))
+
+    async def _auto_delete(self, channel: discord.TextChannel, ticket_id: int):
+        await asyncio.sleep(TICKET_AUTO_DELETE_DELAY)
+        current = await self.bot.db.fetchone("SELECT * FROM tickets WHERE id = ?", (ticket_id,))
+        if not current or current["status"] != "ferme":
+            return  # rouvert ou déjà supprimé entre-temps, on annule
+        await self.bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (ticket_id,))
+        try:
+            await channel.delete(reason="Ticket fermé : suppression automatique.")
+        except discord.HTTPException:
+            pass
 
     async def claim_ticket(self, interaction_or_ctx, channel: discord.TextChannel, staff: discord.Member):
         ticket = await self.get_ticket_by_channel(channel.id)
@@ -170,6 +276,24 @@ class Tickets(commands.Cog):
             return await self._reply(interaction_or_ctx, embeds.error("Ce salon n'est pas un ticket."))
         await self.bot.db.execute("UPDATE tickets SET claimed_by = ? WHERE id = ?", (staff.id, ticket["id"]))
         await self._reply(interaction_or_ctx, embeds.success(f"🙋 {staff.mention} a pris en charge ce ticket."))
+
+    async def send_transcript(self, interaction_or_ctx, channel: discord.TextChannel):
+        """Génère et envoie la transcription du salon. Utilisé à la fois par /ticket-transcript
+        et par le bouton "Transcript" du panneau de contrôle, pour ne pas dupliquer la logique."""
+        is_interaction = isinstance(interaction_or_ctx, discord.Interaction)
+        if is_interaction:
+            await interaction_or_ctx.response.defer()
+        lines = []
+        async for msg in channel.history(limit=1000, oldest_first=True):
+            lines.append(f"[{msg.created_at:%Y-%m-%d %H:%M}] {msg.author}: {msg.content}")
+        content = "\n".join(lines) or "Aucun message."
+        buffer = io.BytesIO(content.encode("utf-8"))
+        file = discord.File(buffer, filename=f"transcript-{channel.name}.txt")
+        embed = embeds.success("📄 Transcription générée.")
+        if is_interaction:
+            await interaction_or_ctx.followup.send(embed=embed, file=file)
+        else:
+            await interaction_or_ctx.send(embed=embed, file=file)
 
     async def _reply(self, target, embed: discord.Embed):
         if isinstance(target, discord.Interaction):
@@ -198,21 +322,6 @@ class Tickets(commands.Cog):
             overwrite.send_messages = True
             await ctx.channel.set_permissions(owner, overwrite=overwrite)
         await ctx.send(embed=embeds.success("🔓 Le ticket a été rouvert."))
-
-    @commands.hybrid_command(name="ticket-delete", description="Supprimer définitivement le ticket.", with_app_command=False)
-    @checks.has_permission_or_modrole("manage_channels")
-    async def ticket_delete(self, ctx: commands.Context):
-        ticket = await self.get_ticket_by_channel(ctx.channel.id)
-        if not ticket:
-            return await ctx.send(embed=embeds.error("Ce salon n'est pas un ticket."))
-        await ctx.send(embed=embeds.warning("🗑️ Ce salon sera supprimé dans 5 secondes..."))
-        await self.bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (ticket["id"],))
-        import asyncio
-        await asyncio.sleep(5)
-        try:
-            await ctx.channel.delete(reason=f"Ticket supprimé par {ctx.author}")
-        except discord.HTTPException:
-            pass
 
     @commands.hybrid_command(name="ticket-claim", description="Prendre en charge ce ticket.")
     @checks.has_permission_or_modrole("manage_channels")
@@ -273,14 +382,7 @@ class Tickets(commands.Cog):
     @commands.hybrid_command(name="ticket-transcript", description="Générer une transcription texte du ticket.")
     @checks.has_permission_or_modrole("manage_channels")
     async def ticket_transcript(self, ctx: commands.Context):
-        await ctx.defer() if ctx.interaction else None
-        lines = []
-        async for msg in ctx.channel.history(limit=1000, oldest_first=True):
-            lines.append(f"[{msg.created_at:%Y-%m-%d %H:%M}] {msg.author}: {msg.content}")
-        content = "\n".join(lines) or "Aucun message."
-        buffer = io.BytesIO(content.encode("utf-8"))
-        file = discord.File(buffer, filename=f"transcript-{ctx.channel.name}.txt")
-        await ctx.send(embed=embeds.success("📄 Transcription générée."), file=file)
+        await self.send_transcript(ctx, ctx.channel)
 
     @commands.hybrid_command(name="ticket-transfer", description="Transférer le ticket à un autre membre du staff.", with_app_command=False)
     @app_commands.describe(membre="Le nouveau membre du staff responsable")

@@ -1,8 +1,9 @@
 """
 Cog GIVEAWAYS / ÉVÉNEMENTS.
-/giveaway-create /giveaway-end /giveaway-reroll /giveaway-list /giveaway-cancel
-/giveaway-blacklist /giveaway-unblacklist /event-create /event-join /event-leave
-/event-list /event-cancel /tournament-create /tournament-join /tournament-start
+/giveaway-create (avec rôle requis, niveau requis, rôle exclu et rôle bonus)
+/giveaway-end /giveaway-reroll /giveaway-list /giveaway-cancel /giveaway-blacklist
+/giveaway-unblacklist /event-create /event-join /event-leave /event-list
+/event-cancel /tournament-create /tournament-join /tournament-start
 /tournament-list /announce
 """
 
@@ -13,6 +14,27 @@ from discord.ext import commands, tasks
 
 from utils import embeds, checks, helpers
 from database.db import now
+
+
+def weighted_draw(pool_with_weight: list[tuple[int, int]], k: int) -> list[int]:
+    """
+    Tire k gagnants uniques parmi une liste de (user_id, poids), sans remise,
+    en respectant les poids (un membre avec un rôle bonus a plus de "tickets"
+    mais ne peut jamais gagner deux fois dans le même giveaway).
+    """
+    remaining = list(pool_with_weight)
+    winners = []
+    for _ in range(min(k, len(remaining))):
+        total = sum(w for _, w in remaining)
+        r = random.uniform(0, total)
+        upto = 0.0
+        for i, (user_id, weight) in enumerate(remaining):
+            upto += weight
+            if upto >= r:
+                winners.append(user_id)
+                remaining.pop(i)
+                break
+    return winners
 
 
 class GiveawayView(discord.ui.View):
@@ -57,29 +79,62 @@ class Events(commands.Cog, name="Events"):
         if not giveaway:
             return await interaction.response.send_message("Ce giveaway n'est plus actif.", ephemeral=True)
 
+        member = interaction.user  # discord.Member dans un salon de serveur
+
+        # 1) Blacklist par membre (liste noire individuelle).
         blacklisted = await self.bot.db.fetchone(
             "SELECT * FROM giveaway_blacklist WHERE guild_id = ? AND user_id = ?",
-            (interaction.guild.id, interaction.user.id),
+            (interaction.guild.id, member.id),
         )
         if blacklisted:
-            return await interaction.response.send_message("Vous n'êtes pas autorisé à participer aux giveaways.", ephemeral=True)
+            return await interaction.response.send_message("🚫 Vous n'êtes pas autorisé à participer aux giveaways.", ephemeral=True)
+
+        # 2) Blacklist par rôle, définie directement à la création de CE giveaway
+        # (paramètre "role_exclu" de /giveaway-create).
+        if giveaway["excluded_role_id"]:
+            if any(r.id == giveaway["excluded_role_id"] for r in member.roles):
+                return await interaction.response.send_message(
+                    "🚫 Votre rôle vous empêche de participer à ce giveaway.", ephemeral=True
+                )
+
+        # 3) Rôle requis pour participer (optionnel, défini à la création du giveaway).
+        if giveaway["required_role_id"]:
+            if not any(r.id == giveaway["required_role_id"] for r in member.roles):
+                role = interaction.guild.get_role(giveaway["required_role_id"])
+                role_name = role.mention if role else "un rôle spécifique"
+                return await interaction.response.send_message(
+                    f"❌ Il faut avoir le rôle {role_name} pour participer à ce giveaway.", ephemeral=True
+                )
+
+        # 4) Niveau requis pour participer (optionnel).
+        if giveaway["required_level"]:
+            level_row = await self.bot.db.get_level(interaction.guild.id, member.id)
+            if level_row["level"] < giveaway["required_level"]:
+                return await interaction.response.send_message(
+                    f"❌ Il faut être au moins niveau **{giveaway['required_level']}** pour participer "
+                    f"(vous êtes niveau {level_row['level']}).",
+                    ephemeral=True,
+                )
 
         existing = await self.bot.db.fetchone(
             "SELECT * FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?",
-            (giveaway["id"], interaction.user.id),
+            (giveaway["id"], member.id),
         )
         if existing:
             await self.bot.db.execute(
                 "DELETE FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?",
-                (giveaway["id"], interaction.user.id),
+                (giveaway["id"], member.id),
             )
             return await interaction.response.send_message("❌ Vous ne participez plus à ce giveaway.", ephemeral=True)
 
         await self.bot.db.execute(
             "INSERT INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)",
-            (giveaway["id"], interaction.user.id),
+            (giveaway["id"], member.id),
         )
-        await interaction.response.send_message("🎉 Vous participez maintenant à ce giveaway !", ephemeral=True)
+        bonus_note = ""
+        if giveaway["bonus_role_id"] and any(r.id == giveaway["bonus_role_id"] for r in member.roles):
+            bonus_note = f" (votre rôle vous donne **{giveaway['bonus_entries']}x** plus de chances !)"
+        await interaction.response.send_message(f"🎉 Vous participez maintenant à ce giveaway !{bonus_note}", ephemeral=True)
 
     async def end_giveaway(self, giveaway_id: int):
         giveaway = await self.bot.db.fetchone("SELECT * FROM giveaways WHERE id = ?", (giveaway_id,))
@@ -102,8 +157,21 @@ class Events(commands.Cog, name="Events"):
                     pass
             return
 
-        pool = [e["user_id"] for e in entries]
-        winners = random.sample(pool, min(winners_count, len(pool)))
+        # Construit le tirage pondéré : un membre avec le rôle bonus configuré obtient
+        # plusieurs "tickets" dans le tirage, donc plus de chances de gagner, mais ne
+        # peut toujours gagner qu'une seule fois grâce au tirage sans remise.
+        bonus_role_id = giveaway["bonus_role_id"]
+        bonus_entries = giveaway["bonus_entries"] or 2
+        pool_with_weight = []
+        for entry in entries:
+            weight = 1
+            if bonus_role_id:
+                member = guild.get_member(entry["user_id"])
+                if member and any(r.id == bonus_role_id for r in member.roles):
+                    weight = bonus_entries
+            pool_with_weight.append((entry["user_id"], weight))
+
+        winners = weighted_draw(pool_with_weight, winners_count)
         mentions = ", ".join(f"<@{w}>" for w in winners)
 
         await self.bot.db.execute(
@@ -144,26 +212,62 @@ class Events(commands.Cog, name="Events"):
         prix="Le prix à gagner",
         duree="Durée du giveaway (ex: 10m, 1h, 1j)",
         gagnants="Nombre de gagnants (défaut 1)",
+        role_requis="(Optionnel) Rôle obligatoire pour participer",
+        niveau_requis="(Optionnel) Niveau minimum requis pour participer",
+        role_exclu="(Optionnel) Rôle interdit de participation (liste noire pour ce giveaway)",
+        role_bonus="(Optionnel) Rôle qui donne plus de chances de gagner",
+        entrees_bonus="(Optionnel) Multiplicateur de chances pour le rôle bonus (défaut 2 = double chance)",
     )
     @checks.is_owner_or_admin()
-    async def giveaway_create(self, ctx: commands.Context, prix: str, duree: str, gagnants: int = 1):
+    async def giveaway_create(
+        self,
+        ctx: commands.Context,
+        prix: str,
+        duree: str,
+        gagnants: int = 1,
+        role_requis: discord.Role = None,
+        niveau_requis: int = None,
+        role_exclu: discord.Role = None,
+        role_bonus: discord.Role = None,
+        entrees_bonus: int = 2,
+    ):
         seconds = helpers.parse_duration(duree)
         if not seconds:
             return await ctx.send(embed=embeds.error("Durée invalide. Exemple : `10m`, `1h`, `1j`."))
         if gagnants < 1:
             return await ctx.send(embed=embeds.error("Le nombre de gagnants doit être au moins 1."))
+        if entrees_bonus < 1:
+            entrees_bonus = 2
 
         end_at = now() + seconds
         e = embeds.neutral("🎉 GIVEAWAY 🎉", f"**Prix :** {prix}\n\nCliquez sur le bouton ci-dessous pour participer !")
         e.add_field(name="Se termine", value=f"<t:{end_at}:R>", inline=True)
         e.add_field(name="Gagnants", value=str(gagnants), inline=True)
         e.add_field(name="Organisé par", value=ctx.author.mention, inline=True)
+        if role_requis:
+            e.add_field(name="Rôle requis", value=role_requis.mention, inline=True)
+        if niveau_requis:
+            e.add_field(name="Niveau requis", value=str(niveau_requis), inline=True)
+        if role_exclu:
+            e.add_field(name="Rôle exclu", value=role_exclu.mention, inline=True)
+        if role_bonus:
+            e.add_field(name="Bonus de chances", value=f"{role_bonus.mention} ({entrees_bonus}x)", inline=True)
 
         msg = await ctx.send(embed=e, view=GiveawayView())
         await self.bot.db.execute(
-            "INSERT INTO giveaways (guild_id, channel_id, message_id, prize, winners_count, status, end_at, created_by, created_at) "
-            "VALUES (?, ?, ?, ?, ?, 'actif', ?, ?, ?)",
-            (ctx.guild.id, ctx.channel.id, msg.id, prix, gagnants, end_at, ctx.author.id, now()),
+            "INSERT INTO giveaways "
+            "(guild_id, channel_id, message_id, prize, winners_count, status, end_at, "
+            "required_role_id, required_level, excluded_role_id, bonus_role_id, bonus_entries, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, 'actif', ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                ctx.guild.id, ctx.channel.id, msg.id, prix, gagnants, end_at,
+                role_requis.id if role_requis else None,
+                niveau_requis,
+                role_exclu.id if role_exclu else None,
+                role_bonus.id if role_bonus else None,
+                entrees_bonus,
+                ctx.author.id, now(),
+            ),
         )
         if ctx.interaction:
             await ctx.send(embed=embeds.success("Giveaway créé !"), ephemeral=True)

@@ -1,7 +1,7 @@
 """
 Cog ÉCONOMIE.
 /balance /daily /work /rob /pay /leaderboard-money /shop /buy /inventory
-/sell /gamble /coinflip /deposit /withdraw /bank /give-money /reset-economy
+/sell /gamble /deposit /withdraw /bank /give-money /reset-economy
 """
 
 import random
@@ -193,24 +193,6 @@ class Economy(commands.Cog, name="Economy"):
         else:
             await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, -montant)
             await ctx.send(embed=embeds.error(f"🎰 Vous avez perdu **{montant} 🪙**."))
-
-    @commands.hybrid_command(name="coinflip", description="Pile ou face en pariant de l'argent.", with_app_command=False)
-    @app_commands.describe(montant="Le montant à parier", cote="pile ou face")
-    @app_commands.choices(cote=[app_commands.Choice(name="Pile", value="pile"), app_commands.Choice(name="Face", value="face")])
-    async def coinflip(self, ctx: commands.Context, montant: int, cote: str):
-        if montant <= 0:
-            return await ctx.send(embed=embeds.error("Le montant doit être positif."))
-        await self.bot.db.ensure_economy(ctx.guild.id, ctx.author.id)
-        bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
-        if bal["cash"] < montant:
-            return await ctx.send(embed=embeds.error("Vous n'avez pas assez d'argent."))
-        result = random.choice(["pile", "face"])
-        if result == cote:
-            await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, montant)
-            await ctx.send(embed=embeds.success(f"🪙 C'était **{result}** ! Vous gagnez {montant} 🪙."))
-        else:
-            await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, -montant)
-            await ctx.send(embed=embeds.error(f"🪙 C'était **{result}**. Vous perdez {montant} 🪙."))
 
     @commands.hybrid_command(name="deposit", description="Déposer de l'argent à la banque.", with_app_command=False)
     @app_commands.describe(montant="Le montant à déposer")

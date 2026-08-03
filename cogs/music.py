@@ -1,7 +1,7 @@
 """
 Cog MUSIQUE.
 /join /leave /play /pause /resume /skip /stop /queue /nowplaying /volume
-/loop /shuffle /remove-from-queue /clear-queue /playlist-save /playlist-load /seek
+/loop /shuffle /remove-from-queue /clear-queue /playlist-save /playlist-load
 """
 
 import asyncio
@@ -233,11 +233,6 @@ class Music(commands.Cog, name="Music"):
         state = self.get_state(ctx.guild.id)
         state.queue.extend(tracks)
         await ctx.send(embed=embeds.success(f"📂 Playlist **{nom}** chargée ({len(tracks)} titres ajoutés)."))
-
-    @commands.hybrid_command(name="seek", description="Avancer/reculer dans la musique n'est pas supporté (info).", with_app_command=False)
-    async def seek(self, ctx: commands.Context):
-        await ctx.send(embed=embeds.info("⚠️ La navigation dans une musique (seek) n'est pas supportée pour l'instant."))
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Music(bot))

@@ -1,7 +1,6 @@
 """
 Cog MINI-JEUX.
-/rps /guess-number /trivia /8ball /tictactoe /hangman /math-quiz /reaction-test
-/blackjack /slots /wordscramble
+/rps /guess-number /trivia /tictactoe /hangman /math-quiz /blackjack /slots
 """
 
 import random
@@ -11,12 +10,6 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, helpers
-
-EIGHT_BALL_ANSWERS = [
-    "Oui, absolument.", "Non, certainement pas.", "C'est probable.", "Difficile à dire.",
-    "Demande à nouveau plus tard.", "Je ne recommande pas de compter là-dessus.",
-    "Sans aucun doute.", "Mes sources disent non.", "Concentre-toi et redemande.",
-]
 
 TRIVIA_QUESTIONS = [
     ("Quelle est la capitale de la France ?", "paris"),
@@ -88,11 +81,6 @@ class Minigames(commands.Cog, name="Minigames"):
         else:
             await ctx.send(embed=embeds.error(f"❌ Mauvaise réponse. La bonne réponse était **{answer}**."))
 
-    @commands.hybrid_command(name="8ball", description="Poser une question à la boule magique.")
-    @app_commands.describe(question="Votre question")
-    async def eight_ball(self, ctx: commands.Context, *, question: str):
-        await ctx.send(embed=embeds.neutral("🎱 Boule magique", f"**Question :** {question}\n**Réponse :** {random.choice(EIGHT_BALL_ANSWERS)}"))
-
     @commands.hybrid_command(name="tictactoe", description="Jouer au morpion contre un autre membre.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre contre qui jouer")
     async def tictactoe(self, ctx: commands.Context, adversaire: discord.Member):
@@ -153,24 +141,6 @@ class Minigames(commands.Cog, name="Minigames"):
         except ValueError:
             await ctx.send(embed=embeds.error(f"❌ Ce n'est pas un nombre. La réponse était **{answer}**."))
 
-    @commands.hybrid_command(name="reaction-test", description="Tester votre temps de réaction.", with_app_command=False)
-    async def reaction_test(self, ctx: commands.Context):
-        await ctx.send(embed=embeds.info("👀 Préparez-vous... Réagissez avec ✅ dès que je poste le message !"))
-        await asyncio.sleep(random.uniform(2, 6))
-        start = asyncio.get_event_loop().time()
-        msg = await ctx.send("✅ **Cliquez maintenant !**")
-        await msg.add_reaction("✅")
-
-        def check(reaction, user):
-            return user.id == ctx.author.id and str(reaction.emoji) == "✅" and reaction.message.id == msg.id
-
-        try:
-            await self.bot.wait_for("reaction_add", check=check, timeout=10)
-            elapsed = asyncio.get_event_loop().time() - start
-            await ctx.send(embed=embeds.success(f"⚡ Temps de réaction : **{elapsed:.3f} secondes** !"))
-        except asyncio.TimeoutError:
-            await ctx.send(embed=embeds.warning("⏱️ Trop lent !"))
-
     @commands.hybrid_command(name="blackjack", description="Jouer au blackjack simplifié contre le bot.", with_app_command=False)
     async def blackjack(self, ctx: commands.Context):
         def draw():
@@ -220,26 +190,6 @@ class Minigames(commands.Cog, name="Minigames"):
             await ctx.send(embed=embeds.info(f"🎰 {text}\n👍 Presque !"))
         else:
             await ctx.send(embed=embeds.error(f"🎰 {text}\n❌ Perdu !"))
-
-    @commands.hybrid_command(name="wordscramble", description="Deviner un mot mélangé.", with_app_command=False)
-    async def wordscramble(self, ctx: commands.Context):
-        words = ["discord", "python", "ordinateur", "programmation", "serveur", "console"]
-        word = random.choice(words)
-        scrambled = "".join(random.sample(word, len(word)))
-        await ctx.send(embed=embeds.info(f"🔤 Remettez les lettres dans l'ordre : `{scrambled.upper()}` (20 secondes)"))
-
-        def check(m):
-            return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
-
-        try:
-            msg = await self.bot.wait_for("message", check=check, timeout=20)
-        except asyncio.TimeoutError:
-            return await ctx.send(embed=embeds.warning(f"⏱️ Temps écoulé ! Le mot était **{word}**."))
-        if msg.content.strip().lower() == word:
-            await ctx.send(embed=embeds.success("✅ Bonne réponse !"))
-        else:
-            await ctx.send(embed=embeds.error(f"❌ Faux. Le mot était **{word}**."))
-
 
 class TicTacToeButton(discord.ui.Button):
     def __init__(self, x: int, y: int):

@@ -1,8 +1,9 @@
 """
 Cog INTELLIGENCE ARTIFICIELLE.
-/ask /chat-reset /summarize /image-prompt /explain /rewrite /fact-check
+/sentrix /ask /chat-reset /summarize /image-prompt /explain /rewrite /fact-check
 """
 
+import re
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -35,6 +36,65 @@ class Ai(commands.Cog, name="Ai"):
             return resp.choices[0].message.content
         except Exception as exc:
             return f"__ERROR__{exc}"
+
+    async def ask_ai_with_confidence(self, prompt: str, history: list = None) -> tuple[str, int]:
+        """Comme ask_ai, mais demande aussi à l'IA un indice de confiance (1-10) sur sa réponse."""
+        client = self.client()
+        if not client:
+            return "__NO_KEY__", 0
+        messages = [{
+            "role": "system",
+            "content": (
+                "Tu es SentriX, l'assistant IA de ce serveur Discord. Réponds toujours en français, "
+                "de façon claire et concise, à n'importe quelle question. "
+                "Termine TOUJOURS ta réponse par une dernière ligne exactement au format "
+                "'CONFIANCE: X/10' (X = ton indice de confiance dans l'exactitude de ta réponse, entre 1 et 10)."
+            ),
+        }]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": prompt})
+        try:
+            resp = await client.chat.completions.create(model="gpt-4o-mini", messages=messages, max_tokens=600)
+            content = resp.choices[0].message.content or ""
+        except Exception as exc:
+            return f"__ERROR__{exc}", 0
+
+        confidence = 8
+        match = re.search(r"CONFIANCE\s*:\s*(\d{1,2})\s*/\s*10", content, re.IGNORECASE)
+        if match:
+            confidence = max(1, min(10, int(match.group(1))))
+            content = content[:match.start()].rstrip(" \n-")
+        return content, confidence
+
+    @commands.hybrid_command(
+        name="sentrix",
+        description="Demandez n'importe quoi à SentriX : l'IA du bot répond avec un indice de confiance.",
+    )
+    @app_commands.describe(question="Votre question, sur n'importe quel sujet")
+    async def sentrix(self, ctx: commands.Context, *, question: str):
+        if ctx.interaction:
+            await ctx.defer()
+        history = self.histories.get(ctx.author.id, [])
+        answer, confidence = await self.ask_ai_with_confidence(question, history)
+        if answer == "__NO_KEY__":
+            return await ctx.send(embed=embeds.error("Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur."))
+        if answer.startswith("__ERROR__"):
+            return await ctx.send(embed=embeds.error("Une erreur est survenue avec l'IA. Réessayez plus tard."))
+        history.append({"role": "user", "content": question})
+        history.append({"role": "assistant", "content": answer})
+        self.histories[ctx.author.id] = history[-10:]
+
+        e = embeds.brand("🧠 SentriX")
+        e.add_field(name="❓ Question", value=question[:1024], inline=False)
+        e.add_field(name="💬 Réponse", value=answer[:1000] or "…", inline=False)
+        e.add_field(
+            name="📡 Indice de confiance",
+            value=f"{embeds.bar(confidence, 10)}  **{confidence}/10**",
+            inline=False,
+        )
+        e.set_footer(text=f"SentriX AI • Demandé par {ctx.author}")
+        await ctx.send(embed=e)
 
     @commands.hybrid_command(name="ask", description="Poser une question à l'IA.")
     @app_commands.describe(question="Votre question pour l'IA")

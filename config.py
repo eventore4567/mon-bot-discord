@@ -21,12 +21,13 @@ DEFAULT_PREFIX = os.getenv("BOT_PREFIX", "+")
 DEFAULT_LANGUAGE = "fr"
 DATABASE_PATH = os.getenv("DATABASE_PATH", "database/bot.db")
 
-# Couleurs des embeds (thème cohérent dans tout le bot)
+# Couleurs des embeds (identité visuelle SentriX : violet électrique / futuriste)
 COLOR_SUCCESS = 0x57F287
 COLOR_ERROR = 0xED4245
 COLOR_WARNING = 0xFEE75C
 COLOR_INFO = 0x5865F2
-COLOR_NEUTRAL = 0x2B2D31
+COLOR_NEUTRAL = 0x5847EB
+COLOR_BRAND = 0x5847EB
 
 # Cooldown anti-spam global (par utilisateur, par commande) en secondes
 GLOBAL_COOLDOWN_RATE = 3

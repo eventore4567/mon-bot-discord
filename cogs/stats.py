@@ -1,7 +1,6 @@
 """
 Cog STATISTIQUES / DÉVELOPPEMENT.
-/bot-status /uptime /server-growth /command-stats /latency /shard-info
-/eval-safe /reload-cog /list-cogs /changelog /feedback /botinfo
+/bot-status /server-growth /command-stats /latency /changelog /feedback /botinfo
 """
 
 import time
@@ -10,8 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-import config
-from utils import embeds, checks
+from utils import embeds
 from database.db import now
 
 START_TIME = time.time()
@@ -37,13 +35,6 @@ class Stats(commands.Cog, name="Stats"):
         m, s = divmod(rem, 60)
         e.add_field(name="Uptime", value=f"{h}h {m}m {s}s", inline=True)
         await ctx.send(embed=e)
-
-    @commands.hybrid_command(name="uptime", description="Afficher depuis combien de temps le bot est en ligne.")
-    async def uptime(self, ctx: commands.Context):
-        uptime = int(time.time() - START_TIME)
-        h, rem = divmod(uptime, 3600)
-        m, s = divmod(rem, 60)
-        await ctx.send(embed=embeds.info(f"⏱️ Le bot est en ligne depuis **{h}h {m}m {s}s**."))
 
     @commands.hybrid_command(name="server-growth", description="Afficher la croissance des membres du serveur.", with_app_command=False)
     async def server_growth(self, ctx: commands.Context):
@@ -77,48 +68,9 @@ class Stats(commands.Cog, name="Stats"):
         else:
             await msg.edit(embed=e)
 
-    @commands.hybrid_command(name="shard-info", description="Afficher les informations de sharding.", with_app_command=False)
-    async def shard_info(self, ctx: commands.Context):
-        shard_count = self.bot.shard_count or 1
-        e = embeds.neutral("🧩 Informations de sharding")
-        e.add_field(name="Nombre de shards", value=shard_count, inline=True)
-        e.add_field(name="Shard actuel", value=(ctx.guild.shard_id if ctx.guild else 0), inline=True)
-        await ctx.send(embed=e)
-
-    @commands.hybrid_command(name="eval-safe", description="[Owner] Exécuter une expression Python simple (lecture seule).", with_app_command=False)
-    @app_commands.describe(expression="Expression Python à évaluer")
-    @checks.is_owner_or_admin()
-    async def eval_safe(self, ctx: commands.Context, *, expression: str):
-        if ctx.author.id not in config.OWNER_IDS:
-            return await ctx.send(embed=embeds.error("Seul le propriétaire du bot peut utiliser cette commande."))
-        allowed_names = {"bot": self.bot, "guild": ctx.guild, "len": len}
-        try:
-            result = eval(expression, {"__builtins__": {}}, allowed_names)
-        except Exception as exc:
-            return await ctx.send(embed=embeds.error(f"Erreur : `{exc}`"))
-        await ctx.send(embed=embeds.info(f"```py\n{result}\n```"))
-
-    @commands.hybrid_command(name="reload-cog", description="[Owner] Recharger un module (cog) du bot.", with_app_command=False)
-    @app_commands.describe(nom="Le nom du module (ex: cogs.moderation)")
-    @checks.is_owner_or_admin()
-    async def reload_cog(self, ctx: commands.Context, nom: str):
-        if ctx.author.id not in config.OWNER_IDS:
-            return await ctx.send(embed=embeds.error("Seul le propriétaire du bot peut utiliser cette commande."))
-        try:
-            await self.bot.reload_extension(nom)
-        except Exception as exc:
-            return await ctx.send(embed=embeds.error(f"Échec du rechargement : `{exc}`"))
-        await ctx.send(embed=embeds.success(f"Module `{nom}` rechargé avec succès."))
-
-    @commands.hybrid_command(name="list-cogs", description="Lister les modules (cogs) chargés.", with_app_command=False)
-    @checks.is_owner_or_admin()
-    async def list_cogs(self, ctx: commands.Context):
-        names = ", ".join(f"`{name}`" for name in self.bot.cogs.keys())
-        await ctx.send(embed=embeds.neutral("🧩 Modules chargés", names or "Aucun"))
-
     @commands.hybrid_command(name="changelog", description="Afficher les dernières nouveautés du bot.", with_app_command=False)
     async def changelog(self, ctx: commands.Context):
-        e = embeds.neutral("📋 Changelog", "Version actuelle : **1.0**\n- Lancement initial du bot avec ~260 commandes.\n- Support complet slash (/) et préfixe (+).")
+        e = embeds.neutral("📋 Changelog", "Version actuelle : **1.1**\n- Assistant de configuration `/setup` en un clic.\n- Optimisations pour les gros serveurs.\n- Support complet slash (/) et préfixe (+).")
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="feedback", description="Envoyer un retour aux développeurs du bot.", with_app_command=False)

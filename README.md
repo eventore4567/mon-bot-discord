@@ -32,13 +32,52 @@ Utilisez l'**OAuth2 URL Generator** (onglet OAuth2 > URL Generator) :
 - Scopes : `bot`, `applications.commands`
 - Permissions : `Administrator` (recommandé pour un fonctionnement complet)
 
+## Identité visuelle
+
+Tous les embeds partagent désormais un style cohérent : violet électrique de marque, avatar du bot dans le footer, et des jauges visuelles (🟪) pour l'XP ou l'indice de confiance de l'IA.
+
+- **`/sentrix <question>`** : posez n'importe quelle question à l'IA du bot ; elle répond en français avec un indice de confiance affiché sous forme de jauge (1 à 10).
+- **Panneau de tickets amélioré** : cliquer sur "Créer un ticket" ouvre un formulaire (catégorie, priorité, description) au lieu d'un simple bouton, pour que le staff ait tout de suite le contexte.
+- **Fermeture de ticket** : le bouton "Fermer" suffit, aucune commande requise ; le salon se supprime automatiquement 20 secondes après (annulable avec `+ticket-reopen`).
+- **`/create-logs`** : crée et configure automatiquement un salon de logs privé en une seule commande, sans réglage manuel.
+
+## Configuration en un clic
+
+Plutôt que de taper une dizaine de commandes une par une, lancez simplement :
+
+```
+/setup
+```
+
+Un message avec des menus déroulants apparaît pour choisir votre rôle staff, votre salon de logs, votre salon de bienvenue et votre rôle automatique — tout en un seul endroit. C'est la façon la plus rapide de démarrer.
+
 ## Commandes
 
 - Toutes les commandes fonctionnent avec `/` (slash) **ou** avec le préfixe `+` (ex: `+ban @membre`).
-- Discord limite les bots à 100 commandes slash globales. Ce bot en expose ~83 en slash ; **toutes** les commandes (y compris celles non exposées en `/`) fonctionnent avec `+`, sans exception.
+- Discord limite les bots à 100 commandes slash globales. Ce bot en expose 81 en slash ; **toutes** les commandes (y compris celles non exposées en `/`) fonctionnent avec `+`, sans exception.
 - Utilisez `/help` ou `+help` pour voir la liste complète par catégorie.
+- Les commandes gadgets peu utiles (QR code, calculatrice, boule magique, etc.) ont été retirées pour garder le bot simple et rapide ; les commandes de blacklist/whitelist ont toutes été conservées.
 
 Catégories : Modération, Sécurité/AutoMod, Tickets, Configuration, Utilitaires, Intelligence Artificielle, Économie, Niveaux/Communauté, Mini-jeux, Musique, Giveaways/Événements, Vérification/Rôles, Statistiques/Développement.
+
+## Sécurité renforcée
+
+- **`/antinuke`** : protège contre un compte compromis (staff, ou même un rôle piraté) qui tenterait de détruire le serveur. Si quelqu'un supprime plusieurs salons/rôles ou bannit plusieurs membres en moins de 30 secondes, le bot lui retire immédiatement ses rôles à risque, l'expulse si possible, et alerte le propriétaire du serveur en message privé. Activé par défaut avec `/security-level`.
+- **`/antinuke-whitelist-add`** : exempte un membre de confiance (vous-même, un co-admin) de cette protection.
+- **`/antiraid`** : en plus de l'alerte, relève automatiquement le niveau de vérification du serveur dès qu'un afflux massif de nouveaux membres est détecté, ce qui bloque immédiatement les faux comptes.
+- **`/lockdown-server`** et **`/unlock-server`** : verrouillent/déverrouillent tous les salons textuels en une commande, pour une réaction manuelle immédiate en cas d'urgence.
+
+Pour un serveur sensible, activez `/security-level` sur **Élevé** et ajoutez tous vos administrateurs de confiance à la liste blanche anti-nuke avec `/antinuke-whitelist-add`.
+
+## Tenir sur un gros serveur (20 000+ membres)
+
+Le bot a été optimisé pour les grosses communautés :
+- Base de données en mode **WAL** (lectures/écritures simultanées sans blocage).
+- Index sur toutes les colonnes fréquemment interrogées (tickets, giveaways, avertissements...).
+- Le préfixe de chaque serveur est mis en cache en mémoire pour ne pas interroger la base à chaque message.
+- `/roleall` traite les membres progressivement (impossible d'attribuer un rôle à 20 000 personnes instantanément à cause des limites de débit de Discord — comptez quelques minutes).
+
+Pour un serveur de cette taille, un hébergement 24/7 (voir section Hébergement) est fortement recommandé plutôt qu'un Mac personnel.
 
 ## Sécurité
 
@@ -95,3 +134,4 @@ discord-bot/
 | Erreur de certificat SSL au démarrage | Sur Mac, lancez `/Applications/Python 3.x/Install Certificates.command`. |
 | Une commande `/` n'apparaît pas | Attendez quelques minutes (synchronisation Discord) ou utilisez-la avec `+`. |
 | Le bot ne répond à rien | Vérifiez que le terminal est toujours ouvert et qu'aucune erreur n'apparaît au démarrage. |
+| Le bot semble lent (délai à l'envoi d'un message) | Si le dossier `discord-bot` se trouve dans **Documents** ou **Bureau** avec l'option "Synchronisation iCloud Drive du Bureau et Documents" activée sur le Mac, chaque écriture dans la base de données passe par iCloud et devient très lente. Déplacez le dossier ailleurs (par ex. `~/discord-bot`, en dehors de Documents/Bureau) pour un fonctionnement normal. |

@@ -24,12 +24,18 @@ CREATE TABLE IF NOT EXISTS guild_config (
     rules_channel INTEGER,
     verification_channel INTEGER,
     verification_role INTEGER,
+    verify_role INTEGER,
     security_level TEXT DEFAULT 'moyen',
     xp_multiplier REAL DEFAULT 1.0,
     xp_channel_disabled TEXT DEFAULT '',
     level_message TEXT,
     ticket_category INTEGER,
-    ticket_log_channel INTEGER
+    ticket_log_channel INTEGER,
+    autorole INTEGER,
+    level_channel INTEGER,
+    suggest_channel INTEGER,
+    announce_channel INTEGER,
+    giveaway_channel INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS warnings (
@@ -79,7 +85,14 @@ CREATE TABLE IF NOT EXISTS automod_settings (
     antiraid INTEGER DEFAULT 0,
     antibot INTEGER DEFAULT 0,
     antiaccount INTEGER DEFAULT 0,
-    antiscam INTEGER DEFAULT 0
+    antiscam INTEGER DEFAULT 0,
+    antinuke INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS antinuke_whitelist (
+    guild_id INTEGER,
+    user_id INTEGER,
+    PRIMARY KEY (guild_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS disabled_commands (
@@ -125,7 +138,7 @@ CREATE TABLE IF NOT EXISTS ticket_panels (
 CREATE TABLE IF NOT EXISTS economy (
     guild_id INTEGER,
     user_id INTEGER,
-    balance INTEGER DEFAULT 0,
+    cash INTEGER DEFAULT 0,
     bank INTEGER DEFAULT 0,
     last_daily INTEGER DEFAULT 0,
     last_weekly INTEGER DEFAULT 0,
@@ -149,8 +162,9 @@ CREATE TABLE IF NOT EXISTS shop_items (
 CREATE TABLE IF NOT EXISTS inventory (
     guild_id INTEGER,
     user_id INTEGER,
-    item_id INTEGER,
-    quantity INTEGER DEFAULT 1
+    item_name TEXT,
+    quantity INTEGER DEFAULT 1,
+    UNIQUE (guild_id, user_id, item_name)
 );
 
 CREATE TABLE IF NOT EXISTS levels (
@@ -187,13 +201,17 @@ CREATE TABLE IF NOT EXISTS giveaways (
     channel_id INTEGER,
     message_id INTEGER,
     prize TEXT,
-    winners_count INTEGER,
-    end_time INTEGER,
-    host_id INTEGER,
-    ended INTEGER DEFAULT 0,
-    paused INTEGER DEFAULT 0,
-    requirement_role_id INTEGER,
-    bonus_role_id INTEGER
+    winners_count INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'actif',
+    end_at INTEGER,
+    winners TEXT,
+    required_role_id INTEGER,
+    required_level INTEGER,
+    excluded_role_id INTEGER,
+    bonus_role_id INTEGER,
+    bonus_entries INTEGER DEFAULT 2,
+    created_by INTEGER,
+    created_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS giveaway_entries (
@@ -215,9 +233,10 @@ CREATE TABLE IF NOT EXISTS events (
     message_id INTEGER,
     name TEXT,
     description TEXT,
-    event_time INTEGER,
-    host_id INTEGER,
-    cancelled INTEGER DEFAULT 0
+    start_at INTEGER,
+    status TEXT DEFAULT 'planifie',
+    created_by INTEGER,
+    created_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS event_participants (
@@ -230,8 +249,11 @@ CREATE TABLE IF NOT EXISTS tournaments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER,
     name TEXT,
+    max_participants INTEGER DEFAULT 16,
     status TEXT DEFAULT 'inscriptions',
-    bracket_data TEXT
+    bracket_data TEXT,
+    created_by INTEGER,
+    created_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS tournament_participants (
@@ -272,9 +294,10 @@ CREATE TABLE IF NOT EXISTS suggestions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER,
     user_id INTEGER,
+    message_id INTEGER,
     content TEXT,
     status TEXT DEFAULT 'en_attente',
-    timestamp INTEGER
+    created_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS bug_reports (
@@ -282,15 +305,17 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     guild_id INTEGER,
     user_id INTEGER,
     content TEXT,
-    timestamp INTEGER
+    created_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     channel_id INTEGER,
-    remind_time INTEGER,
-    content TEXT
+    guild_id INTEGER,
+    text TEXT,
+    trigger_at INTEGER,
+    created_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS pets (
@@ -353,6 +378,22 @@ CREATE TABLE IF NOT EXISTS backups (
 );
 """
 
+# Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de
+# plusieurs dizaines de milliers de membres reste rapide (sans ça, chaque requête
+# devient un balayage complet de table au fur et à mesure que les données grossissent).
+INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_warnings_guild_user ON warnings (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_tempactions_expires ON tempactions (expires_at);
+CREATE INDEX IF NOT EXISTS idx_tickets_guild_status ON tickets (guild_id, status);
+CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets (channel_id);
+CREATE INDEX IF NOT EXISTS idx_giveaways_status_end ON giveaways (status, end_at);
+CREATE INDEX IF NOT EXISTS idx_giveaways_message ON giveaways (message_id);
+CREATE INDEX IF NOT EXISTS idx_events_status_start ON events (status, start_at);
+CREATE INDEX IF NOT EXISTS idx_command_logs_guild_cmd ON command_logs (guild_id, command_name);
+CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders (trigger_at);
+CREATE INDEX IF NOT EXISTS idx_reaction_roles_msg ON reaction_roles (guild_id, message_id);
+"""
+
 
 class Database:
     """Petit wrapper async autour d'aiosqlite, partagé par tous les cogs."""
@@ -365,7 +406,15 @@ class Database:
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         self._conn = await aiosqlite.connect(self.path)
         self._conn.row_factory = aiosqlite.Row
+        # WAL = lectures/écritures concurrentes sans se bloquer mutuellement.
+        # synchronous=NORMAL = bon compromis vitesse/sécurité, recommandé avec WAL.
+        # Ces deux réglages sont ce qui permet à SQLite de tenir la charge sur un
+        # gros serveur (plusieurs milliers de membres actifs en même temps).
+        await self._conn.execute("PRAGMA journal_mode=WAL;")
+        await self._conn.execute("PRAGMA synchronous=NORMAL;")
+        await self._conn.execute("PRAGMA foreign_keys=ON;")
         await self._conn.executescript(SCHEMA)
+        await self._conn.executescript(INDEXES)
         await self._conn.commit()
 
     async def close(self):
@@ -442,7 +491,7 @@ class Database:
     async def add_balance(self, guild_id: int, user_id: int, amount: int):
         await self.ensure_economy(guild_id, user_id)
         await self.execute(
-            "UPDATE economy SET balance = balance + ? WHERE guild_id = ? AND user_id = ?",
+            "UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?",
             (amount, guild_id, user_id),
         )
 

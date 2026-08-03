@@ -1,17 +1,16 @@
 """
 Cog UTILITAIRES.
-/help /ping /avatar /banner /serverinfo /userinfo /roleinfo /channelinfo
+/help /ping /avatar /serverinfo /userinfo /roleinfo /channelinfo
 /invite /membercount /emoji-list /poll /remind /reminder-list /reminder-cancel
-/say /embed-create /translate /weather /calc /qrcode /suggest /report-bug
-/afk /roll /choose /timestamp /snipe
+/say /embed-create /translate /weather /suggest /report-bug
+/afk /roll /choose
 """
 
-import time
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, helpers
+from utils import embeds, helpers, checks
 from database.db import now
 
 CATEGORY_LABELS = {
@@ -30,15 +29,45 @@ CATEGORY_LABELS = {
     "Stats": "📊 Statistiques / Développement",
 }
 
+# Catégories entièrement réservées au staff : un membre normal ne les voit JAMAIS
+# dans /help, même si elles contiennent une commande techniquement publique.
+MEMBER_HIDDEN_CATEGORIES = {"Moderation", "Automod", "Tickets", "Configuration", "Utility", "Verification", "Stats"}
+
+# Décorateurs qui, sur une commande, signifient "réservé au staff". On les repère par
+# le nom qualifié de la fonction de vérification plutôt que par une liste de commandes
+# écrite à la main : ainsi le filtrage reste juste même quand des commandes sont
+# ajoutées ou déplacées plus tard.
+STAFF_CHECK_MARKERS = ("is_owner_or_admin", "has_permission_or_modrole", "has_permissions", "has_guild_permissions", "is_owner")
+
+
+def is_staff_command(cmd) -> bool:
+    for check in getattr(cmd, "checks", []):
+        qualname = getattr(check, "__qualname__", "") or ""
+        if any(marker in qualname for marker in STAFF_CHECK_MARKERS):
+            return True
+    return False
+
+
+def visible_commands(cog, is_staff: bool):
+    cmds = [c for c in cog.get_commands() if not c.hidden]
+    return cmds if is_staff else [c for c in cmds if not is_staff_command(c)]
+
+
+def category_visible(cog_name: str, cog, is_staff: bool) -> bool:
+    if not is_staff and cog_name in MEMBER_HIDDEN_CATEGORIES:
+        return False
+    return bool(visible_commands(cog, is_staff))
+
 
 class HelpSelect(discord.ui.Select):
-    def __init__(self, bot: commands.Bot, prefix: str):
+    def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool):
         self.bot = bot
         self.prefix = prefix
+        self.is_staff = is_staff
         options = [
             discord.SelectOption(label=label, value=cog_name)
             for cog_name, label in CATEGORY_LABELS.items()
-            if bot.get_cog(cog_name)
+            if bot.get_cog(cog_name) and category_visible(cog_name, bot.get_cog(cog_name), is_staff)
         ]
         super().__init__(placeholder="Choisissez une catégorie...", options=options)
 
@@ -48,14 +77,12 @@ class HelpSelect(discord.ui.Select):
         slash_names = {c.qualified_name for c in self.bot.tree.get_commands()}
 
         lines = []
-        for cmd in cog.get_commands():
-            if cmd.hidden:
-                continue
+        for cmd in visible_commands(cog, self.is_staff):
             marker = f"/ ou {self.prefix}" if cmd.qualified_name in slash_names else self.prefix
             lines.append(f"`{marker}{cmd.qualified_name}` — {cmd.description or 'Pas de description.'}")
 
         if not lines:
-            e = embeds.neutral(label, "Aucune commande dans cette catégorie.")
+            e = embeds.neutral(label, "Aucune commande visible dans cette catégorie pour vous.")
             return await interaction.response.edit_message(embed=e, view=self.view)
 
         chunks = [lines[i:i + 15] for i in range(0, len(lines), 15)] or [[]]
@@ -73,27 +100,24 @@ class HelpSelect(discord.ui.Select):
 
 
 class HelpView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, prefix: str):
+    def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool):
         super().__init__(timeout=120)
-        self.add_item(HelpSelect(bot, prefix))
+        self.add_item(HelpSelect(bot, prefix, is_staff))
 
 
 class Utility(commands.Cog, name="Utility"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.afk_users: dict[int, str] = {}
-        self.snipes: dict[int, dict] = {}
-
-    @commands.Cog.listener()
-    async def on_message_delete(self, message: discord.Message):
-        if message.author.bot:
-            return
-        self.snipes[message.channel.id] = {
-            "content": message.content,
-            "author": str(message.author),
-            "avatar": message.author.display_avatar.url,
-            "time": now(),
-        }
+    async def _user_is_staff(self, ctx: commands.Context) -> bool:
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            return False
+        import config
+        if ctx.author.id in config.OWNER_IDS:
+            return True
+        if ctx.author.guild_permissions.administrator:
+            return True
+        return await checks.is_mod_or_permission(ctx, "manage_guild")
 
     @commands.hybrid_command(name="help", description="Afficher la liste des commandes du bot.")
     @app_commands.describe(commande="Nom d'une commande précise (optionnel)")
@@ -103,9 +127,11 @@ class Utility(commands.Cog, name="Utility"):
             conf = await self.bot.db.get_guild_config(ctx.guild.id) if ctx.guild else None
             prefix = conf["prefix"] if conf and conf["prefix"] else "+"
 
+        is_staff = await self._user_is_staff(ctx)
+
         if commande:
             cmd = self.bot.get_command(commande)
-            if not cmd:
+            if not cmd or (is_staff_command(cmd) and not is_staff):
                 return await ctx.send(embed=embeds.error(f"Commande `{commande}` introuvable."))
             slash_names = {c.qualified_name for c in self.bot.tree.get_commands()}
             marker = f"/ ou {prefix}" if cmd.qualified_name in slash_names else prefix
@@ -115,15 +141,50 @@ class Utility(commands.Cog, name="Utility"):
                 e.add_field(name="Paramètres", value=params)
             return await ctx.send(embed=e)
 
-        total = sum(1 for _ in self.bot.commands)
-        e = embeds.neutral(
-            "📖 Menu d'aide",
-            f"Ce bot possède **{total} commandes** au total, réparties en catégories ci-dessous.\n\n"
-            f"⚠️ Discord limite les commandes `/` à 100 par bot. Pour ne rien manquer, "
-            f"**toutes les commandes fonctionnent aussi avec le préfixe `{prefix}`**, sans exception.\n\n"
-            f"Utilisez le menu déroulant pour choisir une catégorie."
+        # Construit la liste des catégories réellement visibles pour CET utilisateur.
+        # Les catégories de MEMBER_HIDDEN_CATEGORIES disparaissent totalement pour un
+        # membre normal, même si elles contiennent une commande techniquement publique.
+        public_categories, staff_categories = [], []
+        visible_total = 0
+        for cog_name, label in CATEGORY_LABELS.items():
+            cog = self.bot.get_cog(cog_name)
+            if not cog or not category_visible(cog_name, cog, is_staff):
+                continue
+            visible_total += len(visible_commands(cog, is_staff))
+            if cog_name in MEMBER_HIDDEN_CATEGORIES:
+                staff_categories.append(label)
+            else:
+                public_categories.append(label)
+
+        bot_name = self.bot.user.name if self.bot.user else "le bot"
+        server_name = ctx.guild.name if ctx.guild else "ce serveur"
+
+        e = embeds.brand(
+            f"📖 Bienvenue dans l'aide de {bot_name}",
+            f"Je suis l'assistant du serveur **{server_name}**. Je m'occupe de la modération, de la sécurité, "
+            f"des tickets de support, de l'économie virtuelle, des niveaux, de la musique et de plein de "
+            f"mini-jeux — pour que la communauté reste agréable et vivante.\n\n"
+            f"Utilisez le menu déroulant tout en bas pour explorer une catégorie en détail, ou tapez "
+            f"`{prefix}help <commande>` pour l'aide d'une commande précise."
         )
-        await ctx.send(embed=e, view=HelpView(self.bot, prefix))
+        if self.bot.user:
+            e.set_thumbnail(url=self.bot.user.display_avatar.url)
+
+        if public_categories:
+            e.add_field(name="🌍 Pour tout le monde", value="\n".join(f"• {c}" for c in public_categories), inline=True)
+        if is_staff and staff_categories:
+            e.add_field(name="🔒 Réservé au staff", value="\n".join(f"• {c}" for c in staff_categories), inline=True)
+
+        e.add_field(
+            name="ℹ️ Bon à savoir",
+            value=(
+                f"**{visible_total} commande(s)** disponibles pour vous, en `/` ou avec le préfixe `{prefix}` "
+                f"(les deux fonctionnent toujours, sans exception)."
+            ),
+            inline=False,
+        )
+
+        await ctx.send(embed=e, view=HelpView(self.bot, prefix, is_staff))
 
     @commands.hybrid_command(name="ping", description="Afficher la latence du bot.")
     async def ping(self, ctx: commands.Context):
@@ -135,17 +196,6 @@ class Utility(commands.Cog, name="Utility"):
         membre = membre or ctx.author
         e = embeds.neutral(f"Avatar de {membre}")
         e.set_image(url=membre.display_avatar.url)
-        await ctx.send(embed=e)
-
-    @commands.hybrid_command(name="banner", description="Afficher la bannière d'un membre.", with_app_command=False)
-    @app_commands.describe(membre="Le membre visé (optionnel)")
-    async def banner(self, ctx: commands.Context, membre: discord.Member = None):
-        membre = membre or ctx.author
-        user = await self.bot.fetch_user(membre.id)
-        if not user.banner:
-            return await ctx.send(embed=embeds.warning("Ce membre n'a pas de bannière."))
-        e = embeds.neutral(f"Bannière de {membre}")
-        e.set_image(url=user.banner.url)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="serverinfo", description="Afficher les informations du serveur.")
@@ -306,26 +356,6 @@ class Utility(commands.Cog, name="Utility"):
         e.add_field(name="Condition", value=data["weather"][0]["description"], inline=True)
         await ctx.send(embed=e)
 
-    @commands.hybrid_command(name="calc", description="Calculer une expression mathématique simple.")
-    @app_commands.describe(expression="L'expression à calculer (ex: 2+2*3)")
-    async def calc(self, ctx: commands.Context, *, expression: str):
-        allowed = set("0123456789+-*/(). ")
-        if not set(expression) <= allowed:
-            return await ctx.send(embed=embeds.error("Expression invalide. Utilisez uniquement des chiffres et + - * / ( )."))
-        try:
-            result = eval(expression, {"__builtins__": {}}, {})
-        except Exception:
-            return await ctx.send(embed=embeds.error("Impossible de calculer cette expression."))
-        await ctx.send(embed=embeds.info(f"🧮 `{expression}` = **{result}**"))
-
-    @commands.hybrid_command(name="qrcode", description="Générer un QR code à partir d'un texte.", with_app_command=False)
-    @app_commands.describe(texte="Le texte ou lien à encoder")
-    async def qrcode(self, ctx: commands.Context, *, texte: str):
-        url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={discord.utils.escape_markdown(texte)}"
-        e = embeds.neutral("🔳 QR Code généré")
-        e.set_image(url=url)
-        await ctx.send(embed=e)
-
     @commands.hybrid_command(name="suggest", description="Faire une suggestion pour le serveur.")
     @app_commands.describe(texte="Votre suggestion")
     async def suggest(self, ctx: commands.Context, *, texte: str):
@@ -390,25 +420,6 @@ class Utility(commands.Cog, name="Utility"):
         if len(choices) < 2:
             return await ctx.send(embed=embeds.error("Donnez au moins deux options séparées par des virgules."))
         await ctx.send(embed=embeds.info(f"🤔 Je choisis : **{random.choice(choices)}**"))
-
-    @commands.hybrid_command(name="timestamp", description="Générer un timestamp Discord à partir d'une durée.", with_app_command=False)
-    @app_commands.describe(duree="Durée depuis maintenant (ex: 1h, 2j)")
-    async def timestamp(self, ctx: commands.Context, duree: str):
-        seconds = helpers.parse_duration(duree)
-        if not seconds:
-            return await ctx.send(embed=embeds.error("Durée invalide."))
-        ts = int(time.time()) + seconds
-        await ctx.send(embed=embeds.info(f"`<t:{ts}:F>` → <t:{ts}:F> (<t:{ts}:R>)"))
-
-    @commands.hybrid_command(name="snipe", description="Afficher le dernier message supprimé dans ce salon.", with_app_command=False)
-    async def snipe(self, ctx: commands.Context):
-        data = self.snipes.get(ctx.channel.id)
-        if not data:
-            return await ctx.send(embed=embeds.warning("Aucun message supprimé récemment dans ce salon."))
-        e = embeds.neutral("🗑️ Message supprimé", data["content"] or "*[contenu vide/média]*")
-        e.set_footer(text=f"Par {data['author']}")
-        await ctx.send(embed=e)
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Utility(bot))

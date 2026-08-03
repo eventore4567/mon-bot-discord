@@ -50,11 +50,20 @@ async def get_prefix(bot: "BotAllInOne", message: discord.Message):
     default = config.DEFAULT_PREFIX
     if message.guild is None:
         return commands.when_mentioned_or(default)(bot, message)
+
+    # Sur un gros serveur, un message arrive plusieurs fois par seconde : on ne veut
+    # surtout pas interroger la base de données à chaque message. On garde donc le
+    # préfixe de chaque serveur en mémoire (rafraîchi uniquement par /setprefix).
+    cached = bot.prefix_cache.get(message.guild.id)
+    if cached is not None:
+        return commands.when_mentioned_or(cached)(bot, message)
+
     try:
         conf = await bot.db.get_guild_config(message.guild.id)
         prefix = conf["prefix"] if conf and conf["prefix"] else default
     except Exception:
         prefix = default
+    bot.prefix_cache[message.guild.id] = prefix
     return commands.when_mentioned_or(prefix)(bot, message)
 
 
@@ -70,6 +79,9 @@ class BotAllInOne(commands.Bot):
         self._cooldown_bucket = commands.CooldownMapping.from_cooldown(
             config.GLOBAL_COOLDOWN_RATE, config.GLOBAL_COOLDOWN_PER, commands.BucketType.user
         )
+        # Cache mémoire des préfixes par serveur (voir get_prefix ci-dessus) : évite
+        # une requête DB à chaque message sur un serveur actif.
+        self.prefix_cache: dict[int, str] = {}
 
     async def setup_hook(self):
         await self.db.connect()
@@ -125,6 +137,8 @@ class BotAllInOne(commands.Bot):
         await self.change_presence(
             activity=discord.Activity(type=discord.ActivityType.watching, name=f"{config.DEFAULT_PREFIX}help")
         )
+        # Identité visuelle : une fois connecté, on affiche l'avatar du bot dans le footer de tous les embeds.
+        embeds.set_footer_icon(self.user.display_avatar.url)
         for guild in self.guilds:
             await self.db.ensure_guild(guild.id)
 
@@ -168,13 +182,18 @@ class BotAllInOne(commands.Bot):
 
     async def on_command_completion(self, ctx: commands.Context):
         if ctx.guild:
-            try:
-                await self.db.execute(
-                    "INSERT INTO command_logs (guild_id, user_id, command_name, timestamp) VALUES (?, ?, ?, strftime('%s','now'))",
-                    (ctx.guild.id, ctx.author.id, ctx.command.qualified_name),
-                )
-            except Exception:
-                pass
+            # Écriture en tâche de fond : la réponse à la commande est déjà partie,
+            # pas la peine de faire attendre quoi que ce soit pour un simple journal.
+            asyncio.create_task(self._log_command(ctx))
+
+    async def _log_command(self, ctx: commands.Context):
+        try:
+            await self.db.execute(
+                "INSERT INTO command_logs (guild_id, user_id, command_name, timestamp) VALUES (?, ?, ?, strftime('%s','now'))",
+                (ctx.guild.id, ctx.author.id, ctx.command.qualified_name),
+            )
+        except Exception:
+            pass
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         error = getattr(error, "original", error)

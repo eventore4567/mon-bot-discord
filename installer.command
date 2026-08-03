@@ -28,10 +28,12 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# --- Crée le fichier .env s'il n'existe pas déjà ---
+# --- Crée le fichier .env s'il n'existe pas déjà (jamais de token en dur dans le script) ---
 if [ ! -f ".env" ]; then
-    cat > .env << 'EOF'
-DISCORD_TOKEN=MTUzMjAxMDQxNTk1MTgzOTI1Mg.GKze67.IlNIA7txxXQSIwwvXfVHAxtUKo9dtVJiXeOQ6w
+    echo "Collez votre token de bot Discord (Developer Portal > Bot > Reset Token), puis appuyez sur Entrée :"
+    read -r USER_TOKEN
+    cat > .env << EOF
+DISCORD_TOKEN=$USER_TOKEN
 BOT_PREFIX=+
 OPENAI_API_KEY=
 WEATHER_API_KEY=

@@ -1,10 +1,22 @@
-"""Générateurs d'embeds cohérents pour tout le bot (tous les messages sont en français)."""
+"""Générateurs d'embeds cohérents pour tout le bot (tous les messages sont en français).
+
+Identité visuelle : violet électrique (COLOR_BRAND), footer signé "SentriX", et un
+petit générateur de barres de progression façon jauge futuriste (xp, confiance IA, etc.)
+réutilisé par plusieurs cogs (levels, ai...).
+"""
 
 import discord
 from datetime import datetime, timezone
-from config import COLOR_SUCCESS, COLOR_ERROR, COLOR_WARNING, COLOR_INFO, COLOR_NEUTRAL
+from config import COLOR_SUCCESS, COLOR_ERROR, COLOR_WARNING, COLOR_INFO, COLOR_NEUTRAL, COLOR_BRAND
 
-FOOTER_TEXT = "Bot Discord Tout-en-Un"
+FOOTER_TEXT = "SentriX"
+FOOTER_ICON = None  # défini dynamiquement au démarrage (main.py) une fois le bot connecté
+
+
+def set_footer_icon(url: str) -> None:
+    """Appelé une fois depuis main.py (on_ready) pour afficher l'avatar du bot dans le footer partout."""
+    global FOOTER_ICON
+    FOOTER_ICON = url
 
 
 def _base(title: str, description: str, color: int) -> discord.Embed:
@@ -14,7 +26,10 @@ def _base(title: str, description: str, color: int) -> discord.Embed:
         color=color,
         timestamp=datetime.now(timezone.utc),
     )
-    embed.set_footer(text=FOOTER_TEXT)
+    if FOOTER_ICON:
+        embed.set_footer(text=FOOTER_TEXT, icon_url=FOOTER_ICON)
+    else:
+        embed.set_footer(text=FOOTER_TEXT)
     return embed
 
 
@@ -36,3 +51,15 @@ def info(description: str, title: str = "ℹ️ Information") -> discord.Embed:
 
 def neutral(title: str, description: str = "", color: int | None = None) -> discord.Embed:
     return _base(title, description, color if color else COLOR_NEUTRAL)
+
+
+def brand(title: str, description: str = "") -> discord.Embed:
+    """Embed signature SentriX (violet électrique), pour les écrans les plus visibles (aide, IA, tickets...)."""
+    return _base(title, description, COLOR_BRAND)
+
+
+def bar(value: float, maximum: float, length: int = 12, filled_char: str = "🟪", empty_char: str = "⬛") -> str:
+    """Jauge visuelle façon futuriste (utilisée pour l'XP, la confiance IA, etc.)."""
+    ratio = value / maximum if maximum else 0
+    filled = max(0, min(length, round(length * ratio)))
+    return filled_char * filled + empty_char * (length - filled)

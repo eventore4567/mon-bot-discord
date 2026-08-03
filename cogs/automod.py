@@ -2,11 +2,17 @@
 Cog SÉCURITÉ ET AUTOMOD.
 /blacklist-add /blacklist-remove /blacklist-list /blacklist-user /unblacklist-user
 /blacklist-users /antispam /antilink /antiinvite /antimention /anticaps /antiemoji
-/antiraid /antibot /antiaccount /antiscam /automod-status /whitelist-domain
-/unwhitelist-domain /security-level
+/antiraid /antibot /antiaccount /antiscam /antinuke /automod-status /whitelist-domain
+/unwhitelist-domain /security-level /antinuke-whitelist-add /antinuke-whitelist-remove
+/antinuke-whitelist-list /lockdown-server /unlock-server
 
 Un seul écouteur on_message applique tous les filtres actifs.
 Aucune adresse IP n'est collectée : seuls les identifiants Discord sont utilisés.
+
+L'anti-nuke (/antinuke) protège contre un compte compromis (staff ou même le bot)
+qui tenterait de détruire le serveur : suppression massive de salons/rôles ou
+bannissements en rafale. Si le seuil est dépassé, le responsable est immédiatement
+privé de ses rôles dangereux et expulsé, et le propriétaire du serveur est alerté.
 """
 
 import re
@@ -23,7 +29,7 @@ SCAM_KEYWORDS = ["free nitro", "nitro gratuit", "steamcommunity", "airdrop gratu
 
 TOGGLE_FIELDS = [
     "antispam", "antilink", "antiinvite", "antimention", "anticaps",
-    "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
+    "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam", "antinuke",
 ]
 
 TOGGLE_CHOICES = [
@@ -31,12 +37,24 @@ TOGGLE_CHOICES = [
     app_commands.Choice(name="Désactiver", value="off"),
 ]
 
+DANGEROUS_PERMS = ["administrator", "manage_guild", "manage_roles", "manage_channels", "ban_members", "kick_members"]
+NUKE_ACTION_WINDOW = 30  # secondes
+NUKE_ACTION_THRESHOLD = 3  # actions destructrices avant déclenchement
+
 
 class AutoMod(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.spam_tracker: dict[tuple[int, int], list[float]] = {}
         self.join_tracker: dict[int, list[float]] = {}
+        self.nuke_tracker: dict[tuple[int, int], list[float]] = {}
+        # Caches mémoire : évitent des allers-retours en base de données à CHAQUE
+        # message (ce qui ralentissait le bot sur un salon actif). Invalidés dès
+        # qu'une commande change un réglage.
+        self.automod_cache: dict[int, dict] = {}
+        self.blacklist_words_cache: dict[int, list[str]] = {}
+        self.blacklist_users_cache: dict[int, set[int]] = {}
+        self.whitelist_domains_cache: dict[int, list[str]] = {}
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
         conf = await self.bot.db.get_guild_config(guild.id)
@@ -48,9 +66,36 @@ class AutoMod(commands.Cog):
                 except discord.HTTPException:
                     pass
 
+    # ---------------------------------------------------------------- CACHES
+
+    async def get_automod_cached(self, guild_id: int) -> dict:
+        if guild_id not in self.automod_cache:
+            conf = await self.bot.db.get_automod(guild_id)
+            self.automod_cache[guild_id] = dict(conf) if conf else {}
+        return self.automod_cache[guild_id]
+
+    async def get_blacklist_words_cached(self, guild_id: int) -> list[str]:
+        if guild_id not in self.blacklist_words_cache:
+            rows = await self.bot.db.fetchall("SELECT word FROM blacklist_words WHERE guild_id = ?", (guild_id,))
+            self.blacklist_words_cache[guild_id] = [r["word"] for r in rows]
+        return self.blacklist_words_cache[guild_id]
+
+    async def get_blacklist_users_cached(self, guild_id: int) -> set:
+        if guild_id not in self.blacklist_users_cache:
+            rows = await self.bot.db.fetchall("SELECT user_id FROM blacklist_users WHERE guild_id = ?", (guild_id,))
+            self.blacklist_users_cache[guild_id] = {r["user_id"] for r in rows}
+        return self.blacklist_users_cache[guild_id]
+
+    async def get_whitelist_domains_cached(self, guild_id: int) -> list[str]:
+        if guild_id not in self.whitelist_domains_cache:
+            rows = await self.bot.db.fetchall("SELECT domain FROM whitelist_domains WHERE guild_id = ?", (guild_id,))
+            self.whitelist_domains_cache[guild_id] = [r["domain"] for r in rows]
+        return self.whitelist_domains_cache[guild_id]
+
     async def toggle(self, ctx: commands.Context, field: str, etat: str):
         value = 1 if etat == "on" else 0
         await self.bot.db.set_automod(ctx.guild.id, field, value)
+        self.automod_cache.pop(ctx.guild.id, None)
         state_text = "activé ✅" if value else "désactivé ❌"
         await ctx.send(embed=embeds.success(f"Le filtre **{field}** est maintenant {state_text}."))
 
@@ -126,6 +171,74 @@ class AutoMod(commands.Cog):
     async def antiscam(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antiscam", etat)
 
+    @commands.hybrid_command(name="antinuke", description="Activer/désactiver la protection anti-nuke (compte compromis).")
+    @app_commands.describe(etat="Activer ou désactiver cette protection")
+    @app_commands.choices(etat=TOGGLE_CHOICES)
+    @checks.is_owner_or_admin()
+    async def antinuke(self, ctx: commands.Context, etat: str):
+        await self.toggle(ctx, "antinuke", etat)
+
+    @commands.hybrid_command(name="antinuke-whitelist-add", description="Exempter un membre de confiance de l'anti-nuke.", with_app_command=False)
+    @app_commands.describe(membre="Le membre à exempter")
+    @checks.is_owner_or_admin()
+    async def antinuke_whitelist_add(self, ctx: commands.Context, membre: discord.Member):
+        await self.bot.db.execute(
+            "INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)", (ctx.guild.id, membre.id)
+        )
+        await ctx.send(embed=embeds.success(f"{membre.mention} est maintenant exempté de l'anti-nuke."))
+
+    @commands.hybrid_command(name="antinuke-whitelist-remove", description="Retirer un membre de la liste blanche anti-nuke.", with_app_command=False)
+    @app_commands.describe(membre="Le membre à retirer")
+    @checks.is_owner_or_admin()
+    async def antinuke_whitelist_remove(self, ctx: commands.Context, membre: discord.Member):
+        await self.bot.db.execute(
+            "DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
+        )
+        await ctx.send(embed=embeds.success(f"{membre.mention} a été retiré de la liste blanche anti-nuke."))
+
+    @commands.hybrid_command(name="antinuke-whitelist-list", description="Afficher les membres exemptés de l'anti-nuke.", with_app_command=False)
+    @checks.is_owner_or_admin()
+    async def antinuke_whitelist_list(self, ctx: commands.Context):
+        rows = await self.bot.db.fetchall("SELECT * FROM antinuke_whitelist WHERE guild_id = ?", (ctx.guild.id,))
+        if not rows:
+            return await ctx.send(embed=embeds.info("Aucun membre exempté (seul le propriétaire du serveur est protégé par défaut)."))
+        lines = [f"<@{r['user_id']}>" for r in rows]
+        await ctx.send(embed=embeds.neutral("🛡️ Liste blanche anti-nuke", "\n".join(lines)))
+
+    @commands.hybrid_command(name="lockdown-server", description="[Sécurité] Verrouiller tous les salons textuels du serveur.")
+    @checks.is_owner_or_admin()
+    async def lockdown_server(self, ctx: commands.Context):
+        await ctx.send(embed=embeds.warning("🔒 Verrouillage de tous les salons en cours, merci de patienter..."))
+        count = 0
+        for channel in ctx.guild.text_channels:
+            try:
+                await channel.set_permissions(
+                    ctx.guild.default_role, send_messages=False, reason=f"Verrouillage du serveur par {ctx.author}"
+                )
+                count += 1
+            except discord.Forbidden:
+                pass
+        e = embeds.error(f"🔒 Serveur verrouillé par {ctx.author.mention} ({count} salon(s)).")
+        await self.log_action(ctx.guild, e)
+        await ctx.send(embed=embeds.success(f"🔒 {count} salon(s) verrouillé(s). Utilisez `/unlock-server` pour déverrouiller."))
+
+    @commands.hybrid_command(name="unlock-server", description="[Sécurité] Déverrouiller tous les salons textuels du serveur.")
+    @checks.is_owner_or_admin()
+    async def unlock_server(self, ctx: commands.Context):
+        await ctx.send(embed=embeds.info("🔓 Déverrouillage en cours, merci de patienter..."))
+        count = 0
+        for channel in ctx.guild.text_channels:
+            try:
+                await channel.set_permissions(
+                    ctx.guild.default_role, send_messages=None, reason=f"Déverrouillage du serveur par {ctx.author}"
+                )
+                count += 1
+            except discord.Forbidden:
+                pass
+        e = embeds.success(f"🔓 Serveur déverrouillé par {ctx.author.mention} ({count} salon(s)).")
+        await self.log_action(ctx.guild, e)
+        await ctx.send(embed=embeds.success(f"🔓 {count} salon(s) déverrouillé(s)."))
+
     @commands.hybrid_command(name="automod-status", description="Afficher l'état de tous les filtres automod.")
     async def automod_status(self, ctx: commands.Context):
         conf = await self.bot.db.get_automod(ctx.guild.id)
@@ -146,12 +259,16 @@ class AutoMod(commands.Cog):
     async def security_level(self, ctx: commands.Context, niveau: str):
         await self.bot.db.set_guild_config(ctx.guild.id, "security_level", niveau)
         presets = {
-            "faible": {"antispam": 0, "antilink": 0, "antiinvite": 0, "antiraid": 0, "antiscam": 1},
-            "moyen": {"antispam": 1, "antilink": 0, "antiinvite": 1, "antiraid": 1, "antiscam": 1},
-            "eleve": {"antispam": 1, "antilink": 1, "antiinvite": 1, "antiraid": 1, "antiscam": 1, "antimention": 1, "antiaccount": 1},
+            "faible": {"antispam": 0, "antilink": 0, "antiinvite": 0, "antiraid": 0, "antiscam": 1, "antinuke": 1},
+            "moyen": {"antispam": 1, "antilink": 0, "antiinvite": 1, "antiraid": 1, "antiscam": 1, "antinuke": 1},
+            "eleve": {
+                "antispam": 1, "antilink": 1, "antiinvite": 1, "antiraid": 1, "antiscam": 1,
+                "antimention": 1, "antiaccount": 1, "antinuke": 1,
+            },
         }
         for field, value in presets.get(niveau, {}).items():
             await self.bot.db.set_automod(ctx.guild.id, field, value)
+        self.automod_cache.pop(ctx.guild.id, None)
         await ctx.send(embed=embeds.success(f"Niveau de sécurité réglé sur **{niveau}**. Les filtres associés ont été ajustés."))
 
     # ---------------------------------------------------------------- BLACKLIST MOTS
@@ -163,6 +280,7 @@ class AutoMod(commands.Cog):
         await self.bot.db.execute(
             "INSERT INTO blacklist_words (guild_id, word) VALUES (?, ?)", (ctx.guild.id, mot.lower())
         )
+        self.blacklist_words_cache.pop(ctx.guild.id, None)
         await ctx.send(embed=embeds.success(f"Le mot `{mot}` a été ajouté à la liste noire."))
 
     @commands.hybrid_command(name="blacklist-remove", description="Retirer un mot de la liste noire.", with_app_command=False)
@@ -172,6 +290,7 @@ class AutoMod(commands.Cog):
         await self.bot.db.execute(
             "DELETE FROM blacklist_words WHERE guild_id = ? AND word = ?", (ctx.guild.id, mot.lower())
         )
+        self.blacklist_words_cache.pop(ctx.guild.id, None)
         await ctx.send(embed=embeds.success(f"Le mot `{mot}` a été retiré de la liste noire."))
 
     @commands.hybrid_command(name="blacklist-list", description="Afficher la liste des mots interdits.")
@@ -196,6 +315,7 @@ class AutoMod(commands.Cog):
             "INSERT OR REPLACE INTO blacklist_users (guild_id, user_id, reason) VALUES (?, ?, ?)",
             (ctx.guild.id, membre.id, raison),
         )
+        self.blacklist_users_cache.pop(ctx.guild.id, None)
         await ctx.send(embed=embeds.success(f"{membre.mention} a été ajouté à la liste noire.\nRaison : {raison}"))
 
     @commands.hybrid_command(name="unblacklist-user", description="Retirer un utilisateur de la liste noire.", with_app_command=False)
@@ -205,6 +325,7 @@ class AutoMod(commands.Cog):
         await self.bot.db.execute(
             "DELETE FROM blacklist_users WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
+        self.blacklist_users_cache.pop(ctx.guild.id, None)
         await ctx.send(embed=embeds.success(f"{membre.mention} a été retiré de la liste noire."))
 
     @commands.hybrid_command(name="blacklist-users", description="Afficher tous les utilisateurs en liste noire.", with_app_command=False)
@@ -228,6 +349,7 @@ class AutoMod(commands.Cog):
             "INSERT OR IGNORE INTO whitelist_domains (guild_id, domain) VALUES (?, ?)",
             (ctx.guild.id, domaine.lower()),
         )
+        self.whitelist_domains_cache.pop(ctx.guild.id, None)
         await ctx.send(embed=embeds.success(f"Le domaine `{domaine}` est maintenant autorisé."))
 
     @commands.hybrid_command(name="unwhitelist-domain", description="Retirer un domaine de la liste blanche.", with_app_command=False)
@@ -237,6 +359,7 @@ class AutoMod(commands.Cog):
         await self.bot.db.execute(
             "DELETE FROM whitelist_domains WHERE guild_id = ? AND domain = ?", (ctx.guild.id, domaine.lower())
         )
+        self.whitelist_domains_cache.pop(ctx.guild.id, None)
         await ctx.send(embed=embeds.success(f"Le domaine `{domaine}` a été retiré de la liste blanche."))
 
     # ---------------------------------------------------------------- ÉCOUTEURS
@@ -248,15 +371,12 @@ class AutoMod(commands.Cog):
         if isinstance(message.author, discord.Member) and message.author.guild_permissions.administrator:
             return
 
-        conf = await self.bot.db.get_automod(message.guild.id)
+        conf = await self.get_automod_cached(message.guild.id)
         if not conf:
             return
 
-        blacklisted = await self.bot.db.fetchone(
-            "SELECT 1 FROM blacklist_users WHERE guild_id = ? AND user_id = ?",
-            (message.guild.id, message.author.id),
-        )
-        if blacklisted:
+        blacklisted_users = await self.get_blacklist_users_cached(message.guild.id)
+        if message.author.id in blacklisted_users:
             try:
                 await message.delete()
             except discord.HTTPException:
@@ -265,9 +385,9 @@ class AutoMod(commands.Cog):
 
         content_lower = message.content.lower()
 
-        words = await self.bot.db.fetchall("SELECT word FROM blacklist_words WHERE guild_id = ?", (message.guild.id,))
-        for row in words:
-            if row["word"] in content_lower:
+        words = await self.get_blacklist_words_cached(message.guild.id)
+        for word in words:
+            if word in content_lower:
                 return await self._delete_and_warn(message, "Mot interdit détecté.")
 
         if conf["antiscam"] and any(k in content_lower for k in SCAM_KEYWORDS):
@@ -277,10 +397,7 @@ class AutoMod(commands.Cog):
             return await self._delete_and_warn(message, "Lien d'invitation Discord non autorisé.")
 
         if conf["antilink"] and LINK_RE.search(message.content):
-            whitelisted_domains = await self.bot.db.fetchall(
-                "SELECT domain FROM whitelist_domains WHERE guild_id = ?", (message.guild.id,)
-            )
-            allowed = [d["domain"] for d in whitelisted_domains]
+            allowed = await self.get_whitelist_domains_cached(message.guild.id)
             if not any(domain in content_lower for domain in allowed):
                 return await self._delete_and_warn(message, "Lien non autorisé.")
 
@@ -324,7 +441,7 @@ class AutoMod(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        conf = await self.bot.db.get_automod(member.guild.id)
+        conf = await self.get_automod_cached(member.guild.id)
         if not conf:
             return
 
@@ -354,8 +471,119 @@ class AutoMod(commands.Cog):
             joins.append(t)
             self.join_tracker[member.guild.id] = [x for x in joins if t - x < 10]
             if len(self.join_tracker[member.guild.id]) >= 8:
-                e = embeds.warning("🚨 Raid potentiel détecté ! Un afflux massif de nouveaux membres a été observé. Vérifiez les nouveaux arrivants.")
+                e = embeds.warning("🚨 Raid potentiel détecté ! Un afflux massif de nouveaux membres a été observé.")
                 await self.log_action(member.guild, e)
+                # Réponse automatique : relever le niveau de vérification du serveur
+                # freine immédiatement les faux comptes fraîchement créés, sans avoir
+                # à verrouiller manuellement tous les salons.
+                try:
+                    if member.guild.verification_level != discord.VerificationLevel.highest:
+                        await member.guild.edit(
+                            verification_level=discord.VerificationLevel.highest,
+                            reason="AutoMod : raid détecté, niveau de vérification relevé automatiquement",
+                        )
+                        await self.log_action(
+                            member.guild,
+                            embeds.warning("🔒 Niveau de vérification du serveur relevé automatiquement suite au raid détecté."),
+                        )
+                except discord.Forbidden:
+                    pass
+                # Évite de redéclencher la même alerte à chaque nouvel arrivant tant que le raid dure.
+                self.join_tracker[member.guild.id] = []
+
+    # ---------------------------------------------------------------- ANTI-NUKE
+
+    async def record_nuke_action(self, guild: discord.Guild, actor_id: int) -> bool:
+        """Retourne True si le seuil d'actions destructrices est dépassé pour cet auteur."""
+        key = (guild.id, actor_id)
+        t = time.time()
+        actions = self.nuke_tracker.setdefault(key, [])
+        actions.append(t)
+        self.nuke_tracker[key] = [x for x in actions if t - x < NUKE_ACTION_WINDOW]
+        return len(self.nuke_tracker[key]) >= NUKE_ACTION_THRESHOLD
+
+    async def get_audit_actor(self, guild: discord.Guild, action: discord.AuditLogAction, target_id: int = None):
+        """Retrouve l'auteur d'une action récente via les logs d'audit (nécessite la permission adéquate)."""
+        try:
+            async for entry in guild.audit_logs(limit=5, action=action):
+                if (discord.utils.utcnow() - entry.created_at).total_seconds() > 15:
+                    continue
+                if target_id is None or (entry.target and getattr(entry.target, "id", None) == target_id):
+                    return entry.user
+        except discord.Forbidden:
+            return None
+        return None
+
+    async def is_antinuke_exempt(self, guild: discord.Guild, actor: discord.abc.User) -> bool:
+        if actor is None or actor.bot:
+            return True
+        if actor.id == guild.owner_id:
+            return True
+        row = await self.bot.db.fetchone(
+            "SELECT 1 FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (guild.id, actor.id)
+        )
+        return row is not None
+
+    async def punish_nuker(self, guild: discord.Guild, actor_id: int, reason: str):
+        member = guild.get_member(actor_id)
+        e = embeds.error(
+            f"🚨 **ANTI-NUKE DÉCLENCHÉ**\n**Membre :** <@{actor_id}> (`{actor_id}`)\n**Raison :** {reason}\n"
+            f"Ses rôles à risque ont été retirés et il a été expulsé du serveur si possible."
+        )
+        if member:
+            dangerous_roles = [
+                r for r in member.roles
+                if r != guild.default_role and any(getattr(r.permissions, p, False) for p in DANGEROUS_PERMS)
+            ]
+            try:
+                if dangerous_roles:
+                    await member.remove_roles(*dangerous_roles, reason=f"AutoMod anti-nuke : {reason}")
+            except discord.Forbidden:
+                pass
+            try:
+                await member.kick(reason=f"AutoMod anti-nuke : {reason}")
+            except discord.Forbidden:
+                pass
+        await self.log_action(guild, e)
+        try:
+            owner = guild.owner or await guild.fetch_member(guild.owner_id)
+            if owner:
+                await owner.send(embed=e)
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            pass
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        conf = await self.bot.db.get_automod(channel.guild.id)
+        if not conf or not conf["antinuke"]:
+            return
+        actor = await self.get_audit_actor(channel.guild, discord.AuditLogAction.channel_delete, channel.id)
+        if await self.is_antinuke_exempt(channel.guild, actor):
+            return
+        if await self.record_nuke_action(channel.guild, actor.id):
+            await self.punish_nuker(channel.guild, actor.id, "Suppression massive de salons")
+
+    @commands.Cog.listener()
+    async def on_guild_role_delete(self, role: discord.Role):
+        conf = await self.bot.db.get_automod(role.guild.id)
+        if not conf or not conf["antinuke"]:
+            return
+        actor = await self.get_audit_actor(role.guild, discord.AuditLogAction.role_delete, role.id)
+        if await self.is_antinuke_exempt(role.guild, actor):
+            return
+        if await self.record_nuke_action(role.guild, actor.id):
+            await self.punish_nuker(role.guild, actor.id, "Suppression massive de rôles")
+
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild: discord.Guild, user: discord.User):
+        conf = await self.bot.db.get_automod(guild.id)
+        if not conf or not conf["antinuke"]:
+            return
+        actor = await self.get_audit_actor(guild, discord.AuditLogAction.ban, user.id)
+        if await self.is_antinuke_exempt(guild, actor):
+            return
+        if await self.record_nuke_action(guild, actor.id):
+            await self.punish_nuker(guild, actor.id, "Bannissements massifs")
 
 
 async def setup(bot: commands.Bot):

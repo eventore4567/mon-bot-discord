@@ -1,9 +1,10 @@
 """
 Cog VÉRIFICATION / RÔLES.
 /verify-setup /verify-panel /reactionrole-add /reactionrole-remove /reactionrole-list
-/autorole-set /autorole-remove /giverole /removerole /roleall /massrole
+/giverole /removerole /roleall /massrole
 """
 
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -140,18 +141,8 @@ class Verification(commands.Cog, name="Verification"):
             except discord.Forbidden:
                 pass
 
-    @commands.hybrid_command(name="autorole-set", description="Définir le rôle attribué automatiquement à l'arrivée.", with_app_command=False)
-    @app_commands.describe(role="Le rôle à attribuer automatiquement")
-    @checks.is_owner_or_admin()
-    async def autorole_set(self, ctx: commands.Context, role: discord.Role):
-        await self.bot.db.set_guild_config(ctx.guild.id, "autorole", role.id)
-        await ctx.send(embed=embeds.success(f"Rôle automatique défini sur {role.mention}."))
-
-    @commands.hybrid_command(name="autorole-remove", description="Retirer le rôle automatique.", with_app_command=False)
-    @checks.is_owner_or_admin()
-    async def autorole_remove(self, ctx: commands.Context):
-        await self.bot.db.set_guild_config(ctx.guild.id, "autorole", None)
-        await ctx.send(embed=embeds.success("Rôle automatique retiré."))
+    # Note : configurer le rôle automatique se fait via /setautorole (cog Configuration)
+    # ou directement dans l'assistant /setup — pas besoin d'une commande en double ici.
 
     @commands.hybrid_command(name="giverole", description="Donner un rôle à un membre.")
     @app_commands.describe(membre="Le membre visé", role="Le rôle à donner")
@@ -180,22 +171,31 @@ class Verification(commands.Cog, name="Verification"):
     @app_commands.describe(role="Le rôle à attribuer à tout le monde")
     @checks.is_owner_or_admin()
     async def roleall(self, ctx: commands.Context, role: discord.Role):
-        await ctx.send(embed=embeds.info(f"⏳ Attribution du rôle {role.mention} à tous les membres, cela peut prendre du temps..."))
+        # Sur un gros serveur (dizaines de milliers de membres), on avertit que
+        # l'opération prendra du temps : Discord limite le rythme des requêtes,
+        # donc on ne peut pas attribuer un rôle à 20 000 membres instantanément.
+        estimate_min = max(1, ctx.guild.member_count // 1000)
+        await ctx.send(embed=embeds.info(
+            f"⏳ Attribution du rôle {role.mention} à ~{ctx.guild.member_count} membres. "
+            f"Cela peut prendre plusieurs minutes (estimation : ~{estimate_min} min) sur un gros serveur, merci de patienter..."
+        ))
         count = 0
-        for member in ctx.guild.members:
+        async for member in ctx.guild.fetch_members(limit=None):
             if role not in member.roles and not member.bot:
                 try:
                     await member.add_roles(role, reason=f"Attribution en masse par {ctx.author}")
                     count += 1
                 except discord.Forbidden:
                     pass
+                except discord.HTTPException:
+                    await asyncio.sleep(2)
         await ctx.send(embed=embeds.success(f"Rôle {role.mention} attribué à **{count}** membres."))
 
     @commands.hybrid_command(name="massrole", description="Ajouter ou retirer un rôle sur une liste de membres.", with_app_command=False)
     @app_commands.describe(role="Le rôle concerné", action="add ou remove", membres="Membres séparés par des espaces (mentions)")
     @app_commands.choices(action=[app_commands.Choice(name="Ajouter", value="add"), app_commands.Choice(name="Retirer", value="remove")])
     @checks.is_owner_or_admin()
-    async def massrole(self, ctx: commands.Context, role: discord.Role, action: str, membres: discord.Greedy[discord.Member]):
+    async def massrole(self, ctx: commands.Context, role: discord.Role, action: str, membres: commands.Greedy[discord.Member]):
         if not membres:
             return await ctx.send(embed=embeds.error("Mentionnez au moins un membre."))
         count = 0

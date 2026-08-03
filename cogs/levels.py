@@ -1,9 +1,10 @@
 """
 Cog NIVEAUX / COMMUNAUTÉ.
 /rank /leaderboard-levels /set-level-role /remove-level-role /level-roles
-/set-xp /add-xp /reset-levels /profile /set-bio /messages-count /voice-time
+/set-xp /add-xp /reset-levels /profile /me /set-bio /voice-time
 """
 
+import asyncio
 import random
 import time
 import discord
@@ -18,6 +19,12 @@ XP_COOLDOWN = 60
 
 def xp_for_level(level: int) -> int:
     return 5 * (level ** 2) + 50 * level + 100
+
+
+def xp_bar(current: int, needed: int, length: int = 12) -> str:
+    ratio = current / needed if needed else 0
+    filled = max(0, min(length, round(length * ratio)))
+    return "🟩" * filled + "⬛" * (length - filled)
 
 
 class Levels(commands.Cog, name="Levels"):
@@ -35,48 +42,58 @@ class Levels(commands.Cog, name="Levels"):
             return
         self.cooldowns[key] = time.time()
 
-        await self.bot.db.ensure_level(message.guild.id, message.author.id)
-        await self.bot.db.execute(
-            "UPDATE message_counts SET count = COALESCE(count, 0) + 1 WHERE guild_id = ? AND user_id = ?",
-            (message.guild.id, message.author.id),
-        )
-        await self.bot.db.execute(
-            "INSERT OR IGNORE INTO message_counts (guild_id, user_id, count) VALUES (?, ?, 1)",
-            (message.guild.id, message.author.id),
-        )
-        gained = random.randint(XP_MIN, XP_MAX)
-        row = await self.bot.db.get_level(message.guild.id, message.author.id)
-        new_xp = row["xp"] + gained
-        level = row["level"]
-        needed = xp_for_level(level)
-        leveled_up = False
-        while new_xp >= needed:
-            new_xp -= needed
-            level += 1
-            needed = xp_for_level(level)
-            leveled_up = True
-        await self.bot.db.execute(
-            "UPDATE levels SET xp = ?, level = ? WHERE guild_id = ? AND user_id = ?",
-            (new_xp, level, message.guild.id, message.author.id),
-        )
-        if leveled_up:
-            conf = await self.bot.db.get_guild_config(message.guild.id)
-            channel = message.guild.get_channel(conf["level_channel"]) if conf and conf["level_channel"] else message.channel
-            if channel:
-                try:
-                    await channel.send(embed=embeds.success(f"🎉 {message.author.mention} passe au niveau **{level}** !"))
-                except discord.HTTPException:
-                    pass
-            role_row = await self.bot.db.fetchone(
-                "SELECT * FROM level_roles WHERE guild_id = ? AND level = ?", (message.guild.id, level)
+        # On lance le traitement XP/niveau en tâche de fond : les écritures en base
+        # (et leur commit disque) ne doivent jamais retarder le traitement du message
+        # lui-même ni des autres commandes en cours. C'est ce qui causait la lenteur
+        # ressentie sur un serveur actif.
+        asyncio.create_task(self._process_xp(message))
+
+    async def _process_xp(self, message: discord.Message):
+        try:
+            # Une seule requête (UPSERT) au lieu de deux : moins d'allers-retours vers la base.
+            await self.bot.db.execute(
+                "INSERT INTO message_counts (guild_id, user_id, count) VALUES (?, ?, 1) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + 1",
+                (message.guild.id, message.author.id),
             )
-            if role_row:
-                role = message.guild.get_role(role_row["role_id"])
-                if role:
+            gained = random.randint(XP_MIN, XP_MAX)
+            # get_level() s'occupe déjà de créer la ligne si besoin, pas la peine de le faire deux fois.
+            row = await self.bot.db.get_level(message.guild.id, message.author.id)
+            new_xp = row["xp"] + gained
+            level = row["level"]
+            needed = xp_for_level(level)
+            leveled_up = False
+            while new_xp >= needed:
+                new_xp -= needed
+                level += 1
+                needed = xp_for_level(level)
+                leveled_up = True
+            await self.bot.db.execute(
+                "UPDATE levels SET xp = ?, level = ? WHERE guild_id = ? AND user_id = ?",
+                (new_xp, level, message.guild.id, message.author.id),
+            )
+            if leveled_up:
+                conf = await self.bot.db.get_guild_config(message.guild.id)
+                channel = message.guild.get_channel(conf["level_channel"]) if conf and conf["level_channel"] else message.channel
+                if channel:
                     try:
-                        await message.author.add_roles(role, reason=f"Niveau {level} atteint")
-                    except discord.Forbidden:
+                        await channel.send(embed=embeds.success(f"🎉 {message.author.mention} passe au niveau **{level}** !"))
+                    except discord.HTTPException:
                         pass
+                role_row = await self.bot.db.fetchone(
+                    "SELECT * FROM level_roles WHERE guild_id = ? AND level = ?", (message.guild.id, level)
+                )
+                if role_row:
+                    role = message.guild.get_role(role_row["role_id"])
+                    if role:
+                        try:
+                            await message.author.add_roles(role, reason=f"Niveau {level} atteint")
+                        except discord.Forbidden:
+                            pass
+        except Exception:
+            # Une erreur dans le traitement XP en tâche de fond ne doit jamais faire planter le bot.
+            import logging
+            logging.getLogger("discord-bot").exception("Erreur lors du traitement XP en tâche de fond")
 
     @commands.hybrid_command(name="rank", description="Afficher votre niveau ou celui d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
@@ -85,9 +102,15 @@ class Levels(commands.Cog, name="Levels"):
         await self.bot.db.ensure_level(ctx.guild.id, membre.id)
         row = await self.bot.db.get_level(ctx.guild.id, membre.id)
         needed = xp_for_level(row["level"])
+        rank_row = await self.bot.db.fetchone(
+            "SELECT COUNT(*) AS n FROM levels WHERE guild_id = ? AND (level > ? OR (level = ? AND xp > ?))",
+            (ctx.guild.id, row["level"], row["level"], row["xp"]),
+        )
+        rank = (rank_row["n"] if rank_row else 0) + 1
         e = embeds.neutral(f"📈 Niveau de {membre.display_name}")
         e.add_field(name="Niveau", value=row["level"], inline=True)
-        e.add_field(name="XP", value=f"{row['xp']}/{needed}", inline=True)
+        e.add_field(name="Classement", value=f"#{rank}", inline=True)
+        e.add_field(name="Progression XP", value=f"{xp_bar(row['xp'], needed)}\n{row['xp']}/{needed} XP", inline=False)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="leaderboard-levels", description="Afficher le classement des niveaux.")
@@ -176,6 +199,47 @@ class Levels(commands.Cog, name="Levels"):
         e.add_field(name="Bio", value=(bio_row["bio"] if bio_row and bio_row["bio"] else "Aucune bio définie."), inline=False)
         await ctx.send(embed=e)
 
+    @commands.hybrid_command(name="me", description="Afficher toutes vos statistiques personnelles sur ce serveur.")
+    @app_commands.describe(membre="Le membre visé (optionnel)")
+    async def me(self, ctx: commands.Context, membre: discord.Member = None):
+        membre = membre or ctx.author
+
+        await self.bot.db.ensure_level(ctx.guild.id, membre.id)
+        level_row = await self.bot.db.get_level(ctx.guild.id, membre.id)
+        needed = xp_for_level(level_row["level"])
+        rank_row = await self.bot.db.fetchone(
+            "SELECT COUNT(*) AS n FROM levels WHERE guild_id = ? AND (level > ? OR (level = ? AND xp > ?))",
+            (ctx.guild.id, level_row["level"], level_row["level"], level_row["xp"]),
+        )
+        rank = (rank_row["n"] if rank_row else 0) + 1
+
+        msg_row = await self.bot.db.fetchone(
+            "SELECT count FROM message_counts WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
+        )
+        voice_row = await self.bot.db.fetchone(
+            "SELECT seconds FROM voice_totals WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
+        )
+        seconds = voice_row["seconds"] if voice_row else 0
+        h, m = seconds // 3600, (seconds % 3600) // 60
+
+        await self.bot.db.ensure_economy(ctx.guild.id, membre.id)
+        bal = await self.bot.db.get_balance(ctx.guild.id, membre.id)
+
+        e = embeds.neutral(f"📋 Statistiques de {membre.display_name}")
+        e.set_thumbnail(url=membre.display_avatar.url)
+        e.add_field(name="📈 Niveau", value=str(level_row["level"]), inline=True)
+        e.add_field(name="🏆 Classement", value=f"#{rank}", inline=True)
+        e.add_field(name="💬 Messages envoyés", value=str(msg_row["count"] if msg_row else 0), inline=True)
+        e.add_field(name="✨ Progression XP", value=f"{xp_bar(level_row['xp'], needed)}\n{level_row['xp']}/{needed} XP", inline=False)
+        e.add_field(name="🔊 Temps en vocal", value=f"{h}h {m}m", inline=True)
+        e.add_field(name="💰 Argent", value=f"{bal['cash']} 🪙 (+ {bal['bank']} 🏦 en banque)", inline=True)
+        e.add_field(
+            name="📅 Sur le serveur depuis",
+            value=f"<t:{int(membre.joined_at.timestamp())}:D>" if membre.joined_at else "Inconnu",
+            inline=True,
+        )
+        await ctx.send(embed=e)
+
     @commands.hybrid_command(name="set-bio", description="Définir votre biographie de profil.", with_app_command=False)
     @app_commands.describe(texte="Votre biographie (200 caractères max)")
     async def set_bio(self, ctx: commands.Context, *, texte: str):
@@ -186,15 +250,6 @@ class Levels(commands.Cog, name="Levels"):
             (ctx.guild.id, ctx.author.id, texte),
         )
         await ctx.send(embed=embeds.success("Votre bio a été mise à jour."))
-
-    @commands.hybrid_command(name="messages-count", description="Afficher le nombre de messages envoyés par un membre.", with_app_command=False)
-    @app_commands.describe(membre="Le membre visé (optionnel)")
-    async def messages_count(self, ctx: commands.Context, membre: discord.Member = None):
-        membre = membre or ctx.author
-        row = await self.bot.db.fetchone(
-            "SELECT count FROM message_counts WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
-        )
-        await ctx.send(embed=embeds.info(f"💬 {membre.display_name} a envoyé **{row['count'] if row else 0}** messages."))
 
     @commands.hybrid_command(name="voice-time", description="Afficher le temps passé en vocal par un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé (optionnel)")
