@@ -18,7 +18,8 @@ class BotPermissionError(commands.CheckFailure):
 
 
 def is_owner_or_admin():
-    """Autorise uniquement les administrateurs du serveur ou les propriétaires du bot."""
+    """Autorise les administrateurs du serveur, les propriétaires du bot, ou un membre
+    ajouté comme "gestionnaire du bot" (via /setup → page Gestionnaires)."""
 
     async def predicate(ctx: commands.Context) -> bool:
         from config import OWNER_IDS
@@ -27,7 +28,9 @@ def is_owner_or_admin():
             return True
         if isinstance(ctx.author, discord.Member) and ctx.author.guild_permissions.administrator:
             return True
-        raise BotPermissionError("Vous devez être **administrateur** pour utiliser cette commande.")
+        if ctx.guild is not None and await ctx.bot.db.is_bot_manager(ctx.guild.id, ctx.author.id):
+            return True
+        raise BotPermissionError("Vous devez être **administrateur** (ou gestionnaire du bot) pour utiliser cette commande.")
 
     return commands.check(predicate)
 

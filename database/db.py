@@ -383,6 +383,14 @@ CREATE TABLE IF NOT EXISTS backups (
     data TEXT,
     created_at INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS bot_managers (
+    guild_id INTEGER,
+    user_id INTEGER,
+    added_by INTEGER,
+    added_at INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+);
 """
 
 # Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de
@@ -502,6 +510,30 @@ class Database:
         await self.execute(
             f"UPDATE automod_settings SET {field} = ? WHERE guild_id = ?",
             (value, guild_id),
+        )
+
+    # ---------- Gestionnaires du bot (membres autorisés à le configurer) ----------
+
+    async def add_bot_manager(self, guild_id: int, user_id: int, added_by: int):
+        await self.execute(
+            "INSERT OR IGNORE INTO bot_managers (guild_id, user_id, added_by, added_at) VALUES (?, ?, ?, ?)",
+            (guild_id, user_id, added_by, now()),
+        )
+
+    async def remove_bot_manager(self, guild_id: int, user_id: int):
+        await self.execute(
+            "DELETE FROM bot_managers WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+
+    async def is_bot_manager(self, guild_id: int, user_id: int) -> bool:
+        row = await self.fetchone(
+            "SELECT 1 FROM bot_managers WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        return row is not None
+
+    async def list_bot_managers(self, guild_id: int):
+        return await self.fetchall(
+            "SELECT user_id FROM bot_managers WHERE guild_id = ?", (guild_id,)
         )
 
     # ---------- Économie ----------

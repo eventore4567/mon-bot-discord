@@ -273,6 +273,16 @@ class Configuration(commands.Cog):
         e.add_field(name="Rôle auto", value=fmt_role(conf["autorole"]), inline=True)
         e.add_field(name="Catégorie tickets", value=fmt_channel(conf["ticket_category"]), inline=True)
         e.add_field(name="Logs tickets", value=fmt_channel(conf["ticket_log_channel"]), inline=True)
+
+        managers = await self.bot.db.list_bot_managers(ctx.guild.id)
+        if managers:
+            mentions = []
+            for row in managers:
+                member = ctx.guild.get_member(row["user_id"])
+                mentions.append(member.mention if member else f"<@{row['user_id']}>")
+            e.add_field(name="Gestionnaires du bot", value=", ".join(mentions), inline=False)
+        else:
+            e.add_field(name="Gestionnaires du bot", value="Aucun (seuls les administrateurs peuvent configurer le bot).", inline=False)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="config-reset", description="Réinitialiser toute la configuration du serveur.", with_app_command=False)
@@ -295,7 +305,13 @@ class Configuration(commands.Cog):
         un formulaire, sans jamais avoir à taper une commande. Découpé en pages
         pour rester lisible (Discord limite un message à 5 lignes de menus).
         """
-        view = SetupView(self.bot, ctx.guild.id, ctx.author.id)
+        rows = await self.bot.db.list_bot_managers(ctx.guild.id)
+        existing_managers = {}
+        for row in rows:
+            member = ctx.guild.get_member(row["user_id"])
+            existing_managers[row["user_id"]] = member.display_name if member else f"Membre {row['user_id']}"
+
+        view = SetupView(self.bot, ctx.guild.id, ctx.author.id, existing_managers=existing_managers)
         await ctx.send(embed=view.build_embed(), view=view)
 
     # ---------------------------------------------------------------- LOGS AUTOMATIQUES
@@ -398,7 +414,7 @@ class Configuration(commands.Cog):
 # Pour "channel", on peut préciser les types de salons acceptés (texte, catégorie...).
 SETUP_STEPS = [
     {
-        "title": "1/5 — Général",
+        "title": "1/6 — Général",
         "fields": [
             ("mod_role", "role", "🛡️ Rôle staff (modération)"),
             ("log_channel", "channel", "📝 Salon de logs (sanctions)"),
@@ -407,7 +423,7 @@ SETUP_STEPS = [
         ],
     },
     {
-        "title": "2/5 — Rôles & Tickets",
+        "title": "2/6 — Rôles & Tickets",
         "fields": [
             ("autorole", "role", "🎭 Rôle automatique à l'arrivée"),
             ("verify_role", "role", "✅ Rôle donné après vérification"),
@@ -416,7 +432,7 @@ SETUP_STEPS = [
         ],
     },
     {
-        "title": "3/5 — Salons annexes",
+        "title": "3/6 — Salons annexes",
         "fields": [
             ("level_channel", "channel", "📈 Annonces de passage de niveau"),
             ("suggest_channel", "channel", "💡 Suggestions"),
@@ -425,14 +441,19 @@ SETUP_STEPS = [
         ],
     },
     {
-        "title": "4/5 — Rôles de niveau",
+        "title": "4/6 — Rôles de niveau",
         "fields": [],
         "custom": "level_roles",
     },
     {
-        "title": "5/5 — Système de logs",
+        "title": "5/6 — Système de logs",
         "fields": [],
         "custom": "logs_setup",
+    },
+    {
+        "title": "6/6 — Gestionnaires du bot",
+        "fields": [],
+        "custom": "managers",
     },
 ]
 
@@ -510,7 +531,7 @@ class SetupView(discord.ui.View):
     texte. Rien n'est écrit en base tant qu'on n'a pas cliqué sur "Terminer".
     """
 
-    def __init__(self, bot: commands.Bot, guild_id: int, author_id: int):
+    def __init__(self, bot: commands.Bot, guild_id: int, author_id: int, existing_managers: dict | None = None):
         super().__init__(timeout=300)
         self.bot = bot
         self.guild_id = guild_id
@@ -518,6 +539,7 @@ class SetupView(discord.ui.View):
         self.choices: dict = {}
         self.level_role_additions: list[tuple[int, discord.Role]] = []
         self.logs_created: list[discord.TextChannel] = []
+        self.managers: dict[int, str] = dict(existing_managers or {})
         self.page = 0
         self.render_page()
 
@@ -555,6 +577,22 @@ class SetupView(discord.ui.View):
                 e.add_field(name=f"✅ Créés dans cette session ({len(self.logs_created)})", value=lines, inline=False)
             return e
 
+        if step.get("custom") == "managers":
+            e = embeds.neutral(
+                f"🧙 Assistant de configuration — {step['title']}",
+                "Ajoutez des membres de confiance qui pourront configurer le bot (utiliser `/setup`, "
+                "changer les rôles/salons, l'anti-nuke, etc.) **sans avoir besoin d'être administrateur** "
+                "du serveur.\n\n"
+                "Utilisez le menu **➕ Ajouter des gestionnaires** ci-dessous, ou **🗑️ Retirer un gestionnaire** "
+                "pour en enlever un. Chaque changement est enregistré immédiatement.",
+            )
+            if self.managers:
+                lines = "\n".join(f"<@{uid}>" for uid in self.managers)
+                e.add_field(name=f"✅ Gestionnaires actuels ({len(self.managers)})", value=lines, inline=False)
+            else:
+                e.add_field(name="Gestionnaires actuels", value="Aucun pour l'instant.", inline=False)
+            return e
+
         e = embeds.neutral(
             f"🧙 Assistant de configuration — {step['title']}",
             "Choisissez vos options avec les menus ci-dessous. Laissez vide ce que vous ne voulez pas configurer.\n"
@@ -577,6 +615,23 @@ class SetupView(discord.ui.View):
             logs_btn = discord.ui.Button(label="📡 Créer le système de logs", style=discord.ButtonStyle.primary, row=0)
             logs_btn.callback = self._create_logs_clicked
             self.add_item(logs_btn)
+        elif step.get("custom") == "managers":
+            add_select = discord.ui.UserSelect(
+                placeholder="➕ Ajouter des gestionnaires", min_values=0, max_values=10, row=0
+            )
+            add_select.callback = self._make_manager_add_callback(add_select)
+            self.add_item(add_select)
+            if self.managers:
+                remove_select = discord.ui.Select(
+                    placeholder="🗑️ Retirer un gestionnaire",
+                    options=[
+                        discord.SelectOption(label=name[:100], value=str(uid))
+                        for uid, name in list(self.managers.items())[:25]
+                    ],
+                    row=1,
+                )
+                remove_select.callback = self._make_manager_remove_callback(remove_select)
+                self.add_item(remove_select)
         else:
             for i, field in enumerate(step["fields"]):
                 key, kind, label = field[0], field[1], field[2]
@@ -632,6 +687,27 @@ class SetupView(discord.ui.View):
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
         return callback
 
+    def _make_manager_add_callback(self, select: discord.ui.UserSelect):
+        async def callback(interaction: discord.Interaction):
+            for user in select.values:
+                if user.bot:
+                    continue
+                await self.bot.db.add_bot_manager(self.guild_id, user.id, self.author_id)
+                self.managers[user.id] = user.display_name
+            self.render_page()
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        return callback
+
+    def _make_manager_remove_callback(self, select: discord.ui.Select):
+        async def callback(interaction: discord.Interaction):
+            if select.values:
+                user_id = int(select.values[0])
+                await self.bot.db.remove_bot_manager(self.guild_id, user_id)
+                self.managers.pop(user_id, None)
+            self.render_page()
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        return callback
+
     async def _go_prev(self, interaction: discord.Interaction):
         self.page -= 1
         self.render_page()
@@ -646,7 +722,7 @@ class SetupView(discord.ui.View):
         await interaction.response.send_modal(SetupTextModal(self))
 
     async def _finish(self, interaction: discord.Interaction):
-        if not self.choices and not self.level_role_additions and not self.logs_created:
+        if not self.choices and not self.level_role_additions and not self.logs_created and not self.managers:
             return await interaction.response.send_message("Vous n'avez rien configuré pour l'instant.", ephemeral=True)
         for field, value in self.choices.items():
             await self.bot.db.set_guild_config(self.guild_id, field, value)
@@ -657,6 +733,8 @@ class SetupView(discord.ui.View):
             lines.append(f"✅ {len(self.level_role_additions)} rôle(s) de niveau (déjà enregistrés)")
         if self.logs_created:
             lines.append(f"✅ {len(self.logs_created)} salon(s) de logs (déjà créés)")
+        if self.managers:
+            lines.append(f"✅ {len(self.managers)} gestionnaire(s) du bot (déjà enregistrés)")
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(
