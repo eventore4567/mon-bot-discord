@@ -70,7 +70,48 @@ class Stats(commands.Cog, name="Stats"):
 
     @commands.hybrid_command(name="changelog", description="Afficher les dernières nouveautés du bot.", with_app_command=False)
     async def changelog(self, ctx: commands.Context):
-        e = embeds.neutral("📋 Changelog", "Version actuelle : **1.1**\n- Assistant de configuration `/setup` en un clic.\n- Optimisations pour les gros serveurs.\n- Support complet slash (/) et préfixe (+).")
+        e = embeds.brand(
+            "📋 Changelog",
+            "Dernières nouveautés de SentriX (les plus récentes en premier) :",
+        )
+        e.add_field(
+            name="🆕 Récent",
+            value=(
+                "• `+addrole`/`+delrole` : raccourcis pour donner/retirer un rôle.\n"
+                "• Outils propriétaire : liste noire globale (`+bl`), statut personnalisé, "
+                "identité du bot, alias de commandes.\n"
+                "• `/create-server` : génère automatiquement toute une structure de serveur "
+                "(rôles, catégories, salons) selon un modèle au choix."
+            ),
+            inline=False,
+        )
+        e.add_field(
+            name="🛡️ Sécurité",
+            value=(
+                "• Anti-nuke : détection des renommages massifs et des élévations de permissions "
+                "suspectes, en plus des suppressions.\n"
+                "• Système de logs automatique (`/create-logs`, 7 salons dédiés)."
+            ),
+            inline=False,
+        )
+        e.add_field(
+            name="⚙️ Configuration",
+            value=(
+                "• `/setup` : assistant complet en plusieurs pages (rôles, salons, niveaux, logs, "
+                "gestionnaires du bot).\n"
+                "• Possibilité d'ajouter des membres autorisés à configurer le bot sans être admin."
+            ),
+            inline=False,
+        )
+        e.add_field(
+            name="🎫 Tickets & IA",
+            value=(
+                "• Panneau de tickets avec catégories, priorité et fermeture automatique.\n"
+                "• `/sentrix` : répond à n'importe quelle question avec un indice de confiance, "
+                "et réagit aussi si on lui parle directement en mentionnant le bot ou en écrivant \"sentrix\"."
+            ),
+            inline=False,
+        )
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="feedback", description="Envoyer un retour aux développeurs du bot.", with_app_command=False)
