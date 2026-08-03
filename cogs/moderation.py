@@ -11,6 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+import config
 from utils import embeds, checks, helpers
 from database.db import now
 
@@ -34,7 +35,10 @@ class Moderation(commands.Cog):
             if row["action"] == "ban":
                 try:
                     await guild.unban(discord.Object(id=row["user_id"]), reason="Fin du bannissement temporaire")
-                    e = embeds.neutral("⏰ Fin de sanction temporaire", f"L'utilisateur <@{row['user_id']}> a été débanni automatiquement.")
+                    e = embeds.log_entry(
+                        "⏰ Fin de sanction temporaire", config.COLOR_INFO,
+                        extra={"👤 Utilisateur": f"<@{row['user_id']}>\n`ID: {row['user_id']}`", "📄 Détail": "Débanni automatiquement (fin du tempban)"},
+                    )
                     await self.log_action(guild, e)
                 except discord.HTTPException:
                     pass
@@ -49,16 +53,23 @@ class Moderation(commands.Cog):
         # retombe sur le salon de logs général — jamais de log perdu.
         await helpers.send_log(self.bot, guild, "moderation", embed)
 
+    SANCTION_COLORS = {
+        "Bannissement": None, "Bannissement temporaire": None, "Expulsion": None,
+        "Mute (timeout)": None, "Débannissement": "success", "Unmute": "success", "Avertissement": "warning",
+    }
+
     def sanction_embed(self, action: str, target: discord.abc.User, moderator: discord.abc.User, reason: str, extra: str = "") -> discord.Embed:
-        e = embeds.neutral(f"🔨 Sanction : {action}")
-        e.add_field(name="Membre", value=f"{target.mention} (`{target.id}`)", inline=False)
-        e.add_field(name="Modérateur", value=f"{moderator.mention}", inline=False)
-        e.add_field(name="Raison", value=reason or "Aucune raison fournie", inline=False)
-        if extra:
-            e.add_field(name="Détails", value=extra, inline=False)
-        if hasattr(target, "display_avatar"):
-            e.set_thumbnail(url=target.display_avatar.url)
-        return e
+        kind = self.SANCTION_COLORS.get(action)
+        color = config.COLOR_SUCCESS if kind == "success" else config.COLOR_WARNING if kind == "warning" else config.COLOR_ERROR
+        return embeds.log_entry(
+            f"🔨 Sanction : {action}",
+            color,
+            cible=target,
+            cible_label="👤 Membre",
+            acteur=moderator,
+            raison=reason,
+            extra={"📌 Détails": extra} if extra else None,
+        )
 
     async def check_targetable(self, ctx: commands.Context, membre: discord.Member) -> bool:
         err = checks.check_hierarchy(ctx.author, membre)

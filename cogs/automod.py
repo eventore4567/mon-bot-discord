@@ -21,6 +21,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+import config
 from utils import embeds, checks, helpers
 
 INVITE_RE = re.compile(r"(discord\.gg|discord(?:app)?\.com/invite)/\S+", re.IGNORECASE)
@@ -42,7 +43,7 @@ NUKE_ACTION_WINDOW = 30  # secondes
 NUKE_ACTION_THRESHOLD = 3  # actions destructrices avant déclenchement
 
 
-class AutoMod(commands.Cog):
+class AutoMod(commands.Cog, name="Automod"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.spam_tracker: dict[tuple[int, int], list[float]] = {}
@@ -213,7 +214,10 @@ class AutoMod(commands.Cog):
                 count += 1
             except discord.Forbidden:
                 pass
-        e = embeds.error(f"🔒 Serveur verrouillé par {ctx.author.mention} ({count} salon(s)).")
+        e = embeds.log_entry(
+            "🔒 Verrouillage du serveur", config.COLOR_ERROR, acteur=ctx.author,
+            acteur_label="🛠️ Verrouillé par", extra={"📊 Salons verrouillés": str(count)},
+        )
         await self.log_action(ctx.guild, e)
         await ctx.send(embed=embeds.success(f"🔒 {count} salon(s) verrouillé(s). Utilisez `/unlock-server` pour déverrouiller."))
 
@@ -230,7 +234,10 @@ class AutoMod(commands.Cog):
                 count += 1
             except discord.Forbidden:
                 pass
-        e = embeds.success(f"🔓 Serveur déverrouillé par {ctx.author.mention} ({count} salon(s)).")
+        e = embeds.log_entry(
+            "🔓 Déverrouillage du serveur", config.COLOR_SUCCESS, acteur=ctx.author,
+            acteur_label="🛠️ Déverrouillé par", extra={"📊 Salons déverrouillés": str(count)},
+        )
         await self.log_action(ctx.guild, e)
         await ctx.send(embed=embeds.success(f"🔓 {count} salon(s) déverrouillé(s)."))
 
@@ -431,7 +438,11 @@ class AutoMod(commands.Cog):
             await note.delete(delay=6)
         except discord.HTTPException:
             pass
-        e = embeds.neutral("🛡️ Action AutoMod", f"**Membre :** {message.author.mention}\n**Raison :** {reason}\n**Salon :** {message.channel.mention}")
+        e = embeds.log_entry(
+            "🛡️ Action AutoMod", config.COLOR_WARNING,
+            cible=message.author, cible_label="👤 Membre", raison=reason,
+            extra={"📍 Salon": f"{message.channel.mention}\n`ID: {message.channel.id}`"},
+        )
         await self.log_action(message.guild, e)
 
     @commands.Cog.listener()
@@ -443,7 +454,10 @@ class AutoMod(commands.Cog):
         if conf["antibot"] and member.bot:
             try:
                 await member.kick(reason="AutoMod : bot non autorisé")
-                e = embeds.neutral("🛡️ AutoMod - Antibot", f"Le bot {member.mention} a été expulsé automatiquement.")
+                e = embeds.log_entry(
+                    "🛡️ AutoMod - Antibot", config.COLOR_ERROR,
+                    cible=member, cible_label="🤖 Bot expulsé", raison="Bot non autorisé sur ce serveur",
+                )
                 await self.log_action(member.guild, e)
             except discord.HTTPException:
                 pass
@@ -454,7 +468,12 @@ class AutoMod(commands.Cog):
             if account_age < 7:
                 try:
                     await member.kick(reason="AutoMod : compte créé il y a moins de 7 jours")
-                    e = embeds.neutral("🛡️ AutoMod - Antiaccount", f"{member.mention} a été expulsé (compte trop récent : {account_age} jour(s)).")
+                    e = embeds.log_entry(
+                        "🛡️ AutoMod - Antiaccount", config.COLOR_ERROR,
+                        cible=member, cible_label="👤 Membre expulsé",
+                        raison="Compte créé il y a moins de 7 jours",
+                        extra={"📅 Âge du compte": f"{account_age} jour(s)"},
+                    )
                     await self.log_action(member.guild, e)
                 except discord.HTTPException:
                     pass
@@ -466,7 +485,11 @@ class AutoMod(commands.Cog):
             joins.append(t)
             self.join_tracker[member.guild.id] = [x for x in joins if t - x < 10]
             if len(self.join_tracker[member.guild.id]) >= 8:
-                e = embeds.warning("🚨 Raid potentiel détecté ! Un afflux massif de nouveaux membres a été observé.")
+                e = embeds.log_entry(
+                    "🚨 Raid potentiel détecté", config.COLOR_WARNING,
+                    raison="Afflux massif de nouveaux membres observé",
+                    extra={"📊 Arrivées en 10s": str(len(self.join_tracker[member.guild.id]))},
+                )
                 await self.log_action(member.guild, e)
                 # Réponse automatique : relever le niveau de vérification du serveur
                 # freine immédiatement les faux comptes fraîchement créés, sans avoir
@@ -479,7 +502,10 @@ class AutoMod(commands.Cog):
                         )
                         await self.log_action(
                             member.guild,
-                            embeds.warning("🔒 Niveau de vérification du serveur relevé automatiquement suite au raid détecté."),
+                            embeds.log_entry(
+                                "🔒 Niveau de vérification relevé", config.COLOR_WARNING,
+                                raison="Relevé automatiquement suite à un raid détecté",
+                            ),
                         )
                 except discord.Forbidden:
                     pass
@@ -544,9 +570,11 @@ class AutoMod(commands.Cog):
                     action_taken = "expulsé du serveur (le bot n'a pas la permission de bannir)"
                 except discord.Forbidden:
                     action_taken = "rôles à risque retirés, mais impossible de le sanctionner davantage (permissions insuffisantes)"
-        e = embeds.error(
-            f"🚨 **ANTI-NUKE DÉCLENCHÉ**\n**Membre :** <@{actor_id}> (`{actor_id}`)\n**Raison :** {reason}\n"
-            f"**Action :** {action_taken}."
+        e = embeds.log_entry(
+            "🚨 ANTI-NUKE DÉCLENCHÉ", config.COLOR_ERROR,
+            cible=member or actor_id, cible_label="👤 Auteur suspecté",
+            raison=reason,
+            extra={"⚔️ Action prise": action_taken, "🔗 ID": f"`{actor_id}`"},
         )
         await self.log_action(guild, e)
         try:

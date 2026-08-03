@@ -12,6 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+import config
 from utils import embeds, checks, helpers
 
 ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")
@@ -318,13 +319,29 @@ class Configuration(commands.Cog):
     # Une fois /create-logs (ou la page "Logs" de /setup) utilisé, le bot alimente ces
     # salons tout seul, sans plus jamais rien demander à l'utilisateur.
 
+    async def _get_actor(self, guild: discord.Guild, action: discord.AuditLogAction, target_id: int = None):
+        """Retrouve l'auteur d'une action via l'Audit Log (réutilise le helper du cog Automod).
+        Réservé aux événements peu fréquents (salons/rôles/kicks) — jamais utilisé sur les
+        messages, trop nombreux, pour ne pas multiplier les appels à l'API."""
+        automod_cog = self.bot.get_cog("Automod")
+        if not automod_cog:
+            return None
+        return await automod_cog.get_audit_actor(guild, action, target_id)
+
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
         if message.author.bot or not message.guild or not message.content:
             return
-        e = embeds.neutral(
+        e = embeds.log_entry(
             "🗑️ Message supprimé",
-            f"**Auteur :** {message.author.mention}\n**Salon :** {message.channel.mention}\n\n{message.content[:1000]}",
+            config.COLOR_ERROR,
+            cible=message.author,
+            cible_label="👤 Auteur",
+            extra={
+                "📍 Salon": f"{message.channel.mention}\n`ID: {message.channel.id}`",
+                "💬 Contenu": message.content[:1000] or "*(vide)*",
+                "🔗 ID du message": f"`{message.id}`",
+            },
         )
         await helpers.send_log(self.bot, message.guild, "messages", e)
 
@@ -332,10 +349,17 @@ class Configuration(commands.Cog):
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
         if before.author.bot or not before.guild or before.content == after.content:
             return
-        e = embeds.neutral(
+        e = embeds.log_entry(
             "✏️ Message modifié",
-            f"**Auteur :** {before.author.mention}\n**Salon :** {before.channel.mention}\n\n"
-            f"**Avant :** {before.content[:500] or '(vide)'}\n**Après :** {after.content[:500] or '(vide)'}",
+            config.COLOR_INFO,
+            cible=before.author,
+            cible_label="👤 Auteur",
+            extra={
+                "📍 Salon": f"{before.channel.mention}\n`ID: {before.channel.id}`",
+                "⬅️ Avant": before.content[:500] or "*(vide)*",
+                "➡️ Après": after.content[:500] or "*(vide)*",
+                "🔗 ID du message": f"`{before.id}`",
+            },
         )
         await helpers.send_log(self.bot, before.guild, "messages", e)
 
@@ -344,18 +368,31 @@ class Configuration(commands.Cog):
         if member.bot:
             return
         age_days = (discord.utils.utcnow() - member.created_at).days
-        e = embeds.success(
-            f"**{member}** ({member.mention}) vient de rejoindre.\nCompte créé il y a **{age_days} jour(s)**.",
-            title="📥 Arrivée d'un membre",
+        warning_note = " ⚠️ **Compte très récent**" if age_days < 7 else ""
+        e = embeds.log_entry(
+            "📥 Arrivée d'un membre",
+            config.COLOR_SUCCESS,
+            cible=member,
+            cible_label="👤 Membre",
+            extra={
+                "📅 Compte créé": f"<t:{int(member.created_at.timestamp())}:D> (il y a {age_days} jour(s)){warning_note}",
+                "📊 Membres du serveur": str(member.guild.member_count),
+            },
         )
         await helpers.send_log(self.bot, member.guild, "members", e)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
         roles = [r.mention for r in member.roles if not r.is_default()]
-        e = embeds.error(
-            f"**{member}** a quitté le serveur.\n**Rôles :** {', '.join(roles) if roles else 'Aucun'}",
-            title="📤 Départ d'un membre",
+        actor = await self._get_actor(member.guild, discord.AuditLogAction.kick, member.id)
+        e = embeds.log_entry(
+            "📤 Départ d'un membre" if not actor else "👢 Membre expulsé",
+            config.COLOR_ERROR,
+            cible=member,
+            cible_label="👤 Membre",
+            acteur=actor,
+            acteur_label="🛠️ Expulsé par",
+            extra={"🎭 Rôles qu'il avait": ", ".join(roles) if roles else "Aucun"},
         )
         await helpers.send_log(self.bot, member.guild, "members", e)
 
@@ -366,31 +403,68 @@ class Configuration(commands.Cog):
         if before.channel == after.channel:
             return  # simple mute/deafen/stream toggle : pas assez pertinent pour un log
         if before.channel is None:
-            desc = f"{member.mention} a rejoint {after.channel.mention}."
+            title, extra = "🔊 Connexion vocale", {"📍 Salon": f"{after.channel.mention}\n`ID: {after.channel.id}`"}
         elif after.channel is None:
-            desc = f"{member.mention} a quitté {before.channel.mention}."
+            title, extra = "🔇 Déconnexion vocale", {"📍 Salon": f"{before.channel.mention}\n`ID: {before.channel.id}`"}
         else:
-            desc = f"{member.mention} est passé de {before.channel.mention} à {after.channel.mention}."
-        await helpers.send_log(self.bot, member.guild, "voice", embeds.neutral("🔊 Activité vocale", desc))
+            title = "🔀 Changement de salon vocal"
+            extra = {
+                "⬅️ Depuis": f"{before.channel.mention}\n`ID: {before.channel.id}`",
+                "➡️ Vers": f"{after.channel.mention}\n`ID: {after.channel.id}`",
+            }
+        e = embeds.log_entry(title, config.COLOR_NEUTRAL, cible=member, cible_label="👤 Membre", extra=extra)
+        await helpers.send_log(self.bot, member.guild, "voice", e)
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
-        e = embeds.success(f"**{channel.name}** ({channel.mention if hasattr(channel, 'mention') else channel.name})", title="📁 Salon créé")
+        actor = await self._get_actor(channel.guild, discord.AuditLogAction.channel_create, channel.id)
+        e = embeds.log_entry(
+            "📁 Salon créé",
+            config.COLOR_SUCCESS,
+            cible=channel,
+            cible_label="📍 Salon",
+            acteur=actor,
+            acteur_label="🛠️ Créé par",
+            extra={"🗂️ Catégorie": channel.category.name if getattr(channel, "category", None) else "Aucune", "🏷️ Type": str(channel.type).replace("_", " ").capitalize()},
+        )
         await helpers.send_log(self.bot, channel.guild, "server", e)
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
-        e = embeds.error(f"**#{channel.name}** a été supprimé.", title="📁 Salon supprimé")
+        actor = await self._get_actor(channel.guild, discord.AuditLogAction.channel_delete, channel.id)
+        e = embeds.log_entry(
+            "📁 Salon supprimé",
+            config.COLOR_ERROR,
+            acteur=actor,
+            acteur_label="🛠️ Supprimé par",
+            extra={"📍 Nom du salon": f"#{channel.name}", "🔗 ID": f"`{channel.id}`", "🏷️ Type": str(channel.type).replace("_", " ").capitalize()},
+        )
         await helpers.send_log(self.bot, channel.guild, "server", e)
 
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role):
-        e = embeds.success(f"**{role.name}** ({role.mention})", title="🎭 Rôle créé")
+        actor = await self._get_actor(role.guild, discord.AuditLogAction.role_create, role.id)
+        e = embeds.log_entry(
+            "🎭 Rôle créé",
+            config.COLOR_SUCCESS,
+            cible=role,
+            cible_label="🎭 Rôle",
+            acteur=actor,
+            acteur_label="🛠️ Créé par",
+            extra={"🎨 Couleur": str(role.color)},
+        )
         await helpers.send_log(self.bot, role.guild, "roles", e)
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
-        e = embeds.error(f"**{role.name}** a été supprimé.", title="🎭 Rôle supprimé")
+        actor = await self._get_actor(role.guild, discord.AuditLogAction.role_delete, role.id)
+        e = embeds.log_entry(
+            "🎭 Rôle supprimé",
+            config.COLOR_ERROR,
+            acteur=actor,
+            acteur_label="🛠️ Supprimé par",
+            extra={"🎭 Nom du rôle": role.name, "🔗 ID": f"`{role.id}`"},
+        )
         await helpers.send_log(self.bot, role.guild, "roles", e)
 
     @commands.Cog.listener()
@@ -399,14 +473,23 @@ class Configuration(commands.Cog):
             return
         added = [r for r in after.roles if r not in before.roles]
         removed = [r for r in before.roles if r not in after.roles]
-        parts = []
+        extra = {}
         if added:
-            parts.append("**Ajoutés :** " + ", ".join(r.mention for r in added))
+            extra["✅ Rôles ajoutés"] = ", ".join(r.mention for r in added)
         if removed:
-            parts.append("**Retirés :** " + ", ".join(r.mention for r in removed))
-        if not parts:
+            extra["❌ Rôles retirés"] = ", ".join(r.mention for r in removed)
+        if not extra:
             return
-        e = embeds.neutral(f"🎭 Rôles modifiés pour {after}", "\n".join(parts))
+        actor = await self._get_actor(after.guild, discord.AuditLogAction.member_role_update, after.id)
+        e = embeds.log_entry(
+            "🎭 Rôles modifiés",
+            config.COLOR_NEUTRAL,
+            cible=after,
+            cible_label="👤 Membre",
+            acteur=actor,
+            acteur_label="🛠️ Modifié par",
+            extra=extra,
+        )
         await helpers.send_log(self.bot, after.guild, "roles", e)
 
 
