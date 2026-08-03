@@ -97,6 +97,29 @@ class BotAllInOne(commands.Bot):
         await self.db.connect()
         logger.info("Base de données connectée.")
 
+        # DIAGNOSTIC DE PERSISTANCE — Railway (et la plupart des hébergeurs par conteneurs)
+        # utilisent un disque JETABLE par défaut : si aucun volume persistant n'est monté
+        # au bon endroit, le fichier SQLite repart de zéro à CHAQUE redémarrage/redéploiement,
+        # et TOUTES les données (niveaux, économie, avertissements, tickets...) sont perdues
+        # sans aucune erreur visible — ça ressemble juste à "les niveaux ne montent jamais".
+        # Ce log permet de vérifier en un coup d'œil dans les logs Railway si la base est
+        # bien conservée d'un déploiement à l'autre (le nombre de profils ne doit PAS
+        # retomber à 0 après un redéploiement si un volume persistant est correctement monté).
+        try:
+            level_count = await self.db.fetchone("SELECT COUNT(*) AS n FROM levels")
+            economy_count = await self.db.fetchone("SELECT COUNT(*) AS n FROM economy")
+            logger.info(
+                "Diagnostic de la base de données (chemin : %s) — %s profil(s) de niveau, "
+                "%s compte(s) d'économie déjà enregistrés. Si ce nombre retombe à 0 après "
+                "chaque redéploiement Railway, c'est qu'AUCUN volume persistant n'est monté "
+                "sur le chemin de la base : voir Settings du service -> Volumes sur Railway.",
+                config.DATABASE_PATH,
+                level_count["n"] if level_count else 0,
+                economy_count["n"] if economy_count else 0,
+            )
+        except Exception:
+            logger.warning("Diagnostic de persistance de la base impossible :\n" + traceback.format_exc())
+
         rows = await self.db.blacklist_list()
         self.blacklist_cache = {r["user_id"]: (r["reason"] or "Aucune raison fournie") for r in rows}
 

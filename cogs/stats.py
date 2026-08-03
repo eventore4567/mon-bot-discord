@@ -34,6 +34,22 @@ class Stats(commands.Cog, name="Stats"):
         h, rem = divmod(uptime, 3600)
         m, s = divmod(rem, 60)
         e.add_field(name="Uptime", value=f"{h}h {m}m {s}s", inline=True)
+
+        # Compteur de profils enregistrés en base : sert de diagnostic rapide de
+        # persistance. Si ce nombre retombe à un chiffre anormalement bas juste après un
+        # redéploiement Railway (alors qu'il était plus élevé avant), c'est le signe qu'aucun
+        # volume persistant n'est monté sur le chemin de la base de données, et que toutes
+        # les données (niveaux, économie, avertissements...) repartent de zéro à chaque
+        # redéploiement. Un serveur actif ne doit JAMAIS voir ce chiffre baisser tout seul.
+        try:
+            level_row = await self.bot.db.fetchone("SELECT COUNT(*) AS n FROM levels")
+            e.add_field(
+                name="📦 Profils en base (tous serveurs)",
+                value=str(level_row["n"] if level_row else 0),
+                inline=True,
+            )
+        except Exception:
+            pass
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="server-growth", description="Afficher la croissance des membres du serveur.", with_app_command=False)
