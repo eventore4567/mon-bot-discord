@@ -410,6 +410,16 @@ CREATE TABLE IF NOT EXISTS command_aliases (
     command_name TEXT,
     PRIMARY KEY (guild_id, alias)
 );
+
+CREATE TABLE IF NOT EXISTS member_invites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    member_id INTEGER,
+    inviter_id INTEGER,
+    invite_code TEXT,
+    joined_at INTEGER,
+    left_at INTEGER
+);
 """
 
 # Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de
@@ -426,6 +436,8 @@ CREATE INDEX IF NOT EXISTS idx_events_status_start ON events (status, start_at);
 CREATE INDEX IF NOT EXISTS idx_command_logs_guild_cmd ON command_logs (guild_id, command_name);
 CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders (trigger_at);
 CREATE INDEX IF NOT EXISTS idx_reaction_roles_msg ON reaction_roles (guild_id, message_id);
+CREATE INDEX IF NOT EXISTS idx_member_invites_inviter ON member_invites (guild_id, inviter_id);
+CREATE INDEX IF NOT EXISTS idx_member_invites_member ON member_invites (guild_id, member_id);
 """
 
 # Colonnes ajoutées à guild_config après sa création initiale : CREATE TABLE IF NOT EXISTS
@@ -606,6 +618,47 @@ class Database:
 
     async def list_aliases(self, guild_id: int):
         return await self.fetchall("SELECT alias, command_name FROM command_aliases WHERE guild_id = ?", (guild_id,))
+
+    # ---------- Suivi des invitations ----------
+
+    async def record_invite_join(self, guild_id: int, member_id: int, inviter_id: int | None, invite_code: str | None):
+        await self.execute(
+            "INSERT INTO member_invites (guild_id, member_id, inviter_id, invite_code, joined_at) VALUES (?, ?, ?, ?, ?)",
+            (guild_id, member_id, inviter_id, invite_code, now()),
+        )
+
+    async def mark_invite_left(self, guild_id: int, member_id: int):
+        await self.execute(
+            "UPDATE member_invites SET left_at = ? WHERE guild_id = ? AND member_id = ? AND left_at IS NULL",
+            (now(), guild_id, member_id),
+        )
+
+    async def get_invite_stats(self, guild_id: int, inviter_id: int):
+        total = await self.fetchone(
+            "SELECT COUNT(*) as c FROM member_invites WHERE guild_id = ? AND inviter_id = ?", (guild_id, inviter_id)
+        )
+        left = await self.fetchone(
+            "SELECT COUNT(*) as c FROM member_invites WHERE guild_id = ? AND inviter_id = ? AND left_at IS NOT NULL",
+            (guild_id, inviter_id),
+        )
+        total_n = total["c"] if total else 0
+        left_n = left["c"] if left else 0
+        return {"total": total_n, "left": left_n, "active": total_n - left_n}
+
+    async def get_invite_leaderboard(self, guild_id: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT inviter_id, COUNT(*) as total, "
+            "SUM(CASE WHEN left_at IS NULL THEN 1 ELSE 0 END) as active "
+            "FROM member_invites WHERE guild_id = ? AND inviter_id IS NOT NULL "
+            "GROUP BY inviter_id ORDER BY active DESC LIMIT ?",
+            (guild_id, limit),
+        )
+
+    async def get_invited_by(self, guild_id: int, member_id: int):
+        return await self.fetchone(
+            "SELECT * FROM member_invites WHERE guild_id = ? AND member_id = ? ORDER BY joined_at DESC LIMIT 1",
+            (guild_id, member_id),
+        )
 
     # ---------- Économie ----------
 

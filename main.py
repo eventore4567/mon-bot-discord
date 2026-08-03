@@ -40,6 +40,7 @@ EXTENSIONS = [
     "cogs.verification",
     "cogs.stats",
     "cogs.owner",
+    "cogs.invites",
 ]
 
 INTENTS = discord.Intents.default()

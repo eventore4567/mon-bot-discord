@@ -77,6 +77,9 @@ class Stats(commands.Cog, name="Stats"):
         e.add_field(
             name="🆕 Récent",
             value=(
+                "• `/invites` (alias `+i`), `/invite-leaderboard`, `/invited-by` : suivi des invitations, "
+                "avec alerte si plusieurs comptes très récents sont invités par la même personne en rafale.\n"
+                "• Page \"Sécurité\" dans `/setup` : préréglages et filtres AutoMod détaillés.\n"
                 "• `+addrole`/`+delrole` : raccourcis pour donner/retirer un rôle.\n"
                 "• Outils propriétaire : liste noire globale (`+bl`), statut personnalisé, "
                 "identité du bot, alias de commandes.\n"

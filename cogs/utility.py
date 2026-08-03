@@ -22,6 +22,7 @@ CATEGORY_LABELS = {
     "Minigames": "🎮 Mini-jeux",
     "Music": "🎵 Musique",
     "Events": "🎉 Giveaways / Événements",
+    "Invites": "📨 Invitations",
     "Utility": "🧰 Utilitaires",
     "Moderation": "🛡️ Modération",
     "Automod": "🔒 Sécurité / AutoMod",
