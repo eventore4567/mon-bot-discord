@@ -59,44 +59,155 @@ def category_visible(cog_name: str, cog, is_staff: bool) -> bool:
     return bool(visible_commands(cog, is_staff))
 
 
+CATEGORY_EMOJI = {name: label.split(" ", 1)[0] for name, label in CATEGORY_LABELS.items()}
+
+
+def build_help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_staff: bool) -> discord.Embed:
+    """Construit l'embed d'accueil de /help. Partagé entre la première commande et le
+    bouton "Accueil", pour que revenir en arrière affiche exactement la même chose."""
+    public_categories, staff_categories = [], []
+    visible_total = 0
+    for cog_name, label in CATEGORY_LABELS.items():
+        cog = bot.get_cog(cog_name)
+        if not cog or not category_visible(cog_name, cog, is_staff):
+            continue
+        count = len(visible_commands(cog, is_staff))
+        visible_total += count
+        entry = f"{label} `({count})`"
+        if cog_name in MEMBER_HIDDEN_CATEGORIES:
+            staff_categories.append(entry)
+        else:
+            public_categories.append(entry)
+
+    bot_name = bot.user.name if bot.user else "le bot"
+    server_name = guild.name if guild else "ce serveur"
+
+    e = embeds.brand(
+        f"📖 Bienvenue dans l'aide de {bot_name}",
+        f"Je suis l'assistant du serveur **{server_name}**. Je m'occupe de la modération, de la sécurité, "
+        f"des tickets de support, de l'économie virtuelle, des niveaux, de la musique et de plein de "
+        f"mini-jeux — pour que la communauté reste agréable et vivante.\n\n"
+        f"Utilisez le menu déroulant tout en bas pour explorer une catégorie en détail, ou tapez "
+        f"`{prefix}help <commande>` pour l'aide détaillée d'une commande précise."
+    )
+    if bot.user:
+        e.set_thumbnail(url=bot.user.display_avatar.url)
+
+    if public_categories:
+        e.add_field(name="🌍 Pour tout le monde", value="\n".join(f"• {c}" for c in public_categories), inline=True)
+    if is_staff and staff_categories:
+        e.add_field(name="🔒 Réservé au staff", value="\n".join(f"• {c}" for c in staff_categories), inline=True)
+
+    e.add_field(
+        name="ℹ️ Bon à savoir",
+        value=(
+            f"**{visible_total} commande(s)** disponibles pour vous, en `/` ou avec le préfixe `{prefix}` "
+            f"(les deux fonctionnent toujours, sans exception).\n"
+            f"📡 Astuce : `/sentrix <question>` répond à n'importe quelle question avec une jauge de confiance."
+        ),
+        inline=False,
+    )
+    return e
+
+
+def format_command_line(cmd, prefix: str, slash_names: set) -> str:
+    marker = f"/ ou {prefix}" if cmd.qualified_name in slash_names else prefix
+    usage = ""
+    if isinstance(cmd, commands.HybridCommand) and cmd.clean_params:
+        parts = []
+        for pname, param in cmd.clean_params.items():
+            parts.append(f"[{pname}]" if param.required else f"({pname})")
+        usage = " " + " ".join(parts)
+    lock = "🔒 " if is_staff_command(cmd) else ""
+    return f"{lock}**`{marker}{cmd.qualified_name}{usage}`**\n╰ {cmd.description or 'Pas de description.'}"
+
+
 class HelpSelect(discord.ui.Select):
     def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool):
         self.bot = bot
         self.prefix = prefix
         self.is_staff = is_staff
         options = [
-            discord.SelectOption(label=label, value=cog_name)
+            discord.SelectOption(
+                label=label.split(" ", 1)[1] if " " in label else label,
+                value=cog_name,
+                emoji=CATEGORY_EMOJI.get(cog_name),
+                description=f"{len(visible_commands(bot.get_cog(cog_name), is_staff))} commande(s)",
+            )
             for cog_name, label in CATEGORY_LABELS.items()
             if bot.get_cog(cog_name) and category_visible(cog_name, bot.get_cog(cog_name), is_staff)
         ]
-        super().__init__(placeholder="Choisissez une catégorie...", options=options)
+        super().__init__(placeholder="📂 Choisissez une catégorie à explorer...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
         cog = self.bot.get_cog(self.values[0])
         label = CATEGORY_LABELS.get(self.values[0], self.values[0])
         slash_names = {c.qualified_name for c in self.bot.tree.get_commands()}
 
-        lines = []
-        for cmd in visible_commands(cog, self.is_staff):
-            marker = f"/ ou {self.prefix}" if cmd.qualified_name in slash_names else self.prefix
-            lines.append(f"`{marker}{cmd.qualified_name}` — {cmd.description or 'Pas de description.'}")
+        lines = [format_command_line(cmd, self.prefix, slash_names) for cmd in visible_commands(cog, self.is_staff)]
 
         if not lines:
-            e = embeds.neutral(label, "Aucune commande visible dans cette catégorie pour vous.")
+            e = embeds.brand(label, "Aucune commande visible dans cette catégorie pour vous.")
             return await interaction.response.edit_message(embed=e, view=self.view)
 
-        chunks = [lines[i:i + 15] for i in range(0, len(lines), 15)] or [[]]
-        embeds_list = []
+        chunks = [lines[i:i + 8] for i in range(0, len(lines), 8)] or [[]]
+        pages = []
         for i, chunk in enumerate(chunks):
-            e = embeds.neutral(label, "\n".join(chunk))
-            e.set_footer(text=f"Page {i + 1}/{len(chunks)} • {len(lines)} commande(s)")
-            embeds_list.append(e)
+            e = embeds.brand(label, "\n\n".join(chunk))
+            e.set_footer(text=f"Page {i + 1}/{len(chunks)} • {len(lines)} commande(s) au total • [param] = requis, (param) = optionnel")
+            pages.append(e)
 
-        if len(embeds_list) > 1:
-            paginator = helpers.PaginatorView(embeds_list, interaction.user.id)
-            await interaction.response.edit_message(embed=embeds_list[0], view=paginator)
-        else:
-            await interaction.response.edit_message(embed=embeds_list[0], view=self.view)
+        home_embed = build_help_home(self.bot, interaction.guild, self.prefix, self.is_staff)
+        view = CategoryHelpView(self.bot, self.prefix, self.is_staff, pages, interaction.user.id, home_embed)
+        await interaction.response.edit_message(embed=pages[0], view=view)
+
+
+class CategoryHelpView(discord.ui.View):
+    """Vue affichée après avoir choisi une catégorie : menu déroulant toujours accessible
+    pour changer de catégorie, pagination si besoin, et un bouton pour revenir à l'accueil."""
+
+    def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool, pages: list[discord.Embed], author_id: int, home_embed: discord.Embed):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.prefix = prefix
+        self.is_staff = is_staff
+        self.pages = pages
+        self.author_id = author_id
+        self.home_embed = home_embed
+        self.index = 0
+        self.add_item(HelpSelect(bot, prefix, is_staff))
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.previous_page.disabled = self.index == 0
+        self.next_page.disabled = len(self.pages) <= 1 or self.index >= len(self.pages) - 1
+        if len(self.pages) <= 1:
+            self.previous_page.disabled = True
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Seule la personne à l'origine de la commande peut naviguer.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, row=1)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.index = max(0, self.index - 1)
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+    @discord.ui.button(label="🏠 Accueil", style=discord.ButtonStyle.primary, row=1)
+    async def home(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = HelpView(self.bot, self.prefix, self.is_staff)
+        await interaction.response.edit_message(embed=self.home_embed, view=view)
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, row=1)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.index = min(len(self.pages) - 1, self.index + 1)
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
 
 class HelpView(discord.ui.View):
@@ -134,56 +245,42 @@ class Utility(commands.Cog, name="Utility"):
             if not cmd or (is_staff_command(cmd) and not is_staff):
                 return await ctx.send(embed=embeds.error(f"Commande `{commande}` introuvable."))
             slash_names = {c.qualified_name for c in self.bot.tree.get_commands()}
-            marker = f"/ ou {prefix}" if cmd.qualified_name in slash_names else prefix
-            e = embeds.neutral(f"{marker}{cmd.qualified_name}", cmd.description or "Pas de description.")
+            is_slash = cmd.qualified_name in slash_names
+            marker = f"/{cmd.qualified_name}" if is_slash else f"{prefix}{cmd.qualified_name}"
+
+            # Catégorie d'origine de la commande, pour donner du contexte.
+            category_label = CATEGORY_LABELS.get(cmd.cog.qualified_name, cmd.cog.qualified_name) if cmd.cog else "—"
+
+            e = embeds.brand(f"📘 {marker}", cmd.description or "Pas de description.")
+            e.add_field(name="📂 Catégorie", value=category_label, inline=True)
+            e.add_field(
+                name="🔗 Accès",
+                value="Slash `/` et préfixe" if is_slash else f"Préfixe `{prefix}` uniquement",
+                inline=True,
+            )
+            e.add_field(name="🔒 Staff uniquement", value="Oui" if is_staff_command(cmd) else "Non", inline=True)
+
+            if getattr(cmd, "aliases", None):
+                e.add_field(name="🔁 Alias", value=", ".join(f"`{a}`" for a in cmd.aliases), inline=False)
+
             if isinstance(cmd, commands.HybridCommand) and cmd.clean_params:
-                params = ", ".join(cmd.clean_params.keys())
-                e.add_field(name="Paramètres", value=params)
+                param_lines = []
+                usage_parts = []
+                for pname, param in cmd.clean_params.items():
+                    required = param.required
+                    type_name = getattr(param.annotation, "__name__", str(param.annotation)).replace("Optional", "texte")
+                    tag = "requis" if required else "optionnel"
+                    param_lines.append(f"• **{pname}** ({type_name}, {tag})")
+                    usage_parts.append(f"<{pname}>" if required else f"[{pname}]")
+                e.add_field(name="🧩 Paramètres", value="\n".join(param_lines), inline=False)
+                e.add_field(name="✏️ Exemple d'usage", value=f"`{prefix}{cmd.qualified_name} {' '.join(usage_parts)}`", inline=False)
+            else:
+                e.add_field(name="✏️ Exemple d'usage", value=f"`{marker}`", inline=False)
+
+            e.set_footer(text=f"Utilisez {prefix}help pour revenir à la liste complète.")
             return await ctx.send(embed=e)
 
-        # Construit la liste des catégories réellement visibles pour CET utilisateur.
-        # Les catégories de MEMBER_HIDDEN_CATEGORIES disparaissent totalement pour un
-        # membre normal, même si elles contiennent une commande techniquement publique.
-        public_categories, staff_categories = [], []
-        visible_total = 0
-        for cog_name, label in CATEGORY_LABELS.items():
-            cog = self.bot.get_cog(cog_name)
-            if not cog or not category_visible(cog_name, cog, is_staff):
-                continue
-            visible_total += len(visible_commands(cog, is_staff))
-            if cog_name in MEMBER_HIDDEN_CATEGORIES:
-                staff_categories.append(label)
-            else:
-                public_categories.append(label)
-
-        bot_name = self.bot.user.name if self.bot.user else "le bot"
-        server_name = ctx.guild.name if ctx.guild else "ce serveur"
-
-        e = embeds.brand(
-            f"📖 Bienvenue dans l'aide de {bot_name}",
-            f"Je suis l'assistant du serveur **{server_name}**. Je m'occupe de la modération, de la sécurité, "
-            f"des tickets de support, de l'économie virtuelle, des niveaux, de la musique et de plein de "
-            f"mini-jeux — pour que la communauté reste agréable et vivante.\n\n"
-            f"Utilisez le menu déroulant tout en bas pour explorer une catégorie en détail, ou tapez "
-            f"`{prefix}help <commande>` pour l'aide d'une commande précise."
-        )
-        if self.bot.user:
-            e.set_thumbnail(url=self.bot.user.display_avatar.url)
-
-        if public_categories:
-            e.add_field(name="🌍 Pour tout le monde", value="\n".join(f"• {c}" for c in public_categories), inline=True)
-        if is_staff and staff_categories:
-            e.add_field(name="🔒 Réservé au staff", value="\n".join(f"• {c}" for c in staff_categories), inline=True)
-
-        e.add_field(
-            name="ℹ️ Bon à savoir",
-            value=(
-                f"**{visible_total} commande(s)** disponibles pour vous, en `/` ou avec le préfixe `{prefix}` "
-                f"(les deux fonctionnent toujours, sans exception)."
-            ),
-            inline=False,
-        )
-
+        e = build_help_home(self.bot, ctx.guild, prefix, is_staff)
         await ctx.send(embed=e, view=HelpView(self.bot, prefix, is_staff))
 
     @commands.hybrid_command(name="ping", description="Afficher la latence du bot.")
