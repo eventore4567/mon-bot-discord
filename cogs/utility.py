@@ -18,6 +18,7 @@ CATEGORY_LABELS = {
     "Automod": "🔒 Sécurité / AutoMod",
     "Tickets": "🎫 Tickets",
     "Configuration": "⚙️ Configuration",
+    "ServerBuilder": "🏗️ Création de serveur",
     "Utility": "🧰 Utilitaires",
     "Ai": "🤖 Intelligence Artificielle",
     "Economy": "💰 Économie",
@@ -31,7 +32,7 @@ CATEGORY_LABELS = {
 
 # Catégories entièrement réservées au staff : un membre normal ne les voit JAMAIS
 # dans /help, même si elles contiennent une commande techniquement publique.
-MEMBER_HIDDEN_CATEGORIES = {"Moderation", "Automod", "Tickets", "Configuration", "Utility", "Verification", "Stats"}
+MEMBER_HIDDEN_CATEGORIES = {"Moderation", "Automod", "Tickets", "Configuration", "ServerBuilder", "Utility", "Verification", "Stats"}
 
 # Décorateurs qui, sur une commande, signifient "réservé au staff". On les repère par
 # le nom qualifié de la fonction de vérification plutôt que par une liste de commandes
