@@ -1,7 +1,10 @@
 """Fonctions utilitaires génériques réutilisées dans plusieurs cogs."""
 
+import logging
 import re
 import discord
+
+logger = logging.getLogger("bot")
 
 # Colonnes de guild_config pour chaque type de log spécialisé, avec repli sur le
 # salon de logs général (log_channel) si le salon dédié n'est pas configuré.
@@ -20,7 +23,11 @@ async def send_log(bot, guild: discord.Guild, kind: str, embed: discord.Embed) -
     """Envoie un embed de log dans le salon dédié à `kind` (messages/members/voice/roles/
     server/automod/moderation), avec repli automatique sur le salon de logs général
     (log_channel) si ce salon spécifique n'est pas configuré. Utilisé partout dans le bot
-    pour que le système de logs reste cohérent, que /create-logs ait été utilisé ou non."""
+    pour que le système de logs reste cohérent, que /create-logs ait été utilisé ou non.
+
+    En cas d'échec (salon supprimé, permissions manquantes...), rien n'est visible côté
+    Discord puisqu'il n'y a personne à qui répondre : on trace donc l'échec dans les logs
+    du process (visibles dans Railway) pour pouvoir diagnostiquer via /logs-status."""
     conf = await bot.db.get_guild_config(guild.id)
     if not conf:
         return
@@ -30,11 +37,30 @@ async def send_log(bot, guild: discord.Guild, kind: str, embed: discord.Embed) -
         return
     channel = guild.get_channel(channel_id)
     if not channel:
+        logger.warning(
+            "send_log: salon %s introuvable pour le log '%s' sur %s (%s) — probablement supprimé, refaire /create-logs.",
+            channel_id, kind, guild.name, guild.id,
+        )
+        return
+    perms = channel.permissions_for(guild.me)
+    if not (perms.view_channel and perms.send_messages):
+        logger.warning(
+            "send_log: permissions manquantes dans #%s pour le log '%s' sur %s (%s) (view=%s, send=%s).",
+            channel.name, kind, guild.name, guild.id, perms.view_channel, perms.send_messages,
+        )
         return
     try:
         await channel.send(embed=embed)
-    except discord.HTTPException:
-        pass
+    except discord.Forbidden:
+        logger.warning(
+            "send_log: Forbidden en envoyant le log '%s' dans #%s sur %s (%s).",
+            kind, channel.name, guild.name, guild.id,
+        )
+    except discord.HTTPException as exc:
+        logger.warning(
+            "send_log: échec HTTP en envoyant le log '%s' dans #%s sur %s (%s) : %s.",
+            kind, channel.name, guild.name, guild.id, exc,
+        )
 
 DURATION_RE = re.compile(r"(\d+)\s*(s|sec|m|min|h|heure|heures|j|jour|jours|d|w|sem|semaine)", re.IGNORECASE)
 

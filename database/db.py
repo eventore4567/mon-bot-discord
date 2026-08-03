@@ -42,7 +42,9 @@ CREATE TABLE IF NOT EXISTS guild_config (
     log_roles INTEGER,
     log_server INTEGER,
     log_automod INTEGER,
-    log_moderation INTEGER
+    log_moderation INTEGER,
+    warn_role INTEGER,
+    warn_ban_threshold INTEGER DEFAULT 3
 );
 
 CREATE TABLE IF NOT EXISTS warnings (
@@ -454,6 +456,8 @@ GUILD_CONFIG_NEW_COLUMNS = {
     "log_server": "INTEGER",
     "log_automod": "INTEGER",
     "log_moderation": "INTEGER",
+    "warn_role": "INTEGER",
+    "warn_ban_threshold": "INTEGER DEFAULT 3",
 }
 
 # Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"

@@ -1,10 +1,10 @@
 """
 Cog CONFIGURATION.
 /setup (assistant complet en un clic) /setprefix /setmodrole /setlogchannel /create-logs
-/setwelcomechannel /setgoodbyechannel /setwelcomemessage /setgoodbyemessage
+/logs-status /setwelcomechannel /setgoodbyechannel /setwelcomemessage /setgoodbyemessage
 /setticketcategory /setticketlogchannel /setautorole /disablecommand /enablecommand
 /ignorechannel /unignorechannel /config-view /config-reset /setlevelchannel
-/setsuggestchannel /setannouncechannel /setgiveawaychannel
+/setsuggestchannel /setannouncechannel /setgiveawaychannel /setwarnrole /setwarnbanthreshold
 """
 
 import re
@@ -30,6 +30,17 @@ LOG_CHANNEL_DEFINITIONS = [
     ("log_moderation", "logs-moderation", "Sanctions : avertissements, mutes, kicks, bans."),
     ("log_automod", "logs-securite", "Actions AutoMod et anti-nuke (spam, liens, protection du serveur)."),
 ]
+
+# Libellés affichés par /logs-status pour chaque colonne de LOG_CHANNEL_DEFINITIONS.
+LOG_KIND_LABELS = {
+    "log_server": "Logs serveur",
+    "log_messages": "Logs messages",
+    "log_members": "Logs membres",
+    "log_voice": "Logs vocal",
+    "log_roles": "Logs rôles",
+    "log_moderation": "Logs modération",
+    "log_automod": "Logs sécurité (AutoMod)",
+}
 
 
 def parse_role_input(guild: discord.Guild, value: str):
@@ -125,6 +136,70 @@ class Configuration(commands.Cog):
         e.add_field(name="Salons créés", value="\n".join(c.mention for c in created), inline=False)
         await ctx.send(embed=e)
 
+    @commands.hybrid_command(
+        name="logs-status",
+        description="Diagnostiquer le système de logs : quel salon reçoit quoi, et ce qui ne fonctionne pas.",
+    )
+    @checks.is_owner_or_admin()
+    async def logs_status(self, ctx: commands.Context):
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
+        e = embeds.neutral("📡 Diagnostic des logs")
+        if not conf:
+            e.description = "Aucune configuration définie pour l'instant. Utilisez `/create-logs` ou `/setup`."
+            return await ctx.send(embed=e)
+
+        def check_channel(channel_id: int):
+            """Retourne (emoji, texte) pour un salon donné : introuvable, permissions
+            manquantes, ou OK. C'est exactement la même logique que helpers.send_log,
+            pour que ce diagnostic reflète fidèlement ce qui se passe réellement."""
+            channel = ctx.guild.get_channel(channel_id)
+            if not channel:
+                return "❌", "salon introuvable (a probablement été supprimé)"
+            perms = channel.permissions_for(ctx.guild.me)
+            if not (perms.view_channel and perms.send_messages):
+                return "⚠️", f"{channel.mention} — le bot n'a pas la permission de voir/écrire ici"
+            return "✅", channel.mention
+
+        general_id = conf["log_channel"]
+        lines = []
+        any_problem = False
+
+        if general_id:
+            status, detail = check_channel(general_id)
+            any_problem = any_problem or status != "✅"
+            lines.append(f"{status} **Salon général** (`/setlogchannel`) — {detail}")
+        else:
+            lines.append("⚪ **Salon général** (`/setlogchannel`) — non défini (sert de repli si un salon dédié manque)")
+
+        for column, _slug, _desc in LOG_CHANNEL_DEFINITIONS:
+            label = LOG_KIND_LABELS.get(column, column)
+            dedicated_id = conf[column]
+            if dedicated_id:
+                status, detail = check_channel(dedicated_id)
+            elif general_id:
+                status, detail = check_channel(general_id)
+                detail = f"{detail} (via le repli sur le salon général)"
+            else:
+                status, detail = "❌", "aucun salon configuré (ni dédié, ni général)"
+            any_problem = any_problem or status != "✅"
+            lines.append(f"{status} **{label}** — {detail}")
+
+        e.description = "\n".join(lines)
+        if any_problem:
+            e.add_field(
+                name="Comment corriger",
+                value=(
+                    "Lancez `/create-logs` pour créer automatiquement les salons manquants, "
+                    "ou `/setup` (page Logs) pour les redéfinir un par un. Si un ❌ ou ⚠️ persiste "
+                    "après ça, vérifiez que le rôle du bot a bien la permission **Voir le salon** "
+                    "et **Envoyer des messages** dans le salon concerné."
+                ),
+                inline=False,
+            )
+        else:
+            e.add_field(name="Résultat", value="Tous les logs configurés fonctionnent correctement. ✅", inline=False)
+        await ctx.send(embed=e)
+
     @commands.hybrid_command(name="setwelcomechannel", description="Définir le salon de bienvenue.", with_app_command=False)
     @app_commands.describe(salon="Le salon de bienvenue")
     @checks.is_owner_or_admin()
@@ -173,6 +248,36 @@ class Configuration(commands.Cog):
     async def setautorole(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.set_guild_config(ctx.guild.id, "autorole", role.id)
         await ctx.send(embed=embeds.success(f"Rôle automatique défini sur {role.mention}."))
+
+    @commands.hybrid_command(
+        name="setwarnrole",
+        description="Définir un rôle attribué automatiquement à chaque avertissement (/warn).",
+        with_app_command=False,
+    )
+    @app_commands.describe(role="Le rôle à attribuer à chaque /warn (laisser vide pour désactiver)")
+    @checks.is_owner_or_admin()
+    async def setwarnrole(self, ctx: commands.Context, role: discord.Role = None):
+        await self.bot.db.set_guild_config(ctx.guild.id, "warn_role", role.id if role else None)
+        if role:
+            await ctx.send(embed=embeds.success(f"Le rôle {role.mention} sera désormais attribué automatiquement à chaque `/warn`."))
+        else:
+            await ctx.send(embed=embeds.success("Le rôle automatique d'avertissement a été désactivé."))
+
+    @commands.hybrid_command(
+        name="setwarnbanthreshold",
+        description="Définir le nombre d'avertissements avant bannissement automatique (0 = désactivé).",
+        with_app_command=False,
+    )
+    @app_commands.describe(nombre="Nombre d'avertissements avant bannissement automatique (0 pour désactiver)")
+    @checks.is_owner_or_admin()
+    async def setwarnbanthreshold(self, ctx: commands.Context, nombre: int):
+        if nombre < 0:
+            return await ctx.send(embed=embeds.error("Le nombre doit être positif (0 pour désactiver)."))
+        await self.bot.db.set_guild_config(ctx.guild.id, "warn_ban_threshold", nombre)
+        if nombre == 0:
+            await ctx.send(embed=embeds.success("Le bannissement automatique après avertissements a été désactivé."))
+        else:
+            await ctx.send(embed=embeds.success(f"Un membre sera désormais banni automatiquement au **{nombre}ᵉ** avertissement."))
 
     @commands.hybrid_command(name="disablecommand", description="Désactiver une commande sur ce serveur.", with_app_command=False)
     @app_commands.describe(commande="Le nom de la commande à désactiver")
@@ -282,6 +387,12 @@ class Configuration(commands.Cog):
         e.add_field(name="Rôle auto", value=fmt_role(conf["autorole"]), inline=True)
         e.add_field(name="Catégorie tickets", value=fmt_channel(conf["ticket_category"]), inline=True)
         e.add_field(name="Logs tickets", value=fmt_channel(conf["ticket_log_channel"]), inline=True)
+        e.add_field(name="Rôle d'avertissement", value=fmt_role(conf["warn_role"]), inline=True)
+        e.add_field(
+            name="Ban auto après N warns",
+            value=f"{conf['warn_ban_threshold']} avertissement(s)" if conf["warn_ban_threshold"] else "Désactivé",
+            inline=True,
+        )
 
         managers = await self.bot.db.list_bot_managers(ctx.guild.id)
         if managers:

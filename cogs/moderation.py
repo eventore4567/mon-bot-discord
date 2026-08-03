@@ -204,13 +204,62 @@ class Moderation(commands.Cog):
         rows = await self.bot.db.fetchall(
             "SELECT id FROM warnings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
+        total = len(rows)
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
+
+        # Rôle automatique d'avertissement (/setwarnrole) : ajouté au membre à chaque
+        # /warn, tant qu'il ne l'a pas déjà et que le bot a la permission de le faire.
+        role_note = ""
+        if conf and conf["warn_role"]:
+            role = ctx.guild.get_role(conf["warn_role"])
+            if role and role not in membre.roles:
+                try:
+                    await membre.add_roles(role, reason=f"Avertissement par {ctx.author} : {raison}")
+                    role_note = f"\nRôle {role.mention} attribué automatiquement."
+                except discord.HTTPException:
+                    role_note = f"\n⚠️ Impossible d'attribuer le rôle {role.mention} (permissions/hiérarchie)."
+
         try:
             await membre.send(embed=embeds.warning(f"Vous avez reçu un **avertissement** sur **{ctx.guild.name}**.\nRaison : {raison}"))
         except discord.Forbidden:
             pass
-        e = self.sanction_embed("Avertissement", membre, ctx.author, raison, f"Total d'avertissements : {len(rows)}")
+        e = self.sanction_embed("Avertissement", membre, ctx.author, raison, f"Total d'avertissements : {total}{role_note}")
         await ctx.send(embed=e)
         await self.log_action(ctx.guild, e)
+
+        # Bannissement automatique au bout de N avertissements (/setwarnbanthreshold,
+        # 3 par défaut, 0 = désactivé). Pas de confirmation demandée : c'est le but de
+        # ce seuil, agir automatiquement dès qu'il est atteint.
+        threshold = conf["warn_ban_threshold"] if conf and conf["warn_ban_threshold"] else 0
+        if threshold and total >= threshold:
+            err = checks.check_bot_hierarchy(ctx.guild, membre)
+            if err:
+                await ctx.send(embed=embeds.warning(
+                    f"{membre.mention} a atteint **{total}** avertissements (seuil : {threshold}) mais n'a pas pu "
+                    f"être banni automatiquement : {err}"
+                ))
+                return
+            try:
+                await membre.send(embed=embeds.warning(
+                    f"Vous avez été **banni automatiquement** de **{ctx.guild.name}** pour avoir atteint "
+                    f"**{threshold}** avertissements."
+                ))
+            except discord.Forbidden:
+                pass
+            try:
+                await ctx.guild.ban(
+                    membre, reason=f"Ban automatique : {threshold} avertissements atteints", delete_message_seconds=0
+                )
+            except discord.HTTPException:
+                await ctx.send(embed=embeds.error(f"Le bannissement automatique de {membre.mention} a échoué (permissions)."))
+                return
+            ban_e = self.sanction_embed(
+                "Bannissement", membre, self.bot.user, f"Seuil de {threshold} avertissements atteint",
+                f"Bannissement automatique — total d'avertissements : {total}",
+            )
+            ban_e.title = "🚨 Bannissement automatique (seuil d'avertissements)"
+            await ctx.send(embed=ban_e)
+            await self.log_action(ctx.guild, ban_e)
 
     @commands.hybrid_command(name="unwarn", description="Supprimer un avertissement précis via son identifiant.", with_app_command=False)
     @app_commands.describe(warn_id="L'identifiant de l'avertissement (voir /warnings)")
