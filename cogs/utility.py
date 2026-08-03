@@ -1,7 +1,7 @@
 """
 Cog UTILITAIRES.
 /help /ping /avatar /serverinfo /userinfo /roleinfo /channelinfo
-/invite /membercount /emoji-list /poll /remind /reminder-list /reminder-cancel
+/membercount /emoji-list /poll /remind /reminder-list /reminder-cancel
 /say /embed-create /translate /weather /suggest /report-bug
 /afk /roll /choose
 """
