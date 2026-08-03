@@ -44,7 +44,10 @@ CREATE TABLE IF NOT EXISTS guild_config (
     log_automod INTEGER,
     log_moderation INTEGER,
     warn_role INTEGER,
-    warn_ban_threshold INTEGER DEFAULT 3
+    warn_ban_threshold INTEGER DEFAULT 3,
+    ticket_delete_delay INTEGER DEFAULT 30,
+    ticket_transcript_dm INTEGER DEFAULT 1,
+    ticket_rating_enabled INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS warnings (
@@ -144,7 +147,10 @@ CREATE TABLE IF NOT EXISTS tickets (
     claimed_by INTEGER,
     created_at INTEGER,
     closed_at INTEGER,
-    rating INTEGER
+    rating INTEGER,
+    type_id INTEGER,
+    locked INTEGER DEFAULT 0,
+    last_activity_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS ticket_notes (
@@ -419,6 +425,111 @@ CREATE TABLE IF NOT EXISTS member_invites (
     joined_at INTEGER,
     left_at INTEGER
 );
+
+-- ---------------------------------------------------------------------------
+-- Outils de sécurité avancés : quarantaine, snapshots de rôles, sauvegarde
+-- de la structure du serveur, audit des permissions (cogs/security_tools.py).
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS role_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    role_ids TEXT,
+    label TEXT DEFAULT '',
+    created_by INTEGER,
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS quarantines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    snapshot_id INTEGER,
+    reason TEXT,
+    moderator_id INTEGER,
+    created_at INTEGER,
+    expires_at INTEGER,
+    active INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS server_backups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    label TEXT DEFAULT '',
+    data_json TEXT,
+    created_by INTEGER,
+    created_at INTEGER
+);
+
+-- ---------------------------------------------------------------------------
+-- Système de tickets v2 : entièrement piloté par Discord (cogs/tickets.py),
+-- rien n'est écrit en dur dans le code. Un serveur peut avoir plusieurs panels,
+-- chaque panel plusieurs types de tickets, chaque type son propre formulaire.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS ticket_panels_v2 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    name TEXT DEFAULT 'Panel',
+    title TEXT DEFAULT '🎫 Support',
+    description TEXT DEFAULT 'Choisissez une option ci-dessous pour ouvrir un ticket.',
+    color INTEGER,
+    image_url TEXT,
+    thumbnail_url TEXT,
+    footer_text TEXT,
+    channel_id INTEGER,
+    message_id INTEGER,
+    style TEXT DEFAULT 'select',
+    max_per_member INTEGER DEFAULT 1,
+    enabled INTEGER DEFAULT 1,
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS ticket_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    panel_id INTEGER,
+    guild_id INTEGER,
+    name TEXT DEFAULT 'Support',
+    description TEXT DEFAULT '',
+    emoji TEXT DEFAULT '🎫',
+    button_label TEXT DEFAULT '',
+    button_style TEXT DEFAULT 'blurple',
+    staff_role_id INTEGER,
+    category_id INTEGER,
+    name_format TEXT DEFAULT 'ticket-{pseudo}',
+    open_message TEXT DEFAULT '',
+    max_per_member INTEGER DEFAULT 1,
+    autoclose_hours INTEGER DEFAULT 0,
+    log_channel_id INTEGER,
+    mention_staff INTEGER DEFAULT 1,
+    use_form INTEGER DEFAULT 0,
+    position INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS ticket_form_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_type_id INTEGER,
+    position INTEGER DEFAULT 0,
+    label TEXT DEFAULT 'Question',
+    placeholder TEXT DEFAULT '',
+    style TEXT DEFAULT 'short',
+    required INTEGER DEFAULT 1,
+    min_length INTEGER DEFAULT 0,
+    max_length INTEGER DEFAULT 500
+);
+
+CREATE TABLE IF NOT EXISTS ticket_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER,
+    question_label TEXT,
+    answer TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ticket_button_settings (
+    guild_id INTEGER PRIMARY KEY,
+    config_json TEXT
+);
 """
 
 # Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de
@@ -442,6 +553,14 @@ CREATE INDEX IF NOT EXISTS idx_economy_guild_total ON economy (guild_id, (cash +
 CREATE INDEX IF NOT EXISTS idx_blacklist_words_guild ON blacklist_words (guild_id);
 CREATE INDEX IF NOT EXISTS idx_automod_logs_guild_time ON automod_logs (guild_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_automod_logs_guild_user ON automod_logs (guild_id, user_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_role_snapshots_guild_user ON role_snapshots (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_quarantines_active_expires ON quarantines (active, expires_at);
+CREATE INDEX IF NOT EXISTS idx_quarantines_guild_user ON quarantines (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_server_backups_guild ON server_backups (guild_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_panels_v2_guild ON ticket_panels_v2 (guild_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_types_panel ON ticket_types (panel_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_form_questions_type ON ticket_form_questions (ticket_type_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_answers_ticket ON ticket_answers (ticket_id);
 """
 
 # Colonnes ajoutées à guild_config après sa création initiale : CREATE TABLE IF NOT EXISTS
@@ -458,12 +577,23 @@ GUILD_CONFIG_NEW_COLUMNS = {
     "log_moderation": "INTEGER",
     "warn_role": "INTEGER",
     "warn_ban_threshold": "INTEGER DEFAULT 3",
+    "ticket_delete_delay": "INTEGER DEFAULT 30",
+    "ticket_transcript_dm": "INTEGER DEFAULT 1",
+    "ticket_rating_enabled": "INTEGER DEFAULT 1",
 }
 
 # Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"
 # a été ajoutée après la création initiale de la table.
 AUTOMOD_SETTINGS_NEW_COLUMNS = {
     "escalation": "INTEGER DEFAULT 1",
+}
+
+# Même principe, pour la table tickets : "type_id" et "locked" ont été ajoutées avec
+# le système de tickets v2 (panels/types/formulaires entièrement configurables).
+TICKETS_NEW_COLUMNS = {
+    "type_id": "INTEGER",
+    "locked": "INTEGER DEFAULT 0",
+    "last_activity_at": "INTEGER",
 }
 
 
@@ -511,6 +641,12 @@ class Database:
         for column, col_type in AUTOMOD_SETTINGS_NEW_COLUMNS.items():
             if column not in existing_automod:
                 await self._conn.execute(f"ALTER TABLE automod_settings ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(tickets)")
+        existing_tickets = {row[1] for row in await cur.fetchall()}
+        for column, col_type in TICKETS_NEW_COLUMNS.items():
+            if column not in existing_tickets:
+                await self._conn.execute(f"ALTER TABLE tickets ADD COLUMN {column} {col_type}")
 
     async def close(self):
         if self._conn:

@@ -2,9 +2,13 @@
 Cog CONFIGURATION.
 /setup (assistant complet en un clic) /setprefix /setmodrole /setlogchannel /create-logs
 /logs-status /setwelcomechannel /setgoodbyechannel /setwelcomemessage /setgoodbyemessage
-/setticketcategory /setticketlogchannel /setautorole /disablecommand /enablecommand
+/setticketlogchannel /setautorole /disablecommand /enablecommand
 /ignorechannel /unignorechannel /config-view /config-reset /setlevelchannel
 /setsuggestchannel /setannouncechannel /setgiveawaychannel /setwarnrole /setwarnbanthreshold
+
+Le système de tickets (panels, types, formulaires, boutons staff) se configure entièrement
+via +ticketsetup (cogs/tickets.py) — /setticketlogchannel ne reste que comme salon de logs
+de repli si un type de ticket n'a pas son propre salon de logs dédié.
 """
 
 import re
@@ -15,7 +19,8 @@ from discord.ext import commands
 import config
 from utils import embeds, checks, helpers
 from cogs.automod import AUTOMOD_TOGGLE_LABELS, SECURITY_PRESETS
-from cogs.tickets import TicketPanelView, TICKET_CATEGORIES
+# Le système de tickets (panels/types/formulaires) est entièrement géré depuis cogs/tickets.py
+# via +ticketsetup — rien à importer ici, /setup se contente d'y rediriger (page 3/8).
 
 ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")
 
@@ -228,15 +233,12 @@ class Configuration(commands.Cog):
         await self.bot.db.set_guild_config(ctx.guild.id, "goodbye_message", message)
         await ctx.send(embed=embeds.success("Message de départ mis à jour."))
 
-    @commands.hybrid_command(name="setticketcategory", description="Définir la catégorie où seront créés les tickets.", with_app_command=False)
-    @app_commands.describe(categorie="La catégorie Discord pour les tickets")
-    @checks.is_owner_or_admin()
-    async def setticketcategory(self, ctx: commands.Context, categorie: discord.CategoryChannel):
-        await self.bot.db.set_guild_config(ctx.guild.id, "ticket_category", categorie.id)
-        await ctx.send(embed=embeds.success(f"Catégorie des tickets définie sur **{categorie.name}**."))
-
-    @commands.hybrid_command(name="setticketlogchannel", description="Définir le salon de logs des tickets.", with_app_command=False)
-    @app_commands.describe(salon="Le salon de logs des tickets")
+    @commands.hybrid_command(
+        name="setticketlogchannel",
+        description="Définir le salon de logs de repli des tickets (utilisé si un type de ticket n'a pas son propre salon de logs).",
+        with_app_command=False,
+    )
+    @app_commands.describe(salon="Le salon de logs de repli pour les tickets")
     @checks.is_owner_or_admin()
     async def setticketlogchannel(self, ctx: commands.Context, salon: discord.TextChannel):
         await self.bot.db.set_guild_config(ctx.guild.id, "ticket_log_channel", salon.id)
@@ -385,8 +387,7 @@ class Configuration(commands.Cog):
         e.add_field(name="Salon bienvenue", value=fmt_channel(conf["welcome_channel"]), inline=True)
         e.add_field(name="Salon départ", value=fmt_channel(conf["goodbye_channel"]), inline=True)
         e.add_field(name="Rôle auto", value=fmt_role(conf["autorole"]), inline=True)
-        e.add_field(name="Catégorie tickets", value=fmt_channel(conf["ticket_category"]), inline=True)
-        e.add_field(name="Logs tickets", value=fmt_channel(conf["ticket_log_channel"]), inline=True)
+        e.add_field(name="Logs tickets (repli)", value=fmt_channel(conf["ticket_log_channel"]), inline=True)
         e.add_field(name="Rôle d'avertissement", value=fmt_role(conf["warn_role"]), inline=True)
         e.add_field(
             name="Ban auto après N warns",
@@ -435,16 +436,9 @@ class Configuration(commands.Cog):
         automod_conf = await self.bot.db.get_automod(ctx.guild.id)
         existing_security = {field: (automod_conf[field] if automod_conf else 0) for field in AUTOMOD_TOGGLE_LABELS}
 
-        guild_conf = await self.bot.db.get_guild_config(ctx.guild.id)
-        existing_tickets = {
-            "ticket_category": guild_conf["ticket_category"] if guild_conf else None,
-            "ticket_log_channel": guild_conf["ticket_log_channel"] if guild_conf else None,
-        }
-
         view = SetupView(
             self.bot, ctx.guild.id, ctx.author.id,
             existing_managers=existing_managers, existing_security=existing_security,
-            existing_tickets=existing_tickets,
         )
         await ctx.send(embed=view.build_embed(), view=view)
 
@@ -684,7 +678,6 @@ SETUP_STEPS = [
 FIELD_LABELS = {
     "mod_role": "Rôle staff", "log_channel": "Salon de logs", "welcome_channel": "Salon de bienvenue",
     "goodbye_channel": "Salon de départ", "autorole": "Rôle automatique", "verify_role": "Rôle de vérification",
-    "ticket_category": "Catégorie tickets", "ticket_log_channel": "Logs tickets",
     "level_channel": "Annonces de niveau", "suggest_channel": "Suggestions",
     "announce_channel": "Annonces", "giveaway_channel": "Giveaways",
     "prefix": "Préfixe", "welcome_message": "Message de bienvenue", "goodbye_message": "Message de départ",
@@ -758,7 +751,6 @@ class SetupView(discord.ui.View):
     def __init__(
         self, bot: commands.Bot, guild_id: int, author_id: int,
         existing_managers: dict | None = None, existing_security: dict | None = None,
-        existing_tickets: dict | None = None,
     ):
         super().__init__(timeout=300)
         self.bot = bot
@@ -770,8 +762,6 @@ class SetupView(discord.ui.View):
         self.managers: dict[int, str] = dict(existing_managers or {})
         self.security_choices: dict[str, int] = dict(existing_security or {field: 0 for field in AUTOMOD_TOGGLE_LABELS})
         self.security_touched = False  # True dès qu'on clique un préréglage ou qu'on change le menu de filtres
-        self.existing_tickets: dict = dict(existing_tickets or {})
-        self.ticket_panel_posted = False  # True dès qu'on poste le panneau depuis cette page
         self.page = 0
         self.render_page()
 
@@ -799,17 +789,12 @@ class SetupView(discord.ui.View):
         if step.get("custom") == "tickets":
             e = embeds.neutral(
                 f"🧙 Assistant de configuration — {step['title']}",
-                "Réglez tout le système de tickets de support depuis cette page : la catégorie où seront créés "
-                "les salons de tickets, le salon où seront journalisées les ouvertures/fermetures, et le "
-                "panneau (menu déroulant + formulaire) à poster dans le salon de votre choix.\n\n"
-                "⚠️ Poster le panneau est enregistré **immédiatement**, comme les logs et les gestionnaires.",
+                "Le système de tickets a sa propre configuration complète, bien plus riche que ce que cette page "
+                "pourrait afficher (plusieurs panels, plusieurs types de tickets, formulaires personnalisés, "
+                "boutons staff configurables...).\n\n"
+                "👉 Utilisez **`+ticketsetup`** pour ouvrir le menu de configuration des tickets, ou "
+                "`+ticketpanel create <nom>` pour créer directement votre premier panel.",
             )
-            cat_id = self.choices.get("ticket_category", self.existing_tickets.get("ticket_category"))
-            log_id = self.choices.get("ticket_log_channel", self.existing_tickets.get("ticket_log_channel"))
-            e.add_field(name="🎫 Catégorie des tickets", value=f"<#{cat_id}>" if cat_id else "❌ Non définie", inline=True)
-            e.add_field(name="📝 Salon de logs", value=f"<#{log_id}>" if log_id else "❌ Non défini", inline=True)
-            if self.ticket_panel_posted:
-                e.add_field(name="✅ Panneau", value="Posté dans ce salon pendant cette session.", inline=False)
             return e
 
         if step.get("custom") == "logs_setup":
@@ -873,20 +858,6 @@ class SetupView(discord.ui.View):
             add_btn = discord.ui.Button(label="➕ Ajouter un rôle de niveau", style=discord.ButtonStyle.primary, row=0)
             add_btn.callback = self._open_level_role_modal
             self.add_item(add_btn)
-        elif step.get("custom") == "tickets":
-            cat_select = discord.ui.ChannelSelect(
-                placeholder="🎫 Catégorie où créer les tickets", channel_types=[discord.ChannelType.category], row=0
-            )
-            cat_select.callback = self._make_channel_callback("ticket_category", cat_select)
-            self.add_item(cat_select)
-            log_select = discord.ui.ChannelSelect(
-                placeholder="📝 Salon de logs des tickets", channel_types=[discord.ChannelType.text], row=1
-            )
-            log_select.callback = self._make_channel_callback("ticket_log_channel", log_select)
-            self.add_item(log_select)
-            panel_btn = discord.ui.Button(label="📌 Poster le panneau de tickets ici", style=discord.ButtonStyle.primary, row=2)
-            panel_btn.callback = self._post_ticket_panel_clicked
-            self.add_item(panel_btn)
         elif step.get("custom") == "logs_setup":
             logs_btn = discord.ui.Button(label="📡 Créer le système de logs", style=discord.ButtonStyle.primary, row=0)
             logs_btn.callback = self._create_logs_clicked
@@ -972,24 +943,6 @@ class SetupView(discord.ui.View):
         self.logs_created.extend(created)
         await interaction.edit_original_response(embed=self.build_embed(), view=self)
 
-    async def _post_ticket_panel_clicked(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        e = embeds.brand(
-            "🎫 Support — Ouvrir un ticket",
-            "Choisissez une catégorie dans le menu ci-dessous pour ouvrir un ticket privé avec l'équipe "
-            "de support. Un court formulaire vous demandera ensuite la priorité et une description, pour "
-            "que le staff ait tout de suite le contexte.",
-        )
-        categories_list = "\n".join(f"{emoji} **{label}** — {desc}" for _, emoji, label, desc in TICKET_CATEGORIES)
-        e.add_field(name="📂 Catégories disponibles", value=categories_list, inline=False)
-        msg = await interaction.channel.send(embed=e, view=TicketPanelView())
-        await self.bot.db.execute(
-            "INSERT INTO ticket_panels (guild_id, channel_id, message_id) VALUES (?, ?, ?)",
-            (self.guild_id, interaction.channel.id, msg.id),
-        )
-        self.ticket_panel_posted = True
-        await interaction.edit_original_response(embed=self.build_embed(), view=self)
-
     def _make_role_callback(self, field: str, select: discord.ui.RoleSelect):
         async def callback(interaction: discord.Interaction):
             if select.values:
@@ -1070,7 +1023,7 @@ class SetupView(discord.ui.View):
     async def _finish(self, interaction: discord.Interaction):
         if (
             not self.choices and not self.level_role_additions and not self.logs_created
-            and not self.managers and not self.security_touched and not self.ticket_panel_posted
+            and not self.managers and not self.security_touched
         ):
             return await interaction.response.send_message("Vous n'avez rien configuré pour l'instant.", ephemeral=True)
         for field, value in self.choices.items():
@@ -1087,8 +1040,6 @@ class SetupView(discord.ui.View):
         if self.security_touched:
             active_filters = sum(1 for v in self.security_choices.values() if v)
             lines.append(f"✅ Sécurité : {active_filters}/{len(AUTOMOD_TOGGLE_LABELS)} filtre(s) actif(s) (déjà enregistrés)")
-        if self.ticket_panel_posted:
-            lines.append("✅ Panneau de tickets posté (déjà enregistré)")
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(

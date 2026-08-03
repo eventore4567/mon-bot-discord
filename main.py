@@ -28,6 +28,7 @@ logger = logging.getLogger("bot")
 EXTENSIONS = [
     "cogs.moderation",
     "cogs.automod",
+    "cogs.security_tools",
     "cogs.tickets",
     "cogs.configuration",
     "cogs.server_builder",
@@ -107,12 +108,17 @@ class BotAllInOne(commands.Bot):
                 logger.error(f"Échec du chargement du module {ext} :\n{traceback.format_exc()}")
 
         # Enregistrement des vues persistantes (boutons qui survivent aux redémarrages).
+        # Le panel d'ouverture est propre à chaque panel configuré (options dynamiques) :
+        # on le reconstruit avec ses VRAIES données depuis la base (restore_panel_views).
+        # La vue de contrôle est générique (custom_id fixes) : un seul enregistrement suffit.
         try:
-            from cogs.tickets import TicketPanelView, TicketControlView
-            self.add_view(TicketPanelView())
+            from cogs.tickets import TicketControlView
             self.add_view(TicketControlView())
+            tickets_cog = self.get_cog("Tickets")
+            if tickets_cog:
+                await tickets_cog.restore_panel_views()
         except Exception:
-            logger.warning("Impossible d'enregistrer les vues de tickets.")
+            logger.warning("Impossible d'enregistrer les vues de tickets :\n" + traceback.format_exc())
 
         try:
             from cogs.verification import VerifyView
