@@ -65,7 +65,7 @@ CATEGORY_EMOJI = {name: label.split(" ", 1)[0] for name, label in CATEGORY_LABEL
 def build_help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_staff: bool) -> discord.Embed:
     """Construit l'embed d'accueil de /help. Partagé entre la première commande et le
     bouton "Accueil", pour que revenir en arrière affiche exactement la même chose."""
-    public_categories, staff_categories = [], []
+    rows = []  # (nom sans emoji, nombre de commandes, réservé au staff ?)
     visible_total = 0
     for cog_name, label in CATEGORY_LABELS.items():
         cog = bot.get_cog(cog_name)
@@ -73,11 +73,8 @@ def build_help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str,
             continue
         count = len(visible_commands(cog, is_staff))
         visible_total += count
-        entry = f"{label} `({count})`"
-        if cog_name in MEMBER_HIDDEN_CATEGORIES:
-            staff_categories.append(entry)
-        else:
-            public_categories.append(entry)
+        name = label.split(" ", 1)[1] if " " in label else label
+        rows.append((name, count, cog_name in MEMBER_HIDDEN_CATEGORIES))
 
     bot_name = bot.user.name if bot.user else "le bot"
     server_name = guild.name if guild else "ce serveur"
@@ -93,17 +90,20 @@ def build_help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str,
     if bot.user:
         e.set_thumbnail(url=bot.user.display_avatar.url)
 
-    if public_categories:
-        e.add_field(name="🌍 Pour tout le monde", value="\n".join(f"• {c}" for c in public_categories), inline=True)
-    if is_staff and staff_categories:
-        e.add_field(name="🔒 Réservé au staff", value="\n".join(f"• {c}" for c in staff_categories), inline=True)
+    if rows:
+        name_width = max(len(n) for n, _, _ in rows) + 2
+        lines = []
+        for name, count, staff_only in rows:
+            suffix = " (staff)" if staff_only else ""
+            lines.append(f"{name.ljust(name_width)}{str(count).rjust(2)}{suffix}")
+        e.add_field(name="📚 Catégories disponibles", value="```\n" + "\n".join(lines) + "\n```", inline=False)
 
     e.add_field(
         name="ℹ️ Bon à savoir",
         value=(
             f"**{visible_total} commande(s)** disponibles pour vous, en `/` ou avec le préfixe `{prefix}` "
             f"(les deux fonctionnent toujours, sans exception).\n"
-            f"📡 Astuce : `/sentrix <question>` répond à n'importe quelle question avec une jauge de confiance."
+            f"Astuce : `/sentrix <question>` répond à n'importe quelle question avec une jauge de confiance."
         ),
         inline=False,
     )
