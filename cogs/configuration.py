@@ -14,6 +14,7 @@ from discord.ext import commands
 
 import config
 from utils import embeds, checks, helpers
+from cogs.automod import AUTOMOD_TOGGLE_LABELS, SECURITY_PRESETS
 
 ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")
 
@@ -312,7 +313,13 @@ class Configuration(commands.Cog):
             member = ctx.guild.get_member(row["user_id"])
             existing_managers[row["user_id"]] = member.display_name if member else f"Membre {row['user_id']}"
 
-        view = SetupView(self.bot, ctx.guild.id, ctx.author.id, existing_managers=existing_managers)
+        automod_conf = await self.bot.db.get_automod(ctx.guild.id)
+        existing_security = {field: (automod_conf[field] if automod_conf else 0) for field in AUTOMOD_TOGGLE_LABELS}
+
+        view = SetupView(
+            self.bot, ctx.guild.id, ctx.author.id,
+            existing_managers=existing_managers, existing_security=existing_security,
+        )
         await ctx.send(embed=view.build_embed(), view=view)
 
     # ---------------------------------------------------------------- LOGS AUTOMATIQUES
@@ -497,7 +504,7 @@ class Configuration(commands.Cog):
 # Pour "channel", on peut préciser les types de salons acceptés (texte, catégorie...).
 SETUP_STEPS = [
     {
-        "title": "1/6 — Général",
+        "title": "1/7 — Général",
         "fields": [
             ("mod_role", "role", "🛡️ Rôle staff (modération)"),
             ("log_channel", "channel", "📝 Salon de logs (sanctions)"),
@@ -506,7 +513,7 @@ SETUP_STEPS = [
         ],
     },
     {
-        "title": "2/6 — Rôles & Tickets",
+        "title": "2/7 — Rôles & Tickets",
         "fields": [
             ("autorole", "role", "🎭 Rôle automatique à l'arrivée"),
             ("verify_role", "role", "✅ Rôle donné après vérification"),
@@ -515,7 +522,7 @@ SETUP_STEPS = [
         ],
     },
     {
-        "title": "3/6 — Salons annexes",
+        "title": "3/7 — Salons annexes",
         "fields": [
             ("level_channel", "channel", "📈 Annonces de passage de niveau"),
             ("suggest_channel", "channel", "💡 Suggestions"),
@@ -524,19 +531,24 @@ SETUP_STEPS = [
         ],
     },
     {
-        "title": "4/6 — Rôles de niveau",
+        "title": "4/7 — Rôles de niveau",
         "fields": [],
         "custom": "level_roles",
     },
     {
-        "title": "5/6 — Système de logs",
+        "title": "5/7 — Système de logs",
         "fields": [],
         "custom": "logs_setup",
     },
     {
-        "title": "6/6 — Gestionnaires du bot",
+        "title": "6/7 — Gestionnaires du bot",
         "fields": [],
         "custom": "managers",
+    },
+    {
+        "title": "7/7 — Sécurité (AutoMod)",
+        "fields": [],
+        "custom": "security",
     },
 ]
 
@@ -614,7 +626,10 @@ class SetupView(discord.ui.View):
     texte. Rien n'est écrit en base tant qu'on n'a pas cliqué sur "Terminer".
     """
 
-    def __init__(self, bot: commands.Bot, guild_id: int, author_id: int, existing_managers: dict | None = None):
+    def __init__(
+        self, bot: commands.Bot, guild_id: int, author_id: int,
+        existing_managers: dict | None = None, existing_security: dict | None = None,
+    ):
         super().__init__(timeout=300)
         self.bot = bot
         self.guild_id = guild_id
@@ -623,6 +638,7 @@ class SetupView(discord.ui.View):
         self.level_role_additions: list[tuple[int, discord.Role]] = []
         self.logs_created: list[discord.TextChannel] = []
         self.managers: dict[int, str] = dict(existing_managers or {})
+        self.security_choices: dict[str, int] = dict(existing_security or {field: 0 for field in AUTOMOD_TOGGLE_LABELS})
         self.page = 0
         self.render_page()
 
@@ -676,6 +692,20 @@ class SetupView(discord.ui.View):
                 e.add_field(name="Gestionnaires actuels", value="Aucun pour l'instant.", inline=False)
             return e
 
+        if step.get("custom") == "security":
+            e = embeds.neutral(
+                f"🧙 Assistant de configuration — {step['title']}",
+                "Cliquez sur un **préréglage** (🟢 Faible / 🟡 Moyen / 🔴 Élevé) pour tout régler en un clic, "
+                "ou utilisez le menu **🎚️ Filtres précis** pour choisir exactement quels filtres activer.\n\n"
+                "⚠️ Chaque changement ici est enregistré **immédiatement**, comme les logs et les gestionnaires.",
+            )
+            lines = [
+                f"{'✅' if self.security_choices.get(field) else '❌'} {label}"
+                for field, label in AUTOMOD_TOGGLE_LABELS.items()
+            ]
+            e.add_field(name="État actuel des filtres", value="\n".join(lines), inline=False)
+            return e
+
         e = embeds.neutral(
             f"🧙 Assistant de configuration — {step['title']}",
             "Choisissez vos options avec les menus ci-dessous. Laissez vide ce que vous ne voulez pas configurer.\n"
@@ -715,6 +745,29 @@ class SetupView(discord.ui.View):
                 )
                 remove_select.callback = self._make_manager_remove_callback(remove_select)
                 self.add_item(remove_select)
+        elif step.get("custom") == "security":
+            presets = [
+                ("🟢 Faible", "faible", discord.ButtonStyle.success),
+                ("🟡 Moyen", "moyen", discord.ButtonStyle.primary),
+                ("🔴 Élevé", "eleve", discord.ButtonStyle.danger),
+            ]
+            for label, level, style in presets:
+                btn = discord.ui.Button(label=label, style=style, row=0)
+                btn.callback = self._make_security_preset_callback(level)
+                self.add_item(btn)
+
+            select = discord.ui.Select(
+                placeholder="🎚️ Choisir précisément les filtres actifs",
+                min_values=0,
+                max_values=len(AUTOMOD_TOGGLE_LABELS),
+                options=[
+                    discord.SelectOption(label=label, value=field, default=bool(self.security_choices.get(field)))
+                    for field, label in AUTOMOD_TOGGLE_LABELS.items()
+                ],
+                row=1,
+            )
+            select.callback = self._make_security_select_callback(select)
+            self.add_item(select)
         else:
             for i, field in enumerate(step["fields"]):
                 key, kind, label = field[0], field[1], field[2]
@@ -791,6 +844,33 @@ class SetupView(discord.ui.View):
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
         return callback
 
+    def _make_security_preset_callback(self, level: str):
+        async def callback(interaction: discord.Interaction):
+            for field, value in SECURITY_PRESETS.get(level, {}).items():
+                await self.bot.db.set_automod(self.guild_id, field, value)
+                self.security_choices[field] = value
+            await self.bot.db.set_guild_config(self.guild_id, "security_level", level)
+            automod_cog = self.bot.get_cog("Automod")
+            if automod_cog:
+                automod_cog.automod_cache.pop(self.guild_id, None)
+            self.render_page()
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        return callback
+
+    def _make_security_select_callback(self, select: discord.ui.Select):
+        async def callback(interaction: discord.Interaction):
+            chosen = set(select.values)
+            for field in AUTOMOD_TOGGLE_LABELS:
+                value = 1 if field in chosen else 0
+                await self.bot.db.set_automod(self.guild_id, field, value)
+                self.security_choices[field] = value
+            automod_cog = self.bot.get_cog("Automod")
+            if automod_cog:
+                automod_cog.automod_cache.pop(self.guild_id, None)
+            self.render_page()
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        return callback
+
     async def _go_prev(self, interaction: discord.Interaction):
         self.page -= 1
         self.render_page()
@@ -818,6 +898,8 @@ class SetupView(discord.ui.View):
             lines.append(f"✅ {len(self.logs_created)} salon(s) de logs (déjà créés)")
         if self.managers:
             lines.append(f"✅ {len(self.managers)} gestionnaire(s) du bot (déjà enregistrés)")
+        active_filters = sum(1 for v in self.security_choices.values() if v)
+        lines.append(f"✅ Sécurité : {active_filters}/{len(AUTOMOD_TOGGLE_LABELS)} filtre(s) actif(s) (déjà enregistrés)")
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(

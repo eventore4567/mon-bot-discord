@@ -33,6 +33,32 @@ TOGGLE_FIELDS = [
     "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam", "antinuke",
 ]
 
+# Libellés lisibles des filtres AutoMod — réutilisés par /automod-status ET par la page
+# "Sécurité" de /setup, pour ne jamais avoir deux endroits à maintenir séparément.
+AUTOMOD_TOGGLE_LABELS = {
+    "antispam": "🚫 Anti-spam (messages répétés)",
+    "antilink": "🔗 Anti-liens",
+    "antiinvite": "📨 Anti-invitations Discord",
+    "antimention": "📢 Anti-mentions massives",
+    "anticaps": "🔠 Anti-majuscules (SPAM CAPS)",
+    "antiemoji": "😀 Anti-spam d'émojis",
+    "antiraid": "🚨 Anti-raid (afflux de comptes)",
+    "antibot": "🤖 Anti-bots non autorisés",
+    "antiaccount": "🆕 Anti-comptes très récents",
+    "antiscam": "🎣 Anti-arnaques",
+    "antinuke": "💣 Anti-nuke (compte compromis)",
+}
+
+# Préréglages du niveau de sécurité global (/security-level et page "Sécurité" de /setup).
+SECURITY_PRESETS = {
+    "faible": {"antispam": 0, "antilink": 0, "antiinvite": 0, "antiraid": 0, "antiscam": 1, "antinuke": 1},
+    "moyen": {"antispam": 1, "antilink": 0, "antiinvite": 1, "antiraid": 1, "antiscam": 1, "antinuke": 1},
+    "eleve": {
+        "antispam": 1, "antilink": 1, "antiinvite": 1, "antiraid": 1, "antiscam": 1,
+        "antimention": 1, "antiaccount": 1, "antinuke": 1,
+    },
+}
+
 TOGGLE_CHOICES = [
     app_commands.Choice(name="Activer", value="on"),
     app_commands.Choice(name="Désactiver", value="off"),
@@ -260,15 +286,7 @@ class AutoMod(commands.Cog, name="Automod"):
     @checks.is_owner_or_admin()
     async def security_level(self, ctx: commands.Context, niveau: str):
         await self.bot.db.set_guild_config(ctx.guild.id, "security_level", niveau)
-        presets = {
-            "faible": {"antispam": 0, "antilink": 0, "antiinvite": 0, "antiraid": 0, "antiscam": 1, "antinuke": 1},
-            "moyen": {"antispam": 1, "antilink": 0, "antiinvite": 1, "antiraid": 1, "antiscam": 1, "antinuke": 1},
-            "eleve": {
-                "antispam": 1, "antilink": 1, "antiinvite": 1, "antiraid": 1, "antiscam": 1,
-                "antimention": 1, "antiaccount": 1, "antinuke": 1,
-            },
-        }
-        for field, value in presets.get(niveau, {}).items():
+        for field, value in SECURITY_PRESETS.get(niveau, {}).items():
             await self.bot.db.set_automod(ctx.guild.id, field, value)
         self.automod_cache.pop(ctx.guild.id, None)
         await ctx.send(embed=embeds.success(f"Niveau de sécurité réglé sur **{niveau}**. Les filtres associés ont été ajustés."))
