@@ -11,4 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Port du dashboard web intégré (voir web/dashboard.py) — Railway fournit sa propre
+# variable PORT au runtime, cette ligne ne sert que de documentation pour Docker.
+EXPOSE 8080
+
 CMD ["python3", "main.py"]

@@ -21,6 +21,13 @@ DEFAULT_PREFIX = os.getenv("BOT_PREFIX", "+")
 DEFAULT_LANGUAGE = "fr"
 DATABASE_PATH = os.getenv("DATABASE_PATH", "database/bot.db")
 
+# --- Dashboard web (tableau de bord en temps réel, voir web/dashboard.py) ---
+# Port d'écoute : Railway fournit automatiquement la variable PORT, sinon 8080 en local.
+DASHBOARD_PORT = int(os.getenv("PORT", "8080"))
+# Jeton optionnel : si défini, le dashboard n'est accessible qu'avec ?token=... dans l'URL
+# (ou l'en-tête X-Dashboard-Token). Fortement recommandé si le domaine Railway est public.
+DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "")
+
 # Couleurs des embeds (identité visuelle SentriX : violet électrique / futuriste)
 COLOR_SUCCESS = 0x57F287
 COLOR_ERROR = 0xED4245

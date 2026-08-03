@@ -19,6 +19,7 @@ import config
 from database.db import Database
 from utils import embeds
 from utils.checks import BotPermissionError, BotBlacklistedError
+from web.dashboard import start_dashboard
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("bot")
@@ -133,6 +134,11 @@ class BotAllInOne(commands.Bot):
             logger.info(f"{len(synced)} commandes slash synchronisées globalement.")
         except Exception:
             logger.error(f"Échec de la synchronisation des commandes slash :\n{traceback.format_exc()}")
+
+        # Dashboard web (voir web/dashboard.py) : tourne dans le même processus, sur le
+        # port fourni par Railway (variable PORT). Ne bloque jamais le démarrage du bot
+        # si ça échoue (ex: port déjà utilisé en local).
+        asyncio.create_task(start_dashboard(self))
 
     async def global_blacklist_check(self, ctx: commands.Context) -> bool:
         """Bloque tout utilisateur inscrit sur la liste noire GLOBALE d'utilisation du bot

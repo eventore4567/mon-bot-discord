@@ -700,6 +700,32 @@ class Database:
             (guild_id, user_id),
         )
 
+    # ---------- Statistiques pour le dashboard web (web/dashboard.py) ----------
+
+    async def commands_count_since(self, since_ts: int) -> int:
+        row = await self.fetchone("SELECT COUNT(*) c FROM command_logs WHERE timestamp >= ?", (since_ts,))
+        return row["c"] if row else 0
+
+    async def commands_count_total(self) -> int:
+        row = await self.fetchone("SELECT COUNT(*) c FROM command_logs")
+        return row["c"] if row else 0
+
+    async def top_commands_since(self, since_ts: int, limit: int = 5):
+        return await self.fetchall(
+            "SELECT command_name, COUNT(*) as c FROM command_logs WHERE timestamp >= ? "
+            "GROUP BY command_name ORDER BY c DESC LIMIT ?",
+            (since_ts, limit),
+        )
+
+    async def commands_hourly_since(self, since_ts: int):
+        """Regroupe les commandes exécutées par tranche d'une heure, pour le mini graphique
+        du dashboard (les 24 dernières heures par défaut)."""
+        return await self.fetchall(
+            "SELECT (timestamp / 3600) * 3600 as bucket, COUNT(*) as c FROM command_logs "
+            "WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC",
+            (since_ts,),
+        )
+
 
 def now() -> int:
     return int(time.time())
