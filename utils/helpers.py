@@ -3,6 +3,39 @@
 import re
 import discord
 
+# Colonnes de guild_config pour chaque type de log spécialisé, avec repli sur le
+# salon de logs général (log_channel) si le salon dédié n'est pas configuré.
+LOG_KIND_COLUMNS = {
+    "messages": "log_messages",
+    "members": "log_members",
+    "voice": "log_voice",
+    "roles": "log_roles",
+    "server": "log_server",
+    "automod": "log_automod",
+    "moderation": "log_moderation",
+}
+
+
+async def send_log(bot, guild: discord.Guild, kind: str, embed: discord.Embed) -> None:
+    """Envoie un embed de log dans le salon dédié à `kind` (messages/members/voice/roles/
+    server/automod/moderation), avec repli automatique sur le salon de logs général
+    (log_channel) si ce salon spécifique n'est pas configuré. Utilisé partout dans le bot
+    pour que le système de logs reste cohérent, que /create-logs ait été utilisé ou non."""
+    conf = await bot.db.get_guild_config(guild.id)
+    if not conf:
+        return
+    column = LOG_KIND_COLUMNS.get(kind)
+    channel_id = conf[column] if column and conf[column] else conf["log_channel"]
+    if not channel_id:
+        return
+    channel = guild.get_channel(channel_id)
+    if not channel:
+        return
+    try:
+        await channel.send(embed=embed)
+    except discord.HTTPException:
+        pass
+
 DURATION_RE = re.compile(r"(\d+)\s*(s|sec|m|min|h|heure|heures|j|jour|jours|d|w|sem|semaine)", re.IGNORECASE)
 
 UNIT_SECONDS = {

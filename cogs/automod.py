@@ -21,7 +21,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks
+from utils import embeds, checks, helpers
 
 INVITE_RE = re.compile(r"(discord\.gg|discord(?:app)?\.com/invite)/\S+", re.IGNORECASE)
 LINK_RE = re.compile(r"https?://\S+", re.IGNORECASE)
@@ -57,14 +57,9 @@ class AutoMod(commands.Cog):
         self.whitelist_domains_cache: dict[int, list[str]] = {}
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
-        conf = await self.bot.db.get_guild_config(guild.id)
-        if conf and conf["log_channel"]:
-            channel = guild.get_channel(conf["log_channel"])
-            if channel:
-                try:
-                    await channel.send(embed=embed)
-                except discord.HTTPException:
-                    pass
+        # Utilise le salon "logs-securite" dédié s'il existe (via /create-logs), sinon
+        # retombe sur le salon de logs général — jamais de log perdu.
+        await helpers.send_log(self.bot, guild, "automod", embed)
 
     # ---------------------------------------------------------------- CACHES
 

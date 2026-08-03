@@ -45,14 +45,9 @@ class Moderation(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
-        conf = await self.bot.db.get_guild_config(guild.id)
-        if conf and conf["log_channel"]:
-            channel = guild.get_channel(conf["log_channel"])
-            if channel:
-                try:
-                    await channel.send(embed=embed)
-                except discord.HTTPException:
-                    pass
+        # Utilise le salon "logs-moderation" dédié s'il existe (via /create-logs), sinon
+        # retombe sur le salon de logs général — jamais de log perdu.
+        await helpers.send_log(self.bot, guild, "moderation", embed)
 
     def sanction_embed(self, action: str, target: discord.abc.User, moderator: discord.abc.User, reason: str, extra: str = "") -> discord.Embed:
         e = embeds.neutral(f"🔨 Sanction : {action}")

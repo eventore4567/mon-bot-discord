@@ -35,7 +35,14 @@ CREATE TABLE IF NOT EXISTS guild_config (
     level_channel INTEGER,
     suggest_channel INTEGER,
     announce_channel INTEGER,
-    giveaway_channel INTEGER
+    giveaway_channel INTEGER,
+    log_messages INTEGER,
+    log_members INTEGER,
+    log_voice INTEGER,
+    log_roles INTEGER,
+    log_server INTEGER,
+    log_automod INTEGER,
+    log_moderation INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS warnings (
@@ -394,6 +401,20 @@ CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders (trigger_at);
 CREATE INDEX IF NOT EXISTS idx_reaction_roles_msg ON reaction_roles (guild_id, message_id);
 """
 
+# Colonnes ajoutées à guild_config après sa création initiale : CREATE TABLE IF NOT EXISTS
+# ne touche pas une table déjà existante, donc sur une base déjà en place (ex: un volume
+# persistant sur l'hébergeur), ces nouvelles colonnes doivent être ajoutées manuellement
+# via ALTER TABLE au démarrage. Voir Database._migrate().
+GUILD_CONFIG_NEW_COLUMNS = {
+    "log_messages": "INTEGER",
+    "log_members": "INTEGER",
+    "log_voice": "INTEGER",
+    "log_roles": "INTEGER",
+    "log_server": "INTEGER",
+    "log_automod": "INTEGER",
+    "log_moderation": "INTEGER",
+}
+
 
 class Database:
     """Petit wrapper async autour d'aiosqlite, partagé par tous les cogs."""
@@ -415,7 +436,17 @@ class Database:
         await self._conn.execute("PRAGMA foreign_keys=ON;")
         await self._conn.executescript(SCHEMA)
         await self._conn.executescript(INDEXES)
+        await self._migrate()
         await self._conn.commit()
+
+    async def _migrate(self):
+        """Ajoute les colonnes manquantes à guild_config si la table existait déjà avant
+        leur introduction (utile si la base survit aux redéploiements, ex: volume persistant)."""
+        cur = await self._conn.execute("PRAGMA table_info(guild_config)")
+        existing = {row[1] for row in await cur.fetchall()}
+        for column, col_type in GUILD_CONFIG_NEW_COLUMNS.items():
+            if column not in existing:
+                await self._conn.execute(f"ALTER TABLE guild_config ADD COLUMN {column} {col_type}")
 
     async def close(self):
         if self._conn:

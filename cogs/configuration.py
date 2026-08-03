@@ -12,9 +12,21 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks
+from utils import embeds, checks, helpers
 
 ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")
+
+# (colonne guild_config, nom du salon, description) — utilisé par /create-logs pour
+# générer toute la catégorie de logs d'un coup, et par les listeners de logging.py.
+LOG_CHANNEL_DEFINITIONS = [
+    ("log_server", "logs-serveur", "Création/suppression/modification de salons, catégories et rôles du serveur."),
+    ("log_messages", "logs-messages", "Messages modifiés ou supprimés."),
+    ("log_members", "logs-membre", "Arrivées et départs de membres."),
+    ("log_voice", "logs-vocal", "Connexions, déconnexions et changements de salon vocal."),
+    ("log_roles", "logs-roles", "Rôles ajoutés ou retirés à un membre."),
+    ("log_moderation", "logs-moderation", "Sanctions : avertissements, mutes, kicks, bans."),
+    ("log_automod", "logs-securite", "Actions AutoMod et anti-nuke (spam, liens, protection du serveur)."),
+]
 
 
 def parse_role_input(guild: discord.Guild, value: str):
@@ -56,21 +68,11 @@ class Configuration(commands.Cog):
         await self.bot.db.set_guild_config(ctx.guild.id, "log_channel", salon.id)
         await ctx.send(embed=embeds.success(f"Le salon de logs a été défini sur {salon.mention}."))
 
-    @commands.hybrid_command(
-        name="create-logs",
-        description="Créer automatiquement un salon de logs privé et le configurer, sans étape manuelle.",
-    )
-    @checks.is_owner_or_admin()
-    async def create_logs(self, ctx: commands.Context):
-        guild = ctx.guild
+    async def create_log_channels(self, guild: discord.Guild, author: discord.Member) -> list[discord.TextChannel]:
+        """Crée (une seule fois) toute la catégorie de logs SentriX : un salon dédié par
+        type d'évènement, avec les bonnes permissions. Réutilisé par /create-logs et par
+        la page "Logs" de /setup. Ne recrée jamais un salon déjà configuré et toujours valide."""
         conf = await self.bot.db.get_guild_config(guild.id)
-
-        # Si un salon de logs valide existe déjà, on ne le recrée pas en double.
-        if conf and conf["log_channel"] and guild.get_channel(conf["log_channel"]):
-            existing = guild.get_channel(conf["log_channel"])
-            return await ctx.send(
-                embed=embeds.warning(f"Un salon de logs existe déjà : {existing.mention}. Utilisez `/setlogchannel` pour en choisir un autre.")
-            )
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -80,27 +82,45 @@ class Configuration(commands.Cog):
             role = guild.get_role(conf["mod_role"])
             if role:
                 overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-        if ctx.author.guild_permissions.administrator:
-            overwrites[ctx.author] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        if author.guild_permissions.administrator:
+            overwrites[author] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
 
-        channel = await guild.create_text_channel(
-            "sentrix-logs",
-            overwrites=overwrites,
-            topic="Salon de logs automatique de SentriX : sanctions, tickets, sécurité.",
-            reason=f"/create-logs par {ctx.author}",
-        )
+        missing = [d for d in LOG_CHANNEL_DEFINITIONS if not (conf and conf[d[0]] and guild.get_channel(conf[d[0]]))]
+        if not missing:
+            return []
 
-        await self.bot.db.set_guild_config(guild.id, "log_channel", channel.id)
-        if not (conf and conf["ticket_log_channel"]):
-            await self.bot.db.set_guild_config(guild.id, "ticket_log_channel", channel.id)
+        category = await guild.create_category("📡 SentriX — Logs", overwrites=overwrites, reason=f"Système de logs créé par {author}")
+
+        created = []
+        for db_column, channel_name, topic in missing:
+            channel = await guild.create_text_channel(
+                channel_name, category=category, overwrites=overwrites, topic=topic,
+                reason=f"Système de logs créé par {author}",
+            )
+            await self.bot.db.set_guild_config(guild.id, db_column, channel.id)
+            created.append(channel)
+            await channel.send(embed=embeds.brand("📡 Journal SentriX", topic))
+        return created
+
+    @commands.hybrid_command(
+        name="create-logs",
+        description="Créer automatiquement toute une catégorie de salons de logs (messages, membres, vocal, rôles, serveur, modération, sécurité).",
+    )
+    @checks.is_owner_or_admin()
+    async def create_logs(self, ctx: commands.Context):
+        await ctx.defer() if ctx.interaction else None
+        created = await self.create_log_channels(ctx.guild, ctx.author)
+
+        if not created:
+            return await ctx.send(embed=embeds.warning("Tous les salons de logs étaient déjà configurés. Utilisez `/setup` pour les changer un par un."))
 
         e = embeds.brand(
-            "📡 Salon de logs créé",
-            f"{channel.mention} a été créé et configuré automatiquement comme salon de logs "
-            "(sanctions, sécurité, tickets). Seul le staff peut le voir.",
+            "📡 Système de logs créé",
+            f"**{len(created)}** salon(s) de logs ont été créés et configurés automatiquement — "
+            "rien d'autre à faire, le bot y écrit tout seul à partir de maintenant.",
         )
+        e.add_field(name="Salons créés", value="\n".join(c.mention for c in created), inline=False)
         await ctx.send(embed=e)
-        await channel.send(embed=embeds.brand("📡 Journal SentriX", "Ce salon recevra automatiquement tous les logs du bot à partir de maintenant."))
 
     @commands.hybrid_command(name="setwelcomechannel", description="Définir le salon de bienvenue.", with_app_command=False)
     @app_commands.describe(salon="Le salon de bienvenue")
@@ -278,12 +298,107 @@ class Configuration(commands.Cog):
         view = SetupView(self.bot, ctx.guild.id, ctx.author.id)
         await ctx.send(embed=view.build_embed(), view=view)
 
+    # ---------------------------------------------------------------- LOGS AUTOMATIQUES
+    # Une fois /create-logs (ou la page "Logs" de /setup) utilisé, le bot alimente ces
+    # salons tout seul, sans plus jamais rien demander à l'utilisateur.
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: discord.Message):
+        if message.author.bot or not message.guild or not message.content:
+            return
+        e = embeds.neutral(
+            "🗑️ Message supprimé",
+            f"**Auteur :** {message.author.mention}\n**Salon :** {message.channel.mention}\n\n{message.content[:1000]}",
+        )
+        await helpers.send_log(self.bot, message.guild, "messages", e)
+
+    @commands.Cog.listener()
+    async def on_message_edit(self, before: discord.Message, after: discord.Message):
+        if before.author.bot or not before.guild or before.content == after.content:
+            return
+        e = embeds.neutral(
+            "✏️ Message modifié",
+            f"**Auteur :** {before.author.mention}\n**Salon :** {before.channel.mention}\n\n"
+            f"**Avant :** {before.content[:500] or '(vide)'}\n**Après :** {after.content[:500] or '(vide)'}",
+        )
+        await helpers.send_log(self.bot, before.guild, "messages", e)
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        if member.bot:
+            return
+        age_days = (discord.utils.utcnow() - member.created_at).days
+        e = embeds.success(
+            f"**{member}** ({member.mention}) vient de rejoindre.\nCompte créé il y a **{age_days} jour(s)**.",
+            title="📥 Arrivée d'un membre",
+        )
+        await helpers.send_log(self.bot, member.guild, "members", e)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        roles = [r.mention for r in member.roles if not r.is_default()]
+        e = embeds.error(
+            f"**{member}** a quitté le serveur.\n**Rôles :** {', '.join(roles) if roles else 'Aucun'}",
+            title="📤 Départ d'un membre",
+        )
+        await helpers.send_log(self.bot, member.guild, "members", e)
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+        if member.bot:
+            return
+        if before.channel == after.channel:
+            return  # simple mute/deafen/stream toggle : pas assez pertinent pour un log
+        if before.channel is None:
+            desc = f"{member.mention} a rejoint {after.channel.mention}."
+        elif after.channel is None:
+            desc = f"{member.mention} a quitté {before.channel.mention}."
+        else:
+            desc = f"{member.mention} est passé de {before.channel.mention} à {after.channel.mention}."
+        await helpers.send_log(self.bot, member.guild, "voice", embeds.neutral("🔊 Activité vocale", desc))
+
+    @commands.Cog.listener()
+    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
+        e = embeds.success(f"**{channel.name}** ({channel.mention if hasattr(channel, 'mention') else channel.name})", title="📁 Salon créé")
+        await helpers.send_log(self.bot, channel.guild, "server", e)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        e = embeds.error(f"**#{channel.name}** a été supprimé.", title="📁 Salon supprimé")
+        await helpers.send_log(self.bot, channel.guild, "server", e)
+
+    @commands.Cog.listener()
+    async def on_guild_role_create(self, role: discord.Role):
+        e = embeds.success(f"**{role.name}** ({role.mention})", title="🎭 Rôle créé")
+        await helpers.send_log(self.bot, role.guild, "roles", e)
+
+    @commands.Cog.listener()
+    async def on_guild_role_delete(self, role: discord.Role):
+        e = embeds.error(f"**{role.name}** a été supprimé.", title="🎭 Rôle supprimé")
+        await helpers.send_log(self.bot, role.guild, "roles", e)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        if before.roles == after.roles:
+            return
+        added = [r for r in after.roles if r not in before.roles]
+        removed = [r for r in before.roles if r not in after.roles]
+        parts = []
+        if added:
+            parts.append("**Ajoutés :** " + ", ".join(r.mention for r in added))
+        if removed:
+            parts.append("**Retirés :** " + ", ".join(r.mention for r in removed))
+        if not parts:
+            return
+        e = embeds.neutral(f"🎭 Rôles modifiés pour {after}", "\n".join(parts))
+        await helpers.send_log(self.bot, after.guild, "roles", e)
+
 
 # Chaque "étape" = une page de l'assistant. "role"/"channel" = type de menu déroulant.
 # Pour "channel", on peut préciser les types de salons acceptés (texte, catégorie...).
 SETUP_STEPS = [
     {
-        "title": "1/4 — Général",
+        "title": "1/5 — Général",
         "fields": [
             ("mod_role", "role", "🛡️ Rôle staff (modération)"),
             ("log_channel", "channel", "📝 Salon de logs (sanctions)"),
@@ -292,7 +407,7 @@ SETUP_STEPS = [
         ],
     },
     {
-        "title": "2/4 — Rôles & Tickets",
+        "title": "2/5 — Rôles & Tickets",
         "fields": [
             ("autorole", "role", "🎭 Rôle automatique à l'arrivée"),
             ("verify_role", "role", "✅ Rôle donné après vérification"),
@@ -301,7 +416,7 @@ SETUP_STEPS = [
         ],
     },
     {
-        "title": "3/4 — Salons annexes",
+        "title": "3/5 — Salons annexes",
         "fields": [
             ("level_channel", "channel", "📈 Annonces de passage de niveau"),
             ("suggest_channel", "channel", "💡 Suggestions"),
@@ -310,9 +425,14 @@ SETUP_STEPS = [
         ],
     },
     {
-        "title": "4/4 — Rôles de niveau",
+        "title": "4/5 — Rôles de niveau",
         "fields": [],
         "custom": "level_roles",
+    },
+    {
+        "title": "5/5 — Système de logs",
+        "fields": [],
+        "custom": "logs_setup",
     },
 ]
 
@@ -397,6 +517,7 @@ class SetupView(discord.ui.View):
         self.author_id = author_id
         self.choices: dict = {}
         self.level_role_additions: list[tuple[int, discord.Role]] = []
+        self.logs_created: list[discord.TextChannel] = []
         self.page = 0
         self.render_page()
 
@@ -421,6 +542,19 @@ class SetupView(discord.ui.View):
                 e.add_field(name=f"✅ Ajoutés dans cette session ({len(self.level_role_additions)})", value="\n".join(lines), inline=False)
             return e
 
+        if step.get("custom") == "logs_setup":
+            e = embeds.neutral(
+                f"🧙 Assistant de configuration — {step['title']}",
+                "Créez en un clic toute une catégorie de salons de logs privés (serveur, messages, membres, "
+                "vocal, rôles, modération, sécurité) — le bot y écrit tout seul ensuite, rien d'autre à faire.\n\n"
+                "Cliquez sur **📡 Créer le système de logs** ci-dessous. Les salons déjà configurés ne sont "
+                "jamais dupliqués.",
+            )
+            if self.logs_created:
+                lines = "\n".join(c.mention for c in self.logs_created)
+                e.add_field(name=f"✅ Créés dans cette session ({len(self.logs_created)})", value=lines, inline=False)
+            return e
+
         e = embeds.neutral(
             f"🧙 Assistant de configuration — {step['title']}",
             "Choisissez vos options avec les menus ci-dessous. Laissez vide ce que vous ne voulez pas configurer.\n"
@@ -439,6 +573,10 @@ class SetupView(discord.ui.View):
             add_btn = discord.ui.Button(label="➕ Ajouter un rôle de niveau", style=discord.ButtonStyle.primary, row=0)
             add_btn.callback = self._open_level_role_modal
             self.add_item(add_btn)
+        elif step.get("custom") == "logs_setup":
+            logs_btn = discord.ui.Button(label="📡 Créer le système de logs", style=discord.ButtonStyle.primary, row=0)
+            logs_btn.callback = self._create_logs_clicked
+            self.add_item(logs_btn)
         else:
             for i, field in enumerate(step["fields"]):
                 key, kind, label = field[0], field[1], field[2]
@@ -473,6 +611,13 @@ class SetupView(discord.ui.View):
     async def _open_level_role_modal(self, interaction: discord.Interaction):
         await interaction.response.send_modal(LevelRoleModal(self))
 
+    async def _create_logs_clicked(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        cog: "Configuration" = self.bot.get_cog("Configuration")
+        created = await cog.create_log_channels(interaction.guild, interaction.user)
+        self.logs_created.extend(created)
+        await interaction.edit_original_response(embed=self.build_embed(), view=self)
+
     def _make_role_callback(self, field: str, select: discord.ui.RoleSelect):
         async def callback(interaction: discord.Interaction):
             if select.values:
@@ -501,7 +646,7 @@ class SetupView(discord.ui.View):
         await interaction.response.send_modal(SetupTextModal(self))
 
     async def _finish(self, interaction: discord.Interaction):
-        if not self.choices and not self.level_role_additions:
+        if not self.choices and not self.level_role_additions and not self.logs_created:
             return await interaction.response.send_message("Vous n'avez rien configuré pour l'instant.", ephemeral=True)
         for field, value in self.choices.items():
             await self.bot.db.set_guild_config(self.guild_id, field, value)
@@ -510,6 +655,8 @@ class SetupView(discord.ui.View):
         lines = [f"✅ {FIELD_LABELS.get(k, k)}" for k in self.choices]
         if self.level_role_additions:
             lines.append(f"✅ {len(self.level_role_additions)} rôle(s) de niveau (déjà enregistrés)")
+        if self.logs_created:
+            lines.append(f"✅ {len(self.logs_created)} salon(s) de logs (déjà créés)")
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(
