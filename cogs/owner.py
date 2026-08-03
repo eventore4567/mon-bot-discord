@@ -82,23 +82,34 @@ class Owner(commands.Cog, name="Owner"):
         # déjà présent, ET on le rebannira automatiquement s'il essaie de rejoindre
         # n'importe quel autre serveur du bot plus tard (voir on_member_join ci-dessous).
         banned_in = []
+        failed_in = []  # (nom du serveur, raison lisible) — pour expliquer clairement quand le ban échoue
         for guild in self.bot.guilds:
             member = guild.get_member(utilisateur.id)
-            if not member or not guild.me.guild_permissions.ban_members:
+            if not member:
+                continue
+            if not guild.me.guild_permissions.ban_members:
+                failed_in.append((guild.name, "il me manque la permission **Bannir des membres**"))
+                continue
+            if member.top_role >= guild.me.top_role and member.id != guild.owner_id:
+                failed_in.append((guild.name, "mon rôle est trop bas dans la hiérarchie par rapport au sien"))
                 continue
             try:
                 await guild.ban(member, reason=f"Liste noire du bot : {raison}")
                 banned_in.append(guild.name)
                 await asyncio.sleep(0.5)
-            except discord.HTTPException:
+            except discord.HTTPException as exc:
+                failed_in.append((guild.name, f"erreur Discord ({exc})"))
                 continue
 
         description = f"**{utilisateur}** ne peut plus utiliser aucune commande du bot, sur aucun serveur.\nRaison : {raison}"
         if banned_in:
             description += f"\n\n🔨 Banni automatiquement sur : {', '.join(banned_in)}"
+        if failed_in:
+            details = "\n".join(f"• **{name}** : {reason}" for name, reason in failed_in)
+            description += f"\n\n⚠️ Pas banni sur (à corriger si besoin) :\n{details}"
         description += (
             "\n🛡️ S'il essaie de rejoindre un autre serveur où je suis présent (avec la permission "
-            "Bannir), il sera banni automatiquement dès son arrivée."
+            "Bannir et un rôle assez haut), il sera banni automatiquement dès son arrivée."
         )
         await ctx.send(embed=embeds.success(description, title="🚫 Ajouté à la liste noire"))
 
