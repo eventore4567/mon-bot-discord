@@ -391,6 +391,25 @@ CREATE TABLE IF NOT EXISTS bot_managers (
     added_at INTEGER,
     PRIMARY KEY (guild_id, user_id)
 );
+
+CREATE TABLE IF NOT EXISTS command_blacklist (
+    user_id INTEGER PRIMARY KEY,
+    reason TEXT,
+    blacklisted_by INTEGER,
+    blacklisted_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS bot_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS command_aliases (
+    guild_id INTEGER,
+    alias TEXT,
+    command_name TEXT,
+    PRIMARY KEY (guild_id, alias)
+);
 """
 
 # Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de
@@ -535,6 +554,58 @@ class Database:
         return await self.fetchall(
             "SELECT user_id FROM bot_managers WHERE guild_id = ?", (guild_id,)
         )
+
+    # ---------- Liste noire GLOBALE d'utilisation du bot (toutes commandes, tous serveurs) ----------
+    # Différente de "blacklist_users" (utils/automod.py) qui ne bloque que le contenu sur UN serveur :
+    # ici, un utilisateur blacklisté ne peut plus utiliser AUCUNE commande du bot, nulle part.
+
+    async def blacklist_add(self, user_id: int, reason: str, by_id: int):
+        await self.execute(
+            "INSERT INTO command_blacklist (user_id, reason, blacklisted_by, blacklisted_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET reason = excluded.reason, blacklisted_by = excluded.blacklisted_by, blacklisted_at = excluded.blacklisted_at",
+            (user_id, reason, by_id, now()),
+        )
+
+    async def blacklist_remove(self, user_id: int):
+        await self.execute("DELETE FROM command_blacklist WHERE user_id = ?", (user_id,))
+
+    async def blacklist_get(self, user_id: int):
+        return await self.fetchone("SELECT * FROM command_blacklist WHERE user_id = ?", (user_id,))
+
+    async def blacklist_list(self):
+        return await self.fetchall("SELECT * FROM command_blacklist ORDER BY blacklisted_at DESC")
+
+    # ---------- Réglages globaux du bot (footer, couleur, présence rotative...) ----------
+
+    async def get_setting(self, key: str, default: str | None = None) -> str | None:
+        row = await self.fetchone("SELECT value FROM bot_settings WHERE key = ?", (key,))
+        return row["value"] if row else default
+
+    async def set_setting(self, key: str, value: str):
+        await self.execute(
+            "INSERT INTO bot_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
+    # ---------- Alias de commandes (préfixe uniquement, par serveur) ----------
+
+    async def add_alias(self, guild_id: int, alias: str, command_name: str):
+        await self.execute(
+            "INSERT INTO command_aliases (guild_id, alias, command_name) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, alias) DO UPDATE SET command_name = excluded.command_name",
+            (guild_id, alias, command_name),
+        )
+
+    async def remove_alias(self, guild_id: int, alias: str):
+        await self.execute("DELETE FROM command_aliases WHERE guild_id = ? AND alias = ?", (guild_id, alias))
+
+    async def get_alias(self, guild_id: int, alias: str):
+        return await self.fetchone(
+            "SELECT command_name FROM command_aliases WHERE guild_id = ? AND alias = ?", (guild_id, alias)
+        )
+
+    async def list_aliases(self, guild_id: int):
+        return await self.fetchall("SELECT alias, command_name FROM command_aliases WHERE guild_id = ?", (guild_id,))
 
     # ---------- Économie ----------
 

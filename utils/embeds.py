@@ -19,6 +19,18 @@ def set_footer_icon(url: str) -> None:
     FOOTER_ICON = url
 
 
+def set_footer_text(text: str) -> None:
+    """Change le texte du footer affiché sur tous les embeds (commande /footer, propriétaire du bot)."""
+    global FOOTER_TEXT
+    FOOTER_TEXT = text or "SentriX"
+
+
+def set_brand_color(color: int) -> None:
+    """Change la couleur d'accent utilisée par embeds.brand() (commande /theme, propriétaire du bot)."""
+    global COLOR_BRAND
+    COLOR_BRAND = color
+
+
 def _base(title: str, description: str, color: int) -> discord.Embed:
     embed = discord.Embed(
         title=title,

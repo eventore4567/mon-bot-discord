@@ -17,6 +17,29 @@ class BotPermissionError(commands.CheckFailure):
         super().__init__(message)
 
 
+class BotBlacklistedError(commands.CheckFailure):
+    """Levée quand un utilisateur inscrit sur la liste noire GLOBALE d'utilisation du bot
+    (voir /bl, cog Owner) essaie d'utiliser n'importe quelle commande, sur n'importe quel serveur."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason)
+
+
+def is_bot_owner():
+    """Autorise uniquement le(s) propriétaire(s) du bot (OWNER_IDS dans .env) — réservé aux
+    réglages globaux qui affectent le bot partout : présence, identité, liste noire d'utilisation..."""
+
+    async def predicate(ctx: commands.Context) -> bool:
+        from config import OWNER_IDS
+
+        if ctx.author.id in OWNER_IDS:
+            return True
+        raise BotPermissionError("Cette commande est réservée au **propriétaire du bot**.")
+
+    return commands.check(predicate)
+
+
 def is_owner_or_admin():
     """Autorise les administrateurs du serveur, les propriétaires du bot, ou un membre
     ajouté comme "gestionnaire du bot" (via /setup → page Gestionnaires)."""

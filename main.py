@@ -18,7 +18,7 @@ from discord.ext import commands
 import config
 from database.db import Database
 from utils import embeds
-from utils.checks import BotPermissionError
+from utils.checks import BotPermissionError, BotBlacklistedError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("bot")
@@ -39,6 +39,7 @@ EXTENSIONS = [
     "cogs.events",
     "cogs.verification",
     "cogs.stats",
+    "cogs.owner",
 ]
 
 INTENTS = discord.Intents.default()
@@ -115,6 +116,7 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning("Impossible d'enregistrer la vue de giveaway.")
 
+        self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
 
         try:
@@ -122,6 +124,16 @@ class BotAllInOne(commands.Bot):
             logger.info(f"{len(synced)} commandes slash synchronisées globalement.")
         except Exception:
             logger.error(f"Échec de la synchronisation des commandes slash :\n{traceback.format_exc()}")
+
+    async def global_blacklist_check(self, ctx: commands.Context) -> bool:
+        """Bloque tout utilisateur inscrit sur la liste noire GLOBALE d'utilisation du bot
+        (/bl, cog Owner) — sur n'importe quelle commande, n'importe quel serveur."""
+        if ctx.author.id in config.OWNER_IDS:
+            return True
+        row = await self.db.blacklist_get(ctx.author.id)
+        if row:
+            raise BotBlacklistedError(row["reason"] or "Aucune raison fournie")
+        return True
 
     async def global_cooldown_check(self, ctx: commands.Context) -> bool:
         if ctx.author.id in config.OWNER_IDS:
@@ -132,6 +144,19 @@ class BotAllInOne(commands.Bot):
             raise commands.CommandOnCooldown(bucket, retry_after, commands.BucketType.user)
         return True
 
+    async def get_context(self, message, *, cls=commands.Context):
+        """Ajoute la résolution des alias de commandes (/alias, cog Owner) : si le mot tapé
+        après le préfixe ne correspond à aucune commande connue, on regarde si c'est un alias
+        configuré sur ce serveur et, si oui, on redirige vers la vraie commande."""
+        ctx = await super().get_context(message, cls=cls)
+        if ctx.command is None and ctx.guild is not None and ctx.invoked_with:
+            row = await self.db.get_alias(ctx.guild.id, ctx.invoked_with.lower())
+            if row:
+                real_command = self.get_command(row["command_name"])
+                if real_command:
+                    ctx.command = real_command
+        return ctx
+
     async def on_ready(self):
         logger.info(f"Connecté en tant que {self.user} (ID: {self.user.id})")
         logger.info(f"Présent sur {len(self.guilds)} serveur(s).")
@@ -140,6 +165,19 @@ class BotAllInOne(commands.Bot):
         )
         # Identité visuelle : une fois connecté, on affiche l'avatar du bot dans le footer de tous les embeds.
         embeds.set_footer_icon(self.user.display_avatar.url)
+
+        # Recharge les réglages de branding persistés (/footer, /theme) : sans ça, ils
+        # reviendraient aux valeurs par défaut à chaque redémarrage/redéploiement Railway.
+        saved_footer = await self.db.get_setting("footer_text")
+        if saved_footer:
+            embeds.set_footer_text(saved_footer)
+        saved_color = await self.db.get_setting("brand_color")
+        if saved_color:
+            try:
+                embeds.set_brand_color(int(saved_color))
+            except ValueError:
+                pass
+
         for guild in self.guilds:
             await self.db.ensure_guild(guild.id)
 
@@ -204,6 +242,9 @@ class BotAllInOne(commands.Bot):
 
         if isinstance(error, BotPermissionError):
             return await ctx.send(embed=embeds.error(error.message))
+
+        if isinstance(error, BotBlacklistedError):
+            return await ctx.send(embed=embeds.error(f"Vous n'êtes pas autorisé à utiliser ce bot.\nRaison : {error.reason}"))
 
         if isinstance(error, commands.CommandOnCooldown):
             return await ctx.send(

@@ -28,17 +28,18 @@ CATEGORY_LABELS = {
     "Events": "🎉 Giveaways / Événements",
     "Verification": "✅ Vérification / Rôles",
     "Stats": "📊 Statistiques / Développement",
+    "Owner": "🔑 Propriétaire du bot",
 }
 
 # Catégories entièrement réservées au staff : un membre normal ne les voit JAMAIS
 # dans /help, même si elles contiennent une commande techniquement publique.
-MEMBER_HIDDEN_CATEGORIES = {"Moderation", "Automod", "Tickets", "Configuration", "ServerBuilder", "Utility", "Verification", "Stats"}
+MEMBER_HIDDEN_CATEGORIES = {"Moderation", "Automod", "Tickets", "Configuration", "ServerBuilder", "Utility", "Verification", "Stats", "Owner"}
 
 # Décorateurs qui, sur une commande, signifient "réservé au staff". On les repère par
 # le nom qualifié de la fonction de vérification plutôt que par une liste de commandes
 # écrite à la main : ainsi le filtrage reste juste même quand des commandes sont
 # ajoutées ou déplacées plus tard.
-STAFF_CHECK_MARKERS = ("is_owner_or_admin", "has_permission_or_modrole", "has_permissions", "has_guild_permissions", "is_owner")
+STAFF_CHECK_MARKERS = ("is_owner_or_admin", "has_permission_or_modrole", "has_permissions", "has_guild_permissions", "is_owner", "is_bot_owner")
 
 
 def is_staff_command(cmd) -> bool:
