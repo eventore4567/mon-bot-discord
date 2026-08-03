@@ -144,7 +144,7 @@ class Verification(commands.Cog, name="Verification"):
     # Note : configurer le rôle automatique se fait via /setautorole (cog Configuration)
     # ou directement dans l'assistant /setup — pas besoin d'une commande en double ici.
 
-    @commands.hybrid_command(name="giverole", description="Donner un rôle à un membre.")
+    @commands.hybrid_command(name="giverole", aliases=["addrole"], description="Donner un rôle à un membre.")
     @app_commands.describe(membre="Le membre visé", role="Le rôle à donner")
     @checks.has_permission_or_modrole("manage_roles")
     async def giverole(self, ctx: commands.Context, membre: discord.Member, role: discord.Role):
@@ -157,7 +157,7 @@ class Verification(commands.Cog, name="Verification"):
             return await ctx.send(embed=embeds.error("Je n'ai pas la permission d'attribuer ce rôle."))
         await ctx.send(embed=embeds.success(f"Rôle {role.mention} donné à {membre.mention}."))
 
-    @commands.hybrid_command(name="removerole", description="Retirer un rôle à un membre.")
+    @commands.hybrid_command(name="removerole", aliases=["delrole"], description="Retirer un rôle à un membre.")
     @app_commands.describe(membre="Le membre visé", role="Le rôle à retirer")
     @checks.has_permission_or_modrole("manage_roles")
     async def removerole(self, ctx: commands.Context, membre: discord.Member, role: discord.Role):
