@@ -20,62 +20,151 @@ from utils import embeds, checks
 SERVER_TEMPLATES = {
     "communaute": {
         "label": "🎮 Communauté / Gaming",
-        "description": "Accueil, discussion, vocaux, staff — pour un serveur de communauté classique.",
+        "description": "Structure complète : infos, communauté, gaming, vocaux, support, staff — 5 rôles, ~20 salons.",
         "roles": [
-            ("Admin", discord.Color.red(), True, discord.Permissions(administrator=True)),
+            ("👑 Admin", discord.Color.red(), True, discord.Permissions(administrator=True)),
             (
-                "Modérateur", discord.Color.orange(), True,
+                "🛡️ Modérateur", discord.Color.orange(), True,
                 discord.Permissions(kick_members=True, ban_members=True, manage_messages=True, moderate_members=True, manage_nicknames=True),
             ),
-            ("Membre", discord.Color.blurple(), False, discord.Permissions.none()),
+            ("🎧 Helper", discord.Color.teal(), True, discord.Permissions(manage_messages=True, moderate_members=True)),
+            ("🌟 Membre Actif", discord.Color.gold(), False, discord.Permissions.none()),
+            ("🎮 Membre", discord.Color.blurple(), False, discord.Permissions.none()),
         ],
         "staff_role_index": 1,
-        "member_role_index": 2,
+        "member_role_index": 4,
         "categories": [
-            {"name": "📌 INFOS", "private": False, "channels": [("annonces", "text"), ("regles", "text"), ("bienvenue", "text")]},
-            {"name": "💬 COMMUNAUTÉ", "private": False, "channels": [("général", "text"), ("discussion-générale", "text"), ("médias-clips", "text"), ("memes", "text")]},
-            {"name": "🔊 VOCAUX", "private": False, "channels": [("Général 1", "voice"), ("Général 2", "voice"), ("Musique", "voice")]},
-            {"name": "🔒 STAFF", "private": True, "channels": [("staff-chat", "text"), ("moderation", "text")]},
+            {
+                "name": "📌 INFOS",
+                "private": False,
+                "channels": [
+                    ("📢・annonces", "text"), ("📜・règlement", "text"),
+                    ("🆕・nouveautés", "text"), ("👋・bienvenue", "text"),
+                ],
+            },
+            {
+                "name": "💬 COMMUNAUTÉ",
+                "private": False,
+                "channels": [
+                    ("💬・général", "text"), ("🗣️・discussion-libre", "text"), ("😂・memes", "text"),
+                    ("📸・médias-clips", "text"), ("🎉・événements", "text"), ("💡・suggestions", "text"),
+                ],
+            },
+            {
+                "name": "🎮 GAMING",
+                "private": False,
+                "channels": [("🎮・gaming-général", "text"), ("🔍・recherche-équipe", "text"), ("🏆・victoires", "text")],
+            },
+            {
+                "name": "🔊 VOCAUX",
+                "private": False,
+                "channels": [
+                    ("🔊・général-1", "voice"), ("🔊・général-2", "voice"),
+                    ("🎵・musique", "voice"), ("😴・afk", "voice"),
+                ],
+            },
+            {
+                "name": "🎫 SUPPORT",
+                "private": False,
+                "channels": [("🎫・infos-tickets", "text"), ("❓・aide", "text")],
+            },
+            {
+                "name": "🔒 STAFF",
+                "private": True,
+                "channels": [("🔒・staff-chat", "text"), ("🛡️・modération", "text"), ("📋・logs-internes", "text")],
+            },
         ],
     },
     "pro": {
         "label": "💼 Professionnel / Entreprise",
-        "description": "Annonces, travail, réunions, direction — pour un serveur pro ou d'entreprise.",
+        "description": "Structure complète : général, travail, réunions, support, direction — 5 rôles, ~16 salons.",
         "roles": [
-            ("Direction", discord.Color.dark_red(), True, discord.Permissions(administrator=True)),
+            ("👑 Direction", discord.Color.dark_red(), True, discord.Permissions(administrator=True)),
             (
-                "Manager", discord.Color.gold(), True,
+                "📊 Manager", discord.Color.gold(), True,
                 discord.Permissions(manage_channels=True, manage_messages=True, kick_members=True, mute_members=True, moderate_members=True),
             ),
-            ("Employé", discord.Color.green(), False, discord.Permissions.none()),
+            ("🧭 Responsable d'équipe", discord.Color.orange(), True, discord.Permissions(manage_messages=True, moderate_members=True)),
+            ("💼 Employé", discord.Color.green(), False, discord.Permissions.none()),
+            ("👤 Invité", discord.Color.light_grey(), False, discord.Permissions.none()),
         ],
         "staff_role_index": 1,
-        "member_role_index": 2,
+        "member_role_index": 4,
         "categories": [
-            {"name": "📢 GÉNÉRAL", "private": False, "channels": [("annonces", "text"), ("accueil", "text")]},
-            {"name": "💼 TRAVAIL", "private": False, "channels": [("discussion", "text"), ("projets", "text"), ("ressources", "text")]},
-            {"name": "📅 RÉUNIONS", "private": False, "channels": [("Salle de réunion 1", "voice"), ("Salle de réunion 2", "voice")]},
-            {"name": "🔒 DIRECTION", "private": True, "channels": [("direction", "text"), ("rh", "text")]},
+            {
+                "name": "📢 GÉNÉRAL",
+                "private": False,
+                "channels": [("📢・annonces", "text"), ("📰・actualités", "text"), ("👋・accueil", "text")],
+            },
+            {
+                "name": "💼 TRAVAIL",
+                "private": False,
+                "channels": [
+                    ("💬・discussion-générale", "text"), ("📁・projets", "text"),
+                    ("📊・ressources", "text"), ("🗂️・documents", "text"), ("💡・idées", "text"),
+                ],
+            },
+            {
+                "name": "📅 RÉUNIONS",
+                "private": False,
+                "channels": [("🔊・salle-réunion-1", "voice"), ("🔊・salle-réunion-2", "voice"), ("🎥・visio", "voice")],
+            },
+            {
+                "name": "🆘 SUPPORT",
+                "private": False,
+                "channels": [("🆘・support-interne", "text"), ("❓・questions-rh", "text")],
+            },
+            {
+                "name": "🔒 DIRECTION",
+                "private": True,
+                "channels": [("🔒・direction", "text"), ("💰・rh-finance", "text"), ("📋・comptes-rendus", "text")],
+            },
         ],
     },
     "support": {
         "label": "🆘 Support / SAV",
-        "description": "Annonces, support, communauté, staff — pour un serveur orienté service client.",
+        "description": "Structure complète : infos, support, communauté, vocaux, staff — 5 rôles, ~15 salons.",
         "roles": [
-            ("Responsable Support", discord.Color.dark_purple(), True, discord.Permissions(administrator=True)),
+            ("👑 Responsable Support", discord.Color.dark_purple(), True, discord.Permissions(administrator=True)),
             (
-                "Agent Support", discord.Color.teal(), True,
-                discord.Permissions(manage_messages=True, kick_members=True, mute_members=True, moderate_members=True),
+                "🥇 Agent Senior", discord.Color.dark_teal(), True,
+                discord.Permissions(kick_members=True, mute_members=True, moderate_members=True, manage_messages=True),
             ),
-            ("Client", discord.Color.light_grey(), False, discord.Permissions.none()),
+            ("🎧 Agent Support", discord.Color.teal(), True, discord.Permissions(manage_messages=True, moderate_members=True)),
+            ("⭐ Client Premium", discord.Color.gold(), False, discord.Permissions.none()),
+            ("👤 Client", discord.Color.light_grey(), False, discord.Permissions.none()),
         ],
-        "staff_role_index": 1,
-        "member_role_index": 2,
+        "staff_role_index": 2,
+        "member_role_index": 4,
         "categories": [
-            {"name": "📢 INFOS", "private": False, "channels": [("annonces", "text"), ("faq", "text")]},
-            {"name": "🆘 SUPPORT", "private": False, "channels": [("support-general", "text"), ("suggestions", "text")]},
-            {"name": "💬 COMMUNAUTÉ", "private": False, "channels": [("discussion", "text")]},
-            {"name": "🔒 STAFF", "private": True, "channels": [("staff-chat", "text")]},
+            {
+                "name": "📢 INFOS",
+                "private": False,
+                "channels": [("📢・annonces", "text"), ("📜・règles", "text"), ("❓・faq", "text")],
+            },
+            {
+                "name": "🆘 SUPPORT",
+                "private": False,
+                "channels": [
+                    ("🆘・support-général", "text"), ("🐛・signaler-un-bug", "text"),
+                    ("💳・facturation", "text"), ("💡・suggestions", "text"),
+                ],
+            },
+            {
+                "name": "💬 COMMUNAUTÉ",
+                "private": False,
+                "channels": [("💬・discussion", "text"), ("🌟・témoignages", "text")],
+            },
+            {
+                "name": "🔊 VOCAUX",
+                "private": False,
+                "channels": [("🔊・support-vocal", "voice"), ("🔊・discussion-libre", "voice")],
+            },
+            {
+                "name": "🔒 STAFF",
+                "private": True,
+                "channels": [("🔒・staff-chat", "text"), ("📋・logs-support", "text")],
+            },
         ],
     },
 }
@@ -118,21 +207,24 @@ class ServerBuilderView(discord.ui.View):
             return embeds.neutral("🏗️ Création de serveur", "Choisissez un modèle ci-dessous pour voir l'aperçu de ce qui sera créé.")
 
         data = SERVER_TEMPLATES[self.selected_template]
+        total_channels = sum(len(cat["channels"]) for cat in data["categories"])
         lines = []
         for cat in data["categories"]:
             tag = " *(privé, staff uniquement)*" if cat["private"] else ""
-            chans = ", ".join(f"#{n}" if t == "text" else f"🔊 {n}" for n, t in cat["channels"])
+            chans = ", ".join(f"`{n}`" for n, _ in cat["channels"])
             lines.append(f"**{cat['name']}**{tag}\n{chans}")
 
         admin_role_name = data["roles"][0][0]
         e = embeds.neutral(
             f"🏗️ Aperçu — {data['label']}",
-            "Voici ce qui va être créé. Les rôles, catégories et salons déjà existants avec le même nom "
+            f"Voici ce qui va être créé : **{len(data['roles'])} rôles**, **{len(data['categories'])} catégories** "
+            f"et **{total_channels} salons**. Les rôles, catégories et salons déjà existants avec le même nom "
             "ne seront **jamais dupliqués** (vous pouvez relancer la commande sans risque).\n\n"
             f"⚠️ Le rôle **{admin_role_name}** recevra la permission **Administrateur** — ne le donnez qu'à des personnes de confiance.",
         )
-        e.add_field(name="Rôles", value="\n".join(f"• {r[0]}" for r in data["roles"]), inline=False)
-        e.add_field(name="Catégories & salons", value="\n\n".join(lines)[:1024], inline=False)
+        e.add_field(name="Rôles (du plus élevé au plus bas)", value="\n".join(f"• {r[0]}" for r in data["roles"]), inline=False)
+        for cat_lines in [lines[i:i + 3] for i in range(0, len(lines), 3)]:
+            e.add_field(name="​", value="\n\n".join(cat_lines)[:1024], inline=False)
         return e
 
     async def confirm(self, interaction: discord.Interaction):
