@@ -4,11 +4,15 @@ Cog CRÉATION DE SERVEUR.
 salons texte/vocaux) à partir d'un modèle choisi dans un menu (Communauté/Gaming,
 Professionnel/Entreprise, Support/SAV). Idempotent : si relancée, ne duplique jamais les
 rôles/catégories/salons déjà existants (comparaison par nom).
+/delete-channel — supprimer un salon précis.
+/wipe-server — supprimer TOUS les salons/catégories du serveur (confirmation obligatoire,
+en tapant le nom exact du serveur), pour repartir d'une base propre.
 """
 
 import asyncio
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, checks
@@ -320,6 +324,99 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             ))
         view = ServerBuilderView(self.bot, ctx.author.id)
         await ctx.send(embed=view.build_preview_embed(), view=view)
+
+    # ---------------------------------------------------------------- SUPPRESSION DE SALONS
+
+    @commands.hybrid_command(name="delete-channel", description="Supprimer un salon précis du serveur.")
+    @app_commands.describe(salon="Le salon à supprimer", raison="La raison (optionnel)")
+    @checks.is_owner_or_admin()
+    async def delete_channel(self, ctx: commands.Context, salon: discord.TextChannel, *, raison: str = "Aucune raison fournie"):
+        if salon.id == ctx.channel.id:
+            return await ctx.send(embed=embeds.error("Vous ne pouvez pas supprimer le salon depuis lequel vous lancez cette commande."))
+        name = salon.name
+        try:
+            await salon.delete(reason=f"{ctx.author} : {raison}")
+        except discord.Forbidden:
+            return await ctx.send(embed=embeds.error("Je n'ai pas la permission de supprimer ce salon."))
+        await ctx.send(embed=embeds.success(f"Le salon **{name}** a été supprimé.\nRaison : {raison}"))
+
+    @commands.hybrid_command(
+        name="wipe-server",
+        description="[DANGER] Supprimer TOUS les salons et catégories du serveur (irréversible, confirmation requise).",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin()
+    async def wipe_server(self, ctx: commands.Context):
+        guild = ctx.guild
+        total = len(guild.channels)
+        if total == 0:
+            return await ctx.send(embed=embeds.info("Il n'y a aucun salon à supprimer."))
+        e = embeds.error(
+            f"Vous êtes sur le point de supprimer **{total}** salon(s)/catégorie(s) sur **{guild.name}**.\n"
+            "C'est **IRRÉVERSIBLE** : tous les messages et l'historique de ces salons seront perdus.\n\n"
+            "⚠️ Seuls les salons et catégories sont supprimés — les rôles et les membres ne sont **pas** touchés "
+            "(supprimer des rôles en masse est trop risqué, y compris pour le bot lui-même).\n\n"
+            "Cliquez ci-dessous puis tapez le **nom exact du serveur** pour confirmer.",
+            title="🧨 Suppression totale des salons",
+        )
+        view = WipeConfirmView(ctx.author.id, guild, ctx.channel.id)
+        await ctx.send(embed=e, view=view)
+
+
+class WipeConfirmModal(discord.ui.Modal, title="Confirmation de suppression totale"):
+    def __init__(self, guild: discord.Guild, invoker_channel_id: int):
+        super().__init__()
+        self.guild = guild
+        self.invoker_channel_id = invoker_channel_id
+        self.confirm_input = discord.ui.TextInput(
+            label="Nom exact du serveur (sensible à la casse)",
+            placeholder=guild.name,
+            required=True,
+            max_length=100,
+        )
+        self.add_item(self.confirm_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if self.confirm_input.value.strip() != self.guild.name:
+            return await interaction.response.send_message(
+                "Nom incorrect — suppression **annulée**, aucun salon n'a été touché.", ephemeral=True
+            )
+        await interaction.response.defer()
+        deleted = 0
+        failed = 0
+        for channel in list(self.guild.channels):
+            if channel.id == self.invoker_channel_id:
+                continue
+            try:
+                await channel.delete(reason=f"Suppression totale demandée par {interaction.user}")
+                deleted += 1
+                await asyncio.sleep(0.4)
+            except discord.HTTPException:
+                failed += 1
+        description = f"**{deleted}** salon(s)/catégorie(s) supprimé(s)."
+        if failed:
+            description += f" ({failed} échec(s), probablement des permissions manquantes.)"
+        description += "\n\nLe salon actuel n'a pas été supprimé, pour que vous puissiez voir ce message."
+        await interaction.followup.send(embed=embeds.success(description, title="🧹 Suppression terminée"))
+
+
+class WipeConfirmView(discord.ui.View):
+    def __init__(self, author_id: int, guild: discord.Guild, invoker_channel_id: int):
+        super().__init__(timeout=60)
+        self.author_id = author_id
+        self.guild = guild
+        self.invoker_channel_id = invoker_channel_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Seule la personne ayant lancé la commande peut confirmer.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="⚠️ Confirmer la suppression totale", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(WipeConfirmModal(self.guild, self.invoker_channel_id))
+        self.stop()
 
 
 async def setup(bot: commands.Bot):
