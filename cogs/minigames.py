@@ -11,6 +11,12 @@ from discord.ext import commands
 
 from utils import embeds, helpers
 
+MATH_OPS = {
+    "+": lambda a, b: a + b,
+    "-": lambda a, b: a - b,
+    "*": lambda a, b: a * b,
+}
+
 TRIVIA_QUESTIONS = [
     ("Quelle est la capitale de la France ?", "paris"),
     ("Combien font 7 x 8 ?", "56"),
@@ -122,8 +128,8 @@ class Minigames(commands.Cog, name="Minigames"):
     @commands.hybrid_command(name="math-quiz", description="Répondre à une opération mathématique rapide.", with_app_command=False)
     async def math_quiz(self, ctx: commands.Context):
         a, b = random.randint(2, 50), random.randint(2, 50)
-        op = random.choice(["+", "-", "*"])
-        answer = eval(f"{a}{op}{b}")
+        op = random.choice(list(MATH_OPS))
+        answer = MATH_OPS[op](a, b)
         await ctx.send(embed=embeds.info(f"🧮 Combien font **{a} {op} {b}** ? (10 secondes)"))
 
         def check(m):

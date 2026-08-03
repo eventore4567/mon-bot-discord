@@ -292,6 +292,7 @@ class Configuration(commands.Cog):
     async def config_reset(self, ctx: commands.Context):
         await self.bot.db.execute("DELETE FROM guild_config WHERE guild_id = ?", (ctx.guild.id,))
         await self.bot.db.ensure_guild(ctx.guild.id)
+        self.bot.db.invalidate_guild_config(ctx.guild.id)
         self.bot.prefix_cache.pop(ctx.guild.id, None)
         await ctx.send(embed=embeds.success("La configuration du serveur a été réinitialisée."))
 

@@ -142,14 +142,20 @@ class Tickets(commands.Cog):
 
     async def create_ticket(
         self,
-        interaction: discord.Interaction,
+        ctx_or_interaction,
         category: str = "general",
         description: str | None = None,
         priority: str = "normale",
     ):
-        guild = interaction.guild
-        user = interaction.user
-        await interaction.response.defer(ephemeral=True)
+        """Crée un ticket, que l'appel vienne d'une interaction (slash, modal) ou d'une
+        commande préfixée (+ticket) : les deux chemins partagent EXACTEMENT la même logique
+        (vérification de ticket déjà ouvert, rôle staff visible, catégorie configurée...),
+        pour éviter que la version préfixée se comporte différemment de la version slash."""
+        is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
+        guild = ctx_or_interaction.guild
+        user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
+        if is_interaction:
+            await ctx_or_interaction.response.defer(ephemeral=True)
 
         existing = await self.bot.db.fetchone(
             "SELECT * FROM tickets WHERE guild_id = ? AND user_id = ? AND status = 'ouvert'",
@@ -158,9 +164,10 @@ class Tickets(commands.Cog):
         if existing:
             channel = guild.get_channel(existing["channel_id"])
             if channel:
-                return await interaction.followup.send(
-                    embed=embeds.warning(f"Vous avez déjà un ticket ouvert : {channel.mention}"), ephemeral=True
-                )
+                warn = embeds.warning(f"Vous avez déjà un ticket ouvert : {channel.mention}")
+                if is_interaction:
+                    return await ctx_or_interaction.followup.send(embed=warn, ephemeral=True)
+                return await ctx_or_interaction.send(embed=warn)
 
         conf = await self.bot.db.get_guild_config(guild.id)
         overwrites = {
@@ -192,7 +199,11 @@ class Tickets(commands.Cog):
             e.add_field(name="📝 Description", value=description[:1000], inline=False)
         await channel.send(content=user.mention, embed=e, view=TicketControlView())
 
-        await interaction.followup.send(embed=embeds.success(f"Votre ticket a été créé : {channel.mention}"), ephemeral=True)
+        success = embeds.success(f"Votre ticket a été créé : {channel.mention}")
+        if is_interaction:
+            await ctx_or_interaction.followup.send(embed=success, ephemeral=True)
+        else:
+            await ctx_or_interaction.send(embed=success)
 
         log_e = embeds.neutral("🎫 Ticket ouvert", f"**Membre :** {user.mention}\n**Salon :** {channel.mention}\n**Catégorie :** {category}\n**Priorité :** {priority}")
         await self.log_action(guild, log_e)
@@ -200,23 +211,7 @@ class Tickets(commands.Cog):
     @commands.hybrid_command(name="ticket", description="Créer un nouveau ticket de support.")
     @app_commands.describe(categorie="Catégorie du ticket (ex: support, facturation, signalement)")
     async def ticket(self, ctx: commands.Context, categorie: str = "general"):
-        if ctx.interaction:
-            await self.create_ticket(ctx.interaction, category=categorie)
-        else:
-            guild = ctx.guild
-            conf = await self.bot.db.get_guild_config(guild.id)
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-                guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
-            }
-            channel = await guild.create_text_channel(f"ticket-{ctx.author.name}".lower()[:90], overwrites=overwrites)
-            await self.bot.db.execute(
-                "INSERT INTO tickets (guild_id, channel_id, user_id, status, category, priority, created_at) VALUES (?, ?, ?, 'ouvert', ?, 'normale', ?)",
-                (guild.id, channel.id, ctx.author.id, categorie, now()),
-            )
-            await channel.send(content=ctx.author.mention, embed=embeds.neutral("🎫 Nouveau ticket", "Un membre du staff vous répondra bientôt."), view=TicketControlView())
-            await ctx.send(embed=embeds.success(f"Ticket créé : {channel.mention}"))
+        await self.create_ticket(ctx.interaction or ctx, category=categorie)
 
     @commands.hybrid_command(name="ticket-panel", description="Poster le panneau de création de tickets dans ce salon.")
     @checks.is_owner_or_admin()

@@ -94,7 +94,7 @@ class Moderation(commands.Cog):
             await membre.send(embed=embeds.warning(f"Vous avez été **banni** de **{ctx.guild.name}**.\nRaison : {raison}"))
         except discord.Forbidden:
             pass
-        await ctx.guild.ban(membre, reason=f"{ctx.author} : {raison}", delete_message_days=0)
+        await ctx.guild.ban(membre, reason=f"{ctx.author} : {raison}", delete_message_seconds=0)
         e = self.sanction_embed("Bannissement", membre, ctx.author, raison)
         await ctx.send(embed=e)
         await self.log_action(ctx.guild, e)
@@ -112,7 +112,7 @@ class Moderation(commands.Cog):
             await membre.send(embed=embeds.warning(f"Vous avez été **banni temporairement** de **{ctx.guild.name}** pour {helpers.format_duration(seconds)}.\nRaison : {raison}"))
         except discord.Forbidden:
             pass
-        await ctx.guild.ban(membre, reason=f"{ctx.author} (temporaire {duree}) : {raison}", delete_message_days=0)
+        await ctx.guild.ban(membre, reason=f"{ctx.author} (temporaire {duree}) : {raison}", delete_message_seconds=0)
         await self.bot.db.execute(
             "INSERT INTO tempactions (guild_id, user_id, action, expires_at) VALUES (?, ?, 'ban', ?)",
             (ctx.guild.id, membre.id, now() + seconds),

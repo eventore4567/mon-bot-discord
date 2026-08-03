@@ -12,6 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+import config
 from utils import embeds, checks, helpers
 from database.db import now
 
@@ -60,15 +61,9 @@ class Events(commands.Cog, name="Events"):
         self.check_events.cancel()
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
-        conf = await self.bot.db.get_guild_config(guild.id)
-        channel_id = conf["log_channel"] if conf else None
-        if channel_id:
-            channel = guild.get_channel(channel_id)
-            if channel:
-                try:
-                    await channel.send(embed=embed)
-                except discord.HTTPException:
-                    pass
+        # Même salon dédié ("logs-serveur") que les autres événements de serveur, avec
+        # repli sur le salon de logs général — cohérent avec le reste du bot.
+        await helpers.send_log(self.bot, guild, "server", embed)
 
     # ---------------------------------------------------------------- GIVEAWAYS
 
@@ -271,6 +266,10 @@ class Events(commands.Cog, name="Events"):
         )
         if ctx.interaction:
             await ctx.send(embed=embeds.success("Giveaway créé !"), ephemeral=True)
+        await self.log_action(ctx.guild, embeds.log_entry(
+            "🎉 Giveaway créé", config.COLOR_SUCCESS, acteur=ctx.author, acteur_label="🛠️ Organisé par",
+            extra={"🎁 Prix": prix, "🏆 Gagnants": str(gagnants), "⏱️ Se termine": f"<t:{end_at}:R>"},
+        ))
 
     @commands.hybrid_command(name="giveaway-end", description="Terminer un giveaway immédiatement.")
     @app_commands.describe(message_id="L'identifiant du message du giveaway")
@@ -333,6 +332,10 @@ class Events(commands.Cog, name="Events"):
             except discord.NotFound:
                 pass
         await ctx.send(embed=embeds.success("Giveaway annulé."))
+        await self.log_action(ctx.guild, embeds.log_entry(
+            "🚫 Giveaway annulé", config.COLOR_WARNING, acteur=ctx.author, acteur_label="🛠️ Annulé par",
+            extra={"🎁 Prix": giveaway["prize"]},
+        ))
 
     @commands.hybrid_command(name="giveaway-blacklist", description="Empêcher un membre de participer aux giveaways.", with_app_command=False)
     @app_commands.describe(membre="Le membre à mettre sur liste noire")
@@ -388,6 +391,10 @@ class Events(commands.Cog, name="Events"):
             (ctx.guild.id, ctx.channel.id, nom, start_at, ctx.author.id, now()),
         )
         await ctx.send(embed=embeds.success(f"📅 Événement **{nom}** créé, il commence <t:{start_at}:R>. Utilisez `/event-join` pour vous inscrire."))
+        await self.log_action(ctx.guild, embeds.log_entry(
+            "📅 Événement créé", config.COLOR_SUCCESS, acteur=ctx.author, acteur_label="🛠️ Organisé par",
+            extra={"🏷️ Nom": nom, "⏱️ Débute": f"<t:{start_at}:R>"},
+        ))
 
     @commands.hybrid_command(name="event-join", description="Rejoindre un événement.")
     @app_commands.describe(nom="Le nom de l'événement")

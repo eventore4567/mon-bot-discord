@@ -343,19 +343,6 @@ CREATE TABLE IF NOT EXISTS playlists (
     tracks TEXT
 );
 
-CREATE TABLE IF NOT EXISTS soundboard (
-    guild_id INTEGER,
-    name TEXT,
-    url TEXT,
-    PRIMARY KEY (guild_id, name)
-);
-
-CREATE TABLE IF NOT EXISTS music_settings (
-    guild_id INTEGER PRIMARY KEY,
-    default_volume REAL DEFAULT 0.5,
-    dj_role INTEGER
-);
-
 CREATE TABLE IF NOT EXISTS message_counts (
     guild_id INTEGER,
     user_id INTEGER,
@@ -375,13 +362,6 @@ CREATE TABLE IF NOT EXISTS growth_snapshots (
     guild_id INTEGER,
     member_count INTEGER,
     timestamp INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS backups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id INTEGER,
-    data TEXT,
-    created_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS bot_managers (
@@ -438,6 +418,9 @@ CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders (trigger_at);
 CREATE INDEX IF NOT EXISTS idx_reaction_roles_msg ON reaction_roles (guild_id, message_id);
 CREATE INDEX IF NOT EXISTS idx_member_invites_inviter ON member_invites (guild_id, inviter_id);
 CREATE INDEX IF NOT EXISTS idx_member_invites_member ON member_invites (guild_id, member_id);
+CREATE INDEX IF NOT EXISTS idx_levels_guild_rank ON levels (guild_id, level DESC, xp DESC);
+CREATE INDEX IF NOT EXISTS idx_economy_guild_total ON economy (guild_id, (cash + bank) DESC);
+CREATE INDEX IF NOT EXISTS idx_blacklist_words_guild ON blacklist_words (guild_id);
 """
 
 # Colonnes ajoutées à guild_config après sa création initiale : CREATE TABLE IF NOT EXISTS
@@ -461,6 +444,13 @@ class Database:
     def __init__(self, path: str):
         self.path = path
         self._conn: aiosqlite.Connection | None = None
+        # guild_config est lu à peu près à CHAQUE message/arrivée/départ/log sur TOUT le bot
+        # (welcome, autorole, salons de logs, préfixe...). Sur un serveur de plusieurs dizaines
+        # ou centaines de milliers de membres, ça représente un très gros volume d'événements :
+        # sans cache, chacun ferait un aller-retour SQLite pour une ligne qui ne change presque
+        # jamais. On garde donc la config de chaque serveur en mémoire, invalidée uniquement
+        # quand elle est explicitement modifiée (set_guild_config / reset).
+        self._guild_config_cache: dict[int, "aiosqlite.Row"] = {}
 
     async def connect(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
@@ -519,16 +509,29 @@ class Database:
         )
 
     async def get_guild_config(self, guild_id: int):
+        cached = self._guild_config_cache.get(guild_id)
+        if cached is not None:
+            return cached
         await self.ensure_guild(guild_id)
-        return await self.fetchone(
+        row = await self.fetchone(
             "SELECT * FROM guild_config WHERE guild_id = ?", (guild_id,)
         )
+        if row is not None:
+            self._guild_config_cache[guild_id] = row
+        return row
 
     async def set_guild_config(self, guild_id: int, field: str, value):
         await self.ensure_guild(guild_id)
         await self.execute(
             f"UPDATE guild_config SET {field} = ? WHERE guild_id = ?", (value, guild_id)
         )
+        # Invalide le cache : la prochaine lecture ira chercher la ligne à jour.
+        self._guild_config_cache.pop(guild_id, None)
+
+    def invalidate_guild_config(self, guild_id: int):
+        """À appeler après toute modification de guild_config qui ne passe pas par
+        set_guild_config (ex: /config-reset qui fait un DELETE direct)."""
+        self._guild_config_cache.pop(guild_id, None)
 
     async def get_automod(self, guild_id: int):
         await self.ensure_guild(guild_id)

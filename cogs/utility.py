@@ -159,7 +159,6 @@ class SearchModal(discord.ui.Modal, title="🔎 Rechercher une commande"):
 
         if not results:
             e = embeds.brand("🔎 Recherche", f"Aucune commande trouvée pour `{self.mot_cle.value}`.")
-            home_embed = build_help_home(self.bot, interaction.guild, self.prefix, self.is_staff)
             return await interaction.response.edit_message(embed=e, view=HelpView(self.bot, self.prefix, self.is_staff))
 
         lines = [f"*{label}*\n{format_command_line(cmd, self.prefix, slash_names)}" for label, cmd in results]
@@ -284,6 +283,7 @@ class Utility(commands.Cog, name="Utility"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.afk_users: dict[int, str] = {}
+
     async def _user_is_staff(self, ctx: commands.Context) -> bool:
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             return False
@@ -412,8 +412,14 @@ class Utility(commands.Cog, name="Utility"):
     @commands.hybrid_command(name="membercount", description="Afficher le nombre de membres du serveur.", with_app_command=False)
     async def membercount(self, ctx: commands.Context):
         guild = ctx.guild
-        humans = sum(1 for m in guild.members if not m.bot)
-        bots = sum(1 for m in guild.members if m.bot)
+        # Un seul passage sur guild.members (au lieu de deux) : sur un serveur de
+        # plusieurs dizaines/centaines de milliers de membres, ça compte.
+        humans = bots = 0
+        for m in guild.members:
+            if m.bot:
+                bots += 1
+            else:
+                humans += 1
         e = embeds.neutral("👥 Membres du serveur")
         e.add_field(name="Total", value=guild.member_count, inline=True)
         e.add_field(name="Humains", value=humans, inline=True)

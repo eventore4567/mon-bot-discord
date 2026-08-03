@@ -75,6 +75,7 @@ class Owner(commands.Cog, name="Owner"):
         if utilisateur.id == ctx.author.id:
             return await ctx.send(embed=embeds.error("Vous ne pouvez pas vous blacklister vous-même."))
         await self.bot.db.blacklist_add(utilisateur.id, raison, ctx.author.id)
+        self.bot.blacklist_cache[utilisateur.id] = raison
 
         # Protection maximale (dans la limite de ce que l'API Discord permet — aucun bot,
         # même le mien, ne peut voir ou bannir par adresse IP, cette donnée n'est jamais
@@ -143,6 +144,7 @@ class Owner(commands.Cog, name="Owner"):
     @checks.is_bot_owner()
     async def unbl(self, ctx: commands.Context, utilisateur: discord.User):
         await self.bot.db.blacklist_remove(utilisateur.id)
+        self.bot.blacklist_cache.pop(utilisateur.id, None)
         await ctx.send(embed=embeds.success(f"**{utilisateur}** peut de nouveau utiliser le bot."))
 
     @commands.hybrid_command(name="editbl", description="Modifier la raison de liste noire d'un utilisateur.", with_app_command=False)
@@ -152,6 +154,7 @@ class Owner(commands.Cog, name="Owner"):
         if not row:
             return await ctx.send(embed=embeds.error(f"**{utilisateur}** n'est pas sur la liste noire."))
         await self.bot.db.blacklist_add(utilisateur.id, raison, row["blacklisted_by"] or ctx.author.id)
+        self.bot.blacklist_cache[utilisateur.id] = raison
         await ctx.send(embed=embeds.success(f"Raison mise à jour pour **{utilisateur}** : {raison}"))
 
     @commands.hybrid_command(

@@ -85,10 +85,18 @@ class BotAllInOne(commands.Bot):
         # Cache mémoire des préfixes par serveur (voir get_prefix ci-dessus) : évite
         # une requête DB à chaque message sur un serveur actif.
         self.prefix_cache: dict[int, str] = {}
+        # Cache mémoire de la liste noire GLOBALE d'utilisation du bot (/bl) : ce check
+        # tourne sur QUASIMENT CHAQUE commande, tous serveurs confondus. Sur un gros
+        # serveur très actif, interroger la base à chaque fois serait inutilement lourd
+        # pour une liste qui change rarement (owner.py tient ce cache à jour).
+        self.blacklist_cache: dict[int, str] = {}
 
     async def setup_hook(self):
         await self.db.connect()
         logger.info("Base de données connectée.")
+
+        rows = await self.db.blacklist_list()
+        self.blacklist_cache = {r["user_id"]: (r["reason"] or "Aucune raison fournie") for r in rows}
 
         for ext in EXTENSIONS:
             try:
@@ -131,9 +139,9 @@ class BotAllInOne(commands.Bot):
         (/bl, cog Owner) — sur n'importe quelle commande, n'importe quel serveur."""
         if ctx.author.id in config.OWNER_IDS:
             return True
-        row = await self.db.blacklist_get(ctx.author.id)
-        if row:
-            raise BotBlacklistedError(row["reason"] or "Aucune raison fournie")
+        reason = self.blacklist_cache.get(ctx.author.id)
+        if reason is not None:
+            raise BotBlacklistedError(reason)
         return True
 
     async def global_cooldown_check(self, ctx: commands.Context) -> bool:
