@@ -1,6 +1,10 @@
 """
 Cog INTELLIGENCE ARTIFICIELLE.
 /sentrix /ask /chat-reset /summarize /image-prompt /explain /rewrite /fact-check
+
+En plus de la commande /sentrix, le bot répond aussi quand on lui parle directement dans
+le chat : soit en le mentionnant (@SentriX ...), soit en commençant son message par
+"sentrix" (ex: "sentrix comment tu vas ?"), sans avoir besoin d'une vraie commande.
 """
 
 import re
@@ -8,6 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+import config
 from utils import embeds
 
 
@@ -67,23 +72,19 @@ class Ai(commands.Cog, name="Ai"):
             content = content[:match.start()].rstrip(" \n-")
         return content, confidence
 
-    @commands.hybrid_command(
-        name="sentrix",
-        description="Demandez n'importe quoi à SentriX : l'IA du bot répond avec un indice de confiance.",
-    )
-    @app_commands.describe(question="Votre question, sur n'importe quel sujet")
-    async def sentrix(self, ctx: commands.Context, *, question: str):
-        if ctx.interaction:
-            await ctx.defer()
-        history = self.histories.get(ctx.author.id, [])
+    async def send_sentrix_reply(self, destination, author, question: str):
+        """Construit et envoie la réponse "SentriX AI" (embed + jauge de confiance).
+        Partagé entre la commande /sentrix et le déclenchement par simple message
+        (mention du bot ou message commençant par "sentrix")."""
+        history = self.histories.get(author.id, [])
         answer, confidence = await self.ask_ai_with_confidence(question, history)
         if answer == "__NO_KEY__":
-            return await ctx.send(embed=embeds.error("Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur."))
+            return await destination.send(embed=embeds.error("Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur."))
         if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=embeds.error("Une erreur est survenue avec l'IA. Réessayez plus tard."))
+            return await destination.send(embed=embeds.error("Une erreur est survenue avec l'IA. Réessayez plus tard."))
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
-        self.histories[ctx.author.id] = history[-10:]
+        self.histories[author.id] = history[-10:]
 
         e = embeds.brand("🧠 SentriX")
         e.add_field(name="❓ Question", value=question[:1024], inline=False)
@@ -93,8 +94,50 @@ class Ai(commands.Cog, name="Ai"):
             value=f"{embeds.bar(confidence, 10)}  **{confidence}/10**",
             inline=False,
         )
-        e.set_footer(text=f"SentriX AI • Demandé par {ctx.author}")
-        await ctx.send(embed=e)
+        e.set_footer(text=f"SentriX AI • Demandé par {author}")
+        await destination.send(embed=e)
+
+    @commands.hybrid_command(
+        name="sentrix",
+        description="Demandez n'importe quoi à SentriX : l'IA du bot répond avec un indice de confiance.",
+    )
+    @app_commands.describe(question="Votre question, sur n'importe quel sujet")
+    async def sentrix(self, ctx: commands.Context, *, question: str):
+        if ctx.interaction:
+            await ctx.defer()
+        await self.send_sentrix_reply(ctx, ctx.author, question)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Permet de parler au bot sans commande : le mentionner, ou commencer son message
+        par "sentrix" (ex: "sentrix comment tu vas ?"). Il répond alors comme avec /sentrix."""
+        if message.author.bot or not message.guild:
+            return
+        content = message.content.strip()
+        if not content:
+            return
+
+        mentioned = self.bot.user is not None and self.bot.user in message.mentions
+        name_trigger = content.lower().startswith("sentrix")
+        if not mentioned and not name_trigger:
+            return
+
+        # Ne pas répondre en double si c'est en fait une vraie commande préfixée
+        # (ex: "+sentrix ..." est déjà géré par le système de commandes classique).
+        prefix = self.bot.prefix_cache.get(message.guild.id, config.DEFAULT_PREFIX) if hasattr(self.bot, "prefix_cache") else config.DEFAULT_PREFIX
+        if content.startswith(prefix):
+            return
+
+        question = content
+        if mentioned:
+            question = re.sub(r"<@!?\d+>", "", question, count=1).strip()
+        elif name_trigger:
+            question = content[len("sentrix"):].lstrip(" ,:-").strip()
+        if not question:
+            question = "Salut, comment tu vas ?"
+
+        async with message.channel.typing():
+            await self.send_sentrix_reply(message.channel, message.author, question)
 
     @commands.hybrid_command(name="ask", description="Poser une question à l'IA.")
     @app_commands.describe(question="Votre question pour l'IA")
