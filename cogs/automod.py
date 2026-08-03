@@ -521,10 +521,7 @@ class AutoMod(commands.Cog):
 
     async def punish_nuker(self, guild: discord.Guild, actor_id: int, reason: str):
         member = guild.get_member(actor_id)
-        e = embeds.error(
-            f"🚨 **ANTI-NUKE DÉCLENCHÉ**\n**Membre :** <@{actor_id}> (`{actor_id}`)\n**Raison :** {reason}\n"
-            f"Ses rôles à risque ont été retirés et il a été expulsé du serveur si possible."
-        )
+        action_taken = "aucune action possible (permissions insuffisantes)"
         if member:
             dangerous_roles = [
                 r for r in member.roles
@@ -535,10 +532,22 @@ class AutoMod(commands.Cog):
                     await member.remove_roles(*dangerous_roles, reason=f"AutoMod anti-nuke : {reason}")
             except discord.Forbidden:
                 pass
+            # Un nuke en cours justifie une réponse décisive : on bannit directement
+            # (empêche de revenir avec une nouvelle invitation), avec repli sur un kick
+            # si le bot n'a pas la permission de bannir.
             try:
-                await member.kick(reason=f"AutoMod anti-nuke : {reason}")
+                await guild.ban(discord.Object(id=actor_id), reason=f"AutoMod anti-nuke : {reason}", delete_message_seconds=3600)
+                action_taken = "banni du serveur"
             except discord.Forbidden:
-                pass
+                try:
+                    await member.kick(reason=f"AutoMod anti-nuke : {reason}")
+                    action_taken = "expulsé du serveur (le bot n'a pas la permission de bannir)"
+                except discord.Forbidden:
+                    action_taken = "rôles à risque retirés, mais impossible de le sanctionner davantage (permissions insuffisantes)"
+        e = embeds.error(
+            f"🚨 **ANTI-NUKE DÉCLENCHÉ**\n**Membre :** <@{actor_id}> (`{actor_id}`)\n**Raison :** {reason}\n"
+            f"**Action :** {action_taken}."
+        )
         await self.log_action(guild, e)
         try:
             owner = guild.owner or await guild.fetch_member(guild.owner_id)
@@ -568,6 +577,42 @@ class AutoMod(commands.Cog):
             return
         if await self.record_nuke_action(role.guild, actor.id):
             await self.punish_nuker(role.guild, actor.id, "Suppression massive de rôles")
+
+    @commands.Cog.listener()
+    async def on_guild_channel_update(self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
+        # Un "nuke" ne supprime pas forcément les salons : il arrive très souvent qu'il les
+        # renomme en masse (ex: "NUKED-BY-...") sans rien supprimer, ce qui passait avant
+        # complètement inaperçu par l'anti-nuke (qui ne regardait que les suppressions).
+        if before.name == after.name:
+            return
+        conf = await self.bot.db.get_automod(after.guild.id)
+        if not conf or not conf["antinuke"]:
+            return
+        actor = await self.get_audit_actor(after.guild, discord.AuditLogAction.channel_update, after.id)
+        if await self.is_antinuke_exempt(after.guild, actor):
+            return
+        if await self.record_nuke_action(after.guild, actor.id):
+            await self.punish_nuker(after.guild, actor.id, "Renommage massif de salons")
+
+    @commands.Cog.listener()
+    async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
+        # Même logique que ci-dessus, pour les rôles : renommage massif ou octroi soudain
+        # de permissions dangereuses (élévation de privilèges avant un nuke).
+        name_changed = before.name != after.name
+        perms_escalated = before.permissions != after.permissions and any(
+            not getattr(before.permissions, p, False) and getattr(after.permissions, p, False) for p in DANGEROUS_PERMS
+        )
+        if not name_changed and not perms_escalated:
+            return
+        conf = await self.bot.db.get_automod(after.guild.id)
+        if not conf or not conf["antinuke"]:
+            return
+        actor = await self.get_audit_actor(after.guild, discord.AuditLogAction.role_update, after.id)
+        if await self.is_antinuke_exempt(after.guild, actor):
+            return
+        reason = "Élévation de permissions suspecte sur un rôle" if perms_escalated else "Renommage massif de rôles"
+        if await self.record_nuke_action(after.guild, actor.id):
+            await self.punish_nuker(after.guild, actor.id, reason)
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
