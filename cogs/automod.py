@@ -26,14 +26,19 @@ bannissements en rafale. Si le seuil est dépassé, le responsable est immédiat
 privé de ses rôles dangereux et expulsé, et le propriétaire du serveur est alerté.
 """
 
+import logging
 import re
 import time
+from datetime import timedelta
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 import config
 from utils import embeds, checks, helpers
+
+logger = logging.getLogger("bot")
 
 INVITE_RE = re.compile(r"(discord\.gg|discord(?:app)?\.com/invite)/\S+", re.IGNORECASE)
 LINK_RE = re.compile(r"https?://\S+", re.IGNORECASE)
@@ -220,7 +225,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
         try:
             if action_to_take == "mute":
-                until = discord.utils.utcnow() + discord.utils.timedelta(seconds=MUTE_ESCALATION_SECONDS)
+                until = discord.utils.utcnow() + timedelta(seconds=MUTE_ESCALATION_SECONDS)
                 await member.timeout(until, reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}")
             elif action_to_take == "kick":
                 await member.kick(reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}")
@@ -740,14 +745,29 @@ class AutoMod(commands.Cog, name="Automod"):
         return len(self.nuke_tracker[key]) >= NUKE_ACTION_THRESHOLD
 
     async def get_audit_actor(self, guild: discord.Guild, action: discord.AuditLogAction, target_id: int = None):
-        """Retrouve l'auteur d'une action récente via les logs d'audit (nécessite la permission adéquate)."""
+        """Retrouve l'auteur d'une action récente via les logs d'audit (nécessite la permission adéquate).
+
+        BUG CORRIGÉ : cette fonction ne rattrapait avant que discord.Forbidden (permission
+        manquante). Or elle est appelée par TOUS les écouteurs de logs (salon créé/supprimé,
+        rôle créé/supprimé, membre expulsé, anti-nuke...) AVANT l'envoi du log lui-même. La
+        moindre erreur réseau/API Discord (429, 5xx, timeout) pendant guild.audit_logs()
+        faisait planter silencieusement l'écouteur entier : le log correspondant n'était
+        alors JAMAIS envoyé, sans aucune trace nulle part. C'est une cause plausible des
+        "logs qui ne marchent pas de temps en temps" signalés sans réussir à reproduire.
+        On rattrape maintenant discord.HTTPException (qui couvre aussi Forbidden) et on
+        trace l'échec dans les logs du process, comme le fait déjà helpers.send_log()."""
         try:
             async for entry in guild.audit_logs(limit=5, action=action):
                 if (discord.utils.utcnow() - entry.created_at).total_seconds() > 15:
                     continue
                 if target_id is None or (entry.target and getattr(entry.target, "id", None) == target_id):
                     return entry.user
-        except discord.Forbidden:
+        except discord.HTTPException as exc:
+            logger.warning(
+                "get_audit_actor: échec de lecture de l'audit log ('%s') sur %s (%s) : %s. "
+                "Le log correspondant sera envoyé sans auteur identifié plutôt que d'être perdu.",
+                action, guild.name, guild.id, exc,
+            )
             return None
         return None
 

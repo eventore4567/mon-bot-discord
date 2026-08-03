@@ -971,7 +971,7 @@ class Tickets(commands.Cog):
 
         select.callback = cb
         view.add_item(select)
-        await interaction.response.send_message(view=view, ephemeral=True)
+        await interaction.response.send_message("Qui voulez-vous ajouter à ce ticket ?", view=view, ephemeral=True)
 
     async def btn_remove(self, interaction: discord.Interaction, ticket):
         select = discord.ui.UserSelect(placeholder="➖ Choisir le membre à retirer")
@@ -986,7 +986,7 @@ class Tickets(commands.Cog):
 
         select.callback = cb
         view.add_item(select)
-        await interaction.response.send_message(view=view, ephemeral=True)
+        await interaction.response.send_message("Qui voulez-vous retirer de ce ticket ?", view=view, ephemeral=True)
 
     async def btn_rename(self, interaction: discord.Interaction, ticket):
         await interaction.response.send_modal(TicketRenameModal(self, interaction.channel))
@@ -1003,7 +1003,7 @@ class Tickets(commands.Cog):
 
         select.callback = cb
         view.add_item(select)
-        await interaction.response.send_message(view=view, ephemeral=True)
+        await interaction.response.send_message("À quel membre du staff transférer ce ticket ?", view=view, ephemeral=True)
 
     async def btn_note(self, interaction: discord.Interaction, ticket):
         await interaction.response.send_modal(TicketNoteModal(self, ticket["id"]))
@@ -1017,14 +1017,23 @@ class Tickets(commands.Cog):
 
     # ---------------------------------------------------------------- FERMETURE
 
-    async def generate_transcript(self, channel: discord.TextChannel) -> discord.File:
+    async def _fetch_transcript_text(self, channel: discord.TextChannel) -> str:
         lines = []
         async for msg in channel.history(limit=2000, oldest_first=True):
             lines.append(f"[{msg.created_at:%Y-%m-%d %H:%M}] {msg.author} ({msg.author.id}): {msg.content}")
             for att in msg.attachments:
                 lines.append(f"    [pièce jointe] {att.url}")
-        content = "\n".join(lines) or "Aucun message."
-        return discord.File(io.BytesIO(content.encode("utf-8")), filename=f"transcript-{channel.name}.txt")
+        return "\n".join(lines) or "Aucun message."
+
+    def _transcript_file(self, channel: discord.TextChannel, text: str) -> discord.File:
+        # Un discord.File ne peut servir qu'à UN SEUL envoi (son contenu est "consommé"
+        # après le premier .send()) : on doit donc en recréer un pour chaque destinataire,
+        # mais à partir du même texte déjà récupéré, plutôt que de relire tout l'historique.
+        return discord.File(io.BytesIO(text.encode("utf-8")), filename=f"transcript-{channel.name}.txt")
+
+    async def generate_transcript(self, channel: discord.TextChannel) -> discord.File:
+        text = await self._fetch_transcript_text(channel)
+        return self._transcript_file(channel, text)
 
     async def close_ticket(self, interaction: discord.Interaction, ticket_id: int, reason: str):
         ticket = await self.bot.db.fetchone("SELECT * FROM tickets WHERE id = ?", (ticket_id,))
@@ -1048,19 +1057,38 @@ class Tickets(commands.Cog):
             except discord.HTTPException:
                 pass
 
-        transcript = await self.generate_transcript(channel)
+        # BUG CORRIGÉ (perf) : la transcription était relue 3 fois de suite (message du
+        # salon, log, DM) via 3 lectures complètes et séparées de l'historique du salon —
+        # jusqu'à 3x plus d'appels à l'API Discord que nécessaire à CHAQUE fermeture de
+        # ticket. Sur un serveur de 200k membres où les tickets se ferment en continu, ça
+        # représente une charge inutile. On ne lit l'historique qu'une seule fois maintenant.
+        try:
+            transcript_text = await self._fetch_transcript_text(channel)
+        except discord.HTTPException:
+            transcript_text = "Transcription indisponible (erreur lors de la lecture du salon)."
+
         delay = (conf["ticket_delete_delay"] if conf else 30) or 30
 
-        await channel.send(embed=embeds.warning(
-            f"🔒 Ticket fermé par {interaction.user.mention}.\nRaison : {reason}\n\n"
-            f"Suppression automatique dans **{helpers.format_duration(delay)}**."
-        ), file=transcript)
+        # BUG CORRIGÉ (fiabilité) : cette suppression automatique est maintenant programmée
+        # AVANT les envois qui suivent (message, log, DM), pas après. Avant, si l'envoi du DM
+        # de transcription échouait pour une raison autre qu'un DM fermé (erreur réseau,
+        # timeout Discord...), l'exception non rattrapée empêchait ce create_task de
+        # s'exécuter : le salon du ticket restait alors ouvert indéfiniment, sans suppression
+        # automatique et sans aucune erreur visible pour le staff.
+        asyncio.create_task(self._auto_delete(channel, ticket_id, delay))
+
+        try:
+            await channel.send(embed=embeds.warning(
+                f"🔒 Ticket fermé par {interaction.user.mention}.\nRaison : {reason}\n\n"
+                f"Suppression automatique dans **{helpers.format_duration(delay)}**."
+            ), file=self._transcript_file(channel, transcript_text))
+        except discord.HTTPException:
+            pass
 
         log_e = embeds.log_entry(
             "🔒 Ticket fermé", 0xED4245, cible=owner or ticket["user_id"], acteur=interaction.user, raison=reason,
             extra={"📌 Salon": channel.mention},
         )
-        transcript_for_log = await self.generate_transcript(channel)
         log_channel_id = ticket_type["log_channel_id"] if ticket_type else None
         target_channel = channel.guild.get_channel(log_channel_id) if log_channel_id else None
         if not target_channel:
@@ -1069,7 +1097,7 @@ class Tickets(commands.Cog):
             target_channel = channel.guild.get_channel(fallback_id) if fallback_id else None
         if target_channel:
             try:
-                await target_channel.send(embed=log_e, file=transcript_for_log)
+                await target_channel.send(embed=log_e, file=self._transcript_file(channel, transcript_text))
             except discord.HTTPException:
                 await helpers.send_log(self.bot, interaction.guild, "moderation", log_e)
         else:
@@ -1077,19 +1105,19 @@ class Tickets(commands.Cog):
 
         if owner and (not conf or conf["ticket_transcript_dm"]):
             try:
-                dm_transcript = await self.generate_transcript(channel)
-                await owner.send(embed=embeds.info(f"Voici la transcription de votre ticket sur **{interaction.guild.name}**."), file=dm_transcript)
-            except discord.Forbidden:
+                await owner.send(
+                    embed=embeds.info(f"Voici la transcription de votre ticket sur **{interaction.guild.name}**."),
+                    file=self._transcript_file(channel, transcript_text),
+                )
+            except (discord.Forbidden, discord.HTTPException):
                 pass
             if not conf or conf["ticket_rating_enabled"]:
                 try:
                     await owner.send(
                         content="Pouvez-vous noter le support reçu ?", view=RatingView(self, ticket_id),
                     )
-                except discord.Forbidden:
+                except (discord.Forbidden, discord.HTTPException):
                     pass
-
-        asyncio.create_task(self._auto_delete(channel, ticket_id, delay))
 
     async def _auto_delete(self, channel: discord.TextChannel, ticket_id: int, delay: int):
         await asyncio.sleep(delay)

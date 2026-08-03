@@ -302,8 +302,8 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             f"({roles_created} nouveau(x) rôle(s), les autres existaient déjà).\n\n"
             f"🛡️ Rôle staff du bot configuré automatiquement sur {staff_role.mention} (`/setmodrole`).\n"
             f"🎭 Rôle automatique à l'arrivée configuré sur {member_role.mention} (`/setautorole`).\n\n"
-            "Pensez à utiliser `/create-logs` pour ajouter les salons de logs, et `/ticket-panel` "
-            "pour installer le panneau de tickets si besoin.",
+            "Pensez à utiliser `/create-logs` pour ajouter les salons de logs, et `+ticketsetup` "
+            "pour créer et installer votre panneau de tickets si besoin.",
             title="✅ Structure du serveur créée",
         )
         return e

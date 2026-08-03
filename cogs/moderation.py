@@ -7,6 +7,8 @@ Toutes les commandes existent en slash ET en commande préfixée (+), vérifient
 permissions, respectent la hiérarchie des rôles et journalisent dans le salon de logs.
 """
 
+from datetime import timedelta
+
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -174,7 +176,7 @@ class Moderation(commands.Cog):
         seconds = helpers.parse_duration(duree)
         if seconds is None or seconds > 2419200:
             return await ctx.send(embed=embeds.error("Durée invalide (maximum 28 jours). Exemple : `10m`, `1h`, `1j`."))
-        until = discord.utils.utcnow() + discord.utils.timedelta(seconds=seconds)
+        until = discord.utils.utcnow() + timedelta(seconds=seconds)
         await membre.timeout(until, reason=f"{ctx.author} : {raison}")
         e = self.sanction_embed("Mute (timeout)", membre, ctx.author, raison, f"Durée : {helpers.format_duration(seconds)}")
         await ctx.send(embed=e)

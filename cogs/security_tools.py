@@ -1,6 +1,7 @@
 """
 Cog OUTILS DE SÉCURITÉ AVANCÉS.
-/quarantine /role-snapshot /role-restore /permission-audit /server-backup /server-restore
+/quarantine /unquarantine /role-snapshot /role-restore /permission-audit
+/server-backup /server-restore
 
 Ces commandes complètent AutoMod (cogs/automod.py, protection automatique) avec des
 outils MANUELS pour réagir à un incident (raid, compromission de compte, erreur de
@@ -9,7 +10,7 @@ permissions dangereuses du serveur, et sauvegarder/restaurer la structure du ser
 """
 
 import json
-import time
+from datetime import timedelta
 
 import discord
 from discord import app_commands
@@ -115,7 +116,10 @@ class Security(commands.Cog):
             "SELECT * FROM quarantines WHERE guild_id = ? AND user_id = ? AND active = 1", (ctx.guild.id, membre.id)
         )
         if existing:
-            return await ctx.send(embed=embeds.warning(f"{membre.mention} est déjà en quarantaine (voir `+permission-audit` non lié — utilisez `+role-restore` pour lever manuellement)."))
+            return await ctx.send(embed=embeds.warning(
+                f"{membre.mention} est déjà en quarantaine (jusqu'à <t:{existing['expires_at']}:R>).\n"
+                f"Pour la lever tout de suite : `+unquarantine @{membre.name}`."
+            ))
 
         role_ids = [str(r.id) for r in membre.roles if r != ctx.guild.default_role]
         cur = await self.bot.db.execute(
@@ -130,7 +134,7 @@ class Security(commands.Cog):
             except discord.HTTPException:
                 return await ctx.send(embed=embeds.error("Impossible de retirer les rôles de ce membre (permissions)."))
 
-        until = discord.utils.utcnow() + discord.utils.timedelta(seconds=seconds)
+        until = discord.utils.utcnow() + timedelta(seconds=seconds)
         try:
             await membre.timeout(until, reason=f"Quarantaine : {raison}")
         except discord.HTTPException:
@@ -156,6 +160,23 @@ class Security(commands.Cog):
         )
         await ctx.send(embed=e)
         await self.log_action(ctx.guild, e)
+
+    @commands.hybrid_command(
+        name="unquarantine",
+        description="Lever immédiatement la quarantaine d'un membre et lui rendre ses rôles.",
+        with_app_command=False,
+    )
+    @app_commands.describe(membre="Le membre à sortir de quarantaine")
+    @checks.has_permission_or_modrole("moderate_members")
+    async def unquarantine(self, ctx: commands.Context, membre: discord.Member):
+        row = await self.bot.db.fetchone(
+            "SELECT * FROM quarantines WHERE guild_id = ? AND user_id = ? AND active = 1", (ctx.guild.id, membre.id)
+        )
+        if not row:
+            return await ctx.send(embed=embeds.error(f"{membre.mention} n'est pas en quarantaine."))
+        await self._restore_from_quarantine(ctx.guild, membre, row)
+        await self.bot.db.execute("UPDATE quarantines SET active = 0 WHERE id = ?", (row["id"],))
+        await ctx.send(embed=embeds.success(f"🔓 Quarantaine levée pour {membre.mention} — ses rôles lui ont été rendus."))
 
     # ---------------------------------------------------------------- SNAPSHOTS DE RÔLES
 
