@@ -75,10 +75,46 @@ class Owner(commands.Cog, name="Owner"):
         if utilisateur.id == ctx.author.id:
             return await ctx.send(embed=embeds.error("Vous ne pouvez pas vous blacklister vous-même."))
         await self.bot.db.blacklist_add(utilisateur.id, raison, ctx.author.id)
-        await ctx.send(embed=embeds.success(
-            f"**{utilisateur}** ne peut plus utiliser aucune commande du bot, sur aucun serveur.\nRaison : {raison}",
-            title="🚫 Ajouté à la liste noire",
-        ))
+
+        # Protection maximale (dans la limite de ce que l'API Discord permet — aucun bot,
+        # même le mien, ne peut voir ou bannir par adresse IP, cette donnée n'est jamais
+        # transmise par Discord) : on bannit tout de suite ce membre partout où il est
+        # déjà présent, ET on le rebannira automatiquement s'il essaie de rejoindre
+        # n'importe quel autre serveur du bot plus tard (voir on_member_join ci-dessous).
+        banned_in = []
+        for guild in self.bot.guilds:
+            member = guild.get_member(utilisateur.id)
+            if not member or not guild.me.guild_permissions.ban_members:
+                continue
+            try:
+                await guild.ban(member, reason=f"Liste noire du bot : {raison}")
+                banned_in.append(guild.name)
+                await asyncio.sleep(0.5)
+            except discord.HTTPException:
+                continue
+
+        description = f"**{utilisateur}** ne peut plus utiliser aucune commande du bot, sur aucun serveur.\nRaison : {raison}"
+        if banned_in:
+            description += f"\n\n🔨 Banni automatiquement sur : {', '.join(banned_in)}"
+        description += (
+            "\n🛡️ S'il essaie de rejoindre un autre serveur où je suis présent (avec la permission "
+            "Bannir), il sera banni automatiquement dès son arrivée."
+        )
+        await ctx.send(embed=embeds.success(description, title="🚫 Ajouté à la liste noire"))
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        """Protection renforcée de /bl : si un membre blacklisté (bot-wide) rejoint N'IMPORTE
+        QUEL serveur où le bot est présent, il est banni immédiatement, avant de pouvoir agir."""
+        row = await self.bot.db.blacklist_get(member.id)
+        if not row:
+            return
+        if not member.guild.me.guild_permissions.ban_members:
+            return
+        try:
+            await member.guild.ban(member, reason=f"Liste noire du bot (protection automatique) : {row['reason'] or 'Aucune raison'}")
+        except discord.HTTPException:
+            pass
 
     @commands.hybrid_command(name="blinfo", description="Afficher les infos de liste noire d'un utilisateur.", with_app_command=False)
     @checks.is_bot_owner()
