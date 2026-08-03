@@ -4,10 +4,21 @@ Cog SÉCURITÉ ET AUTOMOD.
 /blacklist-users /antispam /antilink /antiinvite /antimention /anticaps /antiemoji
 /antiraid /antibot /antiaccount /antiscam /antinuke /automod-status /whitelist-domain
 /unwhitelist-domain /security-level /antinuke-whitelist-add /antinuke-whitelist-remove
-/antinuke-whitelist-list /lockdown-server /unlock-server
+/antinuke-whitelist-list /lockdown-server /unlock-server /automod-escalation
+/automod-exempt-role-add /automod-exempt-role-remove /automod-history
 
-Un seul écouteur on_message applique tous les filtres actifs.
+Un seul écouteur on_message applique tous les filtres actifs. Un salon ignoré via
+/ignorechannel est désormais bien respecté par AutoMod (avant, ce n'était pas le cas).
 Aucune adresse IP n'est collectée : seuls les identifiants Discord sont utilisés.
+
+Escalade automatique des sanctions : chaque infraction (suppression de message par un
+filtre) est comptabilisée sur une fenêtre glissante d'1h. Au-delà de certains seuils,
+le membre est automatiquement mute (3), expulsé (5) puis banni (7) — sans intervention
+manuelle. Désactivable via /automod-escalation. Historique consultable via /automod-history
+et /automod-status (statistiques des dernières 24h par filtre).
+
+Exemptions : administrateurs, propriétaire(s) du bot, rôle staff (/setmodrole) et tout
+rôle ajouté via /automod-exempt-role-add ne sont jamais filtrés par AutoMod.
 
 L'anti-nuke (/antinuke) protège contre un compte compromis (staff ou même le bot)
 qui tenterait de détruire le serveur : suppression massive de salons/rôles ou
@@ -26,7 +37,37 @@ from utils import embeds, checks, helpers
 
 INVITE_RE = re.compile(r"(discord\.gg|discord(?:app)?\.com/invite)/\S+", re.IGNORECASE)
 LINK_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-SCAM_KEYWORDS = ["free nitro", "nitro gratuit", "steamcommunity", "airdrop gratuit", "crypto giveaway"]
+SCAM_KEYWORDS = [
+    "free nitro", "nitro gratuit", "steamcommunity", "airdrop gratuit", "crypto giveaway",
+    "discord nitro free", "gagnez des nitro", "claim your nitro", "gift nitro free",
+    "double your crypto", "investissement garanti", "steam gift free",
+]
+
+# ---------------------------------------------------------------- ESCALADE DES SANCTIONS
+# Au-delà d'un simple "suppression + avertissement", AutoMod suit désormais le nombre
+# d'infractions d'un même membre sur une fenêtre glissante et escalade automatiquement
+# la sanction si ça continue — sans qu'un modérateur ait besoin d'intervenir à la main.
+# Le compteur est remis à zéro dès qu'une sanction est appliquée (on ne cumule pas
+# plusieurs sanctions pour la même série d'infractions).
+ESCALATION_WINDOW = 3600  # fenêtre glissante d'une heure
+ESCALATION_RULES = [  # (seuil d'infractions atteint, action) — évalué du plus haut au plus bas
+    (7, "ban"),
+    (5, "kick"),
+    (3, "mute"),
+]
+MUTE_ESCALATION_SECONDS = 600  # 10 minutes
+ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "ban": "🔨 Bannissement"}
+
+
+def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
+    """Vérifie qu'un domaine autorisé apparaît vraiment comme domaine dans le message,
+    pas juste comme sous-chaîne. Avant, whitelister "yt.com" aurait aussi laissé passer
+    "evil-yt.com.ru" puisque la vérification était un simple `in` sur la chaîne complète."""
+    for domain in allowed_domains:
+        if re.search(rf"(?<![\w.-]){re.escape(domain)}(?![\w-])", content_lower):
+            return True
+    return False
+
 
 TOGGLE_FIELDS = [
     "antispam", "antilink", "antiinvite", "antimention", "anticaps",
@@ -75,6 +116,7 @@ class AutoMod(commands.Cog, name="Automod"):
         self.spam_tracker: dict[tuple[int, int], list[float]] = {}
         self.join_tracker: dict[int, list[float]] = {}
         self.nuke_tracker: dict[tuple[int, int], list[float]] = {}
+        self.infraction_tracker: dict[tuple[int, int], list[float]] = {}
         # Caches mémoire : évitent des allers-retours en base de données à CHAQUE
         # message (ce qui ralentissait le bot sur un salon actif). Invalidés dès
         # qu'une commande change un réglage.
@@ -82,6 +124,8 @@ class AutoMod(commands.Cog, name="Automod"):
         self.blacklist_words_cache: dict[int, list[str]] = {}
         self.blacklist_users_cache: dict[int, set[int]] = {}
         self.whitelist_domains_cache: dict[int, list[str]] = {}
+        self.exempt_roles_cache: dict[int, set[int]] = {}
+        self.ignored_channels_cache: dict[int, set[int]] = {}
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
         # Utilise le salon "logs-securite" dédié s'il existe (via /create-logs), sinon
@@ -114,12 +158,86 @@ class AutoMod(commands.Cog, name="Automod"):
             self.whitelist_domains_cache[guild_id] = [r["domain"] for r in rows]
         return self.whitelist_domains_cache[guild_id]
 
+    async def get_exempt_roles_cached(self, guild_id: int) -> set[int]:
+        if guild_id not in self.exempt_roles_cache:
+            rows = await self.bot.db.list_automod_exempt_roles(guild_id)
+            self.exempt_roles_cache[guild_id] = {r["role_id"] for r in rows}
+        return self.exempt_roles_cache[guild_id]
+
+    async def get_ignored_channels_cached(self, guild_id: int) -> set[int]:
+        if guild_id not in self.ignored_channels_cache:
+            rows = await self.bot.db.fetchall("SELECT channel_id FROM ignored_channels WHERE guild_id = ?", (guild_id,))
+            self.ignored_channels_cache[guild_id] = {r["channel_id"] for r in rows}
+        return self.ignored_channels_cache[guild_id]
+
+    async def is_automod_exempt(self, member: discord.abc.User) -> bool:
+        """Vrai si ce membre ne doit JAMAIS être filtré par AutoMod : propriétaire du bot,
+        administrateur, rôle staff configuré (/setmodrole), ou rôle explicitement exempté
+        (/automod-exempt-role-add). Avant, seul "administrateur" était vérifié : un modérateur
+        avec juste la permission Gérer les messages pouvait se faire supprimer ses propres
+        messages par AutoMod en testant un mot interdit, par exemple."""
+        if not isinstance(member, discord.Member):
+            return False
+        if member.guild_permissions.administrator:
+            return True
+        if member.id in config.OWNER_IDS:
+            return True
+        conf = await self.bot.db.get_guild_config(member.guild.id)
+        if conf and conf["mod_role"]:
+            role = member.guild.get_role(conf["mod_role"])
+            if role and role in member.roles:
+                return True
+        exempt_ids = await self.get_exempt_roles_cached(member.guild.id)
+        if exempt_ids and any(r.id in exempt_ids for r in member.roles):
+            return True
+        return False
+
+    async def _maybe_escalate(self, guild: discord.Guild, member: discord.Member, reason: str) -> tuple[str | None, int]:
+        """Enregistre une infraction pour ce membre et, si le nombre d'infractions récentes
+        dépasse un des seuils d'ESCALATION_RULES, applique automatiquement une sanction plus
+        sévère (mute → kick → ban). Retourne (action_prise_ou_None, nombre_d_infractions)."""
+        key = (guild.id, member.id)
+        t = time.time()
+        hits = self.infraction_tracker.setdefault(key, [])
+        hits.append(t)
+        self.infraction_tracker[key] = [x for x in hits if t - x < ESCALATION_WINDOW]
+        count = len(self.infraction_tracker[key])
+
+        conf = await self.get_automod_cached(guild.id)
+        if not conf.get("escalation", 1):
+            return None, count
+
+        action_to_take = None
+        for threshold, action in ESCALATION_RULES:
+            if count >= threshold:
+                action_to_take = action
+                break  # ESCALATION_RULES est trié du seuil le plus haut au plus bas
+
+        if action_to_take is None:
+            return None, count
+        if member.id == guild.owner_id or member.top_role >= guild.me.top_role:
+            return None, count  # hors de portée du bot, inutile d'essayer
+
+        try:
+            if action_to_take == "mute":
+                until = discord.utils.utcnow() + discord.utils.timedelta(seconds=MUTE_ESCALATION_SECONDS)
+                await member.timeout(until, reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}")
+            elif action_to_take == "kick":
+                await member.kick(reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}")
+            elif action_to_take == "ban":
+                await member.ban(reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}", delete_message_seconds=0)
+            self.infraction_tracker[key] = []  # repart à zéro après une sanction
+            return action_to_take, count
+        except discord.Forbidden:
+            return None, count
+
     async def toggle(self, ctx: commands.Context, field: str, etat: str):
         value = 1 if etat == "on" else 0
         await self.bot.db.set_automod(ctx.guild.id, field, value)
         self.automod_cache.pop(ctx.guild.id, None)
         state_text = "activé ✅" if value else "désactivé ❌"
-        await ctx.send(embed=embeds.success(f"Le filtre **{field}** est maintenant {state_text}."))
+        label = "L'escalade automatique" if field == "escalation" else f"Le filtre **{AUTOMOD_TOGGLE_LABELS.get(field, field)}**"
+        await ctx.send(embed=embeds.success(f"{label} est maintenant {state_text}."))
 
     # ---------------------------------------------------------------- TOGGLES (10 commandes explicites)
 
@@ -267,14 +385,74 @@ class AutoMod(commands.Cog, name="Automod"):
         await self.log_action(ctx.guild, e)
         await ctx.send(embed=embeds.success(f"🔓 {count} salon(s) déverrouillé(s)."))
 
-    @commands.hybrid_command(name="automod-status", description="Afficher l'état de tous les filtres automod.")
+    @commands.hybrid_command(name="automod-status", description="Afficher l'état de tous les filtres automod, avec les statistiques des dernières 24h.")
     async def automod_status(self, ctx: commands.Context):
         conf = await self.bot.db.get_automod(ctx.guild.id)
-        e = embeds.neutral("🛡️ État de l'AutoMod")
-        for field in TOGGLE_FIELDS:
+        since_24h = int(time.time() - 86400)
+        stats_rows = await self.bot.db.automod_stats_since(ctx.guild.id, since_24h)
+        stats_by_filter = {r["filter_name"]: r["c"] for r in stats_rows}
+        total_24h = sum(stats_by_filter.values())
+
+        e = embeds.brand(
+            "🛡️ État de l'AutoMod",
+            f"**{total_24h}** action(s) déclenchée(s) sur les dernières 24h. "
+            f"Escalade automatique : {'✅ activée' if (conf and conf['escalation']) else '❌ désactivée'} "
+            f"(`/automod-escalation`).",
+        )
+        lines = []
+        for field, label in AUTOMOD_TOGGLE_LABELS.items():
             value = conf[field] if conf else 0
-            e.add_field(name=field, value="✅ Activé" if value else "❌ Désactivé", inline=True)
+            state = "✅" if value else "❌"
+            count = stats_by_filter.get(field, 0)
+            count_txt = f" — `{count}` déclenchement(s)/24h" if count else ""
+            lines.append(f"{state} {label}{count_txt}")
+        e.add_field(name="Filtres", value="\n".join(lines), inline=False)
+        exempt_rows = await self.bot.db.list_automod_exempt_roles(ctx.guild.id)
+        if exempt_rows:
+            mentions = ", ".join(f"<@&{r['role_id']}>" for r in exempt_rows)
+            e.add_field(name="🛡️ Rôles exemptés", value=mentions, inline=False)
         await ctx.send(embed=e)
+
+    @commands.hybrid_command(name="automod-escalation", description="Activer/désactiver l'escalade automatique des sanctions AutoMod.", with_app_command=False)
+    @app_commands.describe(etat="Activer ou désactiver l'escalade")
+    @app_commands.choices(etat=TOGGLE_CHOICES)
+    @checks.is_owner_or_admin()
+    async def automod_escalation(self, ctx: commands.Context, etat: str):
+        await self.toggle(ctx, "escalation", etat)
+
+    @commands.hybrid_command(name="automod-exempt-role-add", description="Exempter un rôle des filtres AutoMod (jamais sanctionné).", with_app_command=False)
+    @app_commands.describe(role="Le rôle à exempter")
+    @checks.is_owner_or_admin()
+    async def automod_exempt_role_add(self, ctx: commands.Context, role: discord.Role):
+        await self.bot.db.add_automod_exempt_role(ctx.guild.id, role.id)
+        self.exempt_roles_cache.pop(ctx.guild.id, None)
+        await ctx.send(embed=embeds.success(f"Les membres avec le rôle {role.mention} ne seront plus jamais filtrés par AutoMod."))
+
+    @commands.hybrid_command(name="automod-exempt-role-remove", description="Retirer un rôle de la liste des rôles exemptés d'AutoMod.", with_app_command=False)
+    @app_commands.describe(role="Le rôle à retirer")
+    @checks.is_owner_or_admin()
+    async def automod_exempt_role_remove(self, ctx: commands.Context, role: discord.Role):
+        await self.bot.db.remove_automod_exempt_role(ctx.guild.id, role.id)
+        self.exempt_roles_cache.pop(ctx.guild.id, None)
+        await ctx.send(embed=embeds.success(f"Le rôle {role.mention} n'est plus exempté d'AutoMod."))
+
+    @commands.hybrid_command(name="automod-history", description="Afficher l'historique récent des actions AutoMod (globalement ou pour un membre).", with_app_command=False)
+    @app_commands.describe(membre="Filtrer sur un membre précis (optionnel)")
+    @checks.is_owner_or_admin()
+    async def automod_history(self, ctx: commands.Context, membre: discord.Member = None):
+        if membre:
+            rows = await self.bot.db.automod_history_for_user(ctx.guild.id, membre.id, limit=10)
+            title = f"📜 Historique AutoMod — {membre.display_name}"
+        else:
+            rows = await self.bot.db.automod_recent(ctx.guild.id, limit=10)
+            title = "📜 Historique AutoMod — Serveur"
+        if not rows:
+            return await ctx.send(embed=embeds.info("Aucune action AutoMod enregistrée pour l'instant."))
+        lines = []
+        for r in rows:
+            who = f"<@{r['user_id']}>" if r["user_id"] else "—"
+            lines.append(f"<t:{r['timestamp']}:R> — {who} — `{r['filter_name']}` → **{r['action']}**\n╰ {r['reason']}")
+        await ctx.send(embed=embeds.neutral(title, "\n\n".join(lines)))
 
     @commands.hybrid_command(name="security-level", description="Définir le niveau de sécurité global du serveur.")
     @app_commands.describe(niveau="Niveau de sécurité")
@@ -388,7 +566,15 @@ class AutoMod(commands.Cog, name="Automod"):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
-        if isinstance(message.author, discord.Member) and message.author.guild_permissions.administrator:
+
+        # Correction : un salon mis en "ignoré" via /ignorechannel n'était en réalité
+        # JAMAIS respecté par AutoMod (seules certaines commandes le vérifiaient) — les
+        # filtres continuaient de supprimer des messages dans un salon censé être exempté.
+        ignored = await self.get_ignored_channels_cached(message.guild.id)
+        if message.channel.id in ignored:
+            return
+
+        if await self.is_automod_exempt(message.author):
             return
 
         conf = await self.get_automod_cached(message.guild.id)
@@ -408,31 +594,31 @@ class AutoMod(commands.Cog, name="Automod"):
         words = await self.get_blacklist_words_cached(message.guild.id)
         for word in words:
             if word in content_lower:
-                return await self._delete_and_warn(message, "Mot interdit détecté.")
+                return await self._delete_and_warn(message, "Mot interdit détecté.", "blacklist_word")
 
         if conf["antiscam"] and any(k in content_lower for k in SCAM_KEYWORDS):
-            return await self._delete_and_warn(message, "Message d'arnaque potentiel détecté.")
+            return await self._delete_and_warn(message, "Message d'arnaque potentiel détecté.", "antiscam")
 
         if conf["antiinvite"] and INVITE_RE.search(message.content):
-            return await self._delete_and_warn(message, "Lien d'invitation Discord non autorisé.")
+            return await self._delete_and_warn(message, "Lien d'invitation Discord non autorisé.", "antiinvite")
 
         if conf["antilink"] and LINK_RE.search(message.content):
             allowed = await self.get_whitelist_domains_cached(message.guild.id)
-            if not any(domain in content_lower for domain in allowed):
-                return await self._delete_and_warn(message, "Lien non autorisé.")
+            if not _domain_allowed(content_lower, allowed):
+                return await self._delete_and_warn(message, "Lien non autorisé.", "antilink")
 
         if conf["antimention"] and len(message.mentions) >= 5:
-            return await self._delete_and_warn(message, "Mention massive détectée.")
+            return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
 
         if conf["anticaps"] and len(message.content) >= 10:
             letters = [c for c in message.content if c.isalpha()]
             if letters and sum(1 for c in letters if c.isupper()) / len(letters) > 0.7:
-                return await self._delete_and_warn(message, "Trop de majuscules (SPAM CAPS).")
+                return await self._delete_and_warn(message, "Trop de majuscules (SPAM CAPS).", "anticaps")
 
         if conf["antiemoji"]:
             emoji_count = len(re.findall(r"<a?:\w+:\d+>|[\U0001F300-\U0001FAFF]", message.content))
             if emoji_count > 10:
-                return await self._delete_and_warn(message, "Spam d'émojis détecté.")
+                return await self._delete_and_warn(message, "Spam d'émojis détecté.", "antiemoji")
 
         if conf["antispam"]:
             key = (message.guild.id, message.author.id)
@@ -442,9 +628,9 @@ class AutoMod(commands.Cog, name="Automod"):
             self.spam_tracker[key] = [x for x in timestamps if t - x < 6]
             if len(self.spam_tracker[key]) >= 5:
                 self.spam_tracker[key] = []
-                return await self._delete_and_warn(message, "Spam de messages détecté.")
+                return await self._delete_and_warn(message, "Spam de messages détecté.", "antispam")
 
-    async def _delete_and_warn(self, message: discord.Message, reason: str):
+    async def _delete_and_warn(self, message: discord.Message, reason: str, filter_name: str = "automod"):
         try:
             await message.delete()
         except discord.HTTPException:
@@ -456,11 +642,23 @@ class AutoMod(commands.Cog, name="Automod"):
             await note.delete(delay=6)
         except discord.HTTPException:
             pass
-        e = embeds.log_entry(
-            "🛡️ Action AutoMod", config.COLOR_WARNING,
-            cible=message.author, cible_label="👤 Membre", raison=reason,
-            extra={"📍 Salon": f"{message.channel.mention}\n`ID: {message.channel.id}`"},
-        )
+
+        await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, "suppression", reason)
+        escalation_action, infraction_count = await self._maybe_escalate(message.guild, message.author, reason)
+
+        title = "🛡️ Action AutoMod"
+        color = config.COLOR_WARNING
+        extra = {
+            "📍 Salon": f"{message.channel.mention}\n`ID: {message.channel.id}`",
+            "🔢 Infractions (1h)": str(infraction_count),
+        }
+        if escalation_action:
+            extra["⚔️ Escalade automatique"] = ESCALATION_LABELS.get(escalation_action, escalation_action)
+            title = "🚨 Action AutoMod — escalade déclenchée"
+            color = config.COLOR_ERROR if escalation_action in ("kick", "ban") else config.COLOR_WARNING
+            await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, escalation_action, reason)
+
+        e = embeds.log_entry(title, color, cible=message.author, cible_label="👤 Membre", raison=reason, extra=extra)
         await self.log_action(message.guild, e)
 
     @commands.Cog.listener()
@@ -604,7 +802,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
-        conf = await self.bot.db.get_automod(channel.guild.id)
+        conf = await self.get_automod_cached(channel.guild.id)
         if not conf or not conf["antinuke"]:
             return
         actor = await self.get_audit_actor(channel.guild, discord.AuditLogAction.channel_delete, channel.id)
@@ -615,7 +813,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
-        conf = await self.bot.db.get_automod(role.guild.id)
+        conf = await self.get_automod_cached(role.guild.id)
         if not conf or not conf["antinuke"]:
             return
         actor = await self.get_audit_actor(role.guild, discord.AuditLogAction.role_delete, role.id)
@@ -631,7 +829,7 @@ class AutoMod(commands.Cog, name="Automod"):
         # complètement inaperçu par l'anti-nuke (qui ne regardait que les suppressions).
         if before.name == after.name:
             return
-        conf = await self.bot.db.get_automod(after.guild.id)
+        conf = await self.get_automod_cached(after.guild.id)
         if not conf or not conf["antinuke"]:
             return
         actor = await self.get_audit_actor(after.guild, discord.AuditLogAction.channel_update, after.id)
@@ -650,7 +848,7 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         if not name_changed and not perms_escalated:
             return
-        conf = await self.bot.db.get_automod(after.guild.id)
+        conf = await self.get_automod_cached(after.guild.id)
         if not conf or not conf["antinuke"]:
             return
         actor = await self.get_audit_actor(after.guild, discord.AuditLogAction.role_update, after.id)
@@ -662,7 +860,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
-        conf = await self.bot.db.get_automod(guild.id)
+        conf = await self.get_automod_cached(guild.id)
         if not conf or not conf["antinuke"]:
             return
         actor = await self.get_audit_actor(guild, discord.AuditLogAction.ban, user.id)

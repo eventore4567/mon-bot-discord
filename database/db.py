@@ -93,7 +93,24 @@ CREATE TABLE IF NOT EXISTS automod_settings (
     antibot INTEGER DEFAULT 0,
     antiaccount INTEGER DEFAULT 0,
     antiscam INTEGER DEFAULT 0,
-    antinuke INTEGER DEFAULT 0
+    antinuke INTEGER DEFAULT 0,
+    escalation INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS automod_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    filter_name TEXT,
+    action TEXT,
+    reason TEXT,
+    timestamp INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS automod_exempt_roles (
+    guild_id INTEGER,
+    role_id INTEGER,
+    PRIMARY KEY (guild_id, role_id)
 );
 
 CREATE TABLE IF NOT EXISTS antinuke_whitelist (
@@ -421,6 +438,8 @@ CREATE INDEX IF NOT EXISTS idx_member_invites_member ON member_invites (guild_id
 CREATE INDEX IF NOT EXISTS idx_levels_guild_rank ON levels (guild_id, level DESC, xp DESC);
 CREATE INDEX IF NOT EXISTS idx_economy_guild_total ON economy (guild_id, (cash + bank) DESC);
 CREATE INDEX IF NOT EXISTS idx_blacklist_words_guild ON blacklist_words (guild_id);
+CREATE INDEX IF NOT EXISTS idx_automod_logs_guild_time ON automod_logs (guild_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_automod_logs_guild_user ON automod_logs (guild_id, user_id, timestamp);
 """
 
 # Colonnes ajoutées à guild_config après sa création initiale : CREATE TABLE IF NOT EXISTS
@@ -435,6 +454,12 @@ GUILD_CONFIG_NEW_COLUMNS = {
     "log_server": "INTEGER",
     "log_automod": "INTEGER",
     "log_moderation": "INTEGER",
+}
+
+# Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"
+# a été ajoutée après la création initiale de la table.
+AUTOMOD_SETTINGS_NEW_COLUMNS = {
+    "escalation": "INTEGER DEFAULT 1",
 }
 
 
@@ -469,13 +494,19 @@ class Database:
         await self._conn.commit()
 
     async def _migrate(self):
-        """Ajoute les colonnes manquantes à guild_config si la table existait déjà avant
-        leur introduction (utile si la base survit aux redéploiements, ex: volume persistant)."""
+        """Ajoute les colonnes manquantes si les tables existaient déjà avant leur
+        introduction (utile si la base survit aux redéploiements, ex: volume persistant)."""
         cur = await self._conn.execute("PRAGMA table_info(guild_config)")
         existing = {row[1] for row in await cur.fetchall()}
         for column, col_type in GUILD_CONFIG_NEW_COLUMNS.items():
             if column not in existing:
                 await self._conn.execute(f"ALTER TABLE guild_config ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(automod_settings)")
+        existing_automod = {row[1] for row in await cur.fetchall()}
+        for column, col_type in AUTOMOD_SETTINGS_NEW_COLUMNS.items():
+            if column not in existing_automod:
+                await self._conn.execute(f"ALTER TABLE automod_settings ADD COLUMN {column} {col_type}")
 
     async def close(self):
         if self._conn:
@@ -545,6 +576,56 @@ class Database:
             f"UPDATE automod_settings SET {field} = ? WHERE guild_id = ?",
             (value, guild_id),
         )
+
+    # ---------- Historique AutoMod (audit + statistiques) ----------
+
+    async def log_automod_action(self, guild_id: int, user_id: int | None, filter_name: str, action: str, reason: str):
+        await self.execute(
+            "INSERT INTO automod_logs (guild_id, user_id, filter_name, action, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+            (guild_id, user_id, filter_name, action, reason, now()),
+        )
+
+    async def automod_stats_since(self, guild_id: int, since_ts: int):
+        """Nombre de déclenchements par filtre, pour /automod-status."""
+        return await self.fetchall(
+            "SELECT filter_name, COUNT(*) as c FROM automod_logs WHERE guild_id = ? AND timestamp >= ? "
+            "GROUP BY filter_name ORDER BY c DESC",
+            (guild_id, since_ts),
+        )
+
+    async def automod_history_for_user(self, guild_id: int, user_id: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT * FROM automod_logs WHERE guild_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (guild_id, user_id, limit),
+        )
+
+    async def automod_recent(self, guild_id: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT * FROM automod_logs WHERE guild_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (guild_id, limit),
+        )
+
+    async def automod_infraction_count_since(self, guild_id: int, user_id: int, since_ts: int) -> int:
+        row = await self.fetchone(
+            "SELECT COUNT(*) c FROM automod_logs WHERE guild_id = ? AND user_id = ? AND timestamp >= ?",
+            (guild_id, user_id, since_ts),
+        )
+        return row["c"] if row else 0
+
+    # ---------- Rôles exemptés d'AutoMod (staff qui ne doit jamais être filtré) ----------
+
+    async def add_automod_exempt_role(self, guild_id: int, role_id: int):
+        await self.execute(
+            "INSERT OR IGNORE INTO automod_exempt_roles (guild_id, role_id) VALUES (?, ?)", (guild_id, role_id)
+        )
+
+    async def remove_automod_exempt_role(self, guild_id: int, role_id: int):
+        await self.execute(
+            "DELETE FROM automod_exempt_roles WHERE guild_id = ? AND role_id = ?", (guild_id, role_id)
+        )
+
+    async def list_automod_exempt_roles(self, guild_id: int):
+        return await self.fetchall("SELECT role_id FROM automod_exempt_roles WHERE guild_id = ?", (guild_id,))
 
     # ---------- Gestionnaires du bot (membres autorisés à le configurer) ----------
 

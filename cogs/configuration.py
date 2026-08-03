@@ -205,7 +205,10 @@ class Configuration(commands.Cog):
             "INSERT OR IGNORE INTO ignored_channels (guild_id, channel_id) VALUES (?, ?)",
             (ctx.guild.id, salon.id),
         )
-        await ctx.send(embed=embeds.success(f"Le salon {salon.mention} est maintenant ignoré."))
+        automod_cog = self.bot.get_cog("Automod")
+        if automod_cog:
+            automod_cog.ignored_channels_cache.pop(ctx.guild.id, None)
+        await ctx.send(embed=embeds.success(f"Le salon {salon.mention} est maintenant ignoré (y compris par AutoMod)."))
 
     @commands.hybrid_command(name="unignorechannel", description="Ne plus ignorer un salon.", with_app_command=False)
     @app_commands.describe(salon="Le salon à ne plus ignorer")
@@ -216,6 +219,9 @@ class Configuration(commands.Cog):
             "DELETE FROM ignored_channels WHERE guild_id = ? AND channel_id = ?",
             (ctx.guild.id, salon.id),
         )
+        automod_cog = self.bot.get_cog("Automod")
+        if automod_cog:
+            automod_cog.ignored_channels_cache.pop(ctx.guild.id, None)
         await ctx.send(embed=embeds.success(f"Le salon {salon.mention} n'est plus ignoré."))
 
     @commands.hybrid_command(name="setlevelchannel", description="Définir le salon des annonces de niveau.", with_app_command=False)
