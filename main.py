@@ -260,6 +260,19 @@ class BotAllInOne(commands.Bot):
             perms = ", ".join(error.missing_permissions)
             return await ctx.send(embed=embeds.error(f"Je n'ai pas les permissions nécessaires : `{perms}`"))
 
+        if isinstance(error, commands.UserNotFound):
+            # /bl (et blinfo/unbl/editbl) attendent un UTILISATEUR (mention ou ID) : ce n'est pas
+            # la même chose que la liste de mots interdits, qui est une commande différente.
+            # Erreur fréquente si on essaie de blacklister un mot avec /bl : on redirige clairement.
+            if ctx.command and ctx.command.qualified_name in {"bl", "blinfo", "unbl", "editbl"}:
+                return await ctx.send(embed=embeds.error(
+                    f"`{error.argument}` n'est pas un membre valide (mention `@membre` ou ID attendu).\n\n"
+                    "**`/bl`** bloque un **utilisateur** sur tout le bot (aucune commande nulle part).\n"
+                    "Pour interdire un **mot** (ex: une insulte) dans les messages de ce serveur, utilisez "
+                    "**`/blacklist-add <mot>`** à la place — c'est une fonction différente."
+                ))
+            return await ctx.send(embed=embeds.error("Utilisateur introuvable. Vérifiez la mention ou l'ID."))
+
         if isinstance(error, commands.MemberNotFound):
             return await ctx.send(embed=embeds.error("Membre introuvable. Vérifiez le nom ou la mention."))
 
