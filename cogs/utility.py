@@ -409,14 +409,6 @@ class Utility(commands.Cog, name="Utility"):
         e.add_field(name="Créé le", value=f"<t:{int(salon.created_at.timestamp())}:D>", inline=True)
         await ctx.send(embed=e)
 
-    # Renommé "invite" -> "invite-bot" pour ne plus entrer en collision avec /invites
-    # (suivi des invitations d'un membre) : les deux noms étaient trop proches et se
-    # mélangeaient dans l'autocomplétion Discord, causant de la confusion.
-    @commands.hybrid_command(name="invite-bot", description="Obtenir le lien pour ajouter ce bot sur un autre serveur.")
-    async def invite_bot(self, ctx: commands.Context):
-        link = discord.utils.oauth_url(self.bot.user.id, permissions=discord.Permissions(administrator=True))
-        await ctx.send(embed=embeds.info(f"[Cliquez ici pour m'ajouter sur un serveur]({link})"))
-
     @commands.hybrid_command(name="membercount", description="Afficher le nombre de membres du serveur.", with_app_command=False)
     async def membercount(self, ctx: commands.Context):
         guild = ctx.guild
