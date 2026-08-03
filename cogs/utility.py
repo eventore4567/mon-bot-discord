@@ -13,20 +13,22 @@ from discord.ext import commands
 from utils import embeds, helpers, checks
 from database.db import now
 
+# Ordre volontaire : catégories utiles à tout le monde en premier, catégories staff/technique
+# ensuite — pour que /help mette en avant ce qui sert le plus grand nombre.
 CATEGORY_LABELS = {
-    "Moderation": "🛡️ Modération",
-    "Automod": "🔒 Sécurité / AutoMod",
-    "Tickets": "🎫 Tickets",
-    "Configuration": "⚙️ Configuration",
-    "ServerBuilder": "🏗️ Création de serveur",
-    "Utility": "🧰 Utilitaires",
     "Ai": "🤖 Intelligence Artificielle",
     "Economy": "💰 Économie",
     "Levels": "📈 Niveaux / Communauté",
     "Minigames": "🎮 Mini-jeux",
     "Music": "🎵 Musique",
     "Events": "🎉 Giveaways / Événements",
+    "Utility": "🧰 Utilitaires",
+    "Moderation": "🛡️ Modération",
+    "Automod": "🔒 Sécurité / AutoMod",
+    "Tickets": "🎫 Tickets",
     "Verification": "✅ Vérification / Rôles",
+    "Configuration": "⚙️ Configuration",
+    "ServerBuilder": "🏗️ Création de serveur",
     "Stats": "📊 Statistiques / Développement",
     "Owner": "🔑 Propriétaire du bot",
 }
@@ -86,8 +88,9 @@ def build_help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str,
         f"Je suis l'assistant du serveur **{server_name}**. Je m'occupe de la modération, de la sécurité, "
         f"des tickets de support, de l'économie virtuelle, des niveaux, de la musique et de plein de "
         f"mini-jeux — pour que la communauté reste agréable et vivante.\n\n"
-        f"Utilisez le menu déroulant tout en bas pour explorer une catégorie en détail, ou tapez "
-        f"`{prefix}help <commande>` pour l'aide détaillée d'une commande précise."
+        f"Utilisez le menu déroulant tout en bas pour explorer une catégorie en détail, le bouton "
+        f"**🔎 Rechercher** pour trouver une commande par mot-clé, ou tapez `{prefix}help <commande>` "
+        f"pour l'aide détaillée d'une commande précise."
     )
     if bot.user:
         e.set_thumbnail(url=bot.user.display_avatar.url)
@@ -122,6 +125,53 @@ def format_command_line(cmd, prefix: str, slash_names: set) -> str:
         usage = " " + " ".join(parts)
     lock = "🔒 " if is_staff_command(cmd) else ""
     return f"{lock}**`{marker}{cmd.qualified_name}{usage}`**\n╰ {cmd.description or 'Pas de description.'}"
+
+
+def search_commands(bot: commands.Bot, is_staff: bool, keyword: str):
+    """Cherche un mot-clé dans le nom ET la description de toutes les commandes visibles,
+    toutes catégories confondues. Retourne une liste de (label_catégorie, commande)."""
+    keyword = keyword.lower().strip()
+    results = []
+    for cog_name, label in CATEGORY_LABELS.items():
+        cog = bot.get_cog(cog_name)
+        if not cog or not category_visible(cog_name, cog, is_staff):
+            continue
+        for cmd in visible_commands(cog, is_staff):
+            haystack = f"{cmd.qualified_name} {cmd.description or ''}".lower()
+            if keyword in haystack:
+                results.append((label, cmd))
+    return results
+
+
+class SearchModal(discord.ui.Modal, title="🔎 Rechercher une commande"):
+    mot_cle = discord.ui.TextInput(label="Mot-clé (nom ou description)", max_length=50)
+
+    def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool):
+        super().__init__()
+        self.bot = bot
+        self.prefix = prefix
+        self.is_staff = is_staff
+
+    async def on_submit(self, interaction: discord.Interaction):
+        slash_names = {c.qualified_name for c in self.bot.tree.get_commands()}
+        results = search_commands(self.bot, self.is_staff, self.mot_cle.value)
+
+        if not results:
+            e = embeds.brand("🔎 Recherche", f"Aucune commande trouvée pour `{self.mot_cle.value}`.")
+            home_embed = build_help_home(self.bot, interaction.guild, self.prefix, self.is_staff)
+            return await interaction.response.edit_message(embed=e, view=HelpView(self.bot, self.prefix, self.is_staff))
+
+        lines = [f"*{label}*\n{format_command_line(cmd, self.prefix, slash_names)}" for label, cmd in results]
+        chunks = [lines[i:i + 6] for i in range(0, len(lines), 6)] or [[]]
+        pages = []
+        for i, chunk in enumerate(chunks):
+            e = embeds.brand(f"🔎 Résultats pour « {self.mot_cle.value} »", "\n\n".join(chunk))
+            e.set_footer(text=f"Page {i + 1}/{len(chunks)} • {len(results)} commande(s) trouvée(s)")
+            pages.append(e)
+
+        home_embed = build_help_home(self.bot, interaction.guild, self.prefix, self.is_staff)
+        view = CategoryHelpView(self.bot, self.prefix, self.is_staff, pages, interaction.user.id, home_embed)
+        await interaction.response.edit_message(embed=pages[0], view=view)
 
 
 class HelpSelect(discord.ui.Select):
@@ -211,11 +261,22 @@ class CategoryHelpView(discord.ui.View):
         self._update_buttons()
         await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
+    @discord.ui.button(label="🔎 Rechercher", style=discord.ButtonStyle.secondary, row=2)
+    async def search(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(SearchModal(self.bot, self.prefix, self.is_staff))
+
 
 class HelpView(discord.ui.View):
     def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool):
         super().__init__(timeout=120)
+        self.bot = bot
+        self.prefix = prefix
+        self.is_staff = is_staff
         self.add_item(HelpSelect(bot, prefix, is_staff))
+
+    @discord.ui.button(label="🔎 Rechercher une commande", style=discord.ButtonStyle.secondary, row=1)
+    async def search(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(SearchModal(self.bot, self.prefix, self.is_staff))
 
 
 class Utility(commands.Cog, name="Utility"):
