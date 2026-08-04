@@ -5,7 +5,6 @@ sont stockées ici. Aucune adresse IP n'est jamais collectée ni stockée.
 """
 
 import aiosqlite
-import asyncio
 import json
 import os
 import time
@@ -570,31 +569,6 @@ CREATE TABLE IF NOT EXISTS setup_sessions (
     updated_at INTEGER
 );
 
--- Historique des transactions économiques : /pay, /daily, /weekly, /work, /give-money...
--- sender_id est NULL pour une récompense (daily/weekly/work), rempli pour un transfert
--- entre deux membres (/pay) ou un ajustement staff (/give-money).
-CREATE TABLE IF NOT EXISTS economy_transactions (
-    transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id INTEGER,
-    sender_id INTEGER,
-    receiver_id INTEGER,
-    transaction_type TEXT,
-    amount INTEGER,
-    created_at INTEGER,
-    reason TEXT DEFAULT ''
-);
-
--- Historique de réputation : qui a donné/retiré un point à qui, quand, et pourquoi.
-CREATE TABLE IF NOT EXISTS reputation_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id INTEGER,
-    giver_id INTEGER,
-    receiver_id INTEGER,
-    amount INTEGER,
-    reason TEXT DEFAULT '',
-    created_at INTEGER
-);
-
 -- Session vocale EN COURS d'un membre (temps vocal, refonte /stats et /level).
 -- Une ligne = un membre actuellement connecté à un salon vocal suivi. Permet de
 -- retrouver "depuis quand" un membre est en vocal après un redémarrage du bot,
@@ -640,8 +614,6 @@ CREATE INDEX IF NOT EXISTS idx_ticket_answers_ticket ON ticket_answers (ticket_i
 CREATE INDEX IF NOT EXISTS idx_setup_sessions_guild ON setup_sessions (guild_id);
 CREATE INDEX IF NOT EXISTS idx_bot_manager_permissions_guild_user ON bot_manager_permissions (guild_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_voice_sessions_guild ON voice_sessions (guild_id);
-CREATE INDEX IF NOT EXISTS idx_economy_transactions_guild ON economy_transactions (guild_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_reputation_history_guild ON reputation_history (guild_id, receiver_id);
 """
 
 # Valeurs par défaut du panneau +statsconfig — fusionnées avec ce qui est enregistré en
@@ -669,15 +641,7 @@ DEFAULT_STATS_SETTINGS = {
     "voice_ignore_solo": False,
     "buttons_visible": True,
     "allow_view_others": True,
-    "economy_emoji": "🪙",
-    "reputation_cooldown": 86400,
-    "level_announce_enabled": True,
-    "level_keep_old_roles": False,
 }
-
-# Champs de la table economy dont le nom en base ("cash") diffère volontairement du nom
-# affiché ("wallet") demandé par Jayden — renommer la colonne sur une base de 200 000
-# membres est un risque inutile ; on ne renomme donc qu'à l'affichage (voir stats_service.py).
 
 # Catégories de permissions disponibles pour un gestionnaire du bot (page 7 de /setup).
 MANAGER_CATEGORIES = {
@@ -750,12 +714,6 @@ class Database:
         # jamais. On garde donc la config de chaque serveur en mémoire, invalidée uniquement
         # quand elle est explicitement modifiée (set_guild_config / reset).
         self._guild_config_cache: dict[int, "aiosqlite.Row"] = {}
-        # Protège toute opération économique qui fait "vérifier le solde/cooldown PUIS
-        # écrire" (paiement, daily, weekly, work, réputation) contre une double exécution
-        # simultanée (deux clics rapides, ou /daily lancé deux fois avant la première
-        # écriture) qui contournerait sinon la vérification — c'est ce qui garantit
-        # "empêcher les doubles récompenses" et l'absence de double dépense sur /pay.
-        self._economy_lock = asyncio.Lock()
 
     async def connect(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
@@ -1100,67 +1058,6 @@ class Database:
             (amount, guild_id, user_id),
         )
 
-    async def log_transaction(self, guild_id: int, sender_id: int | None, receiver_id: int, transaction_type: str, amount: int, reason: str = ""):
-        await self.execute(
-            "INSERT INTO economy_transactions (guild_id, sender_id, receiver_id, transaction_type, amount, created_at, reason) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (guild_id, sender_id, receiver_id, transaction_type, amount, now(), reason),
-        )
-
-    async def get_transactions(self, guild_id: int, user_id: int, limit: int = 15):
-        return await self.fetchall(
-            "SELECT * FROM economy_transactions WHERE guild_id = ? AND (sender_id = ? OR receiver_id = ?) "
-            "ORDER BY created_at DESC LIMIT ?",
-            (guild_id, user_id, user_id, limit),
-        )
-
-    async def pay_member(self, guild_id: int, sender_id: int, receiver_id: int, amount: int, reason: str = "") -> bool:
-        """Transfert atomique (protégé par _economy_lock) : vérifie le solde ET débite/
-        crédite/historise sans qu'un autre appel concurrent ne puisse s'intercaler entre
-        la vérification et l'écriture (double dépense impossible)."""
-        if amount <= 0 or sender_id == receiver_id:
-            return False
-        async with self._economy_lock:
-            await self.ensure_economy(guild_id, sender_id)
-            await self.ensure_economy(guild_id, receiver_id)
-            row = await self.fetchone("SELECT cash FROM economy WHERE guild_id = ? AND user_id = ?", (guild_id, sender_id))
-            if not row or row["cash"] < amount:
-                return False
-            await self._conn.execute("UPDATE economy SET cash = cash - ? WHERE guild_id = ? AND user_id = ?", (amount, guild_id, sender_id))
-            await self._conn.execute("UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?", (amount, guild_id, receiver_id))
-            await self._conn.execute(
-                "INSERT INTO economy_transactions (guild_id, sender_id, receiver_id, transaction_type, amount, created_at, reason) "
-                "VALUES (?, ?, ?, 'pay', ?, ?, ?)",
-                (guild_id, sender_id, receiver_id, amount, now(), reason),
-            )
-            await self._conn.commit()
-            return True
-
-    async def claim_timed_reward(self, guild_id: int, user_id: int, field: str, amount: int, cooldown: int, transaction_type: str) -> tuple[bool, int]:
-        """Réclame une récompense périodique (daily/weekly/work) de façon atomique :
-        vérifie le cooldown ET l'écrit dans le même verrou, pour qu'un double-clic ou un
-        double appel de commande ne permette jamais de réclamer deux fois. Retourne
-        (True, 0) si la récompense a été accordée, ou (False, secondes_restantes) sinon."""
-        assert field in ("last_daily", "last_weekly", "last_work"), "champ de cooldown non autorisé"
-        async with self._economy_lock:
-            await self.ensure_economy(guild_id, user_id)
-            row = await self.fetchone(f"SELECT {field} FROM economy WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
-            last = row[field] if row else 0
-            remaining = cooldown - (now() - last) if last else 0
-            if remaining > 0:
-                return False, remaining
-            await self._conn.execute(
-                f"UPDATE economy SET cash = cash + ?, {field} = ? WHERE guild_id = ? AND user_id = ?",
-                (amount, now(), guild_id, user_id),
-            )
-            await self._conn.execute(
-                "INSERT INTO economy_transactions (guild_id, sender_id, receiver_id, transaction_type, amount, created_at, reason) "
-                "VALUES (?, NULL, ?, ?, ?, ?, '')",
-                (guild_id, user_id, transaction_type, amount, now()),
-            )
-            await self._conn.commit()
-            return True, 0
-
     # ---------- Niveaux ----------
 
     async def ensure_level(self, guild_id: int, user_id: int):
@@ -1210,66 +1107,6 @@ class Database:
             "SELECT reputation FROM profiles WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
         )
         return row["reputation"] if row else 0
-
-    async def ensure_profile(self, guild_id: int, user_id: int):
-        await self.execute("INSERT OR IGNORE INTO profiles (guild_id, user_id) VALUES (?, ?)", (guild_id, user_id))
-
-    async def give_reputation(self, guild_id: int, giver_id: int, receiver_id: int, cooldown: int, reason: str = "") -> tuple[bool, int]:
-        """Donne 1 point de réputation, protégé par _economy_lock (même verrou que
-        l'économie : même besoin d'atomicité vérification-cooldown + écriture)."""
-        async with self._economy_lock:
-            await self.ensure_profile(guild_id, giver_id)
-            await self.ensure_profile(guild_id, receiver_id)
-            row = await self.fetchone("SELECT last_rep FROM profiles WHERE guild_id = ? AND user_id = ?", (guild_id, giver_id))
-            last = row["last_rep"] if row else 0
-            remaining = cooldown - (now() - last) if last else 0
-            if remaining > 0:
-                return False, remaining
-            await self._conn.execute(
-                "UPDATE profiles SET reputation = reputation + 1 WHERE guild_id = ? AND user_id = ?", (guild_id, receiver_id)
-            )
-            await self._conn.execute(
-                "UPDATE profiles SET last_rep = ? WHERE guild_id = ? AND user_id = ?", (now(), guild_id, giver_id)
-            )
-            await self._conn.execute(
-                "INSERT INTO reputation_history (guild_id, giver_id, receiver_id, amount, reason, created_at) VALUES (?, ?, ?, 1, ?, ?)",
-                (guild_id, giver_id, receiver_id, reason, now()),
-            )
-            await self._conn.commit()
-            return True, 0
-
-    async def get_reputation_cooldown_remaining(self, guild_id: int, user_id: int, cooldown: int) -> int:
-        row = await self.fetchone("SELECT last_rep FROM profiles WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
-        last = row["last_rep"] if row else 0
-        return max(0, cooldown - (now() - last)) if last else 0
-
-    async def adjust_reputation(self, guild_id: int, moderator_id: int, target_id: int, amount: int, reason: str = "") -> int:
-        """Ajout/retrait manuel par le staff (+repadd / +repremove), sans cooldown. Le
-        total ne descend jamais sous 0. Retourne le nouveau total."""
-        await self.ensure_profile(guild_id, target_id)
-        current = await self.get_reputation(guild_id, target_id)
-        new_total = max(0, current + amount)
-        await self.execute("UPDATE profiles SET reputation = ? WHERE guild_id = ? AND user_id = ?", (new_total, guild_id, target_id))
-        await self.execute(
-            "INSERT INTO reputation_history (guild_id, giver_id, receiver_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (guild_id, moderator_id, target_id, new_total - current, reason, now()),
-        )
-        return new_total
-
-    async def reset_reputation(self, guild_id: int, moderator_id: int, target_id: int, reason: str = "Réinitialisation") -> int:
-        current = await self.get_reputation(guild_id, target_id)
-        await self.execute("UPDATE profiles SET reputation = 0 WHERE guild_id = ? AND user_id = ?", (guild_id, target_id))
-        await self.execute(
-            "INSERT INTO reputation_history (guild_id, giver_id, receiver_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (guild_id, moderator_id, target_id, -current, reason, now()),
-        )
-        return 0
-
-    async def get_reputation_history(self, guild_id: int, user_id: int, limit: int = 15):
-        return await self.fetchall(
-            "SELECT * FROM reputation_history WHERE guild_id = ? AND receiver_id = ? ORDER BY created_at DESC LIMIT ?",
-            (guild_id, user_id, limit),
-        )
 
     # ---------- Sessions vocales (persistance après redémarrage) ----------
 
