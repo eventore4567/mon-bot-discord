@@ -420,7 +420,12 @@ class Ai(commands.Cog, name="Ai"):
     async def sentrix(self, ctx: commands.Context, *, question: str):
         if ctx.interaction:
             await ctx.defer()
-        await self.send_sentrix_reply(ctx, ctx.author, question)
+        # ctx.typing() donne un retour immédiat ("SentriX est en train d'écrire...") même
+        # en préfixe, pour ne jamais laisser l'utilisateur face à un silence total pendant
+        # que l'IA réfléchit (voir REQUEST_TIMEOUT_SECONDS dans ai_service.py : la réponse
+        # arrive toujours, au pire sous forme d'erreur claire, en moins de 45s).
+        async with ctx.typing():
+            await self.send_sentrix_reply(ctx, ctx.author, question)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -459,7 +464,8 @@ class Ai(commands.Cog, name="Ai"):
             await ctx.defer()
         guild_id = ctx.guild.id if ctx.guild else None
         history = self.histories.get(ctx.author.id, [])
-        answer = await self.ask_ai(question, history)
+        async with ctx.typing():
+            answer = await self.ask_ai(question, history)
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.", kind="danger"))
         if answer.startswith("__ERROR__"):
@@ -482,7 +488,8 @@ class Ai(commands.Cog, name="Ai"):
         guild_id = ctx.guild.id if ctx.guild else None
         if ctx.interaction:
             await ctx.defer()
-        answer = await self.ask_ai(f"Résume ce texte en 3-4 phrases maximum :\n\n{texte}")
+        async with ctx.typing():
+            answer = await self.ask_ai(f"Résume ce texte en 3-4 phrases maximum :\n\n{texte}")
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
         if answer.startswith("__ERROR__"):
@@ -495,7 +502,8 @@ class Ai(commands.Cog, name="Ai"):
         guild_id = ctx.guild.id if ctx.guild else None
         if ctx.interaction:
             await ctx.defer()
-        answer = await self.ask_ai(f"Génère un prompt détaillé et créatif en anglais pour un générateur d'images IA, sur ce sujet : {sujet}")
+        async with ctx.typing():
+            answer = await self.ask_ai(f"Génère un prompt détaillé et créatif en anglais pour un générateur d'images IA, sur ce sujet : {sujet}")
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
         if answer.startswith("__ERROR__"):
@@ -508,7 +516,8 @@ class Ai(commands.Cog, name="Ai"):
         guild_id = ctx.guild.id if ctx.guild else None
         if ctx.interaction:
             await ctx.defer()
-        answer = await self.ask_ai(f"Explique ce concept simplement, comme à un débutant : {sujet}")
+        async with ctx.typing():
+            answer = await self.ask_ai(f"Explique ce concept simplement, comme à un débutant : {sujet}")
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
         if answer.startswith("__ERROR__"):
@@ -521,7 +530,8 @@ class Ai(commands.Cog, name="Ai"):
         guild_id = ctx.guild.id if ctx.guild else None
         if ctx.interaction:
             await ctx.defer()
-        answer = await self.ask_ai(f"Reformule ce texte de façon plus claire, en gardant le sens original :\n\n{texte}")
+        async with ctx.typing():
+            answer = await self.ask_ai(f"Reformule ce texte de façon plus claire, en gardant le sens original :\n\n{texte}")
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
         if answer.startswith("__ERROR__"):
@@ -534,9 +544,10 @@ class Ai(commands.Cog, name="Ai"):
         guild_id = ctx.guild.id if ctx.guild else None
         if ctx.interaction:
             await ctx.defer()
-        answer = await self.ask_ai(
-            f"Évalue la véracité probable de cette affirmation, avec prudence et nuance, en précisant que ce n'est pas une vérification garantie : {affirmation}"
-        )
+        async with ctx.typing():
+            answer = await self.ask_ai(
+                f"Évalue la véracité probable de cette affirmation, avec prudence et nuance, en précisant que ce n'est pas une vérification garantie : {affirmation}"
+            )
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
         if answer.startswith("__ERROR__"):

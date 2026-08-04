@@ -248,11 +248,20 @@ def split_for_discord(text: str, limit: int = DISCORD_MESSAGE_LIMIT) -> list[str
 
 # ---------------------------------------------------------------- CLIENT OPENAI
 
+# Sans timeout explicite, le SDK OpenAI attend jusqu'à 10 minutes par défaut avant
+# d'abandonner un appel bloqué (ex: souci réseau entre l'hébergeur et api.openai.com,
+# ou l'IA qui met très longtemps à répondre) — pendant ce temps, le bot ne renvoie
+# RIEN du tout à l'utilisateur, ce qui ressemble exactement à "ça ne marche pas".
+# On limite donc explicitement l'attente pour échouer proprement et vite (message
+# d'erreur clair) plutôt que de laisser l'utilisateur face à un silence total.
+REQUEST_TIMEOUT_SECONDS = 45.0
+
+
 def get_client():
     if not config.OPENAI_API_KEY:
         return None
     from openai import AsyncOpenAI
-    return AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+    return AsyncOpenAI(api_key=config.OPENAI_API_KEY, timeout=REQUEST_TIMEOUT_SECONDS, max_retries=1)
 
 
 def _extract_text(resp) -> str:
