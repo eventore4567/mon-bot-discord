@@ -47,15 +47,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
     warn_ban_threshold INTEGER DEFAULT 3,
     ticket_delete_delay INTEGER DEFAULT 30,
     ticket_transcript_dm INTEGER DEFAULT 1,
-    ticket_rating_enabled INTEGER DEFAULT 1,
-    member_role INTEGER,
-    booster_role INTEGER,
-    bot_commands_channel INTEGER,
-    report_channel INTEGER,
-    partner_channel INTEGER,
-    stats_channel INTEGER,
-    afk_channel INTEGER,
-    error_channel INTEGER
+    ticket_rating_enabled INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS warnings (
@@ -405,20 +397,6 @@ CREATE TABLE IF NOT EXISTS bot_managers (
     PRIMARY KEY (guild_id, user_id)
 );
 
--- Permissions PAR CATÉGORIE d'un gestionnaire du bot (page 7 de /setup, Phase 2).
--- Une ligne = une catégorie accordée à un gestionnaire ("configuration", "tickets",
--- "moderation", "securite", "economie", ou "complete" qui vaut tout). Un gestionnaire
--- sans aucune ligne ici (ajouté via l'ancien système) est traité comme "complete" pour
--- ne rien casser de l'existant — voir Database.has_manager_permission().
-CREATE TABLE IF NOT EXISTS bot_manager_permissions (
-    guild_id INTEGER,
-    user_id INTEGER,
-    category TEXT,
-    granted_by INTEGER,
-    granted_at INTEGER,
-    PRIMARY KEY (guild_id, user_id, category)
-);
-
 CREATE TABLE IF NOT EXISTS command_blacklist (
     user_id INTEGER PRIMARY KEY,
     reason TEXT,
@@ -598,18 +576,7 @@ CREATE INDEX IF NOT EXISTS idx_ticket_types_panel ON ticket_types (panel_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_form_questions_type ON ticket_form_questions (ticket_type_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_answers_ticket ON ticket_answers (ticket_id);
 CREATE INDEX IF NOT EXISTS idx_setup_sessions_guild ON setup_sessions (guild_id);
-CREATE INDEX IF NOT EXISTS idx_bot_manager_permissions_guild_user ON bot_manager_permissions (guild_id, user_id);
 """
-
-# Catégories de permissions disponibles pour un gestionnaire du bot (page 7 de /setup).
-MANAGER_CATEGORIES = {
-    "configuration": "⚙️ Configuration générale",
-    "tickets": "🎫 Tickets",
-    "moderation": "🛡️ Modération",
-    "securite": "🔐 Sécurité / AutoMod",
-    "economie": "💰 Économie",
-    "complete": "🔑 Gestion complète",
-}
 
 # Colonnes ajoutées à guild_config après sa création initiale : CREATE TABLE IF NOT EXISTS
 # ne touche pas une table déjà existante, donc sur une base déjà en place (ex: un volume
@@ -628,15 +595,6 @@ GUILD_CONFIG_NEW_COLUMNS = {
     "ticket_delete_delay": "INTEGER DEFAULT 30",
     "ticket_transcript_dm": "INTEGER DEFAULT 1",
     "ticket_rating_enabled": "INTEGER DEFAULT 1",
-    # Ajoutées en Phase 2 de la refonte de /setup (pages Rôles et Salons annexes).
-    "member_role": "INTEGER",
-    "booster_role": "INTEGER",
-    "bot_commands_channel": "INTEGER",
-    "report_channel": "INTEGER",
-    "partner_channel": "INTEGER",
-    "stats_channel": "INTEGER",
-    "afk_channel": "INTEGER",
-    "error_channel": "INTEGER",
 }
 
 # Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"
@@ -836,9 +794,6 @@ class Database:
         await self.execute(
             "DELETE FROM bot_managers WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
         )
-        await self.execute(
-            "DELETE FROM bot_manager_permissions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
-        )
 
     async def is_bot_manager(self, guild_id: int, user_id: int) -> bool:
         row = await self.fetchone(
@@ -850,35 +805,6 @@ class Database:
         return await self.fetchall(
             "SELECT user_id FROM bot_managers WHERE guild_id = ?", (guild_id,)
         )
-
-    # ---------- Permissions par catégorie des gestionnaires du bot (page 7 de /setup) ----------
-
-    async def set_manager_categories(self, guild_id: int, user_id: int, categories: list[str], granted_by: int):
-        """Remplace entièrement les catégories accordées à ce gestionnaire par la liste
-        donnée. Un gestionnaire ne peut jamais s'accorder LUI-MÊME de nouvelles catégories :
-        ce contrôle est fait côté cog (SetupView), pas ici — cette méthode se contente
-        d'écrire ce qu'on lui donne."""
-        await self.execute("DELETE FROM bot_manager_permissions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
-        for category in categories:
-            await self.execute(
-                "INSERT OR IGNORE INTO bot_manager_permissions (guild_id, user_id, category, granted_by, granted_at) VALUES (?, ?, ?, ?, ?)",
-                (guild_id, user_id, category, granted_by, now()),
-            )
-
-    async def get_manager_categories(self, guild_id: int, user_id: int) -> list[str]:
-        rows = await self.fetchall(
-            "SELECT category FROM bot_manager_permissions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
-        )
-        return [r["category"] for r in rows]
-
-    async def has_manager_permission(self, guild_id: int, user_id: int, category: str) -> bool:
-        """True si ce gestionnaire a la catégorie demandée, OU la gestion complète, OU s'il
-        n'a AUCUNE ligne de permission enregistrée (= géré à l'ancienne, avant la Phase 2 :
-        on lui laisse un accès complet pour ne rien casser de ce qui existait avant)."""
-        rows = await self.get_manager_categories(guild_id, user_id)
-        if not rows:
-            return True
-        return "complete" in rows or category in rows
 
     # ---------- Sessions /setup (survie de l'assistant à un redémarrage du bot) ----------
 
