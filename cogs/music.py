@@ -52,7 +52,7 @@ class Music(commands.Cog, name="Music"):
         colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
         default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
         return design_system.create_embed(
-            title=f"{style['emoji']} {title}",
+            title=design_system.kind_title(title, kind=kind, category_emoji=style["emoji"]),
             description=description,
             colour=design.get(colour_key, default_colour),
             footer=design.get("footer"),

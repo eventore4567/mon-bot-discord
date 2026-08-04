@@ -28,7 +28,7 @@ class Ai(commands.Cog, name="Ai"):
         default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
         design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
         return design_system.create_embed(
-            title=f"{style['emoji']} {title}",
+            title=design_system.kind_title(title, kind=kind, category_emoji=style["emoji"]),
             description=description,
             colour=design.get(colour_key, default_colour),
             footer=design.get("footer"),

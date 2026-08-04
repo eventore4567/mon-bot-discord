@@ -89,6 +89,24 @@ CATEGORY_STYLES = {
     "verification": {"emoji": "✅", "colour": COLORS.verification},
 }
 
+# Icône affichée dans le titre d'un embed selon son état (kind), plutôt que toujours
+# l'emoji de la catégorie — sinon un refus/erreur affiché avec ✅ (emoji de la catégorie
+# "verification" par exemple) donne l'impression trompeuse d'une réussite. Seul le kind
+# "primary" (information neutre) garde l'emoji de catégorie ; les autres états ont leur
+# propre icône universelle, reconnaissable quelle que soit la commande.
+KIND_EMOJI = {
+    "success": "✅",
+    "warning": "⚠️",
+    "danger": "❌",
+}
+
+
+def kind_title(title: str, *, kind: str, category_emoji: str) -> str:
+    """Préfixe `title` avec l'icône correspondant à `kind` (✅/⚠️/❌), ou l'emoji de la
+    catégorie si `kind` est "primary" (information neutre, pas de succès/échec à signaler)."""
+    emoji = KIND_EMOJI.get(kind, category_emoji)
+    return f"{emoji} {title}"
+
 
 # =============================================================================
 # 2. Nombres, dates, barres de progression

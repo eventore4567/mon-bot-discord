@@ -35,7 +35,7 @@ class Verification(commands.Cog, name="Verification"):
         default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
         design = await self.bot.db.get_design_settings(guild_id)
         return design_system.create_embed(
-            title=f"{style['emoji']} {title}",
+            title=design_system.kind_title(title, kind=kind, category_emoji=style["emoji"]),
             description=description,
             colour=design.get(colour_key, default_colour),
             footer=design.get("footer"),
@@ -161,7 +161,14 @@ class Verification(commands.Cog, name="Verification"):
     @app_commands.describe(membre="Le membre visé", role="Le rôle à donner")
     @checks.has_permission_or_modrole("manage_roles")
     async def giverole(self, ctx: commands.Context, membre: discord.Member, role: discord.Role):
-        error = checks.check_hierarchy(ctx.author, membre) if isinstance(ctx.author, discord.Member) else None
+        # check_hierarchy bloque toute action "sur soi-même" — pertinent pour une sanction
+        # (on ne se bannit pas soi-même), mais pas pour un rôle : un membre autorisé à gérer
+        # les rôles doit pouvoir se donner un rôle à lui-même (rôle couleur, self-service...).
+        # On ne saute le contrôle QUE quand la cible est l'auteur ; toute autre cible reste
+        # protégée par la hiérarchie normale.
+        error = None
+        if membre.id != ctx.author.id and isinstance(ctx.author, discord.Member):
+            error = checks.check_hierarchy(ctx.author, membre)
         if error and ctx.author.id != ctx.guild.owner_id:
             return await ctx.send(embed=await self._embed(ctx.guild.id, title="Action refusée", description=error, kind="danger"))
         try:
