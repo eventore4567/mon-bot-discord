@@ -11,7 +11,7 @@ Commandes :
 /ask <question>                   — question ponctuelle (sans les boutons)
 +chat-reset                       — réinitialise l'historique legacy
 /summarize, +explain, +image-prompt, +rewrite, +fact-check — outils spécialisés existants
-+improve, +correct, +translate <langue>, +code — nouveaux outils spécialisés
++improve, +correct, +ai-translate <langue>, +code — nouveaux outils spécialisés
 +aisetup (admin)                  — configuration de l'IA pour ce serveur
 +aidiag (admin)                   — diagnostic technique de la connexion à l'IA (sans la clé)
 
@@ -580,7 +580,7 @@ class Ai(commands.Cog, name="Ai"):
 
     async def _prepare_and_generate(self, *, guild_id, channel_id, user_id, author_name,
                                      question, forced_advanced: bool = False, suffix: str = "") -> dict:
-        """Pipeline complet partagé par +ai, +chat, +improve, +correct, +translate, +code et
+        """Pipeline complet partagé par +ai, +chat, +improve, +correct, +ai-translate, +code et
         les boutons de régénération : réglages serveur, modération, cooldown/limites, mémoire,
         sélection du modèle, appel réel, puis mise à jour mémoire + compteurs d'usage.
         Retourne {"ok": bool, "text": str, "model_key": str} ou {"ok": False, "error": str}."""
@@ -772,7 +772,7 @@ class Ai(commands.Cog, name="Ai"):
             "**+chat <message>** — discuter avec mémoire de conversation\n"
             "**+improve <texte>** — améliorer un texte\n"
             "**+correct <texte>** — corriger l'orthographe et la grammaire\n"
-            "**+translate <langue> <texte>** — traduire un texte\n"
+            "**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n"
             "**+code <demande>** — générer du code\n"
             "**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n"
             "**+aisetup** *(admin)* — configurer l'IA sur ce serveur"
@@ -794,7 +794,12 @@ class Ai(commands.Cog, name="Ai"):
     async def correct_command(self, ctx: commands.Context, *, texte: str):
         await self._handle_ai_command(ctx, f"Corrige l'orthographe et la grammaire de ce texte, retourne directement la version corrigée sans rien ajouter d'autre :\n\n{texte}")
 
-    @commands.hybrid_command(name="translate", description="Demander à l'IA de traduire un texte.", with_app_command=False)
+    # NOTE : le nom "translate" est déjà pris par une commande existante dans cogs/utility.py
+    # (traduction via deep-translator, présente AVANT cette refonte — jamais supprimée, voir
+    # règle "ne jamais supprimer une commande existante"). Utiliser le même nom ici ferait
+    # planter le chargement de tout ce module au démarrage (CommandRegistrationError) : c'est
+    # exactement ce qui s'est produit en production, d'où le renommage en "ai-translate".
+    @commands.hybrid_command(name="ai-translate", description="Demander à l'IA de traduire un texte.", with_app_command=False)
     @app_commands.describe(langue="La langue cible (ex: anglais, espagnol...)", texte="Le texte à traduire")
     async def translate_command(self, ctx: commands.Context, langue: str, *, texte: str):
         await self._handle_ai_command(ctx, f"Traduis ce texte en {langue}, retourne uniquement la traduction, sans rien ajouter d'autre :\n\n{texte}")
