@@ -162,3 +162,44 @@ def check_bot_hierarchy(guild: discord.Guild, target: discord.Member) -> str | N
     if target.top_role >= me.top_role:
         return "Mon rôle est trop bas dans la hiérarchie pour sanctionner ce membre."
     return None
+
+
+async def can_use_embed_builder(ctx: commands.Context) -> bool:
+    """Utilisée à la fois comme check de commande ET dans les vérifications d'interaction
+    du créateur d'embeds (+embed) : Gérer les messages, Gérer le serveur, gestionnaire du
+    bot avec la catégorie "embeds" (ou gestion complète), ou un rôle explicitement autorisé
+    via +embedconfig. Le propriétaire du bot passe toujours."""
+    from config import OWNER_IDS
+
+    if ctx.author.id in OWNER_IDS:
+        return True
+    if not isinstance(ctx.author, discord.Member):
+        return False
+    perms = ctx.author.guild_permissions
+    if perms.manage_messages or perms.manage_guild:
+        return True
+    db = ctx.bot.db
+    if await db.is_bot_manager(ctx.guild.id, ctx.author.id):
+        if await db.has_manager_permission(ctx.guild.id, ctx.author.id, "embeds"):
+            return True
+    rows = await db.fetchall("SELECT role_id FROM embed_allowed_roles WHERE guild_id = ?", (ctx.guild.id,))
+    allowed_role_ids = {r["role_id"] for r in rows}
+    if allowed_role_ids and any(r.id in allowed_role_ids for r in ctx.author.roles):
+        return True
+    return False
+
+
+def has_embed_permission():
+    """Check de commande pour +embed et son groupe de sous-commandes — voir
+    can_use_embed_builder() pour le détail des règles."""
+
+    async def predicate(ctx: commands.Context) -> bool:
+        if await can_use_embed_builder(ctx):
+            return True
+        raise BotPermissionError(
+            "Il vous faut la permission **Gérer les messages**, **Gérer le serveur**, être "
+            "gestionnaire du bot (catégorie « Créateur d'embeds ») ou avoir un rôle autorisé "
+            "via `+embedconfig` pour utiliser cette commande."
+        )
+
+    return commands.check(predicate)

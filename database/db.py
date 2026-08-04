@@ -638,6 +638,40 @@ CREATE TABLE IF NOT EXISTS voice_sessions (
     joined_at INTEGER,
     PRIMARY KEY (guild_id, user_id)
 );
+
+-- Modèles d'embeds sauvegardés par +embed. Un modèle = tout ce qu'il faut pour reconstruire
+-- le message (texte au-dessus, embed complet, champs, boutons-liens), séparé par guild_id :
+-- deux serveurs peuvent avoir un modèle du même nom sans jamais se mélanger.
+CREATE TABLE IF NOT EXISTS embed_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    content TEXT,
+    title TEXT,
+    description TEXT,
+    colour INTEGER,
+    author_name TEXT,
+    author_icon_url TEXT,
+    thumbnail_url TEXT,
+    image_url TEXT,
+    footer_text TEXT,
+    footer_icon_url TEXT,
+    timestamp_enabled INTEGER DEFAULT 0,
+    fields_json TEXT DEFAULT '[]',
+    buttons_json TEXT DEFAULT '[]',
+    created_by INTEGER,
+    created_at INTEGER,
+    updated_at INTEGER,
+    UNIQUE (guild_id, name)
+);
+
+-- Rôles supplémentaires (en plus de Gérer les messages / Gérer le serveur / gestionnaires
+-- du bot) autorisés à utiliser +embed sur ce serveur — configurable via +embedconfig.
+CREATE TABLE IF NOT EXISTS embed_allowed_roles (
+    guild_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, role_id)
+);
 """
 
 # Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de
@@ -677,6 +711,8 @@ CREATE INDEX IF NOT EXISTS idx_bot_manager_permissions_guild_user ON bot_manager
 CREATE INDEX IF NOT EXISTS idx_voice_sessions_guild ON voice_sessions (guild_id);
 CREATE INDEX IF NOT EXISTS idx_economy_transactions_guild ON economy_transactions (guild_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_reputation_history_guild ON reputation_history (guild_id, receiver_id);
+CREATE INDEX IF NOT EXISTS idx_embed_templates_guild ON embed_templates (guild_id);
+CREATE INDEX IF NOT EXISTS idx_embed_allowed_roles_guild ON embed_allowed_roles (guild_id);
 """
 
 # Valeurs par défaut du panneau +statsconfig — fusionnées avec ce qui est enregistré en
@@ -744,6 +780,7 @@ MANAGER_CATEGORIES = {
     "moderation": "🛡️ Modération",
     "securite": "🔐 Sécurité / AutoMod",
     "economie": "💰 Économie",
+    "embeds": "📨 Créateur d'embeds",
     "complete": "🔑 Gestion complète",
 }
 

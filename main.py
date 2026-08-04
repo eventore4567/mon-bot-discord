@@ -44,6 +44,7 @@ EXTENSIONS = [
     "cogs.owner",
     "cogs.invites",
     "cogs.design",
+    "cogs.embed_builder",
 ]
 
 INTENTS = discord.Intents.default()
