@@ -43,6 +43,7 @@ EXTENSIONS = [
     "cogs.stats",
     "cogs.owner",
     "cogs.invites",
+    "cogs.design",
 ]
 
 INTENTS = discord.Intents.default()
