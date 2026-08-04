@@ -7,14 +7,6 @@ Ces commandes complètent AutoMod (cogs/automod.py, protection automatique) avec
 outils MANUELS pour réagir à un incident (raid, compromission de compte, erreur de
 permissions) : isoler un membre suspect, sauvegarder/restaurer des rôles, auditer les
 permissions dangereuses du serveur, et sauvegarder/restaurer la structure du serveur.
-
-Refonte visuelle (Phase 3, design premium/sombre) : /permission-audit affiche maintenant
-un "score de sécurité" sur 100 en plus de la liste des points relevés. Ce score est un
-calcul 100% déterministe et transparent à partir des MÊMES points déjà détectés par
-l'audit (rien n'est ajouté ni deviné) : chaque point 🔴 Critique retire 30 points, chaque
-point 🟠 À surveiller retire 15, chaque point 🟡 Information retire 5, plancher à 0. Voir
-_compute_security_score() pour le détail — la règle de calcul est documentée pour rester
-vérifiable, pas une "boîte noire".
 """
 
 import json
@@ -24,10 +16,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from utils import embeds, checks, helpers, design_system
+from utils import embeds, checks, helpers
 from database.db import now
-
-SCORE_DEDUCTIONS = {"🔴 Critique": 30, "🟠 À surveiller": 15, "🟡 Information": 5}
 
 # Permissions considérées "dangereuses" si accordées à @everyone ou à un rôle très
 # largement distribué : c'est ce que /permission-audit vérifie en priorité.
@@ -316,37 +306,15 @@ class Security(commands.Cog):
         if not conf or not conf["mod_role"]:
             findings.append(("🟡 Information", "Aucun rôle staff n'est configuré (`/setmodrole`) — certaines commandes de modération se basent uniquement sur les permissions Discord natives."))
 
-        score = self._compute_security_score(findings)
-        style = design_system.CATEGORY_STYLES["security"]
-        if score >= 80:
-            score_colour, score_label = design_system.COLORS.success, "🟢 Bon niveau de sécurité"
-        elif score >= 50:
-            score_colour, score_label = design_system.COLORS.warning, "🟠 Des points à corriger"
-        else:
-            score_colour, score_label = design_system.COLORS.danger, "🔴 Sécurité fragile — à corriger rapidement"
-
-        e = design_system.create_embed(
-            title=f"{style['emoji']} Tableau de bord sécurité",
-            description=f"**{score} / 100** — {score_label}",
-            colour=score_colour,
-            footer=f"SentriX • {len(findings)} point(s) relevé(s) sur {len(guild.roles)} rôles",
-        )
+        e = embeds.neutral("🔍 Audit des permissions" if not findings else "🔍 Audit des permissions — points relevés")
         if not findings:
-            e.add_field(name="✅ Résultat", value="Aucun problème de permission évident détecté. Bon travail !", inline=False)
+            e.description = "✅ Aucun problème de permission évident détecté. Bon travail !"
+            e.color = 0x57F287
         else:
             for label, text in findings:
                 e.add_field(name=label, value=helpers.truncate(text, 1024), inline=False)
+        e.set_footer(text=f"SentriX • {len(findings)} point(s) relevé(s) sur {len(guild.roles)} rôles")
         await ctx.send(embed=e)
-
-    @staticmethod
-    def _compute_security_score(findings: list[tuple[str, str]]) -> int:
-        """Score déterministe à partir des points RÉELLEMENT détectés par l'audit ci-dessus
-        (aucune valeur inventée) : 100 au départ, déductions par sévérité, plancher à 0.
-        Voir SCORE_DEDUCTIONS en tête de fichier pour le barème exact."""
-        score = 100
-        for label, _ in findings:
-            score -= SCORE_DEDUCTIONS.get(label, 5)
-        return max(0, score)
 
     # ---------------------------------------------------------------- BACKUP / RESTORE SERVEUR
 

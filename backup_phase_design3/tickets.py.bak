@@ -30,7 +30,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from utils import embeds, checks, helpers, design_system
+from utils import embeds, checks, helpers
 from database.db import now
 
 TEXT_STYLES = {"court": discord.TextStyle.short, "long": discord.TextStyle.paragraph}
@@ -901,20 +901,7 @@ class Tickets(commands.Cog):
                     "INSERT INTO ticket_answers (ticket_id, question_label, answer) VALUES (?, ?, ?)", (ticket_id, label, value[:1000])
                 )
 
-        # Fiche d'ouverture de ticket (Phase 3, design premium/sombre) — n'affecte QUE ce
-        # message d'accueil, jamais TicketControlView ni les custom_id des boutons
-        # persistants (ceux-ci restent inchangés pour ne rien casser après un redémarrage).
-        style = design_system.CATEGORY_STYLES["tickets"]
-        e = design_system.create_embed(
-            title=f"{ticket_type['emoji'] or style['emoji']} {ticket_type['name']} — Ticket #{number}",
-            description=ticket_type["open_message"] or f"Bonjour {user.mention}, le staff vous répondra bientôt.",
-            colour=style["colour"],
-            user=user,
-            thumbnail=user.display_avatar.url,
-            footer="SentriX",
-        )
-        e.add_field(name="👤 Ouvert par", value=user.mention, inline=True)
-        e.add_field(name="📂 Type", value=ticket_type["name"], inline=True)
+        e = embeds.brand(f"{ticket_type['emoji'] or '🎫'} {ticket_type['name']}", ticket_type["open_message"] or f"Bonjour {user.mention}, le staff vous répondra bientôt.")
         for label, value in answers:
             if value:
                 e.add_field(name=label[:256], value=helpers.truncate(value, 1024), inline=False)

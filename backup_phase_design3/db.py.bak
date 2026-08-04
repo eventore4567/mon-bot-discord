@@ -71,23 +71,6 @@ CREATE TABLE IF NOT EXISTS warnings (
     timestamp INTEGER
 );
 
--- Journal unifié de TOUTES les sanctions (ban/tempban/unban/kick/mute/unmute/warn) — chaque
--- ligne correspond à une action RÉELLEMENT exécutée par le bot, avec un numéro de dossier
--- (case_number) séquentiel PAR SERVEUR (jamais partagé entre serveurs, jamais deviné).
--- Sert de "fiche de sanction" (Phase 3 de la refonte visuelle) et d'historique complet
--- d'un membre, contrairement à la table `warnings` qui ne couvrait que les avertissements.
-CREATE TABLE IF NOT EXISTS sanctions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id INTEGER,
-    case_number INTEGER,
-    user_id INTEGER,
-    moderator_id INTEGER,
-    action TEXT,
-    reason TEXT,
-    duration_seconds INTEGER,
-    created_at INTEGER
-);
-
 CREATE TABLE IF NOT EXISTS tempactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER,
@@ -657,8 +640,6 @@ CREATE INDEX IF NOT EXISTS idx_reaction_roles_msg ON reaction_roles (guild_id, m
 CREATE INDEX IF NOT EXISTS idx_member_invites_inviter ON member_invites (guild_id, inviter_id);
 CREATE INDEX IF NOT EXISTS idx_member_invites_member ON member_invites (guild_id, member_id);
 CREATE INDEX IF NOT EXISTS idx_invite_bonuses_guild_user ON invite_bonuses (guild_id, user_id);
-CREATE INDEX IF NOT EXISTS idx_sanctions_guild_case ON sanctions (guild_id, case_number);
-CREATE INDEX IF NOT EXISTS idx_sanctions_guild_user ON sanctions (guild_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_levels_guild_rank ON levels (guild_id, level DESC, xp DESC);
 CREATE INDEX IF NOT EXISTS idx_economy_guild_total ON economy (guild_id, (cash + bank) DESC);
 CREATE INDEX IF NOT EXISTS idx_blacklist_words_guild ON blacklist_words (guild_id);
@@ -830,10 +811,6 @@ class Database:
         # écriture) qui contournerait sinon la vérification — c'est ce qui garantit
         # "empêcher les doubles récompenses" et l'absence de double dépense sur /pay.
         self._economy_lock = asyncio.Lock()
-        # Protège l'attribution du numéro de dossier (case_number) : deux sanctions prises
-        # au même moment sur le même serveur (deux modérateurs qui agissent en même temps)
-        # ne doivent jamais recevoir le même numéro.
-        self._sanctions_lock = asyncio.Lock()
 
     async def connect(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
@@ -1245,40 +1222,6 @@ class Database:
             "SELECT * FROM member_invites WHERE guild_id = ? AND member_id = ? ORDER BY joined_at DESC LIMIT 1",
             (guild_id, member_id),
         )
-
-    # ---------- Modération : journal unifié des sanctions (fiches, Phase 3) ----------
-
-    async def record_sanction(
-        self, guild_id: int, user_id: int, moderator_id: int, action: str, reason: str, duration_seconds: int | None = None
-    ) -> int:
-        """Enregistre une sanction RÉELLEMENT exécutée par le bot et lui attribue un
-        numéro de dossier séquentiel PROPRE À CE SERVEUR (jamais partagé entre serveurs).
-        Protégé par un verrou pour qu'un double-clic ou deux modérateurs simultanés ne
-        puissent jamais recevoir le même numéro. Retourne le numéro de dossier attribué."""
-        async with self._sanctions_lock:
-            row = await self.fetchone("SELECT COALESCE(MAX(case_number), 0) as m FROM sanctions WHERE guild_id = ?", (guild_id,))
-            case_number = (row["m"] if row else 0) + 1
-            await self.execute(
-                "INSERT INTO sanctions (guild_id, case_number, user_id, moderator_id, action, reason, duration_seconds, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (guild_id, case_number, user_id, moderator_id, action, reason, duration_seconds, now()),
-            )
-            return case_number
-
-    async def get_sanction_by_case(self, guild_id: int, case_number: int):
-        return await self.fetchone(
-            "SELECT * FROM sanctions WHERE guild_id = ? AND case_number = ?", (guild_id, case_number)
-        )
-
-    async def get_sanction_history(self, guild_id: int, user_id: int, limit: int = 10):
-        return await self.fetchall(
-            "SELECT * FROM sanctions WHERE guild_id = ? AND user_id = ? ORDER BY case_number DESC LIMIT ?",
-            (guild_id, user_id, limit),
-        )
-
-    async def get_sanction_count(self, guild_id: int, user_id: int) -> int:
-        row = await self.fetchone("SELECT COUNT(*) as c FROM sanctions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
-        return row["c"] if row else 0
 
     # ---------- Économie ----------
 

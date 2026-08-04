@@ -2,18 +2,9 @@
 Cog MODÉRATION.
 /ban /tempban /unban /kick /mute /unmute /warn /unwarn /warnings /clearwarnings
 /clear /slowmode /lock /unlock /hide /show /nickname /resetnick /move /disconnect
-/case /modhistory
 
 Toutes les commandes existent en slash ET en commande préfixée (+), vérifient les
 permissions, respectent la hiérarchie des rôles et journalisent dans le salon de logs.
-
-Refonte visuelle (Phase 3, design premium/sombre) : chaque sanction RÉELLEMENT exécutée
-(ban/tempban/unban/kick/mute/unmute/warn, y compris le ban automatique par seuil
-d'avertissements) reçoit maintenant un numéro de dossier séquentiel PAR SERVEUR (jamais
-partagé entre serveurs, jamais deviné — voir database/db.py::record_sanction()), affiché
-sur une "fiche de sanction" façon design_system. /case permet de retrouver une sanction
-précise par son numéro, /modhistory affiche l'historique complet d'un membre (tous types
-confondus, pas seulement les avertissements comme avec /warnings).
 """
 
 from datetime import timedelta
@@ -23,7 +14,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
-from utils import embeds, checks, helpers, design_system
+from utils import embeds, checks, helpers
 from database.db import now
 
 
@@ -46,16 +37,10 @@ class Moderation(commands.Cog):
             if row["action"] == "ban":
                 try:
                     await guild.unban(discord.Object(id=row["user_id"]), reason="Fin du bannissement temporaire")
-                    case_number = await self.bot.db.record_sanction(
-                        guild.id, row["user_id"], self.bot.user.id, "unban", "Fin du bannissement temporaire (automatique)"
+                    e = embeds.log_entry(
+                        "⏰ Fin de sanction temporaire", config.COLOR_INFO,
+                        extra={"👤 Utilisateur": f"<@{row['user_id']}>\n`ID: {row['user_id']}`", "📄 Détail": "Débanni automatiquement (fin du tempban)"},
                     )
-                    e = design_system.create_embed(
-                        title=f"⏰ Dossier #{case_number} — Fin de sanction temporaire",
-                        colour=config.COLOR_INFO,
-                        footer="SentriX",
-                    )
-                    e.add_field(name="👤 Utilisateur", value=f"<@{row['user_id']}>\n`ID: {row['user_id']}`", inline=False)
-                    e.add_field(name="📄 Détail", value="Débanni automatiquement (fin du tempban)", inline=False)
                     await self.log_action(guild, e)
                 except discord.HTTPException:
                     pass
@@ -70,49 +55,23 @@ class Moderation(commands.Cog):
         # retombe sur le salon de logs général — jamais de log perdu.
         await helpers.send_log(self.bot, guild, "moderation", embed)
 
-    # "kind" détermine seulement la couleur de la fiche (succès/avertissement/danger) —
-    # l'action elle-même (ce qui a réellement été fait) reste toujours le texte exact.
-    SANCTION_KIND = {
-        "ban": "danger", "tempban": "danger", "kick": "danger", "mute": "warning",
-        "warn": "warning", "unban": "success", "unmute": "success",
-    }
-    SANCTION_LABELS = {
-        "ban": "🔨 Bannissement", "tempban": "🔨 Bannissement temporaire", "kick": "👢 Expulsion",
-        "mute": "🔇 Mute (timeout)", "warn": "⚠️ Avertissement", "unban": "🔓 Débannissement",
-        "unmute": "🔊 Unmute",
+    SANCTION_COLORS = {
+        "Bannissement": None, "Bannissement temporaire": None, "Expulsion": None,
+        "Mute (timeout)": None, "Débannissement": "success", "Unmute": "success", "Avertissement": "warning",
     }
 
-    async def log_sanction(
-        self, ctx: commands.Context, action: str, target: discord.abc.User, reason: str,
-        duration_seconds: int | None = None, extra_fields: dict | None = None,
-    ) -> discord.Embed:
-        """Point de passage UNIQUE pour toute sanction réelle : enregistre le dossier en
-        base (numéro de dossier séquentiel réel), construit la fiche visuelle, l'envoie
-        dans le salon de logs, et retourne l'embed pour l'affichage dans le salon courant."""
-        case_number = await self.bot.db.record_sanction(
-            ctx.guild.id, target.id, ctx.author.id, action, reason, duration_seconds
+    def sanction_embed(self, action: str, target: discord.abc.User, moderator: discord.abc.User, reason: str, extra: str = "") -> discord.Embed:
+        kind = self.SANCTION_COLORS.get(action)
+        color = config.COLOR_SUCCESS if kind == "success" else config.COLOR_WARNING if kind == "warning" else config.COLOR_ERROR
+        return embeds.log_entry(
+            f"🔨 Sanction : {action}",
+            color,
+            cible=target,
+            cible_label="👤 Membre",
+            acteur=moderator,
+            raison=reason,
+            extra={"📌 Détails": extra} if extra else None,
         )
-        kind = self.SANCTION_KIND.get(action, "danger")
-        colour = {"success": config.COLOR_SUCCESS, "warning": config.COLOR_WARNING, "danger": config.COLOR_ERROR}[kind]
-        label = self.SANCTION_LABELS.get(action, action)
-        style = design_system.CATEGORY_STYLES["moderation"]
-        e = design_system.create_embed(
-            title=f"{style['emoji']} Dossier #{case_number} — {label}",
-            colour=colour,
-            thumbnail=target.display_avatar.url if hasattr(target, "display_avatar") else None,
-            footer="SentriX",
-        )
-        e.add_field(name="👤 Membre", value=f"{getattr(target, 'mention', target)}\n`ID: {target.id}`", inline=True)
-        e.add_field(name="🛡️ Modérateur", value=f"{ctx.author.mention}\n`ID: {ctx.author.id}`", inline=True)
-        total = await self.bot.db.get_sanction_count(ctx.guild.id, target.id)
-        e.add_field(name="📁 Historique", value=f"{total} sanction(s) au total pour ce membre", inline=True)
-        if duration_seconds:
-            e.add_field(name="⏱️ Durée", value=helpers.format_duration(duration_seconds), inline=True)
-        e.add_field(name="📝 Raison", value=reason or "Aucune raison fournie", inline=False)
-        for name, value in (extra_fields or {}).items():
-            e.add_field(name=name, value=value, inline=False)
-        await self.log_action(ctx.guild, e)
-        return e
 
     async def check_targetable(self, ctx: commands.Context, membre: discord.Member) -> bool:
         err = checks.check_hierarchy(ctx.author, membre)
@@ -138,8 +97,9 @@ class Moderation(commands.Cog):
         except discord.Forbidden:
             pass
         await ctx.guild.ban(membre, reason=f"{ctx.author} : {raison}", delete_message_seconds=0)
-        e = await self.log_sanction(ctx, "ban", membre, raison)
+        e = self.sanction_embed("Bannissement", membre, ctx.author, raison)
         await ctx.send(embed=e)
+        await self.log_action(ctx.guild, e)
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
     @app_commands.describe(membre="Le membre à bannir", duree="Durée (ex: 30m, 2h, 1j)", raison="La raison")
@@ -159,8 +119,9 @@ class Moderation(commands.Cog):
             "INSERT INTO tempactions (guild_id, user_id, action, expires_at) VALUES (?, ?, 'ban', ?)",
             (ctx.guild.id, membre.id, now() + seconds),
         )
-        e = await self.log_sanction(ctx, "tempban", membre, raison, duration_seconds=seconds)
+        e = self.sanction_embed("Bannissement temporaire", membre, ctx.author, raison, f"Durée : {helpers.format_duration(seconds)}")
         await ctx.send(embed=e)
+        await self.log_action(ctx.guild, e)
 
     @commands.hybrid_command(name="unban", description="Débannir un utilisateur via son identifiant Discord.")
     @app_commands.describe(user_id="L'identifiant Discord de l'utilisateur", raison="La raison")
@@ -175,8 +136,9 @@ class Moderation(commands.Cog):
             await ctx.guild.unban(user, reason=f"{ctx.author} : {raison}")
         except discord.NotFound:
             return await ctx.send(embed=embeds.error("Cet utilisateur n'est pas banni ou n'existe pas."))
-        e = await self.log_sanction(ctx, "unban", user, raison)
+        e = self.sanction_embed("Débannissement", user, ctx.author, raison)
         await ctx.send(embed=e)
+        await self.log_action(ctx.guild, e)
 
     # ---------------------------------------------------------------- KICK
 
@@ -191,8 +153,9 @@ class Moderation(commands.Cog):
         except discord.Forbidden:
             pass
         await ctx.guild.kick(membre, reason=f"{ctx.author} : {raison}")
-        e = await self.log_sanction(ctx, "kick", membre, raison)
+        e = self.sanction_embed("Expulsion", membre, ctx.author, raison)
         await ctx.send(embed=e)
+        await self.log_action(ctx.guild, e)
 
     # ---------------------------------------------------------------- MUTE
 
@@ -215,16 +178,18 @@ class Moderation(commands.Cog):
             return await ctx.send(embed=embeds.error("Durée invalide (maximum 28 jours). Exemple : `10m`, `1h`, `1j`."))
         until = discord.utils.utcnow() + timedelta(seconds=seconds)
         await membre.timeout(until, reason=f"{ctx.author} : {raison}")
-        e = await self.log_sanction(ctx, "mute", membre, raison, duration_seconds=seconds)
+        e = self.sanction_embed("Mute (timeout)", membre, ctx.author, raison, f"Durée : {helpers.format_duration(seconds)}")
         await ctx.send(embed=e)
+        await self.log_action(ctx.guild, e)
 
     @commands.hybrid_command(name="unmute", description="Retirer le mute (timeout) d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à démuter", raison="La raison")
     @checks.has_permission_or_modrole("moderate_members")
     async def unmute(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
         await membre.timeout(None, reason=f"{ctx.author} : {raison}")
-        e = await self.log_sanction(ctx, "unmute", membre, raison)
+        e = self.sanction_embed("Unmute", membre, ctx.author, raison)
         await ctx.send(embed=e)
+        await self.log_action(ctx.guild, e)
 
     # ---------------------------------------------------------------- WARN
 
@@ -260,9 +225,9 @@ class Moderation(commands.Cog):
             await membre.send(embed=embeds.warning(f"Vous avez reçu un **avertissement** sur **{ctx.guild.name}**.\nRaison : {raison}"))
         except discord.Forbidden:
             pass
-        extra = {"📌 Détails": f"Total d'avertissements : {total}{role_note}"}
-        e = await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra)
+        e = self.sanction_embed("Avertissement", membre, ctx.author, raison, f"Total d'avertissements : {total}{role_note}")
         await ctx.send(embed=e)
+        await self.log_action(ctx.guild, e)
 
         # Bannissement automatique au bout de N avertissements (/setwarnbanthreshold,
         # 3 par défaut, 0 = désactivé). Pas de confirmation demandée : c'est le but de
@@ -290,21 +255,11 @@ class Moderation(commands.Cog):
             except discord.HTTPException:
                 await ctx.send(embed=embeds.error(f"Le bannissement automatique de {membre.mention} a échoué (permissions)."))
                 return
-            case_number = await self.bot.db.record_sanction(
-                ctx.guild.id, membre.id, self.bot.user.id, "ban",
-                f"Seuil de {threshold} avertissements atteint",
+            ban_e = self.sanction_embed(
+                "Bannissement", membre, self.bot.user, f"Seuil de {threshold} avertissements atteint",
+                f"Bannissement automatique — total d'avertissements : {total}",
             )
-            style = design_system.CATEGORY_STYLES["moderation"]
-            ban_e = design_system.create_embed(
-                title=f"{style['emoji']} Dossier #{case_number} — 🚨 Bannissement automatique (seuil d'avertissements)",
-                colour=config.COLOR_ERROR,
-                thumbnail=membre.display_avatar.url,
-                footer="SentriX",
-            )
-            ban_e.add_field(name="👤 Membre", value=f"{membre.mention}\n`ID: {membre.id}`", inline=True)
-            ban_e.add_field(name="🛡️ Modérateur", value=f"{self.bot.user.mention} (automatique)", inline=True)
-            ban_e.add_field(name="📝 Raison", value=f"Seuil de {threshold} avertissements atteint", inline=False)
-            ban_e.add_field(name="📌 Détails", value=f"Bannissement automatique — total d'avertissements : {total}", inline=False)
+            ban_e.title = "🚨 Bannissement automatique (seuil d'avertissements)"
             await ctx.send(embed=ban_e)
             await self.log_action(ctx.guild, ban_e)
 
@@ -348,54 +303,6 @@ class Moderation(commands.Cog):
             "DELETE FROM warnings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
         await ctx.send(embed=embeds.success(f"Tous les avertissements de {membre.mention} ont été supprimés."))
-
-    # ---------------------------------------------------------------- DOSSIERS DE SANCTION
-
-    @commands.hybrid_command(name="case", description="Retrouver une sanction précise via son numéro de dossier.", with_app_command=False)
-    @app_commands.describe(numero="Le numéro de dossier (voir la fiche envoyée lors de la sanction)")
-    @checks.has_permission_or_modrole("moderate_members")
-    async def case(self, ctx: commands.Context, numero: int):
-        row = await self.bot.db.get_sanction_by_case(ctx.guild.id, numero)
-        if not row:
-            return await ctx.send(embed=embeds.error(f"Aucun dossier `#{numero}` trouvé sur ce serveur."))
-        label = self.SANCTION_LABELS.get(row["action"], row["action"])
-        kind = self.SANCTION_KIND.get(row["action"], "danger")
-        colour = {"success": config.COLOR_SUCCESS, "warning": config.COLOR_WARNING, "danger": config.COLOR_ERROR}[kind]
-        style = design_system.CATEGORY_STYLES["moderation"]
-        e = design_system.create_embed(title=f"{style['emoji']} Dossier #{row['case_number']} — {label}", colour=colour, footer="SentriX")
-        e.add_field(name="👤 Membre", value=f"<@{row['user_id']}>\n`ID: {row['user_id']}`", inline=True)
-        e.add_field(name="🛡️ Modérateur", value=f"<@{row['moderator_id']}>\n`ID: {row['moderator_id']}`", inline=True)
-        e.add_field(name="📅 Date", value=f"<t:{row['created_at']}:F>", inline=True)
-        if row["duration_seconds"]:
-            e.add_field(name="⏱️ Durée", value=helpers.format_duration(row["duration_seconds"]), inline=True)
-        e.add_field(name="📝 Raison", value=row["reason"] or "Aucune raison fournie", inline=False)
-        await ctx.send(embed=e)
-
-    @commands.hybrid_command(name="modhistory", description="Afficher l'historique complet des sanctions d'un membre (tous types confondus).", with_app_command=False)
-    @app_commands.describe(membre="Le membre à consulter")
-    @checks.has_permission_or_modrole("moderate_members")
-    async def modhistory(self, ctx: commands.Context, membre: discord.Member):
-        rows = await self.bot.db.get_sanction_history(ctx.guild.id, membre.id, limit=15)
-        total = await self.bot.db.get_sanction_count(ctx.guild.id, membre.id)
-        if not rows:
-            return await ctx.send(embed=embeds.info(f"{membre.mention} n'a aucune sanction enregistrée sur ce serveur."))
-        style = design_system.CATEGORY_STYLES["moderation"]
-        e = design_system.create_embed(
-            title=f"{style['emoji']} Historique de sanctions — {membre.display_name}",
-            description=f"**{total}** dossier(s) au total"
-                        + (f" (les {len(rows)} plus récents affichés ci-dessous)" if total > len(rows) else ""),
-            colour=style["colour"],
-            thumbnail=membre.display_avatar.url,
-            footer="SentriX",
-        )
-        for row in rows:
-            label = self.SANCTION_LABELS.get(row["action"], row["action"])
-            e.add_field(
-                name=f"Dossier #{row['case_number']} — {label} — <t:{row['created_at']}:R>",
-                value=f"Par <@{row['moderator_id']}> — {row['reason'] or 'Aucune raison fournie'}",
-                inline=False,
-            )
-        await ctx.send(embed=e)
 
     # ---------------------------------------------------------------- SALON
 
