@@ -21,6 +21,21 @@ from utils import embeds, design_system
 logger = logging.getLogger("bot.ai")
 
 
+# Personnalité de l'IA du bot — ton sarcastique et cinglant façon GLaDOS (demandé par Jayden,
+# exemple concret fourni en capture d'écran) : piques, ironie, un peu condescendant, mais la
+# vraie réponse doit toujours être présente sous le sarcasme — jamais du sarcasme creux sans
+# contenu utile.
+SYSTEM_PROMPT_PERSONALITY = (
+    "Tu es SentriX, l'IA de ce serveur Discord. Ton style est sarcastique et cinglant, un peu "
+    "condescendant, façon GLaDOS : des piques, de l'ironie, des réponses parfois moqueuses — "
+    "mais tu restes malgré tout utile, la vraie réponse à la question doit toujours être "
+    "présente sous le sarcasme. Réponds en français, en une ou deux phrases courtes, texte "
+    "brut uniquement (jamais de liste, jamais de formatage). Pas de \"Bonjour\", pas de "
+    "politesse, pas de blabla, pas de tournures robotiques du genre « Je suis ravi de vous "
+    "aider » ou « N'hésitez pas à me demander »."
+)
+
+
 def _ai_error_detail(answer: str) -> str:
     """Extrait et tronque le détail technique d'une erreur IA (préfixe __ERROR__), pour
     l'afficher au staff au lieu d'un message générique sans information. BUG CORRIGÉ : avant,
@@ -54,11 +69,14 @@ class Ai(commands.Cog, name="Ai"):
         from openai import AsyncOpenAI
         return AsyncOpenAI(api_key=config.OPENAI_API_KEY)
 
-    async def ask_ai(self, prompt: str, history: list = None) -> str:
+    async def ask_ai(self, prompt: str, history: list = None, author_name: str = None) -> str:
         client = self.client()
         if not client:
             return "__NO_KEY__"
-        messages = [{"role": "system", "content": "Tu es un assistant utile, réponds toujours en français, de façon concise."}]
+        system_content = SYSTEM_PROMPT_PERSONALITY
+        if author_name:
+            system_content += f" La personne qui te parle s'appelle « {author_name} » — commence TOUJOURS ta réponse par ce nom suivi d'une virgule (ex: « {author_name}, ... »)."
+        messages = [{"role": "system", "content": system_content}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": prompt})
@@ -77,8 +95,7 @@ class Ai(commands.Cog, name="Ai"):
         messages = [{
             "role": "system",
             "content": (
-                "Tu es SentriX, l'assistant IA de ce serveur Discord. Réponds toujours en français, "
-                "de façon claire et concise, à n'importe quelle question. "
+                SYSTEM_PROMPT_PERSONALITY + " "
                 "Termine TOUJOURS ta réponse par une dernière ligne exactement au format "
                 "'CONFIANCE: X/10' (X = ton indice de confiance dans l'exactitude de ta réponse, entre 1 et 10)."
             ),
@@ -101,12 +118,14 @@ class Ai(commands.Cog, name="Ai"):
         return content, confidence
 
     async def send_sentrix_reply(self, destination, author, question: str):
-        """Construit et envoie la réponse "SentriX AI" (embed + jauge de confiance).
-        Partagé entre la commande /sentrix et le déclenchement par simple message
-        (mention du bot ou message commençant par "sentrix")."""
+        """Envoie la réponse de SentriX en texte brut, sans embed ni indice de confiance
+        (demandé par Jayden, exemple concret fourni : réponse sarcastique nue, comme un
+        message de chat normal). Partagé entre la commande /sentrix et le déclenchement par
+        simple message (mention du bot ou message commençant par "sentrix")."""
         guild_id = getattr(getattr(destination, "guild", None), "id", None)
         history = self.histories.get(author.id, [])
-        answer, confidence = await self.ask_ai_with_confidence(question, history)
+        author_name = getattr(author, "display_name", None) or str(author)
+        answer = await self.ask_ai(question, history, author_name=author_name)
         if answer == "__NO_KEY__":
             return await destination.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.", kind="danger"))
         if answer.startswith("__ERROR__"):
@@ -115,18 +134,14 @@ class Ai(commands.Cog, name="Ai"):
         history.append({"role": "assistant", "content": answer})
         self.histories[author.id] = history[-10:]
 
-        design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
-        e = await self._embed(guild_id, title="SentriX")
-        e.add_field(name="❓ Question", value=question[:1024], inline=False)
-        e.add_field(name="💬 Réponse", value=answer[:1000] or "…", inline=False)
-        bar = design_system.progress_bar(confidence, 10, length=design.get("progress_length", 10), filled=design.get("progress_filled", "🟪"), empty=design.get("progress_empty", "⬛"))
-        e.add_field(name="📡 Indice de confiance", value=f"{bar}  **{confidence}/10**", inline=False)
-        e.set_footer(text=f"SentriX AI • Demandé par {author}")
-        await destination.send(embed=e)
+        content = (answer or "…").strip()
+        if len(content) > 2000:
+            content = content[:1997] + "…"
+        await destination.send(content=content)
 
     @commands.hybrid_command(
         name="sentrix",
-        description="Demandez n'importe quoi à SentriX : l'IA du bot répond avec un indice de confiance.",
+        description="Demandez n'importe quoi à SentriX, l'IA du bot.",
     )
     @app_commands.describe(question="Votre question, sur n'importe quel sujet")
     async def sentrix(self, ctx: commands.Context, *, question: str):
