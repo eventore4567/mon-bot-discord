@@ -580,6 +580,18 @@ class AutoMod(commands.Cog, name="Automod"):
         if message.channel.id in ignored:
             return
 
+        # Correction : la liste noire de MOTS doit s'appliquer à TOUT LE MONDE, y compris
+        # le staff/les administrateurs — contrairement aux autres filtres (spam, liens...)
+        # qui exemptent volontairement le staff pour ne pas gêner la modération. Avant, ce
+        # test passait APRÈS is_automod_exempt() : un admin qui testait "+blacklist-add mot"
+        # puis tapait le mot lui-même voyait le message ne JAMAIS être supprimé, donnant
+        # l'impression trompeuse que le filtre ne marchait pas du tout.
+        content_lower = message.content.lower()
+        words = await self.get_blacklist_words_cached(message.guild.id)
+        for word in words:
+            if word in content_lower:
+                return await self._delete_and_warn(message, "Mot interdit détecté.", "blacklist_word")
+
         if await self.is_automod_exempt(message.author):
             return
 
@@ -595,13 +607,6 @@ class AutoMod(commands.Cog, name="Automod"):
             except discord.HTTPException:
                 pass
             return
-
-        content_lower = message.content.lower()
-
-        words = await self.get_blacklist_words_cached(message.guild.id)
-        for word in words:
-            if word in content_lower:
-                return await self._delete_and_warn(message, "Mot interdit détecté.", "blacklist_word")
 
         if conf["antiscam"] and any(k in content_lower for k in SCAM_KEYWORDS):
             return await self._delete_and_warn(message, "Message d'arnaque potentiel détecté.", "antiscam")

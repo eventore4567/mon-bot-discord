@@ -802,8 +802,8 @@ class Levels(commands.Cog, name="Levels"):
         bar_str, pct = stats_service.progress_bar(
             stats["current_level_xp"], stats["required_xp"],
             length=settings.get("bar_length", 10),
-            emoji_filled=settings.get("emoji_filled", "🟩"),
-            emoji_empty=settings.get("emoji_empty", "⬜"),
+            emoji_filled=settings.get("emoji_filled", "🟪"),
+            emoji_empty=settings.get("emoji_empty", "⬛"),
         )
         e.add_field(
             name="✨ Progression",
@@ -852,8 +852,8 @@ class Levels(commands.Cog, name="Levels"):
         bar_str, pct = stats_service.progress_bar(
             stats["current_level_xp"], stats["required_xp"],
             length=settings.get("bar_length", 10),
-            emoji_filled=settings.get("emoji_filled", "🟩"),
-            emoji_empty=settings.get("emoji_empty", "⬜"),
+            emoji_filled=settings.get("emoji_filled", "🟪"),
+            emoji_empty=settings.get("emoji_empty", "⬛"),
         )
         e.add_field(name="Progression", value=f"{bar_str} — {pct}%", inline=False)
         e.add_field(name="🎭 Prochain rôle", value=self._next_role_text(stats), inline=False)
@@ -904,6 +904,15 @@ class Levels(commands.Cog, name="Levels"):
     # -------------------------------------------------------------- Commandes
 
     async def _send_stats(self, ctx: commands.Context, membre: discord.Member = None):
+        # Correction : /stats enchaîne une dizaine de requêtes (get_member_statistics
+        # interroge levels, message_counts, voice_totals, voice_sessions, economy,
+        # réputation, level_roles...). Sans defer(), Discord n'attend que 3 secondes avant
+        # d'afficher "Cette interaction a échoué" à l'utilisateur — c'est très exactement
+        # ce qui donnait l'impression que /stats et /level "ne se chargent pas" ou "prennent
+        # trop de temps" : le bot répondait bien, mais souvent trop tard pour l'interaction
+        # slash d'origine. defer() donne au bot jusqu'à 15 minutes pour répondre.
+        if ctx.interaction:
+            await ctx.defer()
         membre = membre or ctx.author
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
         try:
@@ -933,6 +942,10 @@ class Levels(commands.Cog, name="Levels"):
         await self._send_stats(ctx, membre)
 
     async def _send_level(self, ctx: commands.Context, membre: discord.Member = None):
+        # Même correction que _send_stats : plusieurs requêtes DB enchaînées, il faut
+        # deferer avant que Discord ne considère l'interaction comme expirée.
+        if ctx.interaction:
+            await ctx.defer()
         membre = membre or ctx.author
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
         try:
@@ -958,6 +971,8 @@ class Levels(commands.Cog, name="Levels"):
 
     @commands.hybrid_command(name="leaderboard-levels", description="Afficher le classement des niveaux.")
     async def leaderboard_levels(self, ctx: commands.Context):
+        if ctx.interaction:
+            await ctx.defer()
         rows = await self.bot.db.fetchall(
             "SELECT * FROM levels WHERE guild_id = ? ORDER BY level DESC, xp DESC LIMIT 15", (ctx.guild.id,)
         )
@@ -1048,6 +1063,10 @@ class Levels(commands.Cog, name="Levels"):
         # +statsconfig — elle peut donc adopter le nouveau système sans rien casser de
         # déjà testé/approuvé. /stats et /level restent inchangées pour l'instant (voir
         # rapport de Phase 2 envoyé à Jayden).
+        # Même correction que _send_stats/_send_level : get_member_statistics() enchaîne
+        # une dizaine de requêtes, il faut deferer avant l'expiration à 3s de l'interaction.
+        if ctx.interaction:
+            await ctx.defer()
         membre = membre or ctx.author
         bio_row = await self.bot.db.fetchone(
             "SELECT * FROM profiles WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
@@ -1136,6 +1155,8 @@ class Levels(commands.Cog, name="Levels"):
 
     @commands.hybrid_command(name="repleaderboard", description="Afficher le classement de réputation.")
     async def repleaderboard(self, ctx: commands.Context):
+        if ctx.interaction:
+            await ctx.defer()
         rows = await self.bot.db.fetchall(
             "SELECT * FROM profiles WHERE guild_id = ? AND reputation > 0 ORDER BY reputation DESC LIMIT 15", (ctx.guild.id,)
         )
@@ -1209,6 +1230,8 @@ class Levels(commands.Cog, name="Levels"):
     @commands.hybrid_command(name="voice-time", description="Afficher le temps passé en vocal par un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def voice_time(self, ctx: commands.Context, membre: discord.Member = None):
+        if ctx.interaction:
+            await ctx.defer()
         membre = membre or ctx.author
         try:
             stats = await stats_service.get_member_statistics(self.bot, ctx.guild, membre)

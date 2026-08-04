@@ -683,7 +683,7 @@ CREATE INDEX IF NOT EXISTS idx_reputation_history_guild ON reputation_history (g
 # base (guild_config.stats_settings_json) pour que toute clé absente (nouveau réglage
 # ajouté plus tard, ou serveur qui n'a encore rien configuré) garde un comportement sûr.
 DEFAULT_STATS_SETTINGS = {
-    "color": 0x5865F2,
+    "color": 0x7C5CFC,
     "title_stats": "📊 Profil de {display_name}",
     "footer": "SentriX • Statistiques mises à jour à l'instant",
     "show_economy": True,
@@ -693,8 +693,10 @@ DEFAULT_STATS_SETTINGS = {
     "show_join_date": True,
     "show_next_role": True,
     "bar_length": 10,
-    "emoji_filled": "🟩",
-    "emoji_empty": "⬜",
+    # Barre XP violette par défaut (identité SentriX), demandé par Jayden — reste
+    # personnalisable serveur par serveur via +statsconfig si besoin.
+    "emoji_filled": "🟪",
+    "emoji_empty": "⬛",
     "xp_cooldown": 60,
     "xp_min": 10,
     "xp_max": 25,
