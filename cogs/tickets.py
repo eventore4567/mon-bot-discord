@@ -182,6 +182,32 @@ class PanelMaxModal(discord.ui.Modal, title="🔢 Limite de tickets par membre")
         await interaction.response.send_message(embed=embeds.success(f"Limite définie à **{self.max_input.value}** ticket(s) par membre."), ephemeral=True)
 
 
+class PanelAddTypeModal(discord.ui.Modal, title="➕ Ajouter un type de ticket"):
+    """Permet d'ajouter un type directement depuis l'éditeur de panel (bouton), sans avoir
+    à taper `+tickettype add <panel> <nom>` dans une commande séparée."""
+
+    def __init__(self, cog: "Tickets", panel_id: int, guild_id: int):
+        super().__init__()
+        self.cog = cog
+        self.panel_id = panel_id
+        self.guild_id = guild_id
+        self.name = discord.ui.TextInput(label="Nom du type (ex: Support, Recrutement)", max_length=80)
+        self.add_item(self.name)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        name = self.name.value.strip()
+        if not name:
+            return await interaction.response.send_message(embed=embeds.error("Le nom ne peut pas être vide."), ephemeral=True)
+        if await self.cog.get_type_by_name(self.guild_id, name):
+            return await interaction.response.send_message(embed=embeds.error(f"Un type nommé « {name} » existe déjà sur ce serveur."), ephemeral=True)
+        type_id = await self.cog.add_type(self.guild_id, self.panel_id, name)
+        await interaction.response.send_message(
+            embed=embeds.success(f"Type **{name}** créé (#{type_id}). Configurez-le ci-dessous, puis revenez sur l'éditeur du panel pour l'envoyer."),
+            view=TypeEditView(self.cog, type_id, interaction.user.id),
+            ephemeral=True,
+        )
+
+
 class TypeTextModal(discord.ui.Modal, title="📝 Type de ticket — Texte"):
     def __init__(self, cog: "Tickets", ticket_type):
         super().__init__()
@@ -534,6 +560,13 @@ class PanelEditView(discord.ui.View):
     async def preview(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.send_panel_preview(interaction, self.panel_id)
 
+    @discord.ui.button(label="Ajouter un type de ticket", style=discord.ButtonStyle.secondary, emoji="🎫", row=1)
+    async def add_type_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Corrige : avant, un panel sans type devait obligatoirement être configuré via la
+        # commande séparée `+tickettype add <panel> <nom>` — impossible de le faire depuis
+        # l'éditeur du panel lui-même. On peut maintenant ajouter un type directement ici.
+        await interaction.response.send_modal(PanelAddTypeModal(self.cog, self.panel_id, interaction.guild.id))
+
     @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text], placeholder="📌 Choisir le salon où envoyer le panel", row=2)
     async def select_channel(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
         await self.cog.bot.db.execute("UPDATE ticket_panels_v2 SET channel_id = ? WHERE id = ?", (select.values[0].id, self.panel_id))
@@ -778,6 +811,17 @@ class Tickets(commands.Cog):
         cur = await self.bot.db.execute(
             "INSERT INTO ticket_panels_v2 (guild_id, name, title, description, created_at) VALUES (?, ?, ?, ?, ?)",
             (guild_id, name, f"🎫 {name}", "Choisissez une option ci-dessous pour ouvrir un ticket.", now()),
+        )
+        return cur.lastrowid
+
+    async def add_type(self, guild_id: int, panel_id: int, name: str) -> int:
+        """Logique partagée entre `+tickettype add` et le bouton "➕ Type de ticket" de
+        l'éditeur de panel — un seul endroit pour créer un type, pour ne jamais désynchroniser
+        les deux chemins."""
+        count = await self.bot.db.fetchone("SELECT COUNT(*) c FROM ticket_types WHERE panel_id = ?", (panel_id,))
+        cur = await self.bot.db.execute(
+            "INSERT INTO ticket_types (panel_id, guild_id, name, name_format, position) VALUES (?, ?, ?, ?, ?)",
+            (panel_id, guild_id, name, f"ticket-{{pseudo}}", count["c"]),
         )
         return cur.lastrowid
 
@@ -1548,12 +1592,7 @@ class Tickets(commands.Cog):
             return await ctx.send(embed=embeds.error(f"Aucun panel nommé « {panel} »."))
         if await self.get_type_by_name(ctx.guild.id, nom):
             return await ctx.send(embed=embeds.error(f"Un type nommé « {nom} » existe déjà sur ce serveur."))
-        count = await self.bot.db.fetchone("SELECT COUNT(*) c FROM ticket_types WHERE panel_id = ?", (panel_row["id"],))
-        cur = await self.bot.db.execute(
-            "INSERT INTO ticket_types (panel_id, guild_id, name, name_format, position) VALUES (?, ?, ?, ?, ?)",
-            (panel_row["id"], ctx.guild.id, nom, f"ticket-{{pseudo}}", count["c"]),
-        )
-        type_id = cur.lastrowid
+        type_id = await self.add_type(ctx.guild.id, panel_row["id"], nom)
         e = embeds.success(f"Type **{nom}** créé sur le panel « {panel} » (#{type_id}). Configurez-le ci-dessous.")
         await ctx.send(embed=e, view=TypeEditView(self, type_id, ctx.author.id))
 

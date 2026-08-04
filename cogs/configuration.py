@@ -141,7 +141,12 @@ class Configuration(commands.Cog):
 
     @commands.hybrid_command(
         name="create-logs",
-        description="Créer automatiquement toute une catégorie de salons de logs (messages, membres, vocal, rôles, serveur, modération, sécurité).",
+        # BUG CORRIGÉ (critique) : cette description dépassait la limite Discord de 100
+        # caractères (elle en faisait 125). Discord REFUSE alors la synchronisation de
+        # TOUTES les commandes slash globales (pas juste celle-ci) — c'est exactement ce
+        # qui faisait que /ticketsetup, /ticketpanel, etc. semblaient "ne plus répondre" :
+        # le bot n'arrivait plus à publier la moindre commande à jour sur Discord.
+        description="Créer automatiquement une catégorie de salons de logs (messages, vocal, modération, sécurité...).",
     )
     @checks.is_owner_or_admin()
     async def create_logs(self, ctx: commands.Context):

@@ -310,7 +310,10 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
 
     @commands.hybrid_command(
         name="create-server",
-        description="Générer automatiquement toute la structure d'un serveur (rôles, catégories, salons) selon un modèle au choix.",
+        # BUG CORRIGÉ (critique) : même problème que create-logs — description > 100
+        # caractères, ce qui fait échouer la synchronisation slash GLOBALE (voir le
+        # commentaire détaillé dans cogs/configuration.py à côté de create-logs).
+        description="Générer automatiquement la structure d'un serveur (rôles, catégories, salons) selon un modèle.",
     )
     @checks.is_owner_or_admin_for("configuration")
     async def create_server(self, ctx: commands.Context):
