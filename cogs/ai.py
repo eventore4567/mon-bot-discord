@@ -7,13 +7,26 @@ le chat : soit en le mentionnant (@SentriX ...), soit en commençant son message
 "sentrix" (ex: "sentrix comment tu vas ?"), sans avoir besoin d'une vraie commande.
 """
 
+import logging
 import re
+import traceback
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 import config
 from utils import embeds, design_system
+
+logger = logging.getLogger("bot.ai")
+
+
+def _ai_error_detail(answer: str) -> str:
+    """Extrait et tronque le détail technique d'une erreur IA (préfixe __ERROR__), pour
+    l'afficher au staff au lieu d'un message générique sans information. BUG CORRIGÉ : avant,
+    l'exception réelle (clé invalide, quota dépassé, accès au modèle refusé, etc.) était
+    silencieusement jetée — impossible de savoir pourquoi "Erreur IA" s'affichait."""
+    return answer[len("__ERROR__"):][:300]
 
 
 class Ai(commands.Cog, name="Ai"):
@@ -53,7 +66,8 @@ class Ai(commands.Cog, name="Ai"):
             resp = await client.chat.completions.create(model="gpt-4o-mini", messages=messages, max_tokens=600)
             return resp.choices[0].message.content
         except Exception as exc:
-            return f"__ERROR__{exc}"
+            logger.error("Erreur OpenAI (ask_ai) :\n%s", traceback.format_exc())
+            return f"__ERROR__{type(exc).__name__}: {exc}"
 
     async def ask_ai_with_confidence(self, prompt: str, history: list = None) -> tuple[str, int]:
         """Comme ask_ai, mais demande aussi à l'IA un indice de confiance (1-10) sur sa réponse."""
@@ -76,7 +90,8 @@ class Ai(commands.Cog, name="Ai"):
             resp = await client.chat.completions.create(model="gpt-4o-mini", messages=messages, max_tokens=600)
             content = resp.choices[0].message.content or ""
         except Exception as exc:
-            return f"__ERROR__{exc}", 0
+            logger.error("Erreur OpenAI (ask_ai_with_confidence) :\n%s", traceback.format_exc())
+            return f"__ERROR__{type(exc).__name__}: {exc}", 0
 
         confidence = 8
         match = re.search(r"CONFIANCE\s*:\s*(\d{1,2})\s*/\s*10", content, re.IGNORECASE)
@@ -95,7 +110,7 @@ class Ai(commands.Cog, name="Ai"):
         if answer == "__NO_KEY__":
             return await destination.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.", kind="danger"))
         if answer.startswith("__ERROR__"):
-            return await destination.send(embed=await self._embed(guild_id, title="Erreur IA", description="Une erreur est survenue avec l'IA. Réessayez plus tard.", kind="danger"))
+            return await destination.send(embed=await self._embed(guild_id, title="Erreur IA", description=f"Une erreur est survenue avec l'IA. Réessayez plus tard.\nDétail technique : `{_ai_error_detail(answer)}`", kind="danger"))
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
         self.histories[author.id] = history[-10:]
@@ -162,7 +177,7 @@ class Ai(commands.Cog, name="Ai"):
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.", kind="danger"))
         if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description="Une erreur est survenue avec l'IA. Réessayez plus tard.", kind="danger"))
+            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=f"Une erreur est survenue avec l'IA. Réessayez plus tard.\nDétail technique : `{_ai_error_detail(answer)}`", kind="danger"))
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
         self.histories[ctx.author.id] = history[-10:]
@@ -185,7 +200,7 @@ class Ai(commands.Cog, name="Ai"):
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
         if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description="Une erreur est survenue avec l'IA.", kind="danger"))
+            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=f"Une erreur est survenue avec l'IA.\nDétail technique : `{_ai_error_detail(answer)}`", kind="danger"))
         await ctx.send(embed=await self._embed(guild_id, title="Résumé", description=answer[:4000]))
 
     @commands.hybrid_command(name="image-prompt", description="Générer une idée détaillée de prompt d'image avec l'IA.", with_app_command=False)
@@ -197,6 +212,10 @@ class Ai(commands.Cog, name="Ai"):
         answer = await self.ask_ai(f"Génère un prompt détaillé et créatif en anglais pour un générateur d'images IA, sur ce sujet : {sujet}")
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
+        # BUG CORRIGÉ : le cas __ERROR__ n'était pas vérifié ici — en cas d'erreur OpenAI, le
+        # message brut "__ERROR__..." s'affichait tel quel comme si c'était la réponse de l'IA.
+        if answer.startswith("__ERROR__"):
+            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=f"Une erreur est survenue avec l'IA.\nDétail technique : `{_ai_error_detail(answer)}`", kind="danger"))
         await ctx.send(embed=await self._embed(guild_id, title="Prompt généré", description=answer[:4000]))
 
     @commands.hybrid_command(name="explain", description="Demander à l'IA d'expliquer un concept simplement.", with_app_command=False)
@@ -208,6 +227,8 @@ class Ai(commands.Cog, name="Ai"):
         answer = await self.ask_ai(f"Explique ce concept simplement, comme à un débutant : {sujet}")
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
+        if answer.startswith("__ERROR__"):
+            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=f"Une erreur est survenue avec l'IA.\nDétail technique : `{_ai_error_detail(answer)}`", kind="danger"))
         await ctx.send(embed=await self._embed(guild_id, title="Explication", description=answer[:4000]))
 
     @commands.hybrid_command(name="rewrite", description="Demander à l'IA de reformuler un texte.", with_app_command=False)
@@ -219,6 +240,8 @@ class Ai(commands.Cog, name="Ai"):
         answer = await self.ask_ai(f"Reformule ce texte de façon plus claire, en gardant le sens original :\n\n{texte}")
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
+        if answer.startswith("__ERROR__"):
+            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=f"Une erreur est survenue avec l'IA.\nDétail technique : `{_ai_error_detail(answer)}`", kind="danger"))
         await ctx.send(embed=await self._embed(guild_id, title="Reformulation", description=answer[:4000]))
 
     @commands.hybrid_command(name="fact-check", description="Demander à l'IA de vérifier une affirmation (à titre indicatif).", with_app_command=False)
@@ -232,6 +255,8 @@ class Ai(commands.Cog, name="Ai"):
         )
         if answer == "__NO_KEY__":
             return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
+        if answer.startswith("__ERROR__"):
+            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=f"Une erreur est survenue avec l'IA.\nDétail technique : `{_ai_error_detail(answer)}`", kind="danger"))
         e = await self._embed(guild_id, title="Vérification (indicative)", description=answer[:4000])
         e.set_footer(text="⚠️ Réponse générée par IA, à vérifier par vous-même.")
         await ctx.send(embed=e)
