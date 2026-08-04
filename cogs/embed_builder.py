@@ -689,6 +689,14 @@ class EmbedButtonsManageView(discord.ui.View):
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.parent.refresh(interaction)
 
+    async def refresh(self, interaction: discord.Interaction):
+        # BUG CORRIGÉ : cette méthode s'était retrouvée orpheline dans setup() lors d'une
+        # précédente correction (jamais rattachée à la classe) — chaque clic sur un bouton
+        # dans le menu "Boutons" (sélection ou suppression) plantait avec une AttributeError
+        # car EmbedButtonsManageView.refresh() n'existait pas.
+        e = embeds.neutral(f"🔘 Boutons ({len(self.draft.buttons)}/{MAX_BUTTONS})", self.list_text())
+        await interaction.response.edit_message(embeds=[e], view=self)
+
 
 # ---------------------------------------------------------------- VUE PRINCIPALE
 
@@ -802,6 +810,16 @@ class EmbedBuilderView(discord.ui.View):
                 await self.cog.do_edit_message(interaction, self.draft)
             return
         await interaction.response.edit_message(embeds=self.build_panel_embeds(), view=EmbedSendView(self))
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger, emoji="❌", row=3)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # BUG CORRIGÉ : ce bouton s'était retrouvé orphelin dans setup() (jamais rattaché à
+        # la classe EmbedBuilderView) lors d'une précédente correction — le panneau principal
+        # n'avait alors plus aucun moyen de fermer l'éditeur proprement.
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(embeds=[embeds.neutral("❌ Éditeur fermé", "Les modifications non sauvegardées ont été abandonnées.")], view=self)
+        self.stop()
 
 
 MESSAGE_LINK_RE = re.compile(r"(?:https?://)?(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")
@@ -1172,17 +1190,6 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
 async def setup(bot: commands.Bot):
     await bot.add_cog(EmbedBuilder(bot))
 
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger, emoji="❌", row=3)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(embeds=[embeds.neutral("❌ Éditeur fermé", "Les modifications non sauvegardées ont été abandonnées.")], view=self)
-        self.stop()
-
-    async def refresh(self, interaction: discord.Interaction):
-        e = embeds.neutral(f"🔘 Boutons ({len(self.draft.buttons)}/{MAX_BUTTONS})", self.list_text())
-        await interaction.response.edit_message(embeds=[e], view=self)
-
 
 def helpers_confirm_view(author_id: int):
     """Petit ConfirmView local (Oui/Non) — évite une dépendance croisée avec utils/helpers
@@ -1258,7 +1265,13 @@ class EmbedSendView(discord.ui.View):
 
     @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text], placeholder="📌 Choisir le salon de destination", row=0)
     async def pick_channel(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
-        self.channel = select.values[0]
+        # BUG CORRIGÉ : discord.ui.ChannelSelect renvoie des app_commands.AppCommandChannel
+        # (objets partiels, sans permissions_for()) et non de vrais discord.TextChannel — il
+        # faut résoudre le salon réel via le cache de la guilde pour pouvoir vérifier les
+        # permissions du bot au moment de l'envoi. Sans ça : "AttributeError: 'AppCommandChannel'
+        # object has no attribute 'permissions_for'" au clic sur Envoyer.
+        picked = select.values[0]
+        self.channel = interaction.guild.get_channel(picked.id) or picked
         await interaction.response.edit_message(embeds=self.parent.build_panel_embeds(), view=self)
 
     @discord.ui.button(label="Autoriser les mentions @everyone/@here (réservé)", style=discord.ButtonStyle.secondary, row=1)
