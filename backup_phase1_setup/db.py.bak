@@ -530,20 +530,6 @@ CREATE TABLE IF NOT EXISTS ticket_button_settings (
     guild_id INTEGER PRIMARY KEY,
     config_json TEXT
 );
-
--- Session en cours d'un assistant /setup : permet à l'assistant de survivre à un
--- redémarrage du bot (Railway redéploie très souvent pendant le développement).
--- Une ligne = un message d'assistant ouvert. "choices_json" contient tous les choix
--- pas encore définitivement enregistrés (page en cours, sélections en attente).
-CREATE TABLE IF NOT EXISTS setup_sessions (
-    message_id INTEGER PRIMARY KEY,
-    guild_id INTEGER,
-    channel_id INTEGER,
-    author_id INTEGER,
-    page INTEGER DEFAULT 0,
-    choices_json TEXT DEFAULT '{}',
-    updated_at INTEGER
-);
 """
 
 # Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de
@@ -575,7 +561,6 @@ CREATE INDEX IF NOT EXISTS idx_ticket_panels_v2_guild ON ticket_panels_v2 (guild
 CREATE INDEX IF NOT EXISTS idx_ticket_types_panel ON ticket_types (panel_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_form_questions_type ON ticket_form_questions (ticket_type_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_answers_ticket ON ticket_answers (ticket_id);
-CREATE INDEX IF NOT EXISTS idx_setup_sessions_guild ON setup_sessions (guild_id);
 """
 
 # Colonnes ajoutées à guild_config après sa création initiale : CREATE TABLE IF NOT EXISTS
@@ -805,22 +790,6 @@ class Database:
         return await self.fetchall(
             "SELECT user_id FROM bot_managers WHERE guild_id = ?", (guild_id,)
         )
-
-    # ---------- Sessions /setup (survie de l'assistant à un redémarrage du bot) ----------
-
-    async def save_setup_session(self, message_id: int, guild_id: int, channel_id: int, author_id: int, page: int, choices_json: str):
-        await self.execute(
-            "INSERT INTO setup_sessions (message_id, guild_id, channel_id, author_id, page, choices_json, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(message_id) DO UPDATE SET page = excluded.page, choices_json = excluded.choices_json, updated_at = excluded.updated_at",
-            (message_id, guild_id, channel_id, author_id, page, choices_json, now()),
-        )
-
-    async def get_setup_session(self, message_id: int):
-        return await self.fetchone("SELECT * FROM setup_sessions WHERE message_id = ?", (message_id,))
-
-    async def delete_setup_session(self, message_id: int):
-        await self.execute("DELETE FROM setup_sessions WHERE message_id = ?", (message_id,))
 
     # ---------- Liste noire GLOBALE d'utilisation du bot (toutes commandes, tous serveurs) ----------
     # Différente de "blacklist_users" (utils/automod.py) qui ne bloque que le contenu sur UN serveur :
