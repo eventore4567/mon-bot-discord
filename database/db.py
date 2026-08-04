@@ -5,6 +5,7 @@ sont stockées ici. Aucune adresse IP n'est jamais collectée ni stockée.
 """
 
 import aiosqlite
+import json
 import os
 import time
 
@@ -55,7 +56,8 @@ CREATE TABLE IF NOT EXISTS guild_config (
     partner_channel INTEGER,
     stats_channel INTEGER,
     afk_channel INTEGER,
-    error_channel INTEGER
+    error_channel INTEGER,
+    stats_settings_json TEXT DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS warnings (
@@ -566,6 +568,18 @@ CREATE TABLE IF NOT EXISTS setup_sessions (
     choices_json TEXT DEFAULT '{}',
     updated_at INTEGER
 );
+
+-- Session vocale EN COURS d'un membre (temps vocal, refonte /stats et /level).
+-- Une ligne = un membre actuellement connecté à un salon vocal suivi. Permet de
+-- retrouver "depuis quand" un membre est en vocal après un redémarrage du bot,
+-- au lieu de perdre le suivi (l'ancien système gardait ça uniquement en mémoire).
+CREATE TABLE IF NOT EXISTS voice_sessions (
+    guild_id INTEGER,
+    user_id INTEGER,
+    channel_id INTEGER,
+    joined_at INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+);
 """
 
 # Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de
@@ -599,7 +613,35 @@ CREATE INDEX IF NOT EXISTS idx_ticket_form_questions_type ON ticket_form_questio
 CREATE INDEX IF NOT EXISTS idx_ticket_answers_ticket ON ticket_answers (ticket_id);
 CREATE INDEX IF NOT EXISTS idx_setup_sessions_guild ON setup_sessions (guild_id);
 CREATE INDEX IF NOT EXISTS idx_bot_manager_permissions_guild_user ON bot_manager_permissions (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_guild ON voice_sessions (guild_id);
 """
+
+# Valeurs par défaut du panneau +statsconfig — fusionnées avec ce qui est enregistré en
+# base (guild_config.stats_settings_json) pour que toute clé absente (nouveau réglage
+# ajouté plus tard, ou serveur qui n'a encore rien configuré) garde un comportement sûr.
+DEFAULT_STATS_SETTINGS = {
+    "color": 0x5865F2,
+    "title_stats": "📊 Profil de {display_name}",
+    "footer": "SentriX • Statistiques mises à jour à l'instant",
+    "show_economy": True,
+    "show_reputation": True,
+    "show_voice": True,
+    "show_messages": True,
+    "show_join_date": True,
+    "show_next_role": True,
+    "bar_length": 10,
+    "emoji_filled": "🟩",
+    "emoji_empty": "⬜",
+    "xp_cooldown": 60,
+    "xp_min": 10,
+    "xp_max": 25,
+    "xp_disabled_on_commands": False,
+    "xp_excluded_role_ids": [],
+    "voice_ignored_channel_ids": [],
+    "voice_ignore_solo": False,
+    "buttons_visible": True,
+    "allow_view_others": True,
+}
 
 # Catégories de permissions disponibles pour un gestionnaire du bot (page 7 de /setup).
 MANAGER_CATEGORIES = {
@@ -637,6 +679,11 @@ GUILD_CONFIG_NEW_COLUMNS = {
     "stats_channel": "INTEGER",
     "afk_channel": "INTEGER",
     "error_channel": "INTEGER",
+    # Ajoutée pour la refonte de /stats et /level : un seul blob JSON regroupe TOUS les
+    # réglages du panneau +statsconfig (couleur, textes, cooldown XP, bornes XP, rôles/
+    # salons exclus, emojis de la barre, visibilité des champs...). On évite ainsi une
+    # vingtaine de colonnes séparées pour un seul écran de configuration.
+    "stats_settings_json": "TEXT DEFAULT '{}'",
 }
 
 # Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"
@@ -1025,6 +1072,77 @@ class Database:
             "SELECT * FROM levels WHERE guild_id = ? AND user_id = ?",
             (guild_id, user_id),
         )
+
+    # ---------- Réglages de /stats, /level et +statsconfig ----------
+
+    async def get_stats_settings(self, guild_id: int) -> dict:
+        """Fusionne les réglages enregistrés en base avec DEFAULT_STATS_SETTINGS, pour
+        que toute clé absente (serveur pas encore configuré, ou nouveau réglage ajouté
+        après coup) garde une valeur sûre plutôt que de faire planter l'affichage."""
+        conf = await self.get_guild_config(guild_id)
+        raw = conf["stats_settings_json"] if conf and conf["stats_settings_json"] else "{}"
+        try:
+            saved = json.loads(raw)
+        except (ValueError, TypeError):
+            saved = {}
+        merged = dict(DEFAULT_STATS_SETTINGS)
+        merged.update(saved)
+        return merged
+
+    async def set_stats_settings(self, guild_id: int, updates: dict) -> dict:
+        """Fusionne `updates` avec les réglages actuels puis enregistre le tout en une
+        fois (un seul blob JSON, voir DEFAULT_STATS_SETTINGS)."""
+        current = await self.get_stats_settings(guild_id)
+        current.update(updates)
+        await self.set_guild_config(guild_id, "stats_settings_json", json.dumps(current))
+        return current
+
+    async def reset_stats_settings(self, guild_id: int):
+        await self.set_guild_config(guild_id, "stats_settings_json", "{}")
+
+    # ---------- Réputation (table profiles) ----------
+
+    async def get_reputation(self, guild_id: int, user_id: int) -> int:
+        row = await self.fetchone(
+            "SELECT reputation FROM profiles WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        return row["reputation"] if row else 0
+
+    # ---------- Sessions vocales (persistance après redémarrage) ----------
+
+    async def start_voice_session(self, guild_id: int, user_id: int, channel_id: int):
+        await self.execute(
+            "INSERT INTO voice_sessions (guild_id, user_id, channel_id, joined_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET channel_id = excluded.channel_id, joined_at = excluded.joined_at",
+            (guild_id, user_id, channel_id, now()),
+        )
+
+    async def end_voice_session(self, guild_id: int, user_id: int) -> int:
+        """Termine la session en cours (si elle existe), ajoute la durée écoulée à
+        voice_totals, et retourne le nombre de secondes ajoutées (0 si aucune session)."""
+        row = await self.fetchone(
+            "SELECT joined_at FROM voice_sessions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        await self.execute("DELETE FROM voice_sessions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+        if not row:
+            return 0
+        elapsed = max(0, now() - row["joined_at"])
+        await self.execute(
+            "INSERT INTO voice_totals (guild_id, user_id, seconds) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET seconds = seconds + excluded.seconds",
+            (guild_id, user_id, elapsed),
+        )
+        return elapsed
+
+    async def get_all_voice_sessions(self):
+        """Utilisé au démarrage pour nettoyer les sessions restées ouvertes après un
+        arrêt brutal (crash/redéploiement) : leur durée réelle est perdue (on ne peut
+        pas deviner combien de temps s'est écoulé pendant que le bot était hors-ligne),
+        mais on les referme proprement plutôt que de les laisser polluer la base."""
+        return await self.fetchall("SELECT * FROM voice_sessions")
+
+    async def clear_voice_session(self, guild_id: int, user_id: int):
+        await self.execute("DELETE FROM voice_sessions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
 
     # ---------- Statistiques pour le dashboard web (web/dashboard.py) ----------
 

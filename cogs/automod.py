@@ -26,6 +26,7 @@ bannissements en rafale. Si le seuil est dépassé, le responsable est immédiat
 privé de ses rôles dangereux et expulsé, et le propriétaire du serveur est alerté.
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -588,6 +589,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
         blacklisted_users = await self.get_blacklist_users_cached(message.guild.id)
         if message.author.id in blacklisted_users:
+            self._mark_xp_skip(message.id)
             try:
                 await message.delete()
             except discord.HTTPException:
@@ -635,7 +637,24 @@ class AutoMod(commands.Cog, name="Automod"):
                 self.spam_tracker[key] = []
                 return await self._delete_and_warn(message, "Spam de messages détecté.", "antispam")
 
+    def _mark_xp_skip(self, message_id: int):
+        """Empêche cogs/levels.py d'accorder de l'XP pour ce message : AutoMod vient de
+        décider de le supprimer (spam, lien interdit, mot blacklisté, arnaque...). Voir la
+        vérification correspondante dans Levels._process_xp(). Le marqueur s'auto-nettoie
+        après 10 secondes pour ne jamais laisser cet ensemble grossir indéfiniment.
+
+        Best-effort : les deux écouteurs on_message (celui-ci et celui de Levels) sont
+        indépendants et tournent en parallèle, donc cette protection couvre la grande
+        majorité des cas réels mais n'offre pas une garantie absolue à la microseconde
+        près sur un serveur extrêmement chargé."""
+        skip_ids = getattr(self.bot, "_xp_skip_ids", None)
+        if skip_ids is None:
+            skip_ids = self.bot._xp_skip_ids = set()
+        skip_ids.add(message_id)
+        asyncio.get_event_loop().call_later(10, skip_ids.discard, message_id)
+
     async def _delete_and_warn(self, message: discord.Message, reason: str, filter_name: str = "automod"):
+        self._mark_xp_skip(message.id)
         try:
             await message.delete()
         except discord.HTTPException:
