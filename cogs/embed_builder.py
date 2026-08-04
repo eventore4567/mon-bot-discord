@@ -100,6 +100,24 @@ def parse_yesno(text: str, default: bool = False) -> bool:
     return text.strip().lower() in {"oui", "o", "yes", "y", "true", "1", "vrai"}
 
 
+async def _report_ui_error(interaction: discord.Interaction, error: Exception, where: str):
+    """Filet de sécurité commun à TOUTES les vues/modals de +embed. BUG CORRIGÉ : sans ceci,
+    une exception imprévue dans un bouton laissait l'interaction sans aucune réponse — Discord
+    affiche alors ce bouton bloqué en chargement (●●●) indéfiniment côté membre, sans aucun
+    message d'erreur ni log exploitable. Cette fonction garantit qu'une réponse ephemeral est
+    TOUJOURS envoyée (avec le détail technique réel, pour diagnostiquer immédiatement un futur
+    cas), et est branchée via on_error() sur chaque vue/modal ci-dessous."""
+    logger.error("Exception non gérée dans le créateur d'embeds (%s) :\n%s", where, traceback.format_exc())
+    message = f"Une erreur inattendue est survenue ({where}).\nDétail technique : `{type(error).__name__}: {error}`"[:300]
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embeds.error(message), ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embeds.error(message), ephemeral=True)
+    except discord.HTTPException:
+        pass
+
+
 # ---------------------------------------------------------------- MODÈLE DE BROUILLON
 
 class EmbedDraft:
@@ -334,6 +352,9 @@ class EmbedTextModal(discord.ui.Modal, title="📝 Modifier le texte"):
         d.dirty = True
         await self.view_ref.refresh(interaction)
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await _report_ui_error(interaction, error, "modal Modifier le texte")
+
 
 class EmbedColourModal(discord.ui.Modal, title="🎨 Couleur personnalisée"):
     def __init__(self, view: "EmbedAppearanceView"):
@@ -354,6 +375,9 @@ class EmbedColourModal(discord.ui.Modal, title="🎨 Couleur personnalisée"):
         self.view_ref.draft.colour = parsed
         self.view_ref.draft.dirty = True
         await self.view_ref.refresh(interaction)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await _report_ui_error(interaction, error, "modal Couleur personnalisée")
 
 
 class EmbedImagesModal(discord.ui.Modal, title="🖼️ Images"):
@@ -383,6 +407,9 @@ class EmbedImagesModal(discord.ui.Modal, title="🖼️ Images"):
         d.dirty = True
         await self.view_ref.refresh(interaction)
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await _report_ui_error(interaction, error, "modal Images")
+
 
 class EmbedFieldModal(discord.ui.Modal, title="➕ Champ personnalisé"):
     def __init__(self, view: "EmbedBuilderView", index: int | None = None):
@@ -407,6 +434,9 @@ class EmbedFieldModal(discord.ui.Modal, title="➕ Champ personnalisé"):
             d.fields[self.index] = field
         d.dirty = True
         await self.view_ref.refresh(interaction)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await _report_ui_error(interaction, error, "modal Champ personnalisé")
 
 
 class EmbedButtonModal(discord.ui.Modal, title="🔘 Bouton lien"):
@@ -434,6 +464,9 @@ class EmbedButtonModal(discord.ui.Modal, title="🔘 Bouton lien"):
             d.buttons[self.index] = button
         d.dirty = True
         await self.view_ref.refresh(interaction)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await _report_ui_error(interaction, error, "modal Bouton lien")
 
 
 class EmbedSaveModal(discord.ui.Modal, title="💾 Sauvegarder le modèle"):
@@ -465,6 +498,9 @@ class EmbedSaveModal(discord.ui.Modal, title="💾 Sauvegarder le modèle"):
         d.template_name = name
         d.dirty = False
         await self.view_ref.refresh(interaction)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await _report_ui_error(interaction, error, "modal Sauvegarder le modèle")
 
 
 # ---------------------------------------------------------------- SOUS-VUES
@@ -512,6 +548,9 @@ class EmbedAppearanceView(discord.ui.View):
     async def refresh(self, interaction: discord.Interaction):
         embeds_list = self.parent.build_panel_embeds()
         await interaction.response.edit_message(embeds=embeds_list, view=self)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
+        await _report_ui_error(interaction, error, "vue Apparence")
 
 
 class EmbedFieldsManageView(discord.ui.View):
@@ -621,6 +660,9 @@ class EmbedFieldsManageView(discord.ui.View):
         else:
             await interaction.response.edit_message(embeds=[e], view=self)
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
+        await _report_ui_error(interaction, error, "vue Gérer les champs")
+
 
 class EmbedButtonsManageView(discord.ui.View):
     """Sous-écran "🔘 Boutons" : ajouter/modifier/supprimer des boutons-liens."""
@@ -696,6 +738,9 @@ class EmbedButtonsManageView(discord.ui.View):
         # car EmbedButtonsManageView.refresh() n'existait pas.
         e = embeds.neutral(f"🔘 Boutons ({len(self.draft.buttons)}/{MAX_BUTTONS})", self.list_text())
         await interaction.response.edit_message(embeds=[e], view=self)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
+        await _report_ui_error(interaction, error, "vue Boutons")
 
 
 # ---------------------------------------------------------------- VUE PRINCIPALE
@@ -821,6 +866,9 @@ class EmbedBuilderView(discord.ui.View):
         await interaction.response.edit_message(embeds=[embeds.neutral("❌ Éditeur fermé", "Les modifications non sauvegardées ont été abandonnées.")], view=self)
         self.stop()
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
+        await _report_ui_error(interaction, error, "panneau principal +embed")
+
 
 MESSAGE_LINK_RE = re.compile(r"(?:https?://)?(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")
 
@@ -852,6 +900,9 @@ class EmbedImportConfirmView(discord.ui.View):
     @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embed=embeds.error("Import annulé."), view=None)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
+        await _report_ui_error(interaction, error, "confirmation d'import")
 
 
 # =============================================================================
@@ -1215,6 +1266,9 @@ def helpers_confirm_view(author_id: int):
             await interaction.response.edit_message(view=None)
             self.stop()
 
+        async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
+            await _report_ui_error(interaction, error, "confirmation")
+
     return _Confirm()
 
 
@@ -1245,6 +1299,9 @@ class EmbedSendConfirmView(discord.ui.View):
     @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=0)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.parent.refresh(interaction)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
+        await _report_ui_error(interaction, error, "confirmation d'envoi")
 
 
 class EmbedSendView(discord.ui.View):
@@ -1303,3 +1360,6 @@ class EmbedSendView(discord.ui.View):
     @discord.ui.button(label="◀ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back_to_builder(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.parent.refresh(interaction)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
+        await _report_ui_error(interaction, error, "vue Envoyer")
