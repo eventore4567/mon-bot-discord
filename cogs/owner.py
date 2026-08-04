@@ -227,6 +227,60 @@ class Owner(commands.Cog, name="Owner"):
             return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucun membre trouvé", description="Aucun membre banni via la liste noire n'a été trouvé sur ce serveur."))
         await ctx.send(embed=await self._embed(ctx.guild.id, title="Désynchronisation terminée", description=f"**{len(unbanned)}** membre(s) débanni(s) :\n" + "\n".join(unbanned), kind="success"))
 
+    # ---------------------------------------------------------------- SYNCHRONISATION DES COMMANDES SLASH
+
+    @commands.hybrid_command(
+        name="sync",
+        description="Resynchroniser manuellement les commandes slash globales (contre les commandes qui semblent 'ne plus répondre').",
+        with_app_command=False,
+    )
+    @checks.is_bot_owner()
+    async def sync_cmd(self, ctx: commands.Context):
+        # Ce que ça corrige : après un redéploiement qui ajoute/renomme/retire une commande,
+        # Discord peut garder en cache côté client une ANCIENNE version de la commande —
+        # cliquer dessus envoie une interaction que le bot ne sait plus traiter, ce qui
+        # ressemble exactement à "L'application ne répond plus". La synchro globale automatique
+        # (au démarrage du bot) peut aussi échouer silencieusement (rate limit Discord) : cette
+        # commande permet de relancer la synchro à la demande, sans redémarrer tout le bot.
+        guild_id = ctx.guild.id if ctx.guild else None
+        msg = await ctx.send(embed=await self._embed(
+            guild_id, title="Synchronisation en cours…",
+            description="Synchronisation globale des commandes slash. Cela peut prendre jusqu'à **1 heure** pour se propager sur tous les serveurs Discord (limite de Discord, pas du bot).",
+        ))
+        try:
+            synced = await self.bot.tree.sync()
+        except discord.HTTPException as e:
+            return await msg.edit(embed=await self._embed(guild_id, title="Échec de la synchronisation", description=f"Discord a refusé la synchronisation : `{e}`", kind="danger"))
+        await msg.edit(embed=await self._embed(
+            guild_id, title="Synchronisation globale terminée",
+            description=f"**{len(synced)}** commande(s) slash synchronisée(s) globalement.\n\n⏳ Propagation possible jusqu'à **1 heure** sur tous les serveurs — utilisez `+syncguild` sur un serveur précis pour un effet quasi immédiat.",
+            kind="success",
+        ))
+
+    @commands.hybrid_command(
+        name="syncguild",
+        description="Synchroniser rapidement les commandes slash sur CE serveur (effet quasi immédiat, pratique pour tester).",
+        with_app_command=False,
+    )
+    @checks.is_bot_owner()
+    async def syncguild_cmd(self, ctx: commands.Context):
+        if not ctx.guild:
+            return await ctx.send(embed=await self._embed(None, title="Commande de serveur", description="Cette commande doit être utilisée dans un serveur.", kind="danger"))
+        # copy_global_to() + sync(guild=...) : pattern recommandé par discord.py pour tester
+        # instantanément des commandes globales sur UN serveur, sans attendre la propagation
+        # globale (jusqu'à 1h). Discord fusionne ensuite proprement avec la version globale —
+        # aucune commande n'est dupliquée pour les membres de ce serveur.
+        self.bot.tree.copy_global_to(guild=ctx.guild)
+        try:
+            synced = await self.bot.tree.sync(guild=ctx.guild)
+        except discord.HTTPException as e:
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Échec de la synchronisation", description=f"Discord a refusé la synchronisation : `{e}`", kind="danger"))
+        await ctx.send(embed=await self._embed(
+            ctx.guild.id, title="Synchronisation locale terminée",
+            description=f"**{len(synced)}** commande(s) slash synchronisée(s) sur **{ctx.guild.name}** (visibles quasi immédiatement).",
+            kind="success",
+        ))
+
     # ---------------------------------------------------------------- PRÉSENCE / STATUT
 
     @commands.hybrid_command(

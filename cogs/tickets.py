@@ -24,7 +24,10 @@ toujours de view_channel=False pour @everyone, quoi qu'il arrive.
 import asyncio
 import io
 import json
+import logging
 import re
+import time
+import traceback
 
 import discord
 from discord import app_commands
@@ -32,6 +35,12 @@ from discord.ext import commands, tasks
 
 from utils import embeds, checks, helpers, design_system
 from database.db import now
+
+# Logs techniques dédiés aux tickets (diagnostic de "L'application ne répond plus" :
+# ne remplace pas les erreurs affichées au membre, juste une trace complète côté serveur
+# pour retrouver précisément quelle interaction a échoué, avec quel custom_id, et combien
+# de temps le traitement a pris avant/après la réponse à Discord).
+logger = logging.getLogger("bot.tickets")
 
 TEXT_STYLES = {"court": discord.TextStyle.short, "long": discord.TextStyle.paragraph}
 BUTTON_STYLES = {
@@ -722,19 +731,24 @@ class Tickets(commands.Cog):
     def cog_unload(self):
         self.check_autoclose.cancel()
 
-    async def restore_panel_views(self):
+    async def restore_panel_views(self) -> int:
         """Réenregistre une vue persistante pour chaque panel actif après un redémarrage,
         avec ses VRAIES options (types de tickets), pour que les menus/boutons déjà envoyés
-        sur Discord continuent de fonctionner exactement comme avant l'arrêt du bot."""
+        sur Discord continuent de fonctionner exactement comme avant l'arrêt du bot.
+        Retourne le nombre de panels effectivement restaurés (utilisé pour le log de
+        démarrage — voir main.py)."""
         panels = await self.bot.db.fetchall("SELECT * FROM ticket_panels_v2 WHERE enabled = 1 AND message_id IS NOT NULL")
+        restored = 0
         for panel in panels:
             types = await self.get_panel_types(panel["id"])
             if not types:
                 continue
             try:
                 self.bot.add_view(TicketPanelView(panel, types), message_id=panel["message_id"])
+                restored += 1
             except discord.HTTPException:
                 pass
+        return restored
 
     # ---------------------------------------------------------------- ACCÈS DB
 
@@ -835,30 +849,59 @@ class Tickets(commands.Cog):
         await interaction.followup.send(embed=embeds.success(f"📤 Panel envoyé dans {channel.mention}."), ephemeral=True)
 
     async def start_ticket_flow(self, interaction: discord.Interaction, type_id: int):
-        ticket_type = await self.get_type(type_id)
-        if not ticket_type:
-            return await interaction.response.send_message(embed=embeds.error("Ce type de ticket n'existe plus."), ephemeral=True)
+        started = time.monotonic()
+        guild_id = interaction.guild.id if interaction.guild else None
+        user_id = interaction.user.id if interaction.user else None
+        try:
+            ticket_type = await self.get_type(type_id)
+            if not ticket_type:
+                return await interaction.response.send_message(embed=embeds.error("Ce type de ticket n'existe plus."), ephemeral=True)
 
-        limit = ticket_type["max_per_member"] or 1
-        open_count = await self.bot.db.fetchone(
-            "SELECT COUNT(*) c FROM tickets WHERE guild_id = ? AND user_id = ? AND type_id = ? AND status = 'ouvert'",
-            (interaction.guild.id, interaction.user.id, type_id),
-        )
-        if open_count["c"] >= limit:
-            return await interaction.response.send_message(
-                embed=embeds.warning(f"Vous avez déjà **{open_count['c']}** ticket(s) « {ticket_type['name']} » ouvert(s) (maximum : {limit})."),
-                ephemeral=True,
+            limit = ticket_type["max_per_member"] or 1
+            open_count = await self.bot.db.fetchone(
+                "SELECT COUNT(*) c FROM tickets WHERE guild_id = ? AND user_id = ? AND type_id = ? AND status = 'ouvert'",
+                (interaction.guild.id, interaction.user.id, type_id),
             )
+            if open_count["c"] >= limit:
+                return await interaction.response.send_message(
+                    embed=embeds.warning(f"Vous avez déjà **{open_count['c']}** ticket(s) « {ticket_type['name']} » ouvert(s) (maximum : {limit})."),
+                    ephemeral=True,
+                )
 
-        if ticket_type["use_form"]:
-            questions = await self.bot.db.fetchall(
-                "SELECT * FROM ticket_form_questions WHERE ticket_type_id = ? ORDER BY position", (type_id,)
+            if ticket_type["use_form"]:
+                questions = await self.bot.db.fetchall(
+                    "SELECT * FROM ticket_form_questions WHERE ticket_type_id = ? ORDER BY position", (type_id,)
+                )
+                if questions:
+                    return await interaction.response.send_modal(TicketFormModal(self, ticket_type, questions))
+
+            await interaction.response.defer(ephemeral=True)
+            await self.create_ticket(interaction, ticket_type, [])
+        except discord.InteractionResponded:
+            logger.info("Interaction déjà répondue pour l'ouverture du type #%s (guild=%s, user=%s).", type_id, guild_id, user_id)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException) as e:
+            logger.error("Erreur Discord à l'ouverture du ticket type #%s (guild=%s, user=%s) : %s", type_id, guild_id, user_id, e)
+            if not interaction.response.is_done():
+                try:
+                    await interaction.response.send_message(embed=embeds.error("Une erreur Discord est survenue. Réessayez dans un instant."), ephemeral=True)
+                except discord.HTTPException:
+                    pass
+        except Exception:
+            logger.error(
+                "Exception non gérée à l'ouverture du ticket type #%s (guild=%s, user=%s) :\n%s",
+                type_id, guild_id, user_id, traceback.format_exc(),
             )
-            if questions:
-                return await interaction.response.send_modal(TicketFormModal(self, ticket_type, questions))
-
-        await interaction.response.defer(ephemeral=True)
-        await self.create_ticket(interaction, ticket_type, [])
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(embed=embeds.error("Une erreur inattendue est survenue. Le staff a été informé."), ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=embeds.error("Une erreur inattendue est survenue. Le staff a été informé."), ephemeral=True)
+            except discord.HTTPException:
+                pass
+        finally:
+            elapsed = time.monotonic() - started
+            level = logger.warning if elapsed > 2.0 else logger.info
+            level("Ouverture ticket type #%s traitée en %.2fs (guild=%s, user=%s).", type_id, elapsed, guild_id, user_id)
 
     async def create_ticket(self, interaction: discord.Interaction, ticket_type, answers: list):
         guild = interaction.guild
@@ -935,32 +978,76 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- BOUTONS STAFF
 
     async def handle_control_button(self, interaction: discord.Interaction, key: str):
-        ticket = await self.get_ticket_by_channel(interaction.channel.id)
-        if not ticket:
-            return await interaction.response.send_message(embed=embeds.error("Ce salon n'est pas (ou plus) un ticket."), ephemeral=True)
-        if ticket["status"] != "ouvert" and key != "close":
-            return await interaction.response.send_message(embed=embeds.error("Ce ticket est fermé."), ephemeral=True)
+        # Log de diagnostic — voir en-tête du fichier : trace complète de chaque clic sur un
+        # bouton de contrôle de ticket, pour retrouver précisément quelle interaction a
+        # échoué (custom_id, utilisateur, serveur, ticket, durée) sans avoir à deviner.
+        started = time.monotonic()
+        guild_id = interaction.guild.id if interaction.guild else None
+        user_id = interaction.user.id if interaction.user else None
+        try:
+            ticket = await self.get_ticket_by_channel(interaction.channel.id)
+            if not ticket:
+                return await interaction.response.send_message(embed=embeds.error("Ce salon n'est pas (ou plus) un ticket."), ephemeral=True)
+            if ticket["status"] != "ouvert" and key != "close":
+                return await interaction.response.send_message(embed=embeds.error("Ce ticket est fermé."), ephemeral=True)
 
-        settings = await get_button_settings(self.bot, interaction.guild.id)
-        cfg = settings.get(key, {})
-        role_id = cfg.get("role_id")
-        if role_id:
-            role = interaction.guild.get_role(role_id)
-            member = interaction.user
-            allowed = (
-                (role and role in getattr(member, "roles", []))
-                or member.guild_permissions.manage_channels
-                or member.id == interaction.guild.owner_id
-            )
-            if not allowed:
-                return await interaction.response.send_message(
-                    embed=embeds.error(f"Seuls les membres avec le rôle {role.mention if role else 'configuré'} peuvent utiliser ce bouton."), ephemeral=True
+            settings = await get_button_settings(self.bot, interaction.guild.id)
+            cfg = settings.get(key, {})
+            role_id = cfg.get("role_id")
+            if role_id:
+                role = interaction.guild.get_role(role_id)
+                member = interaction.user
+                allowed = (
+                    (role and role in getattr(member, "roles", []))
+                    or member.guild_permissions.manage_channels
+                    or member.id == interaction.guild.owner_id
                 )
+                if not allowed:
+                    return await interaction.response.send_message(
+                        embed=embeds.error(f"Seuls les membres avec le rôle {role.mention if role else 'configuré'} peuvent utiliser ce bouton."), ephemeral=True
+                    )
 
-        await self.touch_activity(ticket["id"])
-        handler = getattr(self, f"btn_{key}", None)
-        if handler:
-            await handler(interaction, ticket)
+            await self.touch_activity(ticket["id"])
+            handler = getattr(self, f"btn_{key}", None)
+            if handler:
+                await handler(interaction, ticket)
+            else:
+                logger.warning(
+                    "Bouton ticket_ctrl_%s cliqué mais aucun handler btn_%s n'existe (guild=%s, user=%s).",
+                    key, key, guild_id, user_id,
+                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(embed=embeds.error("Ce bouton n'est pas encore relié à une action."), ephemeral=True)
+        except discord.InteractionResponded:
+            # Déjà répondu ailleurs (ex: double clic très rapide) — on ne relance jamais une
+            # deuxième réponse dessus, Discord le refuserait de toute façon.
+            logger.info("Interaction déjà répondue pour ticket_ctrl_%s (guild=%s, user=%s).", key, guild_id, user_id)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException) as e:
+            logger.error("Erreur Discord sur ticket_ctrl_%s (guild=%s, user=%s) : %s", key, guild_id, user_id, e)
+            if not interaction.response.is_done():
+                try:
+                    await interaction.response.send_message(embed=embeds.error("Une erreur Discord est survenue. Réessayez dans un instant."), ephemeral=True)
+                except discord.HTTPException:
+                    pass
+        except Exception:
+            # Ne JAMAIS laisser une exception inattendue empêcher toute réponse à
+            # l'interaction : c'est exactement ce qui produit "L'application ne répond
+            # plus" côté membre, sans aucune erreur visible côté staff.
+            logger.error(
+                "Exception non gérée sur ticket_ctrl_%s (guild=%s, user=%s, channel=%s) :\n%s",
+                key, guild_id, user_id, getattr(interaction.channel, "id", None), traceback.format_exc(),
+            )
+            if not interaction.response.is_done():
+                try:
+                    await interaction.response.send_message(embed=embeds.error("Une erreur inattendue est survenue. Le staff a été informé."), ephemeral=True)
+                except discord.HTTPException:
+                    pass
+        finally:
+            elapsed = time.monotonic() - started
+            if elapsed > 2.0:
+                logger.warning("Bouton ticket_ctrl_%s traité en %.2fs (guild=%s, user=%s) — proche ou au-delà du délai Discord.", key, elapsed, guild_id, user_id)
+            else:
+                logger.info("Bouton ticket_ctrl_%s traité en %.2fs (guild=%s, user=%s).", key, elapsed, guild_id, user_id)
 
     async def touch_activity(self, ticket_id: int):
         await self.bot.db.execute("UPDATE tickets SET last_activity_at = ? WHERE id = ?", (now(), ticket_id))
@@ -1191,6 +1278,60 @@ class Tickets(commands.Cog):
             overwrite.send_messages = True
             await ctx.channel.set_permissions(owner, overwrite=overwrite)
         await ctx.send(embed=embeds.success("🔓 Le ticket a été rouvert."))
+
+    # ---------------------------------------------------------------- COMMANDES : OUVERTURE (MEMBRES)
+
+    @commands.hybrid_command(name="ticket", description="Ouvrir un ticket de support.")
+    async def ticket_cmd(self, ctx: commands.Context):
+        """Point d'entrée pour un membre qui veut ouvrir un ticket sans passer par un panel
+        déjà envoyé dans un salon. Tout vient de la base de données (panels/types actifs
+        sur CE serveur) — rien n'est jamais écrit en dur, exactement comme les panels."""
+        if not ctx.guild:
+            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+
+        panels = await self.bot.db.fetchall(
+            "SELECT * FROM ticket_panels_v2 WHERE guild_id = ? AND enabled = 1", (ctx.guild.id,)
+        )
+        available = []
+        for p in panels:
+            types = await self.get_panel_types(p["id"])
+            if types:
+                available.append((p, types))
+
+        if not available:
+            return await ctx.send(
+                embed=embeds.warning(
+                    "Aucun panel de ticket n'est configuré (ou activé) sur ce serveur pour le moment.\n"
+                    "Un membre du staff peut en créer un avec `+ticketsetup` ou `+ticketpanel create`."
+                ),
+                ephemeral=True if ctx.interaction else False,
+            )
+
+        if len(available) == 1:
+            panel, types = available[0]
+            return await ctx.send(
+                embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types),
+                ephemeral=True if ctx.interaction else False,
+            )
+
+        # Plusieurs panels actifs sur ce serveur : on laisse d'abord choisir la catégorie
+        # (les options du menu viennent toutes de la DB, jamais du code).
+        e = embeds.neutral("🎫 Ouvrir un ticket", "Sélectionnez la catégorie correspondant à votre demande.")
+        view = discord.ui.View(timeout=180)
+        options = [
+            discord.SelectOption(label=p["name"][:100], value=str(p["id"]), description=(p["description"] or "")[:100] or None)
+            for p, _t in available[:25]
+        ]
+        select = discord.ui.Select(placeholder="Choisissez une catégorie", options=options)
+
+        async def on_pick(inter: discord.Interaction):
+            panel_id = int(select.values[0])
+            panel, types = next((p, t) for p, t in available if p["id"] == panel_id)
+            await inter.response.edit_message(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types))
+
+        select.callback = on_pick
+        view.add_item(select)
+        await ctx.send(embed=e, view=view, ephemeral=True if ctx.interaction else False)
 
     # ---------------------------------------------------------------- COMMANDES : HUB
 

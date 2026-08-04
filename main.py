@@ -140,7 +140,19 @@ class BotAllInOne(commands.Bot):
             self.add_view(TicketControlView())
             tickets_cog = self.get_cog("Tickets")
             if tickets_cog:
-                await tickets_cog.restore_panel_views()
+                panels_restored = await tickets_cog.restore_panel_views()
+                # Diagnostic demandé : confirmer en un coup d'œil, à chaque démarrage, que le
+                # module tickets est bien chargé et que ses panels/vues survivent au redémarrage
+                # (utile pour retrouver la cause d'un "L'application ne répond plus" — si ce
+                # log manque ou affiche 0 alors qu'il devrait y avoir des panels, le problème
+                # vient du chargement, pas d'une commande précise).
+                ticket_cmd_count = len([c for c in self.commands if c.cog_name == "Tickets"])
+                logger.info(
+                    "Cog Tickets : chargé — %s commande(s) tickets, %s panel(s) actif(s) restauré(s) en vue persistante.",
+                    ticket_cmd_count, panels_restored,
+                )
+            else:
+                logger.error("Cog Tickets introuvable après le chargement des extensions — les commandes de tickets ne fonctionneront pas.")
         except Exception:
             logger.warning("Impossible d'enregistrer les vues de tickets :\n" + traceback.format_exc())
 
