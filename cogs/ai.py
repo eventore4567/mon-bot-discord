@@ -13,6 +13,7 @@ Commandes :
 /summarize, +explain, +image-prompt, +rewrite, +fact-check — outils spécialisés existants
 +improve, +correct, +translate <langue>, +code — nouveaux outils spécialisés
 +aisetup (admin)                  — configuration de l'IA pour ce serveur
++aidiag (admin)                   — diagnostic technique de la connexion à l'IA (sans la clé)
 
 Moteur : utils/ai_service.py — AsyncOpenAI + Responses API, GPT-5.6 Terra par défaut, Sol
 pour les demandes complexes (code, analyse détaillée...), reasoning effort configurable,
@@ -813,6 +814,57 @@ class Ai(commands.Cog, name="Ai"):
         settings = await ai_service.get_settings(self.bot, ctx.guild.id)
         view = AiSetupView(self, ctx.guild.id, ctx.author.id, settings)
         await ctx.send(embed=view.build_embed(), view=view)
+
+    @commands.hybrid_command(
+        name="aidiag",
+        description="Diagnostic technique de la connexion à l'IA (admin uniquement).",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("ai")
+    async def aidiag(self, ctx: commands.Context):
+        """Fait un vrai appel de test à OpenAI et rapporte le résultat SANS JAMAIS afficher
+        la clé — seulement : présence de la clé, latence, et le type d'erreur éventuel
+        (ex: AuthenticationError = clé invalide, APIConnectionError = réseau bloqué côté
+        hébergeur, RateLimitError/PermissionDeniedError = crédit épuisé, NotFoundError =
+        modèle introuvable). Sert à diagnostiquer "l'IA ne répond pas" sans avoir besoin des
+        logs Railway."""
+        if ctx.interaction:
+            await ctx.defer()
+        msg = None
+        if not ctx.interaction:
+            msg = await ctx.send(embed=embeds.info("🔧 Test de connexion à l'IA en cours…"))
+        async with ctx.typing():
+            result = await ai_service.test_connection()
+
+        if not result["has_key"]:
+            e = embeds.error("Aucune clé OPENAI_API_KEY n'est configurée sur Railway (variable vide ou absente).")
+        elif result["ok"]:
+            e = embeds.success(
+                f"✅ Connexion à l'IA fonctionnelle.\n"
+                f"**Latence :** {result['latency_ms']} ms\n"
+                f"**Modèle testé :** {ai_service.MODEL_LABELS[ai_service.MODEL_TERRA]} (`{config.OPENAI_MODEL}`)\n"
+                f"**Réponse test :** {result.get('sample') or '(vide)'}"
+            )
+        else:
+            hints = {
+                "AuthenticationError": "La clé OPENAI_API_KEY est invalide ou incorrecte.",
+                "PermissionDeniedError": "La clé n'a pas la permission d'utiliser ce modèle (vérifie les permissions de la clé sur platform.openai.com).",
+                "RateLimitError": "Limite de débit ou quota/crédit OpenAI épuisé.",
+                "NotFoundError": "Modèle introuvable — vérifie OPENAI_MODEL sur Railway.",
+                "APIConnectionError": "Impossible de joindre l'API OpenAI depuis Railway (problème réseau côté hébergeur).",
+                "APITimeoutError": "L'appel a dépassé le délai maximal (45s) — connexion très lente ou bloquée.",
+            }
+            hint = hints.get(result["error_type"], "Erreur technique — voir les logs du serveur pour le détail complet.")
+            e = embeds.error(
+                f"❌ Échec de connexion à l'IA après {result['latency_ms']} ms.\n"
+                f"**Type d'erreur :** `{result['error_type']}`\n"
+                f"**Diagnostic probable :** {hint}"
+            )
+
+        if msg:
+            await msg.edit(embed=e)
+        else:
+            await ctx.send(embed=e)
 
 
 async def setup(bot: commands.Bot):

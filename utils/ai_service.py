@@ -338,6 +338,34 @@ async def generate(
         return AiResult(error=f"__ERROR__{type(exc).__name__}: {exc}", model_key=model_key)
 
 
+async def test_connection(model_key: str = MODEL_TERRA) -> dict:
+    """Diagnostic pour +aidiag (admin uniquement) : tente un appel minimal à l'API et
+    renvoie un résultat SANS JAMAIS inclure la clé ni le message d'erreur brut (qui peut
+    contenir un extrait de la clé sur certaines erreurs d'authentification) — uniquement
+    le type d'exception, ce qui suffit à diagnostiquer (clé invalide, modèle introuvable,
+    réseau bloqué, quota épuisé, etc.) sans rien exposer de sensible."""
+    if not config.OPENAI_API_KEY:
+        return {"ok": False, "has_key": False, "error_type": None, "latency_ms": 0}
+
+    client = get_client()
+    model_id = MODEL_IDS.get(model_key, config.OPENAI_MODEL)
+    start = time.monotonic()
+    try:
+        resp = await client.responses.create(
+            model=model_id,
+            instructions="Réponds uniquement par le mot : ok",
+            input="Test de connexion.",
+            reasoning={"effort": "low"},
+        )
+        latency_ms = int((time.monotonic() - start) * 1000)
+        text = getattr(resp, "output_text", None) or _extract_text(resp)
+        return {"ok": True, "has_key": True, "error_type": None, "latency_ms": latency_ms, "sample": (text or "")[:50]}
+    except Exception as exc:
+        latency_ms = int((time.monotonic() - start) * 1000)
+        logger.error("Erreur diagnostic OpenAI (+aidiag, modèle=%s) :\n%s", model_id, traceback.format_exc())
+        return {"ok": False, "has_key": True, "error_type": type(exc).__name__, "latency_ms": latency_ms}
+
+
 # ---------------------------------------------------------------- RÉGLAGES PAR SERVEUR (+aisetup)
 
 DEFAULT_AI_SETTINGS = {
