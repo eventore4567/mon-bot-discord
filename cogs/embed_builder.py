@@ -179,10 +179,14 @@ class EmbedDraft:
     def to_embed(self) -> discord.Embed | None:
         if self.is_empty():
             return None
+        # BUG CORRIGÉ : `discord.Embed.Empty` n'existe plus depuis discord.py 2.0 (remplacé
+        # par `None`, qui est déjà géré nativement par le constructeur). L'ancienne ligne
+        # levait une AttributeError dès qu'un embed sans couleur explicite était construit —
+        # c'était la cause du "Une erreur inattendue est survenue. Rien n'a été envoyé."
         e = discord.Embed(
             title=self.title or None,
             description=self.description or None,
-            colour=self.colour if self.colour is not None else discord.Embed.Empty,
+            colour=self.colour,
         )
         if self.author_name:
             e.set_author(name=self.author_name, icon_url=self.author_icon_url or None)
@@ -908,9 +912,12 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
             await self._safe_edit_error(interaction, "Le salon n'existe plus.")
         except discord.HTTPException as e:
             await self._safe_edit_error(interaction, f"Discord a refusé l'envoi : `{e}`")
-        except Exception:
+        except Exception as e:
+            # Le détail exact (tronqué) est aussi affiché au staff qui utilise +embed — pas
+            # juste "une erreur inattendue" sans plus d'info — pour qu'un futur bug puisse
+            # être diagnostiqué directement depuis Discord, sans devoir relire les logs.
             logger.error("Exception non gérée lors de l'envoi d'un embed (guild=%s, user=%s) :\n%s", interaction.guild.id if interaction.guild else None, interaction.user.id, traceback.format_exc())
-            await self._safe_edit_error(interaction, "Une erreur inattendue est survenue. Rien n'a été envoyé.")
+            await self._safe_edit_error(interaction, f"Une erreur inattendue est survenue. Rien n'a été envoyé.\nDétail technique : `{type(e).__name__}: {e}`"[:300])
 
     async def do_edit_message(self, interaction: discord.Interaction, draft: EmbedDraft):
         try:
@@ -930,9 +937,9 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
             await interaction.followup.send(embed=embeds.error("Permission refusée pour modifier ce message."), ephemeral=True)
         except discord.HTTPException as e:
             await interaction.followup.send(embed=embeds.error(f"Discord a refusé la modification : `{e}`"), ephemeral=True)
-        except Exception:
+        except Exception as e:
             logger.error("Exception non gérée lors de l'édition d'un message (guild=%s) :\n%s", interaction.guild.id if interaction.guild else None, traceback.format_exc())
-            await interaction.followup.send(embed=embeds.error("Une erreur inattendue est survenue."), ephemeral=True)
+            await interaction.followup.send(embed=embeds.error(f"Une erreur inattendue est survenue.\nDétail technique : `{type(e).__name__}: {e}`"[:300]), ephemeral=True)
 
     async def _safe_edit_error(self, interaction: discord.Interaction, message: str):
         try:

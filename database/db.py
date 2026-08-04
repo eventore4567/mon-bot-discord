@@ -841,6 +841,13 @@ MEMBER_INVITES_NEW_COLUMNS = {
     "account_age_days": "INTEGER",
 }
 
+# Même principe, pour giveaways : "image_url" ajoutée pour permettre une image sur
+# l'embed du giveaway (demandé par Jayden), sans jamais recréer la table ni perdre
+# les giveaways déjà en cours.
+GIVEAWAYS_NEW_COLUMNS = {
+    "image_url": "TEXT",
+}
+
 # Seuil (en jours) en dessous duquel un compte est considéré "fake" pour le classement
 # d'invitations — mêmes valeur et logique que l'heuristique "comptes suspects" déjà
 # utilisée par cogs/invites.py (SUSPECT_ACCOUNT_AGE_DAYS), pour rester cohérent.
@@ -916,6 +923,12 @@ class Database:
         for column, col_type in MEMBER_INVITES_NEW_COLUMNS.items():
             if column not in existing_invites:
                 await self._conn.execute(f"ALTER TABLE member_invites ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(giveaways)")
+        existing_giveaways = {row[1] for row in await cur.fetchall()}
+        for column, col_type in GIVEAWAYS_NEW_COLUMNS.items():
+            if column not in existing_giveaways:
+                await self._conn.execute(f"ALTER TABLE giveaways ADD COLUMN {column} {col_type}")
 
     async def close(self):
         if self._conn:

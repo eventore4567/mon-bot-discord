@@ -225,6 +225,7 @@ class Events(commands.Cog, name="Events"):
         prix="Le prix à gagner",
         duree="Durée du giveaway (ex: 10m, 1h, 1j)",
         gagnants="Nombre de gagnants (défaut 1)",
+        image="(Optionnel) URL d'une image à afficher sur le giveaway",
         role_requis="(Optionnel) Rôle obligatoire pour participer",
         niveau_requis="(Optionnel) Niveau minimum requis pour participer",
         role_exclu="(Optionnel) Rôle interdit de participation (liste noire pour ce giveaway)",
@@ -238,6 +239,7 @@ class Events(commands.Cog, name="Events"):
         prix: str,
         duree: str,
         gagnants: int = 1,
+        image: str = None,
         role_requis: discord.Role = None,
         niveau_requis: int = None,
         role_exclu: discord.Role = None,
@@ -251,6 +253,14 @@ class Events(commands.Cog, name="Events"):
             return await ctx.send(embed=embeds.error("Le nombre de gagnants doit être au moins 1."))
         if entrees_bonus < 1:
             entrees_bonus = 2
+
+        # Une pièce jointe envoyée AVEC la commande (uniquement possible en préfixe, +) est
+        # acceptée comme alternative à une URL — pratique pour ne pas avoir à héberger
+        # l'image ailleurs avant de créer le giveaway.
+        if not image and ctx.message and ctx.message.attachments:
+            image = ctx.message.attachments[0].url
+        if image and not (image.startswith("http://") or image.startswith("https://")):
+            return await ctx.send(embed=embeds.error("L'URL de l'image doit commencer par `http://` ou `https://`."))
 
         end_at = now() + seconds
         design = await self.bot.db.get_design_settings(ctx.guild.id)
@@ -272,13 +282,15 @@ class Events(commands.Cog, name="Events"):
             e.add_field(name="Rôle exclu", value=role_exclu.mention, inline=True)
         if role_bonus:
             e.add_field(name="Bonus de chances", value=f"{role_bonus.mention} ({entrees_bonus}x)", inline=True)
+        if image:
+            e.set_image(url=image)
 
         msg = await ctx.send(embed=e, view=GiveawayView())
         await self.bot.db.execute(
             "INSERT INTO giveaways "
             "(guild_id, channel_id, message_id, prize, winners_count, status, end_at, "
-            "required_role_id, required_level, excluded_role_id, bonus_role_id, bonus_entries, created_by, created_at) "
-            "VALUES (?, ?, ?, ?, ?, 'actif', ?, ?, ?, ?, ?, ?, ?, ?)",
+            "required_role_id, required_level, excluded_role_id, bonus_role_id, bonus_entries, created_by, created_at, image_url) "
+            "VALUES (?, ?, ?, ?, ?, 'actif', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 ctx.guild.id, ctx.channel.id, msg.id, prix, gagnants, end_at,
                 role_requis.id if role_requis else None,
@@ -286,7 +298,7 @@ class Events(commands.Cog, name="Events"):
                 role_exclu.id if role_exclu else None,
                 role_bonus.id if role_bonus else None,
                 entrees_bonus,
-                ctx.author.id, now(),
+                ctx.author.id, now(), image,
             ),
         )
         if ctx.interaction:
