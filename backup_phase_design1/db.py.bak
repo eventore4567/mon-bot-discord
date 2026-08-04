@@ -58,8 +58,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
     stats_channel INTEGER,
     afk_channel INTEGER,
     error_channel INTEGER,
-    stats_settings_json TEXT DEFAULT '{}',
-    design_settings_json TEXT DEFAULT '{}'
+    stats_settings_json TEXT DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS warnings (
@@ -676,27 +675,6 @@ DEFAULT_STATS_SETTINGS = {
     "level_keep_old_roles": False,
 }
 
-# Valeurs par défaut du panneau +designsetup (Phase 1 de la refonte visuelle) — fusionnées
-# avec ce qui est enregistré en base (guild_config.design_settings_json). Ces réglages ne
-# sont pas encore utilisés par les commandes existantes (utils/embeds.py reste la source
-# tant qu'une commande n'a pas été migrée vers utils/design_system.py, Phases 2 à 5) : ils
-# ne servent pour l'instant qu'à préparer la persistance, sans rien changer au comportement
-# actuel du bot.
-DEFAULT_DESIGN_SETTINGS = {
-    "primary_color": 0x5865F2,
-    "secondary_color": 0x7C5CFC,
-    "success_color": 0x23A559,
-    "warning_color": 0xF0B232,
-    "danger_color": 0xF23F43,
-    "footer": "SentriX",
-    "show_avatars": True,
-    "progress_length": 10,
-    "progress_filled": "🟪",
-    "progress_empty": "⬛",
-    "compact_mode": False,
-    "charts_enabled": True,
-}
-
 # Champs de la table economy dont le nom en base ("cash") diffère volontairement du nom
 # affiché ("wallet") demandé par Jayden — renommer la colonne sur une base de 200 000
 # membres est un risque inutile ; on ne renomme donc qu'à l'affichage (voir stats_service.py).
@@ -742,9 +720,6 @@ GUILD_CONFIG_NEW_COLUMNS = {
     # salons exclus, emojis de la barre, visibilité des champs...). On évite ainsi une
     # vingtaine de colonnes séparées pour un seul écran de configuration.
     "stats_settings_json": "TEXT DEFAULT '{}'",
-    # Ajoutée pour la Phase 1 de la refonte visuelle (+designsetup) : mêmes principes que
-    # stats_settings_json — un seul blob JSON pour tous les réglages de design.
-    "design_settings_json": "TEXT DEFAULT '{}'",
 }
 
 # Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"
@@ -1227,31 +1202,6 @@ class Database:
 
     async def reset_stats_settings(self, guild_id: int):
         await self.set_guild_config(guild_id, "stats_settings_json", "{}")
-
-    # ---------- Réglages de +designsetup (Phase 1 de la refonte visuelle) ----------
-
-    async def get_design_settings(self, guild_id: int) -> dict:
-        """Même principe que get_stats_settings() : fusionne avec DEFAULT_DESIGN_SETTINGS
-        pour qu'un serveur pas encore configuré (ou un nouveau réglage ajouté après coup)
-        garde toujours une valeur sûre."""
-        conf = await self.get_guild_config(guild_id)
-        raw = conf["design_settings_json"] if conf and conf["design_settings_json"] else "{}"
-        try:
-            saved = json.loads(raw)
-        except (ValueError, TypeError):
-            saved = {}
-        merged = dict(DEFAULT_DESIGN_SETTINGS)
-        merged.update(saved)
-        return merged
-
-    async def set_design_settings(self, guild_id: int, updates: dict) -> dict:
-        current = await self.get_design_settings(guild_id)
-        current.update(updates)
-        await self.set_guild_config(guild_id, "design_settings_json", json.dumps(current))
-        return current
-
-    async def reset_design_settings(self, guild_id: int):
-        await self.set_guild_config(guild_id, "design_settings_json", "{}")
 
     # ---------- Réputation (table profiles) ----------
 
