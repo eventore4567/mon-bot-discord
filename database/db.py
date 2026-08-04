@@ -672,6 +672,58 @@ CREATE TABLE IF NOT EXISTS embed_allowed_roles (
     role_id INTEGER NOT NULL,
     PRIMARY KEY (guild_id, role_id)
 );
+
+-- Réglages de l'IA (+aisetup), un jeu de valeurs par serveur. allowed_channel_ids et
+-- allowed_role_ids sont des listes JSON d'IDs ; vides = aucune restriction (tout le monde,
+-- partout, comme le comportement historique de /ask et /sentrix).
+CREATE TABLE IF NOT EXISTS ai_settings (
+    guild_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    default_model TEXT NOT NULL DEFAULT 'terra',
+    reasoning_effort TEXT NOT NULL DEFAULT 'medium',
+    allowed_channel_ids TEXT NOT NULL DEFAULT '[]',
+    allowed_role_ids TEXT NOT NULL DEFAULT '[]',
+    cooldown_seconds INTEGER NOT NULL DEFAULT 8,
+    per_minute_limit INTEGER NOT NULL DEFAULT 6,
+    daily_limit INTEGER NOT NULL DEFAULT 50,
+    max_question_length INTEGER NOT NULL DEFAULT 1500,
+    memory_enabled INTEGER NOT NULL DEFAULT 1,
+    memory_minutes INTEGER NOT NULL DEFAULT 30,
+    response_style TEXT NOT NULL DEFAULT 'standard',
+    language TEXT NOT NULL DEFAULT 'fr',
+    logs_enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER
+);
+
+-- Mémoire de conversation IA, persistante (survit à un redémarrage du bot), toujours
+-- strictement séparée par guild_id + channel_id + user_id : deux utilisateurs, deux salons
+-- ou deux serveurs différents ne partagent jamais la même conversation. Le champ
+-- response_id permet de chaîner les tours via la Responses API (previous_response_id)
+-- sans avoir à renvoyer tout l'historique à chaque appel. Purge : les lignes plus vieilles
+-- que memory_minutes sont ignorées à la lecture et nettoyées périodiquement (voir
+-- ai_service.py) — jamais mélangées, jamais lues au-delà de l'expiration.
+CREATE TABLE IF NOT EXISTS ai_conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    response_id TEXT,
+    created_at INTEGER NOT NULL
+);
+
+-- Suivi de consommation IA (cooldown / limite par minute / limite quotidienne / logs) —
+-- une ligne par utilisateur par jour et par serveur. Ne contient jamais le contenu des
+-- questions/réponses, uniquement des compteurs.
+CREATE TABLE IF NOT EXISTS ai_usage (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    tokens_estimate INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id, day)
+);
 """
 
 # Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de
@@ -713,6 +765,8 @@ CREATE INDEX IF NOT EXISTS idx_economy_transactions_guild ON economy_transaction
 CREATE INDEX IF NOT EXISTS idx_reputation_history_guild ON reputation_history (guild_id, receiver_id);
 CREATE INDEX IF NOT EXISTS idx_embed_templates_guild ON embed_templates (guild_id);
 CREATE INDEX IF NOT EXISTS idx_embed_allowed_roles_guild ON embed_allowed_roles (guild_id);
+CREATE INDEX IF NOT EXISTS idx_ai_conversations_lookup ON ai_conversations (guild_id, channel_id, user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_guild_user_day ON ai_usage (guild_id, user_id, day);
 """
 
 # Valeurs par défaut du panneau +statsconfig — fusionnées avec ce qui est enregistré en
@@ -781,6 +835,7 @@ MANAGER_CATEGORIES = {
     "securite": "🔐 Sécurité / AutoMod",
     "economie": "💰 Économie",
     "embeds": "📨 Créateur d'embeds",
+    "ai": "🤖 Intelligence artificielle",
     "complete": "🔑 Gestion complète",
 }
 

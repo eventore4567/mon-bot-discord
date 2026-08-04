@@ -13,8 +13,15 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # --- Optionnel (fonctionnalités IA / utilitaires) ---
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")          # /ask, /imagine, /rewrite, etc.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")          # /ask, /ai, /sentrix, etc.
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")         # /weather (sinon fallback wttr.in gratuit)
+
+# Modèle IA par défaut (questions courantes) et modèle avancé (programmation, analyse
+# détaillée, résolution de problèmes, longs textes, explications difficiles) — voir
+# utils/ai_service.py pour la logique de sélection automatique. Restent configurables via
+# variables d'environnement sans toucher au code, au cas où OpenAI change encore les noms.
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
+OPENAI_MODEL_ADVANCED = os.getenv("OPENAI_MODEL_ADVANCED", "gpt-5.6-sol")
 
 # --- Général ---
 DEFAULT_PREFIX = os.getenv("BOT_PREFIX", "+")
