@@ -13,7 +13,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
-from utils import embeds, checks, helpers
+from utils import embeds, checks, helpers, design_system
 from database.db import now
 
 
@@ -147,7 +147,15 @@ class Events(commands.Cog, name="Events"):
         if not entries:
             if channel:
                 try:
-                    await channel.send(embed=embeds.warning(f"🎉 Le giveaway **{giveaway['prize']}** est terminé, mais personne n'a participé."))
+                    design = await self.bot.db.get_design_settings(giveaway["guild_id"])
+                    style = design_system.CATEGORY_STYLES["giveaways"]
+                    e = design_system.create_embed(
+                        title=f"{style['emoji']} Giveaway terminé",
+                        description=f"Le giveaway **{giveaway['prize']}** est terminé, mais personne n'a participé.",
+                        colour=design.get("warning_color", design_system.COLORS.warning),
+                        footer=design.get("footer"),
+                    )
+                    await channel.send(embed=e)
                 except discord.HTTPException:
                     pass
             return
@@ -174,7 +182,14 @@ class Events(commands.Cog, name="Events"):
         )
 
         if channel:
-            e = embeds.success(f"🎉 Félicitations {mentions} ! Vous avez gagné **{giveaway['prize']}** !")
+            design = await self.bot.db.get_design_settings(giveaway["guild_id"])
+            style = design_system.CATEGORY_STYLES["giveaways"]
+            e = design_system.create_embed(
+                title=f"{style['emoji']} Félicitations !",
+                description=f"{mentions}\n\nVous avez gagné **{giveaway['prize']}** !",
+                colour=design.get("success_color", design_system.COLORS.success),
+                footer=design.get("footer"),
+            )
             try:
                 await channel.send(embed=e)
                 original = None
@@ -183,7 +198,10 @@ class Events(commands.Cog, name="Events"):
                 except discord.NotFound:
                     pass
                 if original:
-                    ended_embed = original.embeds[0] if original.embeds else embeds.neutral("🎉 Giveaway terminé")
+                    # On garde le même embed d'origine (titre, champs déjà présents) et on
+                    # ajoute seulement le résultat — jamais de nouvel embed reconstruit de
+                    # zéro ici, pour ne perdre aucune information déjà affichée.
+                    ended_embed = original.embeds[0] if original.embeds else design_system.create_embed(title=f"{style['emoji']} Giveaway terminé", colour=style["colour"])
                     ended_embed.description = f"**Gagnant(s) :** {mentions}\n\n*Ce giveaway est terminé.*"
                     ended_embed.color = discord.Color.dark_grey()
                     await original.edit(embed=ended_embed, view=None)
@@ -235,7 +253,14 @@ class Events(commands.Cog, name="Events"):
             entrees_bonus = 2
 
         end_at = now() + seconds
-        e = embeds.neutral("🎉 GIVEAWAY 🎉", f"**Prix :** {prix}\n\nCliquez sur le bouton ci-dessous pour participer !")
+        design = await self.bot.db.get_design_settings(ctx.guild.id)
+        style = design_system.CATEGORY_STYLES["giveaways"]
+        e = design_system.create_embed(
+            title=f"{style['emoji']} GIVEAWAY",
+            description=f"**Prix :** {prix}\n\nCliquez sur le bouton ci-dessous pour participer !",
+            colour=design.get("primary_color", style["colour"]),
+            footer=design.get("footer"),
+        )
         e.add_field(name="Se termine", value=f"<t:{end_at}:R>", inline=True)
         e.add_field(name="Gagnants", value=str(gagnants), inline=True)
         e.add_field(name="Organisé par", value=ctx.author.mention, inline=True)

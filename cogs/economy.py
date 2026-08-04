@@ -20,7 +20,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks, stats_service
+from utils import embeds, checks, stats_service, design_system
 from database.db import now
 
 DAILY_AMOUNT = 200
@@ -50,20 +50,23 @@ class Economy(commands.Cog, name="Economy"):
         self.rob_cooldowns: dict[int, int] = {}
 
     async def _send_balance(self, ctx: commands.Context, membre: discord.Member):
+        # Migrée vers design_system (Phase 4) — la couleur/footer viennent de +designsetup,
+        # l'emoji de la monnaie reste piloté par +statsconfig (economy_emoji), inchangé.
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
+        design = await self.bot.db.get_design_settings(ctx.guild.id)
         eco_emoji = settings.get("economy_emoji", "🪙")
         stats = await stats_service.get_member_statistics(self.bot, ctx.guild, membre)
-        e = embeds.neutral(f"💰 Économie de {membre.display_name}")
-        e.set_thumbnail(url=membre.display_avatar.url)
-        e.add_field(
-            name="💰 Économie",
-            value=(
-                f"Portefeuille : {stats_service.format_number(stats['wallet'])} {eco_emoji}\n"
-                f"Banque : {stats_service.format_number(stats['bank'])} 🏦\n"
-                f"Total : {stats_service.format_number(stats['total_money'])} {eco_emoji}"
-            ),
-            inline=False,
+        style = design_system.CATEGORY_STYLES["economy"]
+        e = design_system.create_embed(
+            title=f"{style['emoji']} Économie de {membre.display_name}",
+            colour=design.get("primary_color", style["colour"]),
+            user=membre if design.get("show_avatars", True) else None,
+            thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
+            footer=design.get("footer"),
         )
+        e.add_field(name="👛 Portefeuille", value=f"{stats_service.format_number(stats['wallet'])} {eco_emoji}", inline=True)
+        e.add_field(name="🏦 Banque", value=f"{stats_service.format_number(stats['bank'])} {eco_emoji}", inline=True)
+        e.add_field(name="💎 Total", value=f"**{stats_service.format_number(stats['total_money'])}** {eco_emoji}", inline=True)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="balance", description="Afficher votre solde ou celui d'un membre.")
@@ -151,6 +154,7 @@ class Economy(commands.Cog, name="Economy"):
 
     @commands.hybrid_command(name="economyleaderboard", description="Afficher le classement des plus riches.")
     async def economyleaderboard(self, ctx: commands.Context):
+        design = await self.bot.db.get_design_settings(ctx.guild.id)
         rows = await self.bot.db.fetchall(
             "SELECT * FROM economy WHERE guild_id = ? ORDER BY (cash + bank) DESC LIMIT 15", (ctx.guild.id,)
         )
@@ -169,10 +173,18 @@ class Economy(commands.Cog, name="Economy"):
             rank += 1
             if rank > 10:
                 break
-            lines.append(f"**{rank}.** {name} — {stats_service.format_number(r['cash'] + r['bank'])} 🪙")
+            medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"**{rank}.**")
+            lines.append(f"{medal} {name} — {stats_service.format_number(r['cash'] + r['bank'])} 🪙")
         if not lines:
             return await ctx.send(embed=embeds.info("Aucune donnée économique pour l'instant."))
-        await ctx.send(embed=embeds.neutral("🏆 Classement des plus riches", "\n".join(lines)))
+        style = design_system.CATEGORY_STYLES["economy"]
+        embed = design_system.create_embed(
+            title=f"{style['emoji']} 🏆 Classement des plus riches",
+            description="\n".join(lines),
+            colour=design.get("primary_color", style["colour"]),
+            footer=design.get("footer"),
+        )
+        await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="leaderboard-money", description="Afficher le classement des plus riches.", with_app_command=False)
     async def leaderboard_money(self, ctx: commands.Context):
@@ -181,11 +193,19 @@ class Economy(commands.Cog, name="Economy"):
 
     @commands.hybrid_command(name="shop", description="Afficher la boutique du serveur.")
     async def shop(self, ctx: commands.Context):
+        design = await self.bot.db.get_design_settings(ctx.guild.id)
         items = await self.bot.db.fetchall("SELECT * FROM shop_items WHERE guild_id = ?", (ctx.guild.id,))
         if not items:
             return await ctx.send(embed=embeds.info("La boutique est vide pour l'instant."))
         lines = [f"**#{it['id']}** {it['name']} — {stats_service.format_number(it['price'])} 🪙" for it in items]
-        await ctx.send(embed=embeds.neutral("🛒 Boutique du serveur", "\n".join(lines)))
+        style = design_system.CATEGORY_STYLES["economy"]
+        embed = design_system.create_embed(
+            title=f"🛒 Boutique du serveur",
+            description="\n".join(lines),
+            colour=design.get("primary_color", style["colour"]),
+            footer=design.get("footer"),
+        )
+        await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="buy", description="Acheter un article de la boutique.")
     @app_commands.describe(id="L'identifiant de l'article (voir /shop)")
@@ -208,13 +228,23 @@ class Economy(commands.Cog, name="Economy"):
 
     @commands.hybrid_command(name="inventory", description="Afficher votre inventaire.", with_app_command=False)
     async def inventory(self, ctx: commands.Context):
+        design = await self.bot.db.get_design_settings(ctx.guild.id)
         rows = await self.bot.db.fetchall(
             "SELECT * FROM inventory WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, ctx.author.id)
         )
         if not rows:
             return await ctx.send(embed=embeds.info("Votre inventaire est vide."))
-        lines = [f"{r['item_name']} x{stats_service.format_number(r['quantity'])}" for r in rows]
-        await ctx.send(embed=embeds.neutral(f"🎒 Inventaire de {ctx.author.display_name}", "\n".join(lines)))
+        lines = [f"• {r['item_name']} × {stats_service.format_number(r['quantity'])}" for r in rows]
+        style = design_system.CATEGORY_STYLES["economy"]
+        embed = design_system.create_embed(
+            title=f"🎒 Inventaire de {ctx.author.display_name}",
+            description="\n".join(lines),
+            colour=design.get("primary_color", style["colour"]),
+            user=ctx.author if design.get("show_avatars", True) else None,
+            thumbnail=ctx.author.display_avatar.url if design.get("show_avatars", True) else None,
+            footer=design.get("footer"),
+        )
+        await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="sell", description="Vendre un article de votre inventaire.", with_app_command=False)
     @app_commands.describe(objet="Le nom de l'objet à vendre")
@@ -282,11 +312,17 @@ class Economy(commands.Cog, name="Economy"):
 
     @commands.hybrid_command(name="bank", description="Afficher le détail de votre compte bancaire.", with_app_command=False)
     async def bank(self, ctx: commands.Context):
+        design = await self.bot.db.get_design_settings(ctx.guild.id)
         stats = await stats_service.get_member_statistics(self.bot, ctx.guild, ctx.author)
-        e = embeds.neutral("🏦 Votre banque")
-        e.add_field(name="Espèces", value=f"{stats_service.format_number(stats['wallet'])} 🪙", inline=True)
-        e.add_field(name="Banque", value=f"{stats_service.format_number(stats['bank'])} 🏦", inline=True)
-        e.add_field(name="Total", value=f"{stats_service.format_number(stats['total_money'])} 🪙", inline=True)
+        style = design_system.CATEGORY_STYLES["economy"]
+        e = design_system.create_embed(
+            title="🏦 Votre banque",
+            colour=design.get("primary_color", style["colour"]),
+            footer=design.get("footer"),
+        )
+        e.add_field(name="👛 Espèces", value=f"{stats_service.format_number(stats['wallet'])} 🪙", inline=True)
+        e.add_field(name="🏦 Banque", value=f"{stats_service.format_number(stats['bank'])} 🪙", inline=True)
+        e.add_field(name="💎 Total", value=f"**{stats_service.format_number(stats['total_money'])}** 🪙", inline=True)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="give-money", description="[Admin] Donner de l'argent à un membre.", with_app_command=False)
