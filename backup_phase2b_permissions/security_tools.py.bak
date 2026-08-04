@@ -251,7 +251,7 @@ class Security(commands.Cog):
     @commands.hybrid_command(
         name="permission-audit", description="Analyser les permissions du serveur et repérer les réglages dangereux.",
     )
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def permission_audit(self, ctx: commands.Context):
         await ctx.defer() if ctx.interaction else None
         guild = ctx.guild
@@ -335,7 +335,7 @@ class Security(commands.Cog):
         with_app_command=False,
     )
     @app_commands.describe(label="Un nom pour retrouver facilement cette sauvegarde")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def server_backup(self, ctx: commands.Context, *, label: str = ""):
         await ctx.defer() if ctx.interaction else None
         guild = ctx.guild
@@ -395,7 +395,7 @@ class Security(commands.Cog):
         with_app_command=False,
     )
     @app_commands.describe(backup_id="L'identifiant de la sauvegarde (voir +server-backup)")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def server_restore(self, ctx: commands.Context, backup_id: int):
         row = await self.bot.db.fetchone("SELECT * FROM server_backups WHERE id = ? AND guild_id = ?", (backup_id, ctx.guild.id))
         if not row:

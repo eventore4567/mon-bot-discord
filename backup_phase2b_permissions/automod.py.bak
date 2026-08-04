@@ -249,83 +249,83 @@ class AutoMod(commands.Cog, name="Automod"):
     @commands.hybrid_command(name="antispam", description="Activer/désactiver la protection anti-spam.")
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antispam(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antispam", etat)
 
     @commands.hybrid_command(name="antilink", description="Activer/désactiver le blocage des liens.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antilink(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antilink", etat)
 
     @commands.hybrid_command(name="antiinvite", description="Activer/désactiver le blocage des invitations Discord.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antiinvite(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antiinvite", etat)
 
     @commands.hybrid_command(name="antimention", description="Activer/désactiver la protection anti-mention massive.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antimention(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antimention", etat)
 
     @commands.hybrid_command(name="anticaps", description="Activer/désactiver le filtre anti-majuscules.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def anticaps(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "anticaps", etat)
 
     @commands.hybrid_command(name="antiemoji", description="Activer/désactiver le filtre anti-spam d'émojis.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antiemoji(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antiemoji", etat)
 
     @commands.hybrid_command(name="antiraid", description="Activer/désactiver la protection anti-raid.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antiraid(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antiraid", etat)
 
     @commands.hybrid_command(name="antibot", description="Activer/désactiver le blocage automatique des bots non autorisés.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antibot(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antibot", etat)
 
     @commands.hybrid_command(name="antiaccount", description="Activer/désactiver le filtre anti-comptes récents.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antiaccount(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antiaccount", etat)
 
     @commands.hybrid_command(name="antiscam", description="Activer/désactiver la détection de liens/messages d'arnaque.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antiscam(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antiscam", etat)
 
     @commands.hybrid_command(name="antinuke", description="Activer/désactiver la protection anti-nuke (compte compromis).")
     @app_commands.describe(etat="Activer ou désactiver cette protection")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antinuke(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antinuke", etat)
 
     @commands.hybrid_command(name="antinuke-whitelist-add", description="Exempter un membre de confiance de l'anti-nuke.", with_app_command=False)
     @app_commands.describe(membre="Le membre à exempter")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antinuke_whitelist_add(self, ctx: commands.Context, membre: discord.Member):
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)", (ctx.guild.id, membre.id)
@@ -334,7 +334,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(name="antinuke-whitelist-remove", description="Retirer un membre de la liste blanche anti-nuke.", with_app_command=False)
     @app_commands.describe(membre="Le membre à retirer")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antinuke_whitelist_remove(self, ctx: commands.Context, membre: discord.Member):
         await self.bot.db.execute(
             "DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
@@ -342,7 +342,7 @@ class AutoMod(commands.Cog, name="Automod"):
         await ctx.send(embed=embeds.success(f"{membre.mention} a été retiré de la liste blanche anti-nuke."))
 
     @commands.hybrid_command(name="antinuke-whitelist-list", description="Afficher les membres exemptés de l'anti-nuke.", with_app_command=False)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def antinuke_whitelist_list(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM antinuke_whitelist WHERE guild_id = ?", (ctx.guild.id,))
         if not rows:
@@ -351,7 +351,7 @@ class AutoMod(commands.Cog, name="Automod"):
         await ctx.send(embed=embeds.neutral("🛡️ Liste blanche anti-nuke", "\n".join(lines)))
 
     @commands.hybrid_command(name="lockdown-server", description="[Sécurité] Verrouiller tous les salons textuels du serveur.")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def lockdown_server(self, ctx: commands.Context):
         await ctx.send(embed=embeds.warning("🔒 Verrouillage de tous les salons en cours, merci de patienter..."))
         count = 0
@@ -371,7 +371,7 @@ class AutoMod(commands.Cog, name="Automod"):
         await ctx.send(embed=embeds.success(f"🔒 {count} salon(s) verrouillé(s). Utilisez `/unlock-server` pour déverrouiller."))
 
     @commands.hybrid_command(name="unlock-server", description="[Sécurité] Déverrouiller tous les salons textuels du serveur.")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def unlock_server(self, ctx: commands.Context):
         await ctx.send(embed=embeds.info("🔓 Déverrouillage en cours, merci de patienter..."))
         count = 0
@@ -421,13 +421,13 @@ class AutoMod(commands.Cog, name="Automod"):
     @commands.hybrid_command(name="automod-escalation", description="Activer/désactiver l'escalade automatique des sanctions AutoMod.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver l'escalade")
     @app_commands.choices(etat=TOGGLE_CHOICES)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def automod_escalation(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "escalation", etat)
 
     @commands.hybrid_command(name="automod-exempt-role-add", description="Exempter un rôle des filtres AutoMod (jamais sanctionné).", with_app_command=False)
     @app_commands.describe(role="Le rôle à exempter")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def automod_exempt_role_add(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.add_automod_exempt_role(ctx.guild.id, role.id)
         self.exempt_roles_cache.pop(ctx.guild.id, None)
@@ -435,7 +435,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(name="automod-exempt-role-remove", description="Retirer un rôle de la liste des rôles exemptés d'AutoMod.", with_app_command=False)
     @app_commands.describe(role="Le rôle à retirer")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def automod_exempt_role_remove(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.remove_automod_exempt_role(ctx.guild.id, role.id)
         self.exempt_roles_cache.pop(ctx.guild.id, None)
@@ -443,7 +443,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(name="automod-history", description="Afficher l'historique récent des actions AutoMod (globalement ou pour un membre).", with_app_command=False)
     @app_commands.describe(membre="Filtrer sur un membre précis (optionnel)")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def automod_history(self, ctx: commands.Context, membre: discord.Member = None):
         if membre:
             rows = await self.bot.db.automod_history_for_user(ctx.guild.id, membre.id, limit=10)
@@ -466,7 +466,7 @@ class AutoMod(commands.Cog, name="Automod"):
         app_commands.Choice(name="Moyen", value="moyen"),
         app_commands.Choice(name="Élevé", value="eleve"),
     ])
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def security_level(self, ctx: commands.Context, niveau: str):
         await self.bot.db.set_guild_config(ctx.guild.id, "security_level", niveau)
         for field, value in SECURITY_PRESETS.get(niveau, {}).items():
@@ -478,7 +478,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(name="blacklist-add", description="Ajouter un mot à la liste noire.")
     @app_commands.describe(mot="Le mot ou l'expression à interdire")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def blacklist_add(self, ctx: commands.Context, *, mot: str):
         await self.bot.db.execute(
             "INSERT INTO blacklist_words (guild_id, word) VALUES (?, ?)", (ctx.guild.id, mot.lower())
@@ -488,7 +488,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(name="blacklist-remove", description="Retirer un mot de la liste noire.", with_app_command=False)
     @app_commands.describe(mot="Le mot à retirer")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def blacklist_remove(self, ctx: commands.Context, *, mot: str):
         await self.bot.db.execute(
             "DELETE FROM blacklist_words WHERE guild_id = ? AND word = ?", (ctx.guild.id, mot.lower())
@@ -497,7 +497,7 @@ class AutoMod(commands.Cog, name="Automod"):
         await ctx.send(embed=embeds.success(f"Le mot `{mot}` a été retiré de la liste noire."))
 
     @commands.hybrid_command(name="blacklist-list", description="Afficher la liste des mots interdits.")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def blacklist_list(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT word FROM blacklist_words WHERE guild_id = ?", (ctx.guild.id,))
         if not rows:
@@ -509,7 +509,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(name="blacklist-user", description="Ajouter un utilisateur à la liste noire du serveur.", with_app_command=False)
     @app_commands.describe(membre="Le membre à mettre en liste noire", raison="La raison")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def blacklist_user(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
         err = checks.check_hierarchy(ctx.author, membre)
         if err:
@@ -523,7 +523,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(name="unblacklist-user", description="Retirer un utilisateur de la liste noire.", with_app_command=False)
     @app_commands.describe(membre="Le membre à retirer de la liste noire")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def unblacklist_user(self, ctx: commands.Context, membre: discord.Member):
         await self.bot.db.execute(
             "DELETE FROM blacklist_users WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
@@ -532,7 +532,7 @@ class AutoMod(commands.Cog, name="Automod"):
         await ctx.send(embed=embeds.success(f"{membre.mention} a été retiré de la liste noire."))
 
     @commands.hybrid_command(name="blacklist-users", description="Afficher tous les utilisateurs en liste noire.", with_app_command=False)
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def blacklist_users(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM blacklist_users WHERE guild_id = ?", (ctx.guild.id,))
         if not rows:
@@ -546,7 +546,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(name="whitelist-domain", description="Autoriser un nom de domaine malgré l'antilink.", with_app_command=False)
     @app_commands.describe(domaine="Le domaine à autoriser (ex: youtube.com)")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def whitelist_domain(self, ctx: commands.Context, domaine: str):
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO whitelist_domains (guild_id, domain) VALUES (?, ?)",
@@ -557,7 +557,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(name="unwhitelist-domain", description="Retirer un domaine de la liste blanche.", with_app_command=False)
     @app_commands.describe(domaine="Le domaine à retirer")
-    @checks.is_owner_or_admin_for("securite")
+    @checks.is_owner_or_admin()
     async def unwhitelist_domain(self, ctx: commands.Context, domaine: str):
         await self.bot.db.execute(
             "DELETE FROM whitelist_domains WHERE guild_id = ? AND domain = ?", (ctx.guild.id, domaine.lower())

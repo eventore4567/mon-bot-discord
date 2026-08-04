@@ -1182,7 +1182,7 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- COMMANDES : HUB
 
     @commands.hybrid_command(name="ticketsetup", description="Ouvrir le menu de configuration complet du système de tickets.")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketsetup(self, ctx: commands.Context):
         e = embeds.brand(
             "🎫 Configuration des tickets",
@@ -1200,7 +1200,7 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- COMMANDES : PANELS
 
     @commands.hybrid_group(name="ticketpanel", description="Gérer les panels de tickets.")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketpanel(self, ctx: commands.Context):
         await self.list_panels(ctx)
 
@@ -1233,7 +1233,7 @@ class Tickets(commands.Cog):
 
     @ticketpanel.command(name="create", description="Créer un nouveau panel de tickets.")
     @app_commands.describe(nom="Le nom interne du panel (pour le retrouver dans les autres commandes)")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketpanel_create(self, ctx: commands.Context, *, nom: str):
         if await self.get_panel_by_name(ctx.guild.id, nom):
             return await ctx.send(embed=embeds.error(f"Un panel nommé « {nom} » existe déjà."))
@@ -1244,7 +1244,7 @@ class Tickets(commands.Cog):
 
     @ticketpanel.command(name="edit", description="Modifier un panel existant.")
     @app_commands.describe(nom="Le nom du panel à modifier")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketpanel_edit(self, ctx: commands.Context, *, nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
@@ -1254,7 +1254,7 @@ class Tickets(commands.Cog):
 
     @ticketpanel.command(name="delete", description="Supprimer un panel (et ses types de tickets).")
     @app_commands.describe(nom="Le nom du panel à supprimer")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketpanel_delete(self, ctx: commands.Context, *, nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
@@ -1276,13 +1276,13 @@ class Tickets(commands.Cog):
         await msg.edit(embed=embeds.success(f"Panel **{panel['name']}** supprimé."), view=None)
 
     @ticketpanel.command(name="list", description="Lister tous les panels du serveur.")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketpanel_list(self, ctx: commands.Context):
         await self.list_panels(ctx)
 
     @ticketpanel.command(name="preview", description="Prévisualiser un panel (visible uniquement par vous).")
     @app_commands.describe(nom="Le nom du panel à prévisualiser")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketpanel_preview(self, ctx: commands.Context, *, nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
@@ -1294,7 +1294,7 @@ class Tickets(commands.Cog):
 
     @ticketpanel.command(name="send", description="Envoyer (ou mettre à jour) un panel dans son salon configuré.")
     @app_commands.describe(nom="Le nom du panel à envoyer")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketpanel_send(self, ctx: commands.Context, *, nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
@@ -1314,7 +1314,7 @@ class Tickets(commands.Cog):
 
     @ticketpanel.command(name="duplicate", description="Dupliquer un panel existant (avec ses types de tickets).")
     @app_commands.describe(nom="Le nom du panel à dupliquer", nouveau_nom="Le nom du panel dupliqué")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketpanel_duplicate(self, ctx: commands.Context, nom: str, *, nouveau_nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
@@ -1350,7 +1350,7 @@ class Tickets(commands.Cog):
 
     @commands.hybrid_command(name="ticketpanel-toggle", description="Activer ou désactiver un panel.", with_app_command=False)
     @app_commands.describe(nom="Le nom du panel")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketpanel_toggle(self, ctx: commands.Context, *, nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
@@ -1362,7 +1362,7 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- COMMANDES : TYPES
 
     @commands.hybrid_group(name="tickettype", description="Gérer les types de tickets.")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def tickettype(self, ctx: commands.Context):
         await self.list_types(ctx, panel_id=None)
 
@@ -1387,7 +1387,7 @@ class Tickets(commands.Cog):
 
     @tickettype.command(name="add", description="Ajouter un type de ticket à un panel.")
     @app_commands.describe(panel="Le nom du panel", nom="Le nom de ce type de ticket (ex: Support)")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def tickettype_add(self, ctx: commands.Context, panel: str, *, nom: str):
         panel_row = await self.get_panel_by_name(ctx.guild.id, panel)
         if not panel_row:
@@ -1405,7 +1405,7 @@ class Tickets(commands.Cog):
 
     @tickettype.command(name="edit", description="Modifier un type de ticket.")
     @app_commands.describe(nom="Le nom du type de ticket à modifier")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def tickettype_edit(self, ctx: commands.Context, *, nom: str):
         t = await self.get_type_by_name(ctx.guild.id, nom)
         if not t:
@@ -1415,7 +1415,7 @@ class Tickets(commands.Cog):
 
     @tickettype.command(name="remove", description="Supprimer un type de ticket.")
     @app_commands.describe(nom="Le nom du type de ticket à supprimer")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def tickettype_remove(self, ctx: commands.Context, *, nom: str):
         t = await self.get_type_by_name(ctx.guild.id, nom)
         if not t:
@@ -1430,20 +1430,20 @@ class Tickets(commands.Cog):
         await msg.edit(embed=embeds.success(f"Type **{t['name']}** supprimé."), view=None)
 
     @tickettype.command(name="list", description="Lister tous les types de tickets du serveur.")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def tickettype_list(self, ctx: commands.Context):
         await self.list_types(ctx, panel_id=None)
 
     # ---------------------------------------------------------------- COMMANDES : FORMULAIRES
 
     @commands.hybrid_group(name="ticketform", description="Gérer le formulaire d'un type de ticket.")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketform(self, ctx: commands.Context):
         await ctx.send(embed=embeds.info("Utilisez `+ticketform add <type>`, `+ticketform edit <type> <question>` ou `+ticketform remove <type> <question>`."))
 
     @ticketform.command(name="add", description="Ajouter une question au formulaire d'un type de ticket (max 5).")
     @app_commands.describe(type_ticket="Le nom du type de ticket")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketform_add(self, ctx: commands.Context, *, type_ticket: str):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
@@ -1455,7 +1455,7 @@ class Tickets(commands.Cog):
 
     @ticketform.command(name="edit", description="Modifier une question existante.")
     @app_commands.describe(type_ticket="Le nom du type de ticket", position="La position de la question (1, 2, 3...)")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketform_edit(self, ctx: commands.Context, type_ticket: str, position: int):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
@@ -1471,7 +1471,7 @@ class Tickets(commands.Cog):
 
     @ticketform.command(name="remove", description="Supprimer une question du formulaire.")
     @app_commands.describe(type_ticket="Le nom du type de ticket", position="La position de la question (1, 2, 3...)")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketform_remove(self, ctx: commands.Context, type_ticket: str, position: int):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
@@ -1491,7 +1491,7 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- RÉGLAGES RAPIDES
 
     @commands.hybrid_command(name="ticketconfig", description="Réglages généraux du système de tickets (boutons, transcript, notes).", with_app_command=False)
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketconfig(self, ctx: commands.Context):
         conf = await self.bot.db.get_guild_config(ctx.guild.id)
         e = embeds.neutral("⚙️ Réglages généraux des tickets")
@@ -1525,7 +1525,7 @@ class Tickets(commands.Cog):
 
     @commands.hybrid_command(name="ticketlogs", description="Définir rapidement le salon de logs d'un type de ticket.", with_app_command=False)
     @app_commands.describe(type_ticket="Le nom du type de ticket", salon="Le salon de logs")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketlogs(self, ctx: commands.Context, type_ticket: str, salon: discord.TextChannel):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
@@ -1535,7 +1535,7 @@ class Tickets(commands.Cog):
 
     @commands.hybrid_command(name="ticketlimit", description="Définir rapidement la limite de tickets par membre d'un type.", with_app_command=False)
     @app_commands.describe(type_ticket="Le nom du type de ticket", nombre="Nombre maximum de tickets ouverts simultanément par membre")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketlimit(self, ctx: commands.Context, type_ticket: str, nombre: app_commands.Range[int, 1, 20]):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
@@ -1545,7 +1545,7 @@ class Tickets(commands.Cog):
 
     @commands.hybrid_command(name="ticketautoclose", description="Définir rapidement la fermeture automatique par inactivité d'un type.", with_app_command=False)
     @app_commands.describe(type_ticket="Le nom du type de ticket", heures="Heures d'inactivité avant fermeture (0 pour désactiver)")
-    @checks.is_owner_or_admin_for("tickets")
+    @checks.is_owner_or_admin()
     async def ticketautoclose(self, ctx: commands.Context, type_ticket: str, heures: app_commands.Range[int, 0, 720]):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:

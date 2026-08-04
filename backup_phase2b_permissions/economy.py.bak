@@ -232,14 +232,14 @@ class Economy(commands.Cog, name="Economy"):
 
     @commands.hybrid_command(name="give-money", description="[Admin] Donner de l'argent à un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé", montant="Le montant à donner")
-    @checks.is_owner_or_admin_for("economie")
+    @checks.is_owner_or_admin()
     async def give_money(self, ctx: commands.Context, membre: discord.Member, montant: int):
         await self.bot.db.ensure_economy(ctx.guild.id, membre.id)
         await self.bot.db.add_balance(ctx.guild.id, membre.id, montant)
         await ctx.send(embed=embeds.success(f"{montant} 🪙 ajoutés au compte de {membre.mention}."))
 
     @commands.hybrid_command(name="reset-economy", description="[Admin] Réinitialiser l'économie du serveur.", with_app_command=False)
-    @checks.is_owner_or_admin_for("economie")
+    @checks.is_owner_or_admin()
     async def reset_economy(self, ctx: commands.Context):
         await self.bot.db.execute("DELETE FROM economy WHERE guild_id = ?", (ctx.guild.id,))
         await ctx.send(embed=embeds.success("L'économie du serveur a été réinitialisée."))

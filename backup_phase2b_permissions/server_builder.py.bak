@@ -312,7 +312,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         name="create-server",
         description="Générer automatiquement toute la structure d'un serveur (rôles, catégories, salons) selon un modèle au choix.",
     )
-    @checks.is_owner_or_admin_for("configuration")
+    @checks.is_owner_or_admin()
     async def create_server(self, ctx: commands.Context):
         if ctx.interaction:
             await ctx.defer()
@@ -329,7 +329,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
 
     @commands.hybrid_command(name="delete-channel", description="Supprimer un salon précis du serveur.")
     @app_commands.describe(salon="Le salon à supprimer", raison="La raison (optionnel)")
-    @checks.is_owner_or_admin_for("configuration")
+    @checks.is_owner_or_admin()
     async def delete_channel(self, ctx: commands.Context, salon: discord.TextChannel, *, raison: str = "Aucune raison fournie"):
         if salon.id == ctx.channel.id:
             return await ctx.send(embed=embeds.error("Vous ne pouvez pas supprimer le salon depuis lequel vous lancez cette commande."))
@@ -345,7 +345,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         description="[DANGER] Supprimer TOUS les salons et catégories du serveur (irréversible, confirmation requise).",
         with_app_command=False,
     )
-    @checks.is_owner_or_admin_for("complete")
+    @checks.is_owner_or_admin()
     async def wipe_server(self, ctx: commands.Context):
         guild = ctx.guild
         total = len(guild.channels)
