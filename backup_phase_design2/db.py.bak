@@ -449,21 +449,7 @@ CREATE TABLE IF NOT EXISTS member_invites (
     inviter_id INTEGER,
     invite_code TEXT,
     joined_at INTEGER,
-    left_at INTEGER,
-    account_age_days INTEGER
-);
-
--- Invitations "bonus" : un ajustement manuel et traçable accordé par le staff (ex: un
--- concours, un événement) — jamais une valeur inventée par le bot, toujours une action
--- explicite d'un membre du staff, journalisée comme economy_transactions/reputation_history.
-CREATE TABLE IF NOT EXISTS invite_bonuses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id INTEGER,
-    user_id INTEGER,
-    amount INTEGER,
-    reason TEXT,
-    granted_by INTEGER,
-    created_at INTEGER
+    left_at INTEGER
 );
 
 -- ---------------------------------------------------------------------------
@@ -639,7 +625,6 @@ CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders (trigger_at);
 CREATE INDEX IF NOT EXISTS idx_reaction_roles_msg ON reaction_roles (guild_id, message_id);
 CREATE INDEX IF NOT EXISTS idx_member_invites_inviter ON member_invites (guild_id, inviter_id);
 CREATE INDEX IF NOT EXISTS idx_member_invites_member ON member_invites (guild_id, member_id);
-CREATE INDEX IF NOT EXISTS idx_invite_bonuses_guild_user ON invite_bonuses (guild_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_levels_guild_rank ON levels (guild_id, level DESC, xp DESC);
 CREATE INDEX IF NOT EXISTS idx_economy_guild_total ON economy (guild_id, (cash + bank) DESC);
 CREATE INDEX IF NOT EXISTS idx_blacklist_words_guild ON blacklist_words (guild_id);
@@ -776,21 +761,6 @@ TICKETS_NEW_COLUMNS = {
     "last_activity_at": "INTEGER",
 }
 
-# Même principe, pour member_invites : "account_age_days" a été ajoutée en Phase 2 de la
-# refonte visuelle pour permettre de distinguer les invitations "réelles" des "fake" à
-# partir d'une donnée 100% réelle (âge du compte au moment de l'arrivée), jamais inventée.
-MEMBER_INVITES_NEW_COLUMNS = {
-    "account_age_days": "INTEGER",
-}
-
-# Seuil (en jours) en dessous duquel un compte est considéré "fake" pour le classement
-# d'invitations — mêmes valeur et logique que l'heuristique "comptes suspects" déjà
-# utilisée par cogs/invites.py (SUSPECT_ACCOUNT_AGE_DAYS), pour rester cohérent.
-FAKE_INVITE_ACCOUNT_AGE_DAYS = 3
-# Une invitation dont le membre repart moins de 1h après son arrivée est elle aussi
-# comptée comme "fake" (test de bot/alt), même si le compte n'était pas tout jeune.
-FAKE_INVITE_QUICK_LEAVE_SECONDS = 3600
-
 
 class Database:
     """Petit wrapper async autour d'aiosqlite, partagé par tous les cogs."""
@@ -848,12 +818,6 @@ class Database:
         for column, col_type in TICKETS_NEW_COLUMNS.items():
             if column not in existing_tickets:
                 await self._conn.execute(f"ALTER TABLE tickets ADD COLUMN {column} {col_type}")
-
-        cur = await self._conn.execute("PRAGMA table_info(member_invites)")
-        existing_invites = {row[1] for row in await cur.fetchall()}
-        for column, col_type in MEMBER_INVITES_NEW_COLUMNS.items():
-            if column not in existing_invites:
-                await self._conn.execute(f"ALTER TABLE member_invites ADD COLUMN {column} {col_type}")
 
     async def close(self):
         if self._conn:
@@ -1100,13 +1064,10 @@ class Database:
 
     # ---------- Suivi des invitations ----------
 
-    async def record_invite_join(
-        self, guild_id: int, member_id: int, inviter_id: int | None, invite_code: str | None, account_age_days: int | None = None
-    ):
+    async def record_invite_join(self, guild_id: int, member_id: int, inviter_id: int | None, invite_code: str | None):
         await self.execute(
-            "INSERT INTO member_invites (guild_id, member_id, inviter_id, invite_code, joined_at, account_age_days) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (guild_id, member_id, inviter_id, invite_code, now(), account_age_days),
+            "INSERT INTO member_invites (guild_id, member_id, inviter_id, invite_code, joined_at) VALUES (?, ?, ?, ?, ?)",
+            (guild_id, member_id, inviter_id, invite_code, now()),
         )
 
     async def mark_invite_left(self, guild_id: int, member_id: int):
@@ -1126,87 +1087,6 @@ class Database:
         total_n = total["c"] if total else 0
         left_n = left["c"] if left else 0
         return {"total": total_n, "left": left_n, "active": total_n - left_n}
-
-    async def get_invite_breakdown(self, guild_id: int, inviter_id: int) -> dict:
-        """Détail réelles / fake / reparties / bonus pour un invitant — toutes ces valeurs
-        viennent de données réellement enregistrées (âge du compte au moment de l'arrivée,
-        départ rapide, octroi manuel du staff), jamais inventées.
-
-        - "left"  : le membre invité a quitté le serveur depuis (peu importe s'il était
-          fake ou non — Discord ne permet pas de "annuler" un départ déjà survenu).
-        - "fake"  : le membre est TOUJOURS présent, mais son compte avait moins de
-          FAKE_INVITE_ACCOUNT_AGE_DAYS jours au moment de son arrivée (indice d'un compte
-          jetable/alt), OU account_age_days est inconnu (ancienne invitation enregistrée
-          avant l'ajout de cette colonne) ET le membre est parti en moins d'une heure —
-          seulement dans ce dernier cas précis, sinon on ne classe jamais "fake" par défaut
-          faute de donnée : on préfère sous-compter plutôt qu'accuser à tort.
-        - "real"  : toujours présent, compte pas suspect.
-        - "bonus" : somme des ajustements manuels du staff (table invite_bonuses).
-        - "credited" : real + bonus — c'est CE total qui sert de classement (une invitation
-          fake ou repartie ne rapporte rien, un bonus manuel s'ajoute)."""
-        rows = await self.fetchall(
-            "SELECT left_at, account_age_days FROM member_invites WHERE guild_id = ? AND inviter_id = ?",
-            (guild_id, inviter_id),
-        )
-        total = len(rows)
-        left = sum(1 for r in rows if r["left_at"] is not None)
-        fake = 0
-        real = 0
-        for r in rows:
-            if r["left_at"] is not None:
-                continue
-            age = r["account_age_days"]
-            if age is not None and age < FAKE_INVITE_ACCOUNT_AGE_DAYS:
-                fake += 1
-            else:
-                real += 1
-        bonus_row = await self.fetchone(
-            "SELECT COALESCE(SUM(amount), 0) as s FROM invite_bonuses WHERE guild_id = ? AND user_id = ?",
-            (guild_id, inviter_id),
-        )
-        bonus = bonus_row["s"] if bonus_row else 0
-        return {
-            "total": total,
-            "left": left,
-            "fake": fake,
-            "real": real,
-            "bonus": bonus,
-            "credited": real + bonus,
-        }
-
-    async def grant_invite_bonus(self, guild_id: int, user_id: int, amount: int, granted_by: int, reason: str = ""):
-        """Ajustement manuel — TOUJOURS une action explicite du staff, jamais générée
-        automatiquement par le bot. `amount` peut être négatif (retirer un bonus déjà
-        accordé), ce qui reste traçable via la ligne elle-même plutôt qu'en supprimant
-        l'historique."""
-        await self.execute(
-            "INSERT INTO invite_bonuses (guild_id, user_id, amount, reason, granted_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (guild_id, user_id, amount, reason, granted_by, now()),
-        )
-
-    async def get_invite_bonus_history(self, guild_id: int, user_id: int, limit: int = 10):
-        return await self.fetchall(
-            "SELECT * FROM invite_bonuses WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?",
-            (guild_id, user_id, limit),
-        )
-
-    async def get_invite_leaderboard_credited(self, guild_id: int, limit: int = 10):
-        """Classement basé sur les invitations CRÉDITÉES (réelles + bonus), pas sur le
-        total brut — sinon un membre qui invite volontairement des comptes jetables
-        remonterait artificiellement dans le classement."""
-        rows = await self.fetchall(
-            "SELECT DISTINCT inviter_id FROM member_invites WHERE guild_id = ? AND inviter_id IS NOT NULL "
-            "UNION SELECT DISTINCT user_id FROM invite_bonuses WHERE guild_id = ?",
-            (guild_id, guild_id),
-        )
-        breakdown = []
-        for r in rows:
-            inviter_id = r["inviter_id"]
-            b = await self.get_invite_breakdown(guild_id, inviter_id)
-            if b["credited"] > 0 or b["total"] > 0:
-                breakdown.append((inviter_id, b))
-        breakdown.sort(key=lambda item: item[1]["credited"], reverse=True)
-        return breakdown[:limit]
 
     async def get_invite_leaderboard(self, guild_id: int, limit: int = 10):
         return await self.fetchall(

@@ -17,7 +17,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks, stats_service, design_system
+from utils import embeds, checks, stats_service
 from database.db import now, DEFAULT_STATS_SETTINGS
 
 XP_COOLDOWN_FALLBACK = 60
@@ -1043,35 +1043,20 @@ class Levels(commands.Cog, name="Levels"):
     @commands.hybrid_command(name="profile", description="Afficher votre profil communautaire.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def profile(self, ctx: commands.Context, membre: discord.Member = None):
-        # Première commande migrée vers utils/design_system (Phase 2) : contrairement à
-        # /stats et /level, /profile n'avait pas de couleur/footer pilotés par
-        # +statsconfig — elle peut donc adopter le nouveau système sans rien casser de
-        # déjà testé/approuvé. /stats et /level restent inchangées pour l'instant (voir
-        # rapport de Phase 2 envoyé à Jayden).
         membre = membre or ctx.author
         bio_row = await self.bot.db.fetchone(
             "SELECT * FROM profiles WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
-        design = await self.bot.db.get_design_settings(ctx.guild.id)
         try:
             stats = await stats_service.get_member_statistics(self.bot, ctx.guild, membre)
         except Exception:
             return await ctx.send(embed=embeds.error("Une erreur est survenue en préparant ce profil."))
         eco_emoji = settings.get("economy_emoji", "🪙")
-        style = design_system.CATEGORY_STYLES["levels"]
-        e = design_system.create_embed(
-            title=f"🪪 Profil de {membre.display_name}",
-            description=f"{membre.mention} • Niveau **{stats['current_level']}**"
-                        + (f" • Rang **#{stats['rank']}**" if stats["is_ranked"] else " • Non classé"),
-            colour=design.get("primary_color", style["colour"]),
-            user=membre if design.get("show_avatars", True) else None,
-            thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
-            footer=design.get("footer"),
-        )
-        e.add_field(name="📈 Niveau", value=f"**{stats['current_level']}**", inline=True)
-        e.add_field(name="💬 Messages", value=stats_service.format_number(stats["message_count"]), inline=True)
-        e.add_field(name="🔊 Temps vocal", value=stats_service.format_duration(stats["voice_time"]), inline=True)
+        e = embeds.neutral(f"🪪 Profil de {membre.display_name}")
+        e.set_thumbnail(url=membre.display_avatar.url)
+        e.add_field(name="Niveau", value=str(stats["current_level"]), inline=True)
+        e.add_field(name="Messages", value=stats_service.format_number(stats["message_count"]), inline=True)
         if settings.get("show_economy", True):
             e.add_field(
                 name="💰 Économie",
@@ -1084,7 +1069,7 @@ class Levels(commands.Cog, name="Levels"):
             )
         if settings.get("show_reputation", True):
             e.add_field(name="⭐ Réputation", value=f"{stats_service.format_number(stats['reputation'])} point(s)", inline=True)
-        e.add_field(name="📝 Bio", value=(bio_row["bio"] if bio_row and bio_row["bio"] else "Aucune bio définie."), inline=False)
+        e.add_field(name="Bio", value=(bio_row["bio"] if bio_row and bio_row["bio"] else "Aucune bio définie."), inline=False)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="set-bio", description="Définir votre biographie de profil.", with_app_command=False)

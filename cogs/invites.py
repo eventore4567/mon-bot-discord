@@ -1,10 +1,21 @@
 """
 Cog INVITATIONS.
-/invites (alias +i) /invite-leaderboard /invited-by
+/invites (alias +i) /invite-leaderboard /invited-by /addbonusinvites /removebonusinvites /invitebonushistory
 
 Détecte automatiquement quelle invitation a été utilisée à chaque arrivée (en comparant
 le nombre d'utilisations avant/après), enregistre qui a invité qui, et suit les départs
 pour distinguer les invitations "actives" des invitations "reparties".
+
+Refonte visuelle (Phase 2, design premium/sombre) : /invites et /invite-leaderboard passent
+maintenant par utils/design_system et affichent un détail réelles/fake/reparties/bonus,
+façon InviteLogger. AUCUNE de ces valeurs n'est inventée :
+- "fake" est déduit de l'âge réel du compte au moment de son arrivée (member.created_at,
+  capturé et stocké dans member_invites.account_age_days) — jamais un compte n'est
+  qualifié de fake sans cette donnée réelle (une ligne sans donnée reste "réelle" par
+  défaut, pour ne jamais accuser à tort faute de preuve).
+- "bonus" est un ajustement 100% manuel et traçable, accordé explicitement par un membre
+  du staff via /addbonusinvites — jamais généré automatiquement par le bot.
+Voir database/db.py::get_invite_breakdown() pour le détail du calcul.
 
 ⚠️ Détection de "doubles comptes" : Discord ne transmet JAMAIS l'adresse IP à un bot,
 donc aucune détection fiable de multi-compte n'est possible. Ce cog applique seulement
@@ -19,7 +30,8 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import embeds, helpers
+from utils import embeds, helpers, checks, design_system
+from database.db import FAKE_INVITE_ACCOUNT_AGE_DAYS
 
 # Fenêtre et seuil de l'heuristique "comptes suspects" : si le même invitant amène au
 # moins ce nombre de comptes créés depuis moins de 3 jours, en moins de 10 minutes.
@@ -83,11 +95,14 @@ class Invites(commands.Cog, name="Invites"):
         invite = await self.find_used_invite(guild)
         inviter_id = invite.inviter.id if invite and invite.inviter else None
         code = invite.code if invite else None
-        await self.bot.db.record_invite_join(guild.id, member.id, inviter_id, code)
+        # Âge réel du compte au moment de l'arrivée, capturé une fois pour toutes ici :
+        # c'est cette valeur (et elle seule) qui permettra plus tard de distinguer une
+        # invitation "réelle" d'une invitation "fake" sur /invites, sans jamais deviner.
+        account_age_days = (discord.utils.utcnow() - member.created_at).days
+        await self.bot.db.record_invite_join(guild.id, member.id, inviter_id, code, account_age_days)
 
         if not inviter_id:
             return
-        account_age_days = (discord.utils.utcnow() - member.created_at).days
         if account_age_days >= SUSPECT_ACCOUNT_AGE_DAYS:
             return
 
@@ -124,29 +139,57 @@ class Invites(commands.Cog, name="Invites"):
     @commands.hybrid_command(
         name="invites",
         aliases=["i"],
-        description="Afficher le nombre d'invitations d'un membre (actives / reparties).",
+        description="Afficher le détail des invitations d'un membre (réelles / fake / reparties / bonus).",
     )
     @app_commands.describe(membre="Le membre à consulter (vous par défaut)")
     async def invites_cmd(self, ctx: commands.Context, membre: discord.Member = None):
         membre = membre or ctx.author
-        stats = await self.bot.db.get_invite_stats(ctx.guild.id, membre.id)
-        e = embeds.neutral(
-            f"📨 Invitations de {membre.display_name}",
-            f"**{stats['active']}** invitation(s) active(s) sur **{stats['total']}** au total "
-            f"({stats['left']} reparti(s) depuis).",
-        )
-        e.set_thumbnail(url=membre.display_avatar.url)
-        await ctx.send(embed=e)
+        design = await self.bot.db.get_design_settings(ctx.guild.id)
+        b = await self.bot.db.get_invite_breakdown(ctx.guild.id, membre.id)
 
-    @commands.hybrid_command(name="invite-leaderboard", description="Classement des membres ayant le plus invité.")
+        style = design_system.CATEGORY_STYLES["invites"]
+        embed = design_system.create_embed(
+            title=f"{style['emoji']} Invitations de {membre.display_name}",
+            description=f"**{design_system.format_number(b['credited'])}** invitation(s) créditée(s) au total.",
+            colour=design.get("primary_color", style["colour"]),
+            user=membre if design.get("show_avatars", True) else None,
+            thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
+            footer=design.get("footer"),
+        )
+        embed.add_field(name="✅ Réelles", value=design_system.format_number(b["real"]), inline=True)
+        embed.add_field(name="🕵️ Fake (compte suspect)", value=design_system.format_number(b["fake"]), inline=True)
+        embed.add_field(name="🚪 Reparties", value=design_system.format_number(b["left"]), inline=True)
+        embed.add_field(name="🎁 Bonus (staff)", value=design_system.format_number(b["bonus"]), inline=True)
+        embed.add_field(name="📊 Total brut", value=design_system.format_number(b["total"]), inline=True)
+        embed.add_field(name="🏆 Total crédité", value=f"**{design_system.format_number(b['credited'])}**", inline=True)
+        embed.set_footer(text=(
+            (design.get("footer") or "SentriX")
+            + " • Fake = compte de moins de "
+            + f"{FAKE_INVITE_ACCOUNT_AGE_DAYS} jours à l'arrivée. Ce n'est qu'une estimation, pas une preuve."
+        ))
+        await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name="invite-leaderboard", description="Classement des membres ayant le plus invité (invitations créditées).")
     async def invite_leaderboard(self, ctx: commands.Context):
-        rows = await self.bot.db.get_invite_leaderboard(ctx.guild.id, 10)
+        design = await self.bot.db.get_design_settings(ctx.guild.id)
+        rows = await self.bot.db.get_invite_leaderboard_credited(ctx.guild.id, 10)
         if not rows:
             return await ctx.send(embed=embeds.info("Personne n'a encore d'invitation enregistrée sur ce serveur."))
+        style = design_system.CATEGORY_STYLES["invites"]
         lines = []
-        for i, row in enumerate(rows, start=1):
-            lines.append(f"**{i}.** <@{row['inviter_id']}> — **{row['active']}** active(s) ({row['total']} au total)")
-        await ctx.send(embed=embeds.neutral("🏆 Classement des invitations", "\n".join(lines)))
+        for i, (inviter_id, b) in enumerate(rows, start=1):
+            bonus_txt = f" (+{b['bonus']} bonus)" if b["bonus"] else ""
+            lines.append(
+                f"**{i}.** <@{inviter_id}> — **{design_system.format_number(b['credited'])}** créditée(s){bonus_txt} "
+                f"• {b['real']} réelle(s), {b['fake']} fake, {b['left']} repartie(s)"
+            )
+        embed = design_system.create_embed(
+            title=f"{style['emoji']} 🏆 Classement des invitations",
+            description="\n".join(lines),
+            colour=design.get("primary_color", style["colour"]),
+            footer=design.get("footer"),
+        )
+        await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="invited-by", description="Voir qui a invité un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à consulter")
@@ -158,6 +201,60 @@ class Invites(commands.Cog, name="Invites"):
             "🔗 Origine de l'invitation",
             f"{membre.mention} a été invité par <@{row['inviter_id']}> le <t:{row['joined_at']}:D>.",
         ))
+
+    # -------------------------------------------------------------- Bonus (staff)
+
+    @commands.hybrid_command(
+        name="addbonusinvites",
+        description="[Admin] Accorder manuellement des invitations bonus à un membre (concours, événement...).",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    @app_commands.describe(membre="Le membre à créditer", montant="Nombre d'invitations bonus (peut être négatif pour retirer)", raison="Raison de cet ajustement")
+    async def addbonusinvites(self, ctx: commands.Context, membre: discord.Member, montant: int, *, raison: str = "Non précisée"):
+        if montant == 0:
+            return await ctx.send(embed=embeds.error("Le montant ne peut pas être zéro."))
+        await self.bot.db.grant_invite_bonus(ctx.guild.id, membre.id, montant, ctx.author.id, raison)
+        b = await self.bot.db.get_invite_breakdown(ctx.guild.id, membre.id)
+        verbe = "accordé" if montant > 0 else "retiré"
+        await ctx.send(embed=embeds.success(
+            f"🎁 {abs(montant)} invitation(s) bonus {verbe}(s) à {membre.mention} — raison : {raison}\n"
+            f"Total bonus de {membre.mention} : **{design_system.format_number(b['bonus'])}** • Total crédité : **{design_system.format_number(b['credited'])}**"
+        ))
+
+    @commands.hybrid_command(
+        name="removebonusinvites",
+        description="[Admin] Retirer des invitations bonus à un membre (raccourci de /addbonusinvites avec un montant négatif).",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    @app_commands.describe(membre="Le membre concerné", montant="Nombre d'invitations bonus à retirer (positif)", raison="Raison de ce retrait")
+    async def removebonusinvites(self, ctx: commands.Context, membre: discord.Member, montant: int, *, raison: str = "Non précisée"):
+        if montant <= 0:
+            return await ctx.send(embed=embeds.error("Indiquez un montant positif à retirer (ex: `10`)."))
+        await self.bot.db.grant_invite_bonus(ctx.guild.id, membre.id, -montant, ctx.author.id, raison)
+        b = await self.bot.db.get_invite_breakdown(ctx.guild.id, membre.id)
+        await ctx.send(embed=embeds.success(
+            f"🎁 {montant} invitation(s) bonus retirée(s) à {membre.mention} — raison : {raison}\n"
+            f"Total bonus de {membre.mention} : **{design_system.format_number(b['bonus'])}** • Total crédité : **{design_system.format_number(b['credited'])}**"
+        ))
+
+    @commands.hybrid_command(
+        name="invitebonushistory",
+        description="[Admin] Voir l'historique des invitations bonus accordées à un membre.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    @app_commands.describe(membre="Le membre concerné")
+    async def invitebonushistory(self, ctx: commands.Context, membre: discord.Member):
+        rows = await self.bot.db.get_invite_bonus_history(ctx.guild.id, membre.id, 10)
+        if not rows:
+            return await ctx.send(embed=embeds.info(f"Aucun ajustement bonus enregistré pour {membre.mention}."))
+        lines = [
+            f"<t:{r['created_at']}:d> — **{'+' if r['amount'] >= 0 else ''}{r['amount']}** par <@{r['granted_by']}> — {r['reason'] or 'Non précisée'}"
+            for r in rows
+        ]
+        await ctx.send(embed=embeds.neutral(f"🎁 Historique bonus de {membre.display_name}", "\n".join(lines)))
 
 
 async def setup(bot: commands.Bot):
