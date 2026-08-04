@@ -159,13 +159,17 @@ class Economy(commands.Cog, name="Economy"):
         lines = []
         rank = 0
         for r in rows:
+            # Un membre non mis en cache (get_member()=None) n'a pas forcément quitté le
+            # serveur — on l'affiche avec un identifiant de secours au lieu de le faire
+            # disparaître du classement. Seuls les BOTS confirmés sont exclus.
             member = ctx.guild.get_member(r["user_id"])
-            if member is None or member.bot:
+            if member is not None and member.bot:
                 continue
+            name = member.display_name if member else f"Utilisateur {r['user_id']}"
             rank += 1
             if rank > 10:
                 break
-            lines.append(f"**{rank}.** {member.display_name} — {stats_service.format_number(r['cash'] + r['bank'])} 🪙")
+            lines.append(f"**{rank}.** {name} — {stats_service.format_number(r['cash'] + r['bank'])} 🪙")
         if not lines:
             return await ctx.send(embed=embeds.info("Aucune donnée économique pour l'instant."))
         await ctx.send(embed=embeds.neutral("🏆 Classement des plus riches", "\n".join(lines)))

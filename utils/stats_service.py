@@ -68,6 +68,19 @@ def progress_bar(current: int, needed: int, length: int = 10, emoji_filled: str 
 
 
 # ---------------------------------------------------------------------------
+# Nombres — séparateur de milliers (espace), utilisé PARTOUT où un montant ou un total
+# est affiché (économie, XP, classements...). Ne jamais formater un nombre à la main.
+# ---------------------------------------------------------------------------
+
+def format_number(number) -> str:
+    try:
+        number = int(round(number))
+    except (TypeError, ValueError):
+        return str(number)
+    return f"{number:,}".replace(",", " ")
+
+
+# ---------------------------------------------------------------------------
 # Temps vocal — mise en forme
 # ---------------------------------------------------------------------------
 
@@ -129,20 +142,22 @@ def invalidate_rank_cache(bot, guild_id: int, user_id: int | None = None):
 # ---------------------------------------------------------------------------
 
 async def get_member_statistics(bot, guild: discord.Guild, member: discord.Member) -> dict:
-    """Récupère TOUT ce qu'il faut pour afficher /stats, /level, /profile ou une entrée
-    de /leaderboard pour ce membre — une seule fonction, une seule vérité.
+    """Récupère TOUT ce qu'il faut pour afficher /stats, /level, /profile, /balance ou
+    une entrée de /leaderboard pour ce membre — une seule fonction, une seule vérité.
 
-    Retourne un dict avec les clés :
-    level, xp_current, xp_needed, xp_total, progress_pct, progress_bar_str, rank,
-    is_ranked, message_count, voice_seconds, wallet, bank, total_money, reputation,
-    joined_at, next_role, next_role_level.
+    Clés retournées : wallet, bank, total_money, reputation, current_level, total_xp,
+    current_level_xp, required_xp, next_level_role, next_level_requirement,
+    remaining_levels, all_roles_obtained, rank, is_ranked, message_count, voice_time,
+    progress_pct, progress_bar, joined_at.
+    (D'anciens alias — level, xp_current, xp_needed, voice_seconds, next_role,
+    next_role_level — restent aussi présents pour compatibilité.)
     """
     db = bot.db
     await db.ensure_level(guild.id, member.id)
     level_row = await db.get_level(guild.id, member.id)
-    level = level_row["level"]
-    xp_current = level_row["xp"]
-    needed = xp_required_for_level(level)
+    current_level = level_row["level"]
+    current_level_xp = level_row["xp"]
+    required_xp = xp_required_for_level(current_level)
 
     msg_row = await db.fetchone(
         "SELECT count FROM message_counts WHERE guild_id = ? AND user_id = ?", (guild.id, member.id)
@@ -152,13 +167,13 @@ async def get_member_statistics(bot, guild: discord.Guild, member: discord.Membe
     # Une donnée est considérée "vide" (membre jamais actif) si niveau 0, XP 0 ET aucun
     # message envoyé : dans ce cas précis on affiche "non classé" plutôt qu'un classement
     # qui n'aurait pas vraiment de sens (voir demande explicite de Jayden).
-    has_activity = not (level == 0 and xp_current == 0 and message_count == 0)
-    rank = await get_rank(bot, guild.id, member.id, level, xp_current) if has_activity else None
+    has_activity = not (current_level == 0 and current_level_xp == 0 and message_count == 0)
+    rank = await get_rank(bot, guild.id, member.id, current_level, current_level_xp) if has_activity else None
 
     voice_row = await db.fetchone(
         "SELECT seconds FROM voice_totals WHERE guild_id = ? AND user_id = ?", (guild.id, member.id)
     )
-    voice_seconds = voice_row["seconds"] if voice_row else 0
+    voice_time = voice_row["seconds"] if voice_row else 0
     # Si le membre est actuellement en vocal, on ajoute le temps de la session en cours
     # (pas encore "flush" dans voice_totals) pour un affichage en temps réel exact.
     session_row = await db.fetchone(
@@ -166,42 +181,66 @@ async def get_member_statistics(bot, guild: discord.Guild, member: discord.Membe
     )
     if session_row:
         from database.db import now as _now
-        voice_seconds += max(0, _now() - session_row["joined_at"])
+        voice_time += max(0, _now() - session_row["joined_at"])
 
     await db.ensure_economy(guild.id, member.id)
     bal = await db.get_balance(guild.id, member.id)
     reputation = await db.get_reputation(guild.id, member.id)
+    wallet = bal["cash"] if bal else 0
+    bank = bal["bank"] if bal else 0
 
+    # Premier palier configuré dont le niveau requis dépasse le niveau actuel du membre.
     role_row = await db.fetchone(
         "SELECT * FROM level_roles WHERE guild_id = ? AND level > ? ORDER BY level ASC LIMIT 1",
-        (guild.id, level),
+        (guild.id, current_level),
     )
-    next_role = None
-    next_role_level = None
-    if role_row:
-        next_role = guild.get_role(role_row["role_id"])
-        next_role_level = role_row["level"]
+    # Existe-t-il AU MOINS un palier configuré sur ce serveur ? (distingue "aucun palier
+    # configuré du tout" de "tous les paliers ont déjà été atteints").
+    any_role_row = await db.fetchone("SELECT COUNT(*) AS n FROM level_roles WHERE guild_id = ?", (guild.id,))
+    has_any_configured = bool(any_role_row and any_role_row["n"])
 
-    bar_str, pct = progress_bar(xp_current, needed)
+    next_level_role = None
+    next_level_requirement = None
+    remaining_levels = None
+    if role_row:
+        next_level_role = guild.get_role(role_row["role_id"])
+        next_level_requirement = role_row["level"]
+        remaining_levels = max(0, next_level_requirement - current_level)
+    all_roles_obtained = has_any_configured and role_row is None
+
+    bar_str, pct = progress_bar(current_level_xp, required_xp)
+    total_xp = total_xp_for(current_level, current_level_xp)
 
     return {
-        "level": level,
-        "xp_current": xp_current,
-        "xp_needed": needed,
-        "xp_total": total_xp_for(level, xp_current),
+        # Noms demandés par Jayden
+        "wallet": wallet,
+        "bank": bank,
+        "total_money": wallet + bank,
+        "reputation": reputation,
+        "current_level": current_level,
+        "total_xp": total_xp,
+        "current_level_xp": current_level_xp,
+        "required_xp": required_xp,
+        "next_level_role": next_level_role,
+        "next_level_requirement": next_level_requirement,
+        "remaining_levels": remaining_levels,
+        "all_roles_obtained": all_roles_obtained,
+        "has_any_level_role_configured": has_any_configured,
+        "rank": rank,
+        "message_count": message_count,
+        "voice_time": voice_time,
+        # Champs additionnels utiles à l'affichage
+        "is_ranked": has_activity,
         "progress_pct": pct,
         "progress_bar": bar_str,
-        "rank": rank,
-        "is_ranked": has_activity,
-        "message_count": message_count,
-        "voice_seconds": voice_seconds,
-        "wallet": bal["cash"] if bal else 0,
-        "bank": bal["bank"] if bal else 0,
-        "total_money": (bal["cash"] + bal["bank"]) if bal else 0,
-        "reputation": reputation,
         "joined_at": member.joined_at,
-        "next_role": next_role,
-        "next_role_level": next_role_level,
+        # Alias conservés pour compatibilité avec du code déjà écrit
+        "level": current_level,
+        "xp_current": current_level_xp,
+        "xp_needed": required_xp,
+        "voice_seconds": voice_time,
+        "next_role": next_level_role,
+        "next_role_level": next_level_requirement,
     }
 
 
@@ -216,7 +255,7 @@ async def get_category_ranks(bot, guild_id: int, stats: dict) -> dict:
     )
     voice_row = await db.fetchone(
         "SELECT COUNT(*) AS n FROM voice_totals WHERE guild_id = ? AND seconds > ?",
-        (guild_id, stats["voice_seconds"]),
+        (guild_id, stats["voice_time"]),
     )
     eco_row = await db.fetchone(
         "SELECT COUNT(*) AS n FROM economy WHERE guild_id = ? AND (cash + bank) > ?",
