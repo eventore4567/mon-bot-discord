@@ -45,6 +45,9 @@ class SentriXColors:
     music: int = 0xE91E63
     giveaways: int = 0xF39C12
     invites: int = 0x1ABC9C
+    games: int = 0x00BCD4
+    ai: int = 0x8E44AD
+    verification: int = 0x2ECC71
 
 
 COLORS = SentriXColors()
@@ -81,6 +84,9 @@ CATEGORY_STYLES = {
     "giveaways": {"emoji": "🎉", "colour": COLORS.giveaways},
     "invites": {"emoji": "🔗", "colour": COLORS.invites},
     "utility": {"emoji": "🧰", "colour": COLORS.primary},
+    "games": {"emoji": "🎮", "colour": COLORS.games},
+    "ai": {"emoji": "🧠", "colour": COLORS.ai},
+    "verification": {"emoji": "✅", "colour": COLORS.verification},
 }
 
 

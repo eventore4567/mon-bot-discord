@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, helpers
+from utils import embeds, helpers, design_system
 
 MATH_OPS = {
     "+": lambda a, b: a + b,
@@ -30,6 +30,19 @@ class Minigames(commands.Cog, name="Minigames"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def _embed(self, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
+        """Embed mini-jeux cohérent avec +designsetup (catégorie CATEGORY_STYLES["games"])."""
+        style = design_system.CATEGORY_STYLES["games"]
+        colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
+        default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
+        design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
+        return design_system.create_embed(
+            title=f"{style['emoji']} {title}",
+            description=description,
+            colour=design.get(colour_key, default_colour),
+            footer=design.get("footer"),
+        )
+
     @commands.hybrid_command(name="rps", description="Jouer à pierre-feuille-ciseaux contre le bot.")
     @app_commands.describe(choix="Votre choix")
     @app_commands.choices(choix=[
@@ -41,17 +54,18 @@ class Minigames(commands.Cog, name="Minigames"):
         options = ["pierre", "feuille", "ciseaux"]
         bot_choice = random.choice(options)
         if choix == bot_choice:
-            result = "Égalité !"
+            result, kind = "Égalité !", "primary"
         elif (choix, bot_choice) in [("pierre", "ciseaux"), ("feuille", "pierre"), ("ciseaux", "feuille")]:
-            result = "Vous avez gagné ! 🎉"
+            result, kind = "Vous avez gagné ! 🎉", "success"
         else:
-            result = "Vous avez perdu !"
-        await ctx.send(embed=embeds.info(f"Vous : **{choix}** | Bot : **{bot_choice}**\n{result}"))
+            result, kind = "Vous avez perdu !", "danger"
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Pierre-feuille-ciseaux", description=f"Vous : **{choix}** | Bot : **{bot_choice}**\n{result}", kind=kind))
 
     @commands.hybrid_command(name="guess-number", description="Deviner un nombre entre 1 et 100.")
     async def guess_number(self, ctx: commands.Context):
+        guild_id = ctx.guild.id if ctx.guild else None
         target = random.randint(1, 100)
-        await ctx.send(embed=embeds.info("🔢 J'ai choisi un nombre entre 1 et 100. Vous avez 6 essais ! Écrivez votre réponse dans le chat."))
+        await ctx.send(embed=await self._embed(guild_id, title="Devine le nombre", description="J'ai choisi un nombre entre 1 et 100. Vous avez 6 essais ! Écrivez votre réponse dans le chat."))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id and m.content.isdigit()
@@ -60,20 +74,21 @@ class Minigames(commands.Cog, name="Minigames"):
             try:
                 msg = await self.bot.wait_for("message", check=check, timeout=20)
             except asyncio.TimeoutError:
-                return await ctx.send(embed=embeds.warning(f"⏱️ Temps écoulé ! Le nombre était **{target}**."))
+                return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", description=f"⏱️ Le nombre était **{target}**.", kind="warning"))
             guess = int(msg.content)
             if guess == target:
-                return await ctx.send(embed=embeds.success(f"🎉 Bravo ! Vous avez trouvé **{target}** en {attempt + 1} essai(s) !"))
+                return await ctx.send(embed=await self._embed(guild_id, title="Trouvé !", description=f"🎉 Bravo ! Vous avez trouvé **{target}** en {attempt + 1} essai(s) !", kind="success"))
             elif guess < target:
-                await ctx.send(embed=embeds.info("📈 Plus grand !"))
+                await ctx.send(embed=await self._embed(guild_id, title="Plus grand !", description="📈"))
             else:
-                await ctx.send(embed=embeds.info("📉 Plus petit !"))
-        await ctx.send(embed=embeds.warning(f"❌ Vous avez épuisé vos essais. Le nombre était **{target}**."))
+                await ctx.send(embed=await self._embed(guild_id, title="Plus petit !", description="📉"))
+        await ctx.send(embed=await self._embed(guild_id, title="Essais épuisés", description=f"❌ Le nombre était **{target}**.", kind="warning"))
 
     @commands.hybrid_command(name="trivia", description="Répondre à une question de culture générale.")
     async def trivia(self, ctx: commands.Context):
+        guild_id = ctx.guild.id if ctx.guild else None
         question, answer = random.choice(TRIVIA_QUESTIONS)
-        await ctx.send(embed=embeds.info(f"❓ {question}\nVous avez 15 secondes."))
+        await ctx.send(embed=await self._embed(guild_id, title="Question de culture générale", description=f"❓ {question}\nVous avez 15 secondes."))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
@@ -81,28 +96,30 @@ class Minigames(commands.Cog, name="Minigames"):
         try:
             msg = await self.bot.wait_for("message", check=check, timeout=15)
         except asyncio.TimeoutError:
-            return await ctx.send(embed=embeds.warning(f"⏱️ Temps écoulé ! La réponse était **{answer}**."))
+            return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", description=f"⏱️ La réponse était **{answer}**.", kind="warning"))
         if msg.content.strip().lower() == answer:
-            await ctx.send(embed=embeds.success("✅ Bonne réponse !"))
+            await ctx.send(embed=await self._embed(guild_id, title="Bonne réponse !", description="✅", kind="success"))
         else:
-            await ctx.send(embed=embeds.error(f"❌ Mauvaise réponse. La bonne réponse était **{answer}**."))
+            await ctx.send(embed=await self._embed(guild_id, title="Mauvaise réponse", description=f"❌ La bonne réponse était **{answer}**.", kind="danger"))
 
     @commands.hybrid_command(name="tictactoe", description="Jouer au morpion contre un autre membre.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre contre qui jouer")
     async def tictactoe(self, ctx: commands.Context, adversaire: discord.Member):
         if adversaire.bot or adversaire.id == ctx.author.id:
-            return await ctx.send(embed=embeds.error("Choisissez un adversaire valide."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Adversaire invalide", kind="danger"))
         view = TicTacToeView(ctx.author, adversaire)
-        await ctx.send(embed=embeds.neutral("⭕ Morpion", f"{ctx.author.mention} (❌) vs {adversaire.mention} (⭕)\nAu tour de {ctx.author.mention}"), view=view)
+        e = await self._embed(ctx.guild.id if ctx.guild else None, title="Morpion", description=f"{ctx.author.mention} (❌) vs {adversaire.mention} (⭕)\nAu tour de {ctx.author.mention}")
+        await ctx.send(embed=e, view=view)
 
     @commands.hybrid_command(name="hangman", description="Jouer au pendu.", with_app_command=False)
     async def hangman(self, ctx: commands.Context):
+        guild_id = ctx.guild.id if ctx.guild else None
         words = ["python", "discord", "ordinateur", "clavier", "programmation", "serveur"]
         word = random.choice(words)
         guessed = set()
         tries = 6
         display = "".join(c if c in guessed else "_" for c in word)
-        msg = await ctx.send(embed=embeds.info(f"🎯 Pendu : `{display}`\nEssais restants : {tries}"))
+        await ctx.send(embed=await self._embed(guild_id, title="Pendu", description=f"🎯 `{display}`\nEssais restants : {tries}"))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id and len(m.content) == 1
@@ -111,26 +128,27 @@ class Minigames(commands.Cog, name="Minigames"):
             try:
                 m = await self.bot.wait_for("message", check=check, timeout=30)
             except asyncio.TimeoutError:
-                return await ctx.send(embed=embeds.warning(f"⏱️ Temps écoulé ! Le mot était **{word}**."))
+                return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", description=f"⏱️ Le mot était **{word}**.", kind="warning"))
             letter = m.content.lower()
             if letter in word:
                 guessed.add(letter)
                 display = "".join(c if c in guessed else "_" for c in word)
             else:
                 tries -= 1
-            await ctx.send(embed=embeds.info(f"🎯 Pendu : `{display}`\nEssais restants : {tries}"))
+            await ctx.send(embed=await self._embed(guild_id, title="Pendu", description=f"🎯 `{display}`\nEssais restants : {tries}"))
 
         if "_" not in display:
-            await ctx.send(embed=embeds.success(f"🎉 Bravo ! Le mot était **{word}** !"))
+            await ctx.send(embed=await self._embed(guild_id, title="Gagné !", description=f"🎉 Le mot était **{word}** !", kind="success"))
         else:
-            await ctx.send(embed=embeds.error(f"❌ Perdu ! Le mot était **{word}**."))
+            await ctx.send(embed=await self._embed(guild_id, title="Perdu", description=f"❌ Le mot était **{word}**.", kind="danger"))
 
     @commands.hybrid_command(name="math-quiz", description="Répondre à une opération mathématique rapide.", with_app_command=False)
     async def math_quiz(self, ctx: commands.Context):
+        guild_id = ctx.guild.id if ctx.guild else None
         a, b = random.randint(2, 50), random.randint(2, 50)
         op = random.choice(list(MATH_OPS))
         answer = MATH_OPS[op](a, b)
-        await ctx.send(embed=embeds.info(f"🧮 Combien font **{a} {op} {b}** ? (10 secondes)"))
+        await ctx.send(embed=await self._embed(guild_id, title="Quiz mathématique", description=f"🧮 Combien font **{a} {op} {b}** ? (10 secondes)"))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
@@ -138,23 +156,25 @@ class Minigames(commands.Cog, name="Minigames"):
         try:
             msg = await self.bot.wait_for("message", check=check, timeout=10)
         except asyncio.TimeoutError:
-            return await ctx.send(embed=embeds.warning(f"⏱️ Temps écoulé ! La réponse était **{answer}**."))
+            return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", description=f"⏱️ La réponse était **{answer}**.", kind="warning"))
         try:
             if int(msg.content.strip()) == answer:
-                await ctx.send(embed=embeds.success("✅ Bonne réponse !"))
+                await ctx.send(embed=await self._embed(guild_id, title="Bonne réponse !", description="✅", kind="success"))
             else:
-                await ctx.send(embed=embeds.error(f"❌ Faux. La réponse était **{answer}**."))
+                await ctx.send(embed=await self._embed(guild_id, title="Faux", description=f"❌ La réponse était **{answer}**.", kind="danger"))
         except ValueError:
-            await ctx.send(embed=embeds.error(f"❌ Ce n'est pas un nombre. La réponse était **{answer}**."))
+            await ctx.send(embed=await self._embed(guild_id, title="Réponse invalide", description=f"❌ Ce n'est pas un nombre. La réponse était **{answer}**.", kind="danger"))
 
     @commands.hybrid_command(name="blackjack", description="Jouer au blackjack simplifié contre le bot.", with_app_command=False)
     async def blackjack(self, ctx: commands.Context):
+        guild_id = ctx.guild.id if ctx.guild else None
+
         def draw():
             return random.randint(1, 11)
 
         player = [draw(), draw()]
         bot_hand = [draw(), draw()]
-        await ctx.send(embed=embeds.info(f"🃏 Votre main : {player} (total {sum(player)})\nTapez `hit` pour tirer ou `stand` pour rester."))
+        await ctx.send(embed=await self._embed(guild_id, title="Blackjack", description=f"🃏 Votre main : {player} (total {sum(player)})\nTapez `hit` pour tirer ou `stand` pour rester."))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id and m.content.lower() in ("hit", "stand")
@@ -163,39 +183,40 @@ class Minigames(commands.Cog, name="Minigames"):
             try:
                 m = await self.bot.wait_for("message", check=check, timeout=20)
             except asyncio.TimeoutError:
-                return await ctx.send(embed=embeds.warning("⏱️ Temps écoulé."))
+                return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", kind="warning"))
             if m.content.lower() == "hit":
                 player.append(draw())
-                await ctx.send(embed=embeds.info(f"🃏 Votre main : {player} (total {sum(player)})"))
+                await ctx.send(embed=await self._embed(guild_id, title="Blackjack", description=f"🃏 Votre main : {player} (total {sum(player)})"))
             else:
                 break
 
         if sum(player) > 21:
-            return await ctx.send(embed=embeds.error(f"💥 Vous avez dépassé 21 ({sum(player)}). Vous perdez !"))
+            return await ctx.send(embed=await self._embed(guild_id, title="Perdu", description=f"💥 Vous avez dépassé 21 ({sum(player)}). Vous perdez !", kind="danger"))
 
         while sum(bot_hand) < 17:
             bot_hand.append(draw())
 
-        e = embeds.neutral("🃏 Résultat", f"Vous : {sum(player)} | Bot : {sum(bot_hand)}")
         if sum(bot_hand) > 21 or sum(player) > sum(bot_hand):
-            e.description += "\n🎉 Vous gagnez !"
+            issue, kind = "🎉 Vous gagnez !", "success"
         elif sum(player) == sum(bot_hand):
-            e.description += "\n🤝 Égalité !"
+            issue, kind = "🤝 Égalité !", "primary"
         else:
-            e.description += "\n❌ Vous perdez !"
+            issue, kind = "❌ Vous perdez !", "danger"
+        e = await self._embed(guild_id, title="Résultat", description=f"Vous : {sum(player)} | Bot : {sum(bot_hand)}\n{issue}", kind=kind)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="slots", description="Jouer à la machine à sous.", with_app_command=False)
     async def slots(self, ctx: commands.Context):
+        guild_id = ctx.guild.id if ctx.guild else None
         symbols = ["🍒", "🍋", "🍊", "🍇", "💎", "7️⃣"]
         result = [random.choice(symbols) for _ in range(3)]
         text = " | ".join(result)
         if result[0] == result[1] == result[2]:
-            await ctx.send(embed=embeds.success(f"🎰 {text}\n🎉 JACKPOT !"))
+            await ctx.send(embed=await self._embed(guild_id, title="Machine à sous", description=f"🎰 {text}\n🎉 JACKPOT !", kind="success"))
         elif len(set(result)) == 2:
-            await ctx.send(embed=embeds.info(f"🎰 {text}\n👍 Presque !"))
+            await ctx.send(embed=await self._embed(guild_id, title="Machine à sous", description=f"🎰 {text}\n👍 Presque !"))
         else:
-            await ctx.send(embed=embeds.error(f"🎰 {text}\n❌ Perdu !"))
+            await ctx.send(embed=await self._embed(guild_id, title="Machine à sous", description=f"🎰 {text}\n❌ Perdu !", kind="danger"))
 
 class TicTacToeButton(discord.ui.Button):
     def __init__(self, x: int, y: int):

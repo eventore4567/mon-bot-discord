@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, helpers, checks
+from utils import embeds, helpers, checks, design_system
 from database.db import now
 
 # Ordre volontaire : catégories utiles à tout le monde en premier, catégories staff/technique
@@ -285,6 +285,21 @@ class Utility(commands.Cog, name="Utility"):
         self.bot = bot
         self.afk_users: dict[int, str] = {}
 
+    async def _embed(self, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
+        """Embed utilitaire cohérent avec +designsetup (catégorie CATEGORY_STYLES["utility"]).
+        `guild_id` peut être None (ex: commande utilisée en DM) — dans ce cas on retombe sur
+        les réglages par défaut plutôt que d'échouer."""
+        style = design_system.CATEGORY_STYLES["utility"]
+        colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
+        default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
+        design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
+        return design_system.create_embed(
+            title=f"{style['emoji']} {title}",
+            description=description,
+            colour=design.get(colour_key, default_colour),
+            footer=design.get("footer"),
+        )
+
     async def _user_is_staff(self, ctx: commands.Context) -> bool:
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             return False
@@ -350,20 +365,20 @@ class Utility(commands.Cog, name="Utility"):
 
     @commands.hybrid_command(name="ping", description="Afficher la latence du bot.")
     async def ping(self, ctx: commands.Context):
-        await ctx.send(embed=embeds.info(f"🏓 Pong ! Latence : **{round(self.bot.latency * 1000)}ms**"))
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Pong !", description=f"Latence : **{round(self.bot.latency * 1000)}ms**"))
 
     @commands.hybrid_command(name="avatar", description="Afficher l'avatar d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def avatar(self, ctx: commands.Context, membre: discord.Member = None):
         membre = membre or ctx.author
-        e = embeds.neutral(f"Avatar de {membre}")
+        e = await self._embed(ctx.guild.id if ctx.guild else None, title=f"Avatar de {membre}")
         e.set_image(url=membre.display_avatar.url)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="serverinfo", description="Afficher les informations du serveur.")
     async def serverinfo(self, ctx: commands.Context):
         guild = ctx.guild
-        e = embeds.neutral(f"📊 {guild.name}")
+        e = await self._embed(guild.id, title=guild.name)
         if guild.icon:
             e.set_thumbnail(url=guild.icon.url)
         e.add_field(name="Propriétaire", value=f"<@{guild.owner_id}>", inline=True)
@@ -379,7 +394,7 @@ class Utility(commands.Cog, name="Utility"):
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def userinfo(self, ctx: commands.Context, membre: discord.Member = None):
         membre = membre or ctx.author
-        e = embeds.neutral(f"👤 {membre}")
+        e = await self._embed(ctx.guild.id, title=str(membre))
         e.set_thumbnail(url=membre.display_avatar.url)
         e.add_field(name="ID", value=membre.id, inline=True)
         e.add_field(name="Compte créé", value=f"<t:{int(membre.created_at.timestamp())}:D>", inline=True)
@@ -391,8 +406,11 @@ class Utility(commands.Cog, name="Utility"):
     @commands.hybrid_command(name="roleinfo", description="Afficher les informations d'un rôle.", with_app_command=False)
     @app_commands.describe(role="Le rôle visé")
     async def roleinfo(self, ctx: commands.Context, role: discord.Role):
-        e = embeds.neutral(f"🎭 {role.name}")
-        e.color = role.color if role.color.value else e.color
+        e = await self._embed(ctx.guild.id, title=role.name)
+        # La couleur du rôle prime sur la couleur design_system quand le rôle en a une —
+        # information plus pertinente ici que la charte visuelle générique.
+        if role.color.value:
+            e.color = role.color
         e.add_field(name="ID", value=role.id, inline=True)
         e.add_field(name="Couleur", value=str(role.color), inline=True)
         e.add_field(name="Membres", value=len(role.members), inline=True)
@@ -404,7 +422,7 @@ class Utility(commands.Cog, name="Utility"):
     @app_commands.describe(salon="Le salon visé (optionnel)")
     async def channelinfo(self, ctx: commands.Context, salon: discord.abc.GuildChannel = None):
         salon = salon or ctx.channel
-        e = embeds.neutral(f"📺 #{salon.name}")
+        e = await self._embed(ctx.guild.id, title=f"#{salon.name}")
         e.add_field(name="ID", value=salon.id, inline=True)
         e.add_field(name="Type", value=str(salon.type), inline=True)
         e.add_field(name="Créé le", value=f"<t:{int(salon.created_at.timestamp())}:D>", inline=True)
@@ -421,7 +439,7 @@ class Utility(commands.Cog, name="Utility"):
                 bots += 1
             else:
                 humans += 1
-        e = embeds.neutral("👥 Membres du serveur")
+        e = await self._embed(guild.id, title="Membres du serveur")
         e.add_field(name="Total", value=guild.member_count, inline=True)
         e.add_field(name="Humains", value=humans, inline=True)
         e.add_field(name="Bots", value=bots, inline=True)
@@ -430,14 +448,14 @@ class Utility(commands.Cog, name="Utility"):
     @commands.hybrid_command(name="emoji-list", description="Lister les emojis du serveur.", with_app_command=False)
     async def emoji_list(self, ctx: commands.Context):
         if not ctx.guild.emojis:
-            return await ctx.send(embed=embeds.warning("Ce serveur n'a aucun emoji personnalisé."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucun emoji", description="Ce serveur n'a aucun emoji personnalisé.", kind="warning"))
         text = " ".join(str(e) for e in ctx.guild.emojis)[:4000]
-        await ctx.send(embed=embeds.neutral(f"😀 Emojis ({len(ctx.guild.emojis)})", text))
+        await ctx.send(embed=await self._embed(ctx.guild.id, title=f"Emojis ({len(ctx.guild.emojis)})", description=text))
 
     @commands.hybrid_command(name="poll", description="Créer un sondage rapide (réactions 👍/👎).")
     @app_commands.describe(question="La question du sondage")
     async def poll(self, ctx: commands.Context, *, question: str):
-        e = embeds.neutral("📊 Sondage", question)
+        e = await self._embed(ctx.guild.id if ctx.guild else None, title="Sondage", description=question)
         e.set_footer(text=f"Créé par {ctx.author}")
         msg = await ctx.send(embed=e)
         await msg.add_reaction("👍")
@@ -448,30 +466,30 @@ class Utility(commands.Cog, name="Utility"):
     async def remind(self, ctx: commands.Context, duree: str, *, texte: str):
         seconds = helpers.parse_duration(duree)
         if not seconds:
-            return await ctx.send(embed=embeds.error("Durée invalide. Exemple : `10m`, `2h`, `1j`."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Durée invalide", description="Exemple : `10m`, `2h`, `1j`.", kind="danger"))
         trigger_at = now() + seconds
         await self.bot.db.execute(
             "INSERT INTO reminders (user_id, channel_id, guild_id, text, trigger_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (ctx.author.id, ctx.channel.id, ctx.guild.id if ctx.guild else None, texte, trigger_at, now()),
         )
-        await ctx.send(embed=embeds.success(f"⏰ Rappel défini dans {helpers.format_duration(seconds)}."))
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Rappel défini", description=f"⏰ Rappel défini dans {helpers.format_duration(seconds)}.", kind="success"))
 
     @commands.hybrid_command(name="reminder-list", description="Lister vos rappels en cours.", with_app_command=False)
     async def reminder_list(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM reminders WHERE user_id = ? ORDER BY trigger_at ASC", (ctx.author.id,))
         if not rows:
-            return await ctx.send(embed=embeds.info("Vous n'avez aucun rappel en cours."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Aucun rappel", description="Vous n'avez aucun rappel en cours."))
         lines = [f"`#{r['id']}` <t:{r['trigger_at']}:R> — {r['text'][:50]}" for r in rows[:15]]
-        await ctx.send(embed=embeds.neutral("⏰ Vos rappels", "\n".join(lines)))
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Vos rappels", description="\n".join(lines)))
 
     @commands.hybrid_command(name="reminder-cancel", description="Annuler un rappel.", with_app_command=False)
     @app_commands.describe(id="L'identifiant du rappel (voir /reminder-list)")
     async def reminder_cancel(self, ctx: commands.Context, id: int):
         row = await self.bot.db.fetchone("SELECT * FROM reminders WHERE id = ? AND user_id = ?", (id, ctx.author.id))
         if not row:
-            return await ctx.send(embed=embeds.error("Rappel introuvable."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Rappel introuvable", kind="danger"))
         await self.bot.db.execute("DELETE FROM reminders WHERE id = ?", (id,))
-        await ctx.send(embed=embeds.success("Rappel annulé."))
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Rappel annulé", kind="success"))
 
     @commands.hybrid_command(name="say", description="Faire répéter un message par le bot.", with_app_command=False)
     @app_commands.describe(texte="Le texte à faire répéter")
@@ -487,7 +505,7 @@ class Utility(commands.Cog, name="Utility"):
     @app_commands.describe(titre="Titre de l'embed", description="Contenu de l'embed")
     @commands.has_permissions(manage_messages=True)
     async def embed_create(self, ctx: commands.Context, titre: str, *, description: str):
-        e = embeds.neutral(titre, description)
+        e = await self._embed(ctx.guild.id if ctx.guild else None, title=titre, description=description)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="translate", description="Traduire un texte vers une autre langue.")
@@ -496,24 +514,24 @@ class Utility(commands.Cog, name="Utility"):
         try:
             from deep_translator import GoogleTranslator
             result = GoogleTranslator(source="auto", target=langue).translate(texte)
-            await ctx.send(embed=embeds.neutral(f"🌐 Traduction ({langue})", result))
+            await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title=f"Traduction ({langue})", description=result))
         except Exception:
-            await ctx.send(embed=embeds.error("La traduction a échoué. Vérifiez le code de langue."))
+            await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Traduction échouée", description="Vérifiez le code de langue.", kind="danger"))
 
     @commands.hybrid_command(name="weather", description="Afficher la météo d'une ville.")
     @app_commands.describe(ville="Le nom de la ville")
     async def weather(self, ctx: commands.Context, *, ville: str):
         import config
         if not config.WEATHER_API_KEY:
-            return await ctx.send(embed=embeds.error("Aucune clé météo n'est configurée sur ce bot."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Météo indisponible", description="Aucune clé météo n'est configurée sur ce bot.", kind="danger"))
         import aiohttp
         url = f"https://api.openweathermap.org/data/2.5/weather?q={ville}&appid={config.WEATHER_API_KEY}&units=metric&lang=fr"
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    return await ctx.send(embed=embeds.error(f"Ville `{ville}` introuvable."))
+                    return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Ville introuvable", description=f"Ville `{ville}` introuvable.", kind="danger"))
                 data = await resp.json()
-        e = embeds.neutral(f"🌤️ Météo à {data['name']}")
+        e = await self._embed(ctx.guild.id if ctx.guild else None, title=f"Météo à {data['name']}")
         e.add_field(name="Température", value=f"{data['main']['temp']}°C", inline=True)
         e.add_field(name="Ressenti", value=f"{data['main']['feels_like']}°C", inline=True)
         e.add_field(name="Condition", value=data["weather"][0]["description"], inline=True)
@@ -524,7 +542,7 @@ class Utility(commands.Cog, name="Utility"):
     async def suggest(self, ctx: commands.Context, *, texte: str):
         conf = await self.bot.db.get_guild_config(ctx.guild.id)
         channel = ctx.guild.get_channel(conf["suggest_channel"]) if conf and conf["suggest_channel"] else ctx.channel
-        e = embeds.neutral("💡 Nouvelle suggestion", texte)
+        e = await self._embed(ctx.guild.id, title="Nouvelle suggestion", description=texte)
         e.set_footer(text=f"Proposé par {ctx.author}")
         msg = await channel.send(embed=e)
         await msg.add_reaction("👍")
@@ -534,7 +552,7 @@ class Utility(commands.Cog, name="Utility"):
             (ctx.guild.id, ctx.author.id, msg.id, texte, now()),
         )
         if channel != ctx.channel:
-            await ctx.send(embed=embeds.success(f"Suggestion envoyée dans {channel.mention} !"))
+            await ctx.send(embed=await self._embed(ctx.guild.id, title="Suggestion envoyée", description=f"Suggestion envoyée dans {channel.mention} !", kind="success"))
 
     @commands.hybrid_command(name="report-bug", description="Signaler un bug du bot aux développeurs.", with_app_command=False)
     @app_commands.describe(texte="Description du bug")
@@ -543,28 +561,29 @@ class Utility(commands.Cog, name="Utility"):
             "INSERT INTO bug_reports (guild_id, user_id, content, created_at) VALUES (?, ?, ?, ?)",
             (ctx.guild.id if ctx.guild else None, ctx.author.id, texte, now()),
         )
-        await ctx.send(embed=embeds.success("🐛 Merci, votre signalement a été enregistré."))
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Signalement enregistré", description="🐛 Merci, votre signalement a été enregistré.", kind="success"))
 
     @commands.hybrid_command(name="afk", description="Se mettre en mode AFK (absent).")
     @app_commands.describe(raison="La raison de votre absence (optionnel)")
     async def afk(self, ctx: commands.Context, *, raison: str = "Absent"):
         self.afk_users[ctx.author.id] = raison
-        await ctx.send(embed=embeds.info(f"😴 {ctx.author.mention} est maintenant AFK : {raison}"))
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Mode AFK activé", description=f"😴 {ctx.author.mention} est maintenant AFK : {raison}"))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
+        guild_id = message.guild.id if message.guild else None
         if message.author.id in self.afk_users:
             del self.afk_users[message.author.id]
             try:
-                await message.channel.send(embed=embeds.info(f"👋 Bon retour {message.author.mention}, votre statut AFK a été retiré."), delete_after=5)
+                await message.channel.send(embed=await self._embed(guild_id, title="De retour", description=f"👋 Bon retour {message.author.mention}, votre statut AFK a été retiré."), delete_after=5)
             except discord.HTTPException:
                 pass
         for mention in message.mentions:
             if mention.id in self.afk_users:
                 try:
-                    await message.channel.send(embed=embeds.info(f"💤 {mention.display_name} est AFK : {self.afk_users[mention.id]}"), delete_after=5)
+                    await message.channel.send(embed=await self._embed(guild_id, title="Membre AFK", description=f"💤 {mention.display_name} est AFK : {self.afk_users[mention.id]}"), delete_after=5)
                 except discord.HTTPException:
                     pass
 
@@ -573,7 +592,7 @@ class Utility(commands.Cog, name="Utility"):
     async def roll(self, ctx: commands.Context, max: int = 100):
         import random
         result = random.randint(1, max)
-        await ctx.send(embed=embeds.info(f"🎲 Vous avez obtenu : **{result}** (sur {max})"))
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Lancer de dé", description=f"🎲 Vous avez obtenu : **{result}** (sur {max})"))
 
     @commands.hybrid_command(name="choose", description="Faire choisir le bot parmi plusieurs options.")
     @app_commands.describe(options="Options séparées par des virgules")
@@ -581,8 +600,8 @@ class Utility(commands.Cog, name="Utility"):
         import random
         choices = [c.strip() for c in options.split(",") if c.strip()]
         if len(choices) < 2:
-            return await ctx.send(embed=embeds.error("Donnez au moins deux options séparées par des virgules."))
-        await ctx.send(embed=embeds.info(f"🤔 Je choisis : **{random.choice(choices)}**"))
+            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Options manquantes", description="Donnez au moins deux options séparées par des virgules.", kind="danger"))
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Choix du bot", description=f"🤔 Je choisis : **{random.choice(choices)}**"))
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Utility(bot))

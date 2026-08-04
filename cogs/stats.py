@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds
+from utils import embeds, design_system
 from database.db import now
 
 START_TIME = time.time()
@@ -19,12 +19,26 @@ class Stats(commands.Cog, name="Stats"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def _embed(self, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
+        """Embed statut/dev cohérent avec +designsetup (catégorie CATEGORY_STYLES["utility"],
+        car ces commandes techniques n'ont pas leur propre catégorie visuelle dédiée)."""
+        style = design_system.CATEGORY_STYLES["utility"]
+        colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
+        default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
+        design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
+        return design_system.create_embed(
+            title=f"{style['emoji']} {title}",
+            description=description,
+            colour=design.get(colour_key, default_colour),
+            footer=design.get("footer"),
+        )
+
     # NOTE : le nom de méthode ne doit JAMAIS commencer par "bot_" ou "cog_"
     # (restriction interne de discord.py sur les Cogs). D'où "system_status"
     # ici, alors que la commande visible reste "/bot-status" et "+bot-status".
     @commands.hybrid_command(name="bot-status", description="Afficher l'état général du bot.")
     async def system_status(self, ctx: commands.Context):
-        e = embeds.neutral("🤖 État du bot")
+        e = await self._embed(ctx.guild.id if ctx.guild else None, title="État du bot")
         e.add_field(name="Latence", value=f"{round(self.bot.latency * 1000)}ms", inline=True)
         e.add_field(name="Serveurs", value=len(self.bot.guilds), inline=True)
         e.add_field(name="Utilisateurs", value=sum(g.member_count for g in self.bot.guilds), inline=True)
@@ -58,9 +72,9 @@ class Stats(commands.Cog, name="Stats"):
             "SELECT * FROM growth_snapshots WHERE guild_id = ? ORDER BY timestamp DESC LIMIT 7", (ctx.guild.id,)
         )
         if not rows:
-            return await ctx.send(embed=embeds.info("Pas encore assez de données de croissance."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Pas assez de données", description="Pas encore assez de données de croissance."))
         lines = [f"<t:{r['timestamp']}:D> — {r['member_count']} membres" for r in reversed(rows)]
-        await ctx.send(embed=embeds.neutral("📈 Croissance du serveur", "\n".join(lines)))
+        await ctx.send(embed=await self._embed(ctx.guild.id, title="Croissance du serveur", description="\n".join(lines)))
 
     @commands.hybrid_command(name="command-stats", description="Afficher les commandes les plus utilisées.", with_app_command=False)
     async def command_stats(self, ctx: commands.Context):
@@ -69,16 +83,17 @@ class Stats(commands.Cog, name="Stats"):
             (ctx.guild.id,),
         )
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucune statistique de commande pour l'instant."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucune statistique", description="Aucune statistique de commande pour l'instant."))
         lines = [f"`{r['command_name']}` — {r['c']} utilisations" for r in rows]
-        await ctx.send(embed=embeds.neutral("📊 Commandes les plus utilisées", "\n".join(lines)))
+        await ctx.send(embed=await self._embed(ctx.guild.id, title="Commandes les plus utilisées", description="\n".join(lines)))
 
     @commands.hybrid_command(name="latency", description="Afficher la latence détaillée du bot.", with_app_command=False)
     async def latency(self, ctx: commands.Context):
+        guild_id = ctx.guild.id if ctx.guild else None
         start = time.perf_counter()
-        msg = await ctx.send(embed=embeds.info("Calcul en cours..."))
+        msg = await ctx.send(embed=await self._embed(guild_id, title="Latence", description="Calcul en cours..."))
         elapsed = (time.perf_counter() - start) * 1000
-        e = embeds.info(f"🏓 Latence API : **{round(self.bot.latency * 1000)}ms**\n📨 Latence message : **{round(elapsed)}ms**")
+        e = await self._embed(guild_id, title="Latence", description=f"🏓 Latence API : **{round(self.bot.latency * 1000)}ms**\n📨 Latence message : **{round(elapsed)}ms**")
         if ctx.interaction:
             await ctx.edit_original_response(embed=e)
         else:
@@ -86,9 +101,10 @@ class Stats(commands.Cog, name="Stats"):
 
     @commands.hybrid_command(name="changelog", description="Afficher les dernières nouveautés du bot.", with_app_command=False)
     async def changelog(self, ctx: commands.Context):
-        e = embeds.brand(
-            "📋 Changelog",
-            "Dernières nouveautés de SentriX (les plus récentes en premier) :",
+        e = await self._embed(
+            ctx.guild.id if ctx.guild else None,
+            title="Changelog",
+            description="Dernières nouveautés de SentriX (les plus récentes en premier) :",
         )
         e.add_field(
             name="🆕 Récent",
@@ -140,11 +156,11 @@ class Stats(commands.Cog, name="Stats"):
             "INSERT INTO bug_reports (guild_id, user_id, content, created_at) VALUES (?, ?, ?, ?)",
             (ctx.guild.id if ctx.guild else None, ctx.author.id, f"[FEEDBACK] {texte}", now()),
         )
-        await ctx.send(embed=embeds.success("Merci pour votre retour !"))
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Merci !", description="Merci pour votre retour !", kind="success"))
 
     @commands.hybrid_command(name="botinfo", description="Afficher des informations générales sur le bot.")
     async def botinfo(self, ctx: commands.Context):
-        e = embeds.neutral(f"ℹ️ À propos de {self.bot.user.name}")
+        e = await self._embed(ctx.guild.id if ctx.guild else None, title=f"À propos de {self.bot.user.name}")
         e.set_thumbnail(url=self.bot.user.display_avatar.url)
         e.add_field(name="Créateur", value="Développé pour ce serveur", inline=True)
         e.add_field(name="Serveurs", value=len(self.bot.guilds), inline=True)

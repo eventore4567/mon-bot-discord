@@ -13,13 +13,26 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import embeds
+from utils import embeds, design_system
 
 
 class Ai(commands.Cog, name="Ai"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.histories: dict[int, list] = {}
+
+    async def _embed(self, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
+        """Embed IA cohérent avec +designsetup (catégorie CATEGORY_STYLES["ai"])."""
+        style = design_system.CATEGORY_STYLES["ai"]
+        colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
+        default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
+        design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
+        return design_system.create_embed(
+            title=f"{style['emoji']} {title}",
+            description=description,
+            colour=design.get(colour_key, default_colour),
+            footer=design.get("footer"),
+        )
 
     def client(self):
         import config
@@ -76,24 +89,23 @@ class Ai(commands.Cog, name="Ai"):
         """Construit et envoie la réponse "SentriX AI" (embed + jauge de confiance).
         Partagé entre la commande /sentrix et le déclenchement par simple message
         (mention du bot ou message commençant par "sentrix")."""
+        guild_id = getattr(getattr(destination, "guild", None), "id", None)
         history = self.histories.get(author.id, [])
         answer, confidence = await self.ask_ai_with_confidence(question, history)
         if answer == "__NO_KEY__":
-            return await destination.send(embed=embeds.error("Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur."))
+            return await destination.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.", kind="danger"))
         if answer.startswith("__ERROR__"):
-            return await destination.send(embed=embeds.error("Une erreur est survenue avec l'IA. Réessayez plus tard."))
+            return await destination.send(embed=await self._embed(guild_id, title="Erreur IA", description="Une erreur est survenue avec l'IA. Réessayez plus tard.", kind="danger"))
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
         self.histories[author.id] = history[-10:]
 
-        e = embeds.brand("🧠 SentriX")
+        design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
+        e = await self._embed(guild_id, title="SentriX")
         e.add_field(name="❓ Question", value=question[:1024], inline=False)
         e.add_field(name="💬 Réponse", value=answer[:1000] or "…", inline=False)
-        e.add_field(
-            name="📡 Indice de confiance",
-            value=f"{embeds.bar(confidence, 10)}  **{confidence}/10**",
-            inline=False,
-        )
+        bar = design_system.progress_bar(confidence, 10, length=design.get("progress_length", 10), filled=design.get("progress_filled", "🟪"), empty=design.get("progress_empty", "⬛"))
+        e.add_field(name="📡 Indice de confiance", value=f"{bar}  **{confidence}/10**", inline=False)
         e.set_footer(text=f"SentriX AI • Demandé par {author}")
         await destination.send(embed=e)
 
@@ -144,77 +156,83 @@ class Ai(commands.Cog, name="Ai"):
     async def ask(self, ctx: commands.Context, *, question: str):
         if ctx.interaction:
             await ctx.defer()
+        guild_id = ctx.guild.id if ctx.guild else None
         history = self.histories.get(ctx.author.id, [])
         answer = await self.ask_ai(question, history)
         if answer == "__NO_KEY__":
-            return await ctx.send(embed=embeds.error("Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur."))
+            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.", kind="danger"))
         if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=embeds.error("Une erreur est survenue avec l'IA. Réessayez plus tard."))
+            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description="Une erreur est survenue avec l'IA. Réessayez plus tard.", kind="danger"))
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
         self.histories[ctx.author.id] = history[-10:]
-        e = embeds.neutral("🤖 Réponse de l'IA", answer[:4000])
+        e = await self._embed(guild_id, title="Réponse de l'IA", description=answer[:4000])
         e.set_footer(text=f"Demandé par {ctx.author}")
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="chat-reset", description="Réinitialiser votre historique de conversation avec l'IA.", with_app_command=False)
     async def chat_reset(self, ctx: commands.Context):
         self.histories.pop(ctx.author.id, None)
-        await ctx.send(embed=embeds.success("🧹 Votre historique de conversation a été réinitialisé."))
+        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Historique réinitialisé", description="🧹 Votre historique de conversation a été réinitialisé.", kind="success"))
 
     @commands.hybrid_command(name="summarize", description="Résumer un texte avec l'IA.")
     @app_commands.describe(texte="Le texte à résumer")
     async def summarize(self, ctx: commands.Context, *, texte: str):
+        guild_id = ctx.guild.id if ctx.guild else None
         if ctx.interaction:
             await ctx.defer()
         answer = await self.ask_ai(f"Résume ce texte en 3-4 phrases maximum :\n\n{texte}")
         if answer == "__NO_KEY__":
-            return await ctx.send(embed=embeds.error("Aucune clé OpenAI n'est configurée sur ce bot."))
+            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
         if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=embeds.error("Une erreur est survenue avec l'IA."))
-        await ctx.send(embed=embeds.neutral("📝 Résumé", answer[:4000]))
+            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description="Une erreur est survenue avec l'IA.", kind="danger"))
+        await ctx.send(embed=await self._embed(guild_id, title="Résumé", description=answer[:4000]))
 
     @commands.hybrid_command(name="image-prompt", description="Générer une idée détaillée de prompt d'image avec l'IA.", with_app_command=False)
     @app_commands.describe(sujet="Le sujet de l'image souhaitée")
     async def image_prompt(self, ctx: commands.Context, *, sujet: str):
+        guild_id = ctx.guild.id if ctx.guild else None
         if ctx.interaction:
             await ctx.defer()
         answer = await self.ask_ai(f"Génère un prompt détaillé et créatif en anglais pour un générateur d'images IA, sur ce sujet : {sujet}")
         if answer == "__NO_KEY__":
-            return await ctx.send(embed=embeds.error("Aucune clé OpenAI n'est configurée sur ce bot."))
-        await ctx.send(embed=embeds.neutral("🎨 Prompt généré", answer[:4000]))
+            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
+        await ctx.send(embed=await self._embed(guild_id, title="Prompt généré", description=answer[:4000]))
 
     @commands.hybrid_command(name="explain", description="Demander à l'IA d'expliquer un concept simplement.", with_app_command=False)
     @app_commands.describe(sujet="Le concept à expliquer")
     async def explain(self, ctx: commands.Context, *, sujet: str):
+        guild_id = ctx.guild.id if ctx.guild else None
         if ctx.interaction:
             await ctx.defer()
         answer = await self.ask_ai(f"Explique ce concept simplement, comme à un débutant : {sujet}")
         if answer == "__NO_KEY__":
-            return await ctx.send(embed=embeds.error("Aucune clé OpenAI n'est configurée sur ce bot."))
-        await ctx.send(embed=embeds.neutral("💡 Explication", answer[:4000]))
+            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
+        await ctx.send(embed=await self._embed(guild_id, title="Explication", description=answer[:4000]))
 
     @commands.hybrid_command(name="rewrite", description="Demander à l'IA de reformuler un texte.", with_app_command=False)
     @app_commands.describe(texte="Le texte à reformuler")
     async def rewrite(self, ctx: commands.Context, *, texte: str):
+        guild_id = ctx.guild.id if ctx.guild else None
         if ctx.interaction:
             await ctx.defer()
         answer = await self.ask_ai(f"Reformule ce texte de façon plus claire, en gardant le sens original :\n\n{texte}")
         if answer == "__NO_KEY__":
-            return await ctx.send(embed=embeds.error("Aucune clé OpenAI n'est configurée sur ce bot."))
-        await ctx.send(embed=embeds.neutral("✏️ Reformulation", answer[:4000]))
+            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
+        await ctx.send(embed=await self._embed(guild_id, title="Reformulation", description=answer[:4000]))
 
     @commands.hybrid_command(name="fact-check", description="Demander à l'IA de vérifier une affirmation (à titre indicatif).", with_app_command=False)
     @app_commands.describe(affirmation="L'affirmation à vérifier")
     async def fact_check(self, ctx: commands.Context, *, affirmation: str):
+        guild_id = ctx.guild.id if ctx.guild else None
         if ctx.interaction:
             await ctx.defer()
         answer = await self.ask_ai(
             f"Évalue la véracité probable de cette affirmation, avec prudence et nuance, en précisant que ce n'est pas une vérification garantie : {affirmation}"
         )
         if answer == "__NO_KEY__":
-            return await ctx.send(embed=embeds.error("Aucune clé OpenAI n'est configurée sur ce bot."))
-        e = embeds.neutral("🔍 Vérification (indicative)", answer[:4000])
+            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
+        e = await self._embed(guild_id, title="Vérification (indicative)", description=answer[:4000])
         e.set_footer(text="⚠️ Réponse générée par IA, à vérifier par vous-même.")
         await ctx.send(embed=e)
 

@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks
+from utils import embeds, checks, design_system
 
 
 class VerifyView(discord.ui.View):
@@ -27,6 +27,19 @@ class VerifyView(discord.ui.View):
 class Verification(commands.Cog, name="Verification"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def _embed(self, guild_id: int, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
+        """Embed cohérent avec +designsetup (catégorie CATEGORY_STYLES["verification"])."""
+        style = design_system.CATEGORY_STYLES["verification"]
+        colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
+        default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
+        design = await self.bot.db.get_design_settings(guild_id)
+        return design_system.create_embed(
+            title=f"{style['emoji']} {title}",
+            description=description,
+            colour=design.get(colour_key, default_colour),
+            footer=design.get("footer"),
+        )
 
     async def do_verify(self, interaction: discord.Interaction):
         conf = await self.bot.db.get_guild_config(interaction.guild.id)
@@ -53,12 +66,12 @@ class Verification(commands.Cog, name="Verification"):
     @checks.is_owner_or_admin()
     async def verify_setup(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.set_guild_config(ctx.guild.id, "verify_role", role.id)
-        await ctx.send(embed=embeds.success(f"Rôle de vérification défini sur {role.mention}."))
+        await ctx.send(embed=await self._embed(ctx.guild.id, title="Rôle défini", description=f"Rôle de vérification défini sur {role.mention}.", kind="success"))
 
     @commands.hybrid_command(name="verify-panel", description="Poster le panneau de vérification dans ce salon.")
     @checks.is_owner_or_admin()
     async def verify_panel(self, ctx: commands.Context):
-        e = embeds.neutral("✅ Vérification", "Cliquez sur le bouton ci-dessous après avoir lu les règles du serveur pour obtenir l'accès complet.")
+        e = await self._embed(ctx.guild.id, title="Vérification", description="Cliquez sur le bouton ci-dessous après avoir lu les règles du serveur pour obtenir l'accès complet.")
         await ctx.send(embed=e, view=VerifyView())
 
     @commands.hybrid_command(name="reactionrole-add", description="Ajouter un rôle sur réaction à un message.")
@@ -68,17 +81,17 @@ class Verification(commands.Cog, name="Verification"):
         try:
             mid = int(message_id)
         except ValueError:
-            return await ctx.send(embed=embeds.error("Identifiant de message invalide."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Identifiant invalide", description="Identifiant de message invalide.", kind="danger"))
         try:
             msg = await ctx.channel.fetch_message(mid)
         except discord.NotFound:
-            return await ctx.send(embed=embeds.error("Message introuvable dans ce salon."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Message introuvable", description="Message introuvable dans ce salon.", kind="danger"))
         await msg.add_reaction(emoji)
         await self.bot.db.execute(
             "INSERT INTO reaction_roles (guild_id, message_id, emoji, role_id) VALUES (?, ?, ?, ?)",
             (ctx.guild.id, mid, emoji, role.id),
         )
-        await ctx.send(embed=embeds.success(f"Rôle {role.mention} lié à {emoji} sur ce message."))
+        await ctx.send(embed=await self._embed(ctx.guild.id, title="Association créée", description=f"Rôle {role.mention} lié à {emoji} sur ce message.", kind="success"))
 
     @commands.hybrid_command(name="reactionrole-remove", description="Retirer une association rôle/réaction.", with_app_command=False)
     @app_commands.describe(message_id="L'identifiant du message", emoji="L'emoji concerné")
@@ -87,22 +100,22 @@ class Verification(commands.Cog, name="Verification"):
         try:
             mid = int(message_id)
         except ValueError:
-            return await ctx.send(embed=embeds.error("Identifiant de message invalide."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Identifiant invalide", description="Identifiant de message invalide.", kind="danger"))
         await self.bot.db.execute(
             "DELETE FROM reaction_roles WHERE guild_id = ? AND message_id = ? AND emoji = ?", (ctx.guild.id, mid, emoji)
         )
-        await ctx.send(embed=embeds.success("Association retirée."))
+        await ctx.send(embed=await self._embed(ctx.guild.id, title="Association retirée", kind="success"))
 
     @commands.hybrid_command(name="reactionrole-list", description="Lister les rôles sur réaction configurés.", with_app_command=False)
     async def reactionrole_list(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM reaction_roles WHERE guild_id = ?", (ctx.guild.id,))
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucun rôle sur réaction configuré."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucune association", description="Aucun rôle sur réaction configuré."))
         lines = []
         for r in rows:
             role = ctx.guild.get_role(r["role_id"])
             lines.append(f"{r['emoji']} → {role.mention if role else 'Rôle supprimé'} (msg `{r['message_id']}`)")
-        await ctx.send(embed=embeds.neutral("🎭 Rôles sur réaction", "\n".join(lines)))
+        await ctx.send(embed=await self._embed(ctx.guild.id, title="Rôles sur réaction", description="\n".join(lines)))
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -150,12 +163,12 @@ class Verification(commands.Cog, name="Verification"):
     async def giverole(self, ctx: commands.Context, membre: discord.Member, role: discord.Role):
         error = checks.check_hierarchy(ctx.author, membre) if isinstance(ctx.author, discord.Member) else None
         if error and ctx.author.id != ctx.guild.owner_id:
-            return await ctx.send(embed=embeds.error(error))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Action refusée", description=error, kind="danger"))
         try:
             await membre.add_roles(role, reason=f"Ajouté par {ctx.author}")
         except discord.Forbidden:
-            return await ctx.send(embed=embeds.error("Je n'ai pas la permission d'attribuer ce rôle."))
-        await ctx.send(embed=embeds.success(f"Rôle {role.mention} donné à {membre.mention}."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Je n'ai pas la permission d'attribuer ce rôle.", kind="danger"))
+        await ctx.send(embed=await self._embed(ctx.guild.id, title="Rôle attribué", description=f"Rôle {role.mention} donné à {membre.mention}.", kind="success"))
 
     @commands.hybrid_command(name="removerole", aliases=["delrole"], description="Retirer un rôle à un membre.")
     @app_commands.describe(membre="Le membre visé", role="Le rôle à retirer")
@@ -164,8 +177,8 @@ class Verification(commands.Cog, name="Verification"):
         try:
             await membre.remove_roles(role, reason=f"Retiré par {ctx.author}")
         except discord.Forbidden:
-            return await ctx.send(embed=embeds.error("Je n'ai pas la permission de retirer ce rôle."))
-        await ctx.send(embed=embeds.success(f"Rôle {role.mention} retiré à {membre.mention}."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Je n'ai pas la permission de retirer ce rôle.", kind="danger"))
+        await ctx.send(embed=await self._embed(ctx.guild.id, title="Rôle retiré", description=f"Rôle {role.mention} retiré à {membre.mention}.", kind="success"))
 
     @commands.hybrid_command(name="roleall", description="Donner un rôle à tous les membres du serveur.", with_app_command=False)
     @app_commands.describe(role="Le rôle à attribuer à tout le monde")
@@ -178,10 +191,13 @@ class Verification(commands.Cog, name="Verification"):
         # mais son limiteur interne (discord.py) répartit ces lots bien plus efficacement
         # qu'une file strictement séquentielle.
         BATCH_SIZE = 15
-        progress_msg = await ctx.send(embed=embeds.info(
-            f"⏳ Attribution du rôle {role.mention} à ~{ctx.guild.member_count} membres en cours. "
-            "Sur un très gros serveur, ça peut prendre un moment — un message de progression "
-            "s'affichera régulièrement, merci de patienter..."
+        progress_msg = await ctx.send(embed=await self._embed(
+            ctx.guild.id, title="Attribution en cours",
+            description=(
+                f"⏳ Attribution du rôle {role.mention} à ~{ctx.guild.member_count} membres en cours. "
+                "Sur un très gros serveur, ça peut prendre un moment — un message de progression "
+                "s'affichera régulièrement, merci de patienter..."
+            ),
         ))
         count = 0
         failed = 0
@@ -206,16 +222,19 @@ class Verification(commands.Cog, name="Verification"):
                 batch = []
                 if processed % 2000 == 0:
                     try:
-                        await progress_msg.edit(embed=embeds.info(
-                            f"⏳ Progression : **{processed}/{ctx.guild.member_count}** membres traités, "
-                            f"**{count}** rôle(s) attribué(s) jusqu'ici..."
+                        await progress_msg.edit(embed=await self._embed(
+                            ctx.guild.id, title="Progression",
+                            description=(
+                                f"⏳ Progression : **{processed}/{ctx.guild.member_count}** membres traités, "
+                                f"**{count}** rôle(s) attribué(s) jusqu'ici..."
+                            ),
                         ))
                     except discord.HTTPException:
                         pass
         if batch:
             await asyncio.gather(*(apply_role(m) for m in batch))
 
-        result = embeds.success(f"Rôle {role.mention} attribué à **{count}** membre(s).")
+        result = await self._embed(ctx.guild.id, title="Attribution terminée", description=f"Rôle {role.mention} attribué à **{count}** membre(s).", kind="success")
         if failed:
             result.add_field(name="⚠️ Échecs", value=f"{failed} membre(s) n'ont pas pu recevoir le rôle (permissions insuffisantes).", inline=False)
         await ctx.send(embed=result)
@@ -226,7 +245,7 @@ class Verification(commands.Cog, name="Verification"):
     @checks.is_owner_or_admin()
     async def massrole(self, ctx: commands.Context, role: discord.Role, action: str, membres: commands.Greedy[discord.Member]):
         if not membres:
-            return await ctx.send(embed=embeds.error("Mentionnez au moins un membre."))
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Membres manquants", description="Mentionnez au moins un membre.", kind="danger"))
         count = 0
         for m in membres:
             try:
@@ -238,7 +257,7 @@ class Verification(commands.Cog, name="Verification"):
             except discord.Forbidden:
                 pass
         verb = "ajouté" if action == "add" else "retiré"
-        await ctx.send(embed=embeds.success(f"Rôle {role.mention} {verb} pour **{count}** membre(s)."))
+        await ctx.send(embed=await self._embed(ctx.guild.id, title="Massrole terminé", description=f"Rôle {role.mention} {verb} pour **{count}** membre(s).", kind="success"))
 
 
 async def setup(bot: commands.Bot):
