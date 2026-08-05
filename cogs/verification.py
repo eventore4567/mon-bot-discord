@@ -18,7 +18,7 @@ class VerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ Je certifie avoir lu les règles", style=discord.ButtonStyle.success, custom_id="verify_panel_btn")
+    @discord.ui.button(label="● Je certifie avoir lu les règles", style=discord.ButtonStyle.success, custom_id="verify_panel_btn")
     async def verify(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog: "Verification" = interaction.client.get_cog("Verification")
         await cog.do_verify(interaction)
@@ -59,7 +59,7 @@ class Verification(commands.Cog, name="Verification"):
             "INSERT OR IGNORE INTO verified_users (guild_id, user_id, verified_at) VALUES (?, ?, strftime('%s','now'))",
             (interaction.guild.id, interaction.user.id),
         )
-        await interaction.response.send_message("✅ Vous avez été vérifié avec succès !", ephemeral=True)
+        await interaction.response.send_message("● Vous avez été vérifié avec succès !", ephemeral=True)
 
     @commands.hybrid_command(name="verify-setup", description="Définir le rôle attribué lors de la vérification.")
     @app_commands.describe(role="Le rôle à attribuer aux membres vérifiés")
