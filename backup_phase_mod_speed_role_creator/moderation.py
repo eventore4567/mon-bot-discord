@@ -114,22 +114,6 @@ class Moderation(commands.Cog):
         await self.log_action(ctx.guild, e)
         return e
 
-    async def _ack(self, ctx: commands.Context):
-        """Accuse réception IMMÉDIATEMENT, avant tout appel API/DB. Corrige la lenteur
-        perçue du système de modération : chaque sanction enchaîne plusieurs appels
-        séquentiels (DM au membre, action Discord, écriture en base du dossier, envoi
-        du log, PUIS seulement la réponse) — sans accusé de réception immédiat, une
-        commande slash dépasse facilement les 3 secondes de Discord et affiche
-        « L'application ne répond plus », et une commande texte ne donne aucun signe
-        de vie pendant tout ce temps. Pour une interaction, on defer() tout de suite
-        (le petit indicateur "réflexion en cours" apparaît instantanément) ; pour une
-        commande texte, on affiche l'indicateur de frappe."""
-        if ctx.interaction:
-            if not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer()
-        else:
-            await ctx.typing()
-
     async def check_targetable(self, ctx: commands.Context, membre: discord.Member) -> bool:
         err = checks.check_hierarchy(ctx.author, membre)
         if err:
@@ -147,7 +131,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à bannir", raison="La raison du bannissement")
     @checks.has_permission_or_modrole("ban_members")
     async def ban(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
-        await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
         try:
@@ -162,7 +145,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à bannir", duree="Durée (ex: 30m, 2h, 1j)", raison="La raison")
     @checks.has_permission_or_modrole("ban_members")
     async def tempban(self, ctx: commands.Context, membre: discord.Member, duree: str, *, raison: str = "Aucune raison fournie"):
-        await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
         seconds = helpers.parse_duration(duree)
@@ -184,7 +166,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(user_id="L'identifiant Discord de l'utilisateur", raison="La raison")
     @checks.has_permission_or_modrole("ban_members")
     async def unban(self, ctx: commands.Context, user_id: str, *, raison: str = "Aucune raison fournie"):
-        await self._ack(ctx)
         try:
             uid = int(user_id)
         except ValueError:
@@ -203,7 +184,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à expulser", raison="La raison de l'expulsion")
     @checks.has_permission_or_modrole("kick_members")
     async def kick(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
-        await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
         try:
@@ -228,7 +208,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à rendre muet", duree="Durée (ex: 10m, 1h)", raison="La raison")
     @checks.has_permission_or_modrole("moderate_members")
     async def mute(self, ctx: commands.Context, membre: discord.Member, duree: str = "10m", *, raison: str = "Aucune raison fournie"):
-        await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
         seconds = helpers.parse_duration(duree)
@@ -243,7 +222,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à démuter", raison="La raison")
     @checks.has_permission_or_modrole("moderate_members")
     async def unmute(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
-        await self._ack(ctx)
         await membre.timeout(None, reason=f"{ctx.author} : {raison}")
         e = await self.log_sanction(ctx, "unmute", membre, raison)
         await ctx.send(embed=e)
@@ -254,7 +232,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à avertir", raison="La raison de l'avertissement")
     @checks.has_permission_or_modrole("moderate_members")
     async def warn(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
-        await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
         await self.bot.db.execute(
@@ -335,7 +312,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(warn_id="L'identifiant de l'avertissement (voir /warnings)")
     @checks.has_permission_or_modrole("moderate_members")
     async def unwarn(self, ctx: commands.Context, warn_id: int):
-        await self._ack(ctx)
         row = await self.bot.db.fetchone(
             "SELECT * FROM warnings WHERE id = ? AND guild_id = ?", (warn_id, ctx.guild.id)
         )
@@ -348,7 +324,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à consulter")
     @checks.has_permission_or_modrole("moderate_members")
     async def warnings_cmd(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
         rows = await self.bot.db.fetchall(
             "SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? ORDER BY timestamp DESC",
             (ctx.guild.id, membre.id),
@@ -369,7 +344,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre concerné")
     @checks.has_permission_or_modrole("moderate_members")
     async def clearwarnings(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
         await self.bot.db.execute(
             "DELETE FROM warnings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
@@ -381,7 +355,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(numero="Le numéro de dossier (voir la fiche envoyée lors de la sanction)")
     @checks.has_permission_or_modrole("moderate_members")
     async def case(self, ctx: commands.Context, numero: int):
-        await self._ack(ctx)
         row = await self.bot.db.get_sanction_by_case(ctx.guild.id, numero)
         if not row:
             return await ctx.send(embed=embeds.error(f"Aucun dossier `#{numero}` trouvé sur ce serveur."))
@@ -402,7 +375,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à consulter")
     @checks.has_permission_or_modrole("moderate_members")
     async def modhistory(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
         rows = await self.bot.db.get_sanction_history(ctx.guild.id, membre.id, limit=15)
         total = await self.bot.db.get_sanction_count(ctx.guild.id, membre.id)
         if not rows:
@@ -439,7 +411,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(secondes="Délai entre les messages en secondes (0 pour désactiver)")
     @checks.has_permission_or_modrole("manage_channels")
     async def slowmode(self, ctx: commands.Context, secondes: app_commands.Range[int, 0, 21600]):
-        await self._ack(ctx)
         await ctx.channel.edit(slowmode_delay=secondes)
         if secondes == 0:
             await ctx.send(embed=embeds.success("Le mode lent a été désactivé."))
@@ -449,7 +420,6 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="lock", description="Verrouiller le salon (empêche @everyone d'écrire).", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def lock(self, ctx: commands.Context, raison: str = "Aucune raison fournie"):
-        await self._ack(ctx)
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = False
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=raison)
@@ -458,7 +428,6 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="unlock", description="Déverrouiller le salon.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def unlock(self, ctx: commands.Context):
-        await self._ack(ctx)
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = None
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
@@ -467,7 +436,6 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="hide", description="Cacher le salon aux membres (@everyone).", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def hide(self, ctx: commands.Context):
-        await self._ack(ctx)
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.view_channel = False
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
@@ -476,7 +444,6 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="show", description="Rendre le salon à nouveau visible.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def show(self, ctx: commands.Context):
-        await self._ack(ctx)
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.view_channel = None
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
@@ -488,7 +455,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre concerné", pseudo="Le nouveau pseudo")
     @checks.has_permission_or_modrole("manage_nicknames")
     async def nickname(self, ctx: commands.Context, membre: discord.Member, *, pseudo: str):
-        await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
         await membre.edit(nick=pseudo[:32])
@@ -498,7 +464,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre concerné")
     @checks.has_permission_or_modrole("manage_nicknames")
     async def resetnick(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
         await membre.edit(nick=None)
         await ctx.send(embed=embeds.success(f"Le pseudo de {membre.mention} a été réinitialisé."))
 
@@ -506,7 +471,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à déplacer", salon="Le salon vocal de destination")
     @checks.has_permission_or_modrole("move_members")
     async def move(self, ctx: commands.Context, membre: discord.Member, salon: discord.VoiceChannel):
-        await self._ack(ctx)
         if not membre.voice:
             return await ctx.send(embed=embeds.error("Ce membre n'est pas en vocal."))
         await membre.move_to(salon)
@@ -516,7 +480,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à déconnecter")
     @checks.has_permission_or_modrole("move_members")
     async def disconnect(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
         if not membre.voice:
             return await ctx.send(embed=embeds.error("Ce membre n'est pas en vocal."))
         await membre.move_to(None)

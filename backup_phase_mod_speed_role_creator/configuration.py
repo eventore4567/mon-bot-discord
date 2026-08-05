@@ -23,10 +23,6 @@ invitations, niveaux, économie, réputation, giveaways, sauvegardes, mode urgen
   proposition de Voir uniquement / Prendre le contrôle / Annuler, au lieu de laisser deux
   personnes modifier la même chose sans le savoir.
 - Historique des modifications (table setup_history), consultable depuis la page d'accueil.
-- Page Rôles : bouton "➕ Créer un nouveau rôle" — crée un VRAI rôle Discord (nom, couleur,
-  permissions, affiché séparément, mentionnable) directement depuis /setup, sans avoir à
-  passer par les paramètres du serveur Discord. Confirmation obligatoire si Administrateur
-  est sélectionné parmi les permissions.
 """
 
 import json
@@ -947,182 +943,6 @@ class DeleteLevelRoleModal(discord.ui.Modal, title="Supprimer un palier de nivea
         await interaction.response.edit_message(embed=await self.view_ref.build_embed(), view=self.view_ref)
 
 
-# ---------------------------------------------------------------- CRÉATEUR DE RÔLE (page Rôles)
-# Permet de créer un TOUT NOUVEAU rôle Discord (pas juste en assigner un déjà existant à un
-# champ) directement depuis /setup : nom + couleur via un formulaire, puis permissions/
-# affichage séparé/mentionnable via un second écran à cases à cocher. Volontairement limité
-# aux permissions les plus demandées (25 options max pour un menu déroulant Discord).
-ROLE_CREATOR_PERMISSIONS = [
-    ("administrator", "👑 Administrateur (accès total — à utiliser avec prudence)"),
-    ("manage_guild", "⚙️ Gérer le serveur"),
-    ("manage_roles", "🎭 Gérer les rôles"),
-    ("manage_channels", "📁 Gérer les salons"),
-    ("manage_messages", "📝 Gérer les messages"),
-    ("kick_members", "👢 Expulser des membres"),
-    ("ban_members", "🔨 Bannir des membres"),
-    ("moderate_members", "🔇 Rendre muet (timeout)"),
-    ("manage_nicknames", "✏️ Gérer les pseudos"),
-    ("mention_everyone", "📢 Mentionner @everyone"),
-    ("view_channel", "👁️ Voir les salons"),
-    ("send_messages", "💬 Envoyer des messages"),
-    ("embed_links", "🔗 Intégrer des liens"),
-    ("attach_files", "📎 Joindre des fichiers"),
-    ("add_reactions", "😀 Ajouter des réactions"),
-    ("connect", "🔊 Se connecter (vocal)"),
-    ("speak", "🎙️ Parler (vocal)"),
-    ("mute_members", "🔈 Couper le son des membres (vocal)"),
-    ("move_members", "↔️ Déplacer les membres (vocal)"),
-]
-
-HEX_COLOUR_RE = re.compile(r"[0-9A-Fa-f]{6}")
-
-
-class CreateRoleModal(discord.ui.Modal, title="➕ Créer un nouveau rôle"):
-    """Étape 1 : nom + couleur. Les permissions sont demandées juste après (étape 2, voir
-    RoleCreatorPermsView) car un Modal Discord ne peut contenir que des champs texte —
-    pas de menu déroulant possible ici."""
-
-    nom = discord.ui.TextInput(label="Nom du rôle", required=True, max_length=100)
-    couleur = discord.ui.TextInput(
-        label="Couleur hex (ex: 5865F2) — laisser vide si aucune",
-        required=False, max_length=7,
-    )
-
-    def __init__(self, view: "SetupView"):
-        super().__init__()
-        self.view_ref = view
-
-    async def on_submit(self, interaction: discord.Interaction):
-        name = self.nom.value.strip()
-        if not name:
-            return await interaction.response.send_message("❌ Le nom du rôle ne peut pas être vide.", ephemeral=True)
-        raw = self.couleur.value.strip().lstrip("#")
-        if raw and not HEX_COLOUR_RE.fullmatch(raw):
-            return await interaction.response.send_message(
-                "❌ Couleur invalide. Utilisez un code hexadécimal à 6 caractères (ex: `5865F2`), ou laissez le champ vide.",
-                ephemeral=True,
-            )
-        colour_value = int(raw, 16) if raw else 0
-        perms_view = RoleCreatorPermsView(self.view_ref, name, colour_value)
-        e = embeds.neutral(
-            "➕ Créer un nouveau rôle — étape 2/2",
-            f"Nom : **{name}**\nCouleur : {'#' + raw.upper() if raw else '*Aucune*'}\n\n"
-            "Sélectionnez les permissions à accorder (aucune sélection = simple rôle d'affichage, sans "
-            "permission particulière), réglez l'affichage séparé/mentionnable si besoin, puis cliquez sur "
-            "**✅ Créer le rôle**.",
-            color=SETUP_COLOR_MAIN,
-        )
-        await interaction.response.send_message(embed=e, view=perms_view, ephemeral=True)
-
-
-class RoleCreatorPermsView(discord.ui.View):
-    """Étape 2 : permissions (menu multi-sélection), affichage séparé (hoist) et
-    mentionnable (deux boutons à bascule), puis création réelle du rôle."""
-
-    def __init__(self, setup_view: "SetupView", name: str, colour_value: int):
-        super().__init__(timeout=300)
-        self.setup_view = setup_view
-        self.name = name
-        self.colour_value = colour_value
-        self.selected_perms: set[str] = set()
-        self.hoist = False
-        self.mentionable = False
-        self._admin_confirm_pending = False
-
-        self.perm_select = discord.ui.Select(
-            placeholder="🔑 Permissions à accorder (optionnel)",
-            min_values=0, max_values=len(ROLE_CREATOR_PERMISSIONS),
-            options=[discord.SelectOption(label=label, value=key) for key, label in ROLE_CREATOR_PERMISSIONS],
-            row=0,
-        )
-        self.perm_select.callback = self._on_perms_changed
-        self.add_item(self.perm_select)
-
-        self.hoist_btn = discord.ui.Button(label="🚩 Affiché séparément : Non", style=discord.ButtonStyle.secondary, row=1)
-        self.hoist_btn.callback = self._toggle_hoist
-        self.add_item(self.hoist_btn)
-
-        self.mention_btn = discord.ui.Button(label="📣 Mentionnable : Non", style=discord.ButtonStyle.secondary, row=1)
-        self.mention_btn.callback = self._toggle_mentionable
-        self.add_item(self.mention_btn)
-
-        self.create_btn = discord.ui.Button(label="✅ Créer le rôle", style=discord.ButtonStyle.success, row=2)
-        self.create_btn.callback = self._create_clicked
-        self.add_item(self.create_btn)
-
-        self.cancel_btn = discord.ui.Button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=2)
-        self.cancel_btn.callback = self._cancel_clicked
-        self.add_item(self.cancel_btn)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return await self.setup_view.interaction_check(interaction)
-
-    async def _on_perms_changed(self, interaction: discord.Interaction):
-        self.selected_perms = set(self.perm_select.values)
-        self._admin_confirm_pending = False  # tout changement de sélection annule une confirmation Administrateur en attente
-        await interaction.response.defer()
-
-    async def _toggle_hoist(self, interaction: discord.Interaction):
-        self.hoist = not self.hoist
-        self.hoist_btn.label = f"🚩 Affiché séparément : {'Oui' if self.hoist else 'Non'}"
-        await interaction.response.edit_message(view=self)
-
-    async def _toggle_mentionable(self, interaction: discord.Interaction):
-        self.mentionable = not self.mentionable
-        self.mention_btn.label = f"📣 Mentionnable : {'Oui' if self.mentionable else 'Non'}"
-        await interaction.response.edit_message(view=self)
-
-    async def _cancel_clicked(self, interaction: discord.Interaction):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(
-            embed=embeds.neutral("❌ Création annulée", "Aucun rôle n'a été créé.", color=SETUP_COLOR_MAIN), view=self,
-        )
-
-    async def _create_clicked(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        if not guild.me.guild_permissions.manage_roles:
-            return await interaction.response.send_message(
-                "⚠️ SentriX n'a pas la permission **Gérer les rôles** sur ce serveur — impossible de créer un rôle. "
-                "Donnez cette permission au bot puis réessayez.",
-                ephemeral=True,
-            )
-        # Comme partout ailleurs dans /setup (voir _validate_role_selection), un rôle
-        # Administrateur exige une confirmation explicite avant d'être créé — deuxième clic
-        # requis, jamais créé silencieusement.
-        if "administrator" in self.selected_perms and not self._admin_confirm_pending:
-            self._admin_confirm_pending = True
-            return await interaction.response.send_message(
-                "⚠️ Ce rôle aura la permission **Administrateur** (accès total au serveur). "
-                "Cliquez à nouveau sur **✅ Créer le rôle** pour confirmer.",
-                ephemeral=True,
-            )
-        try:
-            perms_kwargs = {p: True for p in self.selected_perms}
-            role = await guild.create_role(
-                name=self.name,
-                colour=discord.Colour(self.colour_value),
-                permissions=discord.Permissions(**perms_kwargs),
-                hoist=self.hoist,
-                mentionable=self.mentionable,
-                reason=f"Créé via /setup par {interaction.user}",
-            )
-        except discord.HTTPException as exc:
-            return await interaction.response.send_message(
-                f"❌ La création du rôle a échoué (`{type(exc).__name__}`). Le serveur a peut-être atteint la "
-                "limite de 250 rôles, ou SentriX n'a plus la permission nécessaire.",
-                ephemeral=True,
-            )
-        await self.setup_view.bot.db.log_setup_history(
-            self.setup_view.guild_id, interaction.user.id, "Rôles", "rôle créé",
-            new_value=f"{role.name} (#{role.id})",
-        )
-        for item in self.children:
-            item.disabled = True
-        e = embeds.success(f"✅ Le rôle {role.mention} a été créé avec succès.")
-        await interaction.response.edit_message(embed=e, view=self)
-
-
 class SetupNavButton(
     discord.ui.DynamicItem[discord.ui.Button],
     # "prev"/"next" restent acceptés (rétrocompatibilité avec d'anciens messages /setup déjà
@@ -1614,9 +1434,6 @@ class SetupView(discord.ui.View):
                 )
                 exempt_select.callback = self._make_exempt_roles_callback(exempt_select)
                 self.add_item(exempt_select)
-                create_role_btn = discord.ui.Button(label="➕ Créer un nouveau rôle", style=discord.ButtonStyle.primary, row=3)
-                create_role_btn.callback = self._open_create_role_modal
-                self.add_item(create_role_btn)
             else:
                 clear_btn = discord.ui.Button(label="🧹 Effacer les salons configurés", style=discord.ButtonStyle.secondary, row=2)
                 clear_btn.callback = self._clear_channels_clicked
@@ -1740,9 +1557,6 @@ class SetupView(discord.ui.View):
             self.add_item(SetupNavButton("cancel", self.message_id, label="❌ Fermer", style=discord.ButtonStyle.danger))
 
     # ---------------------------------------------------------------- ACTIONS SPÉCIFIQUES AUX PAGES
-
-    async def _open_create_role_modal(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(CreateRoleModal(self))
 
     async def _open_level_role_modal(self, interaction: discord.Interaction):
         await interaction.response.send_modal(LevelRoleModal(self))
