@@ -435,30 +435,16 @@ class Moderation(commands.Cog):
         deleted = await ctx.channel.purge(limit=nombre)
         await ctx.send(embed=embeds.success(f"{len(deleted)} message(s) supprimé(s)."), ephemeral=True)
 
-    @commands.hybrid_command(name="slowmode", description="Définir le mode lent du salon (durée libre : 5s, 1m, 10m, 1h...).", with_app_command=False)
-    @app_commands.describe(duree="Ex: 5s, 30s, 1m, 10m, 1h — ou 0 / off pour désactiver (maximum 6 heures)")
+    @commands.hybrid_command(name="slowmode", description="Définir le mode lent du salon (en secondes).", with_app_command=False)
+    @app_commands.describe(secondes="Délai entre les messages en secondes (0 pour désactiver)")
     @checks.has_permission_or_modrole("manage_channels")
-    async def slowmode(self, ctx: commands.Context, duree: str):
+    async def slowmode(self, ctx: commands.Context, secondes: app_commands.Range[int, 0, 21600]):
         await self._ack(ctx)
-        raw = duree.strip().lower()
-        if raw in ("0", "off", "desactive", "désactive", "désactivé", "aucun", "none", "stop"):
-            secondes = 0
-        elif raw.isdigit():
-            # Rétrocompatibilité : un nombre seul (ex: "300") reste interprété comme des secondes,
-            # comme avant ce changement.
-            secondes = int(raw)
-        else:
-            secondes = helpers.parse_duration(raw)
-            if secondes is None:
-                return await ctx.send(embed=embeds.error(
-                    "Durée invalide. Exemples valides : `5s`, `30s`, `1m`, `10m`, `1h`, ou `0` / `off` pour désactiver."
-                ))
-        secondes = max(0, min(21600, secondes))  # limite Discord : 6 heures maximum
         await ctx.channel.edit(slowmode_delay=secondes)
         if secondes == 0:
-            await ctx.send(embed=embeds.success("⏱️ Le mode lent a été désactivé."))
+            await ctx.send(embed=embeds.success("Le mode lent a été désactivé."))
         else:
-            await ctx.send(embed=embeds.success(f"⏱️ Mode lent activé — {helpers.format_duration(secondes)} entre chaque message."))
+            await ctx.send(embed=embeds.success(f"Mode lent réglé sur {secondes} seconde(s)."))
 
     @commands.hybrid_command(name="lock", description="Verrouiller le salon (empêche @everyone d'écrire).", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
