@@ -483,7 +483,7 @@ class Utility(commands.Cog, name="Utility"):
     @commands.hybrid_command(
         name="addemoji",
         aliases=["add-emoji"],
-        description="Ajouter un emoji personnalisé depuis une image jointe ou une URL.",
+        description="Importer un emoji collé, une image jointe ou une URL.",
         with_app_command=False,
     )
     @app_commands.describe(nom="Nom du nouvel emoji", url="URL HTTPS directe (optionnelle si une image est jointe)")
@@ -495,11 +495,23 @@ class Utility(commands.Cog, name="Utility"):
             return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Le bot doit avoir la permission **Gérer les emojis et stickers**.", kind="danger"))
 
         nom = nom.strip()
+
+        # Discord transmet un emoji personnalisé collé sous la forme
+        # <:nom:identifiant> ou <a:nom:identifiant>. On récupère automatiquement
+        # son nom et son image CDN, sans demander d'URL à l'utilisateur.
+        pasted_emoji = re.fullmatch(r"<(a?):([A-Za-z0-9_]{2,32}):([0-9]+)>", nom)
+        if pasted_emoji:
+            animated = bool(pasted_emoji.group(1))
+            nom = pasted_emoji.group(2)
+            emoji_id = pasted_emoji.group(3)
+            extension = "gif" if animated else "png"
+            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}?size=128&quality=lossless"
+
         if not re.fullmatch(r"[A-Za-z0-9_]{2,32}", nom):
             return await ctx.send(embed=await self._embed(
                 ctx.guild.id,
                 title="Nom invalide",
-                description="Le nom doit contenir entre 2 et 32 caractères : lettres, chiffres ou tiret bas uniquement.",
+                description="Collez un emoji personnalisé Discord, ou indiquez un nom de 2 à 32 caractères avec une image jointe.",
                 kind="danger",
             ))
 
