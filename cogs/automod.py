@@ -83,17 +83,17 @@ TOGGLE_FIELDS = [
 # Libellés lisibles des filtres AutoMod — réutilisés par /automod-status ET par la page
 # "Sécurité" de /setup, pour ne jamais avoir deux endroits à maintenir séparément.
 AUTOMOD_TOGGLE_LABELS = {
-    "antispam": "🚫 Anti-spam (messages répétés)",
-    "antilink": "🔗 Anti-liens",
-    "antiinvite": "📨 Anti-invitations Discord",
-    "antimention": "📢 Anti-mentions massives",
-    "anticaps": "🔠 Anti-majuscules (SPAM CAPS)",
-    "antiemoji": "😀 Anti-spam d'émojis",
-    "antiraid": "🚨 Anti-raid (afflux de comptes)",
-    "antibot": "🤖 Anti-bots non autorisés",
-    "antiaccount": "🆕 Anti-comptes très récents",
-    "antiscam": "🎣 Anti-arnaques",
-    "antinuke": "💣 Anti-nuke (compte compromis)",
+    "antispam": "Anti-spam (messages répétés)",
+    "antilink": "Anti-liens",
+    "antiinvite": "Anti-invitations Discord",
+    "antimention": "Anti-mentions massives",
+    "anticaps": "Anti-majuscules (SPAM CAPS)",
+    "antiemoji": "Anti-spam d'émojis",
+    "antiraid": "Anti-raid (afflux de comptes)",
+    "antibot": "Anti-bots non autorisés",
+    "antiaccount": "Anti-comptes très récents",
+    "antiscam": "Anti-arnaques",
+    "antinuke": "Anti-nuke (compte compromis)",
 }
 
 # Préréglages du niveau de sécurité global (/security-level et page "Sécurité" de /setup).
@@ -395,23 +395,23 @@ class AutoMod(commands.Cog, name="Automod"):
         total_24h = sum(stats_by_filter.values())
 
         e = embeds.brand(
-            "🛡️ État de l'AutoMod",
+            "État de l'AutoMod",
             f"**{total_24h}** action(s) déclenchée(s) sur les dernières 24h. "
-            f"Escalade automatique : {'● ACTIVE' if (conf and conf['escalation']) else '○ INACTIVE'} "
+            f"Escalade automatique : {'ACTIVE' if (conf and conf['escalation']) else 'INACTIVE'} "
             f"(`/automod-escalation`).",
         )
         lines = []
         for field, label in AUTOMOD_TOGGLE_LABELS.items():
             value = conf[field] if conf else 0
-            state = "● ACTIF" if value else "○ INACTIF"
+            state = "ACTIF" if value else "INACTIF"
             count = stats_by_filter.get(field, 0)
             count_txt = f" — `{count}` déclenchement(s)/24h" if count else ""
-            lines.append(f"`{state}` · {label}{count_txt}")
+            lines.append(f"**{label}** : {state}{count_txt}")
         e.add_field(name="Filtres", value="\n".join(lines), inline=False)
         exempt_rows = await self.bot.db.list_automod_exempt_roles(ctx.guild.id)
         if exempt_rows:
             mentions = ", ".join(f"<@&{r['role_id']}>" for r in exempt_rows)
-            e.add_field(name="🛡️ Rôles exemptés", value=mentions, inline=False)
+            e.add_field(name="Rôles exemptés", value=mentions, inline=False)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(
@@ -433,15 +433,15 @@ class AutoMod(commands.Cog, name="Automod"):
             "Gérer les rôles": perms.manage_roles,
             "Gérer les salons": perms.manage_channels,
         }
-        permission_lines = [f"`{'● ACCORDÉE' if ok else '○ MANQUANTE'}` · {name}" for name, ok in required.items()]
+        permission_lines = [f"**{name}** : {'Accordée' if ok else 'Manquante'}" for name, ok in required.items()]
         filter_lines = [
-            f"`{'● ACTIF' if conf and conf[field] else '○ INACTIF'}` · {label}"
+            f"**{label}** : {'Actif' if conf and conf[field] else 'Inactif'}"
             for field, label in AUTOMOD_TOGGLE_LABELS.items()
         ]
         e = embeds.brand(
-            "🛡️ Diagnostic de sécurité",
+            "Diagnostic de sécurité",
             "Ce diagnostic vérifie les réglages enregistrés et les permissions réellement "
-            "accordées au bot. Une permission marquée `○ MANQUANTE` empêche la protection associée.",
+            "accordées au bot. Une permission manquante empêche la protection associée.",
         )
         e.add_field(name="Protections", value="\n".join(filter_lines), inline=False)
         e.add_field(name="Permissions du bot", value="\n".join(permission_lines), inline=False)

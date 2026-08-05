@@ -1826,15 +1826,15 @@ class SetupView(discord.ui.View):
 
         elif step["key"] == "security":
             desc = (
-                "Cliquez sur un **préréglage** (🟢 Faible / 🟡 Moyen / 🔴 Élevé) pour tout régler en un clic, "
-                "ou choisissez précisément les filtres actifs dans le menu.\n\n"
-                "⚠️ Chaque changement ici est enregistré **immédiatement**."
+                "Choisissez un préréglage (Faible, Moyen ou Élevé) pour tout régler en un clic, "
+                "ou sélectionnez précisément les filtres actifs dans le menu. "
+                "Chaque changement est enregistré immédiatement."
             )
             e = embeds.neutral(header, desc, color=SETUP_COLOR_MAIN)
             active = sum(1 for v in self.security_choices.values() if v)
             score = round(active / len(AUTOMOD_TOGGLE_LABELS) * 100)
-            e.add_field(name="📊 Score de sécurité", value=f"**{score}/100** ({active}/{len(AUTOMOD_TOGGLE_LABELS)} filtres actifs)", inline=False)
-            lines = [f"{'●' if self.security_choices.get(field) else '○'} {label}" for field, label in AUTOMOD_TOGGLE_LABELS.items()]
+            e.add_field(name="Score de sécurité", value=f"**{score}/100** ({active}/{len(AUTOMOD_TOGGLE_LABELS)} filtres actifs)", inline=False)
+            lines = [f"**{label}** : {'Actif' if self.security_choices.get(field) else 'Inactif'}" for field, label in AUTOMOD_TOGGLE_LABELS.items()]
             e.add_field(name="État des filtres", value="\n".join(lines), inline=False)
 
         elif step["key"] == "summary":
@@ -1852,7 +1852,7 @@ class SetupView(discord.ui.View):
         return e
 
     async def _compute_categories(self, conf) -> list[tuple[str, str]]:
-        """État ●/⚠️/○ de chaque catégorie ACTUELLEMENT implémentée dans /setup. Réutilisé
+        """État textuel de chaque catégorie actuellement implémentée dans /setup. Réutilisé
         par la page d'accueil et le résumé — ne liste QUE les 8 catégories réelles de cette
         phase (les autres modules du bot, comme l'IA ou les statistiques, ont leur propre
         commande de configuration séparée pour l'instant, voir Phases suivantes)."""
@@ -1866,14 +1866,14 @@ class SetupView(discord.ui.View):
             return self.choices.get(field, conf[field] if conf and field in conf.keys() else None)
 
         return [
-            ("⚙️ Général", "●" if cur("mod_role") and cur("log_channel") else ("⚠️" if cur("mod_role") or cur("log_channel") else "○")),
-            ("🎭 Rôles", "●" if cur("autorole") or cur("verify_role") else "⚠️"),
-            ("🎫 Tickets", "●" if n_panels else "⚠️"),
-            ("📢 Salons annexes", "●" if any(cur(f) for f in ("level_channel", "suggest_channel", "announce_channel", "giveaway_channel")) else "⚠️"),
-            ("🏆 Rôles de niveau", "●" if n_levels else "⚠️"),
-            ("📡 Logs", "●" if cur("log_channel") else "○"),
-            ("👥 Gestionnaires", "●" if self.managers else "⚠️"),
-            ("🛡️ Sécurité", "●" if active_security >= 6 else ("⚠️" if active_security > 0 else "○")),
+            ("Général", "Configuré" if cur("mod_role") and cur("log_channel") else ("Partiel" if cur("mod_role") or cur("log_channel") else "Non configuré")),
+            ("Rôles", "Configuré" if cur("autorole") or cur("verify_role") else "Partiel"),
+            ("Tickets", "Configuré" if n_panels else "Partiel"),
+            ("Salons annexes", "Configuré" if any(cur(f) for f in ("level_channel", "suggest_channel", "announce_channel", "giveaway_channel")) else "Partiel"),
+            ("Rôles de niveau", "Configuré" if n_levels else "Partiel"),
+            ("Logs", "Configuré" if cur("log_channel") else "Non configuré"),
+            ("Gestionnaires", "Configuré" if self.managers else "Partiel"),
+            ("Sécurité", "Configuré" if active_security >= 6 else ("Partiel" if active_security > 0 else "Non configuré")),
         ]
 
     async def _build_home_embed(self) -> discord.Embed:
@@ -1882,16 +1882,16 @@ class SetupView(discord.ui.View):
         conf = await self.bot.db.get_guild_config(self.guild_id)
         guild = self._guild()
         categories = await self._compute_categories(conf)
-        configured = sum(1 for _, s in categories if s == "●")
-        critical = sum(1 for _, s in categories if s == "○")
-        warnings = sum(1 for _, s in categories if s == "⚠️")
+        configured = sum(1 for _, s in categories if s == "Configuré")
+        critical = sum(1 for _, s in categories if s == "Non configuré")
+        warnings = sum(1 for _, s in categories if s == "Partiel")
 
         if critical:
-            etat = "🔴 Configuration incomplète — éléments critiques manquants"
+            etat = "Configuration incomplète — éléments critiques manquants"
         elif warnings:
-            etat = "🟠 Configuration incomplète"
+            etat = "Configuration partielle"
         else:
-            etat = "🟢 Configuration à jour"
+            etat = "Configuration à jour"
 
         e = embeds.neutral(
             "⚙️ CENTRE DE CONFIGURATION SENTRIX",
@@ -1914,7 +1914,7 @@ class SetupView(discord.ui.View):
 
         e.add_field(
             name="Catégories disponibles ici",
-            value="\n".join(f"{status} {name}" for name, status in categories),
+            value="\n".join(f"**{name}** : {status}" for name, status in categories),
             inline=False,
         )
         e.add_field(
@@ -1934,10 +1934,10 @@ class SetupView(discord.ui.View):
         e = embeds.neutral(header, "Voici l'état actuel de chaque catégorie.", color=SETUP_COLOR_MAIN)
 
         categories = await self._compute_categories(conf)
-        configured_count = sum(1 for _, status in categories if status == "●")
+        configured_count = sum(1 for _, status in categories if status == "Configuré")
         e.add_field(
             name=f"Modules configurés : {configured_count} sur {len(categories)}",
-            value="\n".join(f"{status} {name}" for name, status in categories),
+            value="\n".join(f"**{name}** : {status}" for name, status in categories),
             inline=False,
         )
 
