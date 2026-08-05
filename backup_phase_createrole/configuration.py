@@ -306,66 +306,6 @@ class Configuration(commands.Cog):
         await ctx.send(embed=embeds.success(f"Rôle automatique défini sur {role.mention}."))
 
     @commands.hybrid_command(
-        name="createrole",
-        description="Créer rapidement un rôle : nom + couleur en un seul message (ex: +createrole Middle Man bleu).",
-        with_app_command=False,
-    )
-    @checks.is_owner_or_admin()
-    async def createrole(self, ctx: commands.Context, *, texte: str):
-        """Usage : +createrole <nom du rôle> <couleur>
-        Exemple : +createrole Middle Man bleu
-
-        La couleur est reconnue si c'est le DERNIER mot du message : un nom courant
-        (rouge/red, bleu/blue, vert/green, jaune/yellow, orange, violet/purple, rose/pink,
-        turquoise/teal, gris/grey, noir/black, blanc/white, marron/brown, blurple) ou un
-        code hexadécimal (ex: 5865F2). Si le dernier mot n'est reconnu comme aucun des
-        deux, tout le texte est utilisé comme nom de rôle, sans couleur particulière —
-        pour un contrôle plus fin (permissions, affiché séparément, mentionnable), utiliser
-        plutôt /setup → 🎭 Rôles → ➕ Créer un nouveau rôle."""
-        await ctx.typing()
-        if not ctx.guild.me.guild_permissions.manage_roles:
-            return await ctx.send(embed=embeds.error(
-                "⚠️ SentriX n'a pas la permission **Gérer les rôles** sur ce serveur — impossible de créer un rôle."
-            ))
-        texte = texte.strip()
-        if not texte:
-            return await ctx.send(embed=embeds.error("Merci d'indiquer un nom de rôle. Exemple : `+createrole Middle Man bleu`"))
-
-        name = texte
-        colour_value = 0
-        colour_label = "Aucune"
-        parts = texte.rsplit(maxsplit=1)
-        if len(parts) == 2:
-            candidate_name, candidate_colour = parts
-            resolved = resolve_named_colour(candidate_colour)
-            if resolved is not None and candidate_name.strip():
-                name = candidate_name.strip()
-                colour_value = resolved
-                colour_label = candidate_colour.strip()
-
-        if len(name) > 100:
-            return await ctx.send(embed=embeds.error("Le nom du rôle est trop long (100 caractères maximum)."))
-
-        try:
-            role = await ctx.guild.create_role(
-                name=name, colour=discord.Colour(colour_value),
-                reason=f"Créé via +createrole par {ctx.author}",
-            )
-        except discord.HTTPException as exc:
-            return await ctx.send(embed=embeds.error(
-                f"❌ La création du rôle a échoué (`{type(exc).__name__}`). Le serveur a peut-être atteint la "
-                "limite de 250 rôles, ou SentriX n'a plus la permission nécessaire."
-            ))
-
-        await self.bot.db.log_setup_history(
-            ctx.guild.id, ctx.author.id, "Rôles", "rôle créé (+createrole)", new_value=f"{role.name} (#{role.id})",
-        )
-        await ctx.send(embed=embeds.success(
-            f"✅ Le rôle {role.mention} a été créé (couleur : {colour_label}).\n"
-            "Pour régler ses permissions, utilisez `/setup` → 🎭 Rôles, ou les paramètres du serveur Discord."
-        ))
-
-    @commands.hybrid_command(
         name="setwarnrole",
         description="Définir un rôle attribué automatiquement à chaque avertissement (/warn).",
         with_app_command=False,
@@ -1035,58 +975,6 @@ ROLE_CREATOR_PERMISSIONS = [
 ]
 
 HEX_COLOUR_RE = re.compile(r"[0-9A-Fa-f]{6}")
-
-# Noms de couleur courants (français + anglais) reconnus par +createrole quand le dernier
-# mot de la commande n'est pas un code hexadécimal. Valeurs choisies en dur (pas via
-# discord.Colour.xxx()) pour ne dépendre d'aucune méthode précise de la librairie.
-COLOUR_NAME_ALIASES = {
-    "rouge": "red", "red": "red",
-    "bleu": "blue", "bleue": "blue", "blue": "blue",
-    "vert": "green", "verte": "green", "green": "green",
-    "jaune": "yellow", "yellow": "yellow",
-    "or": "gold", "dore": "gold", "doré": "gold", "gold": "gold",
-    "orange": "orange",
-    "violet": "purple", "violette": "purple", "mauve": "purple", "purple": "purple",
-    "rose": "pink", "pink": "pink", "magenta": "pink",
-    "turquoise": "teal", "teal": "teal", "cyan": "teal",
-    "gris": "grey", "grise": "grey", "grey": "grey", "gray": "grey",
-    "noir": "black", "noire": "black", "black": "black",
-    "blanc": "white", "blanche": "white", "white": "white",
-    "marron": "brown", "brun": "brown", "brune": "brown", "brown": "brown",
-    "blurple": "blurple", "discord": "blurple",
-}
-
-COLOUR_NAME_VALUES = {
-    "red": 0xED4245,
-    "green": 0x57F287,
-    "blue": 0x3498DB,
-    "yellow": 0xFEE75C,
-    "gold": 0xF1C40F,
-    "orange": 0xE67E22,
-    "purple": 0x9B59B6,
-    "pink": 0xEB459E,
-    "teal": 0x1ABC9C,
-    "grey": 0x95A5A6,
-    "black": 0x000000,
-    "white": 0xFFFFFF,
-    "brown": 0x795548,
-    "blurple": 0x5865F2,
-}
-
-
-def resolve_named_colour(text: str) -> int | None:
-    """Retourne une valeur de couleur (int) à partir d'un nom courant (français ou
-    anglais, voir COLOUR_NAME_ALIASES) ou d'un code hexadécimal (ex: 5865F2 ou #5865F2).
-    Retourne None si le mot ne correspond à aucun des deux — dans ce cas, +createrole
-    traite tout le texte comme un simple nom de rôle, sans couleur particulière."""
-    raw = text.strip().lower()
-    hex_candidate = raw.lstrip("#")
-    if HEX_COLOUR_RE.fullmatch(hex_candidate):
-        return int(hex_candidate, 16)
-    canonical = COLOUR_NAME_ALIASES.get(raw)
-    if canonical is None:
-        return None
-    return COLOUR_NAME_VALUES.get(canonical)
 
 
 class CreateRoleModal(discord.ui.Modal, title="➕ Créer un nouveau rôle"):
