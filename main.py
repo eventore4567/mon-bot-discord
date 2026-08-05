@@ -37,6 +37,7 @@ EXTENSIONS = [
     "cogs.economy",
     "cogs.levels",
     "cogs.minigames",
+    "cogs.games_economy",  # +gamesetup (GamesSetup) est chargé automatiquement par son setup()
     "cogs.music",
     "cogs.events",
     "cogs.verification",

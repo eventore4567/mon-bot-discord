@@ -8,6 +8,7 @@ import aiosqlite
 import asyncio
 import json
 import os
+import sqlite3
 import time
 
 SCHEMA = """
@@ -1791,6 +1792,135 @@ class Database:
             "SELECT (timestamp / 3600) * 3600 as bucket, COUNT(*) as c FROM command_logs "
             "WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC",
             (since_ts,),
+        )
+
+    # ---------- Jeux (Partie 1 — récompenses économiques des mini-jeux) ----------
+    # Toute la logique métier (multiplicateur d'événement, jeux désactivés, limite
+    # journalière...) vit dans utils/game_rewards.py ; les méthodes ci-dessous ne sont que
+    # la couche d'accès aux données, gardée volontairement simple et atomique.
+
+    async def record_game_reward(
+        self, guild_id: int, user_id: int, game_name: str, session_id: str,
+        result: str, amount: int, metadata_json: str = "{}",
+    ) -> tuple[bool, str, int | None]:
+        """Enregistre le résultat d'une manche de mini-jeu et crédite la récompense de façon
+        ATOMIQUE (protégée par le même _economy_lock que /pay, /daily, /weekly...). Le
+        game_session_id est UNIQUE en base : si cette manche précise a déjà été récompensée
+        (double-clic, double appel, redémarrage en plein milieu d'une manche...), l'insertion
+        est refusée et AUCUNE récompense n'est donnée une seconde fois — c'est ce qui garantit
+        qu'un même gain de jeu ne peut jamais être crédité deux fois.
+
+        Retourne (True, "GAME-000123", montant) si la récompense a été accordée, ou
+        (False, "already_rewarded", None) si cette manche était déjà enregistrée."""
+        async with self._economy_lock:
+            try:
+                cur = await self._conn.execute(
+                    "INSERT INTO game_transactions "
+                    "(guild_id, user_id, game_name, game_session_id, result, reward_amount, created_at, metadata_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (guild_id, user_id, game_name, session_id, result, amount, now(), metadata_json),
+                )
+            except sqlite3.IntegrityError:
+                return False, "already_rewarded", None
+            display_id = f"GAME-{cur.lastrowid:06d}"
+            if amount > 0:
+                await self._conn.execute(
+                    "INSERT OR IGNORE INTO economy (guild_id, user_id) VALUES (?, ?)", (guild_id, user_id)
+                )
+                await self._conn.execute(
+                    "UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?",
+                    (amount, guild_id, user_id),
+                )
+                await self._conn.execute(
+                    "INSERT INTO economy_transactions (guild_id, sender_id, receiver_id, transaction_type, amount, created_at, reason) "
+                    "VALUES (?, NULL, ?, 'game_reward', ?, ?, ?)",
+                    (guild_id, user_id, amount, now(), game_name),
+                )
+            await self._conn.commit()
+            return True, display_id, amount
+
+    async def get_game_cooldown_remaining(self, guild_id: int, user_id: int, game_name: str, cooldown: int) -> int:
+        row = await self.fetchone(
+            "SELECT last_used_at FROM game_cooldowns WHERE guild_id = ? AND user_id = ? AND game_name = ?",
+            (guild_id, user_id, game_name),
+        )
+        last = row["last_used_at"] if row else 0
+        return max(0, cooldown - (now() - last)) if last else 0
+
+    async def touch_game_cooldown(self, guild_id: int, user_id: int, game_name: str):
+        await self.execute(
+            "INSERT INTO game_cooldowns (guild_id, user_id, game_name, last_used_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id, game_name) DO UPDATE SET last_used_at = excluded.last_used_at",
+            (guild_id, user_id, game_name, now()),
+        )
+
+    async def count_game_rewards_today(self, guild_id: int, user_id: int) -> int:
+        """Nombre de manches récompensées (reward_amount > 0) depuis minuit UTC glissant
+        (dernières 24h) — utilisé pour la limite journalière de +gamesetup."""
+        since = now() - 86400
+        row = await self.fetchone(
+            "SELECT COUNT(*) as c FROM game_transactions WHERE guild_id = ? AND user_id = ? "
+            "AND reward_amount > 0 AND created_at >= ?",
+            (guild_id, user_id, since),
+        )
+        return row["c"] if row else 0
+
+    async def get_game_settings(self, guild_id: int) -> dict:
+        row = await self.fetchone("SELECT * FROM game_settings WHERE guild_id = ?", (guild_id,))
+        if row is None:
+            await self.execute(
+                "INSERT OR IGNORE INTO game_settings (guild_id, updated_at) VALUES (?, ?)", (guild_id, now())
+            )
+            row = await self.fetchone("SELECT * FROM game_settings WHERE guild_id = ?", (guild_id,))
+        return dict(row)
+
+    async def set_game_settings(self, guild_id: int, updates: dict) -> dict:
+        await self.get_game_settings(guild_id)  # s'assure que la ligne existe déjà
+        columns = ", ".join(f"{k} = ?" for k in updates)
+        params = list(updates.values()) + [now(), guild_id]
+        await self.execute(
+            f"UPDATE game_settings SET {columns}, updated_at = ? WHERE guild_id = ?", tuple(params)
+        )
+        return await self.get_game_settings(guild_id)
+
+    async def get_game_history(self, guild_id: int, user_id: int, limit: int = 15):
+        return await self.fetchall(
+            "SELECT * FROM game_transactions WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (guild_id, user_id, limit),
+        )
+
+    async def get_game_stats(self, guild_id: int, user_id: int) -> dict:
+        row = await self.fetchone(
+            "SELECT COUNT(*) as games_played, "
+            "SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) as wins, "
+            "SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) as losses, "
+            "SUM(CASE WHEN result = 'draw' THEN 1 ELSE 0 END) as draws, "
+            "SUM(reward_amount) as total_earned "
+            "FROM game_transactions WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        return {
+            "games_played": (row["games_played"] if row else 0) or 0,
+            "wins": (row["wins"] if row else 0) or 0,
+            "losses": (row["losses"] if row else 0) or 0,
+            "draws": (row["draws"] if row else 0) or 0,
+            "total_earned": (row["total_earned"] if row else 0) or 0,
+        }
+
+    async def get_game_leaderboard(self, guild_id: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT user_id, SUM(reward_amount) as total_earned, COUNT(*) as games_played "
+            "FROM game_transactions WHERE guild_id = ? GROUP BY user_id "
+            "ORDER BY total_earned DESC LIMIT ?",
+            (guild_id, limit),
+        )
+
+    async def get_game_leaderboard_for_game(self, guild_id: int, game_name: str, limit: int = 10):
+        return await self.fetchall(
+            "SELECT user_id, SUM(reward_amount) as total_earned, COUNT(*) as games_played "
+            "FROM game_transactions WHERE guild_id = ? AND game_name = ? GROUP BY user_id "
+            "ORDER BY total_earned DESC LIMIT ?",
+            (guild_id, game_name, limit),
         )
 
 
