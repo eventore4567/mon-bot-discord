@@ -51,17 +51,25 @@ def total_xp_for(level: int, current_xp: int) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Barre de progression
+# Progression (texte uniquement — plus de barre en blocs/emojis dans aucune commande,
+# demande explicite de Jayden). progress_bar() reste disponible pour compatibilité (au
+# cas où du code l'appellerait encore ailleurs) mais n'est plus utilisée par /stats ni
+# /level : voir progress_percent() ci-dessous, utilisée à la place.
 # ---------------------------------------------------------------------------
+
+def progress_percent(current: int, needed: int) -> int:
+    """Pourcentage de progression (0-100), sans construire de barre visuelle."""
+    if needed <= 0:
+        return 100
+    return max(0, min(100, round((current / needed) * 100)))
+
 
 def progress_bar(current: int, needed: int, length: int = 10, emoji_filled: str = "🟩", emoji_empty: str = "⬜") -> tuple[str, int]:
     """Retourne (barre, pourcentage). Le pourcentage reste toujours entre 0 et 100 ;
     si `current` dépasse `needed` (ne devrait pas arriver, le niveau doit avoir déjà été
-    recalculé avant l'affichage), on plafonne à 100 plutôt que d'afficher un nombre absurde."""
-    if needed <= 0:
-        pct = 100
-    else:
-        pct = max(0, min(100, round((current / needed) * 100)))
+    recalculé avant l'affichage), on plafonne à 100 plutôt que d'afficher un nombre absurde.
+    Conservée pour compatibilité mais plus utilisée pour l'affichage — voir progress_percent()."""
+    pct = progress_percent(current, needed)
     filled = max(0, min(length, round(length * pct / 100)))
     bar = emoji_filled * filled + emoji_empty * (length - filled)
     return bar, pct
@@ -208,7 +216,7 @@ async def get_member_statistics(bot, guild: discord.Guild, member: discord.Membe
         remaining_levels = max(0, next_level_requirement - current_level)
     all_roles_obtained = has_any_configured and role_row is None
 
-    bar_str, pct = progress_bar(current_level_xp, required_xp)
+    pct = progress_percent(current_level_xp, required_xp)
     total_xp = total_xp_for(current_level, current_level_xp)
 
     return {
@@ -232,7 +240,6 @@ async def get_member_statistics(bot, guild: discord.Guild, member: discord.Membe
         # Champs additionnels utiles à l'affichage
         "is_ranked": has_activity,
         "progress_pct": pct,
-        "progress_bar": bar_str,
         "joined_at": member.joined_at,
         # Alias conservés pour compatibilité avec du code déjà écrit
         "level": current_level,

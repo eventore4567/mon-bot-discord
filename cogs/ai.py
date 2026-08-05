@@ -85,6 +85,7 @@ class AiResponseView(discord.ui.View):
             result = await self.cog._prepare_and_generate(
                 guild_id=self.guild_id, channel_id=self.channel_id, user_id=self.author_id,
                 author_name=str(interaction.user), question=self.question, suffix=suffix,
+                command="ai-regenerate",
             )
             for item in self.children:
                 item.disabled = False
@@ -355,10 +356,15 @@ class Ai(commands.Cog, name="Ai"):
 
     # ---------------------------------------------------------------- APPELS IA LEGACY (compat.)
 
-    async def ask_ai(self, prompt, history: list = None, author_name: str = None) -> str:
+    async def ask_ai(self, prompt, history: list = None, author_name: str = None, *,
+                      guild_id: int = None, channel_id: int = None, user_id: int = None,
+                      command: str = None) -> str:
         """Compatibilité : utilisé par /sentrix, /ask, /summarize, +image-prompt, +explain,
         +rewrite, +fact-check — délègue au moteur centralisé (Responses API, GPT-5.6
-        Terra/Sol, nouvelles instructions) en gardant exactement la même signature."""
+        Terra/Sol, nouvelles instructions) en gardant exactement la même signature.
+
+        guild_id/channel_id/user_id/command : contexte optionnel transmis à ai_service.generate()
+        uniquement pour les logs serveur en cas d'erreur (jamais envoyé à OpenIA côté prompt)."""
         model_key = ai_service.pick_model(prompt if isinstance(prompt, str) else "")
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, "medium")
         instructions = ai_service.SYSTEM_PROMPT
@@ -367,12 +373,17 @@ class Ai(commands.Cog, name="Ai"):
         input_payload = prompt
         if history:
             input_payload = list(history) + [{"role": "user", "content": prompt}]
-        result = await ai_service.generate(input_payload, model_key=model_key, reasoning_effort=reasoning_effort, instructions=instructions)
+        result = await ai_service.generate(
+            input_payload, model_key=model_key, reasoning_effort=reasoning_effort, instructions=instructions,
+            guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
+        )
         if not result.ok:
-            return "__NO_KEY__" if result.error == "__NO_KEY__" else result.error
+            return result.error
         return result.text
 
-    async def ask_ai_with_confidence(self, prompt: str, history: list = None) -> tuple[str, int]:
+    async def ask_ai_with_confidence(self, prompt: str, history: list = None, *,
+                                      guild_id: int = None, channel_id: int = None,
+                                      user_id: int = None, command: str = None) -> tuple[str, int]:
         """Comme ask_ai, mais demande aussi à l'IA un indice de confiance (1-10)."""
         model_key = ai_service.pick_model(prompt)
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, "medium")
@@ -383,9 +394,12 @@ class Ai(commands.Cog, name="Ai"):
         input_payload = prompt
         if history:
             input_payload = list(history) + [{"role": "user", "content": prompt}]
-        result = await ai_service.generate(input_payload, model_key=model_key, reasoning_effort=reasoning_effort, instructions=instructions)
+        result = await ai_service.generate(
+            input_payload, model_key=model_key, reasoning_effort=reasoning_effort, instructions=instructions,
+            guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
+        )
         if not result.ok:
-            return ("__NO_KEY__" if result.error == "__NO_KEY__" else result.error), 0
+            return result.error, 0
 
         content = result.text or ""
         confidence = 8
@@ -423,13 +437,14 @@ class Ai(commands.Cog, name="Ai"):
                 return await destination.send(**kwargs)
 
         guild_id = getattr(getattr(destination, "guild", None), "id", None)
+        channel_id = getattr(getattr(destination, "channel", destination), "id", None)
+        command = "sentrix-passif" if reply_to is not None else "sentrix"
         history = self.histories.get(author.id, [])
         author_name = getattr(author, "display_name", None) or str(author)
-        answer = await self.ask_ai(question, history, author_name=author_name)
-        if answer == "__NO_KEY__":
-            return await _send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.", kind="danger"))
-        if answer.startswith("__ERROR__"):
-            return await _send(embed=await self._embed(guild_id, title="Erreur IA", description=ai_service.GENERIC_ERROR, kind="danger"))
+        answer = await self.ask_ai(question, history, author_name=author_name,
+                                    guild_id=guild_id, channel_id=channel_id, user_id=author.id, command=command)
+        if ai_service.is_error_code(answer):
+            return await _send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
         self.histories[author.id] = history[-10:]
@@ -489,11 +504,10 @@ class Ai(commands.Cog, name="Ai"):
         guild_id = ctx.guild.id if ctx.guild else None
         history = self.histories.get(ctx.author.id, [])
         async with ctx.typing():
-            answer = await self.ask_ai(question, history)
-        if answer == "__NO_KEY__":
-            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.", kind="danger"))
-        if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=ai_service.GENERIC_ERROR, kind="danger"))
+            answer = await self.ask_ai(question, history, guild_id=guild_id, channel_id=ctx.channel.id,
+                                        user_id=ctx.author.id, command="ask")
+        if ai_service.is_error_code(answer):
+            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
         self.histories[ctx.author.id] = history[-10:]
@@ -513,11 +527,10 @@ class Ai(commands.Cog, name="Ai"):
         if ctx.interaction:
             await ctx.defer()
         async with ctx.typing():
-            answer = await self.ask_ai(f"Résume ce texte en 3-4 phrases maximum :\n\n{texte}")
-        if answer == "__NO_KEY__":
-            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
-        if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=ai_service.GENERIC_ERROR, kind="danger"))
+            answer = await self.ask_ai(f"Résume ce texte en 3-4 phrases maximum :\n\n{texte}",
+                                        guild_id=guild_id, channel_id=ctx.channel.id, user_id=ctx.author.id, command="summarize")
+        if ai_service.is_error_code(answer):
+            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
         await ctx.send(embed=await self._embed(guild_id, title="Résumé", description=answer[:4000]))
 
     @commands.hybrid_command(name="image-prompt", description="Générer une idée détaillée de prompt d'image avec l'IA.", with_app_command=False)
@@ -527,11 +540,10 @@ class Ai(commands.Cog, name="Ai"):
         if ctx.interaction:
             await ctx.defer()
         async with ctx.typing():
-            answer = await self.ask_ai(f"Génère un prompt détaillé et créatif en anglais pour un générateur d'images IA, sur ce sujet : {sujet}")
-        if answer == "__NO_KEY__":
-            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
-        if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=ai_service.GENERIC_ERROR, kind="danger"))
+            answer = await self.ask_ai(f"Génère un prompt détaillé et créatif en anglais pour un générateur d'images IA, sur ce sujet : {sujet}",
+                                        guild_id=guild_id, channel_id=ctx.channel.id, user_id=ctx.author.id, command="image-prompt")
+        if ai_service.is_error_code(answer):
+            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
         await ctx.send(embed=await self._embed(guild_id, title="Prompt généré", description=answer[:4000]))
 
     @commands.hybrid_command(name="explain", description="Demander à l'IA d'expliquer un concept simplement.", with_app_command=False)
@@ -541,11 +553,10 @@ class Ai(commands.Cog, name="Ai"):
         if ctx.interaction:
             await ctx.defer()
         async with ctx.typing():
-            answer = await self.ask_ai(f"Explique ce concept simplement, comme à un débutant : {sujet}")
-        if answer == "__NO_KEY__":
-            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
-        if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=ai_service.GENERIC_ERROR, kind="danger"))
+            answer = await self.ask_ai(f"Explique ce concept simplement, comme à un débutant : {sujet}",
+                                        guild_id=guild_id, channel_id=ctx.channel.id, user_id=ctx.author.id, command="explain")
+        if ai_service.is_error_code(answer):
+            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
         await ctx.send(embed=await self._embed(guild_id, title="Explication", description=answer[:4000]))
 
     @commands.hybrid_command(name="rewrite", description="Demander à l'IA de reformuler un texte.", with_app_command=False)
@@ -555,11 +566,10 @@ class Ai(commands.Cog, name="Ai"):
         if ctx.interaction:
             await ctx.defer()
         async with ctx.typing():
-            answer = await self.ask_ai(f"Reformule ce texte de façon plus claire, en gardant le sens original :\n\n{texte}")
-        if answer == "__NO_KEY__":
-            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
-        if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=ai_service.GENERIC_ERROR, kind="danger"))
+            answer = await self.ask_ai(f"Reformule ce texte de façon plus claire, en gardant le sens original :\n\n{texte}",
+                                        guild_id=guild_id, channel_id=ctx.channel.id, user_id=ctx.author.id, command="rewrite")
+        if ai_service.is_error_code(answer):
+            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
         await ctx.send(embed=await self._embed(guild_id, title="Reformulation", description=answer[:4000]))
 
     @commands.hybrid_command(name="fact-check", description="Demander à l'IA de vérifier une affirmation (à titre indicatif).", with_app_command=False)
@@ -570,12 +580,11 @@ class Ai(commands.Cog, name="Ai"):
             await ctx.defer()
         async with ctx.typing():
             answer = await self.ask_ai(
-                f"Évalue la véracité probable de cette affirmation, avec prudence et nuance, en précisant que ce n'est pas une vérification garantie : {affirmation}"
+                f"Évalue la véracité probable de cette affirmation, avec prudence et nuance, en précisant que ce n'est pas une vérification garantie : {affirmation}",
+                guild_id=guild_id, channel_id=ctx.channel.id, user_id=ctx.author.id, command="fact-check",
             )
-        if answer == "__NO_KEY__":
-            return await ctx.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot.", kind="danger"))
-        if answer.startswith("__ERROR__"):
-            return await ctx.send(embed=await self._embed(guild_id, title="Erreur IA", description=ai_service.GENERIC_ERROR, kind="danger"))
+        if ai_service.is_error_code(answer):
+            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
         e = await self._embed(guild_id, title="Vérification (indicative)", description=answer[:4000])
         e.set_footer(text="⚠️ Réponse générée par IA, à vérifier par vous-même.")
         await ctx.send(embed=e)
@@ -602,7 +611,8 @@ class Ai(commands.Cog, name="Ai"):
         return False
 
     async def _prepare_and_generate(self, *, guild_id, channel_id, user_id, author_name,
-                                     question, forced_advanced: bool = False, suffix: str = "") -> dict:
+                                     question, forced_advanced: bool = False, suffix: str = "",
+                                     command: str = "ai") -> dict:
         """Pipeline complet partagé par +ai, +chat, +improve, +correct, +ai-translate, +code et
         les boutons de régénération : réglages serveur, modération, cooldown/limites, mémoire,
         sélection du modèle, appel réel, puis mise à jour mémoire + compteurs d'usage.
@@ -647,12 +657,11 @@ class Ai(commands.Cog, name="Ai"):
         result = await ai_service.generate(
             prompt, model_key=model_key, reasoning_effort=reasoning_effort,
             previous_response_id=previous_response_id, instructions=instructions,
+            guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
         )
 
         if not result.ok:
-            if result.error == "__NO_KEY__":
-                return {"ok": False, "error": "🤖 Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur."}
-            return {"ok": False, "error": ai_service.GENERIC_ERROR}
+            return {"ok": False, "error": ai_service.error_message(result.error)}
 
         if guild_id:
             tokens = ai_service.estimate_tokens(prompt) + ai_service.estimate_tokens(result.text)
@@ -683,10 +692,13 @@ class Ai(commands.Cog, name="Ai"):
         else:
             thinking_msg = await ctx.send(embed=embeds.info("🤖 SentriX réfléchit…"))
 
+        ctx_command = getattr(ctx, "command", None)
+        command_name = ctx_command.qualified_name if ctx_command else "ai"
         async with ctx.typing():
             result = await self._prepare_and_generate(
                 guild_id=guild_id, channel_id=channel_id, user_id=ctx.author.id,
                 author_name=str(ctx.author), question=question, forced_advanced=forced_advanced,
+                command=command_name,
             )
 
         if not result["ok"]:

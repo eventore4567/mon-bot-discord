@@ -48,6 +48,58 @@ DISCORD_MESSAGE_LIMIT = 2000
 FILE_FALLBACK_THRESHOLD = 4000
 GENERIC_ERROR = "❌ L'intelligence artificielle est momentanément indisponible."
 
+# ---------------------------------------------------------------- CODES D'ERREUR IA
+#
+# AiResult.error contient toujours l'un de ces codes courts (jamais le message brut
+# d'OpenAI, jamais une trace technique) — cogs/ai.py les transforme en message français
+# affiché à l'utilisateur via error_message()/error_title() ci-dessous, pour TOUTES les
+# commandes IA (+ai, +chat, /sentrix, +ask, +summarize, +improve, +correct, +ai-translate,
+# +code, boutons Régénérer/Plus détaillé/Plus court...).
+ERROR_NO_KEY = "__NO_KEY__"
+ERROR_CYBER_POLICY = "__CYBER_POLICY__"
+ERROR_BAD_REQUEST = "__BAD_REQUEST__"
+ERROR_AUTH = "__AUTH_ERROR__"
+ERROR_RATE_LIMIT = "__RATE_LIMIT__"
+ERROR_TIMEOUT = "__TIMEOUT__"
+ERROR_CONNECTION = "__CONNECTION__"
+ERROR_GENERIC = "__ERROR__"
+
+ALL_ERROR_CODES = frozenset({
+    ERROR_NO_KEY, ERROR_CYBER_POLICY, ERROR_BAD_REQUEST, ERROR_AUTH,
+    ERROR_RATE_LIMIT, ERROR_TIMEOUT, ERROR_CONNECTION, ERROR_GENERIC,
+})
+
+ERROR_MESSAGES = {
+    ERROR_NO_KEY: "Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.",
+    ERROR_CYBER_POLICY: (
+        "🚫 Cette demande a été bloquée par le système de sécurité d'OpenAI (elle ressemble "
+        "à une demande de cybersécurité offensive / piratage). Si ta demande concernait la "
+        "protection ou l'administration d'un serveur que tu possèdes ou gères, reformule-la "
+        "en le précisant clairement (ex : « comment protéger mon serveur contre... » plutôt "
+        "que « comment pirater... »)."
+    ),
+    ERROR_BAD_REQUEST: "❌ Cette demande n'a pas pu être traitée (requête invalide). Reformule-la différemment.",
+    ERROR_AUTH: "🔑 Problème d'authentification avec le service IA. Contactez un administrateur.",
+    ERROR_RATE_LIMIT: "⏳ Le service IA est surchargé pour le moment. Réessaie dans quelques instants.",
+    ERROR_TIMEOUT: "⏱️ Le service IA a mis trop de temps à répondre. Réessaie.",
+    ERROR_CONNECTION: "🌐 Impossible de contacter le service IA pour le moment. Réessaie plus tard.",
+    ERROR_GENERIC: GENERIC_ERROR,
+}
+
+
+def is_error_code(value: str | None) -> bool:
+    """True si `value` est un des codes d'erreur ci-dessus (et non une réponse IA normale)."""
+    return value in ALL_ERROR_CODES
+
+
+def error_title(value: str | None) -> str:
+    return "Clé IA manquante" if value == ERROR_NO_KEY else "Erreur IA"
+
+
+def error_message(value: str | None) -> str:
+    """Message FR prêt à afficher à l'utilisateur — jamais le détail technique brut."""
+    return ERROR_MESSAGES.get(value, GENERIC_ERROR)
+
 # ---------------------------------------------------------------- PERSONNALITÉ / INSTRUCTIONS
 
 SYSTEM_PROMPT = (
@@ -78,6 +130,15 @@ SYSTEM_PROMPT = (
     "- Discord ;\n- modération ;\n- création de serveurs ;\n- bots Discord ;\n- Python ;\n"
     "- Roblox ;\n- rédaction ;\n- correction ;\n- traduction ;\n- devoirs ;\n- idées ;\n"
     "- assistance générale.\n\n"
+    "Contexte spécifique à la sécurité Discord :\n"
+    "- Tu aides à protéger, sécuriser et administrer des serveurs Discord que l'utilisateur "
+    "possède ou administre légitimement (le sien, ou un serveur qu'on lui a confié).\n"
+    "- Tu peux notamment : configurer la modération, prévenir les raids, détecter des "
+    "comportements suspects, restaurer une configuration après une attaque, analyser des "
+    "permissions de façon défensive, et faire respecter le règlement du serveur et les "
+    "règles de Discord.\n"
+    "- Tu n'aides jamais à attaquer, pirater, usurper un compte, contourner la sécurité "
+    "d'un serveur ou d'un système qui n'appartient pas à l'utilisateur.\n\n"
     "Ton nom est SentriX AI."
 )
 
@@ -280,8 +341,10 @@ def _extract_text(resp) -> str:
 
 
 class AiResult:
-    """Résultat d'un appel IA. `error` vaut "__NO_KEY__" (clé absente) ou "__ERROR__<détail>"
-    (échec technique, jamais montré tel quel à l'utilisateur — voir GENERIC_ERROR)."""
+    """Résultat d'un appel IA. `error` vaut None (succès) ou l'un des codes courts définis
+    plus haut (ERROR_NO_KEY, ERROR_CYBER_POLICY, ERROR_BAD_REQUEST, ERROR_AUTH,
+    ERROR_RATE_LIMIT, ERROR_TIMEOUT, ERROR_CONNECTION, ERROR_GENERIC) — jamais le message
+    brut d'OpenAI ni une trace technique (voir error_message() pour le texte FR à afficher)."""
 
     __slots__ = ("text", "response_id", "model_key", "error", "usage_tokens")
 
@@ -305,11 +368,28 @@ async def generate(
     reasoning_effort: str = "medium",
     previous_response_id: str | None = None,
     instructions: str = SYSTEM_PROMPT,
+    guild_id: int | None = None,
+    channel_id: int | None = None,
+    user_id: int | None = None,
+    command: str | None = None,
 ) -> AiResult:
-    """Appelle la Responses API (jamais Chat Completions) via AsyncOpenAI (jamais bloquant)."""
+    """Appelle la Responses API (jamais Chat Completions) via AsyncOpenAI (jamais bloquant).
+
+    guild_id/channel_id/user_id/command ne servent QU'au contexte des logs serveur en cas
+    d'erreur (diagnostic) — jamais envoyés à OpenAI, jamais affichés à l'utilisateur."""
     client = get_client()
     if not client:
-        return AiResult(error="__NO_KEY__")
+        return AiResult(error=ERROR_NO_KEY)
+
+    # Import différé (comme dans get_client) : n'échoue que si le SDK openai est manquant,
+    # ce qui ne peut pas arriver ici puisque get_client() vient de réussir à l'importer.
+    from openai import (
+        APIConnectionError,
+        APITimeoutError,
+        AuthenticationError,
+        BadRequestError,
+        RateLimitError,
+    )
 
     model_id = MODEL_IDS.get(model_key, config.OPENAI_MODEL)
     kwargs = {
@@ -321,6 +401,9 @@ async def generate(
     if previous_response_id:
         kwargs["previous_response_id"] = previous_response_id
 
+    log_context = "modèle=%s commande=%s guild=%s salon=%s utilisateur=%s"
+    log_args = (model_id, command, guild_id, channel_id, user_id)
+
     try:
         resp = await client.responses.create(**kwargs)
         text = getattr(resp, "output_text", None) or _extract_text(resp)
@@ -330,12 +413,50 @@ async def generate(
             usage_tokens = getattr(usage, "total_tokens", 0) or 0
         return AiResult(text=text or "", response_id=getattr(resp, "id", None),
                          model_key=model_key, usage_tokens=usage_tokens)
+
+    except BadRequestError as exc:
+        # OpenAI renvoie code="cyber_policy" (HTTP 400) quand son système de sécurité pense
+        # que la demande relève de la cybersécurité offensive (piratage, exploitation...).
+        # On ne tente JAMAIS de contourner cette protection ni de relancer automatiquement
+        # avec un autre modèle : on informe simplement l'utilisateur, proprement.
+        code = getattr(exc, "code", None)
+        is_cyber_policy = code == "cyber_policy" or "cyber_policy" in str(exc)
+        if is_cyber_policy:
+            logger.warning(
+                "Requête bloquée par OpenAI (cyber_policy) — " + log_context, *log_args,
+            )
+            return AiResult(error=ERROR_CYBER_POLICY, model_key=model_key)
+        logger.error(
+            "Requête invalide refusée par OpenAI (bad_request, code=%s) — " + log_context,
+            code, *log_args,
+        )
+        return AiResult(error=ERROR_BAD_REQUEST, model_key=model_key)
+
+    except AuthenticationError:
+        logger.error("Erreur d'authentification OpenAI — " + log_context, *log_args)
+        return AiResult(error=ERROR_AUTH, model_key=model_key)
+
+    except RateLimitError:
+        logger.warning("Limite de débit OpenAI atteinte — " + log_context, *log_args)
+        return AiResult(error=ERROR_RATE_LIMIT, model_key=model_key)
+
+    except APITimeoutError:
+        logger.warning("Timeout OpenAI — " + log_context, *log_args)
+        return AiResult(error=ERROR_TIMEOUT, model_key=model_key)
+
+    except APIConnectionError:
+        logger.error("Erreur de connexion à OpenAI — " + log_context, *log_args)
+        return AiResult(error=ERROR_CONNECTION, model_key=model_key)
+
     except Exception as exc:
-        # Détail technique en log serveur UNIQUEMENT — jamais renvoyé à l'utilisateur, et ne
-        # contient jamais la clé API (celle-ci n'apparaît dans aucune exception du SDK
-        # officiel : elle n'est utilisée que dans l'en-tête HTTP Authorization).
-        logger.error("Erreur OpenAI (ai_service.generate, modèle=%s) :\n%s", model_id, traceback.format_exc())
-        return AiResult(error=f"__ERROR__{type(exc).__name__}: {exc}", model_key=model_key)
+        # Détail technique (type + traceback) en log serveur UNIQUEMENT — jamais renvoyé à
+        # l'utilisateur, et ne contient jamais la clé API (celle-ci n'apparaît dans aucune
+        # exception du SDK officiel : elle n'est utilisée que dans l'en-tête HTTP Authorization).
+        logger.error(
+            "Erreur OpenAI inattendue (type=%s) — " + log_context + " :\n%s",
+            type(exc).__name__, *log_args, traceback.format_exc(),
+        )
+        return AiResult(error=ERROR_GENERIC, model_key=model_key)
 
 
 async def test_connection(model_key: str = MODEL_TERRA) -> dict:
