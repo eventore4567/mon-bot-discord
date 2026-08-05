@@ -1,0 +1,1928 @@
+"""
+Couche d'accès à la base de données SQLite (async, via aiosqlite).
+Toutes les données du bot (sanctions, tickets, économie, niveaux, config, etc.)
+sont stockées ici. Aucune adresse IP n'est jamais collectée ni stockée.
+"""
+
+import aiosqlite
+import asyncio
+import json
+import os
+import sqlite3
+import time
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS guild_config (
+    guild_id INTEGER PRIMARY KEY,
+    language TEXT DEFAULT 'fr',
+    prefix TEXT DEFAULT '+',
+    log_channel INTEGER,
+    mod_role INTEGER,
+    admin_role INTEGER,
+    mute_role INTEGER,
+    welcome_channel INTEGER,
+    welcome_message TEXT,
+    goodbye_channel INTEGER,
+    goodbye_message TEXT,
+    rules_channel INTEGER,
+    verification_channel INTEGER,
+    verification_role INTEGER,
+    verify_role INTEGER,
+    security_level TEXT DEFAULT 'moyen',
+    xp_multiplier REAL DEFAULT 1.0,
+    xp_channel_disabled TEXT DEFAULT '',
+    level_message TEXT,
+    ticket_category INTEGER,
+    ticket_log_channel INTEGER,
+    autorole INTEGER,
+    level_channel INTEGER,
+    suggest_channel INTEGER,
+    announce_channel INTEGER,
+    giveaway_channel INTEGER,
+    log_messages INTEGER,
+    log_members INTEGER,
+    log_voice INTEGER,
+    log_roles INTEGER,
+    log_server INTEGER,
+    log_automod INTEGER,
+    log_moderation INTEGER,
+    warn_role INTEGER,
+    warn_ban_threshold INTEGER DEFAULT 3,
+    ticket_delete_delay INTEGER DEFAULT 30,
+    ticket_transcript_dm INTEGER DEFAULT 1,
+    ticket_rating_enabled INTEGER DEFAULT 1,
+    member_role INTEGER,
+    booster_role INTEGER,
+    bot_commands_channel INTEGER,
+    report_channel INTEGER,
+    partner_channel INTEGER,
+    stats_channel INTEGER,
+    afk_channel INTEGER,
+    error_channel INTEGER,
+    stats_settings_json TEXT DEFAULT '{}',
+    design_settings_json TEXT DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS warnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    moderator_id INTEGER,
+    reason TEXT,
+    timestamp INTEGER
+);
+
+-- Journal unifié de TOUTES les sanctions (ban/tempban/unban/kick/mute/unmute/warn) — chaque
+-- ligne correspond à une action RÉELLEMENT exécutée par le bot, avec un numéro de dossier
+-- (case_number) séquentiel PAR SERVEUR (jamais partagé entre serveurs, jamais deviné).
+-- Sert de "fiche de sanction" (Phase 3 de la refonte visuelle) et d'historique complet
+-- d'un membre, contrairement à la table `warnings` qui ne couvrait que les avertissements.
+CREATE TABLE IF NOT EXISTS sanctions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    case_number INTEGER,
+    user_id INTEGER,
+    moderator_id INTEGER,
+    action TEXT,
+    reason TEXT,
+    duration_seconds INTEGER,
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS tempactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    action TEXT,
+    expires_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS blacklist_words (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    word TEXT
+);
+
+CREATE TABLE IF NOT EXISTS blacklist_users (
+    guild_id INTEGER,
+    user_id INTEGER,
+    reason TEXT,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS whitelist_domains (
+    guild_id INTEGER,
+    domain TEXT,
+    PRIMARY KEY (guild_id, domain)
+);
+
+CREATE TABLE IF NOT EXISTS automod_settings (
+    guild_id INTEGER PRIMARY KEY,
+    antispam INTEGER DEFAULT 0,
+    antilink INTEGER DEFAULT 0,
+    antiinvite INTEGER DEFAULT 0,
+    antimention INTEGER DEFAULT 0,
+    anticaps INTEGER DEFAULT 0,
+    antiemoji INTEGER DEFAULT 0,
+    antiraid INTEGER DEFAULT 0,
+    antibot INTEGER DEFAULT 0,
+    antiaccount INTEGER DEFAULT 0,
+    antiscam INTEGER DEFAULT 0,
+    antinuke INTEGER DEFAULT 0,
+    escalation INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS automod_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    filter_name TEXT,
+    action TEXT,
+    reason TEXT,
+    timestamp INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS automod_exempt_roles (
+    guild_id INTEGER,
+    role_id INTEGER,
+    PRIMARY KEY (guild_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS antinuke_whitelist (
+    guild_id INTEGER,
+    user_id INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS disabled_commands (
+    guild_id INTEGER,
+    command_name TEXT,
+    PRIMARY KEY (guild_id, command_name)
+);
+
+CREATE TABLE IF NOT EXISTS ignored_channels (
+    guild_id INTEGER,
+    channel_id INTEGER,
+    PRIMARY KEY (guild_id, channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    channel_id INTEGER,
+    user_id INTEGER,
+    status TEXT DEFAULT 'ouvert',
+    category TEXT DEFAULT 'general',
+    priority TEXT DEFAULT 'normale',
+    claimed_by INTEGER,
+    created_at INTEGER,
+    closed_at INTEGER,
+    rating INTEGER,
+    type_id INTEGER,
+    locked INTEGER DEFAULT 0,
+    last_activity_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS ticket_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER,
+    author_id INTEGER,
+    note TEXT,
+    timestamp INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS ticket_panels (
+    guild_id INTEGER,
+    channel_id INTEGER,
+    message_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS economy (
+    guild_id INTEGER,
+    user_id INTEGER,
+    cash INTEGER DEFAULT 0,
+    bank INTEGER DEFAULT 0,
+    last_daily INTEGER DEFAULT 0,
+    last_weekly INTEGER DEFAULT 0,
+    last_work INTEGER DEFAULT 0,
+    last_crime INTEGER DEFAULT 0,
+    last_beg INTEGER DEFAULT 0,
+    last_rob INTEGER DEFAULT 0,
+    protected_until INTEGER DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS shop_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    name TEXT,
+    price INTEGER,
+    description TEXT,
+    role_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS inventory (
+    guild_id INTEGER,
+    user_id INTEGER,
+    item_name TEXT,
+    quantity INTEGER DEFAULT 1,
+    UNIQUE (guild_id, user_id, item_name)
+);
+
+CREATE TABLE IF NOT EXISTS levels (
+    guild_id INTEGER,
+    user_id INTEGER,
+    xp INTEGER DEFAULT 0,
+    level INTEGER DEFAULT 0,
+    last_message_time INTEGER DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS level_roles (
+    guild_id INTEGER,
+    level INTEGER,
+    role_id INTEGER,
+    PRIMARY KEY (guild_id, level)
+);
+
+CREATE TABLE IF NOT EXISTS profiles (
+    guild_id INTEGER,
+    user_id INTEGER,
+    bio TEXT,
+    background TEXT,
+    reputation INTEGER DEFAULT 0,
+    last_rep INTEGER DEFAULT 0,
+    birthday TEXT,
+    married_to INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS giveaways (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    channel_id INTEGER,
+    message_id INTEGER,
+    prize TEXT,
+    winners_count INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'actif',
+    end_at INTEGER,
+    winners TEXT,
+    required_role_id INTEGER,
+    required_level INTEGER,
+    excluded_role_id INTEGER,
+    bonus_role_id INTEGER,
+    bonus_entries INTEGER DEFAULT 2,
+    created_by INTEGER,
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS giveaway_entries (
+    giveaway_id INTEGER,
+    user_id INTEGER,
+    PRIMARY KEY (giveaway_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS giveaway_blacklist (
+    guild_id INTEGER,
+    user_id INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    channel_id INTEGER,
+    message_id INTEGER,
+    name TEXT,
+    description TEXT,
+    start_at INTEGER,
+    status TEXT DEFAULT 'planifie',
+    created_by INTEGER,
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS event_participants (
+    event_id INTEGER,
+    user_id INTEGER,
+    PRIMARY KEY (event_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS tournaments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    name TEXT,
+    max_participants INTEGER DEFAULT 16,
+    status TEXT DEFAULT 'inscriptions',
+    bracket_data TEXT,
+    created_by INTEGER,
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS tournament_participants (
+    tournament_id INTEGER,
+    user_id INTEGER,
+    PRIMARY KEY (tournament_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS reaction_roles (
+    guild_id INTEGER,
+    message_id INTEGER,
+    emoji TEXT,
+    role_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS autorole (
+    guild_id INTEGER,
+    role_id INTEGER,
+    PRIMARY KEY (guild_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS verified_users (
+    guild_id INTEGER,
+    user_id INTEGER,
+    verified_at INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS command_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    command_name TEXT,
+    timestamp INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    message_id INTEGER,
+    content TEXT,
+    status TEXT DEFAULT 'en_attente',
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS bug_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    content TEXT,
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    channel_id INTEGER,
+    guild_id INTEGER,
+    text TEXT,
+    trigger_at INTEGER,
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS pets (
+    guild_id INTEGER,
+    user_id INTEGER,
+    name TEXT DEFAULT 'Compagnon',
+    level INTEGER DEFAULT 1,
+    hunger INTEGER DEFAULT 100,
+    last_fed INTEGER DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS playlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    name TEXT,
+    tracks TEXT
+);
+
+CREATE TABLE IF NOT EXISTS message_counts (
+    guild_id INTEGER,
+    user_id INTEGER,
+    count INTEGER DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS voice_totals (
+    guild_id INTEGER,
+    user_id INTEGER,
+    seconds INTEGER DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS growth_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    member_count INTEGER,
+    timestamp INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS bot_managers (
+    guild_id INTEGER,
+    user_id INTEGER,
+    added_by INTEGER,
+    added_at INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+-- Permissions PAR CATÉGORIE d'un gestionnaire du bot (page 7 de /setup, Phase 2).
+-- Une ligne = une catégorie accordée à un gestionnaire ("configuration", "tickets",
+-- "moderation", "securite", "economie", ou "complete" qui vaut tout). Un gestionnaire
+-- sans aucune ligne ici (ajouté via l'ancien système) est traité comme "complete" pour
+-- ne rien casser de l'existant — voir Database.has_manager_permission().
+CREATE TABLE IF NOT EXISTS bot_manager_permissions (
+    guild_id INTEGER,
+    user_id INTEGER,
+    category TEXT,
+    granted_by INTEGER,
+    granted_at INTEGER,
+    PRIMARY KEY (guild_id, user_id, category)
+);
+
+CREATE TABLE IF NOT EXISTS command_blacklist (
+    user_id INTEGER PRIMARY KEY,
+    reason TEXT,
+    blacklisted_by INTEGER,
+    blacklisted_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS bot_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS command_aliases (
+    guild_id INTEGER,
+    alias TEXT,
+    command_name TEXT,
+    PRIMARY KEY (guild_id, alias)
+);
+
+CREATE TABLE IF NOT EXISTS member_invites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    member_id INTEGER,
+    inviter_id INTEGER,
+    invite_code TEXT,
+    joined_at INTEGER,
+    left_at INTEGER,
+    account_age_days INTEGER
+);
+
+-- Invitations "bonus" : un ajustement manuel et traçable accordé par le staff (ex: un
+-- concours, un événement) — jamais une valeur inventée par le bot, toujours une action
+-- explicite d'un membre du staff, journalisée comme economy_transactions/reputation_history.
+CREATE TABLE IF NOT EXISTS invite_bonuses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    amount INTEGER,
+    reason TEXT,
+    granted_by INTEGER,
+    created_at INTEGER
+);
+
+-- ---------------------------------------------------------------------------
+-- Outils de sécurité avancés : quarantaine, snapshots de rôles, sauvegarde
+-- de la structure du serveur, audit des permissions (cogs/security_tools.py).
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS role_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    role_ids TEXT,
+    label TEXT DEFAULT '',
+    created_by INTEGER,
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS quarantines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    snapshot_id INTEGER,
+    reason TEXT,
+    moderator_id INTEGER,
+    created_at INTEGER,
+    expires_at INTEGER,
+    active INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS server_backups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    label TEXT DEFAULT '',
+    data_json TEXT,
+    created_by INTEGER,
+    created_at INTEGER
+);
+
+-- ---------------------------------------------------------------------------
+-- Système de tickets v2 : entièrement piloté par Discord (cogs/tickets.py),
+-- rien n'est écrit en dur dans le code. Un serveur peut avoir plusieurs panels,
+-- chaque panel plusieurs types de tickets, chaque type son propre formulaire.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS ticket_panels_v2 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    name TEXT DEFAULT 'Panel',
+    title TEXT DEFAULT '🎫 Support',
+    description TEXT DEFAULT 'Choisissez une option ci-dessous pour ouvrir un ticket.',
+    color INTEGER,
+    image_url TEXT,
+    thumbnail_url TEXT,
+    footer_text TEXT,
+    channel_id INTEGER,
+    message_id INTEGER,
+    style TEXT DEFAULT 'select',
+    max_per_member INTEGER DEFAULT 1,
+    enabled INTEGER DEFAULT 1,
+    created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS ticket_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    panel_id INTEGER,
+    guild_id INTEGER,
+    name TEXT DEFAULT 'Support',
+    description TEXT DEFAULT '',
+    emoji TEXT DEFAULT '🎫',
+    button_label TEXT DEFAULT '',
+    button_style TEXT DEFAULT 'blurple',
+    staff_role_id INTEGER,
+    category_id INTEGER,
+    name_format TEXT DEFAULT 'ticket-{pseudo}',
+    open_message TEXT DEFAULT '',
+    max_per_member INTEGER DEFAULT 1,
+    autoclose_hours INTEGER DEFAULT 0,
+    log_channel_id INTEGER,
+    mention_staff INTEGER DEFAULT 1,
+    use_form INTEGER DEFAULT 0,
+    position INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS ticket_form_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_type_id INTEGER,
+    position INTEGER DEFAULT 0,
+    label TEXT DEFAULT 'Question',
+    placeholder TEXT DEFAULT '',
+    style TEXT DEFAULT 'short',
+    required INTEGER DEFAULT 1,
+    min_length INTEGER DEFAULT 0,
+    max_length INTEGER DEFAULT 500
+);
+
+CREATE TABLE IF NOT EXISTS ticket_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER,
+    question_label TEXT,
+    answer TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ticket_button_settings (
+    guild_id INTEGER PRIMARY KEY,
+    config_json TEXT
+);
+
+-- Session en cours d'un assistant /setup : permet à l'assistant de survivre à un
+-- redémarrage du bot (Railway redéploie très souvent pendant le développement).
+-- Une ligne = un message d'assistant ouvert. "choices_json" contient tous les choix
+-- pas encore définitivement enregistrés (page en cours, sélections en attente).
+CREATE TABLE IF NOT EXISTS setup_sessions (
+    message_id INTEGER PRIMARY KEY,
+    guild_id INTEGER,
+    channel_id INTEGER,
+    author_id INTEGER,
+    page INTEGER DEFAULT 0,
+    choices_json TEXT DEFAULT '{}',
+    updated_at INTEGER
+);
+
+-- Journal des modifications faites depuis /setup (refonte "centre de configuration") :
+-- qui a changé quoi, quand, ancienne/nouvelle valeur. Ne contient JAMAIS de secret
+-- (token, clé API) — uniquement des IDs de rôles/salons et des réglages. Consultable
+-- depuis le bouton "📜 Historique" de la page d'accueil de /setup.
+CREATE TABLE IF NOT EXISTS setup_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    module TEXT NOT NULL,
+    action TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    created_at INTEGER NOT NULL
+);
+
+-- Historique des transactions économiques : /pay, /daily, /weekly, /work, /give-money...
+-- sender_id est NULL pour une récompense (daily/weekly/work), rempli pour un transfert
+-- entre deux membres (/pay) ou un ajustement staff (/give-money).
+CREATE TABLE IF NOT EXISTS economy_transactions (
+    transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    sender_id INTEGER,
+    receiver_id INTEGER,
+    transaction_type TEXT,
+    amount INTEGER,
+    created_at INTEGER,
+    reason TEXT DEFAULT ''
+);
+
+-- Historique de réputation : qui a donné/retiré un point à qui, quand, et pourquoi.
+CREATE TABLE IF NOT EXISTS reputation_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    giver_id INTEGER,
+    receiver_id INTEGER,
+    amount INTEGER,
+    reason TEXT DEFAULT '',
+    created_at INTEGER
+);
+
+-- Session vocale EN COURS d'un membre (temps vocal, refonte /stats et /level).
+-- Une ligne = un membre actuellement connecté à un salon vocal suivi. Permet de
+-- retrouver "depuis quand" un membre est en vocal après un redémarrage du bot,
+-- au lieu de perdre le suivi (l'ancien système gardait ça uniquement en mémoire).
+CREATE TABLE IF NOT EXISTS voice_sessions (
+    guild_id INTEGER,
+    user_id INTEGER,
+    channel_id INTEGER,
+    joined_at INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+-- Modèles d'embeds sauvegardés par +embed. Un modèle = tout ce qu'il faut pour reconstruire
+-- le message (texte au-dessus, embed complet, champs, boutons-liens), séparé par guild_id :
+-- deux serveurs peuvent avoir un modèle du même nom sans jamais se mélanger.
+CREATE TABLE IF NOT EXISTS embed_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    content TEXT,
+    title TEXT,
+    description TEXT,
+    colour INTEGER,
+    author_name TEXT,
+    author_icon_url TEXT,
+    thumbnail_url TEXT,
+    image_url TEXT,
+    footer_text TEXT,
+    footer_icon_url TEXT,
+    timestamp_enabled INTEGER DEFAULT 0,
+    fields_json TEXT DEFAULT '[]',
+    buttons_json TEXT DEFAULT '[]',
+    created_by INTEGER,
+    created_at INTEGER,
+    updated_at INTEGER,
+    UNIQUE (guild_id, name)
+);
+
+-- Rôles supplémentaires (en plus de Gérer les messages / Gérer le serveur / gestionnaires
+-- du bot) autorisés à utiliser +embed sur ce serveur — configurable via +embedconfig.
+CREATE TABLE IF NOT EXISTS embed_allowed_roles (
+    guild_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, role_id)
+);
+
+-- Réglages de l'IA (+aisetup), un jeu de valeurs par serveur. allowed_channel_ids et
+-- allowed_role_ids sont des listes JSON d'IDs ; vides = aucune restriction (tout le monde,
+-- partout, comme le comportement historique de /ask et /sentrix).
+CREATE TABLE IF NOT EXISTS ai_settings (
+    guild_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    default_model TEXT NOT NULL DEFAULT 'terra',
+    reasoning_effort TEXT NOT NULL DEFAULT 'medium',
+    allowed_channel_ids TEXT NOT NULL DEFAULT '[]',
+    allowed_role_ids TEXT NOT NULL DEFAULT '[]',
+    cooldown_seconds INTEGER NOT NULL DEFAULT 8,
+    per_minute_limit INTEGER NOT NULL DEFAULT 6,
+    daily_limit INTEGER NOT NULL DEFAULT 50,
+    max_question_length INTEGER NOT NULL DEFAULT 1500,
+    memory_enabled INTEGER NOT NULL DEFAULT 1,
+    memory_minutes INTEGER NOT NULL DEFAULT 30,
+    response_style TEXT NOT NULL DEFAULT 'standard',
+    language TEXT NOT NULL DEFAULT 'fr',
+    logs_enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER
+);
+
+-- Mémoire de conversation IA, persistante (survit à un redémarrage du bot), toujours
+-- strictement séparée par guild_id + channel_id + user_id : deux utilisateurs, deux salons
+-- ou deux serveurs différents ne partagent jamais la même conversation. Le champ
+-- response_id permet de chaîner les tours via la Responses API (previous_response_id)
+-- sans avoir à renvoyer tout l'historique à chaque appel. Purge : les lignes plus vieilles
+-- que memory_minutes sont ignorées à la lecture et nettoyées périodiquement (voir
+-- ai_service.py) — jamais mélangées, jamais lues au-delà de l'expiration.
+CREATE TABLE IF NOT EXISTS ai_conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    response_id TEXT,
+    created_at INTEGER NOT NULL
+);
+
+-- Suivi de consommation IA (cooldown / limite par minute / limite quotidienne / logs) —
+-- une ligne par utilisateur par jour et par serveur. Ne contient jamais le contenu des
+-- questions/réponses, uniquement des compteurs.
+CREATE TABLE IF NOT EXISTS ai_usage (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    tokens_estimate INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id, day)
+);
+"""
+
+# Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de
+# plusieurs dizaines de milliers de membres reste rapide (sans ça, chaque requête
+# devient un balayage complet de table au fur et à mesure que les données grossissent).
+INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_warnings_guild_user ON warnings (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_tempactions_expires ON tempactions (expires_at);
+CREATE INDEX IF NOT EXISTS idx_tickets_guild_status ON tickets (guild_id, status);
+CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets (channel_id);
+CREATE INDEX IF NOT EXISTS idx_giveaways_status_end ON giveaways (status, end_at);
+CREATE INDEX IF NOT EXISTS idx_giveaways_message ON giveaways (message_id);
+CREATE INDEX IF NOT EXISTS idx_events_status_start ON events (status, start_at);
+CREATE INDEX IF NOT EXISTS idx_command_logs_guild_cmd ON command_logs (guild_id, command_name);
+CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders (trigger_at);
+CREATE INDEX IF NOT EXISTS idx_reaction_roles_msg ON reaction_roles (guild_id, message_id);
+CREATE INDEX IF NOT EXISTS idx_member_invites_inviter ON member_invites (guild_id, inviter_id);
+CREATE INDEX IF NOT EXISTS idx_member_invites_member ON member_invites (guild_id, member_id);
+CREATE INDEX IF NOT EXISTS idx_invite_bonuses_guild_user ON invite_bonuses (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_sanctions_guild_case ON sanctions (guild_id, case_number);
+CREATE INDEX IF NOT EXISTS idx_sanctions_guild_user ON sanctions (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_levels_guild_rank ON levels (guild_id, level DESC, xp DESC);
+CREATE INDEX IF NOT EXISTS idx_economy_guild_total ON economy (guild_id, (cash + bank) DESC);
+CREATE INDEX IF NOT EXISTS idx_blacklist_words_guild ON blacklist_words (guild_id);
+CREATE INDEX IF NOT EXISTS idx_automod_logs_guild_time ON automod_logs (guild_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_automod_logs_guild_user ON automod_logs (guild_id, user_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_role_snapshots_guild_user ON role_snapshots (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_quarantines_active_expires ON quarantines (active, expires_at);
+CREATE INDEX IF NOT EXISTS idx_quarantines_guild_user ON quarantines (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_server_backups_guild ON server_backups (guild_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_panels_v2_guild ON ticket_panels_v2 (guild_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_types_panel ON ticket_types (panel_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_form_questions_type ON ticket_form_questions (ticket_type_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_answers_ticket ON ticket_answers (ticket_id);
+CREATE INDEX IF NOT EXISTS idx_setup_sessions_guild ON setup_sessions (guild_id);
+CREATE INDEX IF NOT EXISTS idx_setup_history_guild_time ON setup_history (guild_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bot_manager_permissions_guild_user ON bot_manager_permissions (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_guild ON voice_sessions (guild_id);
+CREATE INDEX IF NOT EXISTS idx_economy_transactions_guild ON economy_transactions (guild_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_reputation_history_guild ON reputation_history (guild_id, receiver_id);
+CREATE INDEX IF NOT EXISTS idx_embed_templates_guild ON embed_templates (guild_id);
+CREATE INDEX IF NOT EXISTS idx_embed_allowed_roles_guild ON embed_allowed_roles (guild_id);
+CREATE INDEX IF NOT EXISTS idx_ai_conversations_lookup ON ai_conversations (guild_id, channel_id, user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_guild_user_day ON ai_usage (guild_id, user_id, day);
+"""
+
+# Valeurs par défaut du panneau +statsconfig — fusionnées avec ce qui est enregistré en
+# base (guild_config.stats_settings_json) pour que toute clé absente (nouveau réglage
+# ajouté plus tard, ou serveur qui n'a encore rien configuré) garde un comportement sûr.
+DEFAULT_STATS_SETTINGS = {
+    "color": 0x7C5CFC,
+    "title_stats": "📊 Profil de {display_name}",
+    "footer": "SentriX • Statistiques mises à jour à l'instant",
+    "show_economy": True,
+    "show_reputation": True,
+    "show_voice": True,
+    "show_messages": True,
+    "show_join_date": True,
+    "show_next_role": True,
+    "bar_length": 10,
+    # Barre XP violette par défaut (identité SentriX), demandé par Jayden — reste
+    # personnalisable serveur par serveur via +statsconfig si besoin.
+    "emoji_filled": "🟪",
+    "emoji_empty": "⬛",
+    "xp_cooldown": 60,
+    "xp_min": 10,
+    "xp_max": 25,
+    "xp_disabled_on_commands": False,
+    "xp_excluded_role_ids": [],
+    "voice_ignored_channel_ids": [],
+    "voice_ignore_solo": False,
+    "buttons_visible": True,
+    "allow_view_others": True,
+    "economy_emoji": "🪙",
+    "reputation_cooldown": 86400,
+    "level_announce_enabled": True,
+    "level_keep_old_roles": False,
+}
+
+# Valeurs par défaut du panneau +designsetup (Phase 1 de la refonte visuelle) — fusionnées
+# avec ce qui est enregistré en base (guild_config.design_settings_json). Ces réglages ne
+# sont pas encore utilisés par les commandes existantes (utils/embeds.py reste la source
+# tant qu'une commande n'a pas été migrée vers utils/design_system.py, Phases 2 à 5) : ils
+# ne servent pour l'instant qu'à préparer la persistance, sans rien changer au comportement
+# actuel du bot.
+DEFAULT_DESIGN_SETTINGS = {
+    "primary_color": 0x5865F2,
+    "secondary_color": 0x7C5CFC,
+    "success_color": 0x23A559,
+    "warning_color": 0xF0B232,
+    "danger_color": 0xF23F43,
+    "footer": "SentriX",
+    "show_avatars": True,
+    "progress_length": 10,
+    "progress_filled": "🟪",
+    "progress_empty": "⬛",
+    "compact_mode": False,
+    "charts_enabled": True,
+}
+
+# Champs de la table economy dont le nom en base ("cash") diffère volontairement du nom
+# affiché ("wallet") demandé par Jayden — renommer la colonne sur une base de 200 000
+# membres est un risque inutile ; on ne renomme donc qu'à l'affichage (voir stats_service.py).
+
+# Catégories de permissions disponibles pour un gestionnaire du bot (page 7 de /setup).
+MANAGER_CATEGORIES = {
+    "configuration": "⚙️ Configuration générale",
+    "tickets": "🎫 Tickets",
+    "moderation": "🛡️ Modération",
+    "securite": "🔐 Sécurité / AutoMod",
+    "economie": "💰 Économie",
+    "embeds": "📨 Créateur d'embeds",
+    "ai": "🤖 Intelligence artificielle",
+    "complete": "🔑 Gestion complète",
+}
+
+# Colonnes ajoutées à guild_config après sa création initiale : CREATE TABLE IF NOT EXISTS
+# ne touche pas une table déjà existante, donc sur une base déjà en place (ex: un volume
+# persistant sur l'hébergeur), ces nouvelles colonnes doivent être ajoutées manuellement
+# via ALTER TABLE au démarrage. Voir Database._migrate().
+GUILD_CONFIG_NEW_COLUMNS = {
+    "log_messages": "INTEGER",
+    "log_members": "INTEGER",
+    "log_voice": "INTEGER",
+    "log_roles": "INTEGER",
+    "log_server": "INTEGER",
+    "log_automod": "INTEGER",
+    "log_moderation": "INTEGER",
+    "warn_role": "INTEGER",
+    "warn_ban_threshold": "INTEGER DEFAULT 3",
+    "ticket_delete_delay": "INTEGER DEFAULT 30",
+    "ticket_transcript_dm": "INTEGER DEFAULT 1",
+    "ticket_rating_enabled": "INTEGER DEFAULT 1",
+    # Ajoutées en Phase 2 de la refonte de /setup (pages Rôles et Salons annexes).
+    "member_role": "INTEGER",
+    "booster_role": "INTEGER",
+    "bot_commands_channel": "INTEGER",
+    "report_channel": "INTEGER",
+    "partner_channel": "INTEGER",
+    "stats_channel": "INTEGER",
+    "afk_channel": "INTEGER",
+    "error_channel": "INTEGER",
+    # Ajoutée pour la refonte de /stats et /level : un seul blob JSON regroupe TOUS les
+    # réglages du panneau +statsconfig (couleur, textes, cooldown XP, bornes XP, rôles/
+    # salons exclus, emojis de la barre, visibilité des champs...). On évite ainsi une
+    # vingtaine de colonnes séparées pour un seul écran de configuration.
+    "stats_settings_json": "TEXT DEFAULT '{}'",
+    # Ajoutée pour la Phase 1 de la refonte visuelle (+designsetup) : mêmes principes que
+    # stats_settings_json — un seul blob JSON pour tous les réglages de design.
+    "design_settings_json": "TEXT DEFAULT '{}'",
+}
+
+# Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"
+# a été ajoutée après la création initiale de la table.
+AUTOMOD_SETTINGS_NEW_COLUMNS = {
+    "escalation": "INTEGER DEFAULT 1",
+}
+
+# Même principe, pour la table tickets : "type_id" et "locked" ont été ajoutées avec
+# le système de tickets v2 (panels/types/formulaires entièrement configurables).
+TICKETS_NEW_COLUMNS = {
+    "type_id": "INTEGER",
+    "locked": "INTEGER DEFAULT 0",
+    "last_activity_at": "INTEGER",
+}
+
+# Même principe, pour member_invites : "account_age_days" a été ajoutée en Phase 2 de la
+# refonte visuelle pour permettre de distinguer les invitations "réelles" des "fake" à
+# partir d'une donnée 100% réelle (âge du compte au moment de l'arrivée), jamais inventée.
+MEMBER_INVITES_NEW_COLUMNS = {
+    "account_age_days": "INTEGER",
+}
+
+# Même principe, pour giveaways : "image_url" ajoutée pour permettre une image sur
+# l'embed du giveaway (demandé par Jayden), sans jamais recréer la table ni perdre
+# les giveaways déjà en cours.
+GIVEAWAYS_NEW_COLUMNS = {
+    "image_url": "TEXT",
+}
+
+# Ajoutée pour +levelcheck/+levelrepair (diagnostic du bug de réinitialisation des
+# niveaux signalé par Jayden) : permet d'afficher "dernière mise à jour" sans se fier à
+# last_message_time (qui ne bouge pas quand un admin utilise +add-xp/+set-xp). Colonne
+# additive uniquement — ne touche à aucune donnée existante, les anciennes lignes gardent
+# leur xp/level tels quels avec updated_at à 0 jusqu'à leur prochaine écriture.
+LEVELS_NEW_COLUMNS = {
+    "updated_at": "INTEGER DEFAULT 0",
+}
+
+# Table de log dédiée aux jeux (Partie 1 — récompenses de mini-jeux) : n'existe pas
+# encore dans le schéma d'origine, créée ici de façon additive (CREATE TABLE IF NOT
+# EXISTS) — aucune donnée existante n'est concernée par cette table.
+GAME_TRANSACTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS game_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    game_name TEXT NOT NULL,
+    game_session_id TEXT NOT NULL,
+    result TEXT NOT NULL,
+    reward_amount INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    metadata_json TEXT DEFAULT '{}',
+    UNIQUE (game_session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_game_tx_guild_user ON game_transactions (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_game_tx_guild_game ON game_transactions (guild_id, game_name);
+
+CREATE TABLE IF NOT EXISTS game_cooldowns (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    game_name TEXT NOT NULL,
+    last_used_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, user_id, game_name)
+);
+
+CREATE TABLE IF NOT EXISTS game_settings (
+    guild_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    disabled_games TEXT DEFAULT '[]',
+    allowed_channel_ids TEXT DEFAULT '[]',
+    blocked_channel_ids TEXT DEFAULT '[]',
+    allowed_role_ids TEXT DEFAULT '[]',
+    blocked_role_ids TEXT DEFAULT '[]',
+    min_reward_multiplier REAL NOT NULL DEFAULT 1.0,
+    max_reward_multiplier REAL NOT NULL DEFAULT 1.0,
+    daily_limit INTEGER NOT NULL DEFAULT 50,
+    event_multiplier REAL NOT NULL DEFAULT 1.0,
+    logs_enabled INTEGER NOT NULL DEFAULT 1,
+    leaderboard_enabled INTEGER NOT NULL DEFAULT 1,
+    dm_results INTEGER NOT NULL DEFAULT 0,
+    compact_mode INTEGER NOT NULL DEFAULT 0,
+    default_difficulty TEXT NOT NULL DEFAULT 'normal',
+    updated_at INTEGER
+);
+"""
+
+# Refonte des logs (Partie 3) : une ligne par (guild_id, log_type), additive — ne touche
+# jamais aux colonnes log_channel/log_messages/etc. déjà existantes dans guild_config
+# (qui restent la source des salons déjà configurés, reprise telle quelle à la migration).
+LOG_SETTINGS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS log_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    log_type TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    channel_id INTEGER,
+    include_content INTEGER NOT NULL DEFAULT 1,
+    include_attachments INTEGER NOT NULL DEFAULT 1,
+    include_actor INTEGER NOT NULL DEFAULT 1,
+    include_reason INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER,
+    updated_at INTEGER,
+    UNIQUE (guild_id, log_type)
+);
+CREATE INDEX IF NOT EXISTS idx_log_settings_guild ON log_settings (guild_id);
+"""
+
+# Seuil (en jours) en dessous duquel un compte est considéré "fake" pour le classement
+# d'invitations — mêmes valeur et logique que l'heuristique "comptes suspects" déjà
+# utilisée par cogs/invites.py (SUSPECT_ACCOUNT_AGE_DAYS), pour rester cohérent.
+FAKE_INVITE_ACCOUNT_AGE_DAYS = 3
+# Une invitation dont le membre repart moins de 1h après son arrivée est elle aussi
+# comptée comme "fake" (test de bot/alt), même si le compte n'était pas tout jeune.
+FAKE_INVITE_QUICK_LEAVE_SECONDS = 3600
+
+
+class Database:
+    """Petit wrapper async autour d'aiosqlite, partagé par tous les cogs."""
+
+    def __init__(self, path: str):
+        self.path = path
+        self._conn: aiosqlite.Connection | None = None
+        # guild_config est lu à peu près à CHAQUE message/arrivée/départ/log sur TOUT le bot
+        # (welcome, autorole, salons de logs, préfixe...). Sur un serveur de plusieurs dizaines
+        # ou centaines de milliers de membres, ça représente un très gros volume d'événements :
+        # sans cache, chacun ferait un aller-retour SQLite pour une ligne qui ne change presque
+        # jamais. On garde donc la config de chaque serveur en mémoire, invalidée uniquement
+        # quand elle est explicitement modifiée (set_guild_config / reset).
+        self._guild_config_cache: dict[int, "aiosqlite.Row"] = {}
+        # Protège toute opération économique qui fait "vérifier le solde/cooldown PUIS
+        # écrire" (paiement, daily, weekly, work, réputation) contre une double exécution
+        # simultanée (deux clics rapides, ou /daily lancé deux fois avant la première
+        # écriture) qui contournerait sinon la vérification — c'est ce qui garantit
+        # "empêcher les doubles récompenses" et l'absence de double dépense sur /pay.
+        self._economy_lock = asyncio.Lock()
+        # Protège l'attribution du numéro de dossier (case_number) : deux sanctions prises
+        # au même moment sur le même serveur (deux modérateurs qui agissent en même temps)
+        # ne doivent jamais recevoir le même numéro.
+        self._sanctions_lock = asyncio.Lock()
+
+    async def connect(self):
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        self._conn = await aiosqlite.connect(self.path)
+        self._conn.row_factory = aiosqlite.Row
+        # WAL = lectures/écritures concurrentes sans se bloquer mutuellement.
+        # synchronous=NORMAL = bon compromis vitesse/sécurité, recommandé avec WAL.
+        # Ces deux réglages sont ce qui permet à SQLite de tenir la charge sur un
+        # gros serveur (plusieurs milliers de membres actifs en même temps).
+        await self._conn.execute("PRAGMA journal_mode=WAL;")
+        await self._conn.execute("PRAGMA synchronous=NORMAL;")
+        await self._conn.execute("PRAGMA foreign_keys=ON;")
+        await self._conn.executescript(SCHEMA)
+        await self._conn.executescript(INDEXES)
+        # Nouvelles tables additives (jeux + logs indépendants) : CREATE TABLE IF NOT
+        # EXISTS, ne touche à aucune table/donnée déjà existante.
+        await self._conn.executescript(GAME_TRANSACTIONS_SCHEMA)
+        await self._conn.executescript(LOG_SETTINGS_SCHEMA)
+        await self._migrate()
+        await self._conn.commit()
+
+    async def _migrate(self):
+        """Ajoute les colonnes manquantes si les tables existaient déjà avant leur
+        introduction (utile si la base survit aux redéploiements, ex: volume persistant)."""
+        cur = await self._conn.execute("PRAGMA table_info(guild_config)")
+        existing = {row[1] for row in await cur.fetchall()}
+        for column, col_type in GUILD_CONFIG_NEW_COLUMNS.items():
+            if column not in existing:
+                await self._conn.execute(f"ALTER TABLE guild_config ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(levels)")
+        existing_levels = {row[1] for row in await cur.fetchall()}
+        for column, col_type in LEVELS_NEW_COLUMNS.items():
+            if column not in existing_levels:
+                await self._conn.execute(f"ALTER TABLE levels ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(automod_settings)")
+        existing_automod = {row[1] for row in await cur.fetchall()}
+        for column, col_type in AUTOMOD_SETTINGS_NEW_COLUMNS.items():
+            if column not in existing_automod:
+                await self._conn.execute(f"ALTER TABLE automod_settings ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(tickets)")
+        existing_tickets = {row[1] for row in await cur.fetchall()}
+        for column, col_type in TICKETS_NEW_COLUMNS.items():
+            if column not in existing_tickets:
+                await self._conn.execute(f"ALTER TABLE tickets ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(member_invites)")
+        existing_invites = {row[1] for row in await cur.fetchall()}
+        for column, col_type in MEMBER_INVITES_NEW_COLUMNS.items():
+            if column not in existing_invites:
+                await self._conn.execute(f"ALTER TABLE member_invites ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(giveaways)")
+        existing_giveaways = {row[1] for row in await cur.fetchall()}
+        for column, col_type in GIVEAWAYS_NEW_COLUMNS.items():
+            if column not in existing_giveaways:
+                await self._conn.execute(f"ALTER TABLE giveaways ADD COLUMN {column} {col_type}")
+
+    async def close(self):
+        if self._conn:
+            await self._conn.close()
+
+    async def execute(self, query: str, params: tuple = ()):
+        cur = await self._conn.execute(query, params)
+        await self._conn.commit()
+        return cur
+
+    async def fetchone(self, query: str, params: tuple = ()):
+        cur = await self._conn.execute(query, params)
+        row = await cur.fetchone()
+        await cur.close()
+        return row
+
+    async def fetchall(self, query: str, params: tuple = ()):
+        cur = await self._conn.execute(query, params)
+        rows = await cur.fetchall()
+        await cur.close()
+        return rows
+
+    # ---------- Helpers "config de guilde" utilisés partout ----------
+
+    async def ensure_guild(self, guild_id: int):
+        await self.execute(
+            "INSERT OR IGNORE INTO guild_config (guild_id) VALUES (?)", (guild_id,)
+        )
+        await self.execute(
+            "INSERT OR IGNORE INTO automod_settings (guild_id) VALUES (?)", (guild_id,)
+        )
+
+    async def get_guild_config(self, guild_id: int):
+        cached = self._guild_config_cache.get(guild_id)
+        if cached is not None:
+            return cached
+        await self.ensure_guild(guild_id)
+        row = await self.fetchone(
+            "SELECT * FROM guild_config WHERE guild_id = ?", (guild_id,)
+        )
+        if row is not None:
+            self._guild_config_cache[guild_id] = row
+        return row
+
+    async def set_guild_config(self, guild_id: int, field: str, value):
+        await self.ensure_guild(guild_id)
+        await self.execute(
+            f"UPDATE guild_config SET {field} = ? WHERE guild_id = ?", (value, guild_id)
+        )
+        # Invalide le cache : la prochaine lecture ira chercher la ligne à jour.
+        self._guild_config_cache.pop(guild_id, None)
+
+    def invalidate_guild_config(self, guild_id: int):
+        """À appeler après toute modification de guild_config qui ne passe pas par
+        set_guild_config (ex: /config-reset qui fait un DELETE direct)."""
+        self._guild_config_cache.pop(guild_id, None)
+
+    async def get_automod(self, guild_id: int):
+        await self.ensure_guild(guild_id)
+        return await self.fetchone(
+            "SELECT * FROM automod_settings WHERE guild_id = ?", (guild_id,)
+        )
+
+    async def set_automod(self, guild_id: int, field: str, value: int):
+        await self.ensure_guild(guild_id)
+        await self.execute(
+            f"UPDATE automod_settings SET {field} = ? WHERE guild_id = ?",
+            (value, guild_id),
+        )
+
+    # ---------- Historique AutoMod (audit + statistiques) ----------
+
+    async def log_automod_action(self, guild_id: int, user_id: int | None, filter_name: str, action: str, reason: str):
+        await self.execute(
+            "INSERT INTO automod_logs (guild_id, user_id, filter_name, action, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+            (guild_id, user_id, filter_name, action, reason, now()),
+        )
+
+    async def automod_stats_since(self, guild_id: int, since_ts: int):
+        """Nombre de déclenchements par filtre, pour /automod-status."""
+        return await self.fetchall(
+            "SELECT filter_name, COUNT(*) as c FROM automod_logs WHERE guild_id = ? AND timestamp >= ? "
+            "GROUP BY filter_name ORDER BY c DESC",
+            (guild_id, since_ts),
+        )
+
+    async def automod_history_for_user(self, guild_id: int, user_id: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT * FROM automod_logs WHERE guild_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (guild_id, user_id, limit),
+        )
+
+    async def automod_recent(self, guild_id: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT * FROM automod_logs WHERE guild_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (guild_id, limit),
+        )
+
+    async def automod_infraction_count_since(self, guild_id: int, user_id: int, since_ts: int) -> int:
+        row = await self.fetchone(
+            "SELECT COUNT(*) c FROM automod_logs WHERE guild_id = ? AND user_id = ? AND timestamp >= ?",
+            (guild_id, user_id, since_ts),
+        )
+        return row["c"] if row else 0
+
+    # ---------- Rôles exemptés d'AutoMod (staff qui ne doit jamais être filtré) ----------
+
+    async def add_automod_exempt_role(self, guild_id: int, role_id: int):
+        await self.execute(
+            "INSERT OR IGNORE INTO automod_exempt_roles (guild_id, role_id) VALUES (?, ?)", (guild_id, role_id)
+        )
+
+    async def remove_automod_exempt_role(self, guild_id: int, role_id: int):
+        await self.execute(
+            "DELETE FROM automod_exempt_roles WHERE guild_id = ? AND role_id = ?", (guild_id, role_id)
+        )
+
+    async def list_automod_exempt_roles(self, guild_id: int):
+        return await self.fetchall("SELECT role_id FROM automod_exempt_roles WHERE guild_id = ?", (guild_id,))
+
+    # ---------- Gestionnaires du bot (membres autorisés à le configurer) ----------
+
+    async def add_bot_manager(self, guild_id: int, user_id: int, added_by: int):
+        await self.execute(
+            "INSERT OR IGNORE INTO bot_managers (guild_id, user_id, added_by, added_at) VALUES (?, ?, ?, ?)",
+            (guild_id, user_id, added_by, now()),
+        )
+
+    async def remove_bot_manager(self, guild_id: int, user_id: int):
+        await self.execute(
+            "DELETE FROM bot_managers WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        await self.execute(
+            "DELETE FROM bot_manager_permissions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+
+    async def is_bot_manager(self, guild_id: int, user_id: int) -> bool:
+        row = await self.fetchone(
+            "SELECT 1 FROM bot_managers WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        return row is not None
+
+    async def list_bot_managers(self, guild_id: int):
+        return await self.fetchall(
+            "SELECT user_id FROM bot_managers WHERE guild_id = ?", (guild_id,)
+        )
+
+    # ---------- Permissions par catégorie des gestionnaires du bot (page 7 de /setup) ----------
+
+    async def set_manager_categories(self, guild_id: int, user_id: int, categories: list[str], granted_by: int):
+        """Remplace entièrement les catégories accordées à ce gestionnaire par la liste
+        donnée. Un gestionnaire ne peut jamais s'accorder LUI-MÊME de nouvelles catégories :
+        ce contrôle est fait côté cog (SetupView), pas ici — cette méthode se contente
+        d'écrire ce qu'on lui donne."""
+        await self.execute("DELETE FROM bot_manager_permissions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+        for category in categories:
+            await self.execute(
+                "INSERT OR IGNORE INTO bot_manager_permissions (guild_id, user_id, category, granted_by, granted_at) VALUES (?, ?, ?, ?, ?)",
+                (guild_id, user_id, category, granted_by, now()),
+            )
+
+    async def get_manager_categories(self, guild_id: int, user_id: int) -> list[str]:
+        rows = await self.fetchall(
+            "SELECT category FROM bot_manager_permissions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        return [r["category"] for r in rows]
+
+    async def has_manager_permission(self, guild_id: int, user_id: int, category: str) -> bool:
+        """True si ce gestionnaire a la catégorie demandée, OU la gestion complète, OU s'il
+        n'a AUCUNE ligne de permission enregistrée (= géré à l'ancienne, avant la Phase 2 :
+        on lui laisse un accès complet pour ne rien casser de ce qui existait avant)."""
+        rows = await self.get_manager_categories(guild_id, user_id)
+        if not rows:
+            return True
+        return "complete" in rows or category in rows
+
+    # ---------- Sessions /setup (survie de l'assistant à un redémarrage du bot) ----------
+
+    async def save_setup_session(self, message_id: int, guild_id: int, channel_id: int, author_id: int, page: int, choices_json: str):
+        await self.execute(
+            "INSERT INTO setup_sessions (message_id, guild_id, channel_id, author_id, page, choices_json, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(message_id) DO UPDATE SET page = excluded.page, choices_json = excluded.choices_json, updated_at = excluded.updated_at",
+            (message_id, guild_id, channel_id, author_id, page, choices_json, now()),
+        )
+
+    async def get_setup_session(self, message_id: int):
+        return await self.fetchone("SELECT * FROM setup_sessions WHERE message_id = ?", (message_id,))
+
+    async def delete_setup_session(self, message_id: int):
+        await self.execute("DELETE FROM setup_sessions WHERE message_id = ?", (message_id,))
+
+    # ---------- Historique des modifications /setup ----------
+
+    async def log_setup_history(self, guild_id: int, user_id: int, module: str, action: str,
+                                 old_value: str = None, new_value: str = None):
+        """Enregistre une entrée d'historique. Ne doit JAMAIS recevoir de secret (token,
+        clé API) dans old_value/new_value — uniquement des IDs, noms de réglages ou
+        libellés lisibles. Un échec ici ne doit jamais faire planter /setup."""
+        try:
+            await self.execute(
+                "INSERT INTO setup_history (guild_id, user_id, module, action, old_value, new_value, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (guild_id, user_id, module, action, old_value, new_value, now()),
+            )
+        except Exception:
+            pass
+
+    async def list_setup_history(self, guild_id: int, limit: int = 15):
+        return await self.fetchall(
+            "SELECT * FROM setup_history WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?",
+            (guild_id, limit),
+        )
+
+    # ---------- Liste noire GLOBALE d'utilisation du bot (toutes commandes, tous serveurs) ----------
+    # Différente de "blacklist_users" (utils/automod.py) qui ne bloque que le contenu sur UN serveur :
+    # ici, un utilisateur blacklisté ne peut plus utiliser AUCUNE commande du bot, nulle part.
+
+    async def blacklist_add(self, user_id: int, reason: str, by_id: int):
+        await self.execute(
+            "INSERT INTO command_blacklist (user_id, reason, blacklisted_by, blacklisted_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET reason = excluded.reason, blacklisted_by = excluded.blacklisted_by, blacklisted_at = excluded.blacklisted_at",
+            (user_id, reason, by_id, now()),
+        )
+
+    async def blacklist_remove(self, user_id: int):
+        await self.execute("DELETE FROM command_blacklist WHERE user_id = ?", (user_id,))
+
+    async def blacklist_get(self, user_id: int):
+        return await self.fetchone("SELECT * FROM command_blacklist WHERE user_id = ?", (user_id,))
+
+    async def blacklist_list(self):
+        return await self.fetchall("SELECT * FROM command_blacklist ORDER BY blacklisted_at DESC")
+
+    # ---------- Réglages globaux du bot (footer, couleur, présence rotative...) ----------
+
+    async def get_setting(self, key: str, default: str | None = None) -> str | None:
+        row = await self.fetchone("SELECT value FROM bot_settings WHERE key = ?", (key,))
+        return row["value"] if row else default
+
+    async def set_setting(self, key: str, value: str):
+        await self.execute(
+            "INSERT INTO bot_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
+    # ---------- Alias de commandes (préfixe uniquement, par serveur) ----------
+
+    async def add_alias(self, guild_id: int, alias: str, command_name: str):
+        await self.execute(
+            "INSERT INTO command_aliases (guild_id, alias, command_name) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, alias) DO UPDATE SET command_name = excluded.command_name",
+            (guild_id, alias, command_name),
+        )
+
+    async def remove_alias(self, guild_id: int, alias: str):
+        await self.execute("DELETE FROM command_aliases WHERE guild_id = ? AND alias = ?", (guild_id, alias))
+
+    async def get_alias(self, guild_id: int, alias: str):
+        return await self.fetchone(
+            "SELECT command_name FROM command_aliases WHERE guild_id = ? AND alias = ?", (guild_id, alias)
+        )
+
+    async def list_aliases(self, guild_id: int):
+        return await self.fetchall("SELECT alias, command_name FROM command_aliases WHERE guild_id = ?", (guild_id,))
+
+    # ---------- Suivi des invitations ----------
+
+    async def record_invite_join(
+        self, guild_id: int, member_id: int, inviter_id: int | None, invite_code: str | None, account_age_days: int | None = None
+    ):
+        await self.execute(
+            "INSERT INTO member_invites (guild_id, member_id, inviter_id, invite_code, joined_at, account_age_days) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (guild_id, member_id, inviter_id, invite_code, now(), account_age_days),
+        )
+
+    async def mark_invite_left(self, guild_id: int, member_id: int):
+        await self.execute(
+            "UPDATE member_invites SET left_at = ? WHERE guild_id = ? AND member_id = ? AND left_at IS NULL",
+            (now(), guild_id, member_id),
+        )
+
+    async def get_invite_stats(self, guild_id: int, inviter_id: int):
+        total = await self.fetchone(
+            "SELECT COUNT(*) as c FROM member_invites WHERE guild_id = ? AND inviter_id = ?", (guild_id, inviter_id)
+        )
+        left = await self.fetchone(
+            "SELECT COUNT(*) as c FROM member_invites WHERE guild_id = ? AND inviter_id = ? AND left_at IS NOT NULL",
+            (guild_id, inviter_id),
+        )
+        total_n = total["c"] if total else 0
+        left_n = left["c"] if left else 0
+        return {"total": total_n, "left": left_n, "active": total_n - left_n}
+
+    async def get_invite_breakdown(self, guild_id: int, inviter_id: int) -> dict:
+        """Détail réelles / fake / reparties / bonus pour un invitant — toutes ces valeurs
+        viennent de données réellement enregistrées (âge du compte au moment de l'arrivée,
+        départ rapide, octroi manuel du staff), jamais inventées.
+
+        - "left"  : le membre invité a quitté le serveur depuis (peu importe s'il était
+          fake ou non — Discord ne permet pas de "annuler" un départ déjà survenu).
+        - "fake"  : le membre est TOUJOURS présent, mais son compte avait moins de
+          FAKE_INVITE_ACCOUNT_AGE_DAYS jours au moment de son arrivée (indice d'un compte
+          jetable/alt), OU account_age_days est inconnu (ancienne invitation enregistrée
+          avant l'ajout de cette colonne) ET le membre est parti en moins d'une heure —
+          seulement dans ce dernier cas précis, sinon on ne classe jamais "fake" par défaut
+          faute de donnée : on préfère sous-compter plutôt qu'accuser à tort.
+        - "real"  : toujours présent, compte pas suspect.
+        - "bonus" : somme des ajustements manuels du staff (table invite_bonuses).
+        - "credited" : real + bonus — c'est CE total qui sert de classement (une invitation
+          fake ou repartie ne rapporte rien, un bonus manuel s'ajoute)."""
+        rows = await self.fetchall(
+            "SELECT left_at, account_age_days FROM member_invites WHERE guild_id = ? AND inviter_id = ?",
+            (guild_id, inviter_id),
+        )
+        total = len(rows)
+        left = sum(1 for r in rows if r["left_at"] is not None)
+        fake = 0
+        real = 0
+        for r in rows:
+            if r["left_at"] is not None:
+                continue
+            age = r["account_age_days"]
+            if age is not None and age < FAKE_INVITE_ACCOUNT_AGE_DAYS:
+                fake += 1
+            else:
+                real += 1
+        bonus_row = await self.fetchone(
+            "SELECT COALESCE(SUM(amount), 0) as s FROM invite_bonuses WHERE guild_id = ? AND user_id = ?",
+            (guild_id, inviter_id),
+        )
+        bonus = bonus_row["s"] if bonus_row else 0
+        return {
+            "total": total,
+            "left": left,
+            "fake": fake,
+            "real": real,
+            "bonus": bonus,
+            "credited": real + bonus,
+        }
+
+    async def grant_invite_bonus(self, guild_id: int, user_id: int, amount: int, granted_by: int, reason: str = ""):
+        """Ajustement manuel — TOUJOURS une action explicite du staff, jamais générée
+        automatiquement par le bot. `amount` peut être négatif (retirer un bonus déjà
+        accordé), ce qui reste traçable via la ligne elle-même plutôt qu'en supprimant
+        l'historique."""
+        await self.execute(
+            "INSERT INTO invite_bonuses (guild_id, user_id, amount, reason, granted_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (guild_id, user_id, amount, reason, granted_by, now()),
+        )
+
+    async def get_invite_bonus_history(self, guild_id: int, user_id: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT * FROM invite_bonuses WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (guild_id, user_id, limit),
+        )
+
+    async def get_invite_leaderboard_credited(self, guild_id: int, limit: int = 10):
+        """Classement basé sur les invitations CRÉDITÉES (réelles + bonus), pas sur le
+        total brut — sinon un membre qui invite volontairement des comptes jetables
+        remonterait artificiellement dans le classement."""
+        rows = await self.fetchall(
+            "SELECT DISTINCT inviter_id FROM member_invites WHERE guild_id = ? AND inviter_id IS NOT NULL "
+            "UNION SELECT DISTINCT user_id FROM invite_bonuses WHERE guild_id = ?",
+            (guild_id, guild_id),
+        )
+        breakdown = []
+        for r in rows:
+            inviter_id = r["inviter_id"]
+            b = await self.get_invite_breakdown(guild_id, inviter_id)
+            if b["credited"] > 0 or b["total"] > 0:
+                breakdown.append((inviter_id, b))
+        breakdown.sort(key=lambda item: item[1]["credited"], reverse=True)
+        return breakdown[:limit]
+
+    async def get_invite_leaderboard(self, guild_id: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT inviter_id, COUNT(*) as total, "
+            "SUM(CASE WHEN left_at IS NULL THEN 1 ELSE 0 END) as active "
+            "FROM member_invites WHERE guild_id = ? AND inviter_id IS NOT NULL "
+            "GROUP BY inviter_id ORDER BY active DESC LIMIT ?",
+            (guild_id, limit),
+        )
+
+    async def get_invited_by(self, guild_id: int, member_id: int):
+        return await self.fetchone(
+            "SELECT * FROM member_invites WHERE guild_id = ? AND member_id = ? ORDER BY joined_at DESC LIMIT 1",
+            (guild_id, member_id),
+        )
+
+    # ---------- Modération : journal unifié des sanctions (fiches, Phase 3) ----------
+
+    async def record_sanction(
+        self, guild_id: int, user_id: int, moderator_id: int, action: str, reason: str, duration_seconds: int | None = None
+    ) -> int:
+        """Enregistre une sanction RÉELLEMENT exécutée par le bot et lui attribue un
+        numéro de dossier séquentiel PROPRE À CE SERVEUR (jamais partagé entre serveurs).
+        Protégé par un verrou pour qu'un double-clic ou deux modérateurs simultanés ne
+        puissent jamais recevoir le même numéro. Retourne le numéro de dossier attribué."""
+        async with self._sanctions_lock:
+            row = await self.fetchone("SELECT COALESCE(MAX(case_number), 0) as m FROM sanctions WHERE guild_id = ?", (guild_id,))
+            case_number = (row["m"] if row else 0) + 1
+            await self.execute(
+                "INSERT INTO sanctions (guild_id, case_number, user_id, moderator_id, action, reason, duration_seconds, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (guild_id, case_number, user_id, moderator_id, action, reason, duration_seconds, now()),
+            )
+            return case_number
+
+    async def get_sanction_by_case(self, guild_id: int, case_number: int):
+        return await self.fetchone(
+            "SELECT * FROM sanctions WHERE guild_id = ? AND case_number = ?", (guild_id, case_number)
+        )
+
+    async def get_sanction_history(self, guild_id: int, user_id: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT * FROM sanctions WHERE guild_id = ? AND user_id = ? ORDER BY case_number DESC LIMIT ?",
+            (guild_id, user_id, limit),
+        )
+
+    async def get_sanction_count(self, guild_id: int, user_id: int) -> int:
+        row = await self.fetchone("SELECT COUNT(*) as c FROM sanctions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+        return row["c"] if row else 0
+
+    # ---------- Économie ----------
+
+    async def ensure_economy(self, guild_id: int, user_id: int):
+        await self.execute(
+            "INSERT OR IGNORE INTO economy (guild_id, user_id) VALUES (?, ?)",
+            (guild_id, user_id),
+        )
+
+    async def get_balance(self, guild_id: int, user_id: int):
+        await self.ensure_economy(guild_id, user_id)
+        return await self.fetchone(
+            "SELECT * FROM economy WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+
+    async def add_balance(self, guild_id: int, user_id: int, amount: int):
+        await self.ensure_economy(guild_id, user_id)
+        await self.execute(
+            "UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?",
+            (amount, guild_id, user_id),
+        )
+
+    async def log_transaction(self, guild_id: int, sender_id: int | None, receiver_id: int, transaction_type: str, amount: int, reason: str = ""):
+        await self.execute(
+            "INSERT INTO economy_transactions (guild_id, sender_id, receiver_id, transaction_type, amount, created_at, reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (guild_id, sender_id, receiver_id, transaction_type, amount, now(), reason),
+        )
+
+    async def get_transactions(self, guild_id: int, user_id: int, limit: int = 15):
+        return await self.fetchall(
+            "SELECT * FROM economy_transactions WHERE guild_id = ? AND (sender_id = ? OR receiver_id = ?) "
+            "ORDER BY created_at DESC LIMIT ?",
+            (guild_id, user_id, user_id, limit),
+        )
+
+    async def pay_member(self, guild_id: int, sender_id: int, receiver_id: int, amount: int, reason: str = "") -> bool:
+        """Transfert atomique (protégé par _economy_lock) : vérifie le solde ET débite/
+        crédite/historise sans qu'un autre appel concurrent ne puisse s'intercaler entre
+        la vérification et l'écriture (double dépense impossible)."""
+        if amount <= 0 or sender_id == receiver_id:
+            return False
+        async with self._economy_lock:
+            await self.ensure_economy(guild_id, sender_id)
+            await self.ensure_economy(guild_id, receiver_id)
+            row = await self.fetchone("SELECT cash FROM economy WHERE guild_id = ? AND user_id = ?", (guild_id, sender_id))
+            if not row or row["cash"] < amount:
+                return False
+            await self._conn.execute("UPDATE economy SET cash = cash - ? WHERE guild_id = ? AND user_id = ?", (amount, guild_id, sender_id))
+            await self._conn.execute("UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?", (amount, guild_id, receiver_id))
+            await self._conn.execute(
+                "INSERT INTO economy_transactions (guild_id, sender_id, receiver_id, transaction_type, amount, created_at, reason) "
+                "VALUES (?, ?, ?, 'pay', ?, ?, ?)",
+                (guild_id, sender_id, receiver_id, amount, now(), reason),
+            )
+            await self._conn.commit()
+            return True
+
+    async def claim_timed_reward(self, guild_id: int, user_id: int, field: str, amount: int, cooldown: int, transaction_type: str) -> tuple[bool, int]:
+        """Réclame une récompense périodique (daily/weekly/work) de façon atomique :
+        vérifie le cooldown ET l'écrit dans le même verrou, pour qu'un double-clic ou un
+        double appel de commande ne permette jamais de réclamer deux fois. Retourne
+        (True, 0) si la récompense a été accordée, ou (False, secondes_restantes) sinon."""
+        assert field in ("last_daily", "last_weekly", "last_work"), "champ de cooldown non autorisé"
+        async with self._economy_lock:
+            await self.ensure_economy(guild_id, user_id)
+            row = await self.fetchone(f"SELECT {field} FROM economy WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+            last = row[field] if row else 0
+            remaining = cooldown - (now() - last) if last else 0
+            if remaining > 0:
+                return False, remaining
+            await self._conn.execute(
+                f"UPDATE economy SET cash = cash + ?, {field} = ? WHERE guild_id = ? AND user_id = ?",
+                (amount, now(), guild_id, user_id),
+            )
+            await self._conn.execute(
+                "INSERT INTO economy_transactions (guild_id, sender_id, receiver_id, transaction_type, amount, created_at, reason) "
+                "VALUES (?, NULL, ?, ?, ?, ?, '')",
+                (guild_id, user_id, transaction_type, amount, now()),
+            )
+            await self._conn.commit()
+            return True, 0
+
+    # ---------- Niveaux ----------
+
+    async def ensure_level(self, guild_id: int, user_id: int):
+        await self.execute(
+            "INSERT OR IGNORE INTO levels (guild_id, user_id) VALUES (?, ?)",
+            (guild_id, user_id),
+        )
+
+    async def get_level(self, guild_id: int, user_id: int):
+        await self.ensure_level(guild_id, user_id)
+        return await self.fetchone(
+            "SELECT * FROM levels WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+
+    # ---------- Réglages de /stats, /level et +statsconfig ----------
+
+    async def get_stats_settings(self, guild_id: int) -> dict:
+        """Fusionne les réglages enregistrés en base avec DEFAULT_STATS_SETTINGS, pour
+        que toute clé absente (serveur pas encore configuré, ou nouveau réglage ajouté
+        après coup) garde une valeur sûre plutôt que de faire planter l'affichage."""
+        conf = await self.get_guild_config(guild_id)
+        raw = conf["stats_settings_json"] if conf and conf["stats_settings_json"] else "{}"
+        try:
+            saved = json.loads(raw)
+        except (ValueError, TypeError):
+            saved = {}
+        merged = dict(DEFAULT_STATS_SETTINGS)
+        merged.update(saved)
+        return merged
+
+    async def set_stats_settings(self, guild_id: int, updates: dict) -> dict:
+        """Fusionne `updates` avec les réglages actuels puis enregistre le tout en une
+        fois (un seul blob JSON, voir DEFAULT_STATS_SETTINGS)."""
+        current = await self.get_stats_settings(guild_id)
+        current.update(updates)
+        await self.set_guild_config(guild_id, "stats_settings_json", json.dumps(current))
+        return current
+
+    async def reset_stats_settings(self, guild_id: int):
+        await self.set_guild_config(guild_id, "stats_settings_json", "{}")
+
+    # ---------- Réglages de +designsetup (Phase 1 de la refonte visuelle) ----------
+
+    async def get_design_settings(self, guild_id: int) -> dict:
+        """Même principe que get_stats_settings() : fusionne avec DEFAULT_DESIGN_SETTINGS
+        pour qu'un serveur pas encore configuré (ou un nouveau réglage ajouté après coup)
+        garde toujours une valeur sûre."""
+        conf = await self.get_guild_config(guild_id)
+        raw = conf["design_settings_json"] if conf and conf["design_settings_json"] else "{}"
+        try:
+            saved = json.loads(raw)
+        except (ValueError, TypeError):
+            saved = {}
+        merged = dict(DEFAULT_DESIGN_SETTINGS)
+        merged.update(saved)
+        return merged
+
+    async def set_design_settings(self, guild_id: int, updates: dict) -> dict:
+        current = await self.get_design_settings(guild_id)
+        current.update(updates)
+        await self.set_guild_config(guild_id, "design_settings_json", json.dumps(current))
+        return current
+
+    async def reset_design_settings(self, guild_id: int):
+        await self.set_guild_config(guild_id, "design_settings_json", "{}")
+
+    # ---------- Réputation (table profiles) ----------
+
+    async def get_reputation(self, guild_id: int, user_id: int) -> int:
+        row = await self.fetchone(
+            "SELECT reputation FROM profiles WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        return row["reputation"] if row else 0
+
+    async def ensure_profile(self, guild_id: int, user_id: int):
+        await self.execute("INSERT OR IGNORE INTO profiles (guild_id, user_id) VALUES (?, ?)", (guild_id, user_id))
+
+    async def give_reputation(self, guild_id: int, giver_id: int, receiver_id: int, cooldown: int, reason: str = "") -> tuple[bool, int]:
+        """Donne 1 point de réputation, protégé par _economy_lock (même verrou que
+        l'économie : même besoin d'atomicité vérification-cooldown + écriture)."""
+        async with self._economy_lock:
+            await self.ensure_profile(guild_id, giver_id)
+            await self.ensure_profile(guild_id, receiver_id)
+            row = await self.fetchone("SELECT last_rep FROM profiles WHERE guild_id = ? AND user_id = ?", (guild_id, giver_id))
+            last = row["last_rep"] if row else 0
+            remaining = cooldown - (now() - last) if last else 0
+            if remaining > 0:
+                return False, remaining
+            await self._conn.execute(
+                "UPDATE profiles SET reputation = reputation + 1 WHERE guild_id = ? AND user_id = ?", (guild_id, receiver_id)
+            )
+            await self._conn.execute(
+                "UPDATE profiles SET last_rep = ? WHERE guild_id = ? AND user_id = ?", (now(), guild_id, giver_id)
+            )
+            await self._conn.execute(
+                "INSERT INTO reputation_history (guild_id, giver_id, receiver_id, amount, reason, created_at) VALUES (?, ?, ?, 1, ?, ?)",
+                (guild_id, giver_id, receiver_id, reason, now()),
+            )
+            await self._conn.commit()
+            return True, 0
+
+    async def get_reputation_cooldown_remaining(self, guild_id: int, user_id: int, cooldown: int) -> int:
+        row = await self.fetchone("SELECT last_rep FROM profiles WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+        last = row["last_rep"] if row else 0
+        return max(0, cooldown - (now() - last)) if last else 0
+
+    async def adjust_reputation(self, guild_id: int, moderator_id: int, target_id: int, amount: int, reason: str = "") -> int:
+        """Ajout/retrait manuel par le staff (+repadd / +repremove), sans cooldown. Le
+        total ne descend jamais sous 0. Retourne le nouveau total."""
+        await self.ensure_profile(guild_id, target_id)
+        current = await self.get_reputation(guild_id, target_id)
+        new_total = max(0, current + amount)
+        await self.execute("UPDATE profiles SET reputation = ? WHERE guild_id = ? AND user_id = ?", (new_total, guild_id, target_id))
+        await self.execute(
+            "INSERT INTO reputation_history (guild_id, giver_id, receiver_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (guild_id, moderator_id, target_id, new_total - current, reason, now()),
+        )
+        return new_total
+
+    async def reset_reputation(self, guild_id: int, moderator_id: int, target_id: int, reason: str = "Réinitialisation") -> int:
+        current = await self.get_reputation(guild_id, target_id)
+        await self.execute("UPDATE profiles SET reputation = 0 WHERE guild_id = ? AND user_id = ?", (guild_id, target_id))
+        await self.execute(
+            "INSERT INTO reputation_history (guild_id, giver_id, receiver_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (guild_id, moderator_id, target_id, -current, reason, now()),
+        )
+        return 0
+
+    async def get_reputation_history(self, guild_id: int, user_id: int, limit: int = 15):
+        return await self.fetchall(
+            "SELECT * FROM reputation_history WHERE guild_id = ? AND receiver_id = ? ORDER BY created_at DESC LIMIT ?",
+            (guild_id, user_id, limit),
+        )
+
+    # ---------- Sessions vocales (persistance après redémarrage) ----------
+
+    async def start_voice_session(self, guild_id: int, user_id: int, channel_id: int):
+        await self.execute(
+            "INSERT INTO voice_sessions (guild_id, user_id, channel_id, joined_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET channel_id = excluded.channel_id, joined_at = excluded.joined_at",
+            (guild_id, user_id, channel_id, now()),
+        )
+
+    async def end_voice_session(self, guild_id: int, user_id: int) -> int:
+        """Termine la session en cours (si elle existe), ajoute la durée écoulée à
+        voice_totals, et retourne le nombre de secondes ajoutées (0 si aucune session)."""
+        row = await self.fetchone(
+            "SELECT joined_at FROM voice_sessions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        await self.execute("DELETE FROM voice_sessions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+        if not row:
+            return 0
+        elapsed = max(0, now() - row["joined_at"])
+        await self.execute(
+            "INSERT INTO voice_totals (guild_id, user_id, seconds) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET seconds = seconds + excluded.seconds",
+            (guild_id, user_id, elapsed),
+        )
+        return elapsed
+
+    async def get_all_voice_sessions(self):
+        """Utilisé au démarrage pour nettoyer les sessions restées ouvertes après un
+        arrêt brutal (crash/redéploiement) : leur durée réelle est perdue (on ne peut
+        pas deviner combien de temps s'est écoulé pendant que le bot était hors-ligne),
+        mais on les referme proprement plutôt que de les laisser polluer la base."""
+        return await self.fetchall("SELECT * FROM voice_sessions")
+
+    async def clear_voice_session(self, guild_id: int, user_id: int):
+        await self.execute("DELETE FROM voice_sessions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+
+    # ---------- Statistiques pour le dashboard web (web/dashboard.py) ----------
+
+    async def commands_count_since(self, since_ts: int) -> int:
+        row = await self.fetchone("SELECT COUNT(*) c FROM command_logs WHERE timestamp >= ?", (since_ts,))
+        return row["c"] if row else 0
+
+    async def commands_count_total(self) -> int:
+        row = await self.fetchone("SELECT COUNT(*) c FROM command_logs")
+        return row["c"] if row else 0
+
+    async def top_commands_since(self, since_ts: int, limit: int = 5):
+        return await self.fetchall(
+            "SELECT command_name, COUNT(*) as c FROM command_logs WHERE timestamp >= ? "
+            "GROUP BY command_name ORDER BY c DESC LIMIT ?",
+            (since_ts, limit),
+        )
+
+    async def commands_hourly_since(self, since_ts: int):
+        """Regroupe les commandes exécutées par tranche d'une heure, pour le mini graphique
+        du dashboard (les 24 dernières heures par défaut)."""
+        return await self.fetchall(
+            "SELECT (timestamp / 3600) * 3600 as bucket, COUNT(*) as c FROM command_logs "
+            "WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC",
+            (since_ts,),
+        )
+
+    # ---------- Jeux (Partie 1 — récompenses économiques des mini-jeux) ----------
+    # Toute la logique métier (multiplicateur d'événement, jeux désactivés, limite
+    # journalière...) vit dans utils/game_rewards.py ; les méthodes ci-dessous ne sont que
+    # la couche d'accès aux données, gardée volontairement simple et atomique.
+
+    async def record_game_reward(
+        self, guild_id: int, user_id: int, game_name: str, session_id: str,
+        result: str, amount: int, metadata_json: str = "{}",
+    ) -> tuple[bool, str, int | None]:
+        """Enregistre le résultat d'une manche de mini-jeu et crédite la récompense de façon
+        ATOMIQUE (protégée par le même _economy_lock que /pay, /daily, /weekly...). Le
+        game_session_id est UNIQUE en base : si cette manche précise a déjà été récompensée
+        (double-clic, double appel, redémarrage en plein milieu d'une manche...), l'insertion
+        est refusée et AUCUNE récompense n'est donnée une seconde fois — c'est ce qui garantit
+        qu'un même gain de jeu ne peut jamais être crédité deux fois.
+
+        Retourne (True, "GAME-000123", montant) si la récompense a été accordée, ou
+        (False, "already_rewarded", None) si cette manche était déjà enregistrée."""
+        async with self._economy_lock:
+            try:
+                cur = await self._conn.execute(
+                    "INSERT INTO game_transactions "
+                    "(guild_id, user_id, game_name, game_session_id, result, reward_amount, created_at, metadata_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (guild_id, user_id, game_name, session_id, result, amount, now(), metadata_json),
+                )
+            except sqlite3.IntegrityError:
+                return False, "already_rewarded", None
+            display_id = f"GAME-{cur.lastrowid:06d}"
+            if amount > 0:
+                await self._conn.execute(
+                    "INSERT OR IGNORE INTO economy (guild_id, user_id) VALUES (?, ?)", (guild_id, user_id)
+                )
+                await self._conn.execute(
+                    "UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?",
+                    (amount, guild_id, user_id),
+                )
+                await self._conn.execute(
+                    "INSERT INTO economy_transactions (guild_id, sender_id, receiver_id, transaction_type, amount, created_at, reason) "
+                    "VALUES (?, NULL, ?, 'game_reward', ?, ?, ?)",
+                    (guild_id, user_id, amount, now(), game_name),
+                )
+            await self._conn.commit()
+            return True, display_id, amount
+
+    async def get_game_cooldown_remaining(self, guild_id: int, user_id: int, game_name: str, cooldown: int) -> int:
+        row = await self.fetchone(
+            "SELECT last_used_at FROM game_cooldowns WHERE guild_id = ? AND user_id = ? AND game_name = ?",
+            (guild_id, user_id, game_name),
+        )
+        last = row["last_used_at"] if row else 0
+        return max(0, cooldown - (now() - last)) if last else 0
+
+    async def touch_game_cooldown(self, guild_id: int, user_id: int, game_name: str):
+        await self.execute(
+            "INSERT INTO game_cooldowns (guild_id, user_id, game_name, last_used_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id, game_name) DO UPDATE SET last_used_at = excluded.last_used_at",
+            (guild_id, user_id, game_name, now()),
+        )
+
+    async def count_game_rewards_today(self, guild_id: int, user_id: int) -> int:
+        """Nombre de manches récompensées (reward_amount > 0) depuis minuit UTC glissant
+        (dernières 24h) — utilisé pour la limite journalière de +gamesetup."""
+        since = now() - 86400
+        row = await self.fetchone(
+            "SELECT COUNT(*) as c FROM game_transactions WHERE guild_id = ? AND user_id = ? "
+            "AND reward_amount > 0 AND created_at >= ?",
+            (guild_id, user_id, since),
+        )
+        return row["c"] if row else 0
+
+    async def get_game_settings(self, guild_id: int) -> dict:
+        row = await self.fetchone("SELECT * FROM game_settings WHERE guild_id = ?", (guild_id,))
+        if row is None:
+            await self.execute(
+                "INSERT OR IGNORE INTO game_settings (guild_id, updated_at) VALUES (?, ?)", (guild_id, now())
+            )
+            row = await self.fetchone("SELECT * FROM game_settings WHERE guild_id = ?", (guild_id,))
+        return dict(row)
+
+    async def set_game_settings(self, guild_id: int, updates: dict) -> dict:
+        await self.get_game_settings(guild_id)  # s'assure que la ligne existe déjà
+        columns = ", ".join(f"{k} = ?" for k in updates)
+        params = list(updates.values()) + [now(), guild_id]
+        await self.execute(
+            f"UPDATE game_settings SET {columns}, updated_at = ? WHERE guild_id = ?", tuple(params)
+        )
+        return await self.get_game_settings(guild_id)
+
+    async def get_game_history(self, guild_id: int, user_id: int, limit: int = 15):
+        return await self.fetchall(
+            "SELECT * FROM game_transactions WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (guild_id, user_id, limit),
+        )
+
+    async def get_game_stats(self, guild_id: int, user_id: int) -> dict:
+        row = await self.fetchone(
+            "SELECT COUNT(*) as games_played, "
+            "SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) as wins, "
+            "SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) as losses, "
+            "SUM(CASE WHEN result = 'draw' THEN 1 ELSE 0 END) as draws, "
+            "SUM(reward_amount) as total_earned "
+            "FROM game_transactions WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        return {
+            "games_played": (row["games_played"] if row else 0) or 0,
+            "wins": (row["wins"] if row else 0) or 0,
+            "losses": (row["losses"] if row else 0) or 0,
+            "draws": (row["draws"] if row else 0) or 0,
+            "total_earned": (row["total_earned"] if row else 0) or 0,
+        }
+
+    async def get_game_leaderboard(self, guild_id: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT user_id, SUM(reward_amount) as total_earned, COUNT(*) as games_played "
+            "FROM game_transactions WHERE guild_id = ? GROUP BY user_id "
+            "ORDER BY total_earned DESC LIMIT ?",
+            (guild_id, limit),
+        )
+
+    async def get_game_leaderboard_for_game(self, guild_id: int, game_name: str, limit: int = 10):
+        return await self.fetchall(
+            "SELECT user_id, SUM(reward_amount) as total_earned, COUNT(*) as games_played "
+            "FROM game_transactions WHERE guild_id = ? AND game_name = ? GROUP BY user_id "
+            "ORDER BY total_earned DESC LIMIT ?",
+            (guild_id, game_name, limit),
+        )
+
+
+def now() -> int:
+    return int(time.time())
