@@ -483,10 +483,10 @@ class Utility(commands.Cog, name="Utility"):
     @commands.hybrid_command(
         name="addemoji",
         aliases=["add-emoji"],
-        description="Ajouter un emoji personnalisé au serveur depuis une URL d'image.",
+        description="Ajouter un emoji personnalisé depuis une image jointe ou une URL.",
         with_app_command=False,
     )
-    @app_commands.describe(nom="Nom du nouvel emoji", url="URL HTTPS directe de l'image")
+    @app_commands.describe(nom="Nom du nouvel emoji", url="URL HTTPS directe (optionnelle si une image est jointe)")
     @checks.has_permission("manage_emojis_and_stickers")
     async def addemoji(self, ctx: commands.Context, nom: str, url: str = None):
         if not ctx.guild:
