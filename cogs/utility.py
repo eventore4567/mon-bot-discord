@@ -488,7 +488,7 @@ class Utility(commands.Cog, name="Utility"):
     )
     @app_commands.describe(nom="Nom du nouvel emoji", url="URL HTTPS directe de l'image")
     @checks.has_permission("manage_emojis_and_stickers")
-    async def addemoji(self, ctx: commands.Context, nom: str, url: str):
+    async def addemoji(self, ctx: commands.Context, nom: str, url: str = None):
         if not ctx.guild:
             return await ctx.send(embed=await self._embed(None, title="Commande indisponible", description="Cette commande doit être utilisée sur un serveur.", kind="danger"))
         if not ctx.guild.me.guild_permissions.manage_emojis_and_stickers:
@@ -519,29 +519,45 @@ class Utility(commands.Cog, name="Utility"):
             return candidate
 
         try:
-            current_url = await validate_public_https(url.strip())
-            timeout = aiohttp.ClientTimeout(total=12)
             image_data = None
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                for _ in range(4):
-                    async with session.get(current_url, allow_redirects=False, headers={"User-Agent": "SentriX-EmojiImporter/1.0"}) as response:
-                        if 300 <= response.status < 400 and response.headers.get("Location"):
-                            current_url = await validate_public_https(urljoin(current_url, response.headers["Location"]))
-                            continue
-                        if response.status != 200:
-                            raise ValueError(f"Le serveur de l'image a répondu avec le code {response.status}.")
-                        content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
-                        if content_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"}:
-                            raise ValueError("Le lien doit mener directement vers une image PNG, JPG, GIF ou WebP.")
-                        declared_size = int(response.headers.get("Content-Length", "0") or 0)
-                        if declared_size > 256 * 1024:
-                            raise ValueError("L'image dépasse la limite de 256 Ko pour un emoji Discord.")
-                        image_data = await response.content.read(256 * 1024 + 1)
-                        if len(image_data) > 256 * 1024:
-                            raise ValueError("L'image dépasse la limite de 256 Ko pour un emoji Discord.")
-                        break
-                if image_data is None:
-                    raise ValueError("Le lien contient trop de redirections.")
+            attachment = ctx.message.attachments[0] if ctx.message.attachments else None
+
+            if attachment is not None:
+                content_type = (attachment.content_type or "").split(";", 1)[0].lower()
+                extension = attachment.filename.rsplit(".", 1)[-1].lower() if "." in attachment.filename else ""
+                if content_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"} and extension not in {"png", "jpg", "jpeg", "gif", "webp"}:
+                    raise ValueError("Le fichier joint doit être une image PNG, JPG, GIF ou WebP.")
+                if attachment.size > 256 * 1024:
+                    raise ValueError("L'image jointe dépasse la limite de 256 Ko pour un emoji Discord.")
+                image_data = await attachment.read()
+            elif url:
+                current_url = await validate_public_https(url.strip())
+                timeout = aiohttp.ClientTimeout(total=12)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    for _ in range(4):
+                        async with session.get(current_url, allow_redirects=False, headers={"User-Agent": "SentriX-EmojiImporter/1.0"}) as response:
+                            if 300 <= response.status < 400 and response.headers.get("Location"):
+                                current_url = await validate_public_https(urljoin(current_url, response.headers["Location"]))
+                                continue
+                            if response.status != 200:
+                                raise ValueError(f"Le serveur de l'image a répondu avec le code {response.status}.")
+                            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+                            if content_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"}:
+                                raise ValueError("Le lien doit mener directement vers une image PNG, JPG, GIF ou WebP.")
+                            declared_size = int(response.headers.get("Content-Length", "0") or 0)
+                            if declared_size > 256 * 1024:
+                                raise ValueError("L'image dépasse la limite de 256 Ko pour un emoji Discord.")
+                            image_data = await response.content.read(256 * 1024 + 1)
+                            if len(image_data) > 256 * 1024:
+                                raise ValueError("L'image dépasse la limite de 256 Ko pour un emoji Discord.")
+                            break
+                    if image_data is None:
+                        raise ValueError("Le lien contient trop de redirections.")
+            else:
+                raise ValueError(
+                    "Joignez une image au message ou ajoutez une URL HTTPS après le nom. "
+                    "Exemple : +addemoji sourire"
+                )
 
             emoji = await ctx.guild.create_custom_emoji(
                 name=nom,
