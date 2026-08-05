@@ -856,14 +856,14 @@ class EmbedBuilderView(discord.ui.View):
             return
         await interaction.response.edit_message(embeds=self.build_panel_embeds(), view=EmbedSendView(self))
 
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger, emoji="❌", row=3)
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger, emoji="○", row=3)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         # BUG CORRIGÉ : ce bouton s'était retrouvé orphelin dans setup() (jamais rattaché à
         # la classe EmbedBuilderView) lors d'une précédente correction — le panneau principal
         # n'avait alors plus aucun moyen de fermer l'éditeur proprement.
         for item in self.children:
             item.disabled = True
-        await interaction.response.edit_message(embeds=[embeds.neutral("❌ Éditeur fermé", "Les modifications non sauvegardées ont été abandonnées.")], view=self)
+        await interaction.response.edit_message(embeds=[embeds.neutral("○ Éditeur fermé", "Les modifications non sauvegardées ont été abandonnées.")], view=self)
         self.stop()
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
@@ -889,7 +889,7 @@ class EmbedImportConfirmView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="✅ Confirmer l'import", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="● Confirmer l'import", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         existing = await self.cog.get_template(interaction.guild.id, self.name)
         if existing:
@@ -897,7 +897,7 @@ class EmbedImportConfirmView(discord.ui.View):
         await self.cog.create_template(interaction.guild.id, interaction.user.id, self.name, self.draft)
         await interaction.response.edit_message(embed=embeds.success(f"Modèle **{self.name}** importé et sauvegardé."), view=None)
 
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="○ Annuler", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embed=embeds.error("Import annulé."), view=None)
 
@@ -999,7 +999,7 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
             embed = draft.to_embed()
             view = draft.build_link_view()
             await msg.edit(content=draft.content or None, embed=embed, view=view or discord.utils.MISSING)
-            await interaction.followup.send(embed=embeds.success("✅ Message mis à jour."), ephemeral=True)
+            await interaction.followup.send(embed=embeds.success("● Message mis à jour."), ephemeral=True)
         except discord.NotFound:
             await interaction.followup.send(embed=embeds.error("Le message a été supprimé entre-temps."), ephemeral=True)
         except discord.Forbidden:
@@ -1288,7 +1288,7 @@ class EmbedSendConfirmView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="✅ Confirmer l'envoi", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="● Confirmer l'envoi", style=discord.ButtonStyle.success, row=0)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.parent.cog.do_send(interaction, self.parent.draft, self.channel, self.allow_mentions)
 
@@ -1296,7 +1296,7 @@ class EmbedSendConfirmView(discord.ui.View):
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embeds=self.parent.build_panel_embeds(), view=EmbedSendView(self.parent))
 
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="○ Annuler", style=discord.ButtonStyle.danger, row=0)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.parent.refresh(interaction)
 
