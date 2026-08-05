@@ -78,7 +78,16 @@ def category_visible(cog_name: str, cog, is_staff: bool) -> bool:
     return bool(visible_commands(cog, is_staff))
 
 
-CATEGORY_EMOJI = {name: label.split(" ", 1)[0] for name, label in CATEGORY_LABELS.items()}
+def split_category_label(label: str) -> tuple[str | None, str]:
+    """Sépare l'emoji décoratif du nom seulement si le premier élément est réellement
+    un symbole. Une catégorie textuelle comme "Design et apparence" reste intacte."""
+    first, separator, rest = label.partition(" ")
+    if separator and first and any(not char.isalnum() for char in first):
+        return first, rest
+    return None, label
+
+
+CATEGORY_EMOJI = {name: split_category_label(label)[0] for name, label in CATEGORY_LABELS.items()}
 
 
 def build_help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_staff: bool) -> discord.Embed:
@@ -92,7 +101,7 @@ def build_help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str,
             continue
         count = len(visible_commands(cog, is_staff))
         visible_total += count
-        name = label.split(" ", 1)[1] if " " in label else label
+        name = split_category_label(label)[1]
         rows.append((name, count, cog_name in MEMBER_HIDDEN_CATEGORIES))
 
     bot_name = bot.user.name if bot.user else "le bot"
@@ -195,7 +204,7 @@ class HelpSelect(discord.ui.Select):
         self.is_staff = is_staff
         options = [
             discord.SelectOption(
-                label=label.split(" ", 1)[1] if " " in label else label,
+                label=split_category_label(label)[1],
                 value=cog_name,
                 emoji=CATEGORY_EMOJI.get(cog_name),
                 description=f"{len(visible_commands(bot.get_cog(cog_name), is_staff))} commande(s)",
