@@ -28,7 +28,7 @@ CATEGORY_LABELS = {
     "Automod": "🔒 Sécurité / AutoMod",
     "Security": "🔐 Sécurité avancée",
     "Tickets": "🎫 Tickets",
-    "Verification": "✅ Vérification / Rôles",
+    "Verification": "● Vérification / Rôles",
     "Configuration": "⚙️ Configuration",
     "ServerBuilder": "🏗️ Création de serveur",
     "Stats": "📊 Statistiques / Développement",

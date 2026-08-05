@@ -224,7 +224,7 @@ class Economy(commands.Cog, name="Economy"):
             "ON CONFLICT(guild_id, user_id, item_name) DO UPDATE SET quantity = quantity + 1",
             (ctx.guild.id, ctx.author.id, item["name"]),
         )
-        await ctx.send(embed=embeds.success(f"✅ Vous avez acheté **{item['name']}** pour {stats_service.format_number(item['price'])} 🪙."))
+        await ctx.send(embed=embeds.success(f"● Vous avez acheté **{item['name']}** pour {stats_service.format_number(item['price'])} 🪙."))
 
     @commands.hybrid_command(name="inventory", description="Afficher votre inventaire.", with_app_command=False)
     async def inventory(self, ctx: commands.Context):

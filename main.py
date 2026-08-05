@@ -204,7 +204,7 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning("Impossible d'enregistrer la vue de giveaway.")
 
-        # Boutons de navigation du /setup (◀ 💾 ▶ 👁️ ❌) : contrairement aux vues ci-dessus,
+        # Boutons de navigation du /setup (◀ 💾 ▶ 👁️ ○) : contrairement aux vues ci-dessus,
         # ce sont des "dynamic items" (discord.py >= 2.4) dont le custom_id encode l'ID du
         # message. add_dynamic_items() permet à Discord de les faire fonctionner même après
         # un redémarrage, en reconstruisant l'assistant depuis la table setup_sessions

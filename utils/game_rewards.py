@@ -164,11 +164,11 @@ def validate_opponent(author, opponent) -> str | None:
     """Anti-triche pour les duels : retourne un message d'erreur en français si l'adversaire
     n'est pas valide, sinon None. Aucun duel contre soi-même, aucun duel contre un bot."""
     if opponent is None:
-        return "❌ Adversaire introuvable."
+        return "○ Adversaire introuvable."
     if getattr(opponent, "bot", False):
-        return "❌ Vous ne pouvez pas défier un bot."
+        return "○ Vous ne pouvez pas défier un bot."
     if opponent.id == author.id:
-        return "❌ Vous ne pouvez pas vous défier vous-même."
+        return "○ Vous ne pouvez pas vous défier vous-même."
     return None
 
 

@@ -168,7 +168,7 @@ class Minigames(commands.Cog, name="Minigames"):
             else:
                 await ctx.send(embed=await self._embed(guild_id, title="Plus petit !", description="📉"))
         await self._finish(ctx, "guess-number", session_id, "loss", 0)
-        await ctx.send(embed=await self._embed(guild_id, title="Essais épuisés", description=f"❌ Le nombre était **{target}**.", kind="warning"))
+        await ctx.send(embed=await self._embed(guild_id, title="Essais épuisés", description=f"○ Le nombre était **{target}**.", kind="warning"))
 
     @commands.hybrid_command(name="trivia", description="Répondre à une question de culture générale.")
     async def trivia(self, ctx: commands.Context):
@@ -190,10 +190,10 @@ class Minigames(commands.Cog, name="Minigames"):
             return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", description=f"⏱️ La réponse était **{answer}**.", kind="warning"))
         if msg.content.strip().lower() == answer:
             reward = await self._finish(ctx, "trivia", session_id, "win", REWARD_TRIVIA)
-            await ctx.send(embed=await self._embed(guild_id, title="Bonne réponse !", description="✅" + self._reward_line(reward), kind="success"))
+            await ctx.send(embed=await self._embed(guild_id, title="Bonne réponse !", description="●" + self._reward_line(reward), kind="success"))
         else:
             await self._finish(ctx, "trivia", session_id, "loss", 0)
-            await ctx.send(embed=await self._embed(guild_id, title="Mauvaise réponse", description=f"❌ La bonne réponse était **{answer}**.", kind="danger"))
+            await ctx.send(embed=await self._embed(guild_id, title="Mauvaise réponse", description=f"○ La bonne réponse était **{answer}**.", kind="danger"))
 
     @commands.hybrid_command(name="tictactoe", description="Jouer au morpion contre un autre membre.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre contre qui jouer")
@@ -209,7 +209,7 @@ class Minigames(commands.Cog, name="Minigames"):
             return await ctx.send(embed=await self._embed(guild_id, title="Morpion", description=reason, kind="warning"))
         session_id = game_rewards.new_session_id("tictactoe")
         view = TicTacToeView(ctx.author, adversaire, cog=self, session_id=session_id)
-        e = await self._embed(guild_id, title="Morpion", description=f"{ctx.author.mention} (❌) vs {adversaire.mention} (⭕)\nAu tour de {ctx.author.mention}")
+        e = await self._embed(guild_id, title="Morpion", description=f"{ctx.author.mention} (○) vs {adversaire.mention} (⭕)\nAu tour de {ctx.author.mention}")
         await ctx.send(embed=e, view=view)
 
     @commands.hybrid_command(name="hangman", description="Jouer au pendu.", with_app_command=False)
@@ -248,7 +248,7 @@ class Minigames(commands.Cog, name="Minigames"):
             await ctx.send(embed=await self._embed(guild_id, title="Gagné !", description=f"🎉 Le mot était **{word}** !" + self._reward_line(reward), kind="success"))
         else:
             await self._finish(ctx, "hangman", session_id, "loss", 0)
-            await ctx.send(embed=await self._embed(guild_id, title="Perdu", description=f"❌ Le mot était **{word}**.", kind="danger"))
+            await ctx.send(embed=await self._embed(guild_id, title="Perdu", description=f"○ Le mot était **{word}**.", kind="danger"))
 
     @commands.hybrid_command(name="math-quiz", description="Répondre à une opération mathématique rapide.", with_app_command=False)
     async def math_quiz(self, ctx: commands.Context):
@@ -273,13 +273,13 @@ class Minigames(commands.Cog, name="Minigames"):
         try:
             if int(msg.content.strip()) == answer:
                 reward = await self._finish(ctx, "math-quiz", session_id, "win", REWARD_MATH_QUIZ)
-                await ctx.send(embed=await self._embed(guild_id, title="Bonne réponse !", description="✅" + self._reward_line(reward), kind="success"))
+                await ctx.send(embed=await self._embed(guild_id, title="Bonne réponse !", description="●" + self._reward_line(reward), kind="success"))
             else:
                 await self._finish(ctx, "math-quiz", session_id, "loss", 0)
-                await ctx.send(embed=await self._embed(guild_id, title="Faux", description=f"❌ La réponse était **{answer}**.", kind="danger"))
+                await ctx.send(embed=await self._embed(guild_id, title="Faux", description=f"○ La réponse était **{answer}**.", kind="danger"))
         except ValueError:
             await self._finish(ctx, "math-quiz", session_id, "loss", 0)
-            await ctx.send(embed=await self._embed(guild_id, title="Réponse invalide", description=f"❌ Ce n'est pas un nombre. La réponse était **{answer}**.", kind="danger"))
+            await ctx.send(embed=await self._embed(guild_id, title="Réponse invalide", description=f"○ Ce n'est pas un nombre. La réponse était **{answer}**.", kind="danger"))
 
     @commands.hybrid_command(name="blackjack", description="Jouer au blackjack simplifié contre le bot.", with_app_command=False)
     async def blackjack(self, ctx: commands.Context):
@@ -322,7 +322,7 @@ class Minigames(commands.Cog, name="Minigames"):
         elif sum(player) == sum(bot_hand):
             issue, kind, game_result = "🤝 Égalité !", "primary", "draw"
         else:
-            issue, kind, game_result = "❌ Vous perdez !", "danger", "loss"
+            issue, kind, game_result = "○ Vous perdez !", "danger", "loss"
         reward = await self._finish(ctx, "blackjack", session_id, game_result, REWARD_BLACKJACK)
         e = await self._embed(guild_id, title="Résultat", description=f"Vous : {sum(player)} | Bot : {sum(bot_hand)}\n{issue}" + self._reward_line(reward), kind=kind)
         await ctx.send(embed=e)
@@ -345,7 +345,7 @@ class Minigames(commands.Cog, name="Minigames"):
             await ctx.send(embed=await self._embed(guild_id, title="Machine à sous", description=f"🎰 {text}\n👍 Presque !" + self._reward_line(reward)))
         else:
             await self._finish(ctx, "slots", session_id, "loss", 0)
-            await ctx.send(embed=await self._embed(guild_id, title="Machine à sous", description=f"🎰 {text}\n❌ Perdu !", kind="danger"))
+            await ctx.send(embed=await self._embed(guild_id, title="Machine à sous", description=f"🎰 {text}\n○ Perdu !", kind="danger"))
 
 
 class TicTacToeButton(discord.ui.Button):
@@ -358,9 +358,9 @@ class TicTacToeButton(discord.ui.Button):
         view: "TicTacToeView" = self.view
         if interaction.user.id != view.current_player.id:
             return await interaction.response.send_message("Ce n'est pas votre tour !", ephemeral=True)
-        symbol = "❌" if view.current_player == view.player_x else "⭕"
+        symbol = "○" if view.current_player == view.player_x else "⭕"
         self.label = symbol
-        self.style = discord.ButtonStyle.danger if symbol == "❌" else discord.ButtonStyle.primary
+        self.style = discord.ButtonStyle.danger if symbol == "○" else discord.ButtonStyle.primary
         self.disabled = True
         view.board[self.y][self.x] = symbol
 

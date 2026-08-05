@@ -86,23 +86,23 @@ CATEGORY_STYLES = {
     "utility": {"emoji": "🧰", "colour": COLORS.primary},
     "games": {"emoji": "🎮", "colour": COLORS.games},
     "ai": {"emoji": "🧠", "colour": COLORS.ai},
-    "verification": {"emoji": "✅", "colour": COLORS.verification},
+    "verification": {"emoji": "●", "colour": COLORS.verification},
 }
 
 # Icône affichée dans le titre d'un embed selon son état (kind), plutôt que toujours
-# l'emoji de la catégorie — sinon un refus/erreur affiché avec ✅ (emoji de la catégorie
+# l'emoji de la catégorie — sinon un refus/erreur affiché avec ● (emoji de la catégorie
 # "verification" par exemple) donne l'impression trompeuse d'une réussite. Seul le kind
 # "primary" (information neutre) garde l'emoji de catégorie ; les autres états ont leur
 # propre icône universelle, reconnaissable quelle que soit la commande.
 KIND_EMOJI = {
-    "success": "✅",
+    "success": "●",
     "warning": "⚠️",
-    "danger": "❌",
+    "danger": "○",
 }
 
 
 def kind_title(title: str, *, kind: str, category_emoji: str) -> str:
-    """Préfixe `title` avec l'icône correspondant à `kind` (✅/⚠️/❌), ou l'emoji de la
+    """Préfixe `title` avec l'icône correspondant à `kind` (●/⚠️/○), ou l'emoji de la
     catégorie si `kind` est "primary" (information neutre, pas de succès/échec à signaler)."""
     emoji = KIND_EMOJI.get(kind, category_emoji)
     return f"{emoji} {title}"
@@ -179,11 +179,11 @@ def create_embed(
     return embed
 
 
-def success_embed(message: str, user=None, *, title: str = "✅ Action réussie") -> discord.Embed:
+def success_embed(message: str, user=None, *, title: str = "● Action réussie") -> discord.Embed:
     return create_embed(title=title, description=message, colour=COLORS.success, user=user)
 
 
-def error_embed(message: str, user=None, *, title: str = "❌ Une erreur est survenue") -> discord.Embed:
+def error_embed(message: str, user=None, *, title: str = "○ Une erreur est survenue") -> discord.Embed:
     return create_embed(title=title, description=message, colour=COLORS.danger, user=user)
 
 

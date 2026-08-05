@@ -98,7 +98,7 @@ class Events(commands.Cog, name="Events"):
                 role = interaction.guild.get_role(giveaway["required_role_id"])
                 role_name = role.mention if role else "un rôle spécifique"
                 return await interaction.response.send_message(
-                    f"❌ Il faut avoir le rôle {role_name} pour participer à ce giveaway.", ephemeral=True
+                    f"○ Il faut avoir le rôle {role_name} pour participer à ce giveaway.", ephemeral=True
                 )
 
         # 4) Niveau requis pour participer (optionnel).
@@ -106,7 +106,7 @@ class Events(commands.Cog, name="Events"):
             level_row = await self.bot.db.get_level(interaction.guild.id, member.id)
             if level_row["level"] < giveaway["required_level"]:
                 return await interaction.response.send_message(
-                    f"❌ Il faut être au moins niveau **{giveaway['required_level']}** pour participer "
+                    f"○ Il faut être au moins niveau **{giveaway['required_level']}** pour participer "
                     f"(vous êtes niveau {level_row['level']}).",
                     ephemeral=True,
                 )
@@ -120,7 +120,7 @@ class Events(commands.Cog, name="Events"):
                 "DELETE FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?",
                 (giveaway["id"], member.id),
             )
-            return await interaction.response.send_message("❌ Vous ne participez plus à ce giveaway.", ephemeral=True)
+            return await interaction.response.send_message("○ Vous ne participez plus à ce giveaway.", ephemeral=True)
 
         await self.bot.db.execute(
             "INSERT INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)",
@@ -444,7 +444,7 @@ class Events(commands.Cog, name="Events"):
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO event_participants (event_id, user_id) VALUES (?, ?)", (event["id"], ctx.author.id)
         )
-        await ctx.send(embed=embeds.success(f"✅ Vous participez à **{nom}** !"))
+        await ctx.send(embed=embeds.success(f"● Vous participez à **{nom}** !"))
 
     @commands.hybrid_command(name="event-leave", description="Quitter un événement.", with_app_command=False)
     @app_commands.describe(nom="Le nom de l'événement")
@@ -506,7 +506,7 @@ class Events(commands.Cog, name="Events"):
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO tournament_participants (tournament_id, user_id) VALUES (?, ?)", (t["id"], ctx.author.id)
         )
-        await ctx.send(embed=embeds.success(f"✅ Vous êtes inscrit au tournoi **{nom}** !"))
+        await ctx.send(embed=embeds.success(f"● Vous êtes inscrit au tournoi **{nom}** !"))
 
     @commands.hybrid_command(name="tournament-start", description="Démarrer un tournoi (ferme les inscriptions).", with_app_command=False)
     @app_commands.describe(nom="Le nom du tournoi")

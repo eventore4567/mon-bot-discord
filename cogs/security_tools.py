@@ -253,7 +253,7 @@ class Security(commands.Cog):
         await ctx.send(embed=e)
         await self.log_action(ctx.guild, embeds.log_entry(
             "🔄 Restauration de rôles", 0x5865F2, cible=membre, acteur=ctx.author,
-            extra={"📸 Snapshot": f"#{snapshot_id}", "✅ Rôles ajoutés": str(len(added))},
+            extra={"📸 Snapshot": f"#{snapshot_id}", "● Rôles ajoutés": str(len(added))},
         ))
 
     # ---------------------------------------------------------------- AUDIT DE PERMISSIONS
@@ -332,7 +332,7 @@ class Security(commands.Cog):
             footer=f"SentriX • {len(findings)} point(s) relevé(s) sur {len(guild.roles)} rôles",
         )
         if not findings:
-            e.add_field(name="✅ Résultat", value="Aucun problème de permission évident détecté. Bon travail !", inline=False)
+            e.add_field(name="● Résultat", value="Aucun problème de permission évident détecté. Bon travail !", inline=False)
         else:
             for label, text in findings:
                 e.add_field(name=label, value=helpers.truncate(text, 1024), inline=False)
@@ -493,7 +493,7 @@ class Security(commands.Cog):
             created_channels += 1
 
         result = embeds.success(
-            f"✅ Restauration terminée : **{created_roles}** rôle(s), **{created_categories}** catégorie(s), "
+            f"● Restauration terminée : **{created_roles}** rôle(s), **{created_categories}** catégorie(s), "
             f"**{created_channels}** salon(s) recréé(s) (les éléments déjà existants ont été ignorés)."
         )
         await msg.edit(embed=result, view=None)

@@ -17,7 +17,7 @@ invitations, niveaux, économie, réputation, giveaways, sauvegardes, mode urgen
 - Page d'accueil "⚙️ CENTRE DE CONFIGURATION SENTRIX" avec un menu déroulant de catégories
   (au lieu d'un parcours linéaire forcé page par page) — on choisit directement ce qu'on
   veut configurer, comme avec +help.
-- Navigation par catégorie : 🏠 Accueil / 💾 Enregistrer / 📋 Résumé / ❌ Fermer.
+- Navigation par catégorie : 🏠 Accueil / 💾 Enregistrer / 📋 Résumé / ○ Fermer.
 - Plus aucune barre de progression en blocs (▓░) : uniquement du texte ("X sur Y modules").
 - Verrouillage de session : si un autre administrateur a déjà /setup ouvert sur ce serveur,
   proposition de Voir uniquement / Prendre le contrôle / Annuler, au lieu de laisser deux
@@ -213,11 +213,11 @@ class Configuration(commands.Cog):
             pour que ce diagnostic reflète fidèlement ce qui se passe réellement."""
             channel = ctx.guild.get_channel(channel_id)
             if not channel:
-                return "❌", "salon introuvable (a probablement été supprimé)"
+                return "○", "salon introuvable (a probablement été supprimé)"
             perms = channel.permissions_for(ctx.guild.me)
             if not (perms.view_channel and perms.send_messages):
                 return "⚠️", f"{channel.mention} — le bot n'a pas la permission de voir/écrire ici"
-            return "✅", channel.mention
+            return "●", channel.mention
 
         general_id = conf["log_channel"]
         lines = []
@@ -225,7 +225,7 @@ class Configuration(commands.Cog):
 
         if general_id:
             status, detail = check_channel(general_id)
-            any_problem = any_problem or status != "✅"
+            any_problem = any_problem or status != "●"
             lines.append(f"{status} **Salon général** (`/setlogchannel`) — {detail}")
         else:
             lines.append("⚪ **Salon général** (`/setlogchannel`) — non défini (sert de repli si un salon dédié manque)")
@@ -239,8 +239,8 @@ class Configuration(commands.Cog):
                 status, detail = check_channel(general_id)
                 detail = f"{detail} (via le repli sur le salon général)"
             else:
-                status, detail = "❌", "aucun salon configuré (ni dédié, ni général)"
-            any_problem = any_problem or status != "✅"
+                status, detail = "○", "aucun salon configuré (ni dédié, ni général)"
+            any_problem = any_problem or status != "●"
             lines.append(f"{status} **{label}** — {detail}")
 
         e.description = "\n".join(lines)
@@ -249,14 +249,14 @@ class Configuration(commands.Cog):
                 name="Comment corriger",
                 value=(
                     "Lancez `/create-logs` pour créer automatiquement les salons manquants, "
-                    "ou `/setup` (page Logs) pour les redéfinir un par un. Si un ❌ ou ⚠️ persiste "
+                    "ou `/setup` (page Logs) pour les redéfinir un par un. Si un ○ ou ⚠️ persiste "
                     "après ça, vérifiez que le rôle du bot a bien la permission **Voir le salon** "
                     "et **Envoyer des messages** dans le salon concerné."
                 ),
                 inline=False,
             )
         else:
-            e.add_field(name="Résultat", value="Tous les logs configurés fonctionnent correctement. ✅", inline=False)
+            e.add_field(name="Résultat", value="Tous les logs configurés fonctionnent correctement. ●", inline=False)
         await ctx.send(embed=e)
 
     # ================================================================== LOGS INDÉPENDANTS (/logsetup)
@@ -339,7 +339,7 @@ class Configuration(commands.Cog):
             await log_service.set_log_enabled(self.bot, ctx.guild.id, log_type, True)
         except ValueError:
             return await ctx.send(embed=embeds.error(
-                "❌ Vous devez d'abord choisir un salon valide avant d'activer ce log "
+                "○ Vous devez d'abord choisir un salon valide avant d'activer ce log "
                 f"(`+logs channel {type_log} #salon` ou `+logs enable {type_log} #salon`)."
             ))
         label = log_service.LOG_TYPES[log_type]["label"]
@@ -385,7 +385,7 @@ class Configuration(commands.Cog):
         e.add_field(name="État", value="🟢 Activé" if setting["enabled"] else "⚪ Désactivé", inline=True)
         channel = ctx.guild.get_channel(setting["channel_id"]) if setting["channel_id"] else None
         e.add_field(name="Salon", value=channel.mention if channel else "Non configuré", inline=True)
-        e.add_field(name="Émis actuellement par le bot", value="✅ Oui" if meta["emits"] else "⚠️ Pas encore (configuration prête, événement pas encore câblé)", inline=False)
+        e.add_field(name="Émis actuellement par le bot", value="● Oui" if meta["emits"] else "⚠️ Pas encore (configuration prête, événement pas encore câblé)", inline=False)
         await ctx.send(embed=e)
 
     @logs_group.command(name="list", description="Lister tous les types de logs disponibles et leur état.", with_app_command=False)
@@ -504,7 +504,7 @@ class Configuration(commands.Cog):
             )
         except discord.HTTPException as exc:
             return await ctx.send(embed=embeds.error(
-                f"❌ La création du rôle a échoué (`{type(exc).__name__}`). Le serveur a peut-être atteint la "
+                f"○ La création du rôle a échoué (`{type(exc).__name__}`). Le serveur a peut-être atteint la "
                 "limite de 250 rôles, ou SentriX n'a plus la permission nécessaire."
             ))
 
@@ -512,7 +512,7 @@ class Configuration(commands.Cog):
             ctx.guild.id, ctx.author.id, "Rôles", "rôle créé (+createrole)", new_value=f"{role.name} (#{role.id})",
         )
         await ctx.send(embed=embeds.success(
-            f"✅ Le rôle {role.mention} a été créé (couleur : {colour_label}).\n"
+            f"● Le rôle {role.mention} a été créé (couleur : {colour_label}).\n"
             "Pour régler ses permissions, utilisez `/setup` → 🎭 Rôles, ou les paramètres du serveur Discord."
         ))
 
@@ -760,11 +760,11 @@ class Configuration(commands.Cog):
             return True
         if await self.bot.db.is_bot_manager(guild_id, interaction.user.id):
             return True
-        await interaction.response.send_message("❌ Vous n'êtes pas autorisé à utiliser cette configuration.", ephemeral=True)
+        await interaction.response.send_message("○ Vous n'êtes pas autorisé à utiliser cette configuration.", ephemeral=True)
         return False
 
     async def handle_setup_nav(self, interaction: discord.Interaction, action: str, message_id: int):
-        """Point d'entrée UNIQUE des boutons de navigation du /setup (◀ 💾 ▶ 👁️ ❌ et les
+        """Point d'entrée UNIQUE des boutons de navigation du /setup (◀ 💾 ▶ 👁️ ○ et les
         boutons équivalents de la page 9). Fonctionne que le bot ait redémarré entre-temps
         ou non : si l'assistant n'est plus en mémoire, on le reconstruit depuis la table
         setup_sessions (c'est ce qui permet aux boutons de survivre à un redémarrage)."""
@@ -773,7 +773,7 @@ class Configuration(commands.Cog):
             session = await self.bot.db.get_setup_session(message_id)
             if not session or session["guild_id"] != interaction.guild.id:
                 return await interaction.response.send_message(
-                    "❌ Cette session de configuration a expiré ou est introuvable. Relancez `/setup`.", ephemeral=True
+                    "○ Cette session de configuration a expiré ou est introuvable. Relancez `/setup`.", ephemeral=True
                 )
             if not await self._can_use_setup(interaction, session["author_id"], session["guild_id"]):
                 return
@@ -967,9 +967,9 @@ class Configuration(commands.Cog):
         removed = [r for r in before.roles if r not in after.roles]
         extra = {}
         if added:
-            extra["✅ Rôles ajoutés"] = ", ".join(r.mention for r in added)
+            extra["● Rôles ajoutés"] = ", ".join(r.mention for r in added)
         if removed:
-            extra["❌ Rôles retirés"] = ", ".join(r.mention for r in removed)
+            extra["○ Rôles retirés"] = ", ".join(r.mention for r in removed)
         if not extra:
             return
         actor = await self._get_actor(after.guild, discord.AuditLogAction.member_role_update, after.id)
@@ -1001,7 +1001,7 @@ SETUP_STEPS = [
     {"key": "logs", "icon": "📡", "title": "Système de logs", "fields": [], "custom": "logs_setup"},
     {"key": "managers", "icon": "👥", "title": "Gestionnaires du bot", "fields": [], "custom": "managers"},
     {"key": "security", "icon": "🛡️", "title": "Sécurité (AutoMod)", "fields": [], "custom": "security"},
-    {"key": "summary", "icon": "✅", "title": "Résumé et confirmation", "fields": [], "custom": "summary"},
+    {"key": "summary", "icon": "●", "title": "Résumé et confirmation", "fields": [], "custom": "summary"},
 ]
 
 # Pages "Rôles" et "Salons annexes" (Phase 2) : trop de champs pour tenir en menus
@@ -1012,7 +1012,7 @@ SETUP_STEPS = [
 PICKER_FIELDS = {
     "roles": [
         ("autorole", "role", "🎭 Rôle automatique à l'arrivée"),
-        ("verify_role", "role", "✅ Rôle donné après vérification"),
+        ("verify_role", "role", "● Rôle donné après vérification"),
         ("member_role", "role", "👤 Rôle membre"),
         ("booster_role", "role", "🚀 Rôle booster"),
         ("mute_role", "role", "🔇 Rôle mute / quarantaine"),
@@ -1033,7 +1033,7 @@ PICKER_FIELDS = {
 
 FIELD_LABELS = {
     "mod_role": "🛡️ Rôle staff", "log_channel": "📝 Salon de logs", "welcome_channel": "👋 Salon de bienvenue",
-    "goodbye_channel": "🚪 Salon de départ", "autorole": "🎭 Rôle automatique", "verify_role": "✅ Rôle de vérification",
+    "goodbye_channel": "🚪 Salon de départ", "autorole": "🎭 Rôle automatique", "verify_role": "● Rôle de vérification",
     "member_role": "👤 Rôle membre", "booster_role": "🚀 Rôle booster", "mute_role": "🔇 Rôle mute/quarantaine",
     "level_channel": "📈 Annonces de niveau", "suggest_channel": "💡 Suggestions",
     "announce_channel": "📢 Annonces", "giveaway_channel": "🎉 Giveaways",
@@ -1258,11 +1258,11 @@ class CreateRoleModal(discord.ui.Modal, title="➕ Créer un nouveau rôle"):
     async def on_submit(self, interaction: discord.Interaction):
         name = self.nom.value.strip()
         if not name:
-            return await interaction.response.send_message("❌ Le nom du rôle ne peut pas être vide.", ephemeral=True)
+            return await interaction.response.send_message("○ Le nom du rôle ne peut pas être vide.", ephemeral=True)
         raw = self.couleur.value.strip().lstrip("#")
         if raw and not HEX_COLOUR_RE.fullmatch(raw):
             return await interaction.response.send_message(
-                "❌ Couleur invalide. Utilisez un code hexadécimal à 6 caractères (ex: `5865F2`), ou laissez le champ vide.",
+                "○ Couleur invalide. Utilisez un code hexadécimal à 6 caractères (ex: `5865F2`), ou laissez le champ vide.",
                 ephemeral=True,
             )
         colour_value = int(raw, 16) if raw else 0
@@ -1272,7 +1272,7 @@ class CreateRoleModal(discord.ui.Modal, title="➕ Créer un nouveau rôle"):
             f"Nom : **{name}**\nCouleur : {'#' + raw.upper() if raw else '*Aucune*'}\n\n"
             "Sélectionnez les permissions à accorder (aucune sélection = simple rôle d'affichage, sans "
             "permission particulière), réglez l'affichage séparé/mentionnable si besoin, puis cliquez sur "
-            "**✅ Créer le rôle**.",
+            "**● Créer le rôle**.",
             color=SETUP_COLOR_MAIN,
         )
         await interaction.response.send_message(embed=e, view=perms_view, ephemeral=True)
@@ -1309,11 +1309,11 @@ class RoleCreatorPermsView(discord.ui.View):
         self.mention_btn.callback = self._toggle_mentionable
         self.add_item(self.mention_btn)
 
-        self.create_btn = discord.ui.Button(label="✅ Créer le rôle", style=discord.ButtonStyle.success, row=2)
+        self.create_btn = discord.ui.Button(label="● Créer le rôle", style=discord.ButtonStyle.success, row=2)
         self.create_btn.callback = self._create_clicked
         self.add_item(self.create_btn)
 
-        self.cancel_btn = discord.ui.Button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=2)
+        self.cancel_btn = discord.ui.Button(label="○ Annuler", style=discord.ButtonStyle.danger, row=2)
         self.cancel_btn.callback = self._cancel_clicked
         self.add_item(self.cancel_btn)
 
@@ -1339,7 +1339,7 @@ class RoleCreatorPermsView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(
-            embed=embeds.neutral("❌ Création annulée", "Aucun rôle n'a été créé.", color=SETUP_COLOR_MAIN), view=self,
+            embed=embeds.neutral("○ Création annulée", "Aucun rôle n'a été créé.", color=SETUP_COLOR_MAIN), view=self,
         )
 
     async def _create_clicked(self, interaction: discord.Interaction):
@@ -1357,7 +1357,7 @@ class RoleCreatorPermsView(discord.ui.View):
             self._admin_confirm_pending = True
             return await interaction.response.send_message(
                 "⚠️ Ce rôle aura la permission **Administrateur** (accès total au serveur). "
-                "Cliquez à nouveau sur **✅ Créer le rôle** pour confirmer.",
+                "Cliquez à nouveau sur **● Créer le rôle** pour confirmer.",
                 ephemeral=True,
             )
         try:
@@ -1372,7 +1372,7 @@ class RoleCreatorPermsView(discord.ui.View):
             )
         except discord.HTTPException as exc:
             return await interaction.response.send_message(
-                f"❌ La création du rôle a échoué (`{type(exc).__name__}`). Le serveur a peut-être atteint la "
+                f"○ La création du rôle a échoué (`{type(exc).__name__}`). Le serveur a peut-être atteint la "
                 "limite de 250 rôles, ou SentriX n'a plus la permission nécessaire.",
                 ephemeral=True,
             )
@@ -1382,7 +1382,7 @@ class RoleCreatorPermsView(discord.ui.View):
         )
         for item in self.children:
             item.disabled = True
-        e = embeds.success(f"✅ Le rôle {role.mention} a été créé avec succès.")
+        e = embeds.success(f"● Le rôle {role.mention} a été créé avec succès.")
         await interaction.response.edit_message(embed=e, view=self)
 
 
@@ -1412,7 +1412,7 @@ class SetupNavButton(
     async def callback(self, interaction: discord.Interaction):
         cog = interaction.client.get_cog("Configuration")
         if cog is None:
-            return await interaction.response.send_message("❌ Le module de configuration n'est pas chargé.", ephemeral=True)
+            return await interaction.response.send_message("○ Le module de configuration n'est pas chargé.", ephemeral=True)
         await cog.handle_setup_nav(interaction, self.action, self.message_id)
 
 
@@ -1457,7 +1457,7 @@ class LogsSetupView(discord.ui.View):
         select = discord.ui.Select(placeholder="📂 Choisir une catégorie de logs...", options=options, row=0)
         select.callback = self._make_category_callback(select)
         self.add_item(select)
-        close_btn = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.secondary, emoji="❌", row=1)
+        close_btn = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.secondary, emoji="○", row=1)
         close_btn.callback = self._close_clicked
         self.add_item(close_btn)
 
@@ -1539,7 +1539,7 @@ class LogsSetupView(discord.ui.View):
                 await log_service.set_log_enabled(self.cog.bot, interaction.guild.id, self.current_type, True)
             except ValueError:
                 return await interaction.response.send_message(
-                    embed=embeds.error("❌ Vous devez d'abord choisir un salon valide avant d'activer ce log."),
+                    embed=embeds.error("○ Vous devez d'abord choisir un salon valide avant d'activer ce log."),
                     ephemeral=True,
                 )
         else:
@@ -1581,7 +1581,7 @@ class SetupLockPromptView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.requester_id:
-            await interaction.response.send_message("❌ Vous n'êtes pas autorisé à utiliser ce panneau.", ephemeral=True)
+            await interaction.response.send_message("○ Vous n'êtes pas autorisé à utiliser ce panneau.", ephemeral=True)
             return False
         return True
 
@@ -1634,7 +1634,7 @@ class SetupLockPromptView(discord.ui.View):
             embed=embeds.success(f"Vous avez pris le contrôle — nouveau panneau : {message.jump_url}"), ephemeral=True,
         )
 
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="○ Annuler", style=discord.ButtonStyle.danger, row=0)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children:
             item.disabled = True
@@ -1690,7 +1690,7 @@ class SetupView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         cog = self.bot.get_cog("Configuration")
         if cog is None:
-            await interaction.response.send_message("❌ Le module de configuration n'est pas chargé.", ephemeral=True)
+            await interaction.response.send_message("○ Le module de configuration n'est pas chargé.", ephemeral=True)
             return False
         return await cog._can_use_setup(interaction, self.author_id, self.guild_id)
 
@@ -1788,8 +1788,8 @@ class SetupView(discord.ui.View):
             ticket_log = f"<#{conf['ticket_log_channel']}>" if conf and conf["ticket_log_channel"] else "*Non défini*"
             e.add_field(name="📝 Salon de logs (repli)", value=ticket_log, inline=True)
             e.add_field(name="⏱️ Suppression après fermeture", value=f"{(conf['ticket_delete_delay'] if conf else 30) or 30}s", inline=True)
-            e.add_field(name="📄 Transcript par DM", value="✅ Activé" if (not conf or conf["ticket_transcript_dm"]) else "❌ Désactivé", inline=True)
-            e.add_field(name="⭐ Notation du support", value="✅ Activée" if (not conf or conf["ticket_rating_enabled"]) else "❌ Désactivée", inline=True)
+            e.add_field(name="📄 Transcript par DM", value="● Activé" if (not conf or conf["ticket_transcript_dm"]) else "○ Désactivé", inline=True)
+            e.add_field(name="⭐ Notation du support", value="● Activée" if (not conf or conf["ticket_rating_enabled"]) else "○ Désactivée", inline=True)
 
         elif step["key"] == "logs":
             desc = (
@@ -1801,7 +1801,7 @@ class SetupView(discord.ui.View):
             general = f"<#{conf['log_channel']}>" if conf and conf["log_channel"] else "*Non défini*"
             e.add_field(name="📝 Salon général de repli", value=general, inline=False)
             if self.logs_created:
-                e.add_field(name=f"✅ Créés dans cette session ({len(self.logs_created)})", value="\n".join(c.mention for c in self.logs_created)[:1024], inline=False)
+                e.add_field(name=f"● Créés dans cette session ({len(self.logs_created)})", value="\n".join(c.mention for c in self.logs_created)[:1024], inline=False)
 
         elif step["key"] == "managers":
             desc = (
@@ -1834,7 +1834,7 @@ class SetupView(discord.ui.View):
             active = sum(1 for v in self.security_choices.values() if v)
             score = round(active / len(AUTOMOD_TOGGLE_LABELS) * 100)
             e.add_field(name="📊 Score de sécurité", value=f"**{score}/100** ({active}/{len(AUTOMOD_TOGGLE_LABELS)} filtres actifs)", inline=False)
-            lines = [f"{'✅' if self.security_choices.get(field) else '❌'} {label}" for field, label in AUTOMOD_TOGGLE_LABELS.items()]
+            lines = [f"{'●' if self.security_choices.get(field) else '○'} {label}" for field, label in AUTOMOD_TOGGLE_LABELS.items()]
             e.add_field(name="État des filtres", value="\n".join(lines), inline=False)
 
         elif step["key"] == "summary":
@@ -1852,7 +1852,7 @@ class SetupView(discord.ui.View):
         return e
 
     async def _compute_categories(self, conf) -> list[tuple[str, str]]:
-        """État ✅/⚠️/❌ de chaque catégorie ACTUELLEMENT implémentée dans /setup. Réutilisé
+        """État ●/⚠️/○ de chaque catégorie ACTUELLEMENT implémentée dans /setup. Réutilisé
         par la page d'accueil et le résumé — ne liste QUE les 8 catégories réelles de cette
         phase (les autres modules du bot, comme l'IA ou les statistiques, ont leur propre
         commande de configuration séparée pour l'instant, voir Phases suivantes)."""
@@ -1866,14 +1866,14 @@ class SetupView(discord.ui.View):
             return self.choices.get(field, conf[field] if conf and field in conf.keys() else None)
 
         return [
-            ("⚙️ Général", "✅" if cur("mod_role") and cur("log_channel") else ("⚠️" if cur("mod_role") or cur("log_channel") else "❌")),
-            ("🎭 Rôles", "✅" if cur("autorole") or cur("verify_role") else "⚠️"),
-            ("🎫 Tickets", "✅" if n_panels else "⚠️"),
-            ("📢 Salons annexes", "✅" if any(cur(f) for f in ("level_channel", "suggest_channel", "announce_channel", "giveaway_channel")) else "⚠️"),
-            ("🏆 Rôles de niveau", "✅" if n_levels else "⚠️"),
-            ("📡 Logs", "✅" if cur("log_channel") else "❌"),
-            ("👥 Gestionnaires", "✅" if self.managers else "⚠️"),
-            ("🛡️ Sécurité", "✅" if active_security >= 6 else ("⚠️" if active_security > 0 else "❌")),
+            ("⚙️ Général", "●" if cur("mod_role") and cur("log_channel") else ("⚠️" if cur("mod_role") or cur("log_channel") else "○")),
+            ("🎭 Rôles", "●" if cur("autorole") or cur("verify_role") else "⚠️"),
+            ("🎫 Tickets", "●" if n_panels else "⚠️"),
+            ("📢 Salons annexes", "●" if any(cur(f) for f in ("level_channel", "suggest_channel", "announce_channel", "giveaway_channel")) else "⚠️"),
+            ("🏆 Rôles de niveau", "●" if n_levels else "⚠️"),
+            ("📡 Logs", "●" if cur("log_channel") else "○"),
+            ("👥 Gestionnaires", "●" if self.managers else "⚠️"),
+            ("🛡️ Sécurité", "●" if active_security >= 6 else ("⚠️" if active_security > 0 else "○")),
         ]
 
     async def _build_home_embed(self) -> discord.Embed:
@@ -1882,8 +1882,8 @@ class SetupView(discord.ui.View):
         conf = await self.bot.db.get_guild_config(self.guild_id)
         guild = self._guild()
         categories = await self._compute_categories(conf)
-        configured = sum(1 for _, s in categories if s == "✅")
-        critical = sum(1 for _, s in categories if s == "❌")
+        configured = sum(1 for _, s in categories if s == "●")
+        critical = sum(1 for _, s in categories if s == "○")
         warnings = sum(1 for _, s in categories if s == "⚠️")
 
         if critical:
@@ -1934,7 +1934,7 @@ class SetupView(discord.ui.View):
         e = embeds.neutral(header, "Voici l'état actuel de chaque catégorie.", color=SETUP_COLOR_MAIN)
 
         categories = await self._compute_categories(conf)
-        configured_count = sum(1 for _, status in categories if status == "✅")
+        configured_count = sum(1 for _, status in categories if status == "●")
         e.add_field(
             name=f"Modules configurés : {configured_count} sur {len(categories)}",
             value="\n".join(f"{status} {name}" for name, status in categories),
@@ -1948,17 +1948,17 @@ class SetupView(discord.ui.View):
     async def _run_final_checks(self, guild: discord.Guild | None, conf) -> list[str]:
         lines = []
         if not guild:
-            return ["❌ Serveur introuvable (le bot n'y est peut-être plus)."]
+            return ["○ Serveur introuvable (le bot n'y est peut-être plus)."]
         me = guild.me
         perms = me.guild_permissions if me else None
-        lines.append("✅ Permissions de base du bot" if perms and perms.manage_roles and perms.manage_channels else "⚠️ Il manque des permissions au bot (Gérer les rôles / salons)")
-        lines.append("✅ Rôle staff configuré" if conf and conf["mod_role"] else "⚠️ Aucun rôle staff configuré (page Général)")
-        lines.append("✅ Salon de logs configuré" if conf and conf["log_channel"] else "⚠️ Aucun salon de logs configuré (page Logs)")
+        lines.append("● Permissions de base du bot" if perms and perms.manage_roles and perms.manage_channels else "⚠️ Il manque des permissions au bot (Gérer les rôles / salons)")
+        lines.append("● Rôle staff configuré" if conf and conf["mod_role"] else "⚠️ Aucun rôle staff configuré (page Général)")
+        lines.append("● Salon de logs configuré" if conf and conf["log_channel"] else "⚠️ Aucun salon de logs configuré (page Logs)")
         active_security = sum(1 for v in self.security_choices.values() if v)
-        lines.append("✅ Sécurité active" if active_security > 0 else "❌ Aucune protection AutoMod active — le serveur n'est pas protégé")
+        lines.append("● Sécurité active" if active_security > 0 else "○ Aucune protection AutoMod active — le serveur n'est pas protégé")
         if conf and conf["autorole"]:
             role = guild.get_role(conf["autorole"])
-            lines.append("✅ Rôle automatique valide" if role else "⚠️ Le rôle automatique configuré n'existe plus")
+            lines.append("● Rôle automatique valide" if role else "⚠️ Le rôle automatique configuré n'existe plus")
         return lines
 
     def _render_home(self):
@@ -1977,7 +1977,7 @@ class SetupView(discord.ui.View):
         self.add_item(cat_select)
         self.add_item(SetupNavButton("summary", self.message_id, label="📋 Résumé", style=discord.ButtonStyle.secondary, row=1))
         self.add_item(SetupNavButton("history", self.message_id, label="📜 Historique", style=discord.ButtonStyle.secondary, row=1))
-        self.add_item(SetupNavButton("cancel", self.message_id, label="❌ Fermer", style=discord.ButtonStyle.danger, row=1))
+        self.add_item(SetupNavButton("cancel", self.message_id, label="○ Fermer", style=discord.ButtonStyle.danger, row=1))
 
     def _make_home_category_callback(self, select: discord.ui.Select):
         async def callback(interaction: discord.Interaction):
@@ -2116,7 +2116,7 @@ class SetupView(discord.ui.View):
             home_btn = SetupNavButton("home", self.message_id, label="🏠 Accueil", style=discord.ButtonStyle.secondary, row=0)
             save_btn = SetupNavButton("save", self.message_id, label="💾 Enregistrer définitivement", style=discord.ButtonStyle.success, row=0)
             restart_btn = SetupNavButton("restart", self.message_id, label="🔄 Recommencer", style=discord.ButtonStyle.secondary, row=0)
-            finish_btn = SetupNavButton("finish", self.message_id, label="✅ Terminer", style=discord.ButtonStyle.success, row=0)
+            finish_btn = SetupNavButton("finish", self.message_id, label="● Terminer", style=discord.ButtonStyle.success, row=0)
             for item in (home_btn, save_btn, restart_btn, finish_btn):
                 self.add_item(item)
         else:
@@ -2135,7 +2135,7 @@ class SetupView(discord.ui.View):
             # Discord limite chaque message à 5 lignes de composants. Les pages "Général" et
             # "Salons annexes" utilisent déjà leurs 4 premières lignes (0-3) pour les menus
             # déroulants : il ne reste qu'UNE ligne (la 4ᵉ) pour les boutons, qui accepte au
-            # maximum 5 boutons. Les 4 boutons de navigation essentiels (🏠 💾 📋 ❌) sont donc
+            # maximum 5 boutons. Les 4 boutons de navigation essentiels (🏠 💾 📋 ○) sont donc
             # toujours présents (accès direct à une autre catégorie via 🏠 Accueil, plus de
             # parcours forcé page par page), et le 5ᵉ bouton change selon la page : "✏️ Préfixe
             # & messages" sur la page Général (qui en a besoin), "👁️ Aperçu" partout ailleurs.
@@ -2148,7 +2148,7 @@ class SetupView(discord.ui.View):
                 self.add_item(text_btn)
             else:
                 self.add_item(SetupNavButton("preview", self.message_id, label="👁️ Aperçu", style=discord.ButtonStyle.secondary))
-            self.add_item(SetupNavButton("cancel", self.message_id, label="❌ Fermer", style=discord.ButtonStyle.danger))
+            self.add_item(SetupNavButton("cancel", self.message_id, label="○ Fermer", style=discord.ButtonStyle.danger))
 
     # ---------------------------------------------------------------- ACTIONS SPÉCIFIQUES AUX PAGES
 
@@ -2226,7 +2226,7 @@ class SetupView(discord.ui.View):
         /setup : jamais @everyone, confirmation si Administrateur, hiérarchie du bot,
         permission Gérer les rôles. Retourne True si le rôle peut être utilisé."""
         if role.id == interaction.guild.default_role.id:
-            await interaction.response.send_message("❌ `@everyone` ne peut pas être choisi ici.", ephemeral=True)
+            await interaction.response.send_message("○ `@everyone` ne peut pas être choisi ici.", ephemeral=True)
             return False
         if not interaction.guild.me.guild_permissions.manage_roles:
             await interaction.response.send_message(
@@ -2401,7 +2401,7 @@ class SetupView(discord.ui.View):
             )
             if interaction.user.id == user_id and not is_privileged:
                 return await interaction.response.send_message(
-                    "❌ Vous ne pouvez pas modifier vos propres permissions de gestionnaire.", ephemeral=True
+                    "○ Vous ne pouvez pas modifier vos propres permissions de gestionnaire.", ephemeral=True
                 )
             categories = list(select.values)
             await self.bot.db.set_manager_categories(self.guild_id, user_id, categories, interaction.user.id)
@@ -2527,7 +2527,7 @@ class SetupView(discord.ui.View):
                 "Voulez-vous vraiment annuler ? Les choix **non enregistrés** (rôles/salons pas encore "
                 "sauvegardés avec 💾) seront perdus. Ce qui est déjà enregistré (rôles de niveau, logs, "
                 "gestionnaires, sécurité) ne sera **pas** supprimé.",
-                title="❌ Annuler la configuration ?",
+                title="○ Annuler la configuration ?",
             ),
             view=confirm, ephemeral=True,
         )
@@ -2546,7 +2546,7 @@ class SetupView(discord.ui.View):
             channel = self.bot.get_channel(self.channel_id)
             if channel:
                 message = await channel.fetch_message(self.message_id)
-                await message.edit(embed=embeds.neutral("❌ Configuration annulée", "Rien de ce qui était déjà enregistré n'a été supprimé.", color=SETUP_COLOR_DANGER), view=self)
+                await message.edit(embed=embeds.neutral("○ Configuration annulée", "Rien de ce qui était déjà enregistré n'a été supprimé.", color=SETUP_COLOR_DANGER), view=self)
         except discord.HTTPException:
             pass
 
@@ -2564,16 +2564,16 @@ class SetupView(discord.ui.View):
                 await self.bot.db.set_guild_config(self.guild_id, field, value)
             if "prefix" in self.choices:
                 self.bot.prefix_cache[self.guild_id] = self.choices["prefix"]
-        lines = [f"✅ {FIELD_LABELS.get(k, k)}" for k in self.choices]
+        lines = [f"● {FIELD_LABELS.get(k, k)}" for k in self.choices]
         if self.level_role_additions:
-            lines.append(f"✅ {len(self.level_role_additions)} rôle(s) de niveau")
+            lines.append(f"● {len(self.level_role_additions)} rôle(s) de niveau")
         if self.logs_created:
-            lines.append(f"✅ {len(self.logs_created)} salon(s) de logs créés")
+            lines.append(f"● {len(self.logs_created)} salon(s) de logs créés")
         if self.managers:
-            lines.append(f"✅ {len(self.managers)} gestionnaire(s) du bot")
+            lines.append(f"● {len(self.managers)} gestionnaire(s) du bot")
         if self.security_touched:
             active_filters = sum(1 for v in self.security_choices.values() if v)
-            lines.append(f"✅ Sécurité : {active_filters}/{len(AUTOMOD_TOGGLE_LABELS)} filtre(s) actif(s)")
+            lines.append(f"● Sécurité : {active_filters}/{len(AUTOMOD_TOGGLE_LABELS)} filtre(s) actif(s)")
         if not lines:
             lines.append("Aucun changement — la configuration existante a été conservée telle quelle.")
 
@@ -2593,7 +2593,7 @@ class SetupView(discord.ui.View):
             cog.release_lock(self.guild_id, self.message_id)
         for child in self.children:
             child.disabled = True
-        final_embed = embeds.neutral("✅ Configuration enregistrée !", "\n".join(lines), color=SETUP_COLOR_SUCCESS)
+        final_embed = embeds.neutral("● Configuration enregistrée !", "\n".join(lines), color=SETUP_COLOR_SUCCESS)
         final_embed.add_field(name="🔎 Vérifications finales", value="\n".join(checks_lines)[:1024], inline=False)
         await interaction.response.edit_message(embed=final_embed, view=self)
         self.stop()

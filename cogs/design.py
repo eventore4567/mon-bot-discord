@@ -88,7 +88,7 @@ class DesignBoolToggleButton(discord.ui.Button):
 
     def _sync_label(self):
         value = self.view_ref.pending.get(self.key, False)
-        self.label = f"{self.base_label} : {'✅ Oui' if value else '❌ Non'}"
+        self.label = f"{self.base_label} : {'● Oui' if value else '○ Non'}"
 
     async def callback(self, interaction: discord.Interaction):
         self.view_ref.pending[self.key] = not self.view_ref.pending.get(self.key, False)
@@ -134,7 +134,7 @@ class DesignSetupView(design_system.SentriXView):
         save_btn.callback = self._save
         reset_btn = discord.ui.Button(label="🔄 Réinitialiser", style=discord.ButtonStyle.danger, row=3)
         reset_btn.callback = self._reset
-        cancel_btn = discord.ui.Button(label="❌ Annuler", style=discord.ButtonStyle.secondary, row=3)
+        cancel_btn = discord.ui.Button(label="○ Annuler", style=discord.ButtonStyle.secondary, row=3)
         cancel_btn.callback = self._cancel
         for b in (preview_btn, save_btn, reset_btn, cancel_btn):
             self.add_item(b)
@@ -196,7 +196,7 @@ class DesignSetupView(design_system.SentriXView):
     async def _save(self, interaction: discord.Interaction):
         await self.cog.bot.db.set_design_settings(self.guild.id, self.pending)
         embed = self.build_summary_embed()
-        embed.set_footer(text="✅ Enregistré — ces réglages resteront après un redémarrage du bot.")
+        embed.set_footer(text="● Enregistré — ces réglages resteront après un redémarrage du bot.")
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def _reset(self, interaction: discord.Interaction):

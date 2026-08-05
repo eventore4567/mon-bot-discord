@@ -66,7 +66,7 @@ class StatsView(discord.ui.View):
         if is_staff:
             return True
         await interaction.response.send_message(
-            "❌ Ce menu n'est pas pour vous — utilisez `/stats` de votre côté pour consulter vos propres statistiques.",
+            "○ Ce menu n'est pas pour vous — utilisez `/stats` de votre côté pour consulter vos propres statistiques.",
             ephemeral=True,
         )
         return False
@@ -207,7 +207,7 @@ class BoolToggleButton(discord.ui.Button):
 
     def _sync_label(self):
         value = self.view_ref.pending.get(self.key, False)
-        self.label = f"{self.base_label} : {'✅ Oui' if value else '❌ Non'}"
+        self.label = f"{self.base_label} : {'● Oui' if value else '○ Non'}"
 
     async def callback(self, interaction: discord.Interaction):
         self.view_ref.pending[self.key] = not self.view_ref.pending.get(self.key, False)
@@ -334,7 +334,7 @@ class LevelRoleSelectView(discord.ui.View):
     async def pick(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
         role = select.values[0]
         if role.id == self.guild.default_role.id:
-            return await interaction.response.edit_message(content="❌ Impossible d'utiliser @everyone comme rôle de niveau.", view=None)
+            return await interaction.response.edit_message(content="○ Impossible d'utiliser @everyone comme rôle de niveau.", view=None)
         warn = ""
         if role >= self.guild.me.top_role:
             warn = (
@@ -346,7 +346,7 @@ class LevelRoleSelectView(discord.ui.View):
             "ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id",
             (self.guild.id, self.level, role.id),
         )
-        await interaction.response.edit_message(content=f"✅ Niveau **{self.level}** → {role.mention} enregistré.{warn}", view=None)
+        await interaction.response.edit_message(content=f"● Niveau **{self.level}** → {role.mention} enregistré.{warn}", view=None)
 
 
 class LevelRoleTargetSelectView(discord.ui.View):
@@ -415,7 +415,7 @@ class StatsConfigView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.author_id:
             return True
-        await interaction.response.send_message("❌ Seule la personne ayant ouvert ce panneau peut l'utiliser.", ephemeral=True)
+        await interaction.response.send_message("○ Seule la personne ayant ouvert ce panneau peut l'utiliser.", ephemeral=True)
         return False
 
     async def on_timeout(self):
@@ -471,7 +471,7 @@ class StatsConfigView(discord.ui.View):
         save_btn.callback = self._save
         reset_btn = discord.ui.Button(label="🔄 Réinitialiser", style=discord.ButtonStyle.danger, row=4)
         reset_btn.callback = self._reset
-        cancel_btn = discord.ui.Button(label="❌ Annuler", style=discord.ButtonStyle.secondary, row=4)
+        cancel_btn = discord.ui.Button(label="○ Annuler", style=discord.ButtonStyle.secondary, row=4)
         cancel_btn.callback = self._cancel
         for b in (preview_btn, save_btn, reset_btn, cancel_btn):
             self.add_item(b)
@@ -559,7 +559,7 @@ class StatsConfigView(discord.ui.View):
         await self.cog.bot.db.set_guild_config(self.guild.id, "level_channel", level_channel)
         await self.cog.bot.db.set_stats_settings(self.guild.id, to_save)
         embed = self.build_summary_embed()
-        embed.set_footer(text="✅ Enregistré — ces réglages sont actifs immédiatement et resteront après un redémarrage.")
+        embed.set_footer(text="● Enregistré — ces réglages sont actifs immédiatement et resteront après un redémarrage.")
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def _reset(self, interaction: discord.Interaction):
@@ -838,7 +838,7 @@ class Levels(commands.Cog, name="Levels"):
         if stats["next_level_role"]:
             return f"Niveau {stats['next_level_requirement']} → {stats['next_level_role'].mention}\nEncore {stats['remaining_levels']} niveau(x)."
         if stats["all_roles_obtained"]:
-            return "Tous les paliers ont été atteints ✅"
+            return "Tous les paliers ont été atteints ●"
         return "Aucun palier configuré"
 
     async def build_stats_embed(self, guild: discord.Guild, member: discord.Member, settings_override: dict | None = None) -> discord.Embed:
@@ -1154,14 +1154,14 @@ class Levels(commands.Cog, name="Levels"):
         e = embeds.neutral("🔍 Diagnostic niveau", "")
         e.add_field(name="Membre", value=membre.mention, inline=True)
         e.add_field(name="Serveur", value=ctx.guild.name, inline=True)
-        e.add_field(name="Ligne trouvée", value="✅ Oui" if diag["found"] else "❌ Non (le membre n'a encore jamais gagné d'XP ici)", inline=False)
+        e.add_field(name="Ligne trouvée", value="● Oui" if diag["found"] else "○ Non (le membre n'a encore jamais gagné d'XP ici)", inline=False)
         e.add_field(name="Niveau", value=str(diag["level"]), inline=True)
         e.add_field(name="XP totale (cumulée)", value=stats_service.format_number(diag["total_xp"]), inline=True)
         e.add_field(name="XP actuelle (niveau en cours)", value=stats_service.format_number(diag["xp"]), inline=True)
         e.add_field(name="XP nécessaire (prochain niveau)", value=stats_service.format_number(diag["needed"]), inline=True)
-        e.add_field(name="Cache", value="✅ Cohérent" if diag["cache_coherent"] else "⚠️ Incohérent (sera corrigé automatiquement sous 20s)", inline=True)
+        e.add_field(name="Cache", value="● Cohérent" if diag["cache_coherent"] else "⚠️ Incohérent (sera corrigé automatiquement sous 20s)", inline=True)
         if diag["db_coherent"]:
-            db_value = "✅ Cohérente"
+            db_value = "● Cohérente"
         elif not diag["found"]:
             db_value = "➖ Aucune ligne à vérifier"
         else:
