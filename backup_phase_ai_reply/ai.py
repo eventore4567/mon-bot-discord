@@ -395,41 +395,18 @@ class Ai(commands.Cog, name="Ai"):
             content = content[:match.start()].rstrip(" \n-")
         return content, confidence
 
-    async def send_sentrix_reply(self, destination, author, question: str, *, reply_to: discord.Message = None):
+    async def send_sentrix_reply(self, destination, author, question: str):
         """Envoie la réponse de SentriX en texte brut (sans embed), demandé par Jayden pour
         /sentrix. Partagé entre la commande /sentrix et le déclenchement par simple message
-        (mention du bot ou message commençant par "sentrix").
-
-        reply_to : le message Discord précis auquel répondre (flèche "Répondre" + ping de
-        l'auteur, sans @mention littéral dans le texte). Fourni uniquement quand
-        `destination` est un salon brut (déclenchement passif via on_message ci-dessous) —
-        pour /sentrix (destination=ctx), SentriXContext (main.py) s'en charge déjà tout
-        seul pour toute commande texte, donc reply_to reste à None dans ce cas."""
-
-        async def _send(**kwargs):
-            if reply_to is not None:
-                kwargs["reference"] = discord.MessageReference(
-                    message_id=reply_to.id,
-                    channel_id=reply_to.channel.id,
-                    guild_id=reply_to.guild.id if reply_to.guild else None,
-                    fail_if_not_exists=False,
-                )
-                kwargs.setdefault("mention_author", True)
-            try:
-                return await destination.send(**kwargs)
-            except discord.HTTPException:
-                kwargs.pop("reference", None)
-                kwargs.pop("mention_author", None)
-                return await destination.send(**kwargs)
-
+        (mention du bot ou message commençant par "sentrix")."""
         guild_id = getattr(getattr(destination, "guild", None), "id", None)
         history = self.histories.get(author.id, [])
         author_name = getattr(author, "display_name", None) or str(author)
         answer = await self.ask_ai(question, history, author_name=author_name)
         if answer == "__NO_KEY__":
-            return await _send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.", kind="danger"))
+            return await destination.send(embed=await self._embed(guild_id, title="Clé IA manquante", description="Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.", kind="danger"))
         if answer.startswith("__ERROR__"):
-            return await _send(embed=await self._embed(guild_id, title="Erreur IA", description=ai_service.GENERIC_ERROR, kind="danger"))
+            return await destination.send(embed=await self._embed(guild_id, title="Erreur IA", description=ai_service.GENERIC_ERROR, kind="danger"))
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
         self.histories[author.id] = history[-10:]
@@ -437,7 +414,7 @@ class Ai(commands.Cog, name="Ai"):
         content = (answer or "…").strip()
         if len(content) > 2000:
             content = content[:1997] + "…"
-        await _send(content=content)
+        await destination.send(content=content)
 
     @commands.hybrid_command(name="sentrix", description="Demandez n'importe quoi à SentriX, l'IA du bot.")
     @app_commands.describe(question="Votre question, sur n'importe quel sujet")
@@ -479,7 +456,7 @@ class Ai(commands.Cog, name="Ai"):
             question = "Salut, comment tu vas ?"
 
         async with message.channel.typing():
-            await self.send_sentrix_reply(message.channel, message.author, question, reply_to=message)
+            await self.send_sentrix_reply(message.channel, message.author, question)
 
     @commands.hybrid_command(name="ask", description="Poser une question à l'IA.")
     @app_commands.describe(question="Votre question pour l'IA")
