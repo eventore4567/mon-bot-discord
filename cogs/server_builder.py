@@ -196,7 +196,7 @@ class ServerBuilderView(discord.ui.View):
         self.author_id = author_id
         self.selected_template: str | None = None
         self.add_item(TemplateSelect())
-        self.confirm_btn = discord.ui.Button(label="✅ Créer la structure", style=discord.ButtonStyle.success, disabled=True, row=1)
+        self.confirm_btn = discord.ui.Button(label="● Créer la structure", style=discord.ButtonStyle.success, disabled=True, row=1)
         self.confirm_btn.callback = self.confirm
         self.add_item(self.confirm_btn)
 
@@ -304,7 +304,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             f"🎭 Rôle automatique à l'arrivée configuré sur {member_role.mention} (`/setautorole`).\n\n"
             "Pensez à utiliser `/create-logs` pour ajouter les salons de logs, et `+ticketsetup` "
             "pour créer et installer votre panneau de tickets si besoin.",
-            title="✅ Structure du serveur créée",
+            title="● Structure du serveur créée",
         )
         return e
 
