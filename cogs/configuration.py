@@ -1834,7 +1834,7 @@ class SetupView(discord.ui.View):
             active = sum(1 for v in self.security_choices.values() if v)
             score = round(active / len(AUTOMOD_TOGGLE_LABELS) * 100)
             e.add_field(name="📊 Score de sécurité", value=f"**{score}/100** ({active}/{len(AUTOMOD_TOGGLE_LABELS)} filtres actifs)", inline=False)
-            lines = [f"{'●' if self.security_choices.get(field) else '○'} {label}" for field, label in AUTOMOD_TOGGLE_LABELS.items()]
+            lines = [f"**{label}** : {'Actif' if self.security_choices.get(field) else 'Inactif'}" for field, label in AUTOMOD_TOGGLE_LABELS.items()]
             e.add_field(name="État des filtres", value="\n".join(lines), inline=False)
 
         elif step["key"] == "summary":
