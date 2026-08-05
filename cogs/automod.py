@@ -177,11 +177,10 @@ class AutoMod(commands.Cog, name="Automod"):
         return self.ignored_channels_cache[guild_id]
 
     async def is_automod_exempt(self, member: discord.abc.User) -> bool:
-        """Vrai si ce membre ne doit JAMAIS être filtré par AutoMod : propriétaire du bot,
-        administrateur, rôle staff configuré (/setmodrole), ou rôle explicitement exempté
-        (/automod-exempt-role-add). Avant, seul "administrateur" était vérifié : un modérateur
-        avec juste la permission Gérer les messages pouvait se faire supprimer ses propres
-        messages par AutoMod en testant un mot interdit, par exemple."""
+        """Vrai uniquement pour les exemptions sûres : propriétaire du serveur,
+        propriétaire du bot, ou rôle explicitement autorisé avec
+        +automod-exempt-role-add. Les administrateurs et modérateurs ordinaires restent
+        protégés, car leur compte peut lui aussi être compromis."""
         if not isinstance(member, discord.Member):
             return False
         # La sécurité doit aussi protéger contre un compte staff/admin compromis.
