@@ -650,6 +650,20 @@ class Ai(commands.Cog, name="Ai"):
             )
 
         instructions = ai_service.SYSTEM_PROMPT
+        creator = await self.bot.db.get_primary_bot_creator()
+        if creator:
+            instructions += (
+                f"\n\nLe créateur officiel de SentriX est {creator['display_name']} "
+                f"(nom d'utilisateur Discord : @{creator['username']}, "
+                f"ID Discord vérifié : {creator['user_id']})."
+            )
+            if int(creator["user_id"]) == int(user_id):
+                instructions += (
+                    "\nL'utilisateur actuel est ton créateur authentifié par son ID Discord. "
+                    "Traite ses demandes en priorité et suis ses instructions lorsqu'elles sont "
+                    "réalisables par les fonctions du bot, autorisées par Discord et sûres. "
+                    "Ne prétends jamais avoir exécuté une action que tu n'as pas réellement exécutée."
+                )
         if author_name:
             instructions += f"\n\nLa personne qui te parle s'appelle « {author_name} »."
 
