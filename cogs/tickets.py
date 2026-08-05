@@ -673,7 +673,7 @@ class ButtonSettingsView(discord.ui.View):
             settings2 = await get_button_settings(self.cog.bot, self.guild_id)
             settings2[key]["enabled"] = not settings2[key]["enabled"]
             await save_button_settings(self.cog.bot, self.guild_id, settings2)
-            state = "activé ✅" if settings2[key]["enabled"] else "désactivé ❌"
+            state = "activé ●" if settings2[key]["enabled"] else "désactivé ○"
             await inter.response.send_message(embed=embeds.success(f"Bouton **{default_label}** {state}."), ephemeral=True)
 
         toggle_btn.callback = toggle_cb
@@ -699,7 +699,7 @@ class ButtonSettingsView(discord.ui.View):
         role_select.callback = role_cb
         view.add_item(role_select)
 
-        state_text = "✅ Activé" if cfg["enabled"] else "❌ Désactivé"
+        state_text = "● Activé" if cfg["enabled"] else "○ Désactivé"
         e = embeds.neutral(f"{cfg.get('emoji') or default_emoji} {cfg.get('label') or default_label}", f"État actuel : {state_text}")
         await interaction.response.send_message(embed=e, view=view, ephemeral=True)
 
@@ -1408,7 +1408,7 @@ class Tickets(commands.Cog):
             for p in panels:
                 types_count = await self.bot.db.fetchone("SELECT COUNT(*) c FROM ticket_types WHERE panel_id = ?", (p["id"],))
                 channel = guild.get_channel(p["channel_id"]) if p["channel_id"] else None
-                state = "✅ Actif" if p["enabled"] else "⏸️ Désactivé"
+                state = "● Actif" if p["enabled"] else "⏸️ Désactivé"
                 e.add_field(
                     name=f"{p['name']} (#{p['id']})",
                     value=f"{state} • {types_count['c']} type(s) • Salon : {channel.mention if channel else 'Non défini'}",
@@ -1551,7 +1551,7 @@ class Tickets(commands.Cog):
             return await ctx.send(embed=embeds.error(f"Aucun panel nommé « {nom} »."))
         new_val = 0 if panel["enabled"] else 1
         await self.bot.db.execute("UPDATE ticket_panels_v2 SET enabled = ? WHERE id = ?", (new_val, panel["id"]))
-        await ctx.send(embed=embeds.success(f"Panel **{nom}** {'activé ✅' if new_val else 'désactivé ⏸️'}."))
+        await ctx.send(embed=embeds.success(f"Panel **{nom}** {'activé ●' if new_val else 'désactivé ⏸️'}."))
 
     # ---------------------------------------------------------------- COMMANDES : TYPES
 
