@@ -260,7 +260,7 @@ class Minigames(commands.Cog, name="Minigames"):
         a, b = random.randint(2, 50), random.randint(2, 50)
         op = random.choice(list(MATH_OPS))
         answer = MATH_OPS[op](a, b)
-        await ctx.send(embed=await self._embed(guild_id, title="Quiz mathématique", description=f"🧮 Combien font **{a} {op} {b}** ? (10 secondes)"))
+        await ctx.send(embed=await self._embed(guild_id, title="Quiz mathématique", description=f"🧮 Combien font **{a} {'×' if op == '*' else op} {b}** ? (10 secondes)"))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
