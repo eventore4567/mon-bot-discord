@@ -271,7 +271,7 @@ async def send_test_log(bot, guild: discord.Guild, log_type: str, author: discor
     setting = await get_log_setting(bot, guild.id, log_type)
     ok, reason = validate_channel(guild, setting["channel_id"])
     if not ok:
-        return False, f"❌ Impossible d'envoyer un test : {reason}."
+        return False, f"○ Impossible d'envoyer un test : {reason}."
 
     meta = LOG_TYPES.get(log_type, {})
     from utils import embeds as embeds_mod
@@ -285,6 +285,6 @@ async def send_test_log(bot, guild: discord.Guild, log_type: str, author: discor
     channel = guild.get_channel(setting["channel_id"])
     try:
         await channel.send(embed=test_embed)
-        return True, f"✅ Test envoyé dans {channel.mention}."
+        return True, f"● Test envoyé dans {channel.mention}."
     except discord.HTTPException as exc:
-        return False, f"❌ Échec de l'envoi du test : {exc}."
+        return False, f"○ Échec de l'envoi du test : {exc}."
