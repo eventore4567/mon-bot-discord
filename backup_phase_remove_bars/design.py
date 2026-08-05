@@ -64,12 +64,16 @@ class DesignAppearanceModal(discord.ui.Modal, title="Apparence générale"):
         self.view_ref = view
         p = view.pending
         self.footer = discord.ui.TextInput(label="Texte du footer", default=p["footer"], max_length=100, required=True)
-        for item in (self.footer,):
+        self.emoji_filled = discord.ui.TextInput(label="Emoji case remplie (barre)", default=p["progress_filled"], max_length=10, required=True)
+        self.emoji_empty = discord.ui.TextInput(label="Emoji case vide (barre)", default=p["progress_empty"], max_length=10, required=True)
+        for item in (self.footer, self.emoji_filled, self.emoji_empty):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction):
         self.view_ref.pending.update({
             "footer": str(self.footer.value),
+            "progress_filled": str(self.emoji_filled.value),
+            "progress_empty": str(self.emoji_empty.value),
         })
         await self.view_ref.refresh(interaction)
 
@@ -93,6 +97,20 @@ class DesignBoolToggleButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         self.view_ref.pending[self.key] = not self.view_ref.pending.get(self.key, False)
         self._sync_label()
+        await self.view_ref.refresh(interaction)
+
+
+class DesignProgressLengthSelect(discord.ui.Select):
+    def __init__(self, view: "DesignSetupView"):
+        self.view_ref = view
+        options = [
+            discord.SelectOption(label=f"{n} cases", value=str(n), default=view.pending.get("progress_length", 10) == n)
+            for n in (5, 8, 10, 12, 15)
+        ]
+        super().__init__(placeholder="Longueur des barres de progression", options=options, row=2)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view_ref.pending["progress_length"] = int(self.values[0])
         await self.view_ref.refresh(interaction)
 
 
@@ -124,6 +142,7 @@ class DesignSetupView(design_system.SentriXView):
         appearance_btn.callback = self._open_appearance_modal
         self.add_item(appearance_btn)
 
+        self.add_item(DesignProgressLengthSelect(self))
         self.add_item(DesignBoolToggleButton(self, "show_avatars", "Avatars affichés", row=1))
         self.add_item(DesignBoolToggleButton(self, "compact_mode", "Mode compact", row=1))
         self.add_item(DesignBoolToggleButton(self, "charts_enabled", "Graphiques activés", row=1))
@@ -166,6 +185,7 @@ class DesignSetupView(design_system.SentriXView):
             inline=False,
         )
         e.add_field(name="✏️ Footer", value=p["footer"], inline=True)
+        e.add_field(name="📊 Barre de progression", value=f"{p['progress_filled']}{p['progress_empty']} × {p['progress_length']}", inline=True)
         e.add_field(name="🖼️ Avatars affichés", value="Oui" if p.get("show_avatars", True) else "Non", inline=True)
         e.add_field(name="📐 Mode compact", value="Oui" if p.get("compact_mode", False) else "Non", inline=True)
         e.add_field(name="📈 Graphiques activés", value="Oui" if p.get("charts_enabled", True) else "Non", inline=True)
@@ -184,9 +204,10 @@ class DesignSetupView(design_system.SentriXView):
 
     async def _preview(self, interaction: discord.Interaction):
         p = self.pending
+        bar = design_system.progress_bar(7, 10, length=p["progress_length"], filled=p["progress_filled"], empty=p["progress_empty"])
         embed = design_system.create_embed(
             title="👁️ Aperçu (exemple, non enregistré)",
-            description="Exemple d'affichage de progression avec ces réglages :\n7/10 — 70%",
+            description=f"Exemple de barre de progression avec ces réglages :\n{bar}  70%",
             colour=p["primary_color"],
             user=interaction.user if p.get("show_avatars", True) else None,
             footer=p["footer"],

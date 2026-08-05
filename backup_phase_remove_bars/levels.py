@@ -124,7 +124,9 @@ class StatsAppearanceModal(discord.ui.Modal, title="Apparence de /stats et /leve
         self.couleur = discord.ui.TextInput(
             label="Couleur (hexadécimal, ex: 5865F2)", default=f"{p['color']:06X}", max_length=6, min_length=6, required=True
         )
-        for item in (self.titre, self.footer, self.couleur):
+        self.emoji_rempli = discord.ui.TextInput(label="Emoji case remplie", default=p["emoji_filled"], max_length=10, required=True)
+        self.emoji_vide = discord.ui.TextInput(label="Emoji case vide", default=p["emoji_empty"], max_length=10, required=True)
+        for item in (self.titre, self.footer, self.couleur, self.emoji_rempli, self.emoji_vide):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -138,6 +140,8 @@ class StatsAppearanceModal(discord.ui.Modal, title="Apparence de /stats et /leve
             "title_stats": str(self.titre.value),
             "footer": str(self.footer.value),
             "color": color_value,
+            "emoji_filled": str(self.emoji_rempli.value),
+            "emoji_empty": str(self.emoji_vide.value),
         })
         await self.view_ref.refresh(interaction)
 
@@ -433,6 +437,7 @@ class StatsConfigView(discord.ui.View):
         if self.category == "appearance":
             self.add_item(discord.ui.Button(label="✏️ Modifier textes/couleur", style=discord.ButtonStyle.primary, row=1, custom_id="cfg:edit_appearance"))
             self.children[-1].callback = self._open_appearance_modal
+            self.add_item(self._bar_length_select())
         elif self.category == "visibility":
             self.add_item(VisibilitySelect(self))
             self.add_item(BoolToggleButton(self, "buttons_visible", "Boutons sous /stats", row=2))
@@ -476,6 +481,17 @@ class StatsConfigView(discord.ui.View):
         for b in (preview_btn, save_btn, reset_btn, cancel_btn):
             self.add_item(b)
 
+    def _bar_length_select(self):
+        options = [discord.SelectOption(label=f"{n} cases", value=str(n), default=self.pending.get("bar_length", 10) == n) for n in (5, 8, 10, 12, 15)]
+        select = discord.ui.Select(placeholder="Longueur de la barre de progression", options=options, row=2)
+
+        async def cb(interaction: discord.Interaction):
+            self.pending["bar_length"] = int(select.values[0])
+            await self.refresh(interaction)
+
+        select.callback = cb
+        return select
+
     async def _open_appearance_modal(self, interaction: discord.Interaction):
         await interaction.response.send_modal(StatsAppearanceModal(self))
 
@@ -515,7 +531,7 @@ class StatsConfigView(discord.ui.View):
     def build_summary_embed(self) -> discord.Embed:
         p = self.pending
         e = discord.Embed(title="⚙️ Configuration de /stats et /level", color=p["color"])
-        e.add_field(name="🎨 Apparence", value=f"Titre : {p['title_stats']}\nFooter : {p['footer']}\nCouleur : #{p['color']:06X}", inline=False)
+        e.add_field(name="🎨 Apparence", value=f"Titre : {p['title_stats']}\nFooter : {p['footer']}\nCouleur : #{p['color']:06X}\nBarre : {p['emoji_filled']}{p['emoji_empty']} × {p['bar_length']}", inline=False)
         visible = ", ".join(label for key, label in VISIBILITY_OPTIONS if p.get(key, True)) or "Aucun"
         e.add_field(name="👁️ Champs visibles", value=visible, inline=False)
         e.add_field(name="✨ XP", value=f"Cooldown : {p['xp_cooldown']}s • Min/Max : {p['xp_min']}/{p['xp_max']}\nDésactivé sur commandes : {'Oui' if p.get('xp_disabled_on_commands') else 'Non'}\nRôles exclus : {len(p.get('xp_excluded_role_ids', []))}", inline=False)
@@ -783,9 +799,15 @@ class Levels(commands.Cog, name="Levels"):
         e.add_field(name="🏆 Classement", value=(f"#{stats['rank']}" if stats["is_ranked"] else "Non classé"), inline=True)
         if settings.get("show_messages", True):
             e.add_field(name="💬 Messages", value=stats_service.format_number(stats["message_count"]), inline=True)
+        bar_str, pct = stats_service.progress_bar(
+            stats["current_level_xp"], stats["required_xp"],
+            length=settings.get("bar_length", 10),
+            emoji_filled=settings.get("emoji_filled", "🟪"),
+            emoji_empty=settings.get("emoji_empty", "⬛"),
+        )
         e.add_field(
             name="✨ Progression",
-            value=f"{stats_service.format_number(stats['current_level_xp'])}/{stats_service.format_number(stats['required_xp'])} XP — {stats['progress_pct']}%",
+            value=f"{bar_str}\n{stats_service.format_number(stats['current_level_xp'])}/{stats_service.format_number(stats['required_xp'])} XP — {pct}%",
             inline=False,
         )
         if settings.get("show_voice", True):
@@ -827,7 +849,13 @@ class Levels(commands.Cog, name="Levels"):
         e.add_field(name="Niveau actuel", value=str(stats["current_level"]), inline=True)
         e.add_field(name="Classement", value=(f"#{stats['rank']}" if stats["is_ranked"] else "Non classé"), inline=True)
         e.add_field(name="XP", value=f"{stats_service.format_number(stats['current_level_xp'])}/{stats_service.format_number(stats['required_xp'])}", inline=True)
-        e.add_field(name="Progression", value=f"{stats['progress_pct']}%", inline=False)
+        bar_str, pct = stats_service.progress_bar(
+            stats["current_level_xp"], stats["required_xp"],
+            length=settings.get("bar_length", 10),
+            emoji_filled=settings.get("emoji_filled", "🟪"),
+            emoji_empty=settings.get("emoji_empty", "⬛"),
+        )
+        e.add_field(name="Progression", value=f"{bar_str} — {pct}%", inline=False)
         e.add_field(name="🎭 Prochain rôle", value=self._next_role_text(stats), inline=False)
         e.set_footer(text=settings.get("footer", DEFAULT_STATS_SETTINGS["footer"]))
         return e
