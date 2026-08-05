@@ -1,7 +1,7 @@
 """
 Cog UTILITAIRES.
 /help /ping /avatar /serverinfo /userinfo /roleinfo /channelinfo
-/membercount /emoji-list /poll /remind /reminder-list /reminder-cancel
+/membercount /addemoji /emoji-list /poll /remind /reminder-list /reminder-cancel
 /say /embed-create /translate /weather /suggest /report-bug
 /afk /roll /choose
 """
@@ -41,6 +41,7 @@ CATEGORY_LABELS = {
     "Stats": "📊 Statistiques / Développement",
     "Owner": "🔑 Propriétaire du bot",
     "EmbedBuilder": "📨 Créateur d'embeds",
+    "Design": "Design et apparence",
 }
 
 # Catégories entièrement réservées au staff : un membre normal ne les voit JAMAIS
