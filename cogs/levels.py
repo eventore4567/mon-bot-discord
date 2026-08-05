@@ -585,10 +585,94 @@ class StatsConfigView(discord.ui.View):
 # Cog principal
 # =============================================================================
 
+class _LevelRepairConfirmView(discord.ui.View):
+    """Confirmation obligatoire avant +levelrepair — n'agit que sur le clic de l'auteur
+    de la commande, se désactive après usage ou expiration (5 min)."""
+
+    def __init__(self, *, author_id: int, timeout: float = 300):
+        super().__init__(timeout=timeout)
+        self.author_id = author_id
+        self.confirmed = False
+        self.message: discord.Message | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(embed=embeds.error("Seul l'auteur de la commande peut confirmer."), ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self):
+        if self.message:
+            try:
+                await self.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+
+    @discord.ui.button(label="Confirmer la réparation", style=discord.ButtonStyle.danger, emoji="🛠️")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.confirmed = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.confirmed = False
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(embed=embeds.info("Réparation annulée — aucune donnée modifiée."), view=self)
+        self.stop()
+
+
 class Levels(commands.Cog, name="Levels"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.cooldowns: dict[tuple, float] = {}
+        # Verrou lecture-modification-écriture par (guild_id, user_id) : deux messages
+        # quasi simultanés du même membre déclenchaient deux tâches _process_xp en
+        # parallèle, chacune lisant la même valeur de départ puis réécrivant — la
+        # dernière écriture "gagnait" et l'autre gain d'XP était perdu. Un dict de
+        # verrous (créés à la demande, jamais purgés — coût mémoire négligeable) rend
+        # ce chemin strictement séquentiel par membre, comme pour l'économie
+        # (Database._economy_lock) et les sanctions (Database._sanctions_lock).
+        self._xp_locks: dict[tuple, asyncio.Lock] = {}
+
+    def _get_xp_lock(self, guild_id: int, user_id: int) -> asyncio.Lock:
+        key = (guild_id, user_id)
+        lock = self._xp_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._xp_locks[key] = lock
+        return lock
+
+    async def _apply_xp_delta(self, guild_id: int, user_id: int, delta: int) -> tuple[int, int, bool]:
+        """Ajoute (ou retire) `delta` XP à un membre, sous verrou, en recalculant TOUJOURS
+        le niveau correctement (jamais de xp qui dépasse le seuil du niveau courant sans
+        faire monter le niveau — c'était le cas de +add-xp avant cette correction).
+        Retourne (nouveau_xp, nouveau_niveau, a_gagné_un_niveau)."""
+        await self.bot.db.ensure_level(guild_id, user_id)
+        lock = self._get_xp_lock(guild_id, user_id)
+        async with lock:
+            row = await self.bot.db.get_level(guild_id, user_id)
+            new_xp = max(0, row["xp"] + delta)
+            level = row["level"]
+            needed = stats_service.xp_required_for_level(level)
+            leveled_up = False
+            while new_xp >= needed:
+                new_xp -= needed
+                level += 1
+                needed = stats_service.xp_required_for_level(level)
+                leveled_up = True
+            # En cas de retrait d'XP (delta négatif), on ne fait jamais descendre le
+            # niveau automatiquement — un admin qui veut baisser un niveau doit utiliser
+            # +set-xp explicitement avec la valeur souhaitée, jamais un effet de bord.
+            await self.bot.db.execute(
+                "UPDATE levels SET xp = ?, level = ?, updated_at = ? WHERE guild_id = ? AND user_id = ?",
+                (new_xp, level, now(), guild_id, user_id),
+            )
+        stats_service.invalidate_rank_cache(self.bot, guild_id, user_id)
+        return new_xp, level, leveled_up
 
     async def cog_load(self):
         # Restaure le suivi du temps vocal après un redémarrage : on ne peut pas deviner
@@ -665,21 +749,10 @@ class Levels(commands.Cog, name="Levels"):
                 xp_min, xp_max = xp_max, xp_min
             multiplier = conf["xp_multiplier"] if conf and conf["xp_multiplier"] else 1.0
             gained = round(random.randint(xp_min, xp_max) * multiplier)
-            row = await self.bot.db.get_level(message.guild.id, message.author.id)
-            new_xp = row["xp"] + gained
-            level = row["level"]
-            needed = stats_service.xp_required_for_level(level)
-            leveled_up = False
-            while new_xp >= needed:
-                new_xp -= needed
-                level += 1
-                needed = stats_service.xp_required_for_level(level)
-                leveled_up = True
-            await self.bot.db.execute(
-                "UPDATE levels SET xp = ?, level = ? WHERE guild_id = ? AND user_id = ?",
-                (new_xp, level, message.guild.id, message.author.id),
-            )
-            stats_service.invalidate_rank_cache(self.bot, message.guild.id, message.author.id)
+
+            # _apply_xp_delta gère le verrou par membre (lecture+calcul+écriture atomiques)
+            # et le recalcul du niveau — source unique partagée avec +add-xp.
+            new_xp, level, leveled_up = await self._apply_xp_delta(message.guild.id, message.author.id, gained)
             if leveled_up:
                 if settings.get("level_announce_enabled", True):
                     channel = message.guild.get_channel(conf["level_channel"]) if conf and conf["level_channel"] else message.channel
@@ -1005,7 +1078,10 @@ class Levels(commands.Cog, name="Levels"):
         if membre.bot:
             return await ctx.send(embed=embeds.error("Un bot ne peut pas avoir d'XP."))
         await self.bot.db.ensure_level(ctx.guild.id, membre.id)
-        await self.bot.db.execute("UPDATE levels SET xp = ? WHERE guild_id = ? AND user_id = ?", (max(0, xp), ctx.guild.id, membre.id))
+        await self.bot.db.execute(
+            "UPDATE levels SET xp = ?, updated_at = ? WHERE guild_id = ? AND user_id = ?",
+            (max(0, xp), now(), ctx.guild.id, membre.id),
+        )
         stats_service.invalidate_rank_cache(self.bot, ctx.guild.id, membre.id)
         await ctx.send(embed=embeds.success(f"XP de {membre.mention} défini à **{max(0, xp)}**."))
 
@@ -1015,10 +1091,9 @@ class Levels(commands.Cog, name="Levels"):
     async def add_xp(self, ctx: commands.Context, membre: discord.Member, xp: int):
         if membre.bot:
             return await ctx.send(embed=embeds.error("Un bot ne peut pas avoir d'XP."))
-        await self.bot.db.ensure_level(ctx.guild.id, membre.id)
-        await self.bot.db.execute("UPDATE levels SET xp = xp + ? WHERE guild_id = ? AND user_id = ?", (xp, ctx.guild.id, membre.id))
-        stats_service.invalidate_rank_cache(self.bot, ctx.guild.id, membre.id)
-        await ctx.send(embed=embeds.success(f"**{xp} XP** ajoutés à {membre.mention}."))
+        new_xp, level, leveled_up = await self._apply_xp_delta(ctx.guild.id, membre.id, xp)
+        suffix = f" — passe au niveau **{level}** 🎉" if leveled_up else ""
+        await ctx.send(embed=embeds.success(f"**{xp} XP** ajoutés à {membre.mention} (XP actuelle : {new_xp}, niveau {level}){suffix}."))
 
     @commands.hybrid_command(name="reset-levels", description="[Admin] Réinitialiser tous les niveaux du serveur.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")
@@ -1026,6 +1101,116 @@ class Levels(commands.Cog, name="Levels"):
         await self.bot.db.execute("DELETE FROM levels WHERE guild_id = ?", (ctx.guild.id,))
         stats_service.invalidate_rank_cache(self.bot, ctx.guild.id)
         await ctx.send(embed=embeds.success("Tous les niveaux du serveur ont été réinitialisés."))
+
+    # ---------------------------------------------------------------- DIAGNOSTIC NIVEAUX
+
+    async def _level_diagnosis(self, guild_id: int, user_id: int) -> dict:
+        """Lecture SEULE — ne crée ni ne modifie jamais la ligne du membre. Utilisée par
+        +levelcheck (affichage) et +levelrepair (pour savoir s'il y a réellement quelque
+        chose à réparer avant de proposer une confirmation)."""
+        row = await self.bot.db.fetchone(
+            "SELECT * FROM levels WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+        )
+        found = row is not None
+        level = row["level"] if found else 0
+        xp = row["xp"] if found else 0
+        updated_at = row["updated_at"] if (found and "updated_at" in row.keys()) else 0
+        needed = stats_service.xp_required_for_level(level)
+        total_xp = stats_service.total_xp_for(level, xp)
+
+        db_issues = []
+        if xp < 0:
+            db_issues.append("XP négative")
+        if level < 0:
+            db_issues.append("niveau négatif")
+        if xp >= needed:
+            db_issues.append(f"XP actuelle ({xp}) ≥ XP nécessaire ({needed}) pour ce niveau — le niveau aurait dû monter")
+        db_coherent = found and not db_issues
+
+        cache = getattr(self.bot, "_rank_cache", None)
+        cached_entry = cache.get((guild_id, user_id)) if cache else None
+        cache_coherent = True
+        if cached_entry is not None and found:
+            fresh_row = await self.bot.db.fetchone(
+                "SELECT COUNT(*) AS n FROM levels WHERE guild_id = ? AND (level > ? OR (level = ? AND xp > ?))",
+                (guild_id, level, level, xp),
+            )
+            fresh_rank = (fresh_row["n"] if fresh_row else 0) + 1
+            cache_coherent = cached_entry[1] == fresh_rank
+
+        return {
+            "found": found, "level": level, "xp": xp, "needed": needed, "total_xp": total_xp,
+            "updated_at": updated_at, "db_coherent": db_coherent, "db_issues": db_issues,
+            "cache_coherent": cache_coherent,
+        }
+
+    @commands.hybrid_command(name="levelcheck", description="[Admin] Diagnostic en lecture seule du niveau d'un membre.", with_app_command=False)
+    @app_commands.describe(membre="Le membre à diagnostiquer")
+    @checks.is_owner_or_admin_for("configuration")
+    async def levelcheck(self, ctx: commands.Context, membre: discord.Member):
+        # Diagnostic pur : AUCUNE écriture, même pas ensure_level() (on ne veut pas créer
+        # une ligne juste en la consultant — ça fausserait "ligne trouvée").
+        diag = await self._level_diagnosis(ctx.guild.id, membre.id)
+        e = embeds.neutral("🔍 Diagnostic niveau", "")
+        e.add_field(name="Membre", value=membre.mention, inline=True)
+        e.add_field(name="Serveur", value=ctx.guild.name, inline=True)
+        e.add_field(name="Ligne trouvée", value="✅ Oui" if diag["found"] else "❌ Non (le membre n'a encore jamais gagné d'XP ici)", inline=False)
+        e.add_field(name="Niveau", value=str(diag["level"]), inline=True)
+        e.add_field(name="XP totale (cumulée)", value=stats_service.format_number(diag["total_xp"]), inline=True)
+        e.add_field(name="XP actuelle (niveau en cours)", value=stats_service.format_number(diag["xp"]), inline=True)
+        e.add_field(name="XP nécessaire (prochain niveau)", value=stats_service.format_number(diag["needed"]), inline=True)
+        e.add_field(name="Cache", value="✅ Cohérent" if diag["cache_coherent"] else "⚠️ Incohérent (sera corrigé automatiquement sous 20s)", inline=True)
+        if diag["db_coherent"]:
+            db_value = "✅ Cohérente"
+        elif not diag["found"]:
+            db_value = "➖ Aucune ligne à vérifier"
+        else:
+            db_value = "⚠️ " + " ; ".join(diag["db_issues"])
+        e.add_field(name="Base de données", value=db_value, inline=True)
+        if diag["found"] and diag["updated_at"]:
+            e.add_field(name="Dernière mise à jour", value=f"<t:{diag['updated_at']}:R>", inline=True)
+        else:
+            e.add_field(name="Dernière mise à jour", value="Inconnue (ligne créée avant l'ajout de ce suivi, ou jamais mise à jour)", inline=True)
+        await ctx.send(embed=e)
+
+    @commands.hybrid_command(name="levelrepair", description="[Admin] Réparer une incohérence certaine du niveau d'un membre (après confirmation).", with_app_command=False)
+    @app_commands.describe(membre="Le membre à réparer")
+    @checks.is_owner_or_admin_for("configuration")
+    async def levelrepair(self, ctx: commands.Context, membre: discord.Member):
+        diag = await self._level_diagnosis(ctx.guild.id, membre.id)
+        if not diag["found"]:
+            return await ctx.send(embed=embeds.info("Aucune ligne de niveau pour ce membre — rien à réparer."))
+        if diag["db_coherent"]:
+            return await ctx.send(embed=embeds.success("Aucune incohérence détectée pour ce membre — rien à réparer."))
+
+        # Seule réparation possible : recalculer (niveau, xp du niveau) à partir de l'XP
+        # TOTALE déjà accumulée (total_xp_for/calculate_level_from_total_xp), donc AUCUNE
+        # perte d'XP — on ne fait que redistribuer le même total entre niveau et xp
+        # relative. Jamais de remise à zéro.
+        total_xp = diag["total_xp"]
+        new_level, new_xp, _needed = stats_service.calculate_level_from_total_xp(total_xp)
+
+        view = _LevelRepairConfirmView(author_id=ctx.author.id)
+        preview = (
+            f"**Avant** — niveau {diag['level']}, XP {stats_service.format_number(diag['xp'])} "
+            f"(incohérence : {' ; '.join(diag['db_issues'])})\n"
+            f"**Après** — niveau {new_level}, XP {stats_service.format_number(new_xp)}\n"
+            f"XP totale conservée à l'identique : {stats_service.format_number(total_xp)}."
+        )
+        msg = await ctx.send(embed=embeds.warning(f"Confirmer la réparation du niveau de {membre.mention} ?\n\n{preview}"), view=view)
+        view.message = msg
+        await view.wait()
+        if not view.confirmed:
+            return
+        await self.bot.db.execute(
+            "UPDATE levels SET xp = ?, level = ?, updated_at = ? WHERE guild_id = ? AND user_id = ?",
+            (new_xp, new_level, now(), ctx.guild.id, membre.id),
+        )
+        stats_service.invalidate_rank_cache(self.bot, ctx.guild.id, membre.id)
+        try:
+            await msg.edit(embed=embeds.success(f"Niveau de {membre.mention} réparé : niveau **{new_level}**, XP **{stats_service.format_number(new_xp)}** (XP totale conservée)."), view=None)
+        except discord.HTTPException:
+            pass
 
     @commands.hybrid_command(name="profile", description="Afficher votre profil communautaire.")
     @app_commands.describe(membre="Le membre visé (optionnel)")

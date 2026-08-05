@@ -919,6 +919,84 @@ GIVEAWAYS_NEW_COLUMNS = {
     "image_url": "TEXT",
 }
 
+# Ajoutée pour +levelcheck/+levelrepair (diagnostic du bug de réinitialisation des
+# niveaux signalé par Jayden) : permet d'afficher "dernière mise à jour" sans se fier à
+# last_message_time (qui ne bouge pas quand un admin utilise +add-xp/+set-xp). Colonne
+# additive uniquement — ne touche à aucune donnée existante, les anciennes lignes gardent
+# leur xp/level tels quels avec updated_at à 0 jusqu'à leur prochaine écriture.
+LEVELS_NEW_COLUMNS = {
+    "updated_at": "INTEGER DEFAULT 0",
+}
+
+# Table de log dédiée aux jeux (Partie 1 — récompenses de mini-jeux) : n'existe pas
+# encore dans le schéma d'origine, créée ici de façon additive (CREATE TABLE IF NOT
+# EXISTS) — aucune donnée existante n'est concernée par cette table.
+GAME_TRANSACTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS game_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    game_name TEXT NOT NULL,
+    game_session_id TEXT NOT NULL,
+    result TEXT NOT NULL,
+    reward_amount INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    metadata_json TEXT DEFAULT '{}',
+    UNIQUE (game_session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_game_tx_guild_user ON game_transactions (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_game_tx_guild_game ON game_transactions (guild_id, game_name);
+
+CREATE TABLE IF NOT EXISTS game_cooldowns (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    game_name TEXT NOT NULL,
+    last_used_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, user_id, game_name)
+);
+
+CREATE TABLE IF NOT EXISTS game_settings (
+    guild_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    disabled_games TEXT DEFAULT '[]',
+    allowed_channel_ids TEXT DEFAULT '[]',
+    blocked_channel_ids TEXT DEFAULT '[]',
+    allowed_role_ids TEXT DEFAULT '[]',
+    blocked_role_ids TEXT DEFAULT '[]',
+    min_reward_multiplier REAL NOT NULL DEFAULT 1.0,
+    max_reward_multiplier REAL NOT NULL DEFAULT 1.0,
+    daily_limit INTEGER NOT NULL DEFAULT 50,
+    event_multiplier REAL NOT NULL DEFAULT 1.0,
+    logs_enabled INTEGER NOT NULL DEFAULT 1,
+    leaderboard_enabled INTEGER NOT NULL DEFAULT 1,
+    dm_results INTEGER NOT NULL DEFAULT 0,
+    compact_mode INTEGER NOT NULL DEFAULT 0,
+    default_difficulty TEXT NOT NULL DEFAULT 'normal',
+    updated_at INTEGER
+);
+"""
+
+# Refonte des logs (Partie 3) : une ligne par (guild_id, log_type), additive — ne touche
+# jamais aux colonnes log_channel/log_messages/etc. déjà existantes dans guild_config
+# (qui restent la source des salons déjà configurés, reprise telle quelle à la migration).
+LOG_SETTINGS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS log_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    log_type TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    channel_id INTEGER,
+    include_content INTEGER NOT NULL DEFAULT 1,
+    include_attachments INTEGER NOT NULL DEFAULT 1,
+    include_actor INTEGER NOT NULL DEFAULT 1,
+    include_reason INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER,
+    updated_at INTEGER,
+    UNIQUE (guild_id, log_type)
+);
+CREATE INDEX IF NOT EXISTS idx_log_settings_guild ON log_settings (guild_id);
+"""
+
 # Seuil (en jours) en dessous duquel un compte est considéré "fake" pour le classement
 # d'invitations — mêmes valeur et logique que l'heuristique "comptes suspects" déjà
 # utilisée par cogs/invites.py (SUSPECT_ACCOUNT_AGE_DAYS), pour rester cohérent.
@@ -965,6 +1043,10 @@ class Database:
         await self._conn.execute("PRAGMA foreign_keys=ON;")
         await self._conn.executescript(SCHEMA)
         await self._conn.executescript(INDEXES)
+        # Nouvelles tables additives (jeux + logs indépendants) : CREATE TABLE IF NOT
+        # EXISTS, ne touche à aucune table/donnée déjà existante.
+        await self._conn.executescript(GAME_TRANSACTIONS_SCHEMA)
+        await self._conn.executescript(LOG_SETTINGS_SCHEMA)
         await self._migrate()
         await self._conn.commit()
 
@@ -976,6 +1058,12 @@ class Database:
         for column, col_type in GUILD_CONFIG_NEW_COLUMNS.items():
             if column not in existing:
                 await self._conn.execute(f"ALTER TABLE guild_config ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(levels)")
+        existing_levels = {row[1] for row in await cur.fetchall()}
+        for column, col_type in LEVELS_NEW_COLUMNS.items():
+            if column not in existing_levels:
+                await self._conn.execute(f"ALTER TABLE levels ADD COLUMN {column} {col_type}")
 
         cur = await self._conn.execute("PRAGMA table_info(automod_settings)")
         existing_automod = {row[1] for row in await cur.fetchall()}

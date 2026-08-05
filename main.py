@@ -267,6 +267,39 @@ class BotAllInOne(commands.Bot):
     async def on_ready(self):
         logger.info(f"Connecté en tant que {self.user} (ID: {self.user.id})")
         logger.info(f"Présent sur {len(self.guilds)} serveur(s).")
+
+        # Vérification de persistance (complète le diagnostic de setup_hook, ici self.guilds
+        # est enfin peuplé) : si le bot est réellement présent sur des serveurs mais qu'AUCUNE
+        # configuration ni donnée n'existe en base, c'est le signe très probable d'un disque
+        # Railway non persistant qui vient de repartir de zéro (perte niveaux/économie/etc.).
+        # Ne se déclenche qu'une fois par processus pour ne pas spammer en cas de reconnexion.
+        if not getattr(self, "_persistence_check_done", False):
+            self._persistence_check_done = True
+            try:
+                if self.guilds:
+                    guild_config_count = await self.db.fetchone("SELECT COUNT(*) AS n FROM guild_config")
+                    known_guilds = guild_config_count["n"] if guild_config_count else 0
+                    if known_guilds == 0:
+                        warning_text = (
+                            f"⚠️ SentriX est présent sur {len(self.guilds)} serveur(s) mais AUCUNE "
+                            "configuration n'existe en base (table guild_config vide). C'est le signe "
+                            "typique d'un redéploiement Railway SANS volume persistant : le fichier "
+                            f"SQLite ({config.DATABASE_PATH}) repart de zéro à chaque redémarrage, et "
+                            "toutes les données (niveaux, économie, avertissements, logs configurés...) "
+                            "sont perdues silencieusement. Pour corriger définitivement : dans Railway, "
+                            "Settings du service → Volumes → ajouter un volume monté sur le dossier "
+                            "contenant la base, puis vérifier que DATABASE_PATH pointe bien dedans."
+                        )
+                        logger.warning(warning_text)
+                        for owner_id in getattr(config, "OWNER_IDS", []):
+                            try:
+                                owner = await self.fetch_user(owner_id)
+                                await owner.send(embed=embeds.warning(warning_text))
+                            except (discord.HTTPException, discord.Forbidden):
+                                pass
+            except Exception:
+                logger.warning("Vérification de persistance (on_ready) impossible :\n" + traceback.format_exc())
+
         await self.change_presence(
             activity=discord.Activity(type=discord.ActivityType.watching, name=f"{config.DEFAULT_PREFIX}help")
         )
