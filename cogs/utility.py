@@ -506,12 +506,30 @@ class Utility(commands.Cog, name="Utility"):
             emoji_id = pasted_emoji.group(3)
             extension = "gif" if animated else "png"
             url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}?size=128&quality=lossless"
+        else:
+            # Un emoji Unicode normal (ex: 🧟‍♂️) n'a pas d'URL Discord. Twemoji
+            # fournit sa représentation PNG à partir de la suite de points de code.
+            has_emoji_codepoint = any(
+                0x1F000 <= ord(char) <= 0x1FAFF or 0x2600 <= ord(char) <= 0x27BF
+                for char in nom
+            )
+            if has_emoji_codepoint:
+                codepoints = "-".join(f"{ord(char):x}" for char in nom)
+                first_codepoint = next(
+                    ord(char) for char in nom
+                    if 0x1F000 <= ord(char) <= 0x1FAFF or 0x2600 <= ord(char) <= 0x27BF
+                )
+                nom = f"emoji_{first_codepoint:x}"
+                url = (
+                    "https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/"
+                    f"assets/72x72/{codepoints}.png"
+                )
 
         if not re.fullmatch(r"[A-Za-z0-9_]{2,32}", nom):
             return await ctx.send(embed=await self._embed(
                 ctx.guild.id,
                 title="Nom invalide",
-                description="Collez un emoji personnalisé Discord, ou indiquez un nom de 2 à 32 caractères avec une image jointe.",
+                description="Collez directement un emoji normal ou personnalisé après +addemoji.",
                 kind="danger",
             ))
 
