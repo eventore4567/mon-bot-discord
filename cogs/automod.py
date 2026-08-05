@@ -236,7 +236,7 @@ class AutoMod(commands.Cog, name="Automod"):
         value = 1 if etat == "on" else 0
         await self.bot.db.set_automod(ctx.guild.id, field, value)
         self.automod_cache.pop(ctx.guild.id, None)
-        state_text = "activé ✅" if value else "désactivé ❌"
+        state_text = "ACTIF" if value else "INACTIF"
         label = "L'escalade automatique" if field == "escalation" else f"Le filtre **{AUTOMOD_TOGGLE_LABELS.get(field, field)}**"
         await ctx.send(embed=embeds.success(f"{label} est maintenant {state_text}."))
 
@@ -397,16 +397,16 @@ class AutoMod(commands.Cog, name="Automod"):
         e = embeds.brand(
             "🛡️ État de l'AutoMod",
             f"**{total_24h}** action(s) déclenchée(s) sur les dernières 24h. "
-            f"Escalade automatique : {'✅ activée' if (conf and conf['escalation']) else '❌ désactivée'} "
+            f"Escalade automatique : {'● ACTIVE' if (conf and conf['escalation']) else '○ INACTIVE'} "
             f"(`/automod-escalation`).",
         )
         lines = []
         for field, label in AUTOMOD_TOGGLE_LABELS.items():
             value = conf[field] if conf else 0
-            state = "✅" if value else "❌"
+            state = "● ACTIF" if value else "○ INACTIF"
             count = stats_by_filter.get(field, 0)
             count_txt = f" — `{count}` déclenchement(s)/24h" if count else ""
-            lines.append(f"{state} {label}{count_txt}")
+            lines.append(f"`{state}` · {label}{count_txt}")
         e.add_field(name="Filtres", value="\n".join(lines), inline=False)
         exempt_rows = await self.bot.db.list_automod_exempt_roles(ctx.guild.id)
         if exempt_rows:
@@ -433,15 +433,15 @@ class AutoMod(commands.Cog, name="Automod"):
             "Gérer les rôles": perms.manage_roles,
             "Gérer les salons": perms.manage_channels,
         }
-        permission_lines = [f"{'✅' if ok else '❌'} {name}" for name, ok in required.items()]
+        permission_lines = [f"`{'● ACCORDÉE' if ok else '○ MANQUANTE'}` · {name}" for name, ok in required.items()]
         filter_lines = [
-            f"{'✅' if conf and conf[field] else '❌'} {label}"
+            f"`{'● ACTIF' if conf and conf[field] else '○ INACTIF'}` · {label}"
             for field, label in AUTOMOD_TOGGLE_LABELS.items()
         ]
         e = embeds.brand(
             "🛡️ Diagnostic de sécurité",
             "Ce diagnostic vérifie les réglages enregistrés et les permissions réellement "
-            "accordées au bot. Une permission marquée ❌ empêche la protection associée.",
+            "accordées au bot. Une permission marquée `○ MANQUANTE` empêche la protection associée.",
         )
         e.add_field(name="Protections", value="\n".join(filter_lines), inline=False)
         e.add_field(name="Permissions du bot", value="\n".join(permission_lines), inline=False)
