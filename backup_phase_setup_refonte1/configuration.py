@@ -1,28 +1,14 @@
 """
 Cog CONFIGURATION.
-/setup (centre de configuration : page d'accueil + menu de catégories, façon +help — plus
-besoin de taper une commande différente par réglage) /setprefix /setmodrole /setlogchannel
-/create-logs /logs-status /setwelcomechannel /setgoodbyechannel /setwelcomemessage
-/setgoodbyemessage /setticketlogchannel /setautorole /disablecommand /enablecommand
+/setup (assistant complet en un clic) /setprefix /setmodrole /setlogchannel /create-logs
+/logs-status /setwelcomechannel /setgoodbyechannel /setwelcomemessage /setgoodbyemessage
+/setticketlogchannel /setautorole /disablecommand /enablecommand
 /ignorechannel /unignorechannel /config-view /config-reset /setlevelchannel
 /setsuggestchannel /setannouncechannel /setgiveawaychannel /setwarnrole /setwarnbanthreshold
 
 Le système de tickets (panels, types, formulaires, boutons staff) se configure entièrement
 via +ticketsetup (cogs/tickets.py) — /setticketlogchannel ne reste que comme salon de logs
 de repli si un type de ticket n'a pas son propre salon de logs dédié.
-
-REFONTE /setup (Phase 1 — base technique, voir les phases suivantes pour les catégories
-manquantes : modération, anti-raid, anti-nuke, vérification, bienvenue, débannissements,
-invitations, niveaux, économie, réputation, giveaways, sauvegardes, mode urgence...) :
-- Page d'accueil "⚙️ CENTRE DE CONFIGURATION SENTRIX" avec un menu déroulant de catégories
-  (au lieu d'un parcours linéaire forcé page par page) — on choisit directement ce qu'on
-  veut configurer, comme avec +help.
-- Navigation par catégorie : 🏠 Accueil / 💾 Enregistrer / 📋 Résumé / ❌ Fermer.
-- Plus aucune barre de progression en blocs (▓░) : uniquement du texte ("X sur Y modules").
-- Verrouillage de session : si un autre administrateur a déjà /setup ouvert sur ce serveur,
-  proposition de Voir uniquement / Prendre le contrôle / Annuler, au lieu de laisser deux
-  personnes modifier la même chose sans le savoir.
-- Historique des modifications (table setup_history), consultable depuis la page d'accueil.
 """
 
 import json
@@ -94,19 +80,6 @@ class Configuration(commands.Cog):
         # handle_setup_nav ci-dessous et SetupNavButton, le composant "dynamique" qui
         # survit aux redémarrages).
         self.active_setups: dict[int, "SetupView"] = {}
-        # Verrouillage "un seul /setup actif à la fois par serveur" (en mémoire — ce n'est
-        # pas grave si ça se réinitialise à un redémarrage, ça évite juste que deux admins
-        # modifient la même chose sans le savoir PENDANT que le bot tourne). Valeur :
-        # (message_id, author_id, author_name).
-        self.active_by_guild: dict[int, tuple[int, int, str]] = {}
-
-    def release_lock(self, guild_id: int, message_id: int):
-        """Libère le verrou UNIQUEMENT s'il appartient bien à cette session précise (évite
-        qu'une vieille session fermée en retard n'efface le verrou d'une session plus
-        récente qui aurait pris le contrôle entre-temps)."""
-        current = self.active_by_guild.get(guild_id)
-        if current and current[0] == message_id:
-            self.active_by_guild.pop(guild_id, None)
 
     @commands.hybrid_command(name="setprefix", description="Changer le préfixe des commandes textuelles.")
     @app_commands.describe(prefixe="Le nouveau préfixe (ex: !, ?, +)")
@@ -467,70 +440,41 @@ class Configuration(commands.Cog):
 
     @commands.hybrid_command(
         name="setup",
-        description="Centre de configuration complet du bot (page d'accueil + catégories).",
+        description="Assistant de configuration complet du bot (tous les réglages, en plusieurs pages).",
     )
     @checks.is_owner_or_admin()
     async def setup_wizard(self, ctx: commands.Context):
         """
         Fonctionnalité phare : configure absolument tout le bot (rôles, salons,
-        préfixe, messages de bienvenue/départ, sécurité, tickets...) depuis un seul
-        panneau — page d'accueil avec menu de catégories, comme +help, plus besoin
-        de taper une commande différente par réglage.
+        préfixe, messages de bienvenue/départ...) via des menus déroulants et
+        un formulaire, sans jamais avoir à taper une commande. Découpé en 9 pages
+        pour rester lisible (Discord limite un message à 5 lignes de composants).
         """
-        existing = self.active_by_guild.get(ctx.guild.id)
-        if existing and existing[1] != ctx.author.id:
-            locked_message_id, locked_author_id, locked_author_name = existing
-            view = SetupLockPromptView(self, ctx.guild.id, locked_message_id, locked_author_id, locked_author_name, ctx.author.id)
-            return await ctx.send(
-                embed=embeds.warning(
-                    f"⚠️ Une configuration est déjà en cours par **{locked_author_name}**.",
-                    title="Configuration déjà ouverte",
-                ),
-                view=view,
-            )
-        await self._open_setup_panel(ctx)
-
-    async def _open_setup_panel(self, ctx_or_channel, *, author: discord.Member = None):
-        """Construit et envoie le vrai panneau /setup. Séparé de la commande pour être
-        réutilisable depuis "🔄 Prendre le contrôle" (SetupLockPromptView).
-
-        IMPORTANT : on envoie toujours via `ctx_or_channel.send(...)` (jamais via un objet
-        `channel` extrait séparément) — pour un /setup en slash, `commands.Context.send()`
-        est ce qui répond correctement à l'interaction (sinon Discord affiche "L'application
-        ne répond plus" car l'interaction n'a jamais reçu de réponse). Un `discord.TextChannel`
-        (cas de la prise de contrôle, où l'interaction du bouton a déjà été acquittée séparément)
-        a le même `.send()`, donc cette fonction marche pour les deux cas sans distinction."""
-        guild = ctx_or_channel.guild if hasattr(ctx_or_channel, "guild") else None
-        author = author or ctx_or_channel.author
-        channel_id = ctx_or_channel.channel.id if hasattr(ctx_or_channel, "channel") else ctx_or_channel.id
-
-        rows = await self.bot.db.list_bot_managers(guild.id)
+        rows = await self.bot.db.list_bot_managers(ctx.guild.id)
         existing_managers = {}
         for row in rows:
-            member = guild.get_member(row["user_id"])
+            member = ctx.guild.get_member(row["user_id"])
             existing_managers[row["user_id"]] = member.display_name if member else f"Membre {row['user_id']}"
 
-        automod_conf = await self.bot.db.get_automod(guild.id)
+        automod_conf = await self.bot.db.get_automod(ctx.guild.id)
         existing_security = {field: (automod_conf[field] if automod_conf else 0) for field in AUTOMOD_TOGGLE_LABELS}
-        exempt_rows = await self.bot.db.list_automod_exempt_roles(guild.id)
+        exempt_rows = await self.bot.db.list_automod_exempt_roles(ctx.guild.id)
         existing_exempt = [r["role_id"] for r in exempt_rows]
 
         # Envoi en deux temps : on a besoin de l'ID du message AVANT de construire les
         # boutons de navigation (ils encodent cet ID dans leur custom_id pour pouvoir
         # être retrouvés après un redémarrage — voir SetupNavButton plus bas).
-        placeholder = embeds.neutral("⚙️ CENTRE DE CONFIGURATION SENTRIX", "Chargement...", color=SETUP_COLOR_MAIN)
-        message = await ctx_or_channel.send(embed=placeholder)
+        placeholder = embeds.neutral("🛠️ Configuration SentriX", "Chargement de l'assistant...", color=SETUP_COLOR_MAIN)
+        message = await ctx.send(embed=placeholder)
 
         view = SetupView(
-            self.bot, guild.id, author.id, message.id, channel_id,
+            self.bot, ctx.guild.id, ctx.author.id, message.id, ctx.channel.id,
             existing_managers=existing_managers, existing_security=existing_security,
             existing_exempt_roles=existing_exempt,
         )
         self.active_setups[message.id] = view
-        self.active_by_guild[guild.id] = (message.id, author.id, str(author))
         await view.persist_session()
         await message.edit(embed=await view.build_embed(), view=view)
-        return message, view
 
     async def _can_use_setup(self, interaction: discord.Interaction, author_id: int, guild_id: int) -> bool:
         """Autorise la personne qui a lancé /setup, OU un gestionnaire du bot / admin /
@@ -580,12 +524,9 @@ class Configuration(commands.Cog):
                 view.choices = json.loads(session["choices_json"] or "{}")
             except (json.JSONDecodeError, TypeError):
                 view.choices = {}
-            raw_page = session["page"] if session["page"] is not None else -1
-            view.page = raw_page if raw_page == -1 else max(0, min(len(SETUP_STEPS) - 1, raw_page))
+            view.page = max(0, min(len(SETUP_STEPS) - 1, session["page"] or 0))
             view.render_page()
             self.active_setups[message_id] = view
-            if session["guild_id"] not in self.active_by_guild:
-                self.active_by_guild[session["guild_id"]] = (message_id, session["author_id"], str(session["author_id"]))
         else:
             if not await self._can_use_setup(interaction, view.author_id, view.guild_id):
                 return
@@ -831,11 +772,12 @@ FIELD_LABELS = {
 ROLE_FIELDS = {"mod_role", "autorole", "verify_role", "member_role", "booster_role", "mute_role"}
 
 
-def _progress_text(page: int, total: int) -> str:
-    """Indication de progression en TEXTE uniquement — aucune barre composée d'emojis, de
-    carrés ou de blocs (demande explicite)."""
+def _progress_bar(page: int, total: int, length: int = 9) -> str:
+    """Barre ▓▓░░░░░░░ NN % — une case par page, comme demandé."""
+    filled = round((page + 1) / total * length)
+    filled = max(1, min(length, filled))
     percent = round((page + 1) / total * 100)
-    return f"Étape {page + 1} sur {total} · {percent}% parcouru"
+    return f"{'▓' * filled}{'░' * (length - filled)}  **{percent}%**"
 
 
 class SetupTextModal(discord.ui.Modal, title="Préfixe & messages"):
@@ -945,10 +887,7 @@ class DeleteLevelRoleModal(discord.ui.Modal, title="Supprimer un palier de nivea
 
 class SetupNavButton(
     discord.ui.DynamicItem[discord.ui.Button],
-    # "prev"/"next" restent acceptés (rétrocompatibilité avec d'anciens messages /setup déjà
-    # envoyés avant cette refonte) même s'ils ne sont plus émis par render_page() — retirer
-    # une action du template casserait les boutons de vieux messages encore affichés.
-    template=r"setup:(?P<action>prev|save|next|preview|cancel|summary|finish|restart|home|history):(?P<message_id>[0-9]+)",
+    template=r"setup:(?P<action>prev|save|next|preview|cancel|summary|finish|restart):(?P<message_id>[0-9]+)",
 ):
     """Bouton de navigation du /setup. Son custom_id encode l'action ET l'ID du message,
     ce qui permet à Discord de le retrouver et de le faire fonctionner même si le bot a
@@ -971,92 +910,6 @@ class SetupNavButton(
         if cog is None:
             return await interaction.response.send_message("❌ Le module de configuration n'est pas chargé.", ephemeral=True)
         await cog.handle_setup_nav(interaction, self.action, self.message_id)
-
-
-class SetupLockPromptView(discord.ui.View):
-    """Affichée quand un admin lance /setup alors qu'une autre session est déjà ouverte sur
-    ce serveur (voir "verrouillage de session" demandé). Vue courte (timeout 60s) — pas
-    besoin de survivre à un redémarrage, contrairement au panneau /setup lui-même."""
-
-    def __init__(self, cog: "Configuration", guild_id: int, locked_message_id: int,
-                 locked_author_id: int, locked_author_name: str, requester_id: int):
-        super().__init__(timeout=60)
-        self.cog = cog
-        self.guild_id = guild_id
-        self.locked_message_id = locked_message_id
-        self.locked_author_id = locked_author_id
-        self.locked_author_name = locked_author_name
-        self.requester_id = requester_id
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.requester_id:
-            await interaction.response.send_message("❌ Vous n'êtes pas autorisé à utiliser ce panneau.", ephemeral=True)
-            return False
-        return True
-
-    @discord.ui.button(label="👁️ Voir uniquement", style=discord.ButtonStyle.secondary, row=0)
-    async def view_only(self, interaction: discord.Interaction, button: discord.ui.Button):
-        live_view = self.cog.active_setups.get(self.locked_message_id)
-        if live_view:
-            embed = await live_view.build_embed()
-        else:
-            embed = embeds.neutral(
-                "👁️ Aperçu (lecture seule)",
-                "Session introuvable en mémoire pour l'instant — relancez `/setup` si besoin.",
-                color=SETUP_COLOR_MAIN,
-            )
-        embed.set_footer(text=f"Lecture seule — session ouverte par {self.locked_author_name}")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @discord.ui.button(label="🔄 Prendre le contrôle", style=discord.ButtonStyle.primary, row=0)
-    async def take_control(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(view=self)
-
-        old_view = self.cog.active_setups.pop(self.locked_message_id, None)
-        if old_view:
-            for child in old_view.children:
-                child.disabled = True
-            old_view.stop()
-            try:
-                channel = self.cog.bot.get_channel(old_view.channel_id)
-                if channel:
-                    old_message = await channel.fetch_message(self.locked_message_id)
-                    await old_message.edit(
-                        embed=embeds.neutral(
-                            "🔄 Contrôle transféré",
-                            f"{interaction.user} a pris le contrôle de cette session de configuration.",
-                            color=SETUP_COLOR_WARNING,
-                        ),
-                        view=old_view,
-                    )
-            except discord.HTTPException:
-                pass
-        await self.cog.bot.db.delete_setup_session(self.locked_message_id)
-        self.cog.release_lock(self.guild_id, self.locked_message_id)
-        await self.cog.bot.db.log_setup_history(
-            self.guild_id, interaction.user.id, "Configuration", "prise de contrôle", old_value=self.locked_author_name,
-        )
-        message, _view = await self.cog._open_setup_panel(interaction.channel, author=interaction.user)
-        await interaction.followup.send(
-            embed=embeds.success(f"Vous avez pris le contrôle — nouveau panneau : {message.jump_url}"), ephemeral=True,
-        )
-
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=0)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(view=self)
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
-        try:
-            if interaction.response.is_done():
-                await interaction.followup.send(embed=embeds.error("Une erreur inattendue est survenue."), ephemeral=True)
-            else:
-                await interaction.response.send_message(embed=embeds.error("Une erreur inattendue est survenue."), ephemeral=True)
-        except discord.HTTPException:
-            pass
 
 
 class SetupView(discord.ui.View):
@@ -1093,7 +946,7 @@ class SetupView(discord.ui.View):
         self.selected_level: int | None = None
         self.manager_being_edited: int | None = None  # gestionnaire dont on édite les catégories (page Gestionnaires)
         self.manager_categories_cache: dict[int, list[str]] = {}
-        self.page = -1  # -1 = page d'accueil (menu de catégories) — plus de parcours forcé
+        self.page = 0
         self.render_page()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -1136,10 +989,10 @@ class SetupView(discord.ui.View):
         return "⚪ Rien configuré pour l'instant"
 
     async def build_embed(self) -> discord.Embed:
-        if self.page == -1:
-            return await self._build_home_embed()
         step = SETUP_STEPS[self.page]
-        header = f"🛠️ **Configuration SentriX**\nCatégorie : {step['icon']} {step['title']}"
+        total = len(SETUP_STEPS)
+        header = f"🛠️ **Configuration SentriX**\nPage {self.page + 1} sur {total} — {step['icon']} {step['title']}"
+        bar_line = _progress_bar(self.page, total)
         conf = await self.bot.db.get_guild_config(self.guild_id)
 
         if step["key"] in ("roles", "channels"):
@@ -1150,7 +1003,7 @@ class SetupView(discord.ui.View):
                 f"puis le {noun} correspondant apparaît juste en dessous.\n\n"
                 "Valeurs actuelles :"
             )
-            e = embeds.neutral(header, desc, color=SETUP_COLOR_MAIN)
+            e = embeds.neutral(header, f"{bar_line}\n\n{desc}", color=SETUP_COLOR_MAIN)
             lines = [f"{label} : {self._mention_current(field, conf)}" for field, kind, label in fields]
             e.add_field(name="📋 État actuel", value="\n".join(lines)[:1024], inline=False)
             if step["key"] == "roles":
@@ -1169,7 +1022,7 @@ class SetupView(discord.ui.View):
                 "Cliquez sur **➕ Ajouter un rôle de niveau** pour chaque palier souhaité.\n\n"
                 "⚠️ Chaque ajout ici est enregistré **immédiatement** (pas besoin de 💾 Enregistrer)."
             )
-            e = embeds.neutral(header, desc, color=SETUP_COLOR_MAIN)
+            e = embeds.neutral(header, f"{bar_line}\n\n{desc}", color=SETUP_COLOR_MAIN)
             guild = self._guild()
             if rows:
                 lines = []
@@ -1191,7 +1044,7 @@ class SetupView(discord.ui.View):
                 "formulaires, boutons staff...), bien plus riche que ce que cette page pourrait afficher.\n\n"
                 "👉 Utilisez **`+ticketsetup`** pour tout configurer, ou les boutons ci-dessous pour un accès rapide."
             )
-            e = embeds.neutral(header, desc, color=SETUP_COLOR_MAIN)
+            e = embeds.neutral(header, f"{bar_line}\n\n{desc}", color=SETUP_COLOR_MAIN)
             e.add_field(name="📋 Panels", value=str(len(panels)), inline=True)
             e.add_field(name="🎫 Types de tickets", value=str(len(types)), inline=True)
             ticket_log = f"<#{conf['ticket_log_channel']}>" if conf and conf["ticket_log_channel"] else "*Non défini*"
@@ -1206,7 +1059,7 @@ class SetupView(discord.ui.View):
                 "ensuite. Les salons déjà configurés ne sont jamais dupliqués.\n\n"
                 "Cliquez sur **📡 Créer le système de logs** ci-dessous."
             )
-            e = embeds.neutral(header, desc, color=SETUP_COLOR_MAIN)
+            e = embeds.neutral(header, f"{bar_line}\n\n{desc}", color=SETUP_COLOR_MAIN)
             general = f"<#{conf['log_channel']}>" if conf and conf["log_channel"] else "*Non défini*"
             e.add_field(name="📝 Salon général de repli", value=general, inline=False)
             if self.logs_created:
@@ -1218,7 +1071,7 @@ class SetupView(discord.ui.View):
                 "administrateur du serveur.\n\nAjout/retrait immédiat. Utilisez **🔑 Définir les permissions** "
                 "pour limiter un gestionnaire à certaines catégories seulement (sinon, accès complet par défaut)."
             )
-            e = embeds.neutral(header, desc, color=SETUP_COLOR_MAIN)
+            e = embeds.neutral(header, f"{bar_line}\n\n{desc}", color=SETUP_COLOR_MAIN)
             if self.managers:
                 lines = []
                 for uid in self.managers:
@@ -1239,7 +1092,7 @@ class SetupView(discord.ui.View):
                 "ou choisissez précisément les filtres actifs dans le menu.\n\n"
                 "⚠️ Chaque changement ici est enregistré **immédiatement**."
             )
-            e = embeds.neutral(header, desc, color=SETUP_COLOR_MAIN)
+            e = embeds.neutral(header, f"{bar_line}\n\n{desc}", color=SETUP_COLOR_MAIN)
             active = sum(1 for v in self.security_choices.values() if v)
             score = round(active / len(AUTOMOD_TOGGLE_LABELS) * 100)
             e.add_field(name="📊 Score de sécurité", value=f"**{score}/100** ({active}/{len(AUTOMOD_TOGGLE_LABELS)} filtres actifs)", inline=False)
@@ -1253,18 +1106,20 @@ class SetupView(discord.ui.View):
             desc = "Choisissez vos options avec les menus ci-dessous. Laissez vide ce que vous ne voulez pas changer."
             if step["key"] == "general":
                 desc += "\nUtilisez **✏️ Préfixe & messages** pour le préfixe et les messages de bienvenue/départ."
-            e = embeds.neutral(header, desc, color=SETUP_COLOR_MAIN)
+            e = embeds.neutral(header, f"{bar_line}\n\n{desc}", color=SETUP_COLOR_MAIN)
             for field, kind, label in step["fields"]:
                 e.add_field(name=label, value=self._mention_current(field, conf), inline=True)
 
         e.add_field(name="​", value=self._status_indicator(), inline=False)
         return e
 
-    async def _compute_categories(self, conf) -> list[tuple[str, str]]:
-        """État ✅/⚠️/❌ de chaque catégorie ACTUELLEMENT implémentée dans /setup. Réutilisé
-        par la page d'accueil et le résumé — ne liste QUE les 8 catégories réelles de cette
-        phase (les autres modules du bot, comme l'IA ou les statistiques, ont leur propre
-        commande de configuration séparée pour l'instant, voir Phases suivantes)."""
+    async def _build_summary_embed(self) -> discord.Embed:
+        conf = await self.bot.db.get_guild_config(self.guild_id)
+        guild = self._guild()
+        total = len(SETUP_STEPS)
+        header = f"🛠️ **Configuration SentriX**\nPage {self.page + 1} sur {total} — ✅ Résumé et confirmation"
+        e = embeds.neutral(header, f"{_progress_bar(self.page, total)}\n\nVoici l'état actuel de chaque catégorie.", color=SETUP_COLOR_MAIN)
+
         rows_levels = await self.bot.db.fetchall("SELECT COUNT(*) AS n FROM level_roles WHERE guild_id = ?", (self.guild_id,))
         rows_panels = await self.bot.db.fetchall("SELECT COUNT(*) AS n FROM ticket_panels_v2 WHERE guild_id = ?", (self.guild_id,))
         n_levels = rows_levels[0]["n"] if rows_levels else 0
@@ -1274,7 +1129,7 @@ class SetupView(discord.ui.View):
         def cur(field):
             return self.choices.get(field, conf[field] if conf and field in conf.keys() else None)
 
-        return [
+        categories = [
             ("⚙️ Général", "✅" if cur("mod_role") and cur("log_channel") else ("⚠️" if cur("mod_role") or cur("log_channel") else "❌")),
             ("🎭 Rôles", "✅" if cur("autorole") or cur("verify_role") else "⚠️"),
             ("🎫 Tickets", "✅" if n_panels else "⚠️"),
@@ -1284,71 +1139,7 @@ class SetupView(discord.ui.View):
             ("👥 Gestionnaires", "✅" if self.managers else "⚠️"),
             ("🛡️ Sécurité", "✅" if active_security >= 6 else ("⚠️" if active_security > 0 else "❌")),
         ]
-
-    async def _build_home_embed(self) -> discord.Embed:
-        """Page d'accueil du centre de configuration — remplace l'ancien parcours linéaire
-        forcé : on choisit directement une catégorie dans le menu déroulant, comme +help."""
-        conf = await self.bot.db.get_guild_config(self.guild_id)
-        guild = self._guild()
-        categories = await self._compute_categories(conf)
-        configured = sum(1 for _, s in categories if s == "✅")
-        critical = sum(1 for _, s in categories if s == "❌")
-        warnings = sum(1 for _, s in categories if s == "⚠️")
-
-        if critical:
-            etat = "🔴 Configuration incomplète — éléments critiques manquants"
-        elif warnings:
-            etat = "🟠 Configuration incomplète"
-        else:
-            etat = "🟢 Configuration à jour"
-
-        e = embeds.neutral(
-            "⚙️ CENTRE DE CONFIGURATION SENTRIX",
-            "Configurez les modules de SentriX pour ce serveur. Choisissez une catégorie "
-            "dans le menu ci-dessous, ou consultez le résumé complet.",
-            color=SETUP_COLOR_MAIN,
-        )
-        e.add_field(name="Serveur", value=guild.name if guild else "Inconnu", inline=True)
-        e.add_field(name="Modules configurés", value=f"{configured} sur {len(categories)}", inline=True)
-        e.add_field(name="État général", value=etat, inline=True)
-        e.add_field(name="Problèmes critiques", value=str(critical), inline=True)
-        e.add_field(name="Avertissements", value=str(warnings), inline=True)
-
-        last = await self.bot.db.list_setup_history(self.guild_id, limit=1)
-        if last:
-            row = last[0]
-            e.add_field(name="Dernière modification", value=f"<t:{row['created_at']}:R> par <@{row['user_id']}>", inline=True)
-        else:
-            e.add_field(name="Dernière modification", value="Aucune enregistrée pour l'instant", inline=True)
-
-        e.add_field(
-            name="Catégories disponibles ici",
-            value="\n".join(f"{status} {name}" for name, status in categories),
-            inline=False,
-        )
-        e.add_field(
-            name="Autres modules (commandes séparées pour l'instant)",
-            value=(
-                "🎫 Tickets détaillés → `+ticketsetup` · 🤖 IA → `+aisetup` · 📊 Stats/Niveaux → "
-                "`+statsconfig` · 💾 Sauvegardes serveur → `/server-backup`, `/role-snapshot`"
-            ),
-            inline=False,
-        )
-        return e
-
-    async def _build_summary_embed(self) -> discord.Embed:
-        conf = await self.bot.db.get_guild_config(self.guild_id)
-        guild = self._guild()
-        header = "🛠️ **Configuration SentriX**\n📋 Résumé et confirmation"
-        e = embeds.neutral(header, "Voici l'état actuel de chaque catégorie.", color=SETUP_COLOR_MAIN)
-
-        categories = await self._compute_categories(conf)
-        configured_count = sum(1 for _, status in categories if status == "✅")
-        e.add_field(
-            name=f"Modules configurés : {configured_count} sur {len(categories)}",
-            value="\n".join(f"{status} {name}" for name, status in categories),
-            inline=False,
-        )
+        e.add_field(name="État par catégorie", value="\n".join(f"{status} {name}" for name, status in categories), inline=False)
 
         checks_lines = await self._run_final_checks(guild, conf)
         e.add_field(name="🔎 Vérifications finales", value="\n".join(checks_lines)[:1024], inline=False)
@@ -1370,37 +1161,7 @@ class SetupView(discord.ui.View):
             lines.append("✅ Rôle automatique valide" if role else "⚠️ Le rôle automatique configuré n'existe plus")
         return lines
 
-    def _render_home(self):
-        """Menu déroulant de catégories (façon +help) + accès direct au résumé/historique/
-        fermeture — remplace le parcours forcé page par page."""
-        self.clear_items()
-        cat_select = discord.ui.Select(
-            placeholder="📂 Choisir une catégorie à configurer",
-            options=[
-                discord.SelectOption(label=f"{s['icon']} {s['title']}", value=str(i))
-                for i, s in enumerate(SETUP_STEPS) if s["key"] != "summary"
-            ],
-            row=0,
-        )
-        cat_select.callback = self._make_home_category_callback(cat_select)
-        self.add_item(cat_select)
-        self.add_item(SetupNavButton("summary", self.message_id, label="📋 Résumé", style=discord.ButtonStyle.secondary, row=1))
-        self.add_item(SetupNavButton("history", self.message_id, label="📜 Historique", style=discord.ButtonStyle.secondary, row=1))
-        self.add_item(SetupNavButton("cancel", self.message_id, label="❌ Fermer", style=discord.ButtonStyle.danger, row=1))
-
-    def _make_home_category_callback(self, select: discord.ui.Select):
-        async def callback(interaction: discord.Interaction):
-            if select.values:
-                self.page = int(select.values[0])
-                self.render_page()
-                await self.persist_session()
-            await self._refresh_message(interaction)
-        return callback
-
     def render_page(self):
-        if self.page == -1:
-            self._render_home()
-            return
         self.clear_items()
         step = SETUP_STEPS[self.page]
 
@@ -1519,11 +1280,12 @@ class SetupView(discord.ui.View):
             select.callback = self._make_security_select_callback(select)
             self.add_item(select)
         elif step["key"] == "summary":
-            home_btn = SetupNavButton("home", self.message_id, label="🏠 Accueil", style=discord.ButtonStyle.secondary, row=0)
+            prev_btn = SetupNavButton("prev", self.message_id, label="◀ Précédent", style=discord.ButtonStyle.secondary, row=0)
+            summary_btn = SetupNavButton("summary", self.message_id, label="👁️ Voir le résumé complet", style=discord.ButtonStyle.secondary, row=0)
             save_btn = SetupNavButton("save", self.message_id, label="💾 Enregistrer définitivement", style=discord.ButtonStyle.success, row=0)
             restart_btn = SetupNavButton("restart", self.message_id, label="🔄 Recommencer", style=discord.ButtonStyle.secondary, row=0)
             finish_btn = SetupNavButton("finish", self.message_id, label="✅ Terminer", style=discord.ButtonStyle.success, row=0)
-            for item in (home_btn, save_btn, restart_btn, finish_btn):
+            for item in (prev_btn, summary_btn, save_btn, restart_btn, finish_btn):
                 self.add_item(item)
         else:
             for i, field in enumerate(step["fields"]):
@@ -1541,20 +1303,20 @@ class SetupView(discord.ui.View):
             # Discord limite chaque message à 5 lignes de composants. Les pages "Général" et
             # "Salons annexes" utilisent déjà leurs 4 premières lignes (0-3) pour les menus
             # déroulants : il ne reste qu'UNE ligne (la 4ᵉ) pour les boutons, qui accepte au
-            # maximum 5 boutons. Les 4 boutons de navigation essentiels (🏠 💾 📋 ❌) sont donc
-            # toujours présents (accès direct à une autre catégorie via 🏠 Accueil, plus de
-            # parcours forcé page par page), et le 5ᵉ bouton change selon la page : "✏️ Préfixe
-            # & messages" sur la page Général (qui en a besoin), "👁️ Aperçu" partout ailleurs.
-            self.add_item(SetupNavButton("home", self.message_id, label="🏠 Accueil", style=discord.ButtonStyle.secondary))
+            # maximum 5 boutons. Les 4 boutons de navigation essentiels (◀ 💾 ▶ ❌) sont donc
+            # toujours présents, et le 5ᵉ bouton change selon la page : "✏️ Préfixe & messages"
+            # sur la page Général (qui en a besoin), "👁️ Aperçu" partout ailleurs (l'aperçu
+            # reste de toute façon accessible depuis n'importe quelle autre page).
+            self.add_item(SetupNavButton("prev", self.message_id, label="◀ Précédent", style=discord.ButtonStyle.secondary, disabled=(self.page == 0)))
             self.add_item(SetupNavButton("save", self.message_id, label="💾 Enregistrer", style=discord.ButtonStyle.success))
-            self.add_item(SetupNavButton("summary", self.message_id, label="📋 Résumé", style=discord.ButtonStyle.primary))
+            self.add_item(SetupNavButton("next", self.message_id, label="Suivant ▶", style=discord.ButtonStyle.primary))
             if step["key"] == "general":
                 text_btn = discord.ui.Button(label="✏️ Préfixe & messages", style=discord.ButtonStyle.secondary, row=4)
                 text_btn.callback = self._open_text_modal
                 self.add_item(text_btn)
             else:
                 self.add_item(SetupNavButton("preview", self.message_id, label="👁️ Aperçu", style=discord.ButtonStyle.secondary))
-            self.add_item(SetupNavButton("cancel", self.message_id, label="❌ Fermer", style=discord.ButtonStyle.danger))
+            self.add_item(SetupNavButton("cancel", self.message_id, label="❌ Annuler", style=discord.ButtonStyle.danger))
 
     # ---------------------------------------------------------------- ACTIONS SPÉCIFIQUES AUX PAGES
 
@@ -1822,7 +1584,6 @@ class SetupView(discord.ui.View):
             if automod_cog:
                 automod_cog.automod_cache.pop(self.guild_id, None)
             self.security_touched = True
-            await self.bot.db.log_setup_history(self.guild_id, interaction.user.id, "Sécurité", "préréglage appliqué", new_value=level)
             self.render_page()
             await interaction.response.edit_message(embed=await self.build_embed(), view=self)
         return callback
@@ -1848,21 +1609,7 @@ class SetupView(discord.ui.View):
     # ---------------------------------------------------------------- NAVIGATION STANDARD
 
     async def handle_nav_action(self, interaction: discord.Interaction, action: str):
-        if action == "home":
-            self.page = -1
-            self.render_page()
-            await self.persist_session()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
-        elif action == "summary":
-            # Navigue vers la vraie page Résumé (comme les autres catégories) — contrairement
-            # à "preview" qui affiche juste un aperçu éphémère sans quitter la page actuelle.
-            self.page = next(i for i, s in enumerate(SETUP_STEPS) if s["key"] == "summary")
-            self.render_page()
-            await self.persist_session()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
-        elif action == "history":
-            await self._show_history(interaction)
-        elif action == "prev":
+        if action == "prev":
             self.page = max(0, self.page - 1)
             self.render_page()
             await self.persist_session()
@@ -1874,7 +1621,7 @@ class SetupView(discord.ui.View):
             await interaction.response.edit_message(embed=await self.build_embed(), view=self)
         elif action == "save":
             await self._save_pending(interaction)
-        elif action == "preview":
+        elif action in ("preview", "summary"):
             await self._show_preview(interaction)
         elif action == "cancel":
             await self._ask_cancel(interaction)
@@ -1883,21 +1630,6 @@ class SetupView(discord.ui.View):
         elif action == "restart":
             await self._restart(interaction)
 
-    async def _show_history(self, interaction: discord.Interaction):
-        rows = await self.bot.db.list_setup_history(self.guild_id, limit=15)
-        if not rows:
-            return await interaction.response.send_message(
-                "Aucune modification enregistrée dans l'historique pour l'instant.", ephemeral=True
-            )
-        lines = []
-        for r in rows:
-            lines.append(
-                f"<t:{r['created_at']}:R> — <@{r['user_id']}> — **{r['module']}** : {r['action']}"
-                + (f" (`{r['old_value']}` → `{r['new_value']}`)" if r["new_value"] is not None else "")
-            )
-        e = embeds.neutral("📜 Historique des modifications", "\n".join(lines)[:4000], color=SETUP_COLOR_MAIN)
-        await interaction.response.send_message(embed=e, ephemeral=True)
-
     async def _save_pending(self, interaction: discord.Interaction):
         if not self.choices:
             self.dirty = False
@@ -1905,10 +1637,6 @@ class SetupView(discord.ui.View):
             return
         for field, value in self.choices.items():
             await self.bot.db.set_guild_config(self.guild_id, field, value)
-            await self.bot.db.log_setup_history(
-                self.guild_id, self.author_id, FIELD_LABELS.get(field, field), "réglage modifié",
-                old_value=None, new_value=str(value),
-            )
         if "prefix" in self.choices:
             self.bot.prefix_cache[self.guild_id] = self.choices["prefix"]
         self.dirty = False
@@ -1941,7 +1669,6 @@ class SetupView(discord.ui.View):
         cog = self.bot.get_cog("Configuration")
         if cog:
             cog.active_setups.pop(self.message_id, None)
-            cog.release_lock(self.guild_id, self.message_id)
         for child in self.children:
             child.disabled = True
         self.stop()
@@ -1956,7 +1683,7 @@ class SetupView(discord.ui.View):
     async def _restart(self, interaction: discord.Interaction):
         self.choices = {}
         self.dirty = False
-        self.page = -1
+        self.page = 0
         self.render_page()
         await self.persist_session()
         await interaction.response.edit_message(embed=await self.build_embed(), view=self)
@@ -1986,14 +1713,11 @@ class SetupView(discord.ui.View):
         conf = await self.bot.db.get_guild_config(self.guild_id)
         checks_lines = await self._run_final_checks(self._guild(), conf)
 
-        await self.bot.db.log_setup_history(self.guild_id, self.author_id, "Configuration", "setup terminé", new_value=f"{len(lines)} changement(s)")
-
         self.dirty = False
         await self.bot.db.delete_setup_session(self.message_id)
         cog = self.bot.get_cog("Configuration")
         if cog:
             cog.active_setups.pop(self.message_id, None)
-            cog.release_lock(self.guild_id, self.message_id)
         for child in self.children:
             child.disabled = True
         final_embed = embeds.neutral("✅ Configuration enregistrée !", "\n".join(lines), color=SETUP_COLOR_SUCCESS)
