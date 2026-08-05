@@ -1,7 +1,7 @@
 """
 Cog UTILITAIRES.
 /help /ping /avatar /serverinfo /userinfo /roleinfo /channelinfo
-/membercount /addemoji /emoji-list /poll /remind /reminder-list /reminder-cancel
+/membercount /addemoji /deleteemoji /emoji-list /poll /remind /reminder-list /reminder-cancel
 /say /embed-create /translate /weather /suggest /report-bug
 /afk /roll /choose
 """
@@ -500,6 +500,7 @@ class Utility(commands.Cog, name="Utility"):
         # <:nom:identifiant> ou <a:nom:identifiant>. On récupère automatiquement
         # son nom et son image CDN, sans demander d'URL à l'utilisateur.
         source_is_animated = False
+        fallback_url = None
         pasted_emoji = re.fullmatch(r"<(a?):([A-Za-z0-9_]{2,32}):([0-9]+)>", nom)
         if pasted_emoji:
             animated = bool(pasted_emoji.group(1))
@@ -507,9 +508,11 @@ class Utility(commands.Cog, name="Utility"):
             nom = pasted_emoji.group(2)
             emoji_id = pasted_emoji.group(3)
             extension = "gif" if animated else "png"
-            # Une copie GIF en 64x64 conserve l'animation tout en restant largement
-            # sous la limite de poids imposée par Discord.
-            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}?size=64"
+            # Le GIF original évite les réponses CDN 415 observées lors du
+            # redimensionnement de certains emojis animés.
+            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}"
+            if animated:
+                fallback_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.png?size=128"
         else:
             # Un emoji Unicode normal (ex: 🧟‍♂️) n'a pas d'URL Discord. Twemoji
             # fournit sa représentation PNG à partir de la suite de points de code.
@@ -574,6 +577,14 @@ class Utility(commands.Cog, name="Utility"):
                             if 300 <= response.status < 400 and response.headers.get("Location"):
                                 current_url = await validate_public_https(urljoin(current_url, response.headers["Location"]))
                                 continue
+                            if response.status == 415 and fallback_url:
+                                # Certains emojis sont envoyés avec le marqueur animé alors
+                                # que leur CDN ne fournit plus de GIF. On récupère au moins
+                                # leur image fixe au lieu d'échouer complètement.
+                                current_url = await validate_public_https(fallback_url)
+                                fallback_url = None
+                                source_is_animated = False
+                                continue
                             if response.status != 200:
                                 raise ValueError(f"Le serveur de l'image a répondu avec le code {response.status}.")
                             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
@@ -618,6 +629,52 @@ class Utility(commands.Cog, name="Utility"):
             ctx.guild.id,
             title="Emoji ajouté",
             description=f"{emoji} a été créé sous le nom `:{emoji.name}:`.",
+            kind="success",
+        ))
+
+    @commands.hybrid_command(
+        name="deleteemoji",
+        aliases=["delemoji", "removeemoji", "delete-emoji"],
+        description="Supprimer un emoji personnalisé du serveur.",
+        with_app_command=False,
+    )
+    @app_commands.describe(emoji="Nom de l'emoji ou emoji personnalisé à supprimer")
+    @checks.has_permission("manage_emojis_and_stickers")
+    async def deleteemoji(self, ctx: commands.Context, *, emoji: str):
+        if not ctx.guild:
+            return await ctx.send(embed=await self._embed(None, title="Commande indisponible", description="Cette commande doit être utilisée sur un serveur.", kind="danger"))
+        if not ctx.guild.me.guild_permissions.manage_emojis_and_stickers:
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Le bot doit avoir la permission **Gérer les emojis et stickers**.", kind="danger"))
+
+        value = emoji.strip()
+        pasted = re.fullmatch(r"<a?:([A-Za-z0-9_]{2,32}):([0-9]+)>", value)
+        target = None
+        if pasted:
+            target = ctx.guild.get_emoji(int(pasted.group(2)))
+        else:
+            name = value.strip(":").lower()
+            target = discord.utils.find(lambda item: item.name.lower() == name, ctx.guild.emojis)
+
+        if target is None:
+            return await ctx.send(embed=await self._embed(
+                ctx.guild.id,
+                title="Emoji introuvable",
+                description="Collez un emoji de ce serveur ou indiquez exactement son nom.",
+                kind="danger",
+            ))
+
+        emoji_name = target.name
+        try:
+            await target.delete(reason=f"Emoji supprimé par {ctx.author} avec +deleteemoji")
+        except discord.Forbidden:
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Suppression refusée", description="Le bot n'a pas la permission de supprimer cet emoji.", kind="danger"))
+        except discord.HTTPException as exc:
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Suppression impossible", description=f"Discord a refusé la demande : {exc}", kind="danger"))
+
+        await ctx.send(embed=await self._embed(
+            ctx.guild.id,
+            title="Emoji supprimé",
+            description=f"L'emoji `:{emoji_name}:` a été supprimé du serveur.",
             kind="success",
         ))
 
