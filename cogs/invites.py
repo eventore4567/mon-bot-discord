@@ -156,7 +156,7 @@ class Invites(commands.Cog, name="Invites"):
             thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
             footer=design.get("footer"),
         )
-        embed.add_field(name="✅ Réelles", value=design_system.format_number(b["real"]), inline=True)
+        embed.add_field(name="● Réelles", value=design_system.format_number(b["real"]), inline=True)
         embed.add_field(name="🕵️ Fake (compte suspect)", value=design_system.format_number(b["fake"]), inline=True)
         embed.add_field(name="🚪 Reparties", value=design_system.format_number(b["left"]), inline=True)
         embed.add_field(name="🎁 Bonus (staff)", value=design_system.format_number(b["bonus"]), inline=True)
