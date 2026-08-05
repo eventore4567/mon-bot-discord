@@ -282,19 +282,25 @@ class Economy(commands.Cog, name="Economy"):
             await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, None, "gamble_loss", montant, "Casino")
             await ctx.send(embed=embeds.error(f"🎰 Vous avez perdu **{stats_service.format_number(montant)} 🪙**."))
 
-    @commands.hybrid_command(name="deposit", description="Déposer de l'argent à la banque (ou 'all').", with_app_command=False)
-    @app_commands.describe(montant="Le montant à déposer (ou 'all')")
-    async def deposit(self, ctx: commands.Context, montant: str):
+    async def _deposit_to_bank(self, ctx: commands.Context, montant: str):
+        """Transfère un montant du portefeuille vers la banque."""
         await self.bot.db.ensure_economy(ctx.guild.id, ctx.author.id)
         bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
         amount = _parse_amount(montant, bal["cash"])
         if amount is None or amount <= 0 or amount > bal["cash"]:
-            return await ctx.send(embed=embeds.error("Montant invalide."))
+            return await ctx.send(embed=embeds.error("Montant invalide. Utilisez un nombre positif ou `all`."))
         await self.bot.db.execute(
             "UPDATE economy SET cash = cash - ?, bank = bank + ? WHERE guild_id = ? AND user_id = ?",
             (amount, amount, ctx.guild.id, ctx.author.id),
         )
-        await ctx.send(embed=embeds.success(f"🏦 {stats_service.format_number(amount)} 🪙 déposés à la banque."))
+        await ctx.send(embed=embeds.success(
+            f"{stats_service.format_number(amount)} 🪙 transférés dans votre banque. Cet argent ne peut pas être volé."
+        ))
+
+    @commands.hybrid_command(name="deposit", description="Déposer de l'argent à la banque (ou 'all').", with_app_command=False)
+    @app_commands.describe(montant="Le montant à déposer (ou 'all')")
+    async def deposit(self, ctx: commands.Context, montant: str):
+        await self._deposit_to_bank(ctx, montant)
 
     @commands.hybrid_command(name="withdraw", description="Retirer de l'argent de la banque (ou 'all').", with_app_command=False)
     @app_commands.describe(montant="Le montant à retirer (ou 'all')")
@@ -310,8 +316,17 @@ class Economy(commands.Cog, name="Economy"):
         )
         await ctx.send(embed=embeds.success(f"💵 {stats_service.format_number(amount)} 🪙 retirés de la banque."))
 
-    @commands.hybrid_command(name="banque", aliases=["bank"], description="Afficher le détail de votre compte bancaire.", with_app_command=False)
-    async def bank(self, ctx: commands.Context):
+    @commands.hybrid_command(
+        name="banque",
+        aliases=["bank"],
+        description="Déposer de l'argent à la banque ou afficher votre solde.",
+        with_app_command=False,
+    )
+    @app_commands.describe(montant="Montant à déposer, ou 'all' pour tout déposer (optionnel)")
+    async def bank(self, ctx: commands.Context, montant: str = None):
+        if montant is not None:
+            return await self._deposit_to_bank(ctx, montant)
+
         design = await self.bot.db.get_design_settings(ctx.guild.id)
         stats = await stats_service.get_member_statistics(self.bot, ctx.guild, ctx.author)
         style = design_system.CATEGORY_STYLES["economy"]
