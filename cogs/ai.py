@@ -228,15 +228,15 @@ class AiSetupView(discord.ui.View):
         channels_text = "Tous" if not s["allowed_channel_ids"] else f"{len(s['allowed_channel_ids'])} salon(s)"
         roles_text = "Tous" if not s["allowed_role_ids"] else f"{len(s['allowed_role_ids'])} rôle(s)"
         lines = [
-            f"**Activée :** {'✅ Oui' if s['enabled'] else '❌ Non'}",
+            f"**Activée :** {'● Oui' if s['enabled'] else '○ Non'}",
             f"**Modèle par défaut :** {ai_service.MODEL_LABELS.get(s['default_model'], s['default_model'])}",
             f"**Raisonnement :** {s['reasoning_effort']}",
             f"**Salons autorisés :** {channels_text}",
             f"**Rôles autorisés :** {roles_text}",
             f"**Cooldown :** {s['cooldown_seconds']}s • **Limite/min :** {s['per_minute_limit']} • **Limite/jour :** {s['daily_limit']}",
             f"**Longueur max question :** {s['max_question_length']} caractères",
-            f"**Mémoire :** {'✅ activée' if s['memory_enabled'] else '❌ désactivée'} ({s['memory_minutes']} min d'inactivité)",
-            f"**Langue :** {s['language']} • **Logs d'utilisation :** {'✅' if s['logs_enabled'] else '❌'}",
+            f"**Mémoire :** {'● activée' if s['memory_enabled'] else '○ désactivée'} ({s['memory_minutes']} min d'inactivité)",
+            f"**Langue :** {s['language']} • **Logs d'utilisation :** {'●' if s['logs_enabled'] else '○'}",
         ]
         return embeds.brand("⚙️ Configuration de l'IA — SentriX", "\n".join(lines))
 
@@ -880,7 +880,7 @@ class Ai(commands.Cog, name="Ai"):
             e = embeds.error("Aucune clé OPENAI_API_KEY n'est configurée sur Railway (variable vide ou absente).")
         elif result["ok"]:
             e = embeds.success(
-                f"✅ Connexion à l'IA fonctionnelle.\n"
+                f"● Connexion à l'IA fonctionnelle.\n"
                 f"**Latence :** {result['latency_ms']} ms\n"
                 f"**Modèle testé :** {ai_service.MODEL_LABELS[ai_service.MODEL_TERRA]} (`{config.OPENAI_MODEL}`)\n"
                 f"**Réponse test :** {result.get('sample') or '(vide)'}"
@@ -896,7 +896,7 @@ class Ai(commands.Cog, name="Ai"):
             }
             hint = hints.get(result["error_type"], "Erreur technique — voir les logs du serveur pour le détail complet.")
             e = embeds.error(
-                f"❌ Échec de connexion à l'IA après {result['latency_ms']} ms.\n"
+                f"○ Échec de connexion à l'IA après {result['latency_ms']} ms.\n"
                 f"**Type d'erreur :** `{result['error_type']}`\n"
                 f"**Diagnostic probable :** {hint}"
             )
