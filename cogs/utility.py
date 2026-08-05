@@ -8,6 +8,7 @@ Cog UTILITAIRES.
 
 import asyncio
 import ipaddress
+import logging
 import re
 import socket
 from urllib.parse import urljoin, urlparse
@@ -19,6 +20,8 @@ from discord.ext import commands
 
 from utils import embeds, helpers, checks, design_system
 from database.db import now
+
+logger = logging.getLogger("bot")
 
 # Ordre volontaire : catégories utiles à tout le monde en premier, catégories staff/technique
 # ensuite — pour que /help mette en avant ce qui sert le plus grand nombre.
@@ -202,17 +205,20 @@ class HelpSelect(discord.ui.Select):
         self.bot = bot
         self.prefix = prefix
         self.is_staff = is_staff
-        options = [
-            discord.SelectOption(
+        options = []
+        for cog_name, label in CATEGORY_LABELS.items():
+            cog = bot.get_cog(cog_name)
+            if not cog or not category_visible(cog_name, cog, is_staff):
+                continue
+            # Aucun emoji dans les options : Discord rejette certains symboles Unicode
+            # ordinaires (par exemple ●) lorsqu'ils sont envoyés comme emoji de composant.
+            options.append(discord.SelectOption(
                 label=split_category_label(label)[1],
                 value=cog_name,
-                emoji=CATEGORY_EMOJI.get(cog_name),
-                description=f"{len(visible_commands(bot.get_cog(cog_name), is_staff))} commande(s)",
-            )
-            for cog_name, label in CATEGORY_LABELS.items()
-            if bot.get_cog(cog_name) and category_visible(cog_name, bot.get_cog(cog_name), is_staff)
-        ]
-        super().__init__(placeholder="📂 Choisissez une catégorie à explorer...", options=options)
+                description=f"{len(visible_commands(cog, is_staff))} commande(s)",
+            ))
+        # Discord autorise au maximum 25 options dans un menu.
+        super().__init__(placeholder="Choisissez une catégorie...", options=options[:25])
 
     async def callback(self, interaction: discord.Interaction):
         cog = self.bot.get_cog(self.values[0])
@@ -383,7 +389,14 @@ class Utility(commands.Cog, name="Utility"):
             return await ctx.send(embed=e)
 
         e = build_help_home(self.bot, ctx.guild, prefix, is_staff)
-        await ctx.send(embed=e, view=HelpView(self.bot, prefix, is_staff))
+        try:
+            view = HelpView(self.bot, prefix, is_staff)
+            await ctx.send(embed=e, view=view)
+        except Exception:
+            # L'aide textuelle reste disponible même si Discord refuse ponctuellement
+            # un composant du menu. Le détail technique reste visible dans Railway.
+            logger.exception("Impossible d'afficher le menu interactif de +help")
+            await ctx.send(embed=e)
 
     @commands.hybrid_command(name="ping", description="Afficher la latence du bot.")
     async def ping(self, ctx: commands.Context):
