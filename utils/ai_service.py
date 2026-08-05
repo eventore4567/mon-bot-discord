@@ -46,7 +46,7 @@ VALID_REASONING_EFFORTS = ("none", "low", "medium", "high", "xhigh", "max")
 DISCORD_MESSAGE_LIMIT = 2000
 # Au-delà de ce seuil, un fichier .md est plus lisible qu'une rafale de messages découpés.
 FILE_FALLBACK_THRESHOLD = 4000
-GENERIC_ERROR = "❌ L'intelligence artificielle est momentanément indisponible."
+GENERIC_ERROR = "○ L'intelligence artificielle est momentanément indisponible."
 
 # ---------------------------------------------------------------- CODES D'ERREUR IA
 #
@@ -78,7 +78,7 @@ ERROR_MESSAGES = {
         "en le précisant clairement (ex : « comment protéger mon serveur contre... » plutôt "
         "que « comment pirater... »)."
     ),
-    ERROR_BAD_REQUEST: "❌ Cette demande n'a pas pu être traitée (requête invalide). Reformule-la différemment.",
+    ERROR_BAD_REQUEST: "○ Cette demande n'a pas pu être traitée (requête invalide). Reformule-la différemment.",
     ERROR_AUTH: "🔑 Problème d'authentification avec le service IA. Contactez un administrateur.",
     ERROR_RATE_LIMIT: "⏳ Le service IA est surchargé pour le moment. Réessaie dans quelques instants.",
     ERROR_TIMEOUT: "⏱️ Le service IA a mis trop de temps à répondre. Réessaie.",
