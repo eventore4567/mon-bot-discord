@@ -1,9 +1,9 @@
 """
 Cog ÉCONOMIE.
 /balance /economy /daily /weekly /work /rob /pay /economyleaderboard /shop /buy
-/inventory /sell /gamble /deposit /withdraw /bank /give-money /reset-economy
+/inventory /sell /gamble /deposit /withdraw /banque (+bank) /give-money /reset-economy
 
-Toutes les commandes qui affichent un solde (/balance, /economy, /bank, /stats, /profile)
+Toutes les commandes qui affichent un solde (/balance, /economy, /banque, /bank, /stats, /profile)
 passent par utils/stats_service.get_member_statistics() : portefeuille, banque et total
 viennent TOUJOURS de la même requête, et le total n'est jamais stocké séparément — il est
 toujours recalculé comme wallet + bank (voir stats_service.get_member_statistics).
@@ -310,7 +310,7 @@ class Economy(commands.Cog, name="Economy"):
         )
         await ctx.send(embed=embeds.success(f"💵 {stats_service.format_number(amount)} 🪙 retirés de la banque."))
 
-    @commands.hybrid_command(name="bank", description="Afficher le détail de votre compte bancaire.", with_app_command=False)
+    @commands.hybrid_command(name="banque", aliases=["bank"], description="Afficher le détail de votre compte bancaire.", with_app_command=False)
     async def bank(self, ctx: commands.Context):
         design = await self.bot.db.get_design_settings(ctx.guild.id)
         stats = await stats_service.get_member_statistics(self.bot, ctx.guild, ctx.author)
