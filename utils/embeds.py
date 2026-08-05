@@ -45,11 +45,11 @@ def _base(title: str, description: str, color: int) -> discord.Embed:
     return embed
 
 
-def success(description: str, title: str = "✅ Succès") -> discord.Embed:
+def success(description: str, title: str = "● Succès") -> discord.Embed:
     return _base(title, description, COLOR_SUCCESS)
 
 
-def error(description: str, title: str = "❌ Erreur") -> discord.Embed:
+def error(description: str, title: str = "○ Erreur") -> discord.Embed:
     return _base(title, description, COLOR_ERROR)
 
 
