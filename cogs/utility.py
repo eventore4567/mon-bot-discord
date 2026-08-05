@@ -1,11 +1,18 @@
 """
 Cog UTILITAIRES.
 /help /ping /avatar /serverinfo /userinfo /roleinfo /channelinfo
-/membercount /emoji-list /poll /remind /reminder-list /reminder-cancel
+/membercount /addemoji /emoji-list /poll /remind /reminder-list /reminder-cancel
 /say /embed-create /translate /weather /suggest /report-bug
 /afk /roll /choose
 """
 
+import asyncio
+import ipaddress
+import re
+import socket
+from urllib.parse import urljoin, urlparse
+
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -34,6 +41,7 @@ CATEGORY_LABELS = {
     "Stats": "📊 Statistiques / Développement",
     "Owner": "🔑 Propriétaire du bot",
     "EmbedBuilder": "📨 Créateur d'embeds",
+    "Design": "Design et apparence",
 }
 
 # Catégories entièrement réservées au staff : un membre normal ne les voit JAMAIS
@@ -56,7 +64,11 @@ def is_staff_command(cmd) -> bool:
 
 
 def visible_commands(cog, is_staff: bool):
-    cmds = [c for c in cog.get_commands() if not c.hidden]
+    # walk_commands inclut aussi toutes les sous-commandes des groupes. Cela évite que
+    # +help oublie d'anciennes commandes dès qu'elles sont rangées dans un groupe.
+    walker = getattr(cog, "walk_commands", None)
+    source = list(walker()) if walker else cog.get_commands()
+    cmds = [c for c in source if not c.hidden]
     return cmds if is_staff else [c for c in cmds if not is_staff_command(c)]
 
 
@@ -109,8 +121,8 @@ def build_help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str,
     e.add_field(
         name="ℹ️ Bon à savoir",
         value=(
-            f"**{visible_total} commande(s)** disponibles pour vous, en `/` ou avec le préfixe `{prefix}` "
-            f"(les deux fonctionnent toujours, sans exception).\n"
+            f"**{visible_total} commande(s)** disponibles pour vous. Toutes fonctionnent avec le "
+            f"préfixe `{prefix}` ; celles marquées `/ ou {prefix}` fonctionnent aussi en slash.\n"
             f"Astuce : `/sentrix <question>` répond à n'importe quelle question avec une jauge de confiance."
         ),
         inline=False,
@@ -445,6 +457,90 @@ class Utility(commands.Cog, name="Utility"):
         e.add_field(name="Humains", value=humans, inline=True)
         e.add_field(name="Bots", value=bots, inline=True)
         await ctx.send(embed=e)
+
+    @commands.hybrid_command(
+        name="addemoji",
+        aliases=["add-emoji"],
+        description="Ajouter un emoji personnalisé au serveur depuis une URL d'image.",
+        with_app_command=False,
+    )
+    @app_commands.describe(nom="Nom du nouvel emoji", url="URL HTTPS directe de l'image")
+    @checks.has_permission("manage_emojis_and_stickers")
+    async def addemoji(self, ctx: commands.Context, nom: str, url: str):
+        if not ctx.guild:
+            return await ctx.send(embed=await self._embed(None, title="Commande indisponible", description="Cette commande doit être utilisée sur un serveur.", kind="danger"))
+        if not ctx.guild.me.guild_permissions.manage_emojis_and_stickers:
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Le bot doit avoir la permission **Gérer les emojis et stickers**.", kind="danger"))
+
+        nom = nom.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{2,32}", nom):
+            return await ctx.send(embed=await self._embed(
+                ctx.guild.id,
+                title="Nom invalide",
+                description="Le nom doit contenir entre 2 et 32 caractères : lettres, chiffres ou tiret bas uniquement.",
+                kind="danger",
+            ))
+
+        async def validate_public_https(candidate: str) -> str:
+            parsed = urlparse(candidate)
+            if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError("Utilisez une URL HTTPS publique et directe.")
+            loop = asyncio.get_running_loop()
+            try:
+                addresses = await loop.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+            except socket.gaierror as exc:
+                raise ValueError("Le domaine de cette URL est introuvable.") from exc
+            for info in addresses:
+                ip = ipaddress.ip_address(info[4][0])
+                if not ip.is_global:
+                    raise ValueError("Cette URL pointe vers une adresse privée ou non autorisée.")
+            return candidate
+
+        try:
+            current_url = await validate_public_https(url.strip())
+            timeout = aiohttp.ClientTimeout(total=12)
+            image_data = None
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                for _ in range(4):
+                    async with session.get(current_url, allow_redirects=False, headers={"User-Agent": "SentriX-EmojiImporter/1.0"}) as response:
+                        if 300 <= response.status < 400 and response.headers.get("Location"):
+                            current_url = await validate_public_https(urljoin(current_url, response.headers["Location"]))
+                            continue
+                        if response.status != 200:
+                            raise ValueError(f"Le serveur de l'image a répondu avec le code {response.status}.")
+                        content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+                        if content_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"}:
+                            raise ValueError("Le lien doit mener directement vers une image PNG, JPG, GIF ou WebP.")
+                        declared_size = int(response.headers.get("Content-Length", "0") or 0)
+                        if declared_size > 256 * 1024:
+                            raise ValueError("L'image dépasse la limite de 256 Ko pour un emoji Discord.")
+                        image_data = await response.content.read(256 * 1024 + 1)
+                        if len(image_data) > 256 * 1024:
+                            raise ValueError("L'image dépasse la limite de 256 Ko pour un emoji Discord.")
+                        break
+                if image_data is None:
+                    raise ValueError("Le lien contient trop de redirections.")
+
+            emoji = await ctx.guild.create_custom_emoji(
+                name=nom,
+                image=image_data,
+                reason=f"Emoji ajouté par {ctx.author} avec +addemoji",
+            )
+        except ValueError as exc:
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Image refusée", description=str(exc), kind="danger"))
+        except asyncio.TimeoutError:
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Téléchargement impossible", description="Le serveur de l'image met trop de temps à répondre.", kind="danger"))
+        except discord.Forbidden:
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Création refusée", description="Discord refuse la création. Vérifiez la permission et la position du rôle du bot.", kind="danger"))
+        except (aiohttp.ClientError, discord.HTTPException) as exc:
+            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Création impossible", description=f"Discord ou le serveur de l'image a refusé la demande : {exc}", kind="danger"))
+
+        await ctx.send(embed=await self._embed(
+            ctx.guild.id,
+            title="Emoji ajouté",
+            description=f"{emoji} a été créé sous le nom `:{emoji.name}:`.",
+            kind="success",
+        ))
 
     @commands.hybrid_command(name="emoji-list", description="Lister les emojis du serveur.", with_app_command=False)
     async def emoji_list(self, ctx: commands.Context):
