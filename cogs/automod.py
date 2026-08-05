@@ -395,7 +395,7 @@ class AutoMod(commands.Cog, name="Automod"):
         total_24h = sum(stats_by_filter.values())
 
         e = embeds.brand(
-            "🛡️ État de l'AutoMod",
+            "État de l'AutoMod",
             f"**{total_24h}** action(s) déclenchée(s) sur les dernières 24h. "
             f"Escalade automatique : {'ACTIVE' if (conf and conf['escalation']) else 'INACTIVE'} "
             f"(`/automod-escalation`).",
@@ -411,7 +411,7 @@ class AutoMod(commands.Cog, name="Automod"):
         exempt_rows = await self.bot.db.list_automod_exempt_roles(ctx.guild.id)
         if exempt_rows:
             mentions = ", ".join(f"<@&{r['role_id']}>" for r in exempt_rows)
-            e.add_field(name="🛡️ Rôles exemptés", value=mentions, inline=False)
+            e.add_field(name="Rôles exemptés", value=mentions, inline=False)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(
@@ -439,7 +439,7 @@ class AutoMod(commands.Cog, name="Automod"):
             for field, label in AUTOMOD_TOGGLE_LABELS.items()
         ]
         e = embeds.brand(
-            "🛡️ Diagnostic de sécurité",
+            "Diagnostic de sécurité",
             "Ce diagnostic vérifie les réglages enregistrés et les permissions réellement "
             "accordées au bot. Une permission manquante empêche la protection associée.",
         )
