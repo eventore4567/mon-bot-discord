@@ -499,13 +499,17 @@ class Utility(commands.Cog, name="Utility"):
         # Discord transmet un emoji personnalisé collé sous la forme
         # <:nom:identifiant> ou <a:nom:identifiant>. On récupère automatiquement
         # son nom et son image CDN, sans demander d'URL à l'utilisateur.
+        source_is_animated = False
         pasted_emoji = re.fullmatch(r"<(a?):([A-Za-z0-9_]{2,32}):([0-9]+)>", nom)
         if pasted_emoji:
             animated = bool(pasted_emoji.group(1))
+            source_is_animated = animated
             nom = pasted_emoji.group(2)
             emoji_id = pasted_emoji.group(3)
             extension = "gif" if animated else "png"
-            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}?size=128&quality=lossless"
+            # Une copie GIF en 64x64 conserve l'animation tout en restant largement
+            # sous la limite de poids imposée par Discord.
+            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}?size=64"
         else:
             # Un emoji Unicode normal (ex: 🧟‍♂️) n'a pas d'URL Discord. Twemoji
             # fournit sa représentation PNG à partir de la suite de points de code.
@@ -559,6 +563,7 @@ class Utility(commands.Cog, name="Utility"):
                     raise ValueError("Le fichier joint doit être une image PNG, JPG, GIF ou WebP.")
                 if attachment.size > 256 * 1024:
                     raise ValueError("L'image jointe dépasse la limite de 256 Ko pour un emoji Discord.")
+                source_is_animated = content_type == "image/gif" or extension == "gif"
                 image_data = await attachment.read()
             elif url:
                 current_url = await validate_public_https(url.strip())
@@ -580,6 +585,7 @@ class Utility(commands.Cog, name="Utility"):
                             image_data = await response.content.read(256 * 1024 + 1)
                             if len(image_data) > 256 * 1024:
                                 raise ValueError("L'image dépasse la limite de 256 Ko pour un emoji Discord.")
+                            source_is_animated = source_is_animated or content_type == "image/gif"
                             break
                     if image_data is None:
                         raise ValueError("Le lien contient trop de redirections.")
@@ -587,6 +593,11 @@ class Utility(commands.Cog, name="Utility"):
                 raise ValueError(
                     "Joignez une image au message ou ajoutez une URL HTTPS après le nom. "
                     "Exemple : +addemoji sourire"
+                )
+
+            if source_is_animated and (not image_data or not image_data.startswith((b"GIF87a", b"GIF89a"))):
+                raise ValueError(
+                    "Discord n'a pas renvoyé un vrai GIF animé. Réessayez en collant directement l'emoji animé."
                 )
 
             emoji = await ctx.guild.create_custom_emoji(
