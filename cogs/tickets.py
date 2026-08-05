@@ -828,6 +828,11 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- LOGS
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed, log_channel_id: int | None = None):
+        """Priorité 1 : salon dédié à CE type de ticket (+ticketlogs), inchangé — reste
+        indépendant du réglage général ci-dessous, c'est un choix explicite déjà fait par
+        un admin. Priorité 2 (repli) : catégorie "tickets" de /logsetup (utils/log_service),
+        qui reprend automatiquement l'ancien réglage `ticket_log_channel` au premier accès
+        (migration non destructive — voir log_service._migrate_from_legacy)."""
         if log_channel_id:
             channel = guild.get_channel(log_channel_id)
             if channel:
@@ -836,17 +841,8 @@ class Tickets(commands.Cog):
                     return
                 except discord.HTTPException:
                     pass
-        conf = await self.bot.db.get_guild_config(guild.id)
-        fallback_id = conf["ticket_log_channel"] if conf else None
-        if fallback_id:
-            channel = guild.get_channel(fallback_id)
-            if channel:
-                try:
-                    await channel.send(embed=embed)
-                    return
-                except discord.HTTPException:
-                    pass
-        await helpers.send_log(self.bot, guild, "moderation", embed)
+        from utils import log_service
+        await log_service.send_log(self.bot, guild, "tickets", embed)
 
     # ---------------------------------------------------------------- OUVERTURE
 

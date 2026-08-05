@@ -6,8 +6,9 @@ import discord
 
 logger = logging.getLogger("bot")
 
-# Colonnes de guild_config pour chaque type de log spécialisé, avec repli sur le
-# salon de logs général (log_channel) si le salon dédié n'est pas configuré.
+# Historique (pré-refonte logs indépendants) : colonnes de guild_config pour chaque type
+# de log spécialisé. N'est plus utilisé par send_log() ci-dessous (voir utils/log_service.py
+# et sa migration automatique depuis ces mêmes colonnes) — conservé pour référence/lecture.
 LOG_KIND_COLUMNS = {
     "messages": "log_messages",
     "members": "log_members",
@@ -20,47 +21,14 @@ LOG_KIND_COLUMNS = {
 
 
 async def send_log(bot, guild: discord.Guild, kind: str, embed: discord.Embed) -> None:
-    """Envoie un embed de log dans le salon dédié à `kind` (messages/members/voice/roles/
-    server/automod/moderation), avec repli automatique sur le salon de logs général
-    (log_channel) si ce salon spécifique n'est pas configuré. Utilisé partout dans le bot
-    pour que le système de logs reste cohérent, que /create-logs ait été utilisé ou non.
-
-    En cas d'échec (salon supprimé, permissions manquantes...), rien n'est visible côté
-    Discord puisqu'il n'y a personne à qui répondre : on trace donc l'échec dans les logs
-    du process (visibles dans Railway) pour pouvoir diagnostiquer via /logs-status."""
-    conf = await bot.db.get_guild_config(guild.id)
-    if not conf:
-        return
-    column = LOG_KIND_COLUMNS.get(kind)
-    channel_id = conf[column] if column and conf[column] else conf["log_channel"]
-    if not channel_id:
-        return
-    channel = guild.get_channel(channel_id)
-    if not channel:
-        logger.warning(
-            "send_log: salon %s introuvable pour le log '%s' sur %s (%s) — probablement supprimé, refaire /create-logs.",
-            channel_id, kind, guild.name, guild.id,
-        )
-        return
-    perms = channel.permissions_for(guild.me)
-    if not (perms.view_channel and perms.send_messages):
-        logger.warning(
-            "send_log: permissions manquantes dans #%s pour le log '%s' sur %s (%s) (view=%s, send=%s).",
-            channel.name, kind, guild.name, guild.id, perms.view_channel, perms.send_messages,
-        )
-        return
-    try:
-        await channel.send(embed=embed)
-    except discord.Forbidden:
-        logger.warning(
-            "send_log: Forbidden en envoyant le log '%s' dans #%s sur %s (%s).",
-            kind, channel.name, guild.name, guild.id,
-        )
-    except discord.HTTPException as exc:
-        logger.warning(
-            "send_log: échec HTTP en envoyant le log '%s' dans #%s sur %s (%s) : %s.",
-            kind, channel.name, guild.name, guild.id, exc,
-        )
+    """Compatibilité : délègue désormais entièrement à utils/log_service.py (refonte des
+    logs indépendants on/off — voir ce fichier pour la logique réelle). Signature et
+    comportement d'appel INCHANGÉS pour tous les appelants existants (configuration.py,
+    automod.py, moderation.py, events.py, security_tools.py, tickets.py...) : aucun de
+    ces fichiers n'a besoin d'être modifié pour bénéficier du nouveau système on/off,
+    puisque `kind` correspond exactement à un `log_type` de log_service.LOG_TYPES."""
+    from utils import log_service
+    await log_service.send_log(bot, guild, kind, embed)
 
 DURATION_RE = re.compile(r"(\d+)\s*(s|sec|m|min|h|heure|heures|j|jour|jours|d|w|sem|semaine)", re.IGNORECASE)
 

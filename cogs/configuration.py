@@ -36,7 +36,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import embeds, checks, helpers
+from utils import embeds, checks, helpers, log_service
 from cogs.automod import AUTOMOD_TOGGLE_LABELS, SECURITY_PRESETS
 from database.db import MANAGER_CATEGORIES
 # Le système de tickets (panels/types/formulaires) est entièrement géré depuis cogs/tickets.py
@@ -258,6 +258,157 @@ class Configuration(commands.Cog):
         else:
             e.add_field(name="Résultat", value="Tous les logs configurés fonctionnent correctement. ✅", inline=False)
         await ctx.send(embed=e)
+
+    # ================================================================== LOGS INDÉPENDANTS (/logsetup)
+    #
+    # Refonte demandée par Jayden : chaque catégorie de log peut désormais être activée/
+    # désactivée indépendamment, avec son propre salon — voir utils/log_service.py pour le
+    # catalogue complet (13 catégories) et la logique de migration non destructive depuis
+    # l'ancien système (aucune configuration existante n'est perdue ni remplacée).
+    #
+    # Granularité : une "catégorie" du panneau correspond à un seul `log_type` (voir
+    # log_service.LOG_TYPES) — ce n'est PAS encore un contrôle événement par événement
+    # (ex: "message supprimé" et "message modifié" partagent le même réglage "Messages").
+    # Descendre à ce niveau de détail nécessiterait de retoucher chaque listener un par un ;
+    # ce n'est pas fait dans cette phase pour ne pas risquer de casser des listeners déjà
+    # fonctionnels. Le panneau l'indique honnêtement (colonne "Émis actuellement").
+
+    async def _build_logs_home(self, guild_id: int) -> tuple[discord.Embed, "LogsSetupView"]:
+        all_settings = await log_service.get_all_log_settings(self.bot, guild_id)
+        active = sum(1 for s in all_settings.values() if s["enabled"])
+        disabled = len(all_settings) - active
+        incomplete = sum(1 for log_type, s in all_settings.items() if not s["enabled"] and s["channel_id"])
+        conf = await self.bot.db.get_guild_config(guild_id)
+        error_channel_id = conf["error_channel"] if conf else None
+        guild_obj = self.bot.get_guild(guild_id)
+        error_channel = guild_obj.get_channel(error_channel_id) if (guild_obj and error_channel_id) else None
+
+        e = embeds.brand(
+            "📋 Configuration des logs SentriX",
+            "Choisissez une catégorie ci-dessous pour l'activer/la désactiver et choisir son salon.",
+        )
+        e.add_field(name="Logs actifs", value=str(active), inline=True)
+        e.add_field(name="Logs désactivés", value=str(disabled), inline=True)
+        e.add_field(name="Salons configurés mais désactivés", value=str(incomplete), inline=True)
+        e.add_field(name="Salon d'erreurs", value=error_channel.mention if error_channel else "Non configuré", inline=False)
+        view = LogsSetupView(self, author_id=None, guild_id=guild_id)
+        return e, view
+
+    @commands.hybrid_command(
+        name="logsetup",
+        description="Configurer chaque type de log séparément (activer/désactiver, choisir le salon, tester).",
+        with_app_command=False,  # budget de commandes slash très serré (voir +createrole/+levelcheck) — reste en préfixe
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    async def logsetup(self, ctx: commands.Context):
+        e, view = await self._build_logs_home(ctx.guild.id)
+        view.author_id = ctx.author.id
+        msg = await ctx.send(embed=e, view=view)
+        view.message = msg
+
+    @commands.hybrid_group(name="logs", description="Commandes rapides pour les logs (voir aussi +logsetup pour le panneau complet).", with_app_command=False)
+    @checks.is_owner_or_admin_for("configuration")
+    async def logs_group(self, ctx: commands.Context):
+        if ctx.invoked_subcommand is None:
+            await ctx.send(embed=embeds.info("Sous-commandes : `+logs enable`, `+logs disable`, `+logs channel`, `+logs test`, `+logs status`, `+logs list`, `+logs reset`. Ou utilisez `+logsetup` pour le panneau interactif."))
+
+    def _resolve_log_type(self, value: str) -> str | None:
+        value = value.strip().lower().replace("-", "_")
+        if value in log_service.LOG_TYPES:
+            return value
+        # Alias pratiques vus dans la demande de Jayden (ex: "ban", "ticket_open").
+        aliases = {
+            "ban": "moderation", "unban": "moderation", "kick": "moderation", "warn": "moderation", "mute": "moderation",
+            "ticket_open": "tickets", "ticket_close": "tickets", "ticket": "tickets",
+            "ai_request": "ai", "message_delete": "messages", "message_edit": "messages",
+            "security": "automod", "antiraid": "automod", "antinuke": "automod",
+        }
+        return aliases.get(value)
+
+    @logs_group.command(name="enable", description="Activer un type de log (nécessite un salon déjà configuré, ou fourni ici).", with_app_command=False)
+    async def logs_enable(self, ctx: commands.Context, type_log: str, salon: discord.TextChannel = None):
+        log_type = self._resolve_log_type(type_log)
+        if not log_type:
+            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+        if salon:
+            ok, reason = log_service.validate_channel(ctx.guild, salon.id)
+            if not ok:
+                return await ctx.send(embed=embeds.error(f"Impossible d'utiliser {salon.mention} : {reason}."))
+            await log_service.set_log_channel(self.bot, ctx.guild.id, log_type, salon.id)
+        try:
+            await log_service.set_log_enabled(self.bot, ctx.guild.id, log_type, True)
+        except ValueError:
+            return await ctx.send(embed=embeds.error(
+                "❌ Vous devez d'abord choisir un salon valide avant d'activer ce log "
+                f"(`+logs channel {type_log} #salon` ou `+logs enable {type_log} #salon`)."
+            ))
+        label = log_service.LOG_TYPES[log_type]["label"]
+        await ctx.send(embed=embeds.success(f"Log **{label}** activé."))
+
+    @logs_group.command(name="disable", description="Désactiver un type de log.", with_app_command=False)
+    async def logs_disable(self, ctx: commands.Context, type_log: str):
+        log_type = self._resolve_log_type(type_log)
+        if not log_type:
+            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+        await log_service.set_log_enabled(self.bot, ctx.guild.id, log_type, False)
+        label = log_service.LOG_TYPES[log_type]["label"]
+        await ctx.send(embed=embeds.success(f"Log **{label}** désactivé."))
+
+    @logs_group.command(name="channel", description="Définir le salon d'un type de log (sans l'activer automatiquement).", with_app_command=False)
+    async def logs_channel(self, ctx: commands.Context, type_log: str, salon: discord.TextChannel):
+        log_type = self._resolve_log_type(type_log)
+        if not log_type:
+            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+        ok, reason = log_service.validate_channel(ctx.guild, salon.id)
+        if not ok:
+            return await ctx.send(embed=embeds.error(f"Impossible d'utiliser {salon.mention} : {reason}."))
+        await log_service.set_log_channel(self.bot, ctx.guild.id, log_type, salon.id)
+        label = log_service.LOG_TYPES[log_type]["label"]
+        await ctx.send(embed=embeds.success(f"Salon du log **{label}** défini sur {salon.mention}. Utilisez `+logs enable {type_log}` pour l'activer."))
+
+    @logs_group.command(name="test", description="Envoyer un message de test dans le salon d'un type de log.", with_app_command=False)
+    async def logs_test(self, ctx: commands.Context, type_log: str):
+        log_type = self._resolve_log_type(type_log)
+        if not log_type:
+            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+        ok, message = await log_service.send_test_log(self.bot, ctx.guild, log_type, ctx.author)
+        await ctx.send(embed=(embeds.success(message) if ok else embeds.error(message)))
+
+    @logs_group.command(name="status", description="Voir l'état d'un type de log précis.", with_app_command=False)
+    async def logs_status_one(self, ctx: commands.Context, type_log: str):
+        log_type = self._resolve_log_type(type_log)
+        if not log_type:
+            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+        setting = await log_service.get_log_setting(self.bot, ctx.guild.id, log_type)
+        meta = log_service.LOG_TYPES[log_type]
+        e = embeds.neutral(f"📋 {meta['label']}")
+        e.add_field(name="État", value="🟢 Activé" if setting["enabled"] else "⚪ Désactivé", inline=True)
+        channel = ctx.guild.get_channel(setting["channel_id"]) if setting["channel_id"] else None
+        e.add_field(name="Salon", value=channel.mention if channel else "Non configuré", inline=True)
+        e.add_field(name="Émis actuellement par le bot", value="✅ Oui" if meta["emits"] else "⚠️ Pas encore (configuration prête, événement pas encore câblé)", inline=False)
+        await ctx.send(embed=e)
+
+    @logs_group.command(name="list", description="Lister tous les types de logs disponibles et leur état.", with_app_command=False)
+    async def logs_list(self, ctx: commands.Context):
+        all_settings = await log_service.get_all_log_settings(self.bot, ctx.guild.id)
+        lines = []
+        for category, types in log_service.categories_with_types().items():
+            for log_type in types:
+                s = all_settings[log_type]
+                status = "🟢" if s["enabled"] else "⚪"
+                lines.append(f"{status} `{log_type}` — {log_service.LOG_TYPES[log_type]['label']}")
+        e = embeds.neutral("📋 Types de logs disponibles", "\n".join(lines))
+        await ctx.send(embed=e)
+
+    @logs_group.command(name="reset", description="[Admin] Réinitialiser un type de log (désactivé, sans salon).", with_app_command=False)
+    async def logs_reset(self, ctx: commands.Context, type_log: str):
+        log_type = self._resolve_log_type(type_log)
+        if not log_type:
+            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+        await log_service.set_log_enabled(self.bot, ctx.guild.id, log_type, False)
+        await log_service.set_log_channel(self.bot, ctx.guild.id, log_type, None)
+        label = log_service.LOG_TYPES[log_type]["label"]
+        await ctx.send(embed=embeds.success(f"Log **{label}** réinitialisé (désactivé, aucun salon)."))
 
     @commands.hybrid_command(name="setwelcomechannel", description="Définir le salon de bienvenue.", with_app_command=False)
     @app_commands.describe(salon="Le salon de bienvenue")
@@ -1263,6 +1414,154 @@ class SetupNavButton(
         if cog is None:
             return await interaction.response.send_message("❌ Le module de configuration n'est pas chargé.", ephemeral=True)
         await cog.handle_setup_nav(interaction, self.action, self.message_id)
+
+
+class LogsSetupView(discord.ui.View):
+    """Panneau de +logsetup — deux états dans une seule vue : liste des catégories
+    (self.current_type is None), ou détail d'une catégorie précise (Activer/Désactiver,
+    Choisir le salon, Tester, Retour). Verrouillée à l'auteur de la commande."""
+
+    def __init__(self, cog: "Configuration", *, author_id: int | None, guild_id: int, timeout: float = 300):
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.author_id = author_id
+        self.guild_id = guild_id
+        self.current_type: str | None = None
+        self.message: discord.Message | None = None
+        self._render_home()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.author_id is not None and interaction.user.id != self.author_id:
+            await interaction.response.send_message(embed=embeds.error("Vous n'êtes pas autorisé à utiliser ce panneau."), ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self):
+        if self.message:
+            try:
+                await self.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+
+    # ---------------------------------------------------------------- ÉTAT : ACCUEIL
+
+    def _render_home(self):
+        self.clear_items()
+        options = []
+        for category, types in log_service.categories_with_types().items():
+            log_type = types[0]  # 1 catégorie == 1 type de log dans cette version
+            options.append(discord.SelectOption(
+                label=category, value=log_type,
+                description=log_service.LOG_TYPES[log_type]["label"][:100],
+            ))
+        select = discord.ui.Select(placeholder="📂 Choisir une catégorie de logs...", options=options, row=0)
+        select.callback = self._make_category_callback(select)
+        self.add_item(select)
+        close_btn = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.secondary, emoji="❌", row=1)
+        close_btn.callback = self._close_clicked
+        self.add_item(close_btn)
+
+    def _make_category_callback(self, select: discord.ui.Select):
+        async def callback(interaction: discord.Interaction):
+            self.current_type = select.values[0]
+            await self._refresh(interaction)
+        return callback
+
+    async def _close_clicked(self, interaction: discord.Interaction):
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    # ---------------------------------------------------------------- ÉTAT : DÉTAIL D'UN TYPE
+
+    async def _render_detail(self, guild: discord.Guild) -> discord.Embed:
+        self.clear_items()
+        log_type = self.current_type
+        meta = log_service.LOG_TYPES[log_type]
+        setting = await log_service.get_log_setting(self.cog.bot, guild.id, log_type)
+
+        e = embeds.neutral(f"📝 {meta['label']}")
+        e.add_field(name="État", value="🟢 Activé" if setting["enabled"] else "⚪ Désactivé", inline=True)
+        channel = guild.get_channel(setting["channel_id"]) if setting["channel_id"] else None
+        e.add_field(name="Salon", value=channel.mention if channel else "Non configuré", inline=True)
+        if not meta["emits"]:
+            e.add_field(
+                name="⚠️ À savoir",
+                value="Cette catégorie est configurable, mais aucun événement du bot ne l'utilise encore pour envoyer un log automatiquement.",
+                inline=False,
+            )
+        if log_type == "messages":
+            e.add_field(name="Inclure le contenu", value="Oui" if setting["include_content"] else "Non", inline=True)
+            e.add_field(name="Inclure les pièces jointes", value="Oui" if setting["include_attachments"] else "Non", inline=True)
+            e.add_field(name="Inclure l'auteur", value="Oui" if setting["include_actor"] else "Non", inline=True)
+
+        toggle_btn = discord.ui.Button(
+            label="Désactiver" if setting["enabled"] else "Activer",
+            style=discord.ButtonStyle.danger if setting["enabled"] else discord.ButtonStyle.success,
+            emoji="🔴" if setting["enabled"] else "🟢", row=0,
+        )
+        toggle_btn.callback = self._toggle_clicked
+        self.add_item(toggle_btn)
+
+        test_btn = discord.ui.Button(label="Tester", style=discord.ButtonStyle.secondary, emoji="🧪", row=0)
+        test_btn.callback = self._test_clicked
+        self.add_item(test_btn)
+
+        back_btn = discord.ui.Button(label="Retour", style=discord.ButtonStyle.secondary, emoji="◀", row=0)
+        back_btn.callback = self._back_clicked
+        self.add_item(back_btn)
+
+        channel_select = discord.ui.ChannelSelect(
+            placeholder="📁 Choisir le salon pour ce log...", channel_types=[discord.ChannelType.text], row=1,
+        )
+        channel_select.callback = self._make_channel_callback(channel_select)
+        self.add_item(channel_select)
+
+        return e
+
+    def _make_channel_callback(self, select: discord.ui.ChannelSelect):
+        async def callback(interaction: discord.Interaction):
+            salon = select.values[0]
+            resolved = interaction.guild.get_channel(salon.id) if hasattr(salon, "id") else salon
+            channel_id = resolved.id if resolved else None
+            ok, reason = log_service.validate_channel(interaction.guild, channel_id)
+            if not ok:
+                return await interaction.response.send_message(embed=embeds.error(f"Impossible d'utiliser ce salon : {reason}."), ephemeral=True)
+            await log_service.set_log_channel(self.cog.bot, interaction.guild.id, self.current_type, channel_id)
+            await self._refresh(interaction)
+        return callback
+
+    async def _toggle_clicked(self, interaction: discord.Interaction):
+        setting = await log_service.get_log_setting(self.cog.bot, interaction.guild.id, self.current_type)
+        if not setting["enabled"]:
+            try:
+                await log_service.set_log_enabled(self.cog.bot, interaction.guild.id, self.current_type, True)
+            except ValueError:
+                return await interaction.response.send_message(
+                    embed=embeds.error("❌ Vous devez d'abord choisir un salon valide avant d'activer ce log."),
+                    ephemeral=True,
+                )
+        else:
+            await log_service.set_log_enabled(self.cog.bot, interaction.guild.id, self.current_type, False)
+        await self._refresh(interaction)
+
+    async def _test_clicked(self, interaction: discord.Interaction):
+        ok, message = await log_service.send_test_log(self.cog.bot, interaction.guild, self.current_type, interaction.user)
+        await interaction.response.send_message(embed=(embeds.success(message) if ok else embeds.error(message)), ephemeral=True)
+
+    async def _back_clicked(self, interaction: discord.Interaction):
+        self.current_type = None
+        self._render_home()
+        e, _ = await self.cog._build_logs_home(self.guild_id)
+        await interaction.response.edit_message(embed=e, view=self)
+
+    async def _refresh(self, interaction: discord.Interaction):
+        e = await self._render_detail(interaction.guild)
+        if interaction.response.is_done():
+            await interaction.edit_original_response(embed=e, view=self)
+        else:
+            await interaction.response.edit_message(embed=e, view=self)
 
 
 class SetupLockPromptView(discord.ui.View):
