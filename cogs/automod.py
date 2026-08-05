@@ -184,15 +184,11 @@ class AutoMod(commands.Cog, name="Automod"):
         messages par AutoMod en testant un mot interdit, par exemple."""
         if not isinstance(member, discord.Member):
             return False
-        if member.guild_permissions.administrator:
+        # La sécurité doit aussi protéger contre un compte staff/admin compromis.
+        # Seuls le propriétaire du serveur, le propriétaire du bot et les rôles
+        # explicitement ajoutés à la liste d'exemption échappent aux filtres.
+        if member.id == member.guild.owner_id or member.id in config.OWNER_IDS:
             return True
-        if member.id in config.OWNER_IDS:
-            return True
-        conf = await self.bot.db.get_guild_config(member.guild.id)
-        if conf and conf["mod_role"]:
-            role = member.guild.get_role(conf["mod_role"])
-            if role and role in member.roles:
-                return True
         exempt_ids = await self.get_exempt_roles_cached(member.guild.id)
         if exempt_ids and any(r.id in exempt_ids for r in member.roles):
             return True
@@ -417,6 +413,48 @@ class AutoMod(commands.Cog, name="Automod"):
         if exempt_rows:
             mentions = ", ".join(f"<@&{r['role_id']}>" for r in exempt_rows)
             e.add_field(name="🛡️ Rôles exemptés", value=mentions, inline=False)
+        await ctx.send(embed=e)
+
+    @commands.hybrid_command(
+        name="security-check",
+        description="Diagnostiquer la configuration et les permissions du système de sécurité.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("securite")
+    async def security_check(self, ctx: commands.Context):
+        conf = await self.bot.db.get_automod(ctx.guild.id)
+        me = ctx.guild.me
+        perms = me.guild_permissions
+        required = {
+            "Gérer les messages": perms.manage_messages,
+            "Voir les logs d'audit": perms.view_audit_log,
+            "Exclure des membres": perms.kick_members,
+            "Bannir des membres": perms.ban_members,
+            "Modérer les membres": perms.moderate_members,
+            "Gérer les rôles": perms.manage_roles,
+            "Gérer les salons": perms.manage_channels,
+        }
+        permission_lines = [f"{'✅' if ok else '❌'} {name}" for name, ok in required.items()]
+        filter_lines = [
+            f"{'✅' if conf and conf[field] else '❌'} {label}"
+            for field, label in AUTOMOD_TOGGLE_LABELS.items()
+        ]
+        e = embeds.brand(
+            "🛡️ Diagnostic de sécurité",
+            "Ce diagnostic vérifie les réglages enregistrés et les permissions réellement "
+            "accordées au bot. Une permission marquée ❌ empêche la protection associée.",
+        )
+        e.add_field(name="Protections", value="\n".join(filter_lines), inline=False)
+        e.add_field(name="Permissions du bot", value="\n".join(permission_lines), inline=False)
+        e.add_field(
+            name="Test conseillé",
+            value=(
+                "Utilisez `+security-level eleve`, puis testez avec un compte qui n'est pas "
+                "propriétaire du serveur. Le propriétaire reste toujours exempté pour éviter "
+                "qu'un mauvais réglage ne le bloque."
+            ),
+            inline=False,
+        )
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="automod-escalation", description="Activer/désactiver l'escalade automatique des sanctions AutoMod.", with_app_command=False)
@@ -796,7 +834,12 @@ class AutoMod(commands.Cog, name="Automod"):
         return None
 
     async def is_antinuke_exempt(self, guild: discord.Guild, actor: discord.abc.User) -> bool:
-        if actor is None or actor.bot:
+        # Sans auteur fiable dans l'audit log, ne sanctionne personne au hasard.
+        if actor is None:
+            return True
+        # Le bot SentriX peut effectuer des actions légitimes. En revanche, les autres
+        # bots ne sont plus exemptés automatiquement : un bot malveillant peut nuker.
+        if self.bot.user and actor.id == self.bot.user.id:
             return True
         if actor.id == guild.owner_id:
             return True
