@@ -53,40 +53,6 @@ INTENTS.message_content = True
 INTENTS.voice_states = True
 
 
-class SentriXContext(commands.Context):
-    """Context personnalisé utilisé pour TOUTES les commandes texte (préfixe +) du bot.
-
-    Demande explicite : quand quelqu'un tape une commande texte, la réponse du bot doit
-    être visiblement liée à son message (comme une "réponse" Discord, avec la petite
-    flèche), et pinguer la personne SANS avoir besoin d'un @mention écrit dans le texte —
-    sinon, sur un salon actif, on ne sait plus à quel message le bot répond.
-
-    Les commandes SLASH (interaction) ne sont pas concernées : Discord affiche déjà
-    nativement "SentriX a utilisé /commande" au-dessus de la réponse, donc le lien est
-    déjà visible sans rien faire de plus — voir la condition `self.interaction is None`
-    ci-dessous, qui limite ce comportement aux commandes préfixées uniquement."""
-
-    async def send(self, *args, **kwargs):
-        if self.interaction is None and self.message is not None and "reference" not in kwargs:
-            kwargs["reference"] = discord.MessageReference(
-                message_id=self.message.id,
-                channel_id=self.channel.id,
-                guild_id=self.guild.id if self.guild else None,
-                fail_if_not_exists=False,
-            )
-            kwargs.setdefault("mention_author", True)
-        try:
-            return await super().send(*args, **kwargs)
-        except discord.HTTPException:
-            # Filet de sécurité : si la réponse en tant que "réponse à un message" échoue
-            # pour une raison quelconque (message d'origine supprimé entre-temps, par
-            # exemple par +clear, permissions insuffisantes...), on retombe sur un envoi
-            # normal plutôt que de faire planter la commande.
-            kwargs.pop("reference", None)
-            kwargs.pop("mention_author", None)
-            return await super().send(*args, **kwargs)
-
-
 async def get_prefix(bot: "BotAllInOne", message: discord.Message):
     default = config.DEFAULT_PREFIX
     if message.guild is None:
@@ -247,14 +213,10 @@ class BotAllInOne(commands.Bot):
             raise commands.CommandOnCooldown(bucket, retry_after, commands.BucketType.user)
         return True
 
-    async def get_context(self, message, *, cls=SentriXContext):
+    async def get_context(self, message, *, cls=commands.Context):
         """Ajoute la résolution des alias de commandes (/alias, cog Owner) : si le mot tapé
         après le préfixe ne correspond à aucune commande connue, on regarde si c'est un alias
-        configuré sur ce serveur et, si oui, on redirige vers la vraie commande.
-
-        cls=SentriXContext par défaut (au lieu de commands.Context) : voir la classe
-        SentriXContext plus haut — fait que chaque réponse à une commande texte soit
-        visuellement liée au message qui l'a déclenchée (réponse Discord + ping)."""
+        configuré sur ce serveur et, si oui, on redirige vers la vraie commande."""
         ctx = await super().get_context(message, cls=cls)
         if ctx.command is None and ctx.guild is not None and ctx.invoked_with:
             row = await self.db.get_alias(ctx.guild.id, ctx.invoked_with.lower())
