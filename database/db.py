@@ -11,6 +11,13 @@ import os
 import sqlite3
 import time
 
+# Créateur principal vérifié de SentriX. Ces informations sont recopiées dans la table
+# bot_creators au démarrage afin que l'identité et les permissions ne dépendent pas
+# uniquement de variables d'environnement éphémères.
+PRIMARY_CREATOR_ID = 1355855757991481475
+PRIMARY_CREATOR_DISPLAY_NAME = "Tomioka"
+PRIMARY_CREATOR_USERNAME = "master132013"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS guild_config (
     guild_id INTEGER PRIMARY KEY,
@@ -451,6 +458,16 @@ CREATE TABLE IF NOT EXISTS command_blacklist (
 CREATE TABLE IF NOT EXISTS bot_settings (
     key TEXT PRIMARY KEY,
     value TEXT
+);
+
+-- Identité persistante du/des créateur(s) officiel(s) de SentriX. Le contrôle des
+-- permissions repose sur l'ID Discord numérique, jamais sur un pseudo modifiable.
+CREATE TABLE IF NOT EXISTS bot_creators (
+    user_id INTEGER PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    added_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS command_aliases (
@@ -1049,6 +1066,18 @@ class Database:
         await self._conn.executescript(GAME_TRANSACTIONS_SCHEMA)
         await self._conn.executescript(LOG_SETTINGS_SCHEMA)
         await self._migrate()
+        await self._conn.execute(
+            "INSERT INTO bot_creators (user_id, display_name, username, is_primary, added_at) "
+            "VALUES (?, ?, ?, 1, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET "
+            "display_name = excluded.display_name, username = excluded.username, is_primary = 1",
+            (
+                PRIMARY_CREATOR_ID,
+                PRIMARY_CREATOR_DISPLAY_NAME,
+                PRIMARY_CREATOR_USERNAME,
+                now(),
+            ),
+        )
         await self._conn.commit()
 
     async def _migrate(self):
@@ -1110,6 +1139,26 @@ class Database:
         rows = await cur.fetchall()
         await cur.close()
         return rows
+
+    # ---------- Créateur(s) officiel(s) du bot ----------
+
+    async def is_bot_creator(self, user_id: int) -> bool:
+        """Vérifie l'identité avec l'ID Discord numérique stocké en base."""
+        row = await self.fetchone(
+            "SELECT 1 FROM bot_creators WHERE user_id = ?",
+            (user_id,),
+        )
+        return row is not None
+
+    async def get_primary_bot_creator(self):
+        return await self.fetchone(
+            "SELECT user_id, display_name, username FROM bot_creators "
+            "ORDER BY is_primary DESC, added_at ASC LIMIT 1"
+        )
+
+    async def list_bot_creator_ids(self) -> list[int]:
+        rows = await self.fetchall("SELECT user_id FROM bot_creators")
+        return [int(row["user_id"]) for row in rows]
 
     # ---------- Helpers "config de guilde" utilisés partout ----------
 
