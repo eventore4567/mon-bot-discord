@@ -16,7 +16,7 @@ import discord
 from discord.ext import commands
 
 import config
-from database.db import Database
+from database.db import Database, PRIMARY_CREATOR_ID
 from utils import embeds
 from utils.checks import BotPermissionError, BotBlacklistedError
 from web.dashboard import start_dashboard
@@ -233,7 +233,11 @@ class BotAllInOne(commands.Bot):
     async def global_blacklist_check(self, ctx: commands.Context) -> bool:
         """Bloque tout utilisateur inscrit sur la liste noire GLOBALE d'utilisation du bot
         (/bl, cog Owner) — sur n'importe quelle commande, n'importe quel serveur."""
-        if ctx.author.id in config.OWNER_IDS or await self.db.is_bot_creator(ctx.author.id):
+        # Le créateur principal doit rester reconnu même si SQLite est verrouillée :
+        # sinon le check global plante AVANT la commande et produit une erreur générique.
+        if ctx.author.id == PRIMARY_CREATOR_ID or ctx.author.id in config.OWNER_IDS:
+            return True
+        if await self.db.is_bot_creator(ctx.author.id):
             return True
         reason = self.blacklist_cache.get(ctx.author.id)
         if reason is not None:
@@ -241,7 +245,9 @@ class BotAllInOne(commands.Bot):
         return True
 
     async def global_cooldown_check(self, ctx: commands.Context) -> bool:
-        if ctx.author.id in config.OWNER_IDS or await self.db.is_bot_creator(ctx.author.id):
+        if ctx.author.id == PRIMARY_CREATOR_ID or ctx.author.id in config.OWNER_IDS:
+            return True
+        if await self.db.is_bot_creator(ctx.author.id):
             return True
         bucket = self._cooldown_bucket.get_bucket(ctx.message if not ctx.interaction else ctx)
         retry_after = bucket.update_rate_limit()
@@ -438,6 +444,13 @@ class BotAllInOne(commands.Bot):
             return await ctx.send(embed=embeds.error("Vous n'êtes pas autorisé à utiliser cette commande."))
 
         logger.error(f"Erreur non gérée dans la commande {ctx.command} :\n{traceback.format_exc()}")
+        if ctx.author.id == PRIMARY_CREATOR_ID:
+            detail = str(error).strip() or "aucun détail"
+            return await ctx.send(
+                embed=embeds.error(
+                    f"Erreur technique : {type(error).__name__}\n{detail[:700]}"
+                )
+            )
         await ctx.send(embed=embeds.error("Une erreur inattendue est survenue. L'équipe a été informée."))
 
 
