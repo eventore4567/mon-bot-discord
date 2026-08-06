@@ -238,6 +238,15 @@ CREATE TABLE IF NOT EXISTS shop_role_purchases (
     PRIMARY KEY (guild_id, user_id, role_id)
 );
 
+CREATE TABLE IF NOT EXISTS shop_panels (
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    created_by INTEGER,
+    created_at INTEGER,
+    PRIMARY KEY (guild_id, message_id)
+);
+
 CREATE TABLE IF NOT EXISTS inventory (
     guild_id INTEGER,
     user_id INTEGER,
@@ -362,6 +371,24 @@ CREATE TABLE IF NOT EXISTS reaction_role_panels (
     created_by INTEGER,
     created_at INTEGER,
     UNIQUE (guild_id, message_id)
+);
+
+CREATE TABLE IF NOT EXISTS self_role_panels (
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT 'Choisissez vos rôles',
+    created_by INTEGER,
+    created_at INTEGER,
+    PRIMARY KEY (guild_id, message_id)
+);
+
+CREATE TABLE IF NOT EXISTS self_role_items (
+    guild_id INTEGER NOT NULL,
+    panel_message_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, panel_message_id, role_id)
 );
 
 CREATE TABLE IF NOT EXISTS autorole (
@@ -800,6 +827,8 @@ CREATE INDEX IF NOT EXISTS idx_command_logs_guild_cmd ON command_logs (guild_id,
 CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders (trigger_at);
 CREATE INDEX IF NOT EXISTS idx_reaction_roles_msg ON reaction_roles (guild_id, message_id);
 CREATE INDEX IF NOT EXISTS idx_reaction_role_panels_guild ON reaction_role_panels (guild_id);
+CREATE INDEX IF NOT EXISTS idx_self_role_panels_guild ON self_role_panels (guild_id);
+CREATE INDEX IF NOT EXISTS idx_self_role_items_panel ON self_role_items (guild_id, panel_message_id);
 CREATE INDEX IF NOT EXISTS idx_member_invites_inviter ON member_invites (guild_id, inviter_id);
 CREATE INDEX IF NOT EXISTS idx_member_invites_member ON member_invites (guild_id, member_id);
 CREATE INDEX IF NOT EXISTS idx_invite_bonuses_guild_user ON invite_bonuses (guild_id, user_id);
@@ -808,6 +837,7 @@ CREATE INDEX IF NOT EXISTS idx_sanctions_guild_user ON sanctions (guild_id, user
 CREATE INDEX IF NOT EXISTS idx_levels_guild_rank ON levels (guild_id, level DESC, xp DESC);
 CREATE INDEX IF NOT EXISTS idx_economy_guild_total ON economy (guild_id, (cash + bank) DESC);
 CREATE INDEX IF NOT EXISTS idx_shop_role_purchases_guild_user ON shop_role_purchases (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_shop_panels_guild ON shop_panels (guild_id);
 CREATE INDEX IF NOT EXISTS idx_blacklist_words_guild ON blacklist_words (guild_id);
 CREATE INDEX IF NOT EXISTS idx_automod_logs_guild_time ON automod_logs (guild_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_automod_logs_guild_user ON automod_logs (guild_id, user_id, timestamp);

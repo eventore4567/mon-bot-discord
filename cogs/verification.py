@@ -51,6 +51,93 @@ def _self_role_error(guild: discord.Guild, role: discord.Role) -> str | None:
     return None
 
 
+class SelfRoleSelect(discord.ui.Select):
+    def __init__(self, options: list[discord.SelectOption] | None = None, *, handler: bool = False):
+        real_options = options or [discord.SelectOption(label="Aucun rôle configuré", value="none")]
+        super().__init__(
+            placeholder="Choisissez un ou plusieurs rôles",
+            min_values=1,
+            max_values=min(len(real_options), 25),
+            options=real_options,
+            custom_id="sentrix:selfroles:select",
+            disabled=not options and not handler,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.values or self.values == ["none"]:
+            return await interaction.response.send_message("Aucun rôle n'est encore configuré.", ephemeral=True)
+        cog = interaction.client.get_cog("Verification")
+        if cog is None:
+            return await interaction.response.send_message("Le menu de rôles est temporairement indisponible.", ephemeral=True)
+        await cog.handle_self_role_selection(interaction, self.values)
+
+
+class SelfRoleConfigureButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            label="Configurer les rôles",
+            style=discord.ButtonStyle.secondary,
+            custom_id="sentrix:selfroles:configure",
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Configuration impossible ici.", ephemeral=True)
+        if interaction.user.id != interaction.guild.owner_id and not interaction.user.guild_permissions.manage_roles:
+            return await interaction.response.send_message("Seuls les administrateurs peuvent configurer ce panneau.", ephemeral=True)
+        await interaction.response.send_message(
+            "Sélectionnez directement les rôles que les membres pourront choisir :",
+            view=SelfRoleAdminView(interaction.message.id),
+            ephemeral=True,
+        )
+
+
+class SelfRolePublicView(discord.ui.View):
+    def __init__(self, options: list[discord.SelectOption] | None = None, *, handler: bool = False):
+        super().__init__(timeout=None)
+        self.add_item(SelfRoleSelect(options, handler=handler))
+        self.add_item(SelfRoleConfigureButton())
+
+
+class SelfRoleAdminSelect(discord.ui.RoleSelect):
+    def __init__(self, panel_message_id: int):
+        self.panel_message_id = panel_message_id
+        super().__init__(
+            placeholder="Sélectionnez jusqu'à 25 rôles",
+            min_values=1,
+            max_values=25,
+            custom_id="sentrix:selfroles:admin-select",
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("Verification")
+        if cog is None:
+            return await interaction.response.send_message("Configuration temporairement indisponible.", ephemeral=True)
+        await cog.configure_self_roles(interaction, self.panel_message_id, list(self.values))
+
+
+class SelfRoleClearButton(discord.ui.Button):
+    def __init__(self, panel_message_id: int):
+        self.panel_message_id = panel_message_id
+        super().__init__(label="Retirer tous les choix", style=discord.ButtonStyle.danger, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("Verification")
+        if cog is None or interaction.guild is None:
+            return await interaction.response.send_message("Configuration temporairement indisponible.", ephemeral=True)
+        await cog.clear_self_roles(interaction, self.panel_message_id)
+
+
+class SelfRoleAdminView(discord.ui.View):
+    def __init__(self, panel_message_id: int):
+        super().__init__(timeout=180)
+        self.add_item(SelfRoleAdminSelect(panel_message_id))
+        self.add_item(SelfRoleClearButton(panel_message_id))
+
+
 class VerifyView(discord.ui.View):
     """Vue persistante affichée sur le panneau de vérification (bouton pour obtenir le rôle vérifié)."""
 
@@ -67,6 +154,11 @@ class Verification(commands.Cog, name="Verification"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def cog_load(self):
+        if not getattr(self.bot, "_sentrix_self_role_view_registered", False):
+            self.bot.add_view(SelfRolePublicView(handler=True))
+            self.bot._sentrix_self_role_view_registered = True
+
     async def _embed(self, guild_id: int, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
         """Embed cohérent avec +designsetup (catégorie CATEGORY_STYLES["verification"])."""
         style = design_system.CATEGORY_STYLES["verification"]
@@ -79,6 +171,166 @@ class Verification(commands.Cog, name="Verification"):
             colour=design.get(colour_key, default_colour),
             footer=design.get("footer"),
         )
+
+    async def _self_role_options(self, guild: discord.Guild, panel_message_id: int) -> list[discord.SelectOption]:
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM self_role_items WHERE guild_id = ? AND panel_message_id = ? ORDER BY position ASC",
+            (guild.id, panel_message_id),
+        )
+        options = []
+        for row in rows:
+            role = guild.get_role(row["role_id"])
+            if role is None or _self_role_error(guild, role):
+                continue
+            options.append(discord.SelectOption(label=role.name[:100], value=str(role.id)))
+        return options[:25]
+
+    async def _self_role_embed(self, guild: discord.Guild, panel, options: list[discord.SelectOption]) -> discord.Embed:
+        if options:
+            roles = "\n".join(f"• {option.label}" for option in options)
+            description = (
+                "Choisissez les rôles qui vous intéressent dans le menu ci-dessous.\n"
+                "Choisir un rôle l'ajoute ; le choisir une seconde fois le retire.\n\n"
+                f"**Rôles disponibles**\n{roles}"
+            )
+        else:
+            description = (
+                "Aucun rôle n'est encore proposé.\n"
+                "Un administrateur peut cliquer sur **Configurer les rôles** puis sélectionner directement les rôles Discord."
+            )
+        return await self._embed(guild.id, title=panel["title"], description=description)
+
+    async def _refresh_self_role_panel(self, guild: discord.Guild, message_id: int):
+        panel = await self.bot.db.fetchone(
+            "SELECT * FROM self_role_panels WHERE guild_id = ? AND message_id = ?",
+            (guild.id, message_id),
+        )
+        if not panel:
+            return
+        channel = guild.get_channel(panel["channel_id"]) or self.bot.get_channel(panel["channel_id"])
+        if channel is None:
+            return
+        options = await self._self_role_options(guild, message_id)
+        try:
+            message = await channel.fetch_message(message_id)
+            await message.edit(
+                embed=await self._self_role_embed(guild, panel, options),
+                view=SelfRolePublicView(options),
+            )
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return
+
+    async def _create_self_role_panel(self, ctx: commands.Context, title: str):
+        title = title.strip()[:256] or "Choisissez vos rôles"
+        temporary_panel = {"title": title}
+        message = await ctx.send(
+            embed=await self._self_role_embed(ctx.guild, temporary_panel, []),
+            view=SelfRolePublicView(),
+        )
+        await self.bot.db.execute(
+            "INSERT INTO self_role_panels (guild_id, channel_id, message_id, title, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(guild_id, message_id) DO NOTHING",
+            (ctx.guild.id, ctx.channel.id, message.id, title, ctx.author.id, now()),
+        )
+
+    async def handle_self_role_selection(self, interaction: discord.Interaction, raw_role_ids: list[str]):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Ce menu fonctionne uniquement dans un serveur.", ephemeral=True)
+        panel = await self.bot.db.fetchone(
+            "SELECT 1 FROM self_role_panels WHERE guild_id = ? AND message_id = ?",
+            (interaction.guild.id, interaction.message.id),
+        )
+        if not panel:
+            return await interaction.response.send_message("Ce panneau n'est plus configuré.", ephemeral=True)
+        allowed_rows = await self.bot.db.fetchall(
+            "SELECT role_id FROM self_role_items WHERE guild_id = ? AND panel_message_id = ?",
+            (interaction.guild.id, interaction.message.id),
+        )
+        allowed = {int(row["role_id"]) for row in allowed_rows}
+        chosen = []
+        for raw_role_id in raw_role_ids:
+            try:
+                role_id = int(raw_role_id)
+            except ValueError:
+                continue
+            if role_id not in allowed:
+                continue
+            role = interaction.guild.get_role(role_id)
+            if role and not _self_role_error(interaction.guild, role):
+                chosen.append(role)
+        if not chosen:
+            return await interaction.response.send_message("Aucun de ces rôles n'est encore disponible.", ephemeral=True)
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        added = [role for role in chosen if role not in interaction.user.roles]
+        removed = [role for role in chosen if role in interaction.user.roles]
+        try:
+            if added:
+                await interaction.user.add_roles(*added, reason="Choix dans le panneau de rôles SentriX")
+            if removed:
+                await interaction.user.remove_roles(*removed, reason="Choix dans le panneau de rôles SentriX")
+        except (discord.Forbidden, discord.HTTPException):
+            return await interaction.followup.send(
+                "Discord refuse de modifier un de ces rôles. Le rôle du bot doit être placé au-dessus.",
+                ephemeral=True,
+            )
+        lines = []
+        if added:
+            lines.append("Ajouté : " + ", ".join(role.mention for role in added))
+        if removed:
+            lines.append("Retiré : " + ", ".join(role.mention for role in removed))
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+    async def configure_self_roles(
+        self,
+        interaction: discord.Interaction,
+        panel_message_id: int,
+        roles: list[discord.Role],
+    ):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Configuration impossible.", ephemeral=True)
+        if interaction.user.id != interaction.guild.owner_id and not interaction.user.guild_permissions.manage_roles:
+            return await interaction.response.send_message("Permission Gérer les rôles requise.", ephemeral=True)
+        panel = await self.bot.db.fetchone(
+            "SELECT 1 FROM self_role_panels WHERE guild_id = ? AND message_id = ?",
+            (interaction.guild.id, panel_message_id),
+        )
+        if not panel:
+            return await interaction.response.send_message("Ce panneau n'existe plus.", ephemeral=True)
+        accepted = []
+        refused = []
+        for role in roles:
+            error = _self_role_error(interaction.guild, role)
+            if error:
+                refused.append(role.name)
+            else:
+                accepted.append(role)
+        await self.bot.db.execute(
+            "DELETE FROM self_role_items WHERE guild_id = ? AND panel_message_id = ?",
+            (interaction.guild.id, panel_message_id),
+        )
+        for position, role in enumerate(accepted):
+            await self.bot.db.execute(
+                "INSERT INTO self_role_items (guild_id, panel_message_id, role_id, position) VALUES (?, ?, ?, ?)",
+                (interaction.guild.id, panel_message_id, role.id, position),
+            )
+        await self._refresh_self_role_panel(interaction.guild, panel_message_id)
+        response = f"Configuration enregistrée : {len(accepted)} rôle(s)."
+        if refused:
+            response += "\nRôles refusés (permissions dangereuses ou hiérarchie) : " + ", ".join(refused)
+        await interaction.response.send_message(response, ephemeral=True)
+
+    async def clear_self_roles(self, interaction: discord.Interaction, panel_message_id: int):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Configuration impossible.", ephemeral=True)
+        if interaction.user.id != interaction.guild.owner_id and not interaction.user.guild_permissions.manage_roles:
+            return await interaction.response.send_message("Permission Gérer les rôles requise.", ephemeral=True)
+        await self.bot.db.execute(
+            "DELETE FROM self_role_items WHERE guild_id = ? AND panel_message_id = ?",
+            (interaction.guild.id, panel_message_id),
+        )
+        await self._refresh_self_role_panel(interaction.guild, panel_message_id)
+        await interaction.response.send_message("Tous les choix ont été retirés du panneau.", ephemeral=True)
 
     async def do_verify(self, interaction: discord.Interaction):
         conf = await self.bot.db.get_guild_config(interaction.guild.id)
@@ -257,44 +509,15 @@ class Verification(commands.Cog, name="Verification"):
         ))
 
     @commands.group(name="rolepanel", aliases=["rolespanel", "role-menu"], invoke_without_command=True)
+    @checks.is_owner_or_admin()
     async def rolepanel(self, ctx: commands.Context):
-        await ctx.send(embed=await self._embed(
-            ctx.guild.id,
-            title="Configuration des rôles automatiques",
-            description=(
-                "`+rolepanel create Choisissez vos rôles`\n"
-                "`+rolepanel add <message_id> 🎁 @Ping-Giveaways`\n"
-                "`+rolepanel add <message_id> 📣 @Ping-Annonces`\n"
-                "`+rolepanel remove <message_id> 🎁`\n"
-                "`+rolepanel list`\n"
-                "`+rolepanel delete <message_id>`\n\n"
-                "Ajouter la réaction donne le rôle ; retirer la réaction retire le rôle."
-            ),
-        ))
+        """Crée directement le panneau simple avec menu et bouton de configuration."""
+        await self._create_self_role_panel(ctx, "Choisissez vos rôles")
 
     @rolepanel.command(name="create", aliases=["creer"])
     @checks.is_owner_or_admin()
     async def rolepanel_create(self, ctx: commands.Context, *, title: str = "Choisissez vos rôles"):
-        title = title.strip()[:256] or "Choisissez vos rôles"
-        description = "Réagissez avec l'emoji correspondant pour recevoir ou retirer un rôle."
-        embed = await self._embed(
-            ctx.guild.id,
-            title=title,
-            description=f"{description}\n\n**Rôles disponibles**\nAucun rôle n'est encore configuré.",
-        )
-        message = await ctx.send(embed=embed)
-        await self.bot.db.execute(
-            "INSERT INTO reaction_role_panels "
-            "(guild_id, channel_id, message_id, title, description, created_by, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (ctx.guild.id, ctx.channel.id, message.id, title, description, ctx.author.id, now()),
-        )
-        await ctx.send(embed=await self._embed(
-            ctx.guild.id,
-            title="Panneau créé",
-            description=f"Identifiant du panneau : `{message.id}`\nAjoutez un rôle avec `+rolepanel add {message.id} 🎁 @rôle`.",
-            kind="success",
-        ), delete_after=45)
+        await self._create_self_role_panel(ctx, title)
 
     @rolepanel.command(name="add", aliases=["ajouter"])
     @checks.is_owner_or_admin()
