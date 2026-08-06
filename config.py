@@ -40,13 +40,16 @@ DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
 # URL HTTPS publique de BASE, sans /app ni /oauth/callback. Les anciennes valeurs qui
 # contiennent déjà l'un de ces suffixes sont corrigées automatiquement afin d'éviter les
 # liens du type /oauth/callback/oauth/callback.
-_raw_dashboard_url = os.getenv(
-    "DASHBOARD_PUBLIC_URL",
-    "https://mon-bot-discord-production-8944.up.railway.app",
-).strip().rstrip("/")
+_DEFAULT_DASHBOARD_PUBLIC_URL = "https://mon-bot-discord-production-8944.up.railway.app"
+_raw_dashboard_url = (
+    os.getenv("DASHBOARD_PUBLIC_URL", "").strip().rstrip("/")
+    or _DEFAULT_DASHBOARD_PUBLIC_URL
+)
 for _suffix in ("/oauth/callback", "/app"):
     if _raw_dashboard_url.endswith(_suffix):
         _raw_dashboard_url = _raw_dashboard_url[: -len(_suffix)].rstrip("/")
+if not _raw_dashboard_url.startswith(("https://", "http://")):
+    _raw_dashboard_url = _DEFAULT_DASHBOARD_PUBLIC_URL
 DASHBOARD_PUBLIC_URL = _raw_dashboard_url
 DASHBOARD_APP_URL = f"{DASHBOARD_PUBLIC_URL}/app"
 DASHBOARD_CALLBACK_URL = f"{DASHBOARD_PUBLIC_URL}/oauth/callback"
