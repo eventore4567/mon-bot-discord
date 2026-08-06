@@ -16,6 +16,7 @@ récompense en cas de double-clic ou d'appel concurrent. Chaque transaction sign
 est enregistrée dans economy_transactions (Database.log_transaction).
 """
 
+import asyncio
 import random
 import discord
 from discord import app_commands
@@ -125,6 +126,12 @@ class Economy(commands.Cog, name="Economy"):
         if not getattr(self.bot, "_sentrix_shop_view_registered", False):
             self.bot.add_view(ShopRoleView(persistent_handler=True))
             self.bot._sentrix_shop_view_registered = True
+        self._shop_panel_refresh_task = asyncio.create_task(self._refresh_shop_panels_after_ready())
+
+    async def cog_unload(self):
+        task = getattr(self, "_shop_panel_refresh_task", None)
+        if task:
+            task.cancel()
 
     async def _send_balance(self, ctx: commands.Context, membre: discord.Member):
         # Migrée vers design_system (Phase 4) — la couleur/footer viennent de +designsetup,
@@ -341,16 +348,44 @@ class Economy(commands.Cog, name="Economy"):
                 continue
             try:
                 message = await channel.fetch_message(panel["message_id"])
-                await message.edit(embed=embed, view=ShopRoleView(chunks))
+                view = ShopRoleView(chunks)
+                if message.reference is not None:
+                    replacement = await channel.send(embed=embed, view=view)
+                    await self.bot.db.execute(
+                        "INSERT INTO shop_panels (guild_id, channel_id, message_id, created_by, created_at) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (
+                            guild.id,
+                            channel.id,
+                            replacement.id,
+                            panel["created_by"],
+                            panel["created_at"],
+                        ),
+                    )
+                    await self.bot.db.execute(
+                        "DELETE FROM shop_panels WHERE guild_id = ? AND message_id = ?",
+                        (guild.id, panel["message_id"]),
+                    )
+                    try:
+                        await message.delete()
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        pass
+                    continue
+                await message.edit(embed=embed, view=view)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 continue
+
+    async def _refresh_shop_panels_after_ready(self):
+        await self.bot.wait_until_ready()
+        for guild in self.bot.guilds:
+            await self._refresh_shop_panels(guild)
 
     @commands.command(name="shoppanel", aliases=["boutiquepanel", "shop-panel"])
     @checks.is_owner_or_admin()
     async def shoppanel(self, ctx: commands.Context):
         """Publie la boutique que les membres utilisent sans commande."""
         chunks = await self._shop_role_options(ctx.guild)
-        message = await ctx.send(embed=await self._shop_panel_embed(ctx.guild), view=ShopRoleView(chunks))
+        message = await ctx.channel.send(embed=await self._shop_panel_embed(ctx.guild), view=ShopRoleView(chunks))
         await self.bot.db.execute(
             "INSERT INTO shop_panels (guild_id, channel_id, message_id, created_by, created_at) "
             "VALUES (?, ?, ?, ?, ?) ON CONFLICT(guild_id, message_id) DO NOTHING",
