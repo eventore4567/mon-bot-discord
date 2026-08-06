@@ -522,7 +522,7 @@ class Ai(commands.Cog, name="Ai"):
         if action_intent and re.search(r"\b(help|aide|commandes)\b", normalized):
             return f"{prefix}help"
 
-        emoji_action = "emoji" in normalized
+        emoji_action = any(word in normalized for word in ("emoji", "emogi", "amogi"))
         pasted_emoji = re.search(r"<a?:[A-Za-z0-9_]{2,32}:[0-9]+>", question)
         named_emoji = re.search(r"[:;]([A-Za-z0-9_]{2,32}):", question)
         direct_url = re.search(r"https://\S+", question)
@@ -535,7 +535,7 @@ class Ai(commands.Cog, name="Ai"):
                 if direct_url:
                     command += f" {direct_url.group(0)}"
                 return command
-            tail = re.split(r"\bemoji\b", question, maxsplit=1, flags=re.IGNORECASE)[-1]
+            tail = re.split(r"\b(?:emoji|emogi|amogi)\b", question, maxsplit=1, flags=re.IGNORECASE)[-1]
             tail = re.sub(r"^\s*(?:nomme|appele|appelé|avec|de|moi)\s+", "", tail, flags=re.IGNORECASE).strip()
             if tail:
                 return f"{prefix}addemoji {tail}"
@@ -547,7 +547,7 @@ class Ai(commands.Cog, name="Ai"):
                 return f"{prefix}deleteemoji {pasted_emoji.group(0)}"
             if named_emoji:
                 return f"{prefix}deleteemoji {named_emoji.group(1)}"
-            tail = re.split(r"\bemoji\b", question, maxsplit=1, flags=re.IGNORECASE)[-1]
+            tail = re.split(r"\b(?:emoji|emogi|amogi)\b", question, maxsplit=1, flags=re.IGNORECASE)[-1]
             target = tail.strip(" :;,")
             if target:
                 return f"{prefix}deleteemoji {target}"
@@ -620,7 +620,7 @@ class Ai(commands.Cog, name="Ai"):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         """Permet de parler au bot sans commande : le mentionner, ou commencer son message
-        par "sentrix" ou "ssentrix" (ex: "sentrix comment tu vas ?"). Il répond alors comme avec /sentrix."""
+        par "sentrix" et ses fautes courantes (ex: "snetri ouvre moi help")."""
         if message.author.bot or not message.guild:
             return
         content = message.content.strip()
@@ -628,7 +628,7 @@ class Ai(commands.Cog, name="Ai"):
             return
 
         mentioned = self.bot.user is not None and self.bot.user in message.mentions
-        name_match = re.match(r"^(s?sentrix)\b", content, re.IGNORECASE)
+        name_match = re.match(r"^(?:sentrix|ssentrix|sentri|snetri|snentrix)\b", content, re.IGNORECASE)
         name_trigger = name_match is not None
         if not mentioned and not name_trigger:
             return
