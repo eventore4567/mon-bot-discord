@@ -38,7 +38,6 @@ EXTENSIONS = [
     "cogs.economy",
     "cogs.levels",
     "cogs.minigames",
-    "cogs.games_economy",  # +gamesetup (GamesSetup) est chargé automatiquement par son setup()
     "cogs.music",
     "cogs.events",
     "cogs.verification",
@@ -48,6 +47,31 @@ EXTENSIONS = [
     "cogs.design",
     "cogs.embed_builder",
 ]
+
+# Les réglages ci-dessous existent déjà dans les panneaux interactifs. Ils restent
+# implémentés dans leurs cogs afin que les boutons et les données historiques continuent
+# de fonctionner, mais ne sont plus enregistrés comme commandes publiques.
+COMMANDS_REPLACED_BY_SETUP = frozenset({
+    "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs",
+    "setwelcomechannel", "setgoodbyechannel", "setwelcomemessage",
+    "setgoodbyemessage", "setticketlogchannel", "setautorole", "createrole",
+    "setlevelchannel", "setsuggestchannel", "setannouncechannel",
+    "setgiveawaychannel", "verify-setup", "set-level-role",
+    "remove-level-role", "level-roles", "levelroles", "ticketpanel",
+    "ticketpanel-toggle", "tickettype", "ticketform", "ticketconfig",
+    "ticketlogs", "ticketlimit", "ticketautoclose",
+})
+
+# Alias historiques et commandes qui exécutent exactement la même action qu'une commande
+# principale conservée. Les fonctionnalités restent accessibles via +ai, +stats, +level,
+# +economyleaderboard, +buy, +embed et +ping.
+EXACT_DUPLICATE_COMMANDS = frozenset({
+    "leaderboard-money", "me", "rank", "buyrole", "ask", "chat",
+    "chat-reset", "embed-create", "latency",
+})
+
+PRUNED_COMMANDS = COMMANDS_REPLACED_BY_SETUP | EXACT_DUPLICATE_COMMANDS
+
 
 INTENTS = discord.Intents.default()
 INTENTS.members = True
@@ -131,6 +155,37 @@ class BotAllInOne(commands.Bot):
         # pour une liste qui change rarement (owner.py tient ce cache à jour).
         self.blacklist_cache: dict[int, str] = {}
 
+    def _prune_redundant_commands(self) -> list[str]:
+        """Retire les anciennes entrées de commande sans supprimer leurs implémentations.
+
+        Les panneaux setup appellent directement leurs services et la base de données :
+        conserver les méthodes internes permet donc aux boutons persistants et aux anciens
+        panneaux de continuer à fonctionner, tout en allégeant +help et les commandes slash.
+        """
+        removed_names: list[str] = []
+        for requested_name in sorted(PRUNED_COMMANDS):
+            command = self.get_command(requested_name)
+            if command is None:
+                continue
+
+            root_name = command.root_parent.name if command.root_parent else command.name
+            removed = self.remove_command(root_name)
+            if removed is None:
+                continue
+            removed_names.append(root_name)
+
+            app_command = getattr(removed, "app_command", None)
+            app_name = getattr(app_command, "name", None)
+            if app_name and self.tree.get_command(app_name):
+                self.tree.remove_command(app_name)
+
+        logger.info(
+            "Nettoyage des commandes : %s commande(s) redondante(s) retirée(s) — %s",
+            len(removed_names),
+            ", ".join(sorted(removed_names)) or "aucune",
+        )
+        return removed_names
+
     async def setup_hook(self):
         await self.db.connect()
         logger.info("Base de données connectée.")
@@ -167,6 +222,10 @@ class BotAllInOne(commands.Bot):
                 logger.info(f"Module chargé : {ext}")
             except Exception:
                 logger.error(f"Échec du chargement du module {ext} :\n{traceback.format_exc()}")
+
+        # Le nettoyage se fait après le chargement des cogs et avant tree.sync() : les
+        # commandes disparaissent donc à la fois du préfixe, de +help et des slash Discord.
+        self._prune_redundant_commands()
 
         # Enregistrement des vues persistantes (boutons qui survivent aux redémarrages).
         # Le panel d'ouverture est propre à chaque panel configuré (options dynamiques) :
