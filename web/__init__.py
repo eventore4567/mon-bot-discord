@@ -1,17 +1,23 @@
-"""Initialisation des extensions stables du dashboard SentriX."""
+"""Mode de récupération du dashboard SentriX.
+
+Le dashboard de base reste la seule interface chargée tant que les extensions injectant
+du JavaScript n'ont pas été validées séparément. Les fichiers des extensions et toutes
+les données enregistrées sont conservés.
+"""
 
 from . import dashboard as _dashboard
-from . import embed_dashboard as _embed_dashboard
-from . import channel_search_dashboard as _channel_search_dashboard
-from . import exact_channel_match_dashboard as _exact_channel_match_dashboard
-from . import config_status_dashboard as _config_status_dashboard
 
-# Ces extensions ont déjà été validées en production.
-_embed_dashboard.install(_dashboard)
-_channel_search_dashboard.install(_dashboard)
-_exact_channel_match_dashboard.install(_dashboard)
-_config_status_dashboard.install(_dashboard)
 
-# Les nouveaux centres Setup/Design restent présents dans le dépôt, mais ne sont pas
-# chargés tant que leur injection JavaScript n'a pas été reconstruite de façon isolée.
-# Cela évite qu'une erreur dans un nouvel onglet bloque tout le dashboard.
+_original_handle_index = _dashboard.handle_index
+
+
+async def _handle_index_without_cache(request):
+    """Force le navigateur à récupérer la dernière interface après un correctif."""
+    response = await _original_handle_index(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
+_dashboard.handle_index = _handle_index_without_cache
