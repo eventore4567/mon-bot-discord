@@ -1,4 +1,4 @@
-"""Extension du dashboard SentriX : recherche instantanée dans les listes de salons."""
+"""Extension du dashboard SentriX : recherche instantanée et approximative des salons."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ CHANNEL_SEARCH_CSS = r"""
     .channel-search-input::-webkit-search-cancel-button{cursor:pointer}
     .channel-search-select{width:100%}
     .channel-search-empty{padding:8px 11px;border:1px dashed #38415c;border-radius:9px;color:var(--muted);font-size:12px;background:#111725}
+    .channel-search-empty.suggestions{border-color:#35507a;color:#a9c8ff;background:#111d32}
 """
 
 
@@ -30,36 +31,167 @@ CHANNEL_SEARCH_JS = r"""
       "log_roles","log_server","log_automod","log_moderation",
       "discord_channel_id"
     ]);
-    function normaliseChannelSearch(value){return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLocaleLowerCase("fr").trim();}
+
+    function normaliseChannelSearch(value){
+      return String(value||"")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g,"")
+        .toLocaleLowerCase("fr")
+        .replace(/[^a-z0-9]+/g," ")
+        .trim();
+    }
+
+    function channelOptionName(option){
+      const raw=String(option?.textContent||"").split(" — ")[0];
+      return normaliseChannelSearch(raw);
+    }
+
+    function levenshteinDistance(a,b){
+      if(a===b)return 0;
+      if(!a.length)return b.length;
+      if(!b.length)return a.length;
+      let previous=Array.from({length:b.length+1},(_,index)=>index);
+      for(let i=1;i<=a.length;i++){
+        const current=[i];
+        for(let j=1;j<=b.length;j++){
+          const cost=a[i-1]===b[j-1]?0:1;
+          current[j]=Math.min(
+            current[j-1]+1,
+            previous[j]+1,
+            previous[j-1]+cost
+          );
+        }
+        previous=current;
+      }
+      return previous[b.length];
+    }
+
+    function subsequenceScore(query,name){
+      if(!query||!name)return 0;
+      let queryIndex=0;
+      for(const character of name){
+        if(character===query[queryIndex])queryIndex++;
+        if(queryIndex===query.length)break;
+      }
+      if(queryIndex!==query.length)return 0;
+      return .48+.22*(query.length/name.length);
+    }
+
+    function channelMatchScore(query,name){
+      if(!query||!name)return 0;
+      if(name===query)return 2;
+      if(name.startsWith(query))return 1.85-(name.length-query.length)*.002;
+      const position=name.indexOf(query);
+      if(position>=0)return 1.65-position*.01;
+
+      const queryWords=query.split(/\s+/).filter(Boolean);
+      const nameWords=name.split(/\s+/).filter(Boolean);
+      let wordScore=0;
+      if(queryWords.length){
+        const wordMatches=queryWords.map(queryWord=>{
+          let best=0;
+          for(const nameWord of nameWords){
+            if(nameWord===queryWord)best=Math.max(best,1);
+            else if(nameWord.startsWith(queryWord)||queryWord.startsWith(nameWord))best=Math.max(best,.9);
+            else{
+              const maximum=Math.max(queryWord.length,nameWord.length);
+              const similarity=maximum?1-levenshteinDistance(queryWord,nameWord)/maximum:0;
+              best=Math.max(best,similarity);
+            }
+          }
+          return best;
+        });
+        wordScore=wordMatches.reduce((sum,value)=>sum+value,0)/wordMatches.length;
+      }
+
+      const maximum=Math.max(query.length,name.length);
+      const fullScore=maximum?1-levenshteinDistance(query,name)/maximum:0;
+      return Math.max(fullScore,wordScore,subsequenceScore(query,name));
+    }
+
     function isChannelSelect(select){
       if(!select||select.tagName!=="SELECT")return false;
       if(select.id==="embedChannel"||channelSearchKeys.has(select.dataset.key||""))return true;
       return [...select.options].slice(1).some(option=>/\s—\s[^—]+$/.test(option.textContent||""));
     }
-    function filterChannelOptions(select,input,empty){
-      const query=normaliseChannelSearch(input.value),options=[...select.options];let matches=0;
-      options.forEach((option,index)=>{
-        if(index===0){option.hidden=false;return;}
-        const match=!query||normaliseChannelSearch(option.textContent).includes(query);
-        option.hidden=!match&&!option.selected;
-        if(match)matches++;
-      });
-      empty.classList.toggle("hidden",!query||matches>0);
-      empty.textContent=query?"Aucun salon ne correspond à cette recherche.":"";
+
+    function restoreChannelOptionOrder(select){
+      const options=[...select.options].sort((a,b)=>Number(a.dataset.channelOriginalIndex||0)-Number(b.dataset.channelOriginalIndex||0));
+      options.forEach(option=>{option.hidden=false;select.appendChild(option);});
     }
+
+    function filterChannelOptions(select,input,status){
+      const query=normaliseChannelSearch(input.value);
+      const placeholder=[...select.options].find(option=>option.dataset.channelOriginalIndex==="0")||select.options[0];
+      if(!query){
+        restoreChannelOptionOrder(select);
+        status.classList.add("hidden");
+        status.classList.remove("suggestions");
+        status.textContent="";
+        return;
+      }
+
+      const candidates=[...select.options]
+        .filter(option=>option!==placeholder)
+        .map(option=>{
+          const name=channelOptionName(option);
+          const exact=name.includes(query);
+          const score=channelMatchScore(query,name);
+          return {option,name,exact,score,original:Number(option.dataset.channelOriginalIndex||0)};
+        });
+
+      const minimum=query.length<=2?.88:query.length<=4?.55:.48;
+      let visible=candidates
+        .filter(item=>item.exact||item.score>=minimum||item.option.selected)
+        .sort((a,b)=>{
+          if(a.option.selected!==b.option.selected)return a.option.selected?-1:1;
+          if(a.exact!==b.exact)return a.exact?-1:1;
+          return b.score-a.score||a.original-b.original;
+        });
+
+      const hasExact=visible.some(item=>item.exact);
+      visible=visible.slice(0,hasExact?12:6);
+      const exactCount=visible.filter(item=>item.exact).length;
+      const visibleOptions=new Set(visible.map(item=>item.option));
+
+      placeholder.hidden=false;
+      select.appendChild(placeholder);
+      visible.forEach(item=>{item.option.hidden=false;select.appendChild(item.option);});
+      candidates.forEach(item=>{
+        if(!visibleOptions.has(item.option))item.option.hidden=true;
+      });
+
+      status.classList.remove("hidden");
+      if(!visible.length){
+        status.classList.remove("suggestions");
+        status.textContent="Aucun salon proche trouvé. Essayez avec un autre mot.";
+      }else if(exactCount===0){
+        status.classList.add("suggestions");
+        status.textContent=`Aucun nom exact : ${visible.length} salon${visible.length>1?"s":""} proche${visible.length>1?"s":""} proposé${visible.length>1?"s":""}.`;
+      }else{
+        const approximateCount=visible.length-exactCount;
+        status.classList.toggle("suggestions",approximateCount>0);
+        status.textContent=approximateCount>0
+          ?`${exactCount} résultat${exactCount>1?"s":""} direct${exactCount>1?"s":""} et ${approximateCount} salon${approximateCount>1?"s":""} proche${approximateCount>1?"s":""}.`
+          :`${exactCount} salon${exactCount>1?"s":""} trouvé${exactCount>1?"s":""}.`;
+      }
+    }
+
     function enhanceChannelSelect(select){
       if(!isChannelSelect(select)||select.dataset.channelSearchReady==="1")return;
       select.dataset.channelSearchReady="1";
+      [...select.options].forEach((option,index)=>option.dataset.channelOriginalIndex=String(index));
       const wrap=document.createElement("div");wrap.className="channel-search-wrap";
       const box=document.createElement("div");box.className="channel-search-box";
       const input=document.createElement("input");input.type="search";input.className="channel-search-input";input.placeholder="Rechercher un salon…";input.autocomplete="off";input.spellcheck=false;input.setAttribute("aria-label","Rechercher un salon par son nom");
-      const empty=document.createElement("div");empty.className="channel-search-empty hidden";
+      const status=document.createElement("div");status.className="channel-search-empty hidden";
       const parent=select.parentNode;if(!parent)return;
-      parent.insertBefore(wrap,select);box.appendChild(input);wrap.appendChild(box);wrap.appendChild(select);wrap.appendChild(empty);select.classList.add("channel-search-select");
-      input.addEventListener("input",()=>filterChannelOptions(select,input,empty));
-      input.addEventListener("keydown",event=>{if(event.key==="Escape"&&input.value){input.value="";filterChannelOptions(select,input,empty);input.blur();}});
-      select.addEventListener("change",()=>{if(input.value){input.value="";filterChannelOptions(select,input,empty);}});
+      parent.insertBefore(wrap,select);box.appendChild(input);wrap.appendChild(box);wrap.appendChild(select);wrap.appendChild(status);select.classList.add("channel-search-select");
+      input.addEventListener("input",()=>filterChannelOptions(select,input,status));
+      input.addEventListener("keydown",event=>{if(event.key==="Escape"&&input.value){input.value="";filterChannelOptions(select,input,status);input.blur();}});
+      select.addEventListener("change",()=>{if(input.value){input.value="";filterChannelOptions(select,input,status);}});
     }
+
     function installChannelSearches(){const root=$("fields");if(!root)return;root.querySelectorAll("select").forEach(enhanceChannelSelect);}
 """
 
@@ -102,4 +234,4 @@ def install(dashboard) -> None:
         return
     _INSTALLED = True
     dashboard.INDEX_HTML = _patch_html(dashboard.INDEX_HTML)
-    logger.info("Recherche de salons du dashboard chargée.")
+    logger.info("Recherche approximative de salons du dashboard chargée.")
