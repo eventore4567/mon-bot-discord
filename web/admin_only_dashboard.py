@@ -139,9 +139,9 @@ def install(dashboard) -> None:
 
     def build_app(bot) -> web.Application:
         app = original_build_app(bot)
-        # Première position : le verrou couvre le dashboard principal, le Centre Setup,
-        # leurs API et les futures routes privées ajoutées plus tard.
-        app.middlewares.insert(0, administrator_only)
+        # Le middleware de sécurité existant reste en première position : il ajoute ses
+        # en-têtes à toutes les réponses, y compris à la page « accès refusé ».
+        app.middlewares.append(administrator_only)
         return app
 
     dashboard.build_app = build_app
