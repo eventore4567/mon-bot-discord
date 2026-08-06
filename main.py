@@ -40,6 +40,7 @@ EXTENSIONS = [
     "cogs.server_builder",
     "cogs.logs",
     "cogs.utility",
+    "cogs.notifications",
     "cogs.ai",
     "cogs.economy",
     "cogs.levels",
@@ -139,7 +140,9 @@ CATEGORY_COMMANDS = {
         "embedconfig", "giveaway-create", "giveaway-end", "giveaway-reroll",
         "giveaway-cancel", "giveaway-blacklist", "giveaway-unblacklist",
         "event-create", "event-cancel", "tournament-create",
-        "tournament-start", "announce", "set-nickname", "alias", "diagnostic",
+        "tournament-start", "announce", "notifs-ping", "notifs-list",
+        "notifs-remove", "welcome-config",
+        "set-nickname", "alias", "diagnostic",
     }),
     "tickets": frozenset({
         "ticketsetup", "ticketpanel", "ticketpanel-toggle", "tickettype",
@@ -684,9 +687,18 @@ class BotAllInOne(commands.Bot):
             channel = member.guild.get_channel(conf["welcome_channel"])
             if channel:
                 text = conf["welcome_message"] or "Bienvenue {member} sur **{server}** !"
-                text = text.replace("{member}", member.mention).replace("{server}", member.guild.name)
+                text = (
+                    text.replace("{member}", member.mention)
+                    .replace("{server}", member.guild.name)
+                    .replace("{username}", member.display_name)
+                    .replace("{member_count}", str(member.guild.member_count or 0))
+                )
                 try:
-                    await channel.send(embed=embeds.success(text))
+                    welcome_embed = embeds.success(text, title=f"Bienvenue {member.display_name}")
+                    welcome_embed.set_thumbnail(url=member.display_avatar.url)
+                    if conf["welcome_image_url"]:
+                        welcome_embed.set_image(url=conf["welcome_image_url"])
+                    await channel.send(embed=welcome_embed)
                 except discord.HTTPException:
                     pass
 

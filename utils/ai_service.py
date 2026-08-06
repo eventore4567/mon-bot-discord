@@ -28,6 +28,7 @@ logger = logging.getLogger("bot.ai")
 
 # ---------------------------------------------------------------- MODÈLES
 
+MODEL_LUNA = "luna"
 MODEL_TERRA = "terra"
 MODEL_SOL = "sol"
 
@@ -36,10 +37,12 @@ MODEL_SOL = "sol"
 # ici par défaut). Restent configurables via OPENAI_MODEL / OPENAI_MODEL_ADVANCED (config.py)
 # sans toucher au code si OpenAI fait encore évoluer ces identifiants.
 MODEL_IDS = {
+    MODEL_LUNA: getattr(config, "OPENAI_MODEL_FAST", "gpt-5.6-luna"),
     MODEL_TERRA: config.OPENAI_MODEL,
     MODEL_SOL: config.OPENAI_MODEL_ADVANCED,
 }
 MODEL_LABELS = {
+    MODEL_LUNA: "GPT-5.6 Luna (rapide)",
     MODEL_TERRA: "GPT-5.6 Terra",
     MODEL_SOL: "GPT-5.6 Sol",
 }
@@ -192,14 +195,20 @@ def is_complex_request(text: str, *, forced: bool = False) -> bool:
 
 
 def pick_model(text: str, *, forced_advanced: bool = False) -> str:
-    return MODEL_SOL if is_complex_request(text, forced=forced_advanced) else MODEL_TERRA
+    """Luna répond aux demandes courantes, Terra aux analyses et Sol au code forcé."""
+    if forced_advanced:
+        return MODEL_SOL
+    return MODEL_TERRA if is_complex_request(text) else MODEL_LUNA
 
 
 def pick_reasoning_effort(model_key: str, base_effort: str = "medium") -> str:
-    """Sol peut monter à 'high' pour les demandes complexes ; jamais 'max' par défaut
-    (coût/temps) — le niveau maximum reste un choix explicite via +aisetup, pas automatique."""
+    """Évite le raisonnement coûteux sur les réponses rapides tout en gardant Sol précis."""
     if base_effort not in VALID_REASONING_EFFORTS:
-        base_effort = "medium"
+        base_effort = "low"
+    if model_key == MODEL_LUNA:
+        return "none"
+    if model_key == MODEL_TERRA and base_effort == "medium":
+        return "low"
     if model_key == MODEL_SOL and base_effort in ("none", "low", "medium"):
         return "high"
     return base_effort
@@ -472,29 +481,44 @@ def split_for_discord(text: str, limit: int = DISCORD_MESSAGE_LIMIT) -> list[str
 # RIEN du tout à l'utilisateur, ce qui ressemble exactement à "ça ne marche pas".
 # On limite donc explicitement l'attente pour échouer proprement et vite (message
 # d'erreur clair) plutôt que de laisser l'utilisateur face à un silence total.
-REQUEST_TIMEOUT_SECONDS = 45.0
+REQUEST_TIMEOUT_SECONDS = 15.0
 # Une image 4K complexe peut demander jusqu'à environ deux minutes. Ce client séparé
 # évite d'appliquer le timeout court des réponses texte à la génération d'images.
 IMAGE_REQUEST_TIMEOUT_SECONDS = 150.0
 IMAGE_SIZE_4K = "3840x2160"
 
 
+_TEXT_CLIENT = None
+_IMAGE_CLIENT = None
+
+
 def get_client():
+    """Réutilise le même client et sa connexion HTTP au lieu de reconnecter à chaque question."""
+    global _TEXT_CLIENT
     if not config.OPENAI_API_KEY:
         return None
-    from openai import AsyncOpenAI
-    return AsyncOpenAI(api_key=config.OPENAI_API_KEY, timeout=REQUEST_TIMEOUT_SECONDS, max_retries=1)
+    if _TEXT_CLIENT is None:
+        from openai import AsyncOpenAI
+        _TEXT_CLIENT = AsyncOpenAI(
+            api_key=config.OPENAI_API_KEY,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+    return _TEXT_CLIENT
 
 
 def get_image_client():
+    global _IMAGE_CLIENT
     if not config.OPENAI_API_KEY:
         return None
-    from openai import AsyncOpenAI
-    return AsyncOpenAI(
-        api_key=config.OPENAI_API_KEY,
-        timeout=IMAGE_REQUEST_TIMEOUT_SECONDS,
-        max_retries=1,
-    )
+    if _IMAGE_CLIENT is None:
+        from openai import AsyncOpenAI
+        _IMAGE_CLIENT = AsyncOpenAI(
+            api_key=config.OPENAI_API_KEY,
+            timeout=IMAGE_REQUEST_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+    return _IMAGE_CLIENT
 
 
 def _extract_text(resp) -> str:
@@ -709,6 +733,7 @@ async def generate(
         "instructions": instructions,
         "input": effective_prompt,
         "reasoning": {"effort": reasoning_effort},
+        "max_output_tokens": 600 if model_key == MODEL_LUNA else (1200 if model_key == MODEL_TERRA else 2500),
     }
     if previous_response_id:
         kwargs["previous_response_id"] = previous_response_id
@@ -821,8 +846,8 @@ async def test_connection(model_key: str = MODEL_TERRA) -> dict:
 
 DEFAULT_AI_SETTINGS = {
     "enabled": True,
-    "default_model": MODEL_TERRA,
-    "reasoning_effort": "medium",
+    "default_model": MODEL_LUNA,
+    "reasoning_effort": "low",
     "allowed_channel_ids": [],
     "allowed_role_ids": [],
     "cooldown_seconds": 8,
@@ -962,3 +987,4 @@ async def record_usage(bot, guild_id: int, user_id: int, tokens_estimate: int = 
         "tokens_estimate = tokens_estimate + excluded.tokens_estimate",
         (guild_id, user_id, day, tokens_estimate),
     )
+
