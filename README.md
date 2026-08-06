@@ -54,7 +54,7 @@ Un message avec des menus déroulants apparaît pour choisir votre rôle staff, 
 ## Commandes
 
 - Toutes les commandes fonctionnent avec `/` (slash) **ou** avec le préfixe `+` (ex: `+ban @membre`).
-- Discord limite les bots à 100 commandes slash globales. Ce bot en expose 81 en slash ; **toutes** les commandes (y compris celles non exposées en `/`) fonctionnent avec `+`, sans exception.
+- Discord limite les bots à 100 commandes slash globales. SentriX ne synchronise que les commandes utiles : les réglages disponibles dans `+setup`, `+ticketsetup` ou `+logsetup`, ainsi que les anciens doublons, ne sont plus enregistrés séparément.
 - Utilisez `/help` ou `+help` pour voir la liste complète par catégorie.
 - Les commandes gadgets peu utiles (QR code, calculatrice, boule magique, etc.) ont été retirées pour garder le bot simple et rapide ; les commandes de blacklist/whitelist ont toutes été conservées.
 
