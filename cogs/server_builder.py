@@ -1617,21 +1617,46 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
 
     @commands.hybrid_command(
         name="wipe-server",
-        description="[DANGER] Supprimer tous les salons du serveur après confirmation.",
+        aliases=["wipe-serveur"],
+        description="[DANGER] Supprimer tous les salons et rôles après confirmation.",
         with_app_command=False,
     )
     @checks.is_owner_or_admin_for("complete")
     async def wipe_server(self, ctx: commands.Context):
+        if ctx.guild is None:
+            return await ctx.send(embed=embeds.error("Cette commande doit être lancée dans un serveur."))
         guild = ctx.guild
-        total = len(guild.channels)
-        if total == 0:
-            return await ctx.send(embed=embeds.info("Il n'y a aucun salon à supprimer."))
+        me = guild.me
+        if not me.guild_permissions.manage_channels or not me.guild_permissions.manage_roles:
+            return await ctx.send(embed=embeds.error(
+                "SentriX doit avoir les permissions **Gérer les salons** et **Gérer les rôles**. "
+                "Placez aussi son rôle suffisamment haut avant de relancer la commande."
+            ))
+
+        bot_role_ids = {role.id for role in me.roles}
+        deletable_roles = [
+            role
+            for role in guild.roles
+            if (
+                not role.is_default()
+                and not role.managed
+                and role.id not in bot_role_ids
+                and role < me.top_role
+            )
+        ]
+        protected_roles = len(guild.roles) - len(deletable_roles)
+        total_channels = len(guild.channels)
+        if total_channels == 0 and not deletable_roles:
+            return await ctx.send(embed=embeds.info("Il n'y a aucun salon ni rôle supprimable."))
         warning = embeds.error(
-            f"Vous êtes sur le point de supprimer **{total}** salon(s) ou catégorie(s) sur "
+            f"Vous êtes sur le point de supprimer **{total_channels}** salon(s)/catégorie(s) "
+            f"et **{len(deletable_roles)}** rôle(s) sur "
             f"**{guild.name}**. Cette action est irréversible.\n\n"
-            "Les rôles et les membres ne sont pas touchés. Cliquez ci-dessous puis tapez "
-            "le nom exact du serveur pour confirmer.",
-            title="Suppression totale des salons",
+            f"**{protected_roles} rôle(s) protégé(s)** resteront obligatoirement : @everyone, "
+            "rôles gérés par Discord/intégrations, rôles du bot et rôles placés au-dessus du bot.\n\n"
+            "Les membres ne seront pas expulsés. Cliquez ci-dessous puis tapez le nom exact "
+            "du serveur pour confirmer.",
+            title="Suppression totale du serveur",
         )
         view = WipeConfirmView(ctx.author.id, guild, ctx.channel.id)
         await ctx.send(embed=warning, view=view)
@@ -1653,25 +1678,60 @@ class WipeConfirmModal(discord.ui.Modal, title="Confirmation de suppression tota
     async def on_submit(self, interaction: discord.Interaction):
         if self.confirm_input.value.strip() != self.guild.name:
             return await interaction.response.send_message(
-                "Nom incorrect : suppression annulée, aucun salon n'a été touché.",
+                "Nom incorrect : suppression annulée, aucun salon ni rôle n'a été touché.",
                 ephemeral=True,
             )
-        await interaction.response.defer()
-        deleted = 0
-        failed = 0
+        await interaction.response.defer(ephemeral=True)
+
+        me = self.guild.me
+        bot_role_ids = {role.id for role in me.roles}
+        roles_deleted = 0
+        roles_failed = 0
+        roles_protected = 0
+        for role in reversed(self.guild.roles):
+            if (
+                role.is_default()
+                or role.managed
+                or role.id in bot_role_ids
+                or role >= me.top_role
+            ):
+                roles_protected += 1
+                continue
+            try:
+                await role.delete(
+                    reason=f"Suppression totale demandée par {interaction.user}"
+                )
+                roles_deleted += 1
+                await asyncio.sleep(0.25)
+            except discord.HTTPException:
+                roles_failed += 1
+
+        channels_deleted = 0
+        channels_failed = 0
         for channel in list(self.guild.channels):
             if channel.id == self.invoker_channel_id:
                 continue
             try:
                 await channel.delete(reason=f"Suppression totale demandée par {interaction.user}")
-                deleted += 1
+                channels_deleted += 1
                 await asyncio.sleep(0.4)
             except discord.HTTPException:
-                failed += 1
-        description = f"**{deleted}** salon(s) ou catégorie(s) supprimé(s)."
-        if failed:
-            description += f" {failed} opération(s) ont échoué."
-        description += "\n\nLe salon actuel a été conservé pour afficher ce résultat."
+                channels_failed += 1
+
+        description = (
+            f"**Salons/catégories supprimés :** {channels_deleted}\n"
+            f"**Rôles supprimés :** {roles_deleted}\n"
+            f"**Rôles protégés conservés :** {roles_protected}"
+        )
+        if channels_failed or roles_failed:
+            description += (
+                f"\n**Échecs :** {channels_failed} salon(s), {roles_failed} rôle(s). "
+                "Les éléments concernés sont probablement au-dessus du rôle du bot."
+            )
+        description += (
+            "\n\nLe salon actuel et les rôles indispensables au bot ont été conservés "
+            "pour terminer l'opération et afficher ce résultat."
+        )
         await interaction.followup.send(
             embed=embeds.success(description, title="Suppression terminée")
         )
@@ -1699,7 +1759,7 @@ class WipeConfirmView(discord.ui.View):
         return True
 
     @discord.ui.button(
-        label="Confirmer la suppression totale",
+        label="Supprimer les salons et les rôles",
         style=discord.ButtonStyle.danger,
     )
     async def confirm(
