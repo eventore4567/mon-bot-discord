@@ -139,7 +139,7 @@ CATEGORY_COMMANDS = {
         "embedconfig", "giveaway-create", "giveaway-end", "giveaway-reroll",
         "giveaway-cancel", "giveaway-blacklist", "giveaway-unblacklist",
         "event-create", "event-cancel", "tournament-create",
-        "tournament-start", "announce", "set-nickname", "alias",
+        "tournament-start", "announce", "set-nickname", "alias", "diagnostic",
     }),
     "tickets": frozenset({
         "ticketsetup", "ticketpanel", "ticketpanel-toggle", "tickettype",
@@ -215,6 +215,43 @@ KNOWN_PERMISSION_COMMANDS = (
 )
 
 
+PERMISSION_LABELS = {
+    "administrator": "Administrateur",
+    "manage_guild": "Gérer le serveur",
+    "manage_channels": "Gérer les salons",
+    "manage_roles": "Gérer les rôles",
+    "manage_messages": "Gérer les messages",
+    "manage_nicknames": "Gérer les pseudos",
+    "moderate_members": "Exclure temporairement des membres",
+    "kick_members": "Expulser des membres",
+    "ban_members": "Bannir des membres",
+    "move_members": "Déplacer des membres",
+    "manage_emojis_and_stickers": "Gérer les expressions",
+}
+
+
+def format_permissions(permission_names) -> str:
+    return ", ".join(PERMISSION_LABELS.get(name, name.replace("_", " ").capitalize()) for name in permission_names)
+
+
+def command_usage(ctx: commands.Context) -> str | None:
+    """Construit une syntaxe directement réutilisable dans les messages d'erreur."""
+    command = ctx.command
+    if command is None:
+        return None
+    prefix = getattr(ctx, "clean_prefix", None) or "+"
+    signature = getattr(command, "signature", "") or ""
+    return f"{prefix}{command.qualified_name} {signature}".strip()
+
+
+def cooldown_text(seconds: float) -> str:
+    total = max(1, round(seconds))
+    minutes, remaining = divmod(total, 60)
+    if minutes:
+        return f"{minutes} min {remaining:02d} s"
+    return f"{remaining} s"
+
+
 INTENTS = discord.Intents.default()
 INTENTS.members = True
 INTENTS.message_content = True
@@ -285,6 +322,9 @@ class BotAllInOne(commands.Bot):
             case_insensitive=True,
         )
         self.db = Database(config.DATABASE_PATH)
+        self.expected_extension_count = len(EXTENSIONS)
+        # Un gestionnaire unique garantit des réponses françaises et utiles aussi pour les commandes slash.
+        self.tree.on_error = self.on_app_command_error
         self._cooldown_bucket = commands.CooldownMapping.from_cooldown(
             config.GLOBAL_COOLDOWN_RATE, config.GLOBAL_COOLDOWN_PER, commands.BucketType.user
         )
@@ -692,16 +732,25 @@ class BotAllInOne(commands.Bot):
 
         if isinstance(error, commands.CommandOnCooldown):
             return await ctx.send(
-                embed=embeds.warning(f"⏳ Doucement ! Réessayez dans **{error.retry_after:.1f}** secondes.")
+                embed=embeds.warning(
+                    f"Cette commande est temporairement en recharge. Vous pourrez la réutiliser dans "
+                    f"**{cooldown_text(error.retry_after)}**."
+                )
             )
 
         if isinstance(error, commands.MissingPermissions):
-            perms = ", ".join(error.missing_permissions)
-            return await ctx.send(embed=embeds.error(f"Il vous manque les permissions suivantes : `{perms}`"))
+            perms = format_permissions(error.missing_permissions)
+            return await ctx.send(embed=embeds.error(
+                f"Votre rôle ne possède pas les autorisations nécessaires pour cette action.\n"
+                f"Permission(s) requise(s) : **{perms}**."
+            ))
 
         if isinstance(error, commands.BotMissingPermissions):
-            perms = ", ".join(error.missing_permissions)
-            return await ctx.send(embed=embeds.error(f"Je n'ai pas les permissions nécessaires : `{perms}`"))
+            perms = format_permissions(error.missing_permissions)
+            return await ctx.send(embed=embeds.error(
+                f"Le bot ne peut pas terminer cette action car il lui manque : **{perms}**.\n"
+                "Un administrateur doit corriger les permissions du rôle SentriX et vérifier qu’il est placé assez haut."
+            ))
 
         if isinstance(error, commands.UserNotFound):
             # /bl (et blinfo/unbl/editbl) attendent un UTILISATEUR (mention ou ID) : ce n'est pas
@@ -726,16 +775,32 @@ class BotAllInOne(commands.Bot):
             return await ctx.send(embed=embeds.error("Rôle introuvable."))
 
         if isinstance(error, commands.MissingRequiredArgument):
-            return await ctx.send(embed=embeds.error(f"Il manque un argument : `{error.param.name}`"))
+            usage = command_usage(ctx)
+            detail = f"\nSyntaxe correcte : `{usage}`" if usage else ""
+            return await ctx.send(embed=embeds.error(
+                f"L’argument **{error.param.name}** est obligatoire.{detail}\n"
+                f"Consultez `{ctx.clean_prefix}help {ctx.command.qualified_name}` pour le détail des paramètres."
+            ))
 
         if isinstance(error, commands.BadArgument):
-            return await ctx.send(embed=embeds.error("Argument invalide. Vérifiez la syntaxe de la commande."))
+            usage = command_usage(ctx)
+            detail = f"\nSyntaxe correcte : `{usage}`" if usage else ""
+            return await ctx.send(embed=embeds.error(
+                "Une valeur fournie n’est pas reconnue. Vérifiez les mentions, nombres et noms indiqués."
+                + detail
+            ))
 
         if isinstance(error, discord.Forbidden):
-            return await ctx.send(embed=embeds.error("Je n'ai pas la permission d'effectuer cette action."))
+            return await ctx.send(embed=embeds.error(
+                "Discord a refusé cette action. Vérifiez les permissions du bot et placez le rôle SentriX "
+                "au-dessus du membre ou du rôle concerné."
+            ))
 
         if isinstance(error, commands.CheckFailure):
-            return await ctx.send(embed=embeds.error("Vous n'êtes pas autorisé à utiliser cette commande."))
+            return await ctx.send(embed=embeds.error(
+                "Vous n’avez pas accès à cette commande. Elle est réservée au staff ou nécessite une permission "
+                "qui n’est pas présente sur votre rôle."
+            ))
 
         logger.error(f"Erreur non gérée dans la commande {ctx.command} :\n{traceback.format_exc()}")
         if ctx.author.id == PRIMARY_CREATOR_ID:
@@ -745,7 +810,76 @@ class BotAllInOne(commands.Bot):
                     f"Erreur technique : {type(error).__name__}\n{detail[:700]}"
                 )
             )
-        await ctx.send(embed=embeds.error("Une erreur inattendue est survenue. L'équipe a été informée."))
+        reference = str(getattr(getattr(ctx, "message", None), "id", "indisponible"))
+        await ctx.send(embed=embeds.error(
+            "Une erreur technique inattendue a interrompu la commande. Aucun changement supplémentaire "
+            f"n’a été appliqué. Référence : `{reference}`."
+        ))
+
+    async def on_app_command_error(
+        self,
+        interaction: discord.Interaction,
+        error: discord.app_commands.AppCommandError,
+    ):
+        """Affiche les erreurs slash au membre au lieu du vague « interaction échouée »."""
+        original = getattr(error, "original", error)
+
+        if isinstance(original, BotPermissionError):
+            embed = embeds.error(original.message)
+        elif isinstance(original, BotBlacklistedError):
+            embed = embeds.error(f"Vous n’êtes pas autorisé à utiliser ce bot.\nRaison : {original.reason}")
+        elif isinstance(error, discord.app_commands.CommandOnCooldown):
+            embed = embeds.warning(
+                f"Cette commande est temporairement en recharge. Vous pourrez la réutiliser dans "
+                f"**{cooldown_text(error.retry_after)}**."
+            )
+        elif isinstance(error, discord.app_commands.MissingPermissions):
+            embed = embeds.error(
+                "Votre rôle ne possède pas les autorisations nécessaires.\n"
+                f"Permission(s) requise(s) : **{format_permissions(error.missing_permissions)}**."
+            )
+        elif isinstance(error, discord.app_commands.BotMissingPermissions):
+            embed = embeds.error(
+                "Le bot ne peut pas terminer cette action. Permission(s) manquante(s) : "
+                f"**{format_permissions(error.missing_permissions)}**."
+            )
+        elif isinstance(error, (discord.app_commands.TransformerError, discord.app_commands.CommandSignatureMismatch)):
+            embed = embeds.error(
+                "Une valeur fournie n’est pas valide pour cette commande. Vérifiez les membres, rôles, salons "
+                "et nombres sélectionnés, puis réessayez."
+            )
+        elif isinstance(original, discord.Forbidden):
+            embed = embeds.error(
+                "Discord a refusé cette action. Vérifiez les permissions et la position du rôle SentriX."
+            )
+        elif isinstance(error, discord.app_commands.CheckFailure):
+            embed = embeds.error(
+                "Vous n’avez pas accès à cette commande. Elle est réservée au staff ou nécessite une permission "
+                "supplémentaire."
+            )
+        else:
+            command_name = interaction.command.qualified_name if interaction.command else "inconnue"
+            logger.error(
+                "Erreur non gérée dans la commande slash %s :\n%s",
+                command_name,
+                "".join(traceback.format_exception(type(error), error, error.__traceback__)),
+            )
+            if interaction.user.id == PRIMARY_CREATOR_ID:
+                detail = str(original).strip() or "aucun détail"
+                embed = embeds.error(f"Erreur technique : {type(original).__name__}\n{detail[:700]}")
+            else:
+                embed = embeds.error(
+                    "Une erreur technique inattendue a interrompu la commande. Aucun changement supplémentaire "
+                    f"n’a été appliqué. Référence : `{interaction.id}`."
+                )
+
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+        except discord.HTTPException:
+            logger.warning("Impossible d’envoyer la réponse d’erreur de l’interaction %s.", interaction.id)
 
 
 async def main():

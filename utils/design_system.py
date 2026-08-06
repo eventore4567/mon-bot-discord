@@ -89,23 +89,20 @@ CATEGORY_STYLES = {
     "verification": {"emoji": "●", "colour": COLORS.verification},
 }
 
-# Icône affichée dans le titre d'un embed selon son état (kind), plutôt que toujours
-# l'emoji de la catégorie — sinon un refus/erreur affiché avec ● (emoji de la catégorie
-# "verification" par exemple) donne l'impression trompeuse d'une réussite. Seul le kind
-# "primary" (information neutre) garde l'emoji de catégorie ; les autres états ont leur
-# propre icône universelle, reconnaissable quelle que soit la commande.
-KIND_EMOJI = {
-    "success": "●",
-    "warning": "⚠️",
-    "danger": "○",
+# Titres sobres et lisibles : la couleur de l'embed indique déjà l'état. Les anciens
+# pictogrammes ajoutés automatiquement surchargeaient les réponses et pouvaient donner
+# l'impression qu'une information neutre était une réussite ou une alerte.
+KIND_LABELS = {
+    "success": "Terminé",
+    "warning": "À vérifier",
+    "danger": "Action impossible",
 }
 
 
 def kind_title(title: str, *, kind: str, category_emoji: str) -> str:
-    """Préfixe `title` avec l'icône correspondant à `kind` (●/⚠️/○), ou l'emoji de la
-    catégorie si `kind` est "primary" (information neutre, pas de succès/échec à signaler)."""
-    emoji = KIND_EMOJI.get(kind, category_emoji)
-    return f"{emoji} {title}"
+    """Ajoute un libellé textuel seulement lorsqu'il apporte une information utile."""
+    label = KIND_LABELS.get(kind)
+    return f"{label} — {title}" if label else title
 
 
 # =============================================================================

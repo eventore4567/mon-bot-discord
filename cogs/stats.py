@@ -1,6 +1,6 @@
 """
 Cog STATISTIQUES / DÉVELOPPEMENT.
-/bot-status /server-growth /command-stats /latency /changelog /feedback /botinfo
+/bot-status /server-growth /command-stats /latency /changelog /feedback /botinfo /diagnostic
 """
 
 import time
@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, design_system
+from utils import embeds, design_system, checks
 from database.db import now
 
 START_TIME = time.time()
@@ -66,6 +66,86 @@ class Stats(commands.Cog, name="Stats"):
             pass
         await ctx.send(embed=e)
 
+    @commands.hybrid_command(
+        name="diagnostic",
+        description="Vérifier la base, les modules et les permissions indispensables du bot.",
+    )
+    @commands.guild_only()
+    @checks.is_owner_or_admin_for("configuration")
+    async def diagnostic(self, ctx: commands.Context):
+        """Diagnostic lisible par un administrateur, sans exposer de secret."""
+        database_ok = True
+        try:
+            row = await self.bot.db.fetchone("SELECT 1 AS ok")
+            database_ok = bool(row and row["ok"] == 1)
+        except Exception:
+            database_ok = False
+
+        def count_slash(commands_list) -> int:
+            total = 0
+            for command in commands_list:
+                total += 1
+                total += count_slash(getattr(command, "commands", []))
+            return total
+
+        bot_member = ctx.guild.me
+        channel_permissions = ctx.channel.permissions_for(bot_member)
+        required_permissions = {
+            "Voir le salon": channel_permissions.view_channel,
+            "Envoyer des messages": channel_permissions.send_messages,
+            "Intégrer des liens": channel_permissions.embed_links,
+            "Joindre des fichiers": channel_permissions.attach_files,
+            "Gérer les messages": channel_permissions.manage_messages,
+            "Gérer les salons": channel_permissions.manage_channels,
+            "Gérer les rôles": channel_permissions.manage_roles,
+            "Exclure temporairement": channel_permissions.moderate_members,
+            "Expulser": channel_permissions.kick_members,
+            "Bannir": channel_permissions.ban_members,
+        }
+        missing = [name for name, enabled in required_permissions.items() if not enabled]
+
+        modules_loaded = len(self.bot.extensions)
+        modules_expected = getattr(self.bot, "expected_extension_count", modules_loaded)
+        database_label = "Opérationnelle" if database_ok else "Indisponible"
+        permission_label = "Toutes disponibles" if not missing else f"{len(missing)} manquante(s)"
+        kind = "success" if database_ok and not missing else "warning"
+        e = await self._embed(
+            ctx.guild.id,
+            title="Diagnostic de SentriX",
+            description=(
+                "Ce contrôle vérifie les éléments essentiels dans le salon actuel. "
+                "Il ne modifie aucun réglage du serveur."
+            ),
+            kind=kind,
+        )
+        e.add_field(name="Connexion Discord", value=f"En ligne — {round(self.bot.latency * 1000)} ms", inline=True)
+        e.add_field(name="Base de données", value=database_label, inline=True)
+        e.add_field(name="Modules chargés", value=f"{modules_loaded} / {modules_expected}", inline=True)
+        e.add_field(name="Commandes texte", value=str(len(self.bot.commands)), inline=True)
+        e.add_field(name="Commandes slash", value=str(count_slash(self.bot.tree.get_commands())), inline=True)
+        e.add_field(name="Permissions", value=permission_label, inline=True)
+        if missing:
+            e.add_field(
+                name="À corriger dans ce salon",
+                value="\n".join(f"• {permission}" for permission in missing),
+                inline=False,
+            )
+            e.add_field(
+                name="Solution",
+                value=(
+                    "Ouvrez les paramètres du serveur, vérifiez le rôle SentriX, puis placez-le au-dessus "
+                    "des rôles qu’il doit gérer. Relancez ensuite cette commande dans le salon concerné."
+                ),
+                inline=False,
+            )
+        else:
+            e.add_field(
+                name="Résultat",
+                value="La base de données répond et toutes les permissions indispensables sont disponibles dans ce salon.",
+                inline=False,
+            )
+        await ctx.send(embed=e, ephemeral=True if ctx.interaction else False)
+
     @commands.hybrid_command(name="server-growth", description="Afficher la croissance des membres du serveur.", with_app_command=False)
     async def server_growth(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall(
@@ -107,16 +187,13 @@ class Stats(commands.Cog, name="Stats"):
             description="Dernières nouveautés de SentriX (les plus récentes en premier) :",
         )
         e.add_field(
-            name="🆕 Récent",
+            name="Mise à jour de stabilité",
             value=(
-                "• `/invites` (alias `+i`), `/invite-leaderboard`, `/invited-by` : suivi des invitations, "
-                "avec alerte si plusieurs comptes très récents sont invités par la même personne en rafale.\n"
-                "• Page \"Sécurité\" dans `/setup` : préréglages et filtres AutoMod détaillés.\n"
-                "• `+addrole`/`+delrole` : raccourcis pour donner/retirer un rôle.\n"
-                "• Outils propriétaire : liste noire globale (`+bl`), statut personnalisé, "
-                "identité du bot, alias de commandes.\n"
-                "• `/create-server` : génère automatiquement toute une structure de serveur "
-                "(rôles, catégories, salons) selon un modèle au choix."
+                "• Réponses harmonisées : titres sobres, erreurs détaillées et permissions expliquées en français.\n"
+                "• Aide corrigée : chaque membre voit ses commandes publiques, sans afficher les outils du staff.\n"
+                "• Tickets renforcés : emojis Unicode et personnalisés animés validés avant l’envoi à Discord.\n"
+                "• Nouvelle commande `/diagnostic` : contrôle de la base, des modules et des permissions.\n"
+                "• Les erreurs des commandes slash donnent maintenant une explication au lieu d’un simple échec."
             ),
             inline=False,
         )
