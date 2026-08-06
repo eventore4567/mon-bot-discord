@@ -12,6 +12,7 @@ from . import setup_center_exclusive as _setup_center_exclusive
 from . import setup_center_search as _setup_center_search
 from . import dashboard_explanations_search as _dashboard_explanations_search
 from . import setup_center_explanations as _setup_center_explanations
+from . import admin_only_dashboard as _admin_only_dashboard
 
 
 _original_handle_index = _dashboard.handle_index
@@ -32,3 +33,5 @@ _setup_center_exclusive.install(_setup_center, _setup_dashboard)
 _setup_center_search.install(_setup_center)
 _setup_center_explanations.install(_setup_center)
 _setup_center.install(_dashboard, _setup_dashboard, _design_setup_dashboard)
+# Doit rester en dernier pour protéger également toutes les routes ajoutées ci-dessus.
+_admin_only_dashboard.install(_dashboard)
