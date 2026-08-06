@@ -567,7 +567,7 @@ class Utility(commands.Cog, name="Utility"):
         e.set_image(url=membre.display_avatar.url)
         await ctx.send(embed=e)
 
-    @commands.hybrid_command(name="serverinfo", description="Afficher les informations du serveur.")
+    @commands.hybrid_command(name="serverinfo", aliases=["info-serveur", "serveurinfo"], description="Afficher les informations du serveur.")
     async def serverinfo(self, ctx: commands.Context):
         guild = ctx.guild
         e = await self._embed(guild.id, title=guild.name)
@@ -595,7 +595,7 @@ class Utility(commands.Cog, name="Utility"):
         e.add_field(name=f"Rôles ({len(roles)})", value=", ".join(roles) if roles else "Aucun", inline=False)
         await ctx.send(embed=e)
 
-    @commands.hybrid_command(name="roleinfo", description="Afficher les informations d'un rôle.", with_app_command=False)
+    @commands.hybrid_command(name="roleinfo", aliases=["info-role", "role-info"], description="Afficher les informations d'un rôle.", with_app_command=False)
     @app_commands.describe(role="Le rôle visé")
     async def roleinfo(self, ctx: commands.Context, role: discord.Role):
         e = await self._embed(ctx.guild.id, title=role.name)
