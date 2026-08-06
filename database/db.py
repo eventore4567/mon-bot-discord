@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS guild_config (
     design_settings_json TEXT DEFAULT '{}'
 );
 
+CREATE TABLE IF NOT EXISTS sanction_dm_templates (
+    guild_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    message TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (guild_id, action)
+);
+
 CREATE TABLE IF NOT EXISTS warnings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER,
