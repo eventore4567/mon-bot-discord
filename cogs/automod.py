@@ -47,7 +47,34 @@ from utils.moderation_dataset import MultilingualModerationDataset
 logger = logging.getLogger("bot")
 
 INVITE_RE = re.compile(r"(discord\.gg|discord(?:app)?\.com/invite)/\S+", re.IGNORECASE)
-LINK_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+_COMMON_TLDS = (
+    "com|net|org|gg|io|co|fr|ma|me|tv|ly|be|dev|app|ai|xyz|info|biz|online|"
+    "site|shop|store|tech|pro|cc|ru|de|uk|us|ca|eu|ch|it|es|pt|nl|se|no|fi|"
+    "pl|tr|in|jp|cn|kr|au|nz|br|mx|ar|za|tk|to|link|club|live|news|cloud|"
+    "digital|world|vip|fun|games|social"
+)
+LINK_RE = re.compile(
+    rf"""
+    (?:
+        \b(?:https?|hxxps?)://[^\s<]+
+        | \bwww\.[^\s<]+
+        | (?<![\w@])
+          (?:[a-z0-9](?:[a-z0-9-]{{0,62}}[a-z0-9])?\.)+
+          (?:{_COMMON_TLDS})\b
+          (?::\d{{2,5}})?
+          (?:/[^\s<]*)?
+        | \b(?:\d{{1,3}}\.){{3}}\d{{1,3}}(?::\d{{2,5}})?(?:/[^\s<]*)?
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _normalize_link_text(content: str) -> str:
+    """Normalise les séparateurs utilisés pour contourner l'anti-lien."""
+    value = content.casefold()
+    value = re.sub(r"\s*(?:\[\.\]|\(\.\)|\bdot\b)\s*", ".", value)
+    return value
 SCAM_KEYWORDS = [
     "free nitro", "nitro gratuit", "steamcommunity", "airdrop gratuit", "crypto giveaway",
     "discord nitro free", "gagnez des nitro", "claim your nitro", "gift nitro free",
@@ -90,7 +117,7 @@ TOGGLE_FIELDS = [
 # "Sécurité" de /setup, pour ne jamais avoir deux endroits à maintenir séparément.
 AUTOMOD_TOGGLE_LABELS = {
     "antispam": "Anti-spam (messages répétés)",
-    "antilink": "Anti-liens",
+    "antilink": "Anti-liens (tous les formats)",
     "antiinvite": "Anti-invitations Discord",
     "antimention": "Anti-mentions massives",
     "anticaps": "Anti-majuscules (SPAM CAPS)",
@@ -256,7 +283,7 @@ class AutoMod(commands.Cog, name="Automod"):
     async def antispam(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antispam", etat)
 
-    @commands.hybrid_command(name="antilink", description="Activer/désactiver le blocage des liens.", with_app_command=False)
+    @commands.hybrid_command(name="antilink", description="Bloquer tous les formats de liens.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
     @checks.is_owner_or_admin_for("securite")
@@ -640,6 +667,7 @@ class AutoMod(commands.Cog, name="Automod"):
         # puis tapait le mot lui-même voyait le message ne JAMAIS être supprimé, donnant
         # l'impression trompeuse que le filtre ne marchait pas du tout.
         content_lower = message.content.lower()
+        link_content = _normalize_link_text(message.content)
         words = await self.get_blacklist_words_cached(message.guild.id)
         for word in words:
             if word in content_lower:
@@ -672,12 +700,12 @@ class AutoMod(commands.Cog, name="Automod"):
         if conf["antiscam"] and any(k in content_lower for k in SCAM_KEYWORDS):
             return await self._delete_and_warn(message, "Message d'arnaque potentiel détecté.", "antiscam")
 
-        if conf["antiinvite"] and INVITE_RE.search(message.content):
+        if conf["antiinvite"] and INVITE_RE.search(link_content):
             return await self._delete_and_warn(message, "Lien d'invitation Discord non autorisé.", "antiinvite")
 
-        if conf["antilink"] and LINK_RE.search(message.content):
+        if conf["antilink"] and LINK_RE.search(link_content):
             allowed = await self.get_whitelist_domains_cached(message.guild.id)
-            if not _domain_allowed(content_lower, allowed):
+            if not _domain_allowed(link_content, allowed):
                 return await self._delete_and_warn(message, "Lien non autorisé.", "antilink")
 
         if conf["antimention"] and len(message.mentions) >= 5:
