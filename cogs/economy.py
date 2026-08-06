@@ -1,7 +1,7 @@
 """
 Cog ÉCONOMIE.
 /balance /economy /daily /weekly /work /rob /pay /economyleaderboard /shop /buy /buyrole
-/shopsetup /shoprole add|remove|price|list
+/shopsetup /shoppanel /shoprole add|remove|price|list
 /inventory /sell /gamble /deposit /withdraw /banque (+bank) /give-money /reset-economy
 
 Toutes les commandes qui affichent un solde (/balance, /economy, /banque, /bank, /stats, /profile)
@@ -70,10 +70,61 @@ def _self_assignable_role_error(guild: discord.Guild, role: discord.Role) -> str
     return None
 
 
+class ShopRoleSelect(discord.ui.Select):
+    """Menu public : un choix déclenche directement l'achat du rôle."""
+
+    def __init__(self, slot: int, options: list[discord.SelectOption] | None = None, *, handler: bool = False):
+        real_options = options or [discord.SelectOption(label="Boutique indisponible", value="none")]
+        super().__init__(
+            placeholder=f"Choisissez un rôle{f' — page {slot + 1}' if slot else ''}",
+            min_values=1,
+            max_values=1,
+            options=real_options,
+            custom_id=f"sentrix:shop:role:{slot}",
+            disabled=not options and not handler,
+            row=slot,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.values or self.values[0] == "none":
+            return await interaction.response.send_message("La boutique ne contient encore aucun rôle.", ephemeral=True)
+        cog = interaction.client.get_cog("Economy")
+        if cog is None:
+            return await interaction.response.send_message("La boutique est temporairement indisponible.", ephemeral=True)
+        await cog.handle_shop_selection(interaction, self.values[0])
+
+
+class ShopRoleView(discord.ui.View):
+    def __init__(
+        self,
+        option_chunks: list[list[discord.SelectOption]] | None = None,
+        *,
+        persistent_handler: bool = False,
+    ):
+        super().__init__(timeout=None)
+        if persistent_handler:
+            for slot in range(4):
+                self.add_item(ShopRoleSelect(slot, handler=True))
+            return
+        chunks = option_chunks or []
+        if not chunks:
+            self.add_item(ShopRoleSelect(0))
+            return
+        for slot, options in enumerate(chunks[:4]):
+            self.add_item(ShopRoleSelect(slot, options))
+
+
 class Economy(commands.Cog, name="Economy"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.rob_cooldowns: dict[int, int] = {}
+
+    async def cog_load(self):
+        # Un handler générique suffit pour tous les panneaux, même après redémarrage :
+        # l'article choisi est toujours revérifié dans SQLite avant le débit.
+        if not getattr(self.bot, "_sentrix_shop_view_registered", False):
+            self.bot.add_view(ShopRoleView(persistent_handler=True))
+            self.bot._sentrix_shop_view_registered = True
 
     async def _send_balance(self, ctx: commands.Context, membre: discord.Member):
         # Migrée vers design_system (Phase 4) — la couleur/footer viennent de +designsetup,
@@ -230,9 +281,98 @@ class Economy(commands.Cog, name="Economy"):
             "`+shoprole add @VIP @Booster 500` — ajoute plusieurs rôles au même prix\n"
             "`+shoprole price @VIP 750` — change le prix\n"
             "`+shoprole remove @VIP` — retire le rôle de la boutique\n"
-            "`+shoprole list` — affiche la configuration\n\n"
-            "Les membres utilisent `+shop`, puis `+buy <id>` ou `+buyrole @rôle`."
+            "`+shoprole list` — affiche la configuration\n"
+            "`+shoppanel` — publie le menu interactif dans le salon\n\n"
+            "Après cela, les membres choisissent directement un rôle dans le menu : aucune commande à taper."
         ))
+
+    async def _shop_role_options(self, guild: discord.Guild) -> list[list[discord.SelectOption]]:
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM shop_items WHERE guild_id = ? AND role_id IS NOT NULL ORDER BY price ASC, id ASC LIMIT 100",
+            (guild.id,),
+        )
+        options = []
+        for item in rows:
+            role = guild.get_role(item["role_id"])
+            if role is None or _self_assignable_role_error(guild, role):
+                continue
+            details = f"Prix : {stats_service.format_number(item['price'])} pièces"
+            if item["description"]:
+                details = f"{details} — {item['description']}"
+            options.append(discord.SelectOption(
+                label=role.name[:100],
+                value=str(item["id"]),
+                description=details[:100],
+            ))
+        return [options[index:index + 25] for index in range(0, len(options), 25)]
+
+    async def _shop_panel_embed(self, guild: discord.Guild) -> discord.Embed:
+        count = await self.bot.db.fetchone(
+            "SELECT COUNT(*) AS total FROM shop_items WHERE guild_id = ? AND role_id IS NOT NULL",
+            (guild.id,),
+        )
+        total = int(count["total"] if count else 0)
+        design = await self.bot.db.get_design_settings(guild.id)
+        style = design_system.CATEGORY_STYLES["economy"]
+        return design_system.create_embed(
+            title="Boutique de rôles",
+            description=(
+                "Choisissez le rôle que vous voulez acheter dans le menu ci-dessous.\n"
+                "Le prix est retiré automatiquement de votre portefeuille.\n\n"
+                f"**{total} rôle(s) disponible(s)**\n"
+                "Le résultat de l'achat sera visible uniquement par vous."
+            ),
+            colour=design.get("primary_color", style["colour"]),
+            footer=design.get("footer"),
+        )
+
+    async def _refresh_shop_panels(self, guild: discord.Guild):
+        panels = await self.bot.db.fetchall(
+            "SELECT * FROM shop_panels WHERE guild_id = ?",
+            (guild.id,),
+        )
+        if not panels:
+            return
+        chunks = await self._shop_role_options(guild)
+        embed = await self._shop_panel_embed(guild)
+        for panel in panels:
+            channel = guild.get_channel(panel["channel_id"]) or self.bot.get_channel(panel["channel_id"])
+            if channel is None:
+                continue
+            try:
+                message = await channel.fetch_message(panel["message_id"])
+                await message.edit(embed=embed, view=ShopRoleView(chunks))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                continue
+
+    @commands.command(name="shoppanel", aliases=["boutiquepanel", "shop-panel"])
+    @checks.is_owner_or_admin()
+    async def shoppanel(self, ctx: commands.Context):
+        """Publie la boutique que les membres utilisent sans commande."""
+        chunks = await self._shop_role_options(ctx.guild)
+        message = await ctx.send(embed=await self._shop_panel_embed(ctx.guild), view=ShopRoleView(chunks))
+        await self.bot.db.execute(
+            "INSERT INTO shop_panels (guild_id, channel_id, message_id, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(guild_id, message_id) DO NOTHING",
+            (ctx.guild.id, ctx.channel.id, message.id, ctx.author.id, now()),
+        )
+
+    async def handle_shop_selection(self, interaction: discord.Interaction, raw_item_id: str):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Cette boutique fonctionne uniquement dans un serveur.", ephemeral=True)
+        try:
+            item_id = int(raw_item_id)
+        except ValueError:
+            return await interaction.response.send_message("Ce choix n'est plus disponible.", ephemeral=True)
+        item = await self.bot.db.fetchone(
+            "SELECT * FROM shop_items WHERE guild_id = ? AND id = ? AND role_id IS NOT NULL",
+            (interaction.guild.id, item_id),
+        )
+        if item is None:
+            return await interaction.response.send_message("Ce rôle n'est plus dans la boutique.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        result = await self._purchase_role_result(interaction.guild, interaction.user, item)
+        await interaction.followup.send(embed=result, ephemeral=True)
 
     @commands.group(name="shoprole", aliases=["boutiquerole"], invoke_without_command=True)
     async def shoprole(self, ctx: commands.Context):
@@ -283,6 +423,8 @@ class Economy(commands.Cog, name="Economy"):
             )
         if refused:
             description_lines.append("**Refusés**\n" + "\n".join(refused))
+        if accepted:
+            await self._refresh_shop_panels(ctx.guild)
         kind = "success" if accepted else "danger"
         await ctx.send(embed=await self._shop_config_embed(ctx.guild.id, "Boutique mise à jour", "\n\n".join(description_lines), kind))
 
@@ -295,6 +437,7 @@ class Economy(commands.Cog, name="Economy"):
         )
         if cursor.rowcount < 1:
             return await ctx.send(embed=embeds.error("Ce rôle n'est pas dans la boutique."))
+        await self._refresh_shop_panels(ctx.guild)
         await ctx.send(embed=embeds.success(f"{role.mention} a été retiré de la boutique."))
 
     @shoprole.command(name="price", aliases=["prix"])
@@ -308,6 +451,7 @@ class Economy(commands.Cog, name="Economy"):
         )
         if cursor.rowcount < 1:
             return await ctx.send(embed=embeds.error("Ce rôle n'est pas dans la boutique."))
+        await self._refresh_shop_panels(ctx.guild)
         await ctx.send(embed=embeds.success(
             f"Le prix de {role.mention} est maintenant de **{stats_service.format_number(price)} 🪙**."
         ))
@@ -379,15 +523,9 @@ class Economy(commands.Cog, name="Economy"):
         await self._purchase_item(ctx, item)
 
     async def _purchase_item(self, ctx: commands.Context, item):
-        role = ctx.guild.get_role(item["role_id"]) if item["role_id"] else None
         if item["role_id"]:
-            if role is None:
-                return await ctx.send(embed=embeds.error("Ce rôle n'existe plus. Demandez à un administrateur de corriger la boutique."))
-            role_error = _self_assignable_role_error(ctx.guild, role)
-            if role_error:
-                return await ctx.send(embed=embeds.error(role_error))
-            if role in ctx.author.roles:
-                return await ctx.send(embed=embeds.info("Vous possédez déjà ce rôle. Aucun argent n'a été retiré."))
+            result = await self._purchase_role_result(ctx.guild, ctx.author, item)
+            return await ctx.send(embed=result)
 
         status, purchased_item = await self.bot.db.purchase_shop_item(ctx.guild.id, ctx.author.id, item["id"])
         if status == "not_found":
@@ -396,36 +534,6 @@ class Economy(commands.Cog, name="Economy"):
             return await ctx.send(embed=embeds.error(
                 "Vous n'avez pas assez d'argent dans votre portefeuille. Utilisez `+withdraw` pour retirer de la banque."
             ))
-        if status == "already_owned" and role is not None:
-            # Cas d'un rôle acheté auparavant puis retiré, ou d'un double-clic : on le
-            # restaure sans facturer une deuxième fois.
-            try:
-                await ctx.author.add_roles(role, reason=f"Restauration achat boutique #{item['id']}")
-            except (discord.Forbidden, discord.HTTPException):
-                return await ctx.send(embed=embeds.error(
-                    "Ce rôle a déjà été acheté, mais Discord refuse de le réattribuer. Vérifiez la hiérarchie des rôles."
-                ))
-            return await ctx.send(embed=embeds.success(
-                f"{role.mention} vous a été restauré sans nouvel achat."
-            ))
-
-        if role is not None:
-            try:
-                await ctx.author.add_roles(role, reason=f"Achat boutique #{purchased_item['id']}")
-            except (discord.Forbidden, discord.HTTPException):
-                await self.bot.db.refund_shop_item(
-                    ctx.guild.id,
-                    ctx.author.id,
-                    purchased_item,
-                    f"Remboursement : attribution du rôle {role.name} impossible",
-                )
-                return await ctx.send(embed=embeds.error(
-                    "Discord a refusé l'attribution du rôle. L'achat a été entièrement remboursé."
-                ))
-            return await ctx.send(embed=embeds.success(
-                f"{role.mention} vous a été attribué pour **{stats_service.format_number(purchased_item['price'])} 🪙**."
-            ))
-
         await self.bot.db.execute(
             "INSERT INTO inventory (guild_id, user_id, item_name, quantity) VALUES (?, ?, ?, 1) "
             "ON CONFLICT(guild_id, user_id, item_name) DO UPDATE SET quantity = quantity + 1",
@@ -434,6 +542,50 @@ class Economy(commands.Cog, name="Economy"):
         await ctx.send(embed=embeds.success(
             f"Vous avez acheté **{purchased_item['name']}** pour {stats_service.format_number(purchased_item['price'])} 🪙."
         ))
+
+    async def _purchase_role_result(self, guild: discord.Guild, member: discord.Member, item) -> discord.Embed:
+        role = guild.get_role(item["role_id"]) if item["role_id"] else None
+        if role is None:
+            return embeds.error("Ce rôle n'existe plus. Un administrateur doit actualiser la boutique.")
+        role_error = _self_assignable_role_error(guild, role)
+        if role_error:
+            return embeds.error(role_error)
+        if role in member.roles:
+            return embeds.info("Vous possédez déjà ce rôle. Aucun argent n'a été retiré.")
+
+        status, purchased_item = await self.bot.db.purchase_shop_item(guild.id, member.id, item["id"])
+        if status == "not_found":
+            return embeds.error("Ce rôle n'est plus disponible dans la boutique.")
+        if status == "insufficient_funds":
+            return embeds.error(
+                f"Vous n'avez pas assez d'argent. Ce rôle coûte **{stats_service.format_number(item['price'])} 🪙**."
+            )
+        if status == "already_owned":
+            # Cas d'un rôle acheté auparavant puis retiré, ou d'un double-clic : on le
+            # restaure sans facturer une deuxième fois.
+            try:
+                await member.add_roles(role, reason=f"Restauration achat boutique #{item['id']}")
+            except (discord.Forbidden, discord.HTTPException):
+                return embeds.error(
+                    "Ce rôle a déjà été acheté, mais Discord refuse de le réattribuer. Vérifiez la hiérarchie des rôles."
+                )
+            return embeds.success(
+                f"{role.mention} vous a été restauré sans nouvel achat."
+            )
+
+        try:
+            await member.add_roles(role, reason=f"Achat boutique #{purchased_item['id']}")
+        except (discord.Forbidden, discord.HTTPException):
+            await self.bot.db.refund_shop_item(
+                guild.id,
+                member.id,
+                purchased_item,
+                f"Remboursement : attribution du rôle {role.name} impossible",
+            )
+            return embeds.error("Discord a refusé le rôle. Votre argent a été automatiquement remboursé.")
+        return embeds.success(
+            f"Vous avez acheté {role.mention} pour **{stats_service.format_number(purchased_item['price'])} 🪙**."
+        )
 
     @commands.hybrid_command(name="inventory", description="Afficher votre inventaire.", with_app_command=False)
     async def inventory(self, ctx: commands.Context):
