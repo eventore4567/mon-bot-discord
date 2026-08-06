@@ -69,7 +69,7 @@ def _has_dashboard_button(view: discord.ui.View) -> bool:
     url = dashboard_url()
     return any(
         isinstance(item, discord.ui.Button)
-        and item.style is discord.ButtonStyle.link
+        and item.style == discord.ButtonStyle.link
         and getattr(item, "url", None) == url
         for item in view.children
     )
@@ -124,12 +124,7 @@ class DashboardAccess(commands.Cog, name="DashboardAccess"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def _sync_application_profile(self) -> None:
-        attempts = int(getattr(self.bot, "_dashboard_profile_sync_attempts", 0))
-        if getattr(self.bot, "_dashboard_profile_synced", False) or attempts >= 3:
-            return
-        self.bot._dashboard_profile_sync_attempts = attempts + 1
-
+    async def _sync_application_profile_once(self) -> bool:
         try:
             application = await self.bot.application_info()
             current = str(getattr(application, "description", "") or "")
@@ -143,21 +138,33 @@ class DashboardAccess(commands.Cog, name="DashboardAccess"):
             else:
                 logger.info("Le profil Discord contient déjà le bon lien du dashboard.")
             self.bot._dashboard_profile_synced = True
+            return True
         except discord.HTTPException as exc:
-            logger.warning(
-                "Impossible de mettre à jour le profil Discord du bot (tentative %s/3) : %s",
-                attempts + 1,
-                exc,
-            )
+            logger.warning("Discord a refusé temporairement la mise à jour du profil : %s", exc)
+            return False
         except Exception:
             logger.exception("Erreur inattendue pendant la mise à jour du profil Discord.")
+            return False
 
     @commands.Cog.listener()
     async def on_ready(self):
-        # Laisse l'événement principal terminer son initialisation, puis modifie uniquement
-        # les métadonnées de l'application. Les reconnexions ne provoquent pas de spam API.
-        await asyncio.sleep(1)
-        await self._sync_application_profile()
+        if getattr(self.bot, "_dashboard_profile_synced", False):
+            return
+        if getattr(self.bot, "_dashboard_profile_sync_running", False):
+            return
+
+        self.bot._dashboard_profile_sync_running = True
+        try:
+            # Laisse l'événement principal terminer son initialisation. En cas de panne
+            # Discord momentanée, trois essais espacés évitent d'attendre une reconnexion.
+            await asyncio.sleep(1)
+            for attempt in range(1, 4):
+                if await self._sync_application_profile_once():
+                    break
+                if attempt < 3:
+                    await asyncio.sleep(10)
+        finally:
+            self.bot._dashboard_profile_sync_running = False
 
 
 async def install_dashboard_access(bot: commands.Bot) -> None:
