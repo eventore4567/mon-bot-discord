@@ -7,6 +7,7 @@ Cog UTILITAIRES.
 """
 
 import asyncio
+import io
 import ipaddress
 import logging
 import re
@@ -15,6 +16,7 @@ from urllib.parse import urljoin, urlparse
 
 import aiohttp
 import discord
+from PIL import Image, ImageSequence, UnidentifiedImageError
 from discord import app_commands
 from discord.ext import commands
 
@@ -25,6 +27,8 @@ logger = logging.getLogger("bot")
 
 CUSTOM_EMOJI_RE = re.compile(r"<(a?):([A-Za-z0-9_]{2,32}):([0-9]+)>")
 MAX_EMOJI_BYTES = 256 * 1024
+MAX_EMOJI_SOURCE_BYTES = 8 * 1024 * 1024
+EMOJI_DIMENSION = 128
 
 
 def _contains_unicode_emoji(value: str) -> bool:
@@ -69,6 +73,111 @@ def _custom_emoji_urls(emoji_id: str, animated: bool) -> list[str]:
         f"{base}?size=128&quality=lossless",
         f"https://media.discordapp.net/emojis/{emoji_id}.{extension}?size=128&quality=lossless",
     ]
+
+
+def _emoji_canvas(frame: Image.Image, size: int) -> Image.Image:
+    rgba = frame.convert("RGBA")
+    rgba.thumbnail((size, size), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    left = (size - rgba.width) // 2
+    top = (size - rgba.height) // 2
+    canvas.alpha_composite(rgba, (left, top))
+    return canvas
+
+
+def _encode_static_emoji(data: bytes) -> bytes:
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            if source.width * source.height > 16_777_216:
+                raise ValueError("L'image source est trop grande pour être traitée.")
+            canvas = _emoji_canvas(source, EMOJI_DIMENSION)
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("Impossible de décoder cette image.") from exc
+
+    attempts: list[bytes] = []
+    output = io.BytesIO()
+    canvas.save(output, format="PNG", optimize=True, compress_level=9)
+    attempts.append(output.getvalue())
+    for colors in (256, 128, 64):
+        output = io.BytesIO()
+        indexed = canvas.quantize(
+            colors=colors,
+            method=Image.Quantize.FASTOCTREE,
+            dither=Image.Dither.NONE,
+        )
+        indexed.save(output, format="PNG", optimize=True, compress_level=9)
+        attempts.append(output.getvalue())
+    for encoded in attempts:
+        if len(encoded) <= MAX_EMOJI_BYTES:
+            return encoded
+    raise ValueError("L'image reste trop lourde après conversion en PNG 128 × 128.")
+
+
+def _encode_animated_emoji(data: bytes) -> bytes:
+    # Plusieurs niveaux sont essayés : l'animation est conservée, puis réduite
+    # progressivement uniquement si elle dépasse encore la limite Discord.
+    strategies = [
+        (128, 256, 1),
+        (112, 192, 1),
+        (96, 128, 1),
+        (80, 96, 2),
+        (64, 64, 2),
+    ]
+    last_size = 0
+    for size, colors, frame_step in strategies:
+        try:
+            with Image.open(io.BytesIO(data)) as source:
+                frame_count = getattr(source, "n_frames", 1)
+                if frame_count <= 1:
+                    raise ValueError("Le GIF ne contient pas plusieurs images.")
+                if frame_count > 400:
+                    raise ValueError("Le GIF contient trop d'images pour un emoji Discord.")
+                if source.width * source.height > 16_777_216:
+                    raise ValueError("Le GIF source est trop grand pour être traité.")
+                default_duration = max(20, int(source.info.get("duration", 100) or 100))
+                loop = int(source.info.get("loop", 0) or 0)
+                frames: list[Image.Image] = []
+                durations: list[int] = []
+                for index, frame in enumerate(ImageSequence.Iterator(source)):
+                    if index % frame_step:
+                        continue
+                    canvas = _emoji_canvas(frame, size)
+                    indexed = canvas.quantize(
+                        colors=colors,
+                        method=Image.Quantize.FASTOCTREE,
+                        dither=Image.Dither.NONE,
+                    )
+                    frames.append(indexed)
+                    duration = int(frame.info.get("duration", default_duration) or default_duration)
+                    durations.append(max(20, min(1000, duration * frame_step)))
+        except (UnidentifiedImageError, OSError) as exc:
+            raise ValueError("Impossible de décoder ce GIF animé.") from exc
+
+        if len(frames) <= 1:
+            raise ValueError("Le GIF ne contient pas assez d'images pour rester animé.")
+        output = io.BytesIO()
+        frames[0].save(
+            output,
+            format="GIF",
+            save_all=True,
+            append_images=frames[1:],
+            duration=durations,
+            loop=loop,
+            disposal=2,
+            optimize=True,
+        )
+        encoded = output.getvalue()
+        last_size = len(encoded)
+        if len(encoded) <= MAX_EMOJI_BYTES:
+            return encoded
+    raise ValueError(
+        f"Le GIF reste trop lourd après optimisation ({last_size // 1024} Ko). "
+        "Utilisez une animation plus courte."
+    )
+
+
+def _normalise_emoji_asset(data: bytes, animated: bool) -> bytes:
+    return _encode_animated_emoji(data) if animated else _encode_static_emoji(data)
 
 
 # Ordre volontaire : catégories utiles à tout le monde en premier, catégories staff/technique
@@ -617,8 +726,8 @@ class Utility(commands.Cog, name="Utility"):
                 extension = attachment.filename.rsplit(".", 1)[-1].lower() if "." in attachment.filename else ""
                 if content_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"} and extension not in {"png", "jpg", "jpeg", "gif", "webp"}:
                     raise ValueError("Le fichier joint doit être une image PNG, JPG, GIF ou WebP.")
-                if attachment.size > MAX_EMOJI_BYTES:
-                    raise ValueError("L'image jointe dépasse la limite de 256 Ko pour un emoji Discord.")
+                if attachment.size > MAX_EMOJI_SOURCE_BYTES:
+                    raise ValueError("L'image source dépasse la limite de traitement de 8 Mo.")
                 requires_animation = content_type == "image/gif" or extension == "gif"
                 image_data = await attachment.read()
             elif source_urls:
@@ -649,15 +758,17 @@ class Utility(commands.Cog, name="Utility"):
                                 declared_size = int(
                                     response.headers.get("Content-Length", "0") or 0
                                 )
-                                if declared_size > MAX_EMOJI_BYTES:
+                                if declared_size > MAX_EMOJI_SOURCE_BYTES:
                                     last_error = (
-                                        "L'image dépasse la limite de 256 Ko pour un emoji Discord."
+                                        "L'image source dépasse la limite de traitement de 8 Mo."
                                     )
                                     break
-                                downloaded = await response.content.read(MAX_EMOJI_BYTES + 1)
-                                if len(downloaded) > MAX_EMOJI_BYTES:
+                                downloaded = await response.content.read(
+                                    MAX_EMOJI_SOURCE_BYTES + 1
+                                )
+                                if len(downloaded) > MAX_EMOJI_SOURCE_BYTES:
                                     last_error = (
-                                        "L'image dépasse la limite de 256 Ko pour un emoji Discord."
+                                        "L'image source dépasse la limite de traitement de 8 Mo."
                                     )
                                     break
                                 if _image_kind(downloaded) is None:
@@ -693,6 +804,15 @@ class Utility(commands.Cog, name="Utility"):
                 )
 
             is_animated = image_type == "gif"
+            asset_was_normalised = False
+            if not is_animated or len(image_data) > MAX_EMOJI_BYTES:
+                image_data = await asyncio.to_thread(
+                    _normalise_emoji_asset,
+                    image_data,
+                    is_animated,
+                )
+                asset_was_normalised = True
+
             used_slots = sum(1 for item in ctx.guild.emojis if item.animated == is_animated)
             if used_slots >= ctx.guild.emoji_limit:
                 slot_type = "animés" if is_animated else "statiques"
@@ -701,11 +821,35 @@ class Utility(commands.Cog, name="Utility"):
                     f"({used_slots}/{ctx.guild.emoji_limit})."
                 )
 
-            emoji = await ctx.guild.create_custom_emoji(
-                name=nom,
-                image=image_data,
-                reason=f"Emoji ajouté par {ctx.author} avec +addemoji",
-            )
+            try:
+                emoji = await ctx.guild.create_custom_emoji(
+                    name=nom,
+                    image=image_data,
+                    reason=f"Emoji ajouté par {ctx.author} avec +addemoji",
+                )
+            except discord.HTTPException as exc:
+                if exc.code != 50046 or asset_was_normalised:
+                    raise
+                # Certains GIF Discord ont une signature correcte mais un encodage que
+                # l'API refuse avec 50046. On le réencode puis on tente une seule fois.
+                repaired = await asyncio.to_thread(
+                    _normalise_emoji_asset,
+                    image_data,
+                    is_animated,
+                )
+                try:
+                    emoji = await ctx.guild.create_custom_emoji(
+                        name=nom,
+                        image=repaired,
+                        reason=f"Emoji réparé et ajouté par {ctx.author} avec +addemoji",
+                    )
+                except discord.HTTPException as retry_exc:
+                    if retry_exc.code == 50046:
+                        raise ValueError(
+                            "Discord refuse encore cette image après sa conversion en "
+                            "format emoji 128 × 128. Essayez un autre fichier."
+                        ) from retry_exc
+                    raise
         except ValueError as exc:
             return await ctx.send(embed=await self._embed(ctx.guild.id, title="Image refusée", description=str(exc), kind="danger"))
         except asyncio.TimeoutError:
