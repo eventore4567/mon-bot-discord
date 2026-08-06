@@ -20,6 +20,10 @@ et /automod-status (statistiques des dernières 24h par filtre).
 Exemptions : administrateurs, propriétaire(s) du bot, rôle staff (/setmodrole) et tout
 rôle ajouté via /automod-exempt-role-add ne sont jamais filtrés par AutoMod.
 
+Le filtre multilingue intégré analyse 2 663 termes, 1 200 phrases et 120 groupes de
+mots dans 28 langues. Une détection supprime le message et applique immédiatement une
+exclusion temporaire de 10 minutes, sans attendre l'escalade des autres filtres.
+
 L'anti-nuke (/antinuke) protège contre un compte compromis (staff ou même le bot)
 qui tenterait de détruire le serveur : suppression massive de salons/rôles ou
 bannissements en rafale. Si le seuil est dépassé, le responsable est immédiatement
@@ -38,6 +42,7 @@ from discord.ext import commands
 
 import config
 from utils import embeds, checks, helpers
+from utils.moderation_dataset import MultilingualModerationDataset
 
 logger = logging.getLogger("bot")
 
@@ -62,6 +67,7 @@ ESCALATION_RULES = [  # (seuil d'infractions atteint, action) — évalué du pl
     (3, "mute"),
 ]
 MUTE_ESCALATION_SECONDS = 600  # 10 minutes
+DATASET_TIMEOUT_SECONDS = 600  # sanction directe du filtre multilingue
 ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "ban": "🔨 Bannissement"}
 
 
@@ -123,6 +129,7 @@ class AutoMod(commands.Cog, name="Automod"):
         self.join_tracker: dict[int, list[float]] = {}
         self.nuke_tracker: dict[tuple[int, int], list[float]] = {}
         self.infraction_tracker: dict[tuple[int, int], list[float]] = {}
+        self.moderation_dataset = MultilingualModerationDataset()
         # Caches mémoire : évitent des allers-retours en base de données à CHAQUE
         # message (ce qui ralentissait le bot sur un salon actif). Invalidés dès
         # qu'une commande change un réglage.
@@ -407,6 +414,15 @@ class AutoMod(commands.Cog, name="Automod"):
             count = stats_by_filter.get(field, 0)
             count_txt = f" — `{count}` déclenchement(s)/24h" if count else ""
             lines.append(f"**{label}** : {state}{count_txt}")
+        dataset_count = sum(self.moderation_dataset.source_counts.values())
+        dataset_state = "ACTIF" if self.moderation_dataset.loaded else "ERREUR DE CHARGEMENT"
+        dataset_hits = stats_by_filter.get("multilingual_toxicity", 0)
+        dataset_hits_text = f" — `{dataset_hits}` déclenchement(s)/24h" if dataset_hits else ""
+        lines.insert(
+            0,
+            f"**Filtre multilingue ({len(self.moderation_dataset.languages)} langues, "
+            f"{dataset_count} entrées, mute 10 min)** : {dataset_state}{dataset_hits_text}",
+        )
         e.add_field(name="Filtres", value="\n".join(lines), inline=False)
         exempt_rows = await self.bot.db.list_automod_exempt_roles(ctx.guild.id)
         if exempt_rows:
@@ -632,6 +648,14 @@ class AutoMod(commands.Cog, name="Automod"):
         if await self.is_automod_exempt(message.author):
             return
 
+        dataset_match = self.moderation_dataset.match(message.content)
+        if dataset_match:
+            return await self._delete_and_timeout(
+                message,
+                "Contenu offensant détecté par le filtre multilingue.",
+                detection_kind=dataset_match.kind,
+            )
+
         conf = await self.get_automod_cached(message.guild.id)
         if not conf:
             return
@@ -725,6 +749,85 @@ class AutoMod(commands.Cog, name="Automod"):
             await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, escalation_action, reason)
 
         e = embeds.log_entry(title, color, cible=message.author, cible_label="👤 Membre", raison=reason, extra=extra)
+        await self.log_action(message.guild, e)
+
+    async def _delete_and_timeout(
+        self,
+        message: discord.Message,
+        reason: str,
+        *,
+        detection_kind: str,
+    ):
+        """Supprime le message et applique immédiatement un timeout de 10 minutes."""
+        self._mark_xp_skip(message.id)
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            pass
+
+        member = message.author
+        timeout_applied = False
+        timeout_status = "Impossible à appliquer : permission ou hiérarchie insuffisante."
+        if isinstance(member, discord.Member):
+            me = message.guild.me
+            until = discord.utils.utcnow() + timedelta(seconds=DATASET_TIMEOUT_SECONDS)
+            current_timeout = member.timed_out_until
+            if current_timeout and current_timeout > until:
+                timeout_applied = True
+                timeout_status = "Un timeout plus long était déjà actif; il a été conservé."
+            elif (
+                member.id != message.guild.owner_id
+                and me is not None
+                and me.guild_permissions.moderate_members
+                and member.top_role < me.top_role
+            ):
+                try:
+                    await member.timeout(
+                        until,
+                        reason="AutoMod : contenu offensant détecté par le filtre multilingue",
+                    )
+                    timeout_applied = True
+                    timeout_status = "Exclusion temporaire appliquée pendant 10 minutes."
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+
+        public_status = (
+            "Sanction : exclusion temporaire de 10 minutes."
+            if timeout_applied
+            else "Le message a été bloqué, mais le bot n’a pas pu appliquer le mute. "
+                 "Vérifiez la permission Modérer les membres et la hiérarchie des rôles."
+        )
+        try:
+            note = await message.channel.send(
+                embed=embeds.warning(
+                    f"{message.author.mention}, votre message a été supprimé.\n"
+                    f"Raison : contenu offensant détecté.\n{public_status}"
+                )
+            )
+            await note.delete(delay=8)
+        except discord.HTTPException:
+            pass
+
+        action = "mute" if timeout_applied else "suppression"
+        await self.bot.db.log_automod_action(
+            message.guild.id,
+            message.author.id,
+            "multilingual_toxicity",
+            action,
+            reason,
+        )
+        e = embeds.log_entry(
+            "Action AutoMod — filtre multilingue",
+            config.COLOR_WARNING,
+            cible=message.author,
+            cible_label="Membre",
+            raison=reason,
+            extra={
+                "Salon": f"{message.channel.mention}\n`ID: {message.channel.id}`",
+                "Type de détection": detection_kind.replace("_", " "),
+                "Sanction": timeout_status,
+            },
+        )
         await self.log_action(message.guild, e)
 
     @commands.Cog.listener()
