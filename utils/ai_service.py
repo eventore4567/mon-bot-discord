@@ -190,6 +190,24 @@ def pick_reasoning_effort(model_key: str, base_effort: str = "medium") -> str:
     return base_effort
 
 
+_WEB_SEARCH_KEYWORDS = (
+    "cherche sur internet", "recherche sur internet", "cherche sur le web",
+    "recherche sur le web", "trouve moi", "trouve-moi", "donne moi le lien",
+    "donne-moi le lien", "lien de la video", "lien de la vidéo", "lien youtube",
+    "youtube", "tiktok", "twitch", "instagram", "site officiel", "sur internet",
+    "sur le web", "aujourd'hui", "actualité", "actualite", "dernières nouvelles",
+    "dernieres nouvelles", "latest", "current", "http://", "https://",
+)
+
+
+def needs_web_search(text: str) -> bool:
+    """Détecte les demandes qui exigent des informations ou liens publics actuels."""
+    if not isinstance(text, str):
+        return False
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in _WEB_SEARCH_KEYWORDS)
+
+
 # ---------------------------------------------------------------- ESTIMATION DE TOKENS
 
 def estimate_tokens(text: str) -> int:
@@ -340,6 +358,32 @@ def _extract_text(resp) -> str:
         return ""
 
 
+def _value(obj, name: str, default=None):
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def _append_web_citations(text: str, resp) -> str:
+    """Ajoute les URL de recherche sous une forme réellement cliquable dans Discord."""
+    citations: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for item in _value(resp, "output", []) or []:
+        for content_item in _value(item, "content", []) or []:
+            for annotation in _value(content_item, "annotations", []) or []:
+                citation = _value(annotation, "url_citation", annotation)
+                url = _value(citation, "url")
+                title = (_value(citation, "title") or "Source").replace("\n", " ").strip()
+                if url and url not in seen:
+                    seen.add(url)
+                    citations.append((title[:100], url))
+    missing = [(title, url) for title, url in citations if url not in (text or "")]
+    if not missing:
+        return text or ""
+    sources = "\n".join(f"- [{title}]({url})" for title, url in missing[:5])
+    return f"{(text or '').rstrip()}\n\nSources :\n{sources}".strip()
+
+
 class AiResult:
     """Résultat d'un appel IA. `error` vaut None (succès) ou l'un des codes courts définis
     plus haut (ERROR_NO_KEY, ERROR_CYBER_POLICY, ERROR_BAD_REQUEST, ERROR_AUTH,
@@ -372,6 +416,7 @@ async def generate(
     channel_id: int | None = None,
     user_id: int | None = None,
     command: str | None = None,
+    web_search: bool = False,
 ) -> AiResult:
     """Appelle la Responses API (jamais Chat Completions) via AsyncOpenAI (jamais bloquant).
 
@@ -400,6 +445,9 @@ async def generate(
     }
     if previous_response_id:
         kwargs["previous_response_id"] = previous_response_id
+    if web_search:
+        kwargs["tools"] = [{"type": "web_search", "search_context_size": "low"}]
+        kwargs["tool_choice"] = "required"
 
     log_context = "modèle=%s commande=%s guild=%s salon=%s utilisateur=%s"
     log_args = (model_id, command, guild_id, channel_id, user_id)
@@ -407,6 +455,8 @@ async def generate(
     try:
         resp = await client.responses.create(**kwargs)
         text = getattr(resp, "output_text", None) or _extract_text(resp)
+        if web_search:
+            text = _append_web_citations(text, resp)
         usage_tokens = 0
         usage = getattr(resp, "usage", None)
         if usage is not None:
