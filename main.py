@@ -18,7 +18,13 @@ from discord.ext import commands
 import config
 from database.db import Database, PRIMARY_CREATOR_ID
 from utils import embeds
-from utils.checks import BotPermissionError, BotBlacklistedError
+from utils.checks import (
+    BotPermissionError,
+    BotBlacklistedError,
+    can_use_embed_builder,
+    is_mod_or_permission,
+    is_verified_bot_owner,
+)
 from web.dashboard import start_dashboard
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -71,6 +77,142 @@ EXACT_DUPLICATE_COMMANDS = frozenset({
 })
 
 PRUNED_COMMANDS = COMMANDS_REPLACED_BY_SETUP | EXACT_DUPLICATE_COMMANDS
+
+
+# Politique de sécurité centrale. Une commande absente de cette liste est considérée
+# comme sensible et réservée aux administrateurs par défaut (fail-closed). Les checks
+# présents dans les cogs restent actifs : cette politique est un second verrou qui évite
+# qu'un oubli de décorateur rende accidentellement une commande administrative publique.
+PUBLIC_COMMANDS = frozenset({
+    # Aide et utilitaires sans modification du serveur
+    "help", "ping", "avatar", "serverinfo", "userinfo", "roleinfo",
+    "channelinfo", "membercount", "emoji-list", "poll", "remind",
+    "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
+    "report-bug", "afk", "roll", "choose",
+    # Intelligence artificielle
+    "sentrix", "ask", "chat-reset", "summarize", "image-prompt", "image",
+    "explain", "rewrite", "fact-check", "ai", "chat", "improve", "correct",
+    "ai-translate", "code",
+    # Économie et niveaux
+    "balance", "economy", "daily", "weekly", "work", "rob", "pay",
+    "economyleaderboard", "leaderboard-money", "shop", "buy", "buyrole",
+    "inventory", "sell", "gamble", "deposit", "withdraw", "banque",
+    "stats", "me", "level", "rank", "leaderboard-levels", "level-roles",
+    "profile", "set-bio", "rep", "reputation", "repleaderboard", "voice-time",
+    # Tickets, événements et invitations accessibles aux membres
+    "ticket", "giveaway-list", "event-join", "event-leave", "event-list",
+    "tournament-join", "tournament-list", "invites", "invite-leaderboard",
+    "invited-by",
+    # Statistiques publiques
+    "bot-status", "server-growth", "command-stats", "latency", "changelog",
+    "feedback", "botinfo",
+    # Mini-jeux
+    "rps", "guess-number", "trivia", "tictactoe", "hangman", "math-quiz",
+    "blackjack", "slots",
+    # Musique
+    "join", "leave", "play", "pause", "resume", "skip", "stop", "queue",
+    "nowplaying", "volume", "loop", "shuffle", "remove-from-queue",
+    "clear-queue", "playlist-save", "playlist-load",
+})
+
+OWNER_ONLY_COMMANDS = frozenset({
+    "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
+    "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
+})
+
+CATEGORY_COMMANDS = {
+    "configuration": frozenset({
+        "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs-status",
+        "logsetup", "logs", "setwelcomechannel", "setgoodbyechannel",
+        "setwelcomemessage", "setgoodbyemessage", "setticketlogchannel",
+        "setautorole", "createrole", "setwarnrole", "setwarnbanthreshold",
+        "disablecommand", "enablecommand", "ignorechannel", "unignorechannel",
+        "setlevelchannel", "setsuggestchannel", "setannouncechannel",
+        "setgiveawaychannel", "config-view", "config-reset", "setup",
+        "create-server", "delete-channel", "verify-setup", "verify-panel",
+        "rolepanel", "rolepanel-refresh", "reactionrole-add",
+        "reactionrole-remove", "reactionrole-list", "set-level-role",
+        "remove-level-role", "set-xp", "add-xp", "reset-levels", "levelcheck",
+        "levelrepair", "repconfig", "repadd", "repremove", "represet",
+        "rephistory", "statsconfig", "levelroles", "addbonusinvites",
+        "removebonusinvites", "invitebonushistory", "designsetup",
+        "embedconfig", "giveaway-create", "giveaway-end", "giveaway-reroll",
+        "giveaway-cancel", "giveaway-blacklist", "giveaway-unblacklist",
+        "event-create", "event-cancel", "tournament-create",
+        "tournament-start", "announce", "set-nickname", "alias",
+    }),
+    "tickets": frozenset({
+        "ticketsetup", "ticketpanel", "ticketpanel-toggle", "tickettype",
+        "ticketform", "ticketconfig", "ticketlogs", "ticketlimit",
+        "ticketautoclose",
+    }),
+    "moderation": frozenset({"sanctiondm"}),
+    "securite": frozenset({
+        "antispam", "antilink", "antiinvite", "antimention", "anticaps",
+        "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
+        "antinuke", "antinuke-whitelist-add", "antinuke-whitelist-remove",
+        "antinuke-whitelist-list", "lockdown-server", "unlock-server",
+        "automod-status", "security-check", "automod-escalation",
+        "automod-exempt-role-add", "automod-exempt-role-remove",
+        "automod-history", "security-level", "blacklist-add",
+        "blacklist-remove", "blacklist-list", "blacklist-user",
+        "unblacklist-user", "blacklist-users", "whitelist-domain",
+        "unwhitelist-domain", "permission-audit", "server-backup",
+        "server-restore", "syncbl", "unsyncbl",
+    }),
+    "economie": frozenset({
+        "shopsetup", "shoppanel", "shoprole", "give-money", "reset-economy",
+    }),
+    "ai": frozenset({"aisetup", "aidiag"}),
+    "complete": frozenset({"wipe-server", "roleall", "massrole"}),
+}
+
+DISCORD_PERMISSION_COMMANDS = {
+    "ban": "ban_members",
+    "tempban": "ban_members",
+    "unban": "ban_members",
+    "kick": "kick_members",
+    "mute": "moderate_members",
+    "unmute": "moderate_members",
+    "warn": "moderate_members",
+    "unwarn": "moderate_members",
+    "warnings": "moderate_members",
+    "clearwarnings": "moderate_members",
+    "case": "moderate_members",
+    "modhistory": "moderate_members",
+    "quarantine": "moderate_members",
+    "unquarantine": "moderate_members",
+    "clear": "manage_messages",
+    "say": "manage_messages",
+    "embed-create": "manage_messages",
+    "slowmode": "manage_channels",
+    "lock": "manage_channels",
+    "unlock": "manage_channels",
+    "hide": "manage_channels",
+    "show": "manage_channels",
+    "ticket-reopen": "manage_channels",
+    "tickettranscript": "manage_channels",
+    "ticketstats": "manage_channels",
+    "nickname": "manage_nicknames",
+    "resetnick": "manage_nicknames",
+    "move": "move_members",
+    "disconnect": "move_members",
+    "role-snapshot": "manage_roles",
+    "role-restore": "manage_roles",
+    "giverole": "manage_roles",
+    "removerole": "manage_roles",
+    "addemoji": "manage_emojis_and_stickers",
+    "deleteemoji": "manage_emojis_and_stickers",
+}
+
+CUSTOM_PERMISSION_COMMANDS = frozenset({"embed"})
+KNOWN_PERMISSION_COMMANDS = (
+    PUBLIC_COMMANDS
+    | OWNER_ONLY_COMMANDS
+    | CUSTOM_PERMISSION_COMMANDS
+    | frozenset(DISCORD_PERMISSION_COMMANDS)
+    | frozenset().union(*CATEGORY_COMMANDS.values())
+)
 
 
 INTENTS = discord.Intents.default()
@@ -226,6 +368,7 @@ class BotAllInOne(commands.Bot):
         # Le nettoyage se fait après le chargement des cogs et avant tree.sync() : les
         # commandes disparaissent donc à la fois du préfixe, de +help et des slash Discord.
         self._prune_redundant_commands()
+        self._audit_command_permissions()
 
         # Enregistrement des vues persistantes (boutons qui survivent aux redémarrages).
         # Le panel d'ouverture est propre à chaque panel configuré (options dynamiques) :
@@ -277,6 +420,7 @@ class BotAllInOne(commands.Bot):
 
         self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
+        self.add_check(self.global_permission_check)
 
         try:
             synced = await self.tree.sync()
@@ -288,6 +432,97 @@ class BotAllInOne(commands.Bot):
         # port fourni par Railway (variable PORT). Ne bloque jamais le démarrage du bot
         # si ça échoue (ex: port déjà utilisé en local).
         asyncio.create_task(start_dashboard(self))
+
+    def _audit_command_permissions(self) -> None:
+        """Signale au démarrage toute nouvelle commande non classée.
+
+        Une commande non classée reste bloquée pour les membres ordinaires par
+        global_permission_check(). Ce diagnostic empêche qu'une future commande sensible
+        soit ajoutée silencieusement sans décision explicite sur son niveau d'accès.
+        """
+        registered = {command.name.lower() for command in self.commands}
+        unknown = sorted(registered - KNOWN_PERMISSION_COMMANDS)
+        if unknown:
+            logger.warning(
+                "Sécurité : %s commande(s) non classée(s), accès administrateur appliqué "
+                "par défaut — %s",
+                len(unknown),
+                ", ".join(unknown),
+            )
+        else:
+            logger.info(
+                "Sécurité : %s commande(s) classée(s), aucune commande sans politique d'accès.",
+                len(registered),
+            )
+
+    async def _has_manager_access(self, ctx: commands.Context, category: str) -> bool:
+        """Vérifie propriétaire, administrateur ou gestionnaire autorisé pour une catégorie."""
+        if await is_verified_bot_owner(ctx):
+            return True
+        if not isinstance(ctx.author, discord.Member) or ctx.guild is None:
+            return False
+        if ctx.author.guild_permissions.administrator:
+            return True
+        if not await self.db.is_bot_manager(ctx.guild.id, ctx.author.id):
+            return False
+        return await self.db.has_manager_permission(ctx.guild.id, ctx.author.id, category)
+
+    async def global_permission_check(self, ctx: commands.Context) -> bool:
+        """Second verrou obligatoire pour toutes les commandes, préfixées et slash.
+
+        Les checks locaux des cogs continuent de contrôler la hiérarchie et les détails.
+        Ici, une commande inconnue est refusée aux membres par défaut : la sécurité ne
+        dépend donc plus d'un décorateur qui pourrait être oublié.
+        """
+        command = ctx.command
+        if command is None:
+            return True
+        root = command.root_parent or command
+        name = root.name.lower()
+
+        if name in PUBLIC_COMMANDS:
+            return True
+
+        if name in OWNER_ONLY_COMMANDS:
+            if await is_verified_bot_owner(ctx):
+                return True
+            raise BotPermissionError(
+                "Cette commande est réservée au propriétaire vérifié du bot."
+            )
+
+        if name in CUSTOM_PERMISSION_COMMANDS:
+            if await can_use_embed_builder(ctx):
+                return True
+            raise BotPermissionError(
+                "Cette commande est réservée au staff autorisé à créer des embeds."
+            )
+
+        required_permission = DISCORD_PERMISSION_COMMANDS.get(name)
+        if required_permission is not None:
+            if await is_mod_or_permission(ctx, required_permission):
+                return True
+            raise BotPermissionError(
+                "Cette commande est réservée au staff autorisé. "
+                f"Permission requise : `{required_permission}` ou rôle de modération configuré."
+            )
+
+        for category, names in CATEGORY_COMMANDS.items():
+            if name not in names:
+                continue
+            if await self._has_manager_access(ctx, category):
+                return True
+            raise BotPermissionError(
+                "Cette commande de gestion est réservée aux administrateurs ou à un "
+                f"gestionnaire autorisé pour la catégorie `{category}`."
+            )
+
+        # Fail-closed : toute future commande oubliée dans la politique est protégée.
+        if await self._has_manager_access(ctx, "complete"):
+            return True
+        raise BotPermissionError(
+            "Cette commande n'a pas encore de niveau d'accès public validé. "
+            "Elle est réservée aux administrateurs par sécurité."
+        )
 
     async def global_blacklist_check(self, ctx: commands.Context) -> bool:
         """Bloque tout utilisateur inscrit sur la liste noire GLOBALE d'utilisation du bot
