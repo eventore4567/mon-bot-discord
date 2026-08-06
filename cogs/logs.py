@@ -7,10 +7,15 @@ log_automod. Le cog reste silencieux lorsqu'un salon n'est pas configuré ou ina
 
 from __future__ import annotations
 
+import logging
+
 import discord
 from discord.ext import commands
 
 from utils import checks
+
+
+logger = logging.getLogger(__name__)
 
 
 LOG_TYPES = {
@@ -106,11 +111,14 @@ class Logs(commands.Cog, name="Logs"):
         if ctx.guild is None:
             return await ctx.send("Cette commande doit être utilisée dans un serveur.")
 
-        # ensure_guild répare aussi le cas d'un serveur présent avant l'installation
-        # du module de logs. Une ancienne base reste affichable même si une colonne
-        # de logs n'existe pas encore : elle apparaît simplement non configurée.
-        await self.bot.db.ensure_guild(ctx.guild.id)
-        config = await self.bot.db.get_guild_config(ctx.guild.id)
+        # L'affichage doit rester utilisable même si la base Railway est momentanément
+        # verrouillée ou issue d'une ancienne version. Les commandes de configuration
+        # signaleront séparément un éventuel problème d'écriture.
+        try:
+            config = await self.bot.db.get_guild_config(ctx.guild.id)
+        except Exception:
+            logger.exception("Lecture de la configuration des logs impossible pour %s", ctx.guild.id)
+            config = None
         lines = []
         for _, (config_key, label) in LOG_TYPES.items():
             channel_id = self._config_value(config, config_key)
@@ -127,12 +135,30 @@ class Logs(commands.Cog, name="Logs"):
             value="`+logs set messages #salon`\n`+logs disable messages`",
             inline=False,
         )
-        await ctx.send(embed=embed)
+        try:
+            await ctx.send(embed=embed)
+        except discord.HTTPException:
+            # Certains proxies/clients Discord refusent occasionnellement un embed alors
+            # qu'un message texte passe. Le panneau reste donc toujours accessible.
+            logger.exception("Envoi de l'embed +logsetup impossible")
+            await ctx.send("**Configuration des logs**\n" + "\n".join(lines))
 
     @commands.command(name="logsetup")
     async def logsetup(self, ctx: commands.Context):
         """Afficher l'état des logs, sans dépendre du groupe +logs."""
-        await self._send_status(ctx)
+        try:
+            await self._send_status(ctx)
+        except Exception:
+            # Dernier filet de sécurité : cette commande de diagnostic ne doit jamais
+            # retomber sur le message générique du gestionnaire global.
+            logger.exception("Échec inattendu de +logsetup")
+            await ctx.send(
+                "**Configuration des logs**\n"
+                "Le panneau détaillé n'a pas pu être chargé, mais les commandes restent disponibles :\n"
+                "`+logs set messages #salon`\n"
+                "`+logs set membres #salon`\n"
+                "`+logs set moderation #salon`"
+            )
 
     @commands.group(name="logs", aliases=["log"], invoke_without_command=True)
     @checks.is_owner_or_admin()
