@@ -3,7 +3,8 @@ Cog PROPRIÉTAIRE DU BOT.
 /bl /blinfo /unbl /editbl /syncbl /unsyncbl /setstatus /status-rotate
 /footer /theme /set-bot /set-nickname /bot-servers /bot-leave /alias
 
-Commandes de gestion globale du bot, réservées au propriétaire (OWNER_IDS dans .env)
+Commandes de gestion globale du bot, réservées au créateur vérifié dans la base de données
+(avec OWNER_IDS dans .env comme méthode supplémentaire)
 sauf mention contraire. Toutes fonctionnent uniquement avec le préfixe (+), pas en slash,
 pour ne pas consommer inutilement la limite de 100 commandes slash de Discord — ce sont
 des commandes techniques utilisées rarement, la version + suffit largement.

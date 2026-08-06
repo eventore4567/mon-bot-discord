@@ -232,7 +232,7 @@ class BotAllInOne(commands.Bot):
     async def global_blacklist_check(self, ctx: commands.Context) -> bool:
         """Bloque tout utilisateur inscrit sur la liste noire GLOBALE d'utilisation du bot
         (/bl, cog Owner) — sur n'importe quelle commande, n'importe quel serveur."""
-        if ctx.author.id in config.OWNER_IDS:
+        if ctx.author.id in config.OWNER_IDS or await self.db.is_bot_creator(ctx.author.id):
             return True
         reason = self.blacklist_cache.get(ctx.author.id)
         if reason is not None:
@@ -240,7 +240,7 @@ class BotAllInOne(commands.Bot):
         return True
 
     async def global_cooldown_check(self, ctx: commands.Context) -> bool:
-        if ctx.author.id in config.OWNER_IDS:
+        if ctx.author.id in config.OWNER_IDS or await self.db.is_bot_creator(ctx.author.id):
             return True
         bucket = self._cooldown_bucket.get_bucket(ctx.message if not ctx.interaction else ctx)
         retry_after = bucket.update_rate_limit()
@@ -292,7 +292,9 @@ class BotAllInOne(commands.Bot):
                             "contenant la base, puis vérifier que DATABASE_PATH pointe bien dedans."
                         )
                         logger.warning(warning_text)
-                        for owner_id in getattr(config, "OWNER_IDS", []):
+                        owner_ids = set(getattr(config, "OWNER_IDS", []))
+                        owner_ids.update(await self.db.list_bot_creator_ids())
+                        for owner_id in owner_ids:
                             try:
                                 owner = await self.fetch_user(owner_id)
                                 await owner.send(embed=embeds.warning(warning_text))

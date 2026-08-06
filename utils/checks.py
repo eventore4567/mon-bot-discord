@@ -26,14 +26,21 @@ class BotBlacklistedError(commands.CheckFailure):
         super().__init__(reason)
 
 
+async def is_verified_bot_owner(ctx: commands.Context) -> bool:
+    """Propriétaire configuré par OWNER_IDS ou créateur vérifié dans la base."""
+    from config import OWNER_IDS
+
+    if ctx.author.id in OWNER_IDS:
+        return True
+    return await ctx.bot.db.is_bot_creator(ctx.author.id)
+
+
 def is_bot_owner():
-    """Autorise uniquement le(s) propriétaire(s) du bot (OWNER_IDS dans .env) — réservé aux
+    """Autorise le(s) propriétaire(s) du bot (base de données ou OWNER_IDS dans .env) — réservé aux
     réglages globaux qui affectent le bot partout : présence, identité, liste noire d'utilisation..."""
 
     async def predicate(ctx: commands.Context) -> bool:
-        from config import OWNER_IDS
-
-        if ctx.author.id in OWNER_IDS:
+        if await is_verified_bot_owner(ctx):
             return True
         raise BotPermissionError("Cette commande est réservée au **propriétaire du bot**.")
 
@@ -45,9 +52,7 @@ def is_owner_or_admin():
     ajouté comme "gestionnaire du bot" (via /setup → page Gestionnaires)."""
 
     async def predicate(ctx: commands.Context) -> bool:
-        from config import OWNER_IDS
-
-        if ctx.author.id in OWNER_IDS:
+        if await is_verified_bot_owner(ctx):
             return True
         if isinstance(ctx.author, discord.Member) and ctx.author.guild_permissions.administrator:
             return True
@@ -72,9 +77,7 @@ def is_owner_or_admin_for(category: str):
     cette restriction : ils gardent un accès total, comme avec is_owner_or_admin()."""
 
     async def predicate(ctx: commands.Context) -> bool:
-        from config import OWNER_IDS
-
-        if ctx.author.id in OWNER_IDS:
+        if await is_verified_bot_owner(ctx):
             return True
         if isinstance(ctx.author, discord.Member) and ctx.author.guild_permissions.administrator:
             return True
@@ -169,9 +172,7 @@ async def can_use_embed_builder(ctx: commands.Context) -> bool:
     du créateur d'embeds (+embed) : Gérer les messages, Gérer le serveur, gestionnaire du
     bot avec la catégorie "embeds" (ou gestion complète), ou un rôle explicitement autorisé
     via +embedconfig. Le propriétaire du bot passe toujours."""
-    from config import OWNER_IDS
-
-    if ctx.author.id in OWNER_IDS:
+    if await is_verified_bot_owner(ctx):
         return True
     if not isinstance(ctx.author, discord.Member):
         return False
