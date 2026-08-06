@@ -13,6 +13,7 @@ dans ce fichier :
   (type d'exception, message OpenAI) n'apparaît que dans les logs serveur (logger "bot.ai").
 """
 
+import base64
 import json
 import logging
 import re
@@ -423,6 +424,10 @@ def split_for_discord(text: str, limit: int = DISCORD_MESSAGE_LIMIT) -> list[str
 # On limite donc explicitement l'attente pour échouer proprement et vite (message
 # d'erreur clair) plutôt que de laisser l'utilisateur face à un silence total.
 REQUEST_TIMEOUT_SECONDS = 45.0
+# Une image 4K complexe peut demander jusqu'à environ deux minutes. Ce client séparé
+# évite d'appliquer le timeout court des réponses texte à la génération d'images.
+IMAGE_REQUEST_TIMEOUT_SECONDS = 150.0
+IMAGE_SIZE_4K = "3840x2160"
 
 
 def get_client():
@@ -430,6 +435,17 @@ def get_client():
         return None
     from openai import AsyncOpenAI
     return AsyncOpenAI(api_key=config.OPENAI_API_KEY, timeout=REQUEST_TIMEOUT_SECONDS, max_retries=1)
+
+
+def get_image_client():
+    if not config.OPENAI_API_KEY:
+        return None
+    from openai import AsyncOpenAI
+    return AsyncOpenAI(
+        api_key=config.OPENAI_API_KEY,
+        timeout=IMAGE_REQUEST_TIMEOUT_SECONDS,
+        max_retries=1,
+    )
 
 
 def _extract_text(resp) -> str:
@@ -471,6 +487,109 @@ def _append_web_citations(text: str, resp) -> str:
         return text or ""
     sources = "\n".join(f"- [{title}]({url})" for title, url in missing[:5])
     return f"{(text or '').rstrip()}\n\nSources :\n{sources}".strip()
+
+
+class ImageResult:
+    """Résultat sûr d'une génération d'image : données JPEG ou code d'erreur court."""
+
+    __slots__ = ("data", "error", "model", "size")
+
+    def __init__(
+        self,
+        data: bytes | None = None,
+        error: str | None = None,
+        model: str | None = None,
+        size: str = IMAGE_SIZE_4K,
+    ):
+        self.data = data
+        self.error = error
+        self.model = model
+        self.size = size
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None and bool(self.data)
+
+
+async def generate_image(
+    prompt: str,
+    *,
+    guild_id: int | None = None,
+    channel_id: int | None = None,
+    user_id: int | None = None,
+) -> ImageResult:
+    """Générer une image 4K paysage avec l'Image API officielle OpenAI."""
+    prompt = (prompt or "").strip()
+    if not prompt:
+        return ImageResult(error=ERROR_BAD_REQUEST, model=config.OPENAI_IMAGE_MODEL)
+    if contains_sensitive_content(prompt):
+        logger.info(
+            "Image bloquée par le filtre local — guild=%s salon=%s utilisateur=%s",
+            guild_id, channel_id, user_id,
+        )
+        return ImageResult(error=ERROR_SENSITIVE_CONTENT, model=config.OPENAI_IMAGE_MODEL)
+
+    client = get_image_client()
+    if client is None:
+        return ImageResult(error=ERROR_NO_KEY, model=config.OPENAI_IMAGE_MODEL)
+
+    from openai import (
+        APIConnectionError,
+        APITimeoutError,
+        AuthenticationError,
+        BadRequestError,
+        PermissionDeniedError,
+        RateLimitError,
+    )
+
+    context = "modèle=%s guild=%s salon=%s utilisateur=%s"
+    context_args = (config.OPENAI_IMAGE_MODEL, guild_id, channel_id, user_id)
+    try:
+        response = await client.images.generate(
+            model=config.OPENAI_IMAGE_MODEL,
+            prompt=prompt,
+            size=IMAGE_SIZE_4K,
+            quality="high",
+            output_format="jpeg",
+            output_compression=85,
+            moderation="auto",
+            n=1,
+        )
+        first = response.data[0] if getattr(response, "data", None) else None
+        encoded = getattr(first, "b64_json", None) if first is not None else None
+        if not encoded:
+            logger.error("Réponse image sans données — " + context, *context_args)
+            return ImageResult(error=ERROR_GENERIC, model=config.OPENAI_IMAGE_MODEL)
+        return ImageResult(
+            data=base64.b64decode(encoded),
+            model=config.OPENAI_IMAGE_MODEL,
+            size=IMAGE_SIZE_4K,
+        )
+    except BadRequestError as exc:
+        code = getattr(exc, "code", None)
+        if code == "moderation_blocked":
+            logger.info("Image refusée par la modération OpenAI — " + context, *context_args)
+            return ImageResult(error=ERROR_SENSITIVE_CONTENT, model=config.OPENAI_IMAGE_MODEL)
+        logger.error("Requête image invalide (code=%s) — " + context, code, *context_args)
+        return ImageResult(error=ERROR_BAD_REQUEST, model=config.OPENAI_IMAGE_MODEL)
+    except AuthenticationError:
+        logger.error("Authentification image OpenAI refusée — " + context, *context_args)
+        return ImageResult(error=ERROR_AUTH, model=config.OPENAI_IMAGE_MODEL)
+    except PermissionDeniedError:
+        logger.error("Accès au modèle d'image refusé — " + context, *context_args)
+        return ImageResult(error=ERROR_AUTH, model=config.OPENAI_IMAGE_MODEL)
+    except RateLimitError:
+        logger.warning("Limite ou quota image OpenAI atteint — " + context, *context_args)
+        return ImageResult(error=ERROR_RATE_LIMIT, model=config.OPENAI_IMAGE_MODEL)
+    except APITimeoutError:
+        logger.warning("Timeout génération image — " + context, *context_args)
+        return ImageResult(error=ERROR_TIMEOUT, model=config.OPENAI_IMAGE_MODEL)
+    except APIConnectionError:
+        logger.error("Connexion génération image impossible — " + context, *context_args)
+        return ImageResult(error=ERROR_CONNECTION, model=config.OPENAI_IMAGE_MODEL)
+    except Exception:
+        logger.error("Erreur inattendue génération image — " + context + "\n%s", *context_args, traceback.format_exc())
+        return ImageResult(error=ERROR_GENERIC, model=config.OPENAI_IMAGE_MODEL)
 
 
 class AiResult:
