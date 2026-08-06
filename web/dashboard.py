@@ -17,7 +17,7 @@ Aucun token utilisateur, token du bot ou secret OAuth n'est envoyé au navigateu
 import logging
 import secrets
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, urlunparse
 
 import discord
 from aiohttp import BasicAuth, ClientSession, web
@@ -52,16 +52,23 @@ AI_INT_FIELDS = {
     "memory_minutes": (1, 1440),
 }
 AI_CHOICE_FIELDS = {
-    "default_model": {"terra", "sol"},
+    "default_model": {"luna", "terra", "sol"},
     "reasoning_effort": {"none", "low", "medium", "high", "xhigh", "max"},
 }
 
 TEXT_FIELDS = {
     "prefix": (1, 5),
-    "welcome_message": (0, 1000),
+    "welcome_message": (0, 2000),
     "goodbye_message": (0, 1000),
     "level_message": (0, 1000),
 }
+
+URL_FIELDS = {"welcome_image_url"}
+SUPPORTED_SOCIAL_DOMAINS = (
+    "youtube.com", "youtu.be", "tiktok.com", "twitch.tv", "instagram.com",
+    "x.com", "twitter.com", "facebook.com", "fb.watch", "dailymotion.com",
+    "dai.ly", "vimeo.com", "kick.com",
+)
 
 ROLE_FIELDS = {
     "mod_role", "admin_role", "mute_role", "verification_role", "verify_role",
@@ -397,6 +404,17 @@ async def handle_guild(request: web.Request):
     )
     ai_settings = await db.fetchone("SELECT * FROM ai_settings WHERE guild_id = ?", (guild_id,))
     metrics = await _guild_metrics(db, guild_id)
+    social_rows = await db.fetchall(
+        """
+        SELECT id, source_url, platform, discord_channel_id, role_id,
+               custom_text, image_url, enabled, created_at, last_checked_at
+        FROM social_notifications
+        WHERE guild_id = ?
+        ORDER BY id DESC
+        """,
+        (guild_id,),
+    )
+    social_notifications = [dict(row) for row in social_rows]
     roles = [
         {"id": str(role.id), "name": role.name, "color": str(role.color)}
         for role in sorted(guild.roles, key=lambda role: role.position, reverse=True)
@@ -419,6 +437,7 @@ async def handle_guild(request: web.Request):
         "settings": dict(conf) if conf else {},
         "automod": dict(automod) if automod else {},
         "ai": dict(ai_settings) if ai_settings else {},
+        "social_notifications": social_notifications,
         "roles": roles,
         "channels": channels,
         "metrics": metrics,
@@ -431,6 +450,61 @@ def _normalise_optional_id(value) -> int | None:
     return int(value)
 
 
+def _valid_https_url(value: str) -> bool:
+    try:
+        parsed = urlparse(str(value).strip())
+    except (TypeError, ValueError):
+        return False
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+        and len(str(value)) <= 2000
+    )
+
+
+def _social_platform(value: str) -> str | None:
+    if not _valid_https_url(value):
+        return None
+    host = (urlparse(value).hostname or "").lower().removeprefix("www.")
+    if not any(host == domain or host.endswith(f".{domain}") for domain in SUPPORTED_SOCIAL_DOMAINS):
+        return None
+    if host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com"):
+        return "YouTube"
+    if host == "tiktok.com" or host.endswith(".tiktok.com"):
+        return "TikTok"
+    if host == "twitch.tv" or host.endswith(".twitch.tv"):
+        return "Twitch"
+    if host == "instagram.com" or host.endswith(".instagram.com"):
+        return "Instagram"
+    if host in {"x.com", "twitter.com"} or host.endswith((".x.com", ".twitter.com")):
+        return "X"
+    if host in {"facebook.com", "fb.watch"} or host.endswith(".facebook.com"):
+        return "Facebook"
+    if host in {"dailymotion.com", "dai.ly"} or host.endswith(".dailymotion.com"):
+        return "Dailymotion"
+    if host == "vimeo.com" or host.endswith(".vimeo.com"):
+        return "Vimeo"
+    if host == "kick.com" or host.endswith(".kick.com"):
+        return "Kick"
+    return None
+
+
+def _normalise_social_url(value: str) -> str:
+    parsed = urlparse(value.strip())
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    path = parsed.path.rstrip("/")
+    if (
+        (host == "youtube.com" or host.endswith(".youtube.com"))
+        and path
+        and not any(part in path for part in ("/watch", "/shorts/", "/live/", "/playlist"))
+        and not path.endswith(("/videos", "/shorts", "/streams"))
+    ):
+        path += "/videos"
+    return urlunparse((parsed.scheme, parsed.netloc, path or parsed.path, "", parsed.query, ""))
+
+
 def _validate_settings(guild: discord.Guild, values: dict) -> tuple[dict, str | None]:
     clean = {}
     for field, value in values.items():
@@ -439,6 +513,11 @@ def _validate_settings(guild: discord.Guild, values: dict) -> tuple[dict, str | 
             text = str(value or "").strip()
             if not minimum <= len(text) <= maximum:
                 return {}, f"Le champ {field} doit contenir entre {minimum} et {maximum} caractères."
+            clean[field] = text or None
+        elif field in URL_FIELDS:
+            text = str(value or "").strip()
+            if text and not _valid_https_url(text):
+                return {}, f"Le champ {field} doit être une URL HTTPS valide."
             clean[field] = text or None
         elif field == "security_level":
             if value not in {"faible", "moyen", "eleve"}:
@@ -515,6 +594,116 @@ def _validate_ai(values: dict) -> tuple[dict, str | None]:
         else:
             return {}, f"Le réglage IA {field} n'est pas modifiable depuis le dashboard."
     return clean, None
+
+
+async def handle_create_social_notification(request: web.Request):
+    try:
+        guild_id = int(request.match_info["guild_id"])
+    except ValueError:
+        return _json_error("Identifiant de serveur invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+    csrf_error = _require_csrf(request, session)
+    if csrf_error:
+        return csrf_error
+
+    rate_key = (request.cookies.get(SESSION_COOKIE), guild_id, "social-create")
+    if time.time() - request.app["write_limits"].get(rate_key, 0) < 1.5:
+        return _json_error("Attendez un instant avant d'ajouter une autre notification.", 429)
+    try:
+        payload = await request.json()
+    except Exception:
+        return _json_error("Le formulaire envoyé est invalide.", 400)
+
+    source_url = str(payload.get("source_url") or "").strip()
+    platform = _social_platform(source_url)
+    if platform is None:
+        return _json_error(
+            "Utilisez un lien HTTPS YouTube, TikTok, Twitch, Instagram, X, Facebook, Dailymotion, Vimeo ou Kick.",
+            400,
+        )
+    source_url = _normalise_social_url(source_url)
+    try:
+        channel_id = int(payload.get("discord_channel_id"))
+        role_id = int(payload.get("role_id"))
+    except (TypeError, ValueError):
+        return _json_error("Choisissez le salon Discord et le rôle à notifier.", 400)
+
+    channel = guild.get_channel(channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        return _json_error("Le salon de destination doit être un salon textuel de ce serveur.", 400)
+    role = guild.get_role(role_id)
+    if role is None or role.is_default() or role.managed:
+        return _json_error("Le rôle choisi n'existe plus ou ne peut pas être utilisé.", 400)
+
+    custom_text = str(payload.get("custom_text") or "").strip()
+    if len(custom_text) > 1000:
+        return _json_error("Le texte personnalisé ne peut pas dépasser 1 000 caractères.", 400)
+    image_url = str(payload.get("image_url") or "").strip()
+    if image_url and not _valid_https_url(image_url):
+        return _json_error("L'image doit utiliser une URL HTTPS valide.", 400)
+
+    db = request.app["bot"].db
+    await db.execute(
+        """
+        INSERT INTO social_notifications (
+            guild_id, source_url, platform, discord_channel_id, role_id,
+            custom_text, image_url, enabled, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+        ON CONFLICT(guild_id, source_url) DO UPDATE SET
+            platform = excluded.platform,
+            discord_channel_id = excluded.discord_channel_id,
+            role_id = excluded.role_id,
+            custom_text = excluded.custom_text,
+            image_url = excluded.image_url,
+            enabled = 1
+        """,
+        (
+            guild_id, source_url, platform, channel_id, role_id,
+            custom_text or None, image_url or None, now(),
+        ),
+    )
+    request.app["write_limits"][rate_key] = time.time()
+    logger.info(
+        "Dashboard : %s (%s) a configuré une notification %s sur %s (%s).",
+        session["user"]["username"], session["user"]["id"], platform, guild.name, guild.id,
+    )
+    return web.json_response({
+        "ok": True,
+        "message": "Notification ajoutée. La première vérification sert de point de départ, puis les nouveautés seront publiées automatiquement.",
+    })
+
+
+async def handle_delete_social_notification(request: web.Request):
+    try:
+        guild_id = int(request.match_info["guild_id"])
+        notification_id = int(request.match_info["notification_id"])
+    except ValueError:
+        return _json_error("Identifiant invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+    csrf_error = _require_csrf(request, session)
+    if csrf_error:
+        return csrf_error
+
+    db = request.app["bot"].db
+    row = await db.fetchone(
+        "SELECT id FROM social_notifications WHERE id = ? AND guild_id = ?",
+        (notification_id, guild_id),
+    )
+    if row is None:
+        return _json_error("Cette notification n'existe plus.", 404)
+    await db.execute(
+        "DELETE FROM social_notifications WHERE id = ? AND guild_id = ?",
+        (notification_id, guild_id),
+    )
+    logger.info(
+        "Dashboard : %s (%s) a supprimé la notification %s de %s (%s).",
+        session["user"]["username"], session["user"]["id"], notification_id, guild.name, guild.id,
+    )
+    return web.json_response({"ok": True, "message": "Notification supprimée."})
 
 
 async def handle_update_guild(request: web.Request):
@@ -616,6 +805,11 @@ def build_app(bot) -> web.Application:
     app.router.add_get("/api/guilds", handle_guilds)
     app.router.add_get("/api/guilds/{guild_id}", handle_guild)
     app.router.add_put("/api/guilds/{guild_id}/settings", handle_update_guild)
+    app.router.add_post("/api/guilds/{guild_id}/notifications", handle_create_social_notification)
+    app.router.add_delete(
+        "/api/guilds/{guild_id}/notifications/{notification_id}",
+        handle_delete_social_notification,
+    )
     return app
 
 
@@ -653,9 +847,10 @@ INDEX_HTML = r"""<!doctype html>
     :root{--bg:#090b12;--panel:#111522;--panel2:#171c2c;--line:#262d43;--text:#f2f4ff;--muted:#949db5;--brand:#7c6cff;--brand2:#a897ff;--ok:#44d39a;--bad:#ff667d;--warn:#f2bd5a;--shadow:0 24px 70px #0007}
     *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 15% -10%,#33266b55,transparent 35%),var(--bg);color:var(--text);font:15px Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}button,input,select,textarea{font:inherit}a{color:inherit;text-decoration:none}.hidden{display:none!important}
     .top{height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 5vw;border-bottom:1px solid #ffffff0d;background:#090b12cc;backdrop-filter:blur(14px);position:sticky;top:0;z-index:20}.brand{display:flex;align-items:center;gap:12px;font-weight:800;font-size:18px}.brand-logo{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand),#4736b4);box-shadow:0 0 30px #7c6cff55}.brand-logo img{width:100%;height:100%;border-radius:12px}.status{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:13px}.status i{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 14px var(--ok)}
-    .btn{border:1px solid var(--line);border-radius:11px;padding:11px 16px;background:var(--panel2);color:var(--text);cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:.18s}.btn:hover{transform:translateY(-1px);border-color:#4d5778}.btn.primary{background:linear-gradient(135deg,var(--brand),#5e4ee5);border-color:transparent;box-shadow:0 12px 28px #5e4ee533}.btn.ghost{background:transparent}.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+    .btn{border:1px solid var(--line);border-radius:11px;padding:11px 16px;background:var(--panel2);color:var(--text);cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:.18s}.btn:hover{transform:translateY(-1px);border-color:#4d5778}.btn.primary{background:linear-gradient(135deg,var(--brand),#5e4ee5);border-color:transparent;box-shadow:0 12px 28px #5e4ee533}.btn.ghost{background:transparent}.btn.danger{background:#3a1520;border-color:#713044;color:#ff9aaa}.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
     .hero{max-width:1180px;margin:0 auto;padding:90px 28px 70px;display:grid;grid-template-columns:1.15fr .85fr;gap:60px;align-items:center}.eyebrow{display:inline-flex;padding:7px 11px;border:1px solid #6e5dff55;background:#6e5dff14;border-radius:999px;color:var(--brand2);font-weight:700;font-size:12px;letter-spacing:.04em;text-transform:uppercase}.hero h1{font-size:clamp(42px,7vw,78px);line-height:.98;letter-spacing:-.055em;margin:20px 0 22px;max-width:800px}.hero h1 span{color:var(--brand2)}.hero p{font-size:18px;line-height:1.7;color:var(--muted);max-width:680px;margin:0}.actions{display:flex;gap:12px;margin-top:32px;flex-wrap:wrap}.preview{background:linear-gradient(160deg,#171c2c,#0e111c);border:1px solid var(--line);border-radius:24px;padding:18px;box-shadow:var(--shadow);transform:rotate(1deg)}.preview-head{display:flex;align-items:center;justify-content:space-between;padding:8px 6px 18px}.preview-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stat{padding:18px;background:#0d101a;border:1px solid #20263a;border-radius:15px}.stat small{color:var(--muted);display:block;margin-bottom:8px}.stat strong{font-size:26px}.features{max-width:1180px;margin:0 auto;padding:20px 28px 90px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.feature{padding:26px;background:#101421;border:1px solid var(--line);border-radius:18px}.feature b{display:block;font-size:17px;margin-bottom:9px}.feature p{color:var(--muted);line-height:1.6;margin:0}
     .shell{min-height:100vh;display:grid;grid-template-columns:270px 1fr}.side{border-right:1px solid var(--line);background:#0c0f18;padding:22px;position:sticky;top:0;height:100vh;overflow:auto}.side .brand{margin-bottom:26px}.user{display:flex;gap:11px;align-items:center;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:22px}.avatar{width:38px;height:38px;border-radius:12px;background:#272d43;object-fit:cover}.user b,.user span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.user span{font-size:12px;color:var(--muted);margin-top:2px}.nav-label{font-size:11px;color:#6f7891;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:20px 8px 8px}.nav button{width:100%;border:0;background:transparent;color:var(--muted);padding:11px 12px;text-align:left;border-radius:10px;cursor:pointer;margin:2px 0;font-weight:650}.nav button:hover,.nav button.active{background:#7c6cff18;color:var(--text)}.side-bottom{margin-top:24px;display:grid;gap:8px}.workspace{padding:34px 4vw 70px;min-width:0}.workspace-head{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:28px}.workspace-head h1{margin:0 0 6px;font-size:30px;letter-spacing:-.03em}.workspace-head p{margin:0;color:var(--muted)}.server-select{min-width:260px}.select,input,textarea{width:100%;background:#0c101a;border:1px solid var(--line);color:var(--text);border-radius:11px;padding:11px 12px;outline:none}.select:focus,input:focus,textarea:focus{border-color:var(--brand)}textarea{resize:vertical;min-height:105px}.overview{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}.metric{background:var(--panel);border:1px solid var(--line);padding:18px;border-radius:15px}.metric small{display:block;color:var(--muted);margin-bottom:8px}.metric strong{font-size:24px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden}.panel-head{padding:20px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:20px;align-items:center}.panel-head h2{margin:0 0 5px;font-size:18px}.panel-head p{margin:0;color:var(--muted);font-size:13px}.fields{padding:22px;display:grid;grid-template-columns:1fr 1fr;gap:18px}.field label{display:block;font-weight:700;margin-bottom:7px}.field .hint{color:var(--muted);font-size:12px;margin-top:7px;line-height:1.45}.field.full{grid-column:1/-1}.switch{display:flex;align-items:center;justify-content:space-between;padding:15px;background:#0d111c;border:1px solid #222940;border-radius:13px}.switch div b{display:block}.switch div span{color:var(--muted);font-size:12px}.switch input{appearance:none;width:42px;height:24px;border:0;border-radius:99px;background:#30374c;padding:0;position:relative;cursor:pointer}.switch input:after{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:white;border-radius:50%;transition:.2s}.switch input:checked{background:var(--brand)}.switch input:checked:after{left:21px}.savebar{display:flex;align-items:center;justify-content:flex-end;gap:14px;padding:16px 22px;border-top:1px solid var(--line);background:#0e121d}.save-status{color:var(--muted);font-size:13px}.empty{padding:50px 25px;text-align:center;color:var(--muted)}.toast{position:fixed;right:25px;bottom:25px;max-width:390px;background:#171d2c;border:1px solid #343d59;padding:14px 17px;border-radius:13px;box-shadow:var(--shadow);z-index:50}.toast.bad{border-color:#78354a}.loading{opacity:.55;pointer-events:none}
+    .notification-builder{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:18px}.notification-list{grid-column:1/-1;display:grid;gap:10px;margin-top:4px}.notification-list h3{margin:8px 0 2px}.notification-item{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px;background:#0d111c;border:1px solid #222940;border-radius:13px}.notification-item b,.notification-item span{display:block}.notification-item span{color:var(--muted);font-size:12px;margin-top:4px;overflow-wrap:anywhere}.notification-empty{padding:18px;border:1px dashed #343c58;border-radius:13px;color:var(--muted);text-align:center}
     @media(max-width:980px){.hero{grid-template-columns:1fr}.preview{transform:none}.features{grid-template-columns:1fr}.shell{grid-template-columns:1fr}.side{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line)}.nav{display:flex;overflow:auto}.nav button{min-width:max-content}.side-bottom{display:none}.overview{grid-template-columns:1fr 1fr}.workspace-head{align-items:stretch;flex-direction:column}.server-select{min-width:0}.fields{grid-template-columns:1fr}.field.full{grid-column:auto}}
     @media(max-width:560px){.top{padding:0 18px}.hero{padding:60px 20px}.features{padding:10px 20px 60px}.hero h1{font-size:45px}.overview{grid-template-columns:1fr}.preview-grid{grid-template-columns:1fr}.workspace{padding:25px 16px}.fields{padding:16px}.panel-head{padding:17px}.status span{display:none}}
   </style>
@@ -670,7 +865,7 @@ INDEX_HTML = r"""<!doctype html>
       <div>
         <div class="eyebrow">Dashboard officiel</div>
         <h1>Tout votre serveur, <span>au même endroit.</span></h1>
-        <p>Invitez SentriX, choisissez votre serveur puis gérez la sécurité, les logs, les niveaux, les tickets, les rôles et les salons depuis une interface claire.</p>
+        <p>Invitez SentriX, choisissez votre serveur puis gérez la sécurité, l'IA rapide, l'accueil, les notifications sociales, les tickets, les rôles et les salons depuis une interface claire.</p>
         <div class="actions">
           <a class="btn primary" id="loginButton" href="/login">Se connecter avec Discord</a>
           <a class="btn" id="inviteButton" href="#" target="_blank" rel="noopener">Ajouter SentriX</a>
@@ -707,6 +902,7 @@ INDEX_HTML = r"""<!doctype html>
         <button data-tab="levels">Niveaux</button>
         <button data-tab="tickets">Tickets</button>
         <button data-tab="ai">Intelligence artificielle</button>
+        <button data-tab="notifications">Notifications</button>
         <button data-tab="roles">Rôles et salons</button>
       </nav>
       <div class="side-bottom">
@@ -728,7 +924,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <section class="panel">
           <header class="panel-head"><div><h2 id="tabTitle">Configuration générale</h2><p id="tabDescription">Réglages essentiels du serveur.</p></div></header>
-          <form id="settingsForm"><div class="fields" id="fields"></div><div class="savebar"><span class="save-status" id="saveStatus">Aucune modification</span><button class="btn primary" type="submit">Enregistrer</button></div></form>
+          <form id="settingsForm"><div class="fields" id="fields"></div><div class="savebar"><span class="save-status" id="saveStatus">Aucune modification</span><button class="btn primary" id="saveButton" type="submit">Enregistrer</button></div></form>
         </section>
       </div>
       <div id="emptyState" class="panel empty">Sélectionnez un serveur pour commencer. Les serveurs sans SentriX proposent directement le bouton d'invitation.</div>
@@ -751,7 +947,7 @@ INDEX_HTML = r"""<!doctype html>
         ["log_messages","Messages"],["log_members","Membres"],["log_voice","Salons vocaux"],["log_roles","Rôles"],["log_server","Serveur"],["log_automod","AutoMod"],["log_moderation","Modération"],["log_channel","Salon de logs général"]
       ].map(x=>({key:x[0],label:x[1],type:"channel"}))},
       welcome:{title:"Accueil des membres",description:"Messages d'arrivée, de départ et rôle automatique.",fields:[
-        {key:"welcome_channel",label:"Salon de bienvenue",type:"channel"},{key:"welcome_message",label:"Message de bienvenue",type:"textarea",hint:"Variables disponibles : {member} et {server}."},{key:"goodbye_channel",label:"Salon de départ",type:"channel"},{key:"goodbye_message",label:"Message de départ",type:"textarea",hint:"Variables disponibles : {member} et {server}."},{key:"autorole",label:"Rôle automatique",type:"role"}
+        {key:"welcome_channel",label:"Salon de bienvenue",type:"channel"},{key:"welcome_message",label:"Message de bienvenue",type:"textarea",hint:"Variables : {member}, {username}, {server} et {member_count}."},{key:"welcome_image_url",label:"Image de bienvenue (facultative)",type:"url",hint:"URL HTTPS directe vers une image ou un GIF."},{key:"goodbye_channel",label:"Salon de départ",type:"channel"},{key:"goodbye_message",label:"Message de départ",type:"textarea",hint:"Variables disponibles : {member} et {server}."},{key:"autorole",label:"Rôle automatique",type:"role"}
       ]},
       levels:{title:"Niveaux et expérience",description:"Configurez la progression et les annonces de niveau.",fields:[
         {key:"xp_multiplier",label:"Multiplicateur d'XP",type:"number",min:.1,max:5,step:.1},{key:"level_channel",label:"Salon des niveaux",type:"channel"},{key:"level_message",label:"Message de passage de niveau",type:"textarea",hint:"Le membre est mentionné automatiquement lors du passage de niveau."}
@@ -761,7 +957,7 @@ INDEX_HTML = r"""<!doctype html>
       ]},
       ai:{title:"Intelligence artificielle",description:"Modèle, limites, mémoire et journalisation des réponses de SentriX.",ai:true,fields:[
         {key:"enabled",label:"Activer l'IA",type:"switch",hint:"Autorise les membres à utiliser les fonctions IA."},
-        {key:"default_model",label:"Modèle par défaut",type:"choice",options:[["terra","Terra — rapide et équilibré"],["sol","Sol — raisonnement avancé"]]},
+        {key:"default_model",label:"Modèle par défaut",type:"choice",hint:"Luna répond presque instantanément aux demandes simples. Terra et Sol sont réservés aux tâches plus complexes.",options:[["luna","Luna — ultra-rapide"],["terra","Terra — rapide et équilibré"],["sol","Sol — raisonnement avancé"]]},
         {key:"reasoning_effort",label:"Niveau de raisonnement",type:"choice",options:[["none","Aucun"],["low","Faible"],["medium","Moyen"],["high","Élevé"],["xhigh","Très élevé"],["max","Maximum"]]},
         {key:"cooldown_seconds",label:"Cooldown par membre (secondes)",type:"number",min:0,max:3600},
         {key:"per_minute_limit",label:"Limite par minute",type:"number",min:1,max:100},
@@ -771,6 +967,7 @@ INDEX_HTML = r"""<!doctype html>
         {key:"memory_minutes",label:"Durée de la mémoire (minutes)",type:"number",min:1,max:1440},
         {key:"logs_enabled",label:"Journaliser l'utilisation",type:"switch",hint:"Enregistre uniquement les compteurs d'utilisation, pas les conversations."}
       ]},
+      notifications:{title:"Notifications sociales",description:"Publiez automatiquement les nouveautés de vos créateurs préférés dans Discord.",notifications:true,fields:[]},
       roles:{title:"Rôles et salons",description:"Reliez les fonctions du bot aux éléments déjà présents sur le serveur.",fields:[
         ["mod_role","Rôle modérateur","role"],["admin_role","Rôle administrateur","role"],["mute_role","Rôle muet","role"],["warn_role","Rôle d'avertissement","role"],["member_role","Rôle membre","role"],["booster_role","Rôle booster","role"],["verification_role","Rôle de vérification","role"],["rules_channel","Salon du règlement","channel"],["verification_channel","Salon de vérification","channel"],["bot_commands_channel","Salon des commandes","channel"],["suggest_channel","Salon des suggestions","channel"],["announce_channel","Salon des annonces","channel"],["giveaway_channel","Salon des giveaways","channel"],["report_channel","Salon des signalements","channel"],["error_channel","Salon des erreurs","channel"]
       ].map(x=>({key:x[0],label:x[1],type:x[2]}))}
@@ -786,8 +983,10 @@ INDEX_HTML = r"""<!doctype html>
     async function selectGuild(value){if(!value){state.guildId=null;$("serverContent").classList.add("hidden");$("emptyState").classList.remove("hidden");return;}if(String(value).startsWith("invite:")){const id=String(value).slice(7),g=state.guilds.find(x=>x.id===id);if(g?.invite_url)window.open(g.invite_url,"_blank","noopener");$("serverSelect").value=state.guildId||"";return;}state.guildId=value;$("serverContent").classList.add("loading");try{state.guildData=await json(`/api/guilds/${value}`);const d=state.guildData;$("pageTitle").textContent=d.guild.name;$("pageSubtitle").textContent=`${number(d.guild.members)} membres · ${d.guild.channels_count} salons · ${d.guild.roles_count} rôles`;$("metricMembers").textContent=number(d.guild.members);$("metricCommands").textContent=number(d.metrics.commands_24h);$("metricTickets").textContent=number(d.metrics.open_tickets);$("metricWarnings").textContent=number(d.metrics.warnings);$("emptyState").classList.add("hidden");$("serverContent").classList.remove("hidden");renderTab();}catch(e){toast(e.message,true);}finally{$("serverContent").classList.remove("loading");}}
     function optionList(type,current){const list=type==="role"?state.guildData.roles:state.guildData.channels.filter(c=>type!=="category"||c.type==="category");return '<option value="">Non configuré</option>'+list.map(item=>`<option value="${esc(item.id)}" ${String(current||"")===String(item.id)?"selected":""}>${esc(item.name)}${type!=="role"?` — ${esc(item.type)}`:""}</option>`).join("");}
     function fieldHTML(field){const source=state.tab==="security"?state.guildData.automod:state.tab==="ai"?state.guildData.ai:state.guildData.settings;const value=source[field.key];const hint=field.hint?`<div class="hint">${esc(field.hint)}</div>`:"";if(field.type==="switch")return `<label class="switch full"><div><b>${esc(field.label)}</b><span>${esc(field.hint||"Activation immédiate sur ce serveur.")}</span></div><input data-key="${esc(field.key)}" type="checkbox" ${Number(value)?"checked":""}></label>`;let control="";if(field.type==="choice")control=`<select class="select" data-key="${esc(field.key)}">${field.options.map(o=>`<option value="${esc(o[0])}" ${value===o[0]?"selected":""}>${esc(o[1])}</option>`).join("")}</select>`;else if(["role","channel","category"].includes(field.type))control=`<select class="select" data-key="${esc(field.key)}">${optionList(field.type,value)}</select>`;else if(field.type==="textarea")control=`<textarea data-key="${esc(field.key)}">${esc(value||"")}</textarea>`;else control=`<input data-key="${esc(field.key)}" type="${field.type}" value="${esc(value??"")}" ${field.min!==undefined?`min="${field.min}"`:""} ${field.max!==undefined?`max="${field.max}"`:""} ${field.step!==undefined?`step="${field.step}"`:""}>`;return `<div class="field ${field.type==="textarea"?"full":""}"><label>${esc(field.label)}</label>${control}${hint}</div>`;}
-    function renderTab(){if(!state.guildData)return;const tab=tabs[state.tab];$("tabTitle").textContent=tab.title;$("tabDescription").textContent=tab.description;$("fields").innerHTML=tab.fields.map(fieldHTML).join("");$("saveStatus").textContent="Aucune modification";state.dirty=false;$("fields").querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",()=>{state.dirty=true;$("saveStatus").textContent="Modifications non enregistrées";}));}
-    async function save(event){event.preventDefault();if(!state.guildId||!state.guildData)return;const tab=tabs[state.tab],values={};$("fields").querySelectorAll("[data-key]").forEach(el=>{let value=el.type==="checkbox"?el.checked:el.value;if(el.type==="number"&&value!=="")value=Number(value);values[el.dataset.key]=value;});const body=tab.automod?{automod:values}:tab.ai?{ai:values}:{settings:values};$("settingsForm").classList.add("loading");try{const result=await json(`/api/guilds/${state.guildId}/settings`,{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:JSON.stringify(body)});toast(result.message);state.dirty=false;$("saveStatus").textContent="Configuration enregistrée";await selectGuild(state.guildId);}catch(e){toast(e.message,true);$("saveStatus").textContent="Enregistrement impossible";}finally{$("settingsForm").classList.remove("loading");}}
+    function renderNotifications(){const rows=state.guildData.social_notifications||[];const textChannels=state.guildData.channels.filter(c=>["text","news"].includes(c.type));const channelOptions='<option value="">Choisissez un salon</option>'+textChannels.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");const roleOptions='<option value="">Choisissez un rôle</option>'+state.guildData.roles.map(r=>`<option value="${esc(r.id)}">${esc(r.name)}</option>`).join("");const list=rows.length?rows.map(n=>`<div class="notification-item"><div><b>${esc(n.platform)} · ${esc(state.guildData.roles.find(r=>String(r.id)===String(n.role_id))?.name||"Rôle supprimé")}</b><span>${esc(n.source_url)} · #${esc(state.guildData.channels.find(c=>String(c.id)===String(n.discord_channel_id))?.name||"salon supprimé")}</span></div><button class="btn danger" type="button" data-delete-notification="${esc(n.id)}">Supprimer</button></div>`).join(""):'<div class="notification-empty">Aucune notification configurée. Ajoutez votre première chaîne ci-dessus.</div>';$("fields").innerHTML=`<div class="notification-builder"><div class="field full"><label>Lien de la chaîne ou du profil</label><input data-key="source_url" type="url" placeholder="https://youtube.com/@votrechaine"><div class="hint">YouTube, TikTok, Twitch, Instagram, X, Facebook, Dailymotion, Vimeo et Kick.</div></div><div class="field"><label>Salon de publication</label><select class="select" data-key="discord_channel_id">${channelOptions}</select></div><div class="field"><label>Rôle à notifier</label><select class="select" data-key="role_id">${roleOptions}</select></div><div class="field full"><label>Texte personnalisé (facultatif)</label><textarea data-key="custom_text" placeholder="Une nouvelle publication vient de sortir !"></textarea></div><div class="field full"><label>Image ou GIF (facultatif)</label><input data-key="image_url" type="url" placeholder="https://exemple.com/image.png"><div class="hint">Utilisez une URL HTTPS directe. Sans image, SentriX utilise la miniature de la publication.</div></div></div><div class="notification-list"><h3>Notifications actives</h3>${list}</div>`;$("fields").querySelectorAll("[data-delete-notification]").forEach(button=>button.addEventListener("click",()=>removeNotification(button.dataset.deleteNotification)));}
+    function renderTab(){if(!state.guildData)return;const tab=tabs[state.tab];$("tabTitle").textContent=tab.title;$("tabDescription").textContent=tab.description;if(tab.notifications)renderNotifications();else $("fields").innerHTML=tab.fields.map(fieldHTML).join("");$("saveButton").textContent=tab.notifications?"Ajouter la notification":"Enregistrer";$("saveStatus").textContent=tab.notifications?"Surveillance toutes les 5 minutes":"Aucune modification";state.dirty=false;$("fields").querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",()=>{state.dirty=true;$("saveStatus").textContent="Modifications non enregistrées";}));}
+    async function save(event){event.preventDefault();if(!state.guildId||!state.guildData)return;const tab=tabs[state.tab],values={};$("fields").querySelectorAll("[data-key]").forEach(el=>{let value=el.type==="checkbox"?el.checked:el.value;if(el.type==="number"&&value!=="")value=Number(value);values[el.dataset.key]=value;});const endpoint=tab.notifications?`/api/guilds/${state.guildId}/notifications`:`/api/guilds/${state.guildId}/settings`;const body=tab.notifications?values:tab.automod?{automod:values}:tab.ai?{ai:values}:{settings:values};$("settingsForm").classList.add("loading");try{const result=await json(endpoint,{method:tab.notifications?"POST":"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:JSON.stringify(body)});toast(result.message);state.dirty=false;$("saveStatus").textContent="Configuration enregistrée";await selectGuild(state.guildId);}catch(e){toast(e.message,true);$("saveStatus").textContent="Enregistrement impossible";}finally{$("settingsForm").classList.remove("loading");}}
+    async function removeNotification(id){if(!state.guildId||!id)return;if(!confirm("Supprimer cette notification automatique ?"))return;try{const result=await json(`/api/guilds/${state.guildId}/notifications/${id}`,{method:"DELETE",headers:{"X-CSRF-Token":state.csrf}});toast(result.message);await selectGuild(state.guildId);}catch(e){toast(e.message,true);}}
     $("serverSelect").addEventListener("change",e=>selectGuild(e.target.value));$("settingsForm").addEventListener("submit",save);$("navigation").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(!button)return;state.tab=button.dataset.tab;$("navigation").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===button));renderTab();});$("logoutButton").addEventListener("click",async()=>{try{await json("/logout",{method:"POST",headers:{"X-CSRF-Token":state.csrf}});}finally{location.href="/";}});window.addEventListener("beforeunload",e=>{if(state.dirty){e.preventDefault();e.returnValue="";}});
     Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));
   </script>
