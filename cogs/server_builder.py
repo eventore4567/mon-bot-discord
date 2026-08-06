@@ -11,6 +11,7 @@ donc toujours le serveur dans lequel elle est lancée.
 
 import asyncio
 import logging
+import re
 
 import discord
 from discord import app_commands
@@ -235,6 +236,220 @@ STAFF_ROLE_NAMES = {
 }
 
 
+CATEGORY_EMOJIS = {
+    "ACCUEIL": "📌",
+    "COMMUNAUTÉ": "💬",
+    "JEUX": "🎮",
+    "ÉVÉNEMENTS": "🎉",
+    "ÉCONOMIE": "💰",
+    "CRÉATEURS": "🎥",
+    "SUPPORT": "🎫",
+    "VOCAUX": "🔊",
+    "PARTENAIRES": "🤝",
+    "TICKETS OUVERTS": "🎫",
+    "STAFF": "🔒",
+    "LOGS": "📋",
+    "ARCHIVES": "🗃️",
+    "COMPÉTITION": "🏆",
+    "ENTREPRISE": "💼",
+    "SAV": "🛠️",
+}
+
+CATEGORY_ALIASES = {
+    "ACCUEIL": {"accueil", "infos", "général"},
+    "JEUX": {"jeux", "gaming"},
+}
+
+CHANNEL_EMOJIS = {
+    "annonces": "📢",
+    "règlement": "📜",
+    "bienvenue": "👋",
+    "départs": "🚪",
+    "informations": "ℹ️",
+    "choix-des-rôles": "🎭",
+    "présentations": "🙋",
+    "général": "💬",
+    "discussion-libre": "🗣️",
+    "médias": "📸",
+    "clips": "🎬",
+    "memes": "😂",
+    "sondages": "📊",
+    "suggestions": "💡",
+    "commandes-bot": "🤖",
+    "hors-sujet": "☕",
+    "gaming": "🎮",
+    "recherche-de-joueurs": "🔎",
+    "actualités-jeux": "📰",
+    "captures-et-clips": "📷",
+    "tournois": "🏆",
+    "équipes": "👥",
+    "résultats": "🥇",
+    "calendrier": "📅",
+    "événements": "🎉",
+    "inscriptions": "📝",
+    "concours": "🎁",
+    "gagnants": "🏅",
+    "économie-commandes": "💰",
+    "boutique": "🛒",
+    "classement": "📈",
+    "récompenses": "🎖️",
+    "créations": "🎨",
+    "streams": "🔴",
+    "vidéos": "📺",
+    "collaborations": "🤝",
+    "ouvrir-un-ticket": "🎫",
+    "aide": "❓",
+    "questions-fréquentes": "📚",
+    "statut-des-services": "📡",
+    "informations-partenariats": "ℹ️",
+    "demandes-partenariats": "🤝",
+    "nos-partenaires": "🌐",
+    "staff-général": "🔒",
+    "staff-annonces": "📢",
+    "signalements": "🚨",
+    "sanctions": "🔨",
+    "tâches": "📋",
+    "réunions-staff": "📅",
+    "candidatures": "📄",
+    "logs-modération": "🛡️",
+    "logs-serveur": "⚙️",
+    "logs-rôles": "🎭",
+    "logs-tickets": "🎫",
+    "logs-membres": "👥",
+    "logs-messages": "💬",
+    "logs-vocaux": "🔊",
+    "logs-sécurité": "🔐",
+    "archives-tickets": "🎫",
+    "archives-sanctions": "🔨",
+    "archives-événements": "🎉",
+    "classement-gaming": "🏆",
+    "recrutement-équipes": "👥",
+    "défis": "⚔️",
+    "matchs": "🎮",
+    "direction": "👑",
+    "ressources-humaines": "👥",
+    "projets": "📁",
+    "documents": "📄",
+    "comptes-rendus": "📝",
+    "incidents-connus": "📡",
+    "signaler-un-bug": "🐛",
+    "facturation": "💳",
+    "retours-clients": "💬",
+    "guides": "📚",
+}
+
+CHANNEL_TOPICS = {
+    "annonces": "Annonces officielles du serveur.",
+    "règlement": "Règlement officiel à lire et à respecter.",
+    "bienvenue": "Informations utiles pour bien commencer sur le serveur.",
+    "départs": "Messages de départ des membres.",
+    "informations": "Informations générales et fonctionnement du serveur.",
+    "choix-des-rôles": "Choisissez ici vos rôles, notifications et centres d'intérêt.",
+    "présentations": "Présentez-vous à la communauté.",
+    "général": "Salon principal de discussion de la communauté.",
+    "suggestions": "Proposez des améliorations claires et constructives.",
+    "commandes-bot": "Utilisez ici les commandes de SentriX et des autres bots.",
+    "ouvrir-un-ticket": "Ouvrez un ticket privé en choisissant le motif correspondant.",
+    "aide": "Demandez de l'aide à la communauté sans partager d'informations privées.",
+    "questions-fréquentes": "Réponses aux questions les plus fréquentes.",
+    "statut-des-services": "État des services, incidents et maintenances.",
+    "staff-général": "Salon privé de coordination de l'équipe.",
+    "staff-annonces": "Consignes et annonces réservées à l'équipe.",
+    "signalements": "Traitement privé des signalements reçus.",
+    "sanctions": "Suivi interne des avertissements et sanctions.",
+    "candidatures": "Étude et suivi des candidatures au staff.",
+    "logs-modération": "Historique automatique des actions de modération.",
+    "logs-serveur": "Créations, suppressions et modifications du serveur.",
+    "logs-rôles": "Attributions et retraits de rôles.",
+    "logs-tickets": "Historique automatique des tickets.",
+    "logs-membres": "Arrivées, départs et changements concernant les membres.",
+    "logs-messages": "Suppressions et modifications de messages.",
+    "logs-vocaux": "Connexions, déplacements et déconnexions vocales.",
+    "logs-sécurité": "Événements de sécurité et détections automatiques.",
+}
+
+SLOWMODE_DELAYS = {
+    "général": 2,
+    "discussion-libre": 2,
+    "médias": 5,
+    "clips": 5,
+    "memes": 5,
+    "suggestions": 10,
+    "présentations": 10,
+    "recherche-de-joueurs": 5,
+    "événements": 5,
+    "concours": 10,
+    "demandes-partenariats": 15,
+    "signaler-un-bug": 10,
+    "retours-clients": 10,
+}
+
+
+def _plain_discord_name(value: str) -> str:
+    """Retire l'emoji décoratif initial pour comparer les anciens et nouveaux noms."""
+    value = value.strip()
+    if "・" in value:
+        value = value.split("・", 1)[1]
+    else:
+        value = re.sub(r"^[^0-9A-Za-zÀ-ÖØ-öø-ÿ]+", "", value)
+    return value.strip().casefold()
+
+
+def _category_display_name(base_name: str) -> str:
+    return f"{CATEGORY_EMOJIS.get(base_name, '📁')}・{base_name}"
+
+
+def _channel_display_name(base_name: str, channel_type: str, category_name: str) -> str:
+    emoji = CHANNEL_EMOJIS.get(base_name.casefold())
+    if emoji is None:
+        emoji = "🔊" if channel_type == "voice" else CATEGORY_EMOJIS.get(category_name, "💬")
+    return f"{emoji}・{base_name}"
+
+
+def _channel_topic(base_name: str, category_name: str, privacy: str) -> str:
+    configured = CHANNEL_TOPICS.get(base_name.casefold())
+    if configured:
+        return configured
+    readable = base_name.replace("-", " ").strip()
+    if privacy == "staff":
+        return f"Salon privé de l'équipe : {readable}."
+    return f"Espace {readable} de la catégorie {category_name.title()}."
+
+
+def _voice_user_limit(base_name: str) -> int:
+    lowered = base_name.casefold()
+    if lowered == "duo":
+        return 2
+    if lowered == "squad":
+        return 4
+    if "réunion" in lowered or "support vocal" in lowered:
+        return 25
+    return 0
+
+
+def _find_category(guild: discord.Guild, base_name: str) -> discord.CategoryChannel | None:
+    wanted = base_name.casefold()
+    for category in guild.categories:
+        if _plain_discord_name(category.name) == wanted:
+            return category
+    aliases = CATEGORY_ALIASES.get(base_name, {wanted})
+    for category in guild.categories:
+        if _plain_discord_name(category.name) in aliases:
+            return category
+    return None
+
+
+def _find_channel(
+    category: discord.CategoryChannel,
+    base_name: str,
+) -> discord.abc.GuildChannel | None:
+    wanted = base_name.casefold()
+    return discord.utils.find(
+        lambda channel: _plain_discord_name(channel.name) == wanted,
+        category.channels,
+    )
+
+
 BASE_CATEGORIES = [
     {
         "name": "ACCUEIL",
@@ -243,6 +458,7 @@ BASE_CATEGORIES = [
             ("annonces", "readonly"),
             ("règlement", "readonly"),
             ("bienvenue", "readonly"),
+            ("départs", "readonly"),
             ("informations", "readonly"),
             ("choix-des-rôles", "text"),
             ("présentations", "text"),
@@ -365,7 +581,9 @@ BASE_CATEGORIES = [
         "name": "LOGS",
         "privacy": "staff",
         "channels": [
+            ("logs-serveur", "text"),
             ("logs-modération", "text"),
+            ("logs-rôles", "text"),
             ("logs-tickets", "text"),
             ("logs-membres", "text"),
             ("logs-messages", "text"),
@@ -551,7 +769,10 @@ class ServerBuilderView(discord.ui.View):
         data = SERVER_TEMPLATES[self.selected_template]
         total_channels = sum(len(category["channels"]) for category in data["categories"])
         role_names = [role[0] for role in data["roles"]]
-        category_names = [category["name"] for category in data["categories"]]
+        category_names = [
+            _category_display_name(category["name"])
+            for category in data["categories"]
+        ]
         preview = embeds.neutral(
             f"Aperçu — {data['label']}",
             f"Installation dans **{len(data['roles'])} rôles**, "
@@ -584,7 +805,7 @@ class ServerBuilderView(discord.ui.View):
             ),
             view=self,
         )
-        cog: "ServerBuilder" | None = self.bot.get_cog("ServerBuilder")
+        cog = self.bot.get_cog("ServerBuilder")
         if cog is None:
             await interaction.edit_original_response(
                 embed=embeds.error("Le module de configuration est indisponible."),
@@ -600,20 +821,25 @@ class ServerBuilderView(discord.ui.View):
         except discord.Forbidden:
             logger.exception("Permission Discord refusée pendant create-server")
             summary = embeds.error(
-                "Discord a refusé une opération. Placez le rôle SentriX au-dessus des rôles "
+                f"Discord a refusé l'étape **{cog._build_step}**. "
+                "Placez le rôle SentriX au-dessus des rôles "
                 "qu'il doit gérer et accordez-lui Administrateur, puis relancez +create-server."
             )
         except discord.HTTPException as exc:
             logger.exception("Erreur HTTP Discord pendant create-server")
             summary = embeds.error(
-                f"Discord a interrompu la configuration ({exc}). Les éléments déjà créés sont "
+                f"Discord a interrompu l'étape **{cog._build_step}** ({exc}). "
+                "Les éléments déjà créés sont "
                 "conservés : relancez +create-server pour reprendre sans doublons."
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Erreur inattendue pendant create-server")
+            detail = (str(exc) or exc.__class__.__name__).replace("`", "'")[:300]
             summary = embeds.error(
-                "Une erreur inattendue a interrompu l'installation. Les éléments déjà créés "
-                "sont conservés et la commande peut être relancée sans doublons."
+                f"L'installation s'est arrêtée pendant **{cog._build_step}**. "
+                f"Détail : `{exc.__class__.__name__}: {detail}`\n\n"
+                "Les éléments déjà créés sont conservés. Relancez la commande après correction : "
+                "elle reprend sans doublons."
             )
         await interaction.edit_original_response(embed=summary, view=None)
         self.stop()
@@ -622,6 +848,7 @@ class ServerBuilderView(discord.ui.View):
 class ServerBuilder(commands.Cog, name="ServerBuilder"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._build_step = "initialisation"
 
     @staticmethod
     def _desired_category_overwrites(
@@ -704,7 +931,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         missing_categories = 0
         missing_channels = 0
         for category_data in data["categories"]:
-            category = discord.utils.get(guild.categories, name=category_data["name"])
+            category = _find_category(guild, category_data["name"])
             if category is None:
                 missing_categories += 1
                 missing_channels += len(category_data["channels"])
@@ -712,7 +939,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
                 missing_channels += sum(
                     1
                     for name, _ in category_data["channels"]
-                    if discord.utils.get(category.channels, name=name) is None
+                    if _find_channel(category, name) is None
                 )
         if len(guild.roles) + missing_roles > 250:
             return (
@@ -771,22 +998,33 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         data: dict,
         role_map: dict[str, discord.Role],
         reason: str,
-    ) -> tuple[dict[str, discord.CategoryChannel], dict[str, discord.abc.GuildChannel], int, int]:
+    ) -> tuple[
+        dict[str, discord.CategoryChannel],
+        dict[str, discord.abc.GuildChannel],
+        int,
+        int,
+        int,
+        int,
+    ]:
         category_map: dict[str, discord.CategoryChannel] = {}
         channel_map: dict[str, discord.abc.GuildChannel] = {}
         categories_created = 0
+        categories_updated = 0
         channels_created = 0
+        channels_updated = 0
 
         for category_data in data["categories"]:
+            base_category_name = category_data["name"]
+            display_category_name = _category_display_name(base_category_name)
             desired = self._desired_category_overwrites(
                 guild,
                 role_map,
                 category_data["privacy"],
             )
-            category = discord.utils.get(guild.categories, name=category_data["name"])
+            category = _find_category(guild, base_category_name)
             if category is None:
                 category = await guild.create_category(
-                    category_data["name"],
+                    display_category_name,
                     overwrites=desired,
                     reason=reason,
                 )
@@ -795,48 +1033,176 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             else:
                 merged = dict(category.overwrites)
                 merged.update(desired)
-                if merged != category.overwrites:
-                    await category.edit(overwrites=merged, reason=reason)
+                if (
+                    category.name != display_category_name
+                    or merged != category.overwrites
+                ):
+                    await category.edit(
+                        name=display_category_name,
+                        overwrites=merged,
+                        reason=reason,
+                    )
+                    categories_updated += 1
                     await asyncio.sleep(0.12)
-            category_map[category_data["name"]] = category
+            category_map[base_category_name] = category
 
             for channel_name, channel_type in category_data["channels"]:
-                channel = discord.utils.get(category.channels, name=channel_name)
+                display_channel_name = _channel_display_name(
+                    channel_name,
+                    channel_type,
+                    base_category_name,
+                )
+                channel = _find_channel(category, channel_name)
                 if channel is None:
                     if channel_type == "voice":
                         channel = await guild.create_voice_channel(
-                            channel_name,
+                            display_channel_name,
                             category=category,
+                            bitrate=int(min(96000, guild.bitrate_limit)),
+                            user_limit=_voice_user_limit(channel_name),
                             reason=reason,
                         )
                     else:
-                        channel_overwrites = None
+                        text_options = {
+                            "category": category,
+                            "topic": _channel_topic(
+                                channel_name,
+                                base_category_name,
+                                category_data["privacy"],
+                            ),
+                            "slowmode_delay": SLOWMODE_DELAYS.get(
+                                channel_name.casefold(),
+                                0,
+                            ),
+                            "nsfw": False,
+                            "reason": reason,
+                        }
                         if channel_type == "readonly":
-                            channel_overwrites = self._readonly_overwrites(
+                            text_options["overwrites"] = self._readonly_overwrites(
                                 guild,
                                 role_map,
                                 category.overwrites,
                             )
                         channel = await guild.create_text_channel(
-                            channel_name,
-                            category=category,
-                            overwrites=channel_overwrites,
-                            reason=reason,
+                            display_channel_name,
+                            **text_options,
                         )
                     channels_created += 1
                     await asyncio.sleep(0.15)
-                elif channel_type == "readonly" and isinstance(channel, discord.TextChannel):
-                    desired_readonly = self._readonly_overwrites(
-                        guild,
-                        role_map,
-                        channel.overwrites,
+                elif isinstance(channel, discord.TextChannel) and channel_type != "voice":
+                    topic = _channel_topic(
+                        channel_name,
+                        base_category_name,
+                        category_data["privacy"],
                     )
-                    if desired_readonly != channel.overwrites:
-                        await channel.edit(overwrites=desired_readonly, reason=reason)
+                    slowmode = SLOWMODE_DELAYS.get(channel_name.casefold(), 0)
+                    text_changes = {
+                        "name": display_channel_name,
+                        "topic": topic,
+                        "slowmode_delay": slowmode,
+                        "nsfw": False,
+                        "reason": reason,
+                    }
+                    should_update = (
+                        channel.name != display_channel_name
+                        or channel.topic != topic
+                        or channel.slowmode_delay != slowmode
+                        or channel.nsfw
+                    )
+                    if channel_type == "readonly":
+                        desired_readonly = self._readonly_overwrites(
+                            guild,
+                            role_map,
+                            channel.overwrites,
+                        )
+                        text_changes["overwrites"] = desired_readonly
+                        should_update = (
+                            should_update
+                            or desired_readonly != channel.overwrites
+                        )
+                    if should_update:
+                        await channel.edit(**text_changes)
+                        channels_updated += 1
+                        await asyncio.sleep(0.12)
+                elif isinstance(channel, discord.VoiceChannel) and channel_type == "voice":
+                    bitrate = int(min(96000, guild.bitrate_limit))
+                    user_limit = _voice_user_limit(channel_name)
+                    if (
+                        channel.name != display_channel_name
+                        or channel.bitrate != bitrate
+                        or channel.user_limit != user_limit
+                    ):
+                        await channel.edit(
+                            name=display_channel_name,
+                            bitrate=bitrate,
+                            user_limit=user_limit,
+                            reason=reason,
+                        )
+                        channels_updated += 1
                         await asyncio.sleep(0.12)
                 channel_map[channel_name] = channel
 
-        return category_map, channel_map, categories_created, channels_created
+        return (
+            category_map,
+            channel_map,
+            categories_created,
+            categories_updated,
+            channels_created,
+            channels_updated,
+        )
+
+    async def _configure_bot_channels(
+        self,
+        guild: discord.Guild,
+        role_map: dict[str, discord.Role],
+        category_map: dict[str, discord.CategoryChannel],
+        channel_map: dict[str, discord.abc.GuildChannel],
+        staff_role_name: str,
+    ) -> int:
+        """Relie les salons créés aux fonctions SentriX, sans commande manuelle."""
+        configured = 0
+        role_settings = {
+            "mod_role": role_map.get(staff_role_name),
+            "admin_role": role_map.get("Administrateur"),
+            "autorole": role_map.get("Membre"),
+            "member_role": role_map.get("Membre"),
+            "verify_role": role_map.get("Membre vérifié"),
+            "verification_role": role_map.get("Membre vérifié"),
+            "booster_role": role_map.get("Booster"),
+            "mute_role": role_map.get("Muet"),
+        }
+        channel_settings = {
+            "welcome_channel": channel_map.get("bienvenue"),
+            "goodbye_channel": channel_map.get("départs"),
+            "rules_channel": channel_map.get("règlement"),
+            "verification_channel": channel_map.get("choix-des-rôles"),
+            "announce_channel": channel_map.get("annonces"),
+            "suggest_channel": channel_map.get("suggestions"),
+            "giveaway_channel": channel_map.get("concours"),
+            "bot_commands_channel": channel_map.get("commandes-bot"),
+            "report_channel": channel_map.get("signalements"),
+            "partner_channel": channel_map.get("demandes-partenariats"),
+            "level_channel": channel_map.get("récompenses"),
+            "stats_channel": channel_map.get("classement"),
+            "afk_channel": channel_map.get("Absent"),
+            "error_channel": channel_map.get("logs-sécurité"),
+            "log_channel": channel_map.get("logs-modération"),
+            "ticket_log_channel": channel_map.get("logs-tickets"),
+            "ticket_category": category_map.get("TICKETS OUVERTS"),
+            "log_server": channel_map.get("logs-serveur"),
+            "log_messages": channel_map.get("logs-messages"),
+            "log_members": channel_map.get("logs-membres"),
+            "log_voice": channel_map.get("logs-vocaux"),
+            "log_roles": channel_map.get("logs-rôles"),
+            "log_moderation": channel_map.get("logs-modération"),
+            "log_automod": channel_map.get("logs-sécurité"),
+        }
+        for setting, target in {**role_settings, **channel_settings}.items():
+            if target is None:
+                continue
+            await self.bot.db.set_guild_config(guild.id, setting, target.id)
+            configured += 1
+        return configured
 
     @staticmethod
     async def _publish_once(
@@ -867,6 +1233,15 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         rules_channel = channel_map.get("règlement")
         announcements_channel = channel_map.get("annonces")
         welcome_channel = channel_map.get("bienvenue")
+        information_channel = channel_map.get("informations")
+        roles_channel = channel_map.get("choix-des-rôles")
+        faq_channel = channel_map.get("questions-fréquentes")
+        status_channel = channel_map.get("statut-des-services")
+        ticket_channel = channel_map.get("ouvrir-un-ticket")
+
+        rules_ref = rules_channel.mention if rules_channel else "le salon règlement"
+        roles_ref = roles_channel.mention if roles_channel else "le salon des rôles"
+        ticket_ref = ticket_channel.mention if ticket_channel else "le salon des tickets"
 
         rules = discord.Embed(
             title="Règlement du serveur",
@@ -898,8 +1273,8 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             title="Ouverture du serveur",
             description=(
                 f"Bienvenue sur **{guild.name}**. La structure du serveur est maintenant prête.\n\n"
-                "Commencez par lire le règlement, choisissez vos rôles puis présentez-vous. "
-                "Pour contacter l'équipe, utilisez le panneau dans le salon ouvrir-un-ticket.\n\n"
+                f"Commencez par lire {rules_ref}, utilisez {roles_ref} puis présentez-vous. "
+                f"Pour contacter l'équipe, ouvrez une demande dans {ticket_ref}.\n\n"
                 "Nous vous souhaitons une excellente expérience parmi nous."
             ),
             color=discord.Color.green(),
@@ -915,6 +1290,45 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             color=discord.Color.blurple(),
         )
         welcome.set_footer(text="SentriX • Bienvenue automatique v2")
+
+        information = discord.Embed(
+            title="Guide du serveur",
+            description=(
+                f"**Règlement :** {rules_ref}\n"
+                f"**Rôles :** {roles_ref}\n"
+                f"**Assistance privée :** {ticket_ref}\n\n"
+                "Chaque salon possède un sujet, des permissions et un délai adaptés. "
+                "Utilisez les salons de la bonne catégorie afin de garder le serveur organisé."
+            ),
+            color=discord.Color.blurple(),
+        )
+        information.set_footer(text="SentriX • Guide automatique v2")
+
+        faq = discord.Embed(
+            title="Questions fréquentes",
+            description=(
+                f"**Comment contacter le staff ?**\nUtilisez {ticket_ref}.\n\n"
+                f"**Où lire les règles ?**\nDans {rules_ref}.\n\n"
+                "**Pourquoi mon message a été supprimé ?**\n"
+                "Les liens, le spam, les insultes et le contenu explicite sont filtrés automatiquement.\n\n"
+                "**Comment contester une sanction ?**\n"
+                "Ouvrez un ticket et expliquez calmement la situation avec les preuves utiles."
+            ),
+            color=discord.Color.blurple(),
+        )
+        faq.set_footer(text="SentriX • FAQ automatique v2")
+
+        status = discord.Embed(
+            title="État des services",
+            description=(
+                "**SentriX :** opérationnel\n"
+                "**Tickets :** opérationnels\n"
+                "**Modération automatique :** opérationnelle\n\n"
+                "Les incidents et maintenances seront annoncés dans ce salon."
+            ),
+            color=discord.Color.green(),
+        )
+        status.set_footer(text="SentriX • Statut automatique v2")
 
         published = 0
         if isinstance(rules_channel, discord.TextChannel):
@@ -934,6 +1348,24 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
                 welcome_channel,
                 "SentriX • Bienvenue automatique v2",
                 welcome,
+            )
+        if isinstance(information_channel, discord.TextChannel):
+            published += await self._publish_once(
+                information_channel,
+                "SentriX • Guide automatique v2",
+                information,
+            )
+        if isinstance(faq_channel, discord.TextChannel):
+            published += await self._publish_once(
+                faq_channel,
+                "SentriX • FAQ automatique v2",
+                faq,
+            )
+        if isinstance(status_channel, discord.TextChannel):
+            published += await self._publish_once(
+                status_channel,
+                "SentriX • Statut automatique v2",
+                status,
             )
         return published
 
@@ -1054,11 +1486,13 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         author: discord.Member,
     ) -> discord.Embed:
         data = SERVER_TEMPLATES[template_key]
+        self._build_step = "vérification des limites Discord"
         capacity_error = self._capacity_error(guild, data)
         if capacity_error:
             return embeds.error(capacity_error)
 
         reason = f"Configuration complète {data['label']} demandée par {author}"
+        self._build_step = "création et mise à jour des rôles"
         role_map, roles_created, roles_updated = await self._ensure_roles(
             guild,
             data,
@@ -1066,17 +1500,33 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         )
         staff_role = role_map[data["staff_role_name"]]
         member_role = role_map[data["member_role_name"]]
-        category_map, channel_map, categories_created, channels_created = await self._ensure_structure(
+        self._build_step = "création et configuration des catégories et salons"
+        (
+            category_map,
+            channel_map,
+            categories_created,
+            categories_updated,
+            channels_created,
+            channels_updated,
+        ) = await self._ensure_structure(
             guild,
             data,
             role_map,
             reason,
         )
 
-        await self.bot.db.set_guild_config(guild.id, "mod_role", staff_role.id)
-        await self.bot.db.set_guild_config(guild.id, "autorole", member_role.id)
+        self._build_step = "liaison des salons avec les fonctions SentriX"
+        settings_configured = await self._configure_bot_channels(
+            guild,
+            role_map,
+            category_map,
+            channel_map,
+            data["staff_role_name"],
+        )
 
+        self._build_step = "publication du règlement et des guides"
         messages_published = await self._publish_welcome_content(guild, channel_map)
+        self._build_step = "configuration du panneau de tickets"
         try:
             ticket_status = await self._configure_tickets(
                 guild,
@@ -1089,13 +1539,17 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             logger.exception("Échec de la configuration automatique des tickets")
             ticket_status = "erreur pendant la configuration ; utilisez +ticketsetup"
 
+        self._build_step = "finalisation"
         total_channels = sum(len(category["channels"]) for category in data["categories"])
         result = embeds.success(
             f"Le serveur **{guild.name}** est configuré avec le modèle **{data['label']}**.\n\n"
             f"**Rôles :** {len(data['roles'])} prévus, {roles_created} créés, {roles_updated} mis à jour.\n"
             f"**Structure :** {len(data['categories'])} catégories et {total_channels} salons prévus ; "
-            f"{categories_created} catégories et {channels_created} salons créés maintenant.\n"
-            f"**Messages :** règlement, annonce et accueil installés ({messages_published} nouveau(x)).\n"
+            f"{categories_created} catégorie(s) créée(s), {categories_updated} renommée(s)/configurée(s), "
+            f"{channels_created} salon(s) créé(s) et {channels_updated} configuré(s).\n"
+            f"**Réglages SentriX :** {settings_configured} rôles/salons reliés automatiquement.\n"
+            f"**Messages :** règlement, annonce, accueil, guide, FAQ et statut installés "
+            f"({messages_published} nouveau(x)).\n"
             f"**Tickets :** {ticket_status}.\n"
             f"**Configuration SentriX :** rôle staff {staff_role.mention}, autorôle {member_role.mention}.\n\n"
             "La commande peut être relancée : elle met à jour l'installation sans créer de doublons.",
