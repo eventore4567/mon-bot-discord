@@ -744,6 +744,7 @@ class Ai(commands.Cog, name="Ai"):
         description="Générer une vraie image 4K à partir d'une description.",
         with_app_command=False,
     )
+    @checks.is_owner_or_admin_for("ai")
     @commands.cooldown(1, 180, commands.BucketType.user)
     async def generate_image_command(self, ctx: commands.Context, *, description: str):
         guild_id = ctx.guild.id if ctx.guild else None
