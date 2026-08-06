@@ -234,7 +234,7 @@ class Minigames(commands.Cog, name="Minigames"):
                     title="Devine le nombre — partie collective",
                     description=(
                         "J'ai choisi un nombre entre **1 et 100**.\n"
-                        "Tout le monde peut participer : **6 essais par personne** et **aucune limite de temps**.\n"
+                        "Tout le monde peut participer : **essais illimités** et **aucune limite de temps**.\n"
                         "Le premier qui trouve gagne. Une réaction vers le haut signifie « plus grand », "
                         "et une réaction vers le bas signifie « plus petit »."
                     ),
@@ -270,10 +270,7 @@ class Minigames(commands.Cog, name="Minigames"):
                         )
                     continue
 
-                used = attempts.get(msg.author.id, 0)
-                if used >= 6:
-                    continue
-                attempts[msg.author.id] = used + 1
+                attempts[msg.author.id] = attempts.get(msg.author.id, 0) + 1
                 participants.add(msg.author.id)
                 total_guesses += 1
                 guess = int(msg.content.strip())
