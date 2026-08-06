@@ -9,7 +9,6 @@ from aiohttp import web
 logger = logging.getLogger("bot.dashboard.admin-only")
 _INSTALLED = False
 
-_PUBLIC_API_PATHS = {"/api/public", "/api/me"}
 _PRIVATE_PAGE_PATHS = {"/app", "/setup-center"}
 
 ACCESS_DENIED_HTML = """<!doctype html>
@@ -22,7 +21,7 @@ ACCESS_DENIED_HTML = """<!doctype html>
   <style>
     :root{color-scheme:dark;--bg:#090b12;--panel:#111522;--line:#29304a;--text:#f2f4ff;--muted:#9ca5bc;--brand:#7c6cff;--bad:#ff758b}
     *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 20% 0,#392d7255,transparent 36%),var(--bg);color:var(--text);font:16px Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
-    main{width:min(620px,100%);padding:34px;background:var(--panel);border:1px solid var(--line);border-radius:22px;box-shadow:0 28px 80px #0008} .icon{width:58px;height:58px;display:grid;place-items:center;border-radius:17px;background:#3c1822;color:var(--bad);font-size:28px;margin-bottom:20px}h1{margin:0 0 12px;font-size:30px}p{margin:0;color:var(--muted);line-height:1.7}.notice{margin:22px 0;padding:15px 16px;border:1px solid #654052;background:#28161d;border-radius:13px;color:#ffc0ca}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}a{display:inline-flex;align-items:center;justify-content:center;padding:11px 16px;border-radius:11px;border:1px solid var(--line);color:var(--text);text-decoration:none;font-weight:800;background:#171c2c}a.primary{background:linear-gradient(135deg,var(--brand),#5d4de1);border-color:transparent}
+    main{width:min(620px,100%);padding:34px;background:var(--panel);border:1px solid var(--line);border-radius:22px;box-shadow:0 28px 80px #0008}.icon{width:58px;height:58px;display:grid;place-items:center;border-radius:17px;background:#3c1822;color:var(--bad);font-size:28px;margin-bottom:20px}h1{margin:0 0 12px;font-size:30px}p{margin:0;color:var(--muted);line-height:1.7}.notice{margin:22px 0;padding:15px 16px;border:1px solid #654052;background:#28161d;border-radius:13px;color:#ffc0ca}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}a{display:inline-flex;align-items:center;justify-content:center;padding:11px 16px;border-radius:11px;border:1px solid var(--line);color:var(--text);text-decoration:none;font-weight:800;background:#171c2c}a.primary{background:linear-gradient(135deg,var(--brand),#5d4de1);border-color:transparent}
   </style>
 </head>
 <body>
@@ -32,7 +31,7 @@ ACCESS_DENIED_HTML = """<!doctype html>
     <p>Vous êtes connecté à Discord, mais vous ne pouvez pas utiliser le dashboard SentriX sans la permission <b>Administrateur</b> sur au moins un serveur concerné.</p>
     <div class="notice">Aucun réglage, aucune sanction, aucun log et aucun outil Setup ne sont accessibles tant que cette permission n'est pas accordée.</div>
     <p>Après avoir reçu la permission Administrateur, reconnectez-vous au dashboard pour actualiser vos serveurs.</p>
-    <div class="actions"><a href="/">Retour à l'accueil</a><a class="primary" href="/login">Se reconnecter avec Discord</a></div>
+    <div class="actions"><a href="/?public=1">Voir la page publique</a><a class="primary" href="/login">Se reconnecter avec Discord</a></div>
   </main>
 </body>
 </html>"""
@@ -68,6 +67,15 @@ async def _refresh_admin_guilds(request: web.Request, dashboard, session: dict) 
     return bool(verified)
 
 
+def _denied_page() -> web.Response:
+    return web.Response(
+        text=ACCESS_DENIED_HTML,
+        content_type="text/html",
+        status=403,
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 def _denied_api(dashboard) -> web.Response:
     return dashboard._json_error(
         "Accès refusé : la permission Discord Administrateur est obligatoire pour utiliser le dashboard.",
@@ -88,18 +96,25 @@ def install(dashboard) -> None:
     async def administrator_only(request: web.Request, handler):
         path = request.path
 
-        # Les pages publiques, la connexion OAuth, l'état du bot et la déconnexion
-        # doivent rester accessibles à tout le monde.
+        # Connexion OAuth, état du bot, API publique et déconnexion restent accessibles.
         if (
-            path in {"/", "/health", "/login", "/oauth/callback", "/logout", "/api/public"}
+            path in {"/health", "/login", "/oauth/callback", "/logout", "/api/public"}
             or request.method == "OPTIONS"
         ):
             return await handler(request)
 
         session = dashboard._session(request)
 
-        # /api/me est nécessaire pour afficher l'identité connectée. Il ne donne aucun
-        # accès à un serveur et reste protégé par la session.
+        # La racine sert de page publique quand personne n'est connecté. Avec une ancienne
+        # session sans Administrateur, elle ne doit surtout pas réafficher le dashboard.
+        if path == "/":
+            if session is None or request.query.get("public") == "1":
+                return await handler(request)
+            if not await _refresh_admin_guilds(request, dashboard, session):
+                return _denied_page()
+            return await handler(request)
+
+        # /api/me affiche uniquement l'identité connectée et ne donne accès à aucun serveur.
         if path == "/api/me":
             return await handler(request)
 
@@ -118,21 +133,14 @@ def install(dashboard) -> None:
                 session.get("user", {}).get("id", "inconnu"),
                 path,
             )
-            if path in _PRIVATE_PAGE_PATHS:
-                return web.Response(
-                    text=ACCESS_DENIED_HTML,
-                    content_type="text/html",
-                    status=403,
-                    headers={"Cache-Control": "private, no-store"},
-                )
-            return _denied_api(dashboard)
+            return _denied_page() if path in _PRIVATE_PAGE_PATHS else _denied_api(dashboard)
 
         return await handler(request)
 
     def build_app(bot) -> web.Application:
         app = original_build_app(bot)
-        # Insertion en première position : le verrou s'exécute avant toutes les routes,
-        # y compris celles ajoutées par le Centre Setup et les futures extensions.
+        # Première position : le verrou couvre le dashboard principal, le Centre Setup,
+        # leurs API et les futures routes privées ajoutées plus tard.
         app.middlewares.insert(0, administrator_only)
         return app
 
