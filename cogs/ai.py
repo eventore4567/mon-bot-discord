@@ -744,7 +744,6 @@ class Ai(commands.Cog, name="Ai"):
         description="Générer une vraie image 4K à partir d'une description.",
         with_app_command=False,
     )
-    @checks.is_owner_or_admin_for("ai")
     @commands.cooldown(1, 180, commands.BucketType.user)
     async def generate_image_command(self, ctx: commands.Context, *, description: str):
         guild_id = ctx.guild.id if ctx.guild else None
@@ -756,9 +755,6 @@ class Ai(commands.Cog, name="Ai"):
                 return await ctx.send(embed=embeds.error("L'IA est désactivée sur ce serveur."))
             if not ai_service.is_channel_allowed(settings, channel_id):
                 return await ctx.send(embed=embeds.error("L'IA n'est pas autorisée dans ce salon."))
-            role_ids = [role.id for role in getattr(ctx.author, "roles", [])]
-            if not ai_service.is_role_allowed(settings, role_ids):
-                return await ctx.send(embed=embeds.error("Tu n'as pas le rôle nécessaire pour générer une image."))
             problem = ai_service.moderate_input(description, max_length=settings["max_question_length"])
             if problem:
                 return await ctx.send(embed=embeds.error(problem))
