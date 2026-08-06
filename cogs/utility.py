@@ -206,21 +206,40 @@ CATEGORY_LABELS = {
 
 # Catégories entièrement réservées au staff : un membre normal ne les voit JAMAIS
 # dans /help, même si elles contiennent une commande techniquement publique.
-MEMBER_HIDDEN_CATEGORIES = {"Moderation", "Automod", "Security", "Tickets", "Configuration", "ServerBuilder", "Utility", "Verification", "Stats", "Owner", "EmbedBuilder"}
+MEMBER_HIDDEN_CATEGORIES = {"Moderation", "Automod", "Security", "Configuration", "ServerBuilder", "Verification", "Owner", "EmbedBuilder"}
 
 # Décorateurs qui, sur une commande, signifient "réservé au staff". On les repère par
 # le nom qualifié de la fonction de vérification plutôt que par une liste de commandes
 # écrite à la main : ainsi le filtrage reste juste même quand des commandes sont
 # ajoutées ou déplacées plus tard.
-STAFF_CHECK_MARKERS = ("is_owner_or_admin", "has_permission_or_modrole", "has_permissions", "has_guild_permissions", "is_owner", "is_bot_owner")
+STAFF_CHECK_MARKERS = ("is_owner_or_admin", "has_permission", "has_permissions", "has_guild_permissions", "is_owner", "is_bot_owner")
 
 
 def is_staff_command(cmd) -> bool:
-    for check in getattr(cmd, "checks", []):
-        qualname = getattr(check, "__qualname__", "") or ""
-        if any(marker in qualname for marker in STAFF_CHECK_MARKERS):
-            return True
+    """Détecte les restrictions de la commande et de chacun de ses groupes parents."""
+    current = cmd
+    while current is not None:
+        for check in getattr(current, "checks", []):
+            qualname = getattr(check, "__qualname__", "") or ""
+            if any(marker in qualname for marker in STAFF_CHECK_MARKERS):
+                return True
+        current = getattr(current, "parent", None)
     return False
+
+
+def slash_command_names(bot: commands.Bot) -> set[str]:
+    """Retourne aussi les sous-commandes slash (tree.get_commands ne donne que les racines)."""
+    names: set[str] = set()
+
+    def visit(command, parent: str = ""):
+        qualified = f"{parent} {command.name}".strip()
+        names.add(qualified)
+        for child in getattr(command, "commands", []):
+            visit(child, qualified)
+
+    for command in bot.tree.get_commands():
+        visit(command)
+    return names
 
 
 def visible_commands(cog, is_staff: bool):
@@ -337,7 +356,7 @@ class SearchModal(discord.ui.Modal, title="🔎 Rechercher une commande"):
         self.is_staff = is_staff
 
     async def on_submit(self, interaction: discord.Interaction):
-        slash_names = {c.qualified_name for c in self.bot.tree.get_commands()}
+        slash_names = slash_command_names(self.bot)
         results = search_commands(self.bot, self.is_staff, self.mot_cle.value)
 
         if not results:
@@ -380,7 +399,7 @@ class HelpSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         cog = self.bot.get_cog(self.values[0])
         label = CATEGORY_LABELS.get(self.values[0], self.values[0])
-        slash_names = {c.qualified_name for c in self.bot.tree.get_commands()}
+        slash_names = slash_command_names(self.bot)
 
         lines = [format_command_line(cmd, self.prefix, slash_names) for cmd in visible_commands(cog, self.is_staff)]
 
@@ -525,8 +544,8 @@ class Utility(commands.Cog, name="Utility"):
         if commande:
             cmd = self.bot.get_command(commande)
             if not cmd or (is_staff_command(cmd) and not is_staff):
-                return await ctx.send(embed=embeds.error(f"Commande `{commande}` introuvable."))
-            slash_names = {c.qualified_name for c in self.bot.tree.get_commands()}
+                return await ctx.send(embed=embeds.error(f"La commande `{commande}` est introuvable ou vous n’avez pas la permission de la consulter.\nUtilisez `{prefix}help` pour afficher uniquement les commandes disponibles pour vous."))
+            slash_names = slash_command_names(self.bot)
             is_slash = cmd.qualified_name in slash_names
             marker = f"/{cmd.qualified_name}" if is_slash else f"{prefix}{cmd.qualified_name}"
 
