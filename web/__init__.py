@@ -36,6 +36,13 @@ _setup_center_search.install(_setup_center)
 _setup_center_explanations.install(_setup_center)
 _setup_center.install(_dashboard, _setup_dashboard, _design_setup_dashboard)
 _embed_center.install(_dashboard)
+# Le clic est géré par le script du créateur. Le bouton ne soumet donc pas une seconde fois
+# le formulaire, ce qui empêche l'envoi accidentel de deux messages Discord identiques.
+_embed_center.EMBED_CENTER_HTML = _embed_center.EMBED_CENTER_HTML.replace(
+    'id="saveButton" class="btn primary" type="submit"',
+    'id="saveButton" class="btn primary" type="button"',
+    1,
+)
 _dashboard_polish.install(_dashboard, _setup_center, _embed_center)
 
 # Le créateur d'embeds est une page privée au même titre que le dashboard principal.
