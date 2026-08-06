@@ -6,3 +6,4 @@ PyNaCl>=1.5.0
 yt-dlp>=2024.8.6
 openai>=1.40.0
 deep-translator>=1.11.4
+Pillow>=10.4.0
