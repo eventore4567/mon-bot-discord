@@ -1,6 +1,6 @@
 """Initialisation sécurisée du dashboard SentriX.
 
-Le dashboard principal reste stable. Les améliorations visuelles et le Centre Setup sont
+Le dashboard principal reste stable. Les améliorations visuelles et les outils avancés sont
 chargés par des modules séparés afin qu'une erreur reste isolée.
 """
 
@@ -12,6 +12,8 @@ from . import setup_center_exclusive as _setup_center_exclusive
 from . import setup_center_search as _setup_center_search
 from . import dashboard_explanations_search as _dashboard_explanations_search
 from . import setup_center_explanations as _setup_center_explanations
+from . import embed_center as _embed_center
+from . import dashboard_polish as _dashboard_polish
 from . import admin_only_dashboard as _admin_only_dashboard
 
 
@@ -33,5 +35,10 @@ _setup_center_exclusive.install(_setup_center, _setup_dashboard)
 _setup_center_search.install(_setup_center)
 _setup_center_explanations.install(_setup_center)
 _setup_center.install(_dashboard, _setup_dashboard, _design_setup_dashboard)
+_embed_center.install(_dashboard)
+_dashboard_polish.install(_dashboard, _setup_center, _embed_center)
+
+# Le créateur d'embeds est une page privée au même titre que le dashboard principal.
+_admin_only_dashboard._PRIVATE_PAGE_PATHS.add("/embed-builder")
 # Doit rester en dernier pour protéger également toutes les routes ajoutées ci-dessus.
 _admin_only_dashboard.install(_dashboard)
