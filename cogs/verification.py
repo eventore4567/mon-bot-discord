@@ -55,20 +55,6 @@ def _self_role_error(guild: discord.Guild, role: discord.Role) -> str | None:
 NOTIFICATION_ROLE_MARKERS = (
     "ping",
     "notif",
-    "annonce",
-    "giveaway",
-    "concours",
-    "evenement",
-    "event",
-    "mise a jour",
-    "mises a jour",
-    "update",
-    "actualite",
-    "nouveaute",
-    "live",
-    "stream",
-    "youtube",
-    "twitch",
 )
 
 
@@ -77,6 +63,9 @@ def _is_notification_role(role: discord.Role) -> bool:
     normalized = unicodedata.normalize("NFKD", role.name.casefold())
     normalized = "".join(character for character in normalized if not unicodedata.combining(character))
     normalized = normalized.replace("-", " ").replace("_", " ")
+    # Le rôle doit dire explicitement « ping » ou « notification ». Des mots seuls
+    # comme « événements » ou « streamer » peuvent désigner des postes du staff et ne
+    # doivent jamais apparaître dans le sélecteur public.
     return any(marker in normalized for marker in NOTIFICATION_ROLE_MARKERS)
 
 

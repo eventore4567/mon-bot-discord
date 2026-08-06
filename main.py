@@ -32,6 +32,7 @@ EXTENSIONS = [
     "cogs.tickets",
     "cogs.configuration",
     "cogs.server_builder",
+    "cogs.logs",
     "cogs.utility",
     "cogs.ai",
     "cogs.economy",
