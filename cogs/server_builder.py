@@ -209,6 +209,76 @@ COMPLETE_ROLES = [
 ]
 
 
+def _roles_without(*excluded_names: str) -> list[tuple]:
+    """Construit un profil de rôles sans modifier la liste complète historique."""
+    excluded = set(excluded_names)
+    return [role for role in COMPLETE_ROLES if role[0] not in excluded]
+
+
+GAMING_AND_COLOR_ROLES = {
+    "PC", "PlayStation", "Xbox", "Nintendo", "Mobile", "Roblox", "Minecraft",
+    "Fortnite", "Valorant", "GTA", "Rocket League", "Rouge", "Orange", "Jaune",
+    "Vert", "Bleu", "Violet", "Rose", "Cyan", "Blanc", "Noir",
+}
+
+PROFESSIONAL_ROLES = [
+    *_roles_without(
+        *GAMING_AND_COLOR_ROLES,
+        "Responsable animation", "Animateur", "Responsable événements", "Organisateur",
+        "Créateur de contenu", "Streamer", "YouTube", "TikTok",
+    ),
+    _role("Directeur des opérations", discord.Color.dark_red(), DIRECTION_PERMISSIONS, hoist=True),
+    _role("Responsable RH", discord.Color.from_rgb(120, 70, 160), CONTENT_MANAGER_PERMISSIONS, hoist=True),
+    _role("Chef de projet", discord.Color.from_rgb(50, 110, 180), CONTENT_MANAGER_PERMISSIONS, hoist=True),
+    _role("Responsable commercial", discord.Color.from_rgb(30, 150, 120), hoist=True),
+    _role("Responsable finance", discord.Color.gold(), hoist=True),
+    _role("Responsable communication", discord.Color.magenta(), CONTENT_MANAGER_PERMISSIONS, hoist=True),
+    _role("Équipe RH", discord.Color.from_rgb(145, 95, 180)),
+    _role("Équipe produit", discord.Color.blurple()),
+    _role("Équipe technique", discord.Color.dark_blue()),
+    _role("Équipe commerciale", discord.Color.green()),
+    _role("Équipe marketing", discord.Color.from_rgb(220, 90, 150)),
+    _role("Comptabilité", discord.Color.gold()),
+    _role("Juridique", discord.Color.dark_grey()),
+    _role("Client", discord.Color.teal()),
+    _role("Prestataire", discord.Color.light_grey()),
+    _role("Télétravail", discord.Color.blue()),
+    _role("Au bureau", discord.Color.green()),
+    _role("Disponible", discord.Color.green()),
+    _role("En réunion", discord.Color.orange()),
+    _role("En congé", discord.Color.light_grey()),
+]
+
+SUPPORT_ROLES = [
+    *_roles_without(
+        *GAMING_AND_COLOR_ROLES,
+        "Responsable animation", "Animateur", "Responsable événements", "Organisateur",
+        "Responsable partenariats", "Partenariats", "Designer", "Community manager",
+        "Créateur de contenu", "Streamer", "YouTube", "TikTok",
+    ),
+    _role("Responsable SAV", discord.Color.dark_teal(), SUPPORT_MANAGER_PERMISSIONS, hoist=True),
+    _role("Superviseur support", discord.Color.teal(), SUPPORT_MANAGER_PERMISSIONS, hoist=True),
+    _role("Agent support N3", discord.Color.from_rgb(40, 150, 160), SUPPORT_PERMISSIONS, hoist=True),
+    _role("Agent support N2", discord.Color.from_rgb(60, 170, 175), SUPPORT_PERMISSIONS, hoist=True),
+    _role("Agent support N1", discord.Color.from_rgb(85, 190, 190), SUPPORT_PERMISSIONS, hoist=True),
+    _role("Support technique", discord.Color.blue()),
+    _role("Support facturation", discord.Color.gold()),
+    _role("Support commercial", discord.Color.green()),
+    _role("Équipe qualité", discord.Color.purple()),
+    _role("Astreinte", discord.Color.orange(), hoist=True),
+    _role("Incident majeur", discord.Color.red(), hoist=True),
+    _role("Priorité critique", discord.Color.dark_red()),
+    _role("Client premium", discord.Color.gold()),
+    _role("Client", discord.Color.teal()),
+    _role("Ticket escaladé", discord.Color.orange()),
+    _role("Ticket en attente", discord.Color.light_grey()),
+    _role("Ticket résolu", discord.Color.green()),
+    _role("Disponibilité matin", discord.Color.blurple()),
+    _role("Disponibilité soir", discord.Color.dark_blue()),
+    _role("Disponibilité week-end", discord.Color.purple()),
+]
+
+
 STAFF_ROLE_NAMES = {
     "Fondateur",
     "Cofondateur",
@@ -233,6 +303,16 @@ STAFF_ROLE_NAMES = {
     "Développeur",
     "Designer",
     "Community manager",
+    "Directeur des opérations",
+    "Responsable RH",
+    "Chef de projet",
+    "Responsable communication",
+    "Responsable SAV",
+    "Superviseur support",
+    "Agent support N3",
+    "Agent support N2",
+    "Agent support N1",
+    "Astreinte",
 }
 
 
@@ -253,6 +333,16 @@ CATEGORY_EMOJIS = {
     "COMPÉTITION": "🏆",
     "ENTREPRISE": "💼",
     "SAV": "🛠️",
+    "COMMUNICATION": "📣",
+    "TRAVAIL": "💼",
+    "PROJETS": "🧩",
+    "RÉUNIONS": "📅",
+    "CLIENTS": "🤝",
+    "DIRECTION": "👔",
+    "CENTRE D'AIDE": "🧭",
+    "SUIVI SAV": "📊",
+    "ÉQUIPE SUPPORT": "🛡️",
+    "QUALITÉ": "✅",
 }
 
 CATEGORY_ALIASES = {
@@ -603,8 +693,13 @@ BASE_CATEGORIES = [
 ]
 
 
-PROFILE_CATEGORIES = {
-    "communaute": {
+def _base_category(name: str) -> dict:
+    return next(category for category in BASE_CATEGORIES if category["name"] == name)
+
+
+COMMUNITY_CATEGORIES = [
+    *BASE_CATEGORIES,
+    {
         "name": "COMPÉTITION",
         "privacy": "public",
         "channels": [
@@ -615,68 +710,227 @@ PROFILE_CATEGORIES = {
             ("Palmarès", "voice"),
         ],
     },
-    "pro": {
-        "name": "ENTREPRISE",
+]
+
+PROFESSIONAL_CATEGORIES = [
+    _base_category("ACCUEIL"),
+    {
+        "name": "COMMUNICATION",
+        "privacy": "public",
+        "channels": [
+            ("général", "text"),
+            ("discussion-équipe", "text"),
+            ("actualités-entreprise", "readonly"),
+            ("sondages", "text"),
+            ("suggestions", "text"),
+            ("commandes-bot", "text"),
+        ],
+    },
+    {
+        "name": "TRAVAIL",
+        "privacy": "public",
+        "channels": [
+            ("tâches", "text"),
+            ("documents", "text"),
+            ("ressources", "readonly"),
+            ("procédures", "readonly"),
+            ("idées", "text"),
+            ("planning", "readonly"),
+        ],
+    },
+    {
+        "name": "PROJETS",
+        "privacy": "public",
+        "channels": [
+            ("projets", "text"),
+            ("briefs", "text"),
+            ("livrables", "text"),
+            ("revues-de-projet", "text"),
+            ("suivi-des-bugs", "text"),
+        ],
+    },
+    {
+        "name": "RÉUNIONS",
+        "privacy": "public",
+        "channels": [
+            ("ordre-du-jour", "readonly"),
+            ("comptes-rendus", "readonly"),
+            ("Réunion générale", "voice"),
+            ("Réunion projet", "voice"),
+            ("Salle confidentielle", "voice"),
+        ],
+    },
+    {
+        "name": "CLIENTS",
+        "privacy": "public",
+        "channels": [
+            ("accueil-clients", "readonly"),
+            ("demandes-clients", "text"),
+            ("retours-clients", "text"),
+            ("partenaires", "text"),
+            ("études-de-cas", "readonly"),
+        ],
+    },
+    _base_category("ÉCONOMIE"),
+    _base_category("SUPPORT"),
+    {
+        "name": "VOCAUX",
+        "privacy": "public",
+        "channels": [
+            ("Accueil vocal", "voice"),
+            ("Réunion équipe", "voice"),
+            ("Réunion client", "voice"),
+            ("Focus 1", "voice"),
+            ("Focus 2", "voice"),
+            ("Pause café", "voice"),
+            ("Absent", "voice"),
+        ],
+    },
+    _base_category("TICKETS OUVERTS"),
+    {
+        "name": "DIRECTION",
         "privacy": "staff",
         "channels": [
             ("direction", "text"),
             ("ressources-humaines", "text"),
-            ("projets", "text"),
-            ("documents", "text"),
-            ("comptes-rendus", "readonly"),
+            ("décisions", "readonly"),
+            ("budget", "text"),
+            ("staff-général", "text"),
+            ("staff-annonces", "readonly"),
             ("Réunion direction", "voice"),
-            ("Réunion équipe", "voice"),
         ],
     },
-    "support": {
-        "name": "SAV",
+    _base_category("LOGS"),
+    _base_category("ARCHIVES"),
+]
+
+SUPPORT_CATEGORIES = [
+    _base_category("ACCUEIL"),
+    {
+        "name": "CENTRE D'AIDE",
         "privacy": "public",
         "channels": [
-            ("incidents-connus", "readonly"),
-            ("signaler-un-bug", "text"),
-            ("facturation", "text"),
-            ("retours-clients", "text"),
+            ("aide", "text"),
+            ("questions-fréquentes", "readonly"),
             ("guides", "readonly"),
-            ("Support vocal 1", "voice"),
-            ("Support vocal 2", "voice"),
+            ("tutoriels", "readonly"),
+            ("incidents-connus", "readonly"),
+            ("statut-des-services", "readonly"),
         ],
     },
-}
-
-
-def _template_categories(key: str) -> list[dict]:
-    return [*BASE_CATEGORIES, PROFILE_CATEGORIES[key]]
+    {
+        "name": "COMMUNAUTÉ",
+        "privacy": "public",
+        "channels": [
+            ("général", "text"),
+            ("discussion-libre", "text"),
+            ("suggestions", "text"),
+            ("commandes-bot", "text"),
+            ("annonces-utilisateurs", "text"),
+        ],
+    },
+    {
+        "name": "SUIVI SAV",
+        "privacy": "public",
+        "channels": [
+            ("ouvrir-un-ticket", "readonly"),
+            ("suivi-des-demandes", "readonly"),
+            ("maintenance", "readonly"),
+            ("facturation", "text"),
+            ("retours-clients", "text"),
+            ("satisfaction", "text"),
+        ],
+    },
+    {
+        "name": "QUALITÉ",
+        "privacy": "public",
+        "channels": [
+            ("signaler-un-bug", "text"),
+            ("idées-améliorations", "text"),
+            ("changements", "readonly"),
+            ("tests-publics", "text"),
+            ("base-de-connaissances", "readonly"),
+        ],
+    },
+    _base_category("ÉCONOMIE"),
+    {
+        "name": "VOCAUX",
+        "privacy": "public",
+        "channels": [
+            ("Accueil vocal", "voice"),
+            ("Support vocal 1", "voice"),
+            ("Support vocal 2", "voice"),
+            ("Support vocal 3", "voice"),
+            ("Support vocal 4", "voice"),
+            ("Pause support", "voice"),
+            ("Absent", "voice"),
+        ],
+    },
+    _base_category("TICKETS OUVERTS"),
+    {
+        "name": "ÉQUIPE SUPPORT",
+        "privacy": "staff",
+        "channels": [
+            ("staff-général", "text"),
+            ("staff-annonces", "readonly"),
+            ("signalements", "text"),
+            ("sanctions", "text"),
+            ("tâches", "text"),
+            ("escalades", "text"),
+            ("planning-support", "readonly"),
+            ("candidatures", "text"),
+            ("Réunion support", "voice"),
+        ],
+    },
+    _base_category("LOGS"),
+    _base_category("ARCHIVES"),
+]
 
 
 SERVER_TEMPLATES = {
     "communaute": {
         "label": "Communauté / Gaming",
-        "description": "78 rôles, 14 catégories, plus de 70 salons, tickets, règlement et annonce.",
+        "description": "Gaming, événements, créateurs, compétitions et salons vocaux.",
         "roles": COMPLETE_ROLES,
         "staff_role_name": "Modérateur",
         "member_role_name": "Membre",
-        "categories": _template_categories("communaute"),
+        "categories": COMMUNITY_CATEGORIES,
+        "accent": discord.Color.blurple(),
+        "announcement_title": "Ouverture de la communauté",
+        "welcome_text": "Rejoignez les discussions, trouvez des joueurs et participez aux événements.",
+        "ticket_title": "Aide de la communauté",
+        "ticket_description": "Choisissez votre demande : aide, signalement, partenariat ou recrutement.",
     },
     "pro": {
         "label": "Professionnel / Entreprise",
-        "description": "78 rôles, 14 catégories, plus de 70 salons, tickets et espaces de travail.",
-        "roles": COMPLETE_ROLES,
+        "description": "Projets, équipes, clients, réunions, documents et direction privée.",
+        "roles": PROFESSIONAL_ROLES,
         "staff_role_name": "Modérateur",
         "member_role_name": "Membre",
-        "categories": _template_categories("pro"),
+        "categories": PROFESSIONAL_CATEGORIES,
+        "accent": discord.Color.dark_teal(),
+        "announcement_title": "Ouverture de l'espace professionnel",
+        "welcome_text": "Retrouvez vos projets, documents, réunions et échanges clients au même endroit.",
+        "ticket_title": "Assistance entreprise",
+        "ticket_description": "Choisissez le service concerné pour transmettre votre demande à la bonne équipe.",
     },
     "support": {
         "label": "Support / SAV",
-        "description": "78 rôles, 14 catégories, plus de 70 salons et tickets SAV prêts à utiliser.",
-        "roles": COMPLETE_ROLES,
+        "description": "Centre d'aide, suivi SAV, incidents, qualité et équipe support.",
+        "roles": SUPPORT_ROLES,
         "staff_role_name": "Support",
         "member_role_name": "Membre",
-        "categories": _template_categories("support"),
+        "categories": SUPPORT_CATEGORIES,
+        "accent": discord.Color.orange(),
+        "announcement_title": "Ouverture du centre de support",
+        "welcome_text": "Consultez les guides ou ouvrez un ticket pour être orienté vers le bon service.",
+        "ticket_title": "Centre SAV",
+        "ticket_description": "Sélectionnez le motif exact afin d'accélérer la prise en charge de votre dossier.",
     },
 }
 
 
-TICKET_TYPES = [
+COMMUNITY_TICKET_TYPES = [
     {
         "name": "Support général",
         "description": "Question générale ou demande d'aide.",
@@ -706,6 +960,74 @@ TICKET_TYPES = [
         "open_message": "Présentez-vous, indiquez votre disponibilité, votre expérience et vos motivations.",
     },
 ]
+
+PROFESSIONAL_TICKET_TYPES = [
+    {
+        "name": "Assistance interne",
+        "description": "Accès, outil, matériel ou question liée au travail.",
+        "button_style": "bleu",
+        "name_format": "assistance-{pseudo}",
+        "open_message": "Indiquez l'outil ou le service concerné, le problème rencontré et son impact.",
+    },
+    {
+        "name": "Ressources humaines",
+        "description": "Demande confidentielle destinée à l'équipe RH.",
+        "button_style": "gris",
+        "name_format": "rh-{pseudo}",
+        "open_message": "Expliquez votre demande. Ce ticket doit rester strictement confidentiel.",
+    },
+    {
+        "name": "Projet ou client",
+        "description": "Question concernant un projet, un livrable ou un client.",
+        "button_style": "vert",
+        "name_format": "projet-{pseudo}",
+        "open_message": "Précisez le projet, l'échéance, les personnes concernées et le résultat attendu.",
+    },
+    {
+        "name": "Incident urgent",
+        "description": "Incident bloquant qui nécessite une prise en charge rapide.",
+        "button_style": "rouge",
+        "name_format": "incident-{pseudo}",
+        "open_message": "Décrivez l'incident, son heure de début, son impact et les vérifications déjà réalisées.",
+    },
+]
+
+SUPPORT_TICKET_TYPES = [
+    {
+        "name": "Support technique",
+        "description": "Bug, panne, erreur ou difficulté technique.",
+        "button_style": "bleu",
+        "name_format": "technique-{pseudo}",
+        "open_message": "Décrivez le problème, votre appareil, les étapes et joignez une capture si possible.",
+    },
+    {
+        "name": "Facturation",
+        "description": "Paiement, facture, abonnement ou remboursement.",
+        "button_style": "gris",
+        "name_format": "facturation-{pseudo}",
+        "open_message": "Indiquez la référence concernée sans publier de donnée bancaire confidentielle.",
+    },
+    {
+        "name": "Réclamation",
+        "description": "Contester une décision ou signaler une mauvaise expérience.",
+        "button_style": "rouge",
+        "name_format": "reclamation-{pseudo}",
+        "open_message": "Présentez les faits, la date, le résultat attendu et les preuves utiles.",
+    },
+    {
+        "name": "Question générale",
+        "description": "Toute demande qui ne correspond pas aux autres motifs.",
+        "button_style": "vert",
+        "name_format": "question-{pseudo}",
+        "open_message": "Expliquez votre demande avec suffisamment de détails pour que nous puissions vous aider.",
+    },
+]
+
+TICKET_TYPES_BY_TEMPLATE = {
+    "communaute": COMMUNITY_TICKET_TYPES,
+    "pro": PROFESSIONAL_TICKET_TYPES,
+    "support": SUPPORT_TICKET_TYPES,
+}
 
 
 class TemplateSelect(discord.ui.Select):
@@ -779,7 +1101,13 @@ class ServerBuilderView(discord.ui.View):
             f"**{len(data['categories'])} catégories** et **{total_channels} salons**. "
             "Le règlement, l'annonce d'ouverture et le panneau de tickets seront publiés automatiquement.\n\n"
             "Les éléments existants portant le même nom seront réutilisés et mis à jour, sans doublons. "
-            "Seul le rôle Fondateur possède Administrateur.",
+            "Seul le rôle Fondateur possède Administrateur. Les éléments d'un ancien modèle ne sont "
+            "jamais supprimés automatiquement.",
+        )
+        preview.add_field(
+            name="Identité du modèle",
+            value=data["description"],
+            inline=False,
         )
         for index in range(0, len(role_names), 20):
             preview.add_field(
@@ -1229,7 +1557,10 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         self,
         guild: discord.Guild,
         channel_map: dict[str, discord.abc.GuildChannel],
+        template_key: str,
     ) -> int:
+        profile = SERVER_TEMPLATES[template_key]
+        accent = profile["accent"]
         rules_channel = channel_map.get("règlement")
         announcements_channel = channel_map.get("annonces")
         welcome_channel = channel_map.get("bienvenue")
@@ -1265,29 +1596,31 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
                 "**9. Conditions Discord**\n"
                 "Les règles et conditions d'utilisation de Discord restent applicables."
             ),
-            color=discord.Color.blurple(),
+            color=accent,
         )
         rules.set_footer(text="SentriX • Règlement automatique v2")
 
         announcement = discord.Embed(
-            title="Ouverture du serveur",
+            title=profile["announcement_title"],
             description=(
                 f"Bienvenue sur **{guild.name}**. La structure du serveur est maintenant prête.\n\n"
+                f"{profile['welcome_text']}\n\n"
                 f"Commencez par lire {rules_ref}, utilisez {roles_ref} puis présentez-vous. "
                 f"Pour contacter l'équipe, ouvrez une demande dans {ticket_ref}.\n\n"
                 "Nous vous souhaitons une excellente expérience parmi nous."
             ),
-            color=discord.Color.green(),
+            color=accent,
         )
         announcement.set_footer(text="SentriX • Annonce automatique v2")
 
         welcome = discord.Embed(
             title="Bienvenue",
             description=(
+                f"{profile['welcome_text']}\n\n"
                 "Lisez le règlement, choisissez vos rôles et utilisez les salons correspondant "
                 "à votre demande. L'équipe reste disponible par ticket."
             ),
-            color=discord.Color.blurple(),
+            color=accent,
         )
         welcome.set_footer(text="SentriX • Bienvenue automatique v2")
 
@@ -1297,10 +1630,11 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
                 f"**Règlement :** {rules_ref}\n"
                 f"**Rôles :** {roles_ref}\n"
                 f"**Assistance privée :** {ticket_ref}\n\n"
+                f"**Modèle installé :** {profile['label']}\n"
                 "Chaque salon possède un sujet, des permissions et un délai adaptés. "
                 "Utilisez les salons de la bonne catégorie afin de garder le serveur organisé."
             ),
-            color=discord.Color.blurple(),
+            color=accent,
         )
         information.set_footer(text="SentriX • Guide automatique v2")
 
@@ -1314,7 +1648,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
                 "**Comment contester une sanction ?**\n"
                 "Ouvrez un ticket et expliquez calmement la situation avec les preuves utiles."
             ),
-            color=discord.Color.blurple(),
+            color=accent,
         )
         faq.set_footer(text="SentriX • FAQ automatique v2")
 
@@ -1376,7 +1710,10 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         category_map: dict[str, discord.CategoryChannel],
         channel_map: dict[str, discord.abc.GuildChannel],
         staff_role_name: str,
+        template_key: str,
     ) -> str:
+        profile = SERVER_TEMPLATES[template_key]
+        desired_types = TICKET_TYPES_BY_TEMPLATE[template_key]
         ticket_cog = self.bot.get_cog("Tickets")
         if ticket_cog is None:
             return "module de tickets indisponible"
@@ -1407,33 +1744,30 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             "UPDATE ticket_panels_v2 SET title = ?, description = ?, color = ?, "
             "footer_text = ?, style = ?, enabled = 1, channel_id = ? WHERE id = ?",
             (
-                "Centre de support",
-                "Choisissez le motif correspondant à votre demande. Un salon privé sera créé automatiquement.",
-                discord.Color.blurple().value,
-                "SentriX • Support",
+                profile["ticket_title"],
+                profile["ticket_description"],
+                profile["accent"].value,
+                f"SentriX • {profile['label']}",
                 "button",
                 panel_channel.id,
                 panel_id,
             ),
         )
 
-        existing_types = {
-            ticket_type["name"]: ticket_type
-            for ticket_type in await ticket_cog.get_panel_types(panel_id)
-        }
+        existing_types = await ticket_cog.get_panel_types(panel_id)
         log_channel_id = log_channel.id if isinstance(log_channel, discord.TextChannel) else None
-        for position, type_data in enumerate(TICKET_TYPES):
-            ticket_type = existing_types.get(type_data["name"])
-            if ticket_type is None:
-                type_id = await ticket_cog.add_type(guild.id, panel_id, type_data["name"])
+        for position, type_data in enumerate(desired_types):
+            if position < len(existing_types):
+                type_id = existing_types[position]["id"]
             else:
-                type_id = ticket_type["id"]
+                type_id = await ticket_cog.add_type(guild.id, panel_id, type_data["name"])
             await self.bot.db.execute(
-                "UPDATE ticket_types SET description = ?, emoji = NULL, button_label = ?, "
+                "UPDATE ticket_types SET name = ?, description = ?, emoji = NULL, button_label = ?, "
                 "button_style = ?, staff_role_id = ?, category_id = ?, name_format = ?, "
                 "open_message = ?, max_per_member = 1, autoclose_hours = 72, "
                 "log_channel_id = ?, mention_staff = 1, use_form = 0, position = ? WHERE id = ?",
                 (
+                    type_data["name"],
                     type_data["description"],
                     type_data["name"],
                     type_data["button_style"],
@@ -1477,7 +1811,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             "UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?",
             (message.id, panel_channel.id, panel_id),
         )
-        return f"configurés avec {len(ticket_types)} motifs"
+        return f"configurés avec {len(desired_types)} motifs adaptés au modèle"
 
     async def build_server(
         self,
@@ -1525,7 +1859,11 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         )
 
         self._build_step = "publication du règlement et des guides"
-        messages_published = await self._publish_welcome_content(guild, channel_map)
+        messages_published = await self._publish_welcome_content(
+            guild,
+            channel_map,
+            template_key,
+        )
         self._build_step = "configuration du panneau de tickets"
         try:
             ticket_status = await self._configure_tickets(
@@ -1534,6 +1872,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
                 category_map,
                 channel_map,
                 data["staff_role_name"],
+                template_key,
             )
         except Exception:
             logger.exception("Échec de la configuration automatique des tickets")
@@ -1543,6 +1882,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         total_channels = sum(len(category["channels"]) for category in data["categories"])
         result = embeds.success(
             f"Le serveur **{guild.name}** est configuré avec le modèle **{data['label']}**.\n\n"
+            f"**Style :** {data['description']}\n"
             f"**Rôles :** {len(data['roles'])} prévus, {roles_created} créés, {roles_updated} mis à jour.\n"
             f"**Structure :** {len(data['categories'])} catégories et {total_channels} salons prévus ; "
             f"{categories_created} catégorie(s) créée(s), {categories_updated} renommée(s)/configurée(s), "
