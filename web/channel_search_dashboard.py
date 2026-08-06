@@ -149,9 +149,9 @@ CHANNEL_SEARCH_JS = r"""
           return b.score-a.score||a.original-b.original;
         });
 
+      const hasExact=visible.some(item=>item.exact);
+      visible=visible.slice(0,hasExact?12:6);
       const exactCount=visible.filter(item=>item.exact).length;
-      if(exactCount===0)visible=visible.slice(0,6);
-      else visible=visible.slice(0,12);
       const visibleOptions=new Set(visible.map(item=>item.option));
 
       placeholder.hidden=false;
