@@ -410,6 +410,7 @@ class Economy(commands.Cog, name="Economy"):
         await interaction.followup.send(embed=result, ephemeral=True)
 
     @commands.group(name="shoprole", aliases=["boutiquerole"], invoke_without_command=True)
+    @checks.is_owner_or_admin_for("economie")
     async def shoprole(self, ctx: commands.Context):
         """Configure les rôles achetables avec l'argent du portefeuille."""
         await self._send_shop_setup(ctx)
