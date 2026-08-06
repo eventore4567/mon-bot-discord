@@ -758,7 +758,18 @@ class Levels(commands.Cog, name="Levels"):
                     channel = message.guild.get_channel(conf["level_channel"]) if conf and conf["level_channel"] else message.channel
                     if channel:
                         try:
-                            await channel.send(embed=embeds.success(f"🎉 {message.author.mention} passe au niveau **{level}** !"))
+                            await channel.send(
+                                content=message.author.mention,
+                                embed=embeds.success(
+                                    f"**{message.author.display_name}** passe au niveau **{level}** !"
+                                ),
+                                allowed_mentions=discord.AllowedMentions(
+                                    users=[message.author],
+                                    roles=False,
+                                    everyone=False,
+                                    replied_user=False,
+                                ),
+                            )
                         except discord.HTTPException:
                             pass
                 await self._assign_level_role(message.guild, message.author, level, settings)
