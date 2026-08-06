@@ -68,6 +68,33 @@ STAFF_BUTTONS = {
 DEFAULT_ENABLED_BUTTONS = {"claim", "add", "remove", "rename", "note", "close"}
 
 
+CUSTOM_COMPONENT_EMOJI_RE = re.compile(r"^<a?:[A-Za-z0-9_]{2,32}:[0-9]{15,22}>$")
+
+
+def parse_component_emoji(value: str | None, bot=None):
+    """Valide un emoji Unicode ou personnalisé Discord, animé ou non.
+
+    Un texte libre placé dans `emoji=` fait refuser tout le composant par Discord avec
+    l'erreur 50035. Les anciennes valeurs invalides sont donc ignorées proprement.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    if CUSTOM_COMPONENT_EMOJI_RE.fullmatch(raw):
+        emoji = discord.PartialEmoji.from_str(raw)
+        if bot is not None and bot.get_emoji(emoji.id) is None:
+            return None
+        return emoji
+    if len(raw) <= 16 and any(
+        "\U0001F000" <= char <= "\U0001FAFF"
+        or "\u2000" <= char <= "\u2BFF"
+        or char in {"\uFE0F", "\u20E3"}
+        for char in raw
+    ):
+        return raw
+    return None
+
+
 def default_button_settings() -> dict:
     return {
         key: {"enabled": key in DEFAULT_ENABLED_BUTTONS, "label": label, "emoji": emoji, "style": DEFAULT_BUTTON_STYLE, "role_id": None}
@@ -174,12 +201,24 @@ class PanelMaxModal(discord.ui.Modal, title="🔢 Limite de tickets par membre")
         self.add_item(self.max_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        if not self.max_input.value.strip().isdigit() or int(self.max_input.value) < 1:
-            return await interaction.response.send_message(embed=embeds.error("Entrez un nombre entier positif."), ephemeral=True)
+        if not self.max_input.value.strip().isdigit():
+            return await interaction.response.send_message(
+                embed=embeds.error("La limite doit être un nombre entier compris entre 1 et 20."),
+                ephemeral=True,
+            )
+        maximum = int(self.max_input.value)
+        if not 1 <= maximum <= 20:
+            return await interaction.response.send_message(
+                embed=embeds.error("La limite doit être comprise entre 1 et 20 tickets simultanés par membre."),
+                ephemeral=True,
+            )
         await self.cog.bot.db.execute(
-            "UPDATE ticket_panels_v2 SET max_per_member = ? WHERE id = ?", (int(self.max_input.value), self.panel_id)
+            "UPDATE ticket_panels_v2 SET max_per_member = ? WHERE id = ?", (maximum, self.panel_id)
         )
-        await interaction.response.send_message(embed=embeds.success(f"Limite définie à **{self.max_input.value}** ticket(s) par membre."), ephemeral=True)
+        await interaction.response.send_message(
+            embed=embeds.success(f"Limite enregistrée : **{maximum}** ticket(s) simultané(s) maximum par membre."),
+            ephemeral=True,
+        )
 
 
 class PanelAddTypeModal(discord.ui.Modal, title="➕ Ajouter un type de ticket"):
@@ -215,7 +254,7 @@ class TypeTextModal(discord.ui.Modal, title="📝 Type de ticket — Texte"):
         self.type_id = ticket_type["id"]
         self.name = discord.ui.TextInput(label="Nom du type (ex: Support)", default=ticket_type["name"], max_length=80)
         self.description = discord.ui.TextInput(label="Description courte", default=ticket_type["description"] or "", required=False, max_length=150)
-        self.emoji = discord.ui.TextInput(label="Emoji", default=ticket_type["emoji"] or "", required=False, max_length=10)
+        self.emoji = discord.ui.TextInput(label="Emoji Unicode ou personnalisé", default=ticket_type["emoji"] or "", required=False, max_length=100)
         self.button_label = discord.ui.TextInput(label="Texte du bouton/option", default=ticket_type["button_label"] or "", required=False, max_length=80)
         self.name_format = discord.ui.TextInput(
             label="Format du nom de salon ({pseudo}/{numero})", default=ticket_type["name_format"], max_length=90,
@@ -227,11 +266,24 @@ class TypeTextModal(discord.ui.Modal, title="📝 Type de ticket — Texte"):
         self.add_item(self.name_format)
 
     async def on_submit(self, interaction: discord.Interaction):
+        raw_emoji = self.emoji.value.strip()
+        emoji = parse_component_emoji(raw_emoji, interaction.client)
+        if raw_emoji and emoji is None:
+            return await interaction.response.send_message(
+                embed=embeds.error(
+                    "L’emoji indiqué n’est pas utilisable par le bot. Collez un emoji Unicode, "
+                    "ou un emoji personnalisé Discord complet comme `<:nom:id>` ou `<a:nom:id>`."
+                ),
+                ephemeral=True,
+            )
         await self.cog.bot.db.execute(
             "UPDATE ticket_types SET name = ?, description = ?, emoji = ?, button_label = ?, name_format = ? WHERE id = ?",
-            (self.name.value, self.description.value, self.emoji.value, self.button_label.value, self.name_format.value, self.type_id),
+            (self.name.value.strip(), self.description.value, str(emoji) if emoji else None, self.button_label.value, self.name_format.value, self.type_id),
         )
-        await interaction.response.send_message(embed=embeds.success("Type de ticket mis à jour."), ephemeral=True)
+        await interaction.response.send_message(
+            embed=embeds.success("Le type de ticket a été mis à jour. Le prochain envoi du panel utilisera ces réglages."),
+            ephemeral=True,
+        )
 
 
 class TypeOpenMessageModal(discord.ui.Modal, title="💬 Message d'ouverture"):
@@ -264,12 +316,33 @@ class TypeNumbersModal(discord.ui.Modal, title="🔢 Limites du type de ticket")
 
     async def on_submit(self, interaction: discord.Interaction):
         if not self.max_per_member.value.strip().isdigit() or not self.autoclose.value.strip().isdigit():
-            return await interaction.response.send_message(embed=embeds.error("Entrez des nombres entiers positifs."), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=embeds.error("Les deux champs doivent contenir des nombres entiers, sans lettre ni symbole."),
+                ephemeral=True,
+            )
+        maximum = int(self.max_per_member.value)
+        autoclose = int(self.autoclose.value)
+        if not 1 <= maximum <= 20:
+            return await interaction.response.send_message(
+                embed=embeds.error("La limite doit être comprise entre 1 et 20 tickets simultanés par membre."),
+                ephemeral=True,
+            )
+        if not 0 <= autoclose <= 720:
+            return await interaction.response.send_message(
+                embed=embeds.error("La fermeture automatique doit être comprise entre 0 et 720 heures. Utilisez 0 pour la désactiver."),
+                ephemeral=True,
+            )
         await self.cog.bot.db.execute(
             "UPDATE ticket_types SET max_per_member = ?, autoclose_hours = ? WHERE id = ?",
-            (int(self.max_per_member.value), int(self.autoclose.value), self.type_id),
+            (maximum, autoclose, self.type_id),
         )
-        await interaction.response.send_message(embed=embeds.success("Limites mises à jour."), ephemeral=True)
+        await interaction.response.send_message(
+            embed=embeds.success(
+                f"Limites enregistrées : **{maximum}** ticket(s) maximum par membre, fermeture automatique "
+                + (f"après **{autoclose} h**." if autoclose else "désactivée.")
+            ),
+            ephemeral=True,
+        )
 
 
 class FormQuestionModal(discord.ui.Modal, title="📋 Question du formulaire"):
@@ -339,7 +412,7 @@ class ButtonCustomizeModal(discord.ui.Modal, title="🔘 Personnaliser le bouton
         self.guild_id = guild_id
         self.key = key
         self.label = discord.ui.TextInput(label="Libellé du bouton", default=cfg.get("label") or default_label, max_length=80)
-        self.emoji = discord.ui.TextInput(label="Emoji", default=cfg.get("emoji") or default_emoji, required=False, max_length=10)
+        self.emoji = discord.ui.TextInput(label="Emoji Unicode ou personnalisé", default=cfg.get("emoji") or default_emoji, required=False, max_length=100)
         self.style = discord.ui.TextInput(
             label=f"Couleur ({'/'.join(BUTTON_STYLE_NAMES)})", default=cfg.get("style", DEFAULT_BUTTON_STYLE), max_length=5,
         )
@@ -351,9 +424,19 @@ class ButtonCustomizeModal(discord.ui.Modal, title="🔘 Personnaliser le bouton
         style = self.style.value.strip().lower()
         if style not in BUTTON_STYLES:
             return await interaction.response.send_message(embed=embeds.error(f"Couleur invalide — choisissez parmi : {', '.join(BUTTON_STYLE_NAMES)}."), ephemeral=True)
+        raw_emoji = self.emoji.value.strip()
+        emoji = parse_component_emoji(raw_emoji, interaction.client)
+        if raw_emoji and emoji is None:
+            return await interaction.response.send_message(
+                embed=embeds.error(
+                    "L’emoji indiqué n’est pas utilisable par le bot. Utilisez un emoji Unicode "
+                    "ou collez un emoji Discord complet, animé ou non."
+                ),
+                ephemeral=True,
+            )
         settings = await get_button_settings(self.cog.bot, self.guild_id)
-        settings[self.key]["label"] = self.label.value
-        settings[self.key]["emoji"] = self.emoji.value or None
+        settings[self.key]["label"] = self.label.value.strip()
+        settings[self.key]["emoji"] = str(emoji) if emoji else None
         settings[self.key]["style"] = style
         await save_button_settings(self.cog.bot, self.guild_id, settings)
         await interaction.response.send_message(embed=embeds.success(f"Bouton **{self.label.value}** mis à jour."), ephemeral=True)
@@ -413,7 +496,7 @@ class TicketOpenSelect(discord.ui.Select):
         options = [
             discord.SelectOption(
                 label=(t["name"] or "Ticket")[:100], value=str(t["id"]),
-                emoji=(t["emoji"] or None), description=(t["description"] or "")[:100] or None,
+                emoji=parse_component_emoji(t["emoji"]), description=(t["description"] or "")[:100] or None,
             )
             for t in types[:25]
         ]
@@ -431,7 +514,7 @@ class TicketOpenButton(discord.ui.Button):
     def __init__(self, ticket_type):
         style = BUTTON_STYLES.get(ticket_type["button_style"], discord.ButtonStyle.primary)
         label = (ticket_type["button_label"] or ticket_type["name"] or "Ticket")[:80]
-        super().__init__(label=label, emoji=(ticket_type["emoji"] or None), style=style, custom_id=f"ticket_open_btn:{ticket_type['id']}")
+        super().__init__(label=label, emoji=parse_component_emoji(ticket_type["emoji"]), style=style, custom_id=f"ticket_open_btn:{ticket_type['id']}")
         self.ticket_type_id = ticket_type["id"]
 
     async def callback(self, interaction: discord.Interaction):
@@ -459,7 +542,7 @@ class TicketControlButton(discord.ui.Button):
     def __init__(self, key: str, cfg: dict, default_label: str, default_emoji: str, row: int):
         super().__init__(
             label=(cfg.get("label") or default_label)[:80],
-            emoji=(cfg.get("emoji") or default_emoji) or None,
+            emoji=parse_component_emoji(cfg.get("emoji")) or parse_component_emoji(default_emoji),
             style=BUTTON_STYLES.get(cfg.get("style", DEFAULT_BUTTON_STYLE), discord.ButtonStyle.primary),
             custom_id=f"ticket_ctrl_{key}",
             row=row,
