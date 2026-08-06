@@ -228,6 +228,16 @@ CREATE TABLE IF NOT EXISTS shop_items (
     role_id INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS shop_role_purchases (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    price_paid INTEGER NOT NULL,
+    purchased_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, user_id, role_id)
+);
+
 CREATE TABLE IF NOT EXISTS inventory (
     guild_id INTEGER,
     user_id INTEGER,
@@ -333,9 +343,25 @@ CREATE TABLE IF NOT EXISTS tournament_participants (
 
 CREATE TABLE IF NOT EXISTS reaction_roles (
     guild_id INTEGER,
+    channel_id INTEGER,
     message_id INTEGER,
     emoji TEXT,
-    role_id INTEGER
+    emoji_key TEXT,
+    role_id INTEGER,
+    label TEXT,
+    created_by INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS reaction_role_panels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT 'Choisissez vos rôles',
+    description TEXT,
+    created_by INTEGER,
+    created_at INTEGER,
+    UNIQUE (guild_id, message_id)
 );
 
 CREATE TABLE IF NOT EXISTS autorole (
@@ -773,6 +799,7 @@ CREATE INDEX IF NOT EXISTS idx_events_status_start ON events (status, start_at);
 CREATE INDEX IF NOT EXISTS idx_command_logs_guild_cmd ON command_logs (guild_id, command_name);
 CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders (trigger_at);
 CREATE INDEX IF NOT EXISTS idx_reaction_roles_msg ON reaction_roles (guild_id, message_id);
+CREATE INDEX IF NOT EXISTS idx_reaction_role_panels_guild ON reaction_role_panels (guild_id);
 CREATE INDEX IF NOT EXISTS idx_member_invites_inviter ON member_invites (guild_id, inviter_id);
 CREATE INDEX IF NOT EXISTS idx_member_invites_member ON member_invites (guild_id, member_id);
 CREATE INDEX IF NOT EXISTS idx_invite_bonuses_guild_user ON invite_bonuses (guild_id, user_id);
@@ -780,6 +807,7 @@ CREATE INDEX IF NOT EXISTS idx_sanctions_guild_case ON sanctions (guild_id, case
 CREATE INDEX IF NOT EXISTS idx_sanctions_guild_user ON sanctions (guild_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_levels_guild_rank ON levels (guild_id, level DESC, xp DESC);
 CREATE INDEX IF NOT EXISTS idx_economy_guild_total ON economy (guild_id, (cash + bank) DESC);
+CREATE INDEX IF NOT EXISTS idx_shop_role_purchases_guild_user ON shop_role_purchases (guild_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_blacklist_words_guild ON blacklist_words (guild_id);
 CREATE INDEX IF NOT EXISTS idx_automod_logs_guild_time ON automod_logs (guild_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_automod_logs_guild_user ON automod_logs (guild_id, user_id, timestamp);
@@ -935,6 +963,16 @@ MEMBER_INVITES_NEW_COLUMNS = {
 # les giveaways déjà en cours.
 GIVEAWAYS_NEW_COLUMNS = {
     "image_url": "TEXT",
+}
+
+# L'ancien système de rôles-réactions ne mémorisait que le texte de l'emoji. Ces
+# colonnes additives permettent les emojis personnalisés/animés (identifiés par leur
+# ID), la reconstruction automatique du panneau et un libellé lisible par rôle.
+REACTION_ROLES_NEW_COLUMNS = {
+    "channel_id": "INTEGER",
+    "emoji_key": "TEXT",
+    "label": "TEXT",
+    "created_by": "INTEGER",
 }
 
 # Ajoutée pour +levelcheck/+levelrepair (diagnostic du bug de réinitialisation des
@@ -1118,6 +1156,12 @@ class Database:
         for column, col_type in GIVEAWAYS_NEW_COLUMNS.items():
             if column not in existing_giveaways:
                 await self._conn.execute(f"ALTER TABLE giveaways ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(reaction_roles)")
+        existing_reaction_roles = {row[1] for row in await cur.fetchall()}
+        for column, col_type in REACTION_ROLES_NEW_COLUMNS.items():
+            if column not in existing_reaction_roles:
+                await self._conn.execute(f"ALTER TABLE reaction_roles ADD COLUMN {column} {col_type}")
 
     async def close(self):
         if self._conn:
@@ -1591,6 +1635,90 @@ class Database:
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (guild_id, sender_id, receiver_id, transaction_type, amount, now(), reason),
         )
+
+    async def purchase_shop_item(self, guild_id: int, user_id: int, item_id: int):
+        """Débite un article de manière atomique.
+
+        Retourne (statut, article), où statut vaut ``ok``, ``not_found`` ou
+        ``insufficient_funds`` ou ``already_owned``. Le verrou partagé avec /pay
+        empêche deux achats lancés en même temps de dépenser deux fois le même
+        portefeuille ou de facturer deux fois le même rôle.
+        """
+        async with self._economy_lock:
+            item = await self.fetchone(
+                "SELECT * FROM shop_items WHERE guild_id = ? AND id = ?",
+                (guild_id, item_id),
+            )
+            if not item:
+                return "not_found", None
+            price = int(item["price"] or 0)
+            if price <= 0:
+                return "not_found", None
+            role_id = item["role_id"]
+            if role_id:
+                reservation = await self._conn.execute(
+                    "INSERT OR IGNORE INTO shop_role_purchases "
+                    "(guild_id, user_id, role_id, item_id, price_paid, purchased_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (guild_id, user_id, role_id, item_id, price, now()),
+                )
+                if reservation.rowcount < 1:
+                    return "already_owned", item
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO economy (guild_id, user_id) VALUES (?, ?)",
+                (guild_id, user_id),
+            )
+            balance = await self.fetchone(
+                "SELECT cash FROM economy WHERE guild_id = ? AND user_id = ?",
+                (guild_id, user_id),
+            )
+            if not balance or balance["cash"] < price:
+                if role_id:
+                    await self._conn.execute(
+                        "DELETE FROM shop_role_purchases WHERE guild_id = ? AND user_id = ? AND role_id = ?",
+                        (guild_id, user_id, role_id),
+                    )
+                await self._conn.commit()
+                return "insufficient_funds", item
+            await self._conn.execute(
+                "UPDATE economy SET cash = cash - ? WHERE guild_id = ? AND user_id = ?",
+                (price, guild_id, user_id),
+            )
+            await self._conn.execute(
+                "INSERT INTO economy_transactions "
+                "(guild_id, sender_id, receiver_id, transaction_type, amount, created_at, reason) "
+                "VALUES (?, ?, NULL, 'buy', ?, ?, ?)",
+                (guild_id, user_id, price, now(), f"Achat : {item['name']}"),
+            )
+            await self._conn.commit()
+            return "ok", item
+
+    async def refund_shop_item(self, guild_id: int, user_id: int, item, reason: str):
+        """Rembourse un achat si Discord refuse ensuite l'attribution du rôle."""
+        price = int(item["price"] or 0)
+        if price <= 0:
+            return
+        async with self._economy_lock:
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO economy (guild_id, user_id) VALUES (?, ?)",
+                (guild_id, user_id),
+            )
+            await self._conn.execute(
+                "UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?",
+                (price, guild_id, user_id),
+            )
+            await self._conn.execute(
+                "INSERT INTO economy_transactions "
+                "(guild_id, sender_id, receiver_id, transaction_type, amount, created_at, reason) "
+                "VALUES (?, NULL, ?, 'shop_refund', ?, ?, ?)",
+                (guild_id, user_id, price, now(), reason),
+            )
+            if item["role_id"]:
+                await self._conn.execute(
+                    "DELETE FROM shop_role_purchases WHERE guild_id = ? AND user_id = ? AND role_id = ?",
+                    (guild_id, user_id, item["role_id"]),
+                )
+            await self._conn.commit()
 
     async def get_transactions(self, guild_id: int, user_id: int, limit: int = 15):
         return await self.fetchall(
