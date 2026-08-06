@@ -56,6 +56,9 @@ COOLDOWN_RAPIDE = 8
 class Minigames(commands.Cog, name="Minigames"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        # Une seule manche collective de Guess Number par salon. Le nombre de
+        # participants, lui, n'est jamais limité.
+        self._guess_number_channels: set[tuple[int, int]] = set()
 
     async def _embed(self, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
         """Embed mini-jeux cohérent avec +designsetup (catégorie CATEGORY_STYLES["games"])."""
@@ -137,38 +140,209 @@ class Minigames(commands.Cog, name="Minigames"):
         description = f"Vous : **{choix}** | Bot : **{bot_choice}**\n{result}" + self._reward_line(reward)
         await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Pierre-feuille-ciseaux", description=description, kind=kind))
 
-    @commands.hybrid_command(name="guess-number", description="Deviner un nombre entre 1 et 100.")
+    async def _finish_guess_number_round(
+        self,
+        ctx: commands.Context,
+        session_id: str,
+        winner: discord.Member | None,
+        base_amount: int,
+        *,
+        participant_count: int,
+        total_guesses: int,
+    ) -> tuple["game_rewards.GameReward | None", str]:
+        """Termine une manche collective et récompense le vrai gagnant, pas forcément
+        la personne qui a lancé la commande. Les limites économiques restent appliquées."""
+        guild_id = ctx.guild.id
+        starter_id = ctx.author.id
+
+        winner_cooldown_ok = True
+        remaining = 0
+        if winner is not None and winner.id != starter_id:
+            winner_cooldown_ok, remaining = await game_rewards.check_cooldown(
+                self.bot, guild_id, winner.id, "guess-number", 15
+            )
+
+        await game_rewards.touch_cooldown(self.bot, guild_id, starter_id, "guess-number")
+        if winner is None:
+            return None, ""
+        if winner.id != starter_id and winner_cooldown_ok:
+            await game_rewards.touch_cooldown(self.bot, guild_id, winner.id, "guess-number")
+        if not winner_cooldown_ok:
+            return None, f"\n\nLa partie est gagnée, mais la récompense est en cooldown pour encore {remaining}s."
+
+        allowed, _played, limit = await game_rewards.check_daily_limit(self.bot, guild_id, winner.id)
+        if not allowed:
+            return None, f"\n\nLa partie est gagnée, mais la limite quotidienne de {limit} récompenses est atteinte."
+
+        reward = await game_rewards.reward_game_winner(
+            self.bot,
+            guild_id,
+            winner.id,
+            "guess-number",
+            base_amount,
+            session_id,
+            result="win",
+            metadata={
+                "multiplayer": True,
+                "participant_count": participant_count,
+                "total_guesses": total_guesses,
+                "started_by": starter_id,
+            },
+        )
+        return reward, ""
+
+    @commands.hybrid_command(
+        name="guess-number",
+        description="Lancer une partie collective pour deviner un nombre entre 1 et 100.",
+    )
     async def guess_number(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, session_id = await self._start(ctx, "guess-number", cooldown=15)
         if not started:
-            return await ctx.send(embed=await self._embed(guild_id, title="Devine le nombre", description=err, kind="warning"))
+            return await ctx.send(
+                embed=await self._embed(
+                    guild_id, title="Devine le nombre", description=err, kind="warning"
+                )
+            )
 
+        channel_key = (ctx.guild.id, ctx.channel.id)
+        if channel_key in self._guess_number_channels:
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "guess-number")
+            return await ctx.send(
+                embed=await self._embed(
+                    guild_id,
+                    title="Partie déjà active",
+                    description="Une partie collective est déjà en cours dans ce salon. Rejoignez-la en envoyant un nombre.",
+                    kind="warning",
+                )
+            )
+
+        self._guess_number_channels.add(channel_key)
         target = random.randint(1, 100)
-        await ctx.send(embed=await self._embed(guild_id, title="Devine le nombre", description="J'ai choisi un nombre entre 1 et 100. Vous avez 6 essais ! Écrivez votre réponse dans le chat."))
+        attempts: dict[int, int] = {}
+        participants: set[int] = set()
+        denied_notified: set[int] = set()
+        total_guesses = 0
+        deadline = asyncio.get_running_loop().time() + 60
+        try:
+            settings = await game_rewards.get_settings(self.bot, ctx.guild.id)
+            allowed_roles = set(settings.get("allowed_role_ids", []))
+            blocked_roles = set(settings.get("blocked_role_ids", []))
 
-        def check(m):
-            return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id and m.content.isdigit()
+            await ctx.send(
+                embed=await self._embed(
+                    guild_id,
+                    title="Devine le nombre — partie collective",
+                    description=(
+                        "J'ai choisi un nombre entre **1 et 100**.\n"
+                        "Tout le monde peut participer : **6 essais par personne** et **60 secondes**.\n"
+                        "Le premier qui trouve gagne. Une réaction vers le haut signifie « plus grand », "
+                        "et une réaction vers le bas signifie « plus petit »."
+                    ),
+                )
+            )
+        except Exception:
+            self._guess_number_channels.discard(channel_key)
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "guess-number")
+            raise
 
-        for attempt in range(6):
-            try:
-                msg = await self.bot.wait_for("message", check=check, timeout=20)
-            except asyncio.TimeoutError:
-                await self._finish(ctx, "guess-number", session_id, "loss", 0)
-                return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", description=f"⏱️ Le nombre était **{target}**.", kind="warning"))
-            guess = int(msg.content)
-            if guess == target:
-                # Bonus si trouvé rapidement : jusqu'à +25 en plus du montant de base pour un coup au but.
-                bonus = max(0, (6 - attempt - 1)) * 5
-                reward = await self._finish(ctx, "guess-number", session_id, "win", REWARD_GUESS_BASE + bonus)
-                description = f"🎉 Bravo ! Vous avez trouvé **{target}** en {attempt + 1} essai(s) !" + self._reward_line(reward)
-                return await ctx.send(embed=await self._embed(guild_id, title="Trouvé !", description=description, kind="success"))
-            elif guess < target:
-                await ctx.send(embed=await self._embed(guild_id, title="Plus grand !", description="📈"))
-            else:
-                await ctx.send(embed=await self._embed(guild_id, title="Plus petit !", description="📉"))
-        await self._finish(ctx, "guess-number", session_id, "loss", 0)
-        await ctx.send(embed=await self._embed(guild_id, title="Essais épuisés", description=f"○ Le nombre était **{target}**.", kind="warning"))
+        def check(message: discord.Message) -> bool:
+            if message.channel.id != ctx.channel.id or message.author.bot:
+                return False
+            content = message.content.strip()
+            return content.isdigit() and 1 <= int(content) <= 100
+
+        try:
+            while True:
+                remaining_time = deadline - asyncio.get_running_loop().time()
+                if remaining_time <= 0:
+                    break
+                try:
+                    msg = await self.bot.wait_for("message", check=check, timeout=remaining_time)
+                except asyncio.TimeoutError:
+                    break
+
+                role_ids = {role.id for role in getattr(msg.author, "roles", [])}
+                role_allowed = (
+                    (not allowed_roles or bool(role_ids & allowed_roles))
+                    and not bool(role_ids & blocked_roles)
+                )
+                if not role_allowed:
+                    if msg.author.id not in denied_notified:
+                        denied_notified.add(msg.author.id)
+                        await msg.reply(
+                            "Vous n'avez pas le rôle requis pour participer à ce mini-jeu.",
+                            mention_author=False,
+                            delete_after=8,
+                        )
+                    continue
+
+                used = attempts.get(msg.author.id, 0)
+                if used >= 6:
+                    continue
+                attempts[msg.author.id] = used + 1
+                participants.add(msg.author.id)
+                total_guesses += 1
+                guess = int(msg.content.strip())
+
+                if guess == target:
+                    bonus = max(0, 6 - attempts[msg.author.id]) * 5
+                    reward, reward_note = await self._finish_guess_number_round(
+                        ctx,
+                        session_id,
+                        msg.author,
+                        REWARD_GUESS_BASE + bonus,
+                        participant_count=len(participants),
+                        total_guesses=total_guesses,
+                    )
+                    description = (
+                        f"{msg.author.mention} a trouvé **{target}** en "
+                        f"{attempts[msg.author.id]} essai(s).\n"
+                        f"Participants : **{len(participants)}** · Réponses : **{total_guesses}**"
+                        + self._reward_line(reward)
+                        + reward_note
+                    )
+                    return await ctx.send(
+                        embed=await self._embed(
+                            guild_id,
+                            title="Nombre trouvé",
+                            description=description,
+                            kind="success",
+                        )
+                    )
+
+                reaction = "⬆️" if guess < target else "⬇️"
+                try:
+                    await msg.add_reaction(reaction)
+                except discord.HTTPException:
+                    await msg.reply(
+                        "Plus grand." if guess < target else "Plus petit.",
+                        mention_author=False,
+                        delete_after=8,
+                    )
+
+            await self._finish_guess_number_round(
+                ctx,
+                session_id,
+                None,
+                0,
+                participant_count=len(participants),
+                total_guesses=total_guesses,
+            )
+            await ctx.send(
+                embed=await self._embed(
+                    guild_id,
+                    title="Temps écoulé",
+                    description=(
+                        f"Le nombre était **{target}**.\n"
+                        f"Participants : **{len(participants)}** · Réponses : **{total_guesses}**"
+                    ),
+                    kind="warning",
+                )
+            )
+        finally:
+            self._guess_number_channels.discard(channel_key)
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "guess-number")
 
     @commands.hybrid_command(name="trivia", description="Répondre à une question de culture générale.")
     async def trivia(self, ctx: commands.Context):
