@@ -1,11 +1,13 @@
-"""Mode de récupération du dashboard SentriX.
+"""Initialisation sécurisée du dashboard SentriX.
 
-Le dashboard de base reste la seule interface chargée tant que les extensions injectant
-du JavaScript n'ont pas été validées séparément. Les fichiers des extensions et toutes
-les données enregistrées sont conservés.
+Le dashboard principal reste inchangé. Les réglages avancés sont chargés dans une page
+séparée afin qu'une erreur du Centre Setup ne puisse jamais bloquer les boutons principaux.
 """
 
 from . import dashboard as _dashboard
+from . import setup_dashboard as _setup_dashboard
+from . import design_setup_dashboard as _design_setup_dashboard
+from . import setup_center as _setup_center
 
 
 _original_handle_index = _dashboard.handle_index
@@ -21,3 +23,4 @@ async def _handle_index_without_cache(request):
 
 
 _dashboard.handle_index = _handle_index_without_cache
+_setup_center.install(_dashboard, _setup_dashboard, _design_setup_dashboard)
