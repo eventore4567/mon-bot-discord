@@ -109,7 +109,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         await ctx.send(embed=embed)
 
-    @commands.group(name="logs", aliases=["log"], invoke_without_command=True)
+    @commands.group(name="logs", aliases=["log", "logsetup"], invoke_without_command=True)
     @checks.is_owner_or_admin()
     async def logs(self, ctx: commands.Context):
         """Afficher ou modifier les salons de journalisation."""
