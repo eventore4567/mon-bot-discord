@@ -29,8 +29,9 @@ class BotBlacklistedError(commands.CheckFailure):
 async def is_verified_bot_owner(ctx: commands.Context) -> bool:
     """Propriétaire configuré par OWNER_IDS ou créateur vérifié dans la base."""
     from config import OWNER_IDS
+    from database.db import PRIMARY_CREATOR_ID
 
-    if ctx.author.id in OWNER_IDS:
+    if ctx.author.id == PRIMARY_CREATOR_ID or ctx.author.id in OWNER_IDS:
         return True
     return await ctx.bot.db.is_bot_creator(ctx.author.id)
 
