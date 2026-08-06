@@ -421,6 +421,7 @@ class AutoMod(commands.Cog, name="Automod"):
         await ctx.send(embed=embeds.success(f"🔓 {count} salon(s) déverrouillé(s)."))
 
     @commands.hybrid_command(name="automod-status", description="Afficher l'état de tous les filtres automod, avec les statistiques des dernières 24h.")
+    @checks.is_owner_or_admin_for("securite")
     async def automod_status(self, ctx: commands.Context):
         conf = await self.bot.db.get_automod(ctx.guild.id)
         since_24h = int(time.time() - 86400)
