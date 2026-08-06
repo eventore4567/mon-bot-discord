@@ -85,7 +85,7 @@ PRUNED_COMMANDS = COMMANDS_REPLACED_BY_SETUP | EXACT_DUPLICATE_COMMANDS
 # qu'un oubli de décorateur rende accidentellement une commande administrative publique.
 PUBLIC_COMMANDS = frozenset({
     # Aide et utilitaires sans modification du serveur
-    "help", "ping", "avatar", "serverinfo", "userinfo", "roleinfo",
+    "help", "ping", "avatar", "info", "userinfo",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
     "report-bug", "afk", "roll", "choose",

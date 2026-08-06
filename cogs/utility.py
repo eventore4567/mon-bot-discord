@@ -470,6 +470,23 @@ class Utility(commands.Cog, name="Utility"):
         self.bot = bot
         self.afk_users: dict[int, str] = {}
 
+    @staticmethod
+    def _limited_list(values, *, empty: str, limit: int = 1000) -> str:
+        """Assemble une liste sans dépasser la limite de 1 024 caractères d'un champ Discord."""
+        values = [str(value) for value in values]
+        if not values:
+            return empty
+
+        visible: list[str] = []
+        for index, value in enumerate(values):
+            hidden = len(values) - index
+            suffix = f"\n… et {hidden} autre{'s' if hidden > 1 else ''}." if hidden else ""
+            candidate = ", ".join([*visible, value])
+            if len(candidate) + len(suffix) > limit:
+                return (", ".join(visible) or value[: limit - len(suffix)]) + suffix
+            visible.append(value)
+        return ", ".join(visible)
+
     async def _embed(self, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
         """Embed utilitaire cohérent avec +designsetup (catégorie CATEGORY_STYLES["utility"]).
         `guild_id` peut être None (ex: commande utilisée en DM) — dans ce cas on retombe sur
@@ -567,19 +584,104 @@ class Utility(commands.Cog, name="Utility"):
         e.set_image(url=membre.display_avatar.url)
         await ctx.send(embed=e)
 
-    @commands.hybrid_command(name="serverinfo", aliases=["info-serveur", "serveurinfo"], description="Afficher les informations du serveur.")
-    async def serverinfo(self, ctx: commands.Context):
+    @commands.hybrid_group(
+        name="info",
+        description="Afficher toutes les informations du serveur ou d'un rôle.",
+        invoke_without_command=True,
+    )
+    async def info(self, ctx: commands.Context):
+        if ctx.invoked_subcommand is None:
+            await ctx.send(
+                embed=await self._embed(
+                    ctx.guild.id if ctx.guild else None,
+                    title="Informations",
+                    description=(
+                        "Utilisez `+info serveur` pour le serveur ou "
+                        "`+info role @Rôle` pour un rôle.\n"
+                        "Ces commandes existent aussi en slash : `/info serveur` et `/info role`."
+                    ),
+                )
+            )
+
+    @info.command(name="serveur", description="Afficher la fiche complète du serveur.")
+    async def info_serveur(self, ctx: commands.Context):
         guild = ctx.guild
-        e = await self._embed(guild.id, title=guild.name)
+        if guild is None:
+            return await ctx.send(embed=await self._embed(None, title="Serveur requis", kind="danger"))
+
+        total_members = guild.member_count or len(guild.members)
+        bot_count = sum(1 for member in guild.members if member.bot)
+        human_count = max(0, total_members - bot_count)
+        thread_count = len(guild.threads)
+        shard_text = f"Shard #{guild.shard_id}" if guild.shard_id is not None else "Shard inconnu"
+
+        e = await self._embed(
+            guild.id,
+            title=f"{guild.name} ({guild.id})",
+            description=(
+                f"Informations et statistiques de **{guild.name}**\n"
+                f"**{shard_text} • {len(guild.channels)} salons • {thread_count} fils "
+                f"• {len(guild.roles)} rôles • {bot_count} bots**"
+            ),
+        )
         if guild.icon:
             e.set_thumbnail(url=guild.icon.url)
-        e.add_field(name="Propriétaire", value=f"<@{guild.owner_id}>", inline=True)
-        e.add_field(name="Membres", value=guild.member_count, inline=True)
-        e.add_field(name="Créé le", value=f"<t:{int(guild.created_at.timestamp())}:D>", inline=True)
-        e.add_field(name="Salons textuels", value=len(guild.text_channels), inline=True)
-        e.add_field(name="Salons vocaux", value=len(guild.voice_channels), inline=True)
-        e.add_field(name="Rôles", value=len(guild.roles), inline=True)
-        e.add_field(name="Boosts", value=guild.premium_subscription_count, inline=True)
+
+        owner = guild.owner
+        owner_value = (
+            f"{owner.mention}\n`{owner}`"
+            if owner is not None
+            else f"<@{guild.owner_id}>\n`ID : {guild.owner_id}`"
+        )
+        e.add_field(name="Propriétaire", value=owner_value, inline=True)
+        e.add_field(
+            name="Membres",
+            value=f"**{total_members}** membres\n{human_count} humains • {bot_count} bots",
+            inline=True,
+        )
+
+        tier_names = {
+            0: "Aucun palier",
+            1: "Palier 1",
+            2: "Palier 2",
+            3: "Palier 3",
+        }
+        boost_count = guild.premium_subscription_count or 0
+        e.add_field(
+            name="Boosts",
+            value=f"{tier_names.get(guild.premium_tier, f'Palier {guild.premium_tier}')} ({boost_count} boosts)",
+            inline=True,
+        )
+
+        roles = [role.mention for role in guild.roles]
+        e.add_field(
+            name=f"Rôles [{len(roles)}]",
+            value=self._limited_list(roles, empty="Aucun rôle"),
+            inline=False,
+        )
+
+        emojis = [str(emoji) for emoji in guild.emojis]
+        e.add_field(
+            name=f"Émojis [{len(emojis)}]",
+            value=self._limited_list(emojis, empty="Aucun emoji personnalisé"),
+            inline=False,
+        )
+
+        created_at = int(guild.created_at.timestamp())
+        e.add_field(
+            name="Création du serveur",
+            value=f"<t:{created_at}:F>\n<t:{created_at}:R>",
+            inline=True,
+        )
+
+        bot_member = guild.me
+        if bot_member is not None and bot_member.joined_at is not None:
+            joined_at = int(bot_member.joined_at.timestamp())
+            joined_value = f"<t:{joined_at}:F>\n<t:{joined_at}:R>"
+        else:
+            joined_value = "Date inconnue"
+        e.add_field(name=f"Arrivée de {self.bot.user.name}", value=joined_value, inline=True)
+
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="userinfo", description="Afficher les informations d'un membre.")
@@ -595,19 +697,40 @@ class Utility(commands.Cog, name="Utility"):
         e.add_field(name=f"Rôles ({len(roles)})", value=", ".join(roles) if roles else "Aucun", inline=False)
         await ctx.send(embed=e)
 
-    @commands.hybrid_command(name="roleinfo", aliases=["info-role", "role-info"], description="Afficher les informations d'un rôle.", with_app_command=False)
-    @app_commands.describe(role="Le rôle visé")
-    async def roleinfo(self, ctx: commands.Context, role: discord.Role):
-        e = await self._embed(ctx.guild.id, title=role.name)
-        # La couleur du rôle prime sur la couleur design_system quand le rôle en a une —
-        # information plus pertinente ici que la charte visuelle générique.
+    @info.command(name="role", description="Afficher la fiche complète d'un rôle.")
+    @app_commands.describe(role="Le rôle à inspecter")
+    async def info_role(self, ctx: commands.Context, role: discord.Role):
+        e = await self._embed(ctx.guild.id, title=f"{role.name} ({role.id})")
         if role.color.value:
             e.color = role.color
-        e.add_field(name="ID", value=role.id, inline=True)
+        if role.icon:
+            e.set_thumbnail(url=role.icon.url)
+
+        e.add_field(name="Mention", value=role.mention, inline=True)
         e.add_field(name="Couleur", value=str(role.color), inline=True)
         e.add_field(name="Membres", value=len(role.members), inline=True)
         e.add_field(name="Position", value=role.position, inline=True)
+        e.add_field(name="Affiché séparément", value="Oui" if role.hoist else "Non", inline=True)
         e.add_field(name="Mentionnable", value="Oui" if role.mentionable else "Non", inline=True)
+        e.add_field(name="Géré par Discord ou un bot", value="Oui" if role.managed else "Non", inline=True)
+
+        created_at = int(role.created_at.timestamp())
+        e.add_field(
+            name="Création du rôle",
+            value=f"<t:{created_at}:F>\n<t:{created_at}:R>",
+            inline=True,
+        )
+
+        permissions = [
+            name.replace("_", " ")
+            for name, enabled in role.permissions
+            if enabled
+        ]
+        e.add_field(
+            name=f"Permissions [{len(permissions)}]",
+            value=self._limited_list(permissions, empty="Aucune permission"),
+            inline=False,
+        )
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="channelinfo", description="Afficher les informations d'un salon.", with_app_command=False)
