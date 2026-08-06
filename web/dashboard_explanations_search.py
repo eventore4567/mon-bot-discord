@@ -97,6 +97,7 @@ DASHBOARD_HELP_UI = r"""
 
   function normalise(value){return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();}
   function levenshtein(a,b){if(a===b)return 0;if(!a.length)return b.length;if(!b.length)return a.length;const p=Array.from({length:b.length+1},(_,i)=>i),c=new Array(b.length+1);for(let i=1;i<=a.length;i++){c[0]=i;for(let j=1;j<=b.length;j++){const cost=a[i-1]===b[j-1]?0:1;c[j]=Math.min(c[j-1]+1,p[j]+1,p[j-1]+cost);}for(let j=0;j<=b.length;j++)p[j]=c[j];}return p[b.length];}
+  function searchable(text){return normalise(String(text||"").split(" — ")[0]);}
   function score(name,query){if(name===query)return -1000;if(name.startsWith(query))return -500+name.length-query.length;const index=name.indexOf(query);if(index>=0)return -300+index;const qw=query.split(" ").filter(Boolean),nw=name.split(" ").filter(Boolean);let total=0;for(const word of qw){let best=Infinity;for(const candidate of nw){best=Math.min(best,candidate.startsWith(word)?0:candidate.includes(word)?1:levenshtein(word,candidate));}total+=best;}return total*20+levenshtein(query,name);}
 
   function isChannelSelect(select){
@@ -113,7 +114,7 @@ DASHBOARD_HELP_UI = r"""
   function filterSelect(select,input,status){
     remember(select);const query=normalise(input.value);const selected=new Set([...select.selectedOptions].map(option=>String(option.value)));
     if(!query){restore(select);status.textContent=`${select.options.length} choix disponibles`;status.classList.remove("exact");return;}
-    const entries=(originalOptions.get(select)||[]).filter(entry=>entry.value).map(entry=>({...entry,name:normalise(entry.text),score:score(normalise(entry.text),query)})).sort((a,b)=>a.score-b.score||a.index-b.index);
+    const entries=(originalOptions.get(select)||[]).filter(entry=>entry.value).map(entry=>({...entry,name:searchable(entry.text),score:score(searchable(entry.text),query)})).sort((a,b)=>a.score-b.score||a.index-b.index);
     const exact=entries.find(entry=>entry.name===query);const limit=query.length<=3?45:Math.max(35,query.length*18);let matches=entries.filter(entry=>entry.score<0||entry.score<=limit).slice(0,8);if(!matches.length)matches=entries.slice(0,Math.min(6,entries.length));
     const keep=new Set([...matches.map(entry=>entry.value),...selected]);select.replaceChildren();for(const entry of entries){if(!keep.has(entry.value))continue;const option=document.createElement("option");option.value=entry.value;option.textContent=entry.text;option.selected=selected.has(entry.value);select.appendChild(option);}if(!select.multiple){const empty=document.createElement("option");empty.value="";empty.textContent="Non configuré";if(!selected.size)empty.selected=true;select.insertBefore(empty,select.firstChild);}
     status.textContent=exact?"✓ Salon exact trouvé":`${matches.length} résultat${matches.length>1?"s":""} proche${matches.length>1?"s":""}`;status.classList.toggle("exact",Boolean(exact));select.dataset.bestMatch=matches[0]?.value||"";
@@ -126,7 +127,7 @@ DASHBOARD_HELP_UI = r"""
   }
 
   function ensureGuide(){
-    const fields=document.getElementById("fields");if(!fields)return;const tab=(typeof state!=="undefined"&&state.tab)||"general";const data=guides[tab]||guides.general;let guide=document.getElementById("dashboardHelpGuide");if(!guide){guide=document.createElement("section");guide.id="dashboardHelpGuide";guide.className="dashboard-guide";fields.prepend(guide);}guide.innerHTML=`<h3>💡 ${data.title}</h3><p>${data.text}</p><ul>${data.items.map(item=>`<li>${item}</li>`).join("")}</ul><div class="guide-warning">${data.warning}</div>`;if(fields.firstElementChild!==guide)fields.prepend(guide);
+    const fields=document.getElementById("fields");if(!fields)return;const tab=(typeof state!=="undefined"&&state.tab)||"general";const data=guides[tab]||guides.general;let guide=document.getElementById("dashboardHelpGuide");if(!guide){guide=document.createElement("section");guide.id="dashboardHelpGuide";guide.className="dashboard-guide";fields.prepend(guide);}if(guide.dataset.tab!==tab){guide.dataset.tab=tab;guide.innerHTML=`<h3>💡 ${data.title}</h3><p>${data.text}</p><ul>${data.items.map(item=>`<li>${item}</li>`).join("")}</ul><div class="guide-warning">${data.warning}</div>`;}if(fields.firstElementChild!==guide)fields.prepend(guide);
   }
 
   function addFieldHints(){document.querySelectorAll("#fields [data-key]").forEach(control=>{const key=control.dataset.key,explanation=fieldHints[key];if(!explanation)return;const field=control.closest(".field")||control.closest(".switch");if(!field||field.querySelector(`.dashboard-extra-hint[data-key="${key}"]`))return;const hint=document.createElement("div");hint.className="dashboard-extra-hint";hint.dataset.key=key;hint.textContent=explanation;field.appendChild(hint);});}
