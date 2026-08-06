@@ -32,6 +32,38 @@ Utilisez l'**OAuth2 URL Generator** (onglet OAuth2 > URL Generator) :
 - Scopes : `bot`, `applications.commands`
 - Permissions : `Administrator` (recommandé pour un fonctionnement complet)
 
+## Application dashboard
+
+SentriX possède une application web intégrée au bot. Après avoir généré un domaine public
+dans Railway (**Settings → Networking → Generate Domain**), elle permet :
+
+- de se connecter avec Discord et de choisir un serveur géré ;
+- d'inviter SentriX sur un serveur où il n'est pas encore installé ;
+- de modifier le préfixe, la sécurité, l'AutoMod, les logs, l'accueil, les niveaux,
+  les tickets, les rôles et les salons ;
+- de consulter les membres, commandes récentes, tickets ouverts et avertissements.
+
+La configuration est protégée : la personne doit avoir **Gérer le serveur** ou
+**Administrateur**, et les permissions sont revérifiées par le bot avant chaque action.
+
+Variables Railway à ajouter :
+
+```env
+DISCORD_CLIENT_SECRET=secret_oauth_de_l_application
+DASHBOARD_PUBLIC_URL=https://votre-domaine.up.railway.app
+# Facultatif : l'ID du bot est détecté automatiquement
+DISCORD_CLIENT_ID=
+```
+
+Dans le [Discord Developer Portal](https://discord.com/developers/applications), ajoutez
+exactement cette redirection dans **OAuth2 → Redirects** :
+
+```text
+https://votre-domaine.up.railway.app/oauth/callback
+```
+
+Le secret OAuth, le token Discord et les clés API ne doivent jamais être écrits dans GitHub.
+
 ## Identité visuelle
 
 Tous les embeds partagent désormais un style cohérent : violet électrique de marque, avatar du bot dans le footer, et des jauges visuelles (🟪) pour l'XP ou l'indice de confiance de l'IA.

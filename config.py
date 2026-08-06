@@ -22,7 +22,7 @@ WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")         # /weather (sinon fallbac
 # variables d'environnement sans toucher au code, au cas où OpenAI change encore les noms.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
 OPENAI_MODEL_ADVANCED = os.getenv("OPENAI_MODEL_ADVANCED", "gpt-5.6-sol")
-# Modèle d'images séparé : gpt-image-2 prend en charge la génération 4K native.
+# Modèle séparé pour la génération d'images.
 OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
 
 # --- Général ---
@@ -30,11 +30,16 @@ DEFAULT_PREFIX = os.getenv("BOT_PREFIX", "+")
 DEFAULT_LANGUAGE = "fr"
 DATABASE_PATH = os.getenv("DATABASE_PATH", "database/bot.db")
 
-# --- Dashboard web (tableau de bord en temps réel, voir web/dashboard.py) ---
+# --- Application dashboard (voir web/dashboard.py) ---
 # Port d'écoute : Railway fournit automatiquement la variable PORT, sinon 8080 en local.
 DASHBOARD_PORT = int(os.getenv("PORT", "8080"))
-# Jeton optionnel : si défini, le dashboard n'est accessible qu'avec ?token=... dans l'URL
-# (ou l'en-tête X-Dashboard-Token). Fortement recommandé si le domaine Railway est public.
+# OAuth Discord. Le client ID peut rester vide : le dashboard utilise alors l'ID du bot.
+# Le secret doit uniquement être enregistré dans Railway, jamais dans GitHub.
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
+# URL HTTPS publique sans slash final, ex. https://sentrix.up.railway.app
+DASHBOARD_PUBLIC_URL = os.getenv("DASHBOARD_PUBLIC_URL", "")
+# Ancien réglage conservé pour ne pas casser les installations existantes.
 DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "")
 
 # Couleurs des embeds (identité visuelle SentriX : violet électrique / futuriste)
