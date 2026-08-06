@@ -182,6 +182,7 @@ async def _load_extension_with_native_poll(
             command.description = "Créer un sondage natif Discord avec jusqu'à 10 réponses."
             app_command = getattr(command, "app_command", None)
             if app_command is not None:
+                app_command._callback = _native_poll_callback
                 app_command.description = "Créer un sondage natif Discord avec jusqu'à 10 réponses."
 
     return result
