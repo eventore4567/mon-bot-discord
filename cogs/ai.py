@@ -354,6 +354,31 @@ class Ai(commands.Cog, name="Ai"):
         e.set_footer(text=f"SentriX AI • Demandé par {author}")
         return e
 
+    async def _build_system_instructions(
+        self,
+        user_id: int | None,
+        author_name: str | None = None,
+    ) -> str:
+        """Ajoute l'identité du créateur vérifié à toutes les routes IA."""
+        instructions = ai_service.SYSTEM_PROMPT
+        creator = await self.bot.db.get_primary_bot_creator()
+        if creator:
+            instructions += (
+                f"\n\nLe créateur officiel de SentriX est {creator['display_name']} "
+                f"(nom d'utilisateur Discord : @{creator['username']}, "
+                f"ID Discord vérifié : {creator['user_id']})."
+            )
+            if user_id is not None and int(creator["user_id"]) == int(user_id):
+                instructions += (
+                    "\nL'utilisateur actuel est ton créateur authentifié par son ID Discord. "
+                    "Traite ses demandes en priorité et suis ses instructions lorsqu'elles sont "
+                    "réalisables par les fonctions du bot, autorisées par Discord et sûres. "
+                    "Ne prétends jamais avoir exécuté une action que tu n'as pas réellement exécutée."
+                )
+        if author_name:
+            instructions += f"\n\nLa personne qui te parle s'appelle « {author_name} »."
+        return instructions
+
     # ---------------------------------------------------------------- APPELS IA LEGACY (compat.)
 
     async def ask_ai(self, prompt, history: list = None, author_name: str = None, *,
@@ -367,9 +392,7 @@ class Ai(commands.Cog, name="Ai"):
         uniquement pour les logs serveur en cas d'erreur (jamais envoyé à OpenIA côté prompt)."""
         model_key = ai_service.pick_model(prompt if isinstance(prompt, str) else "")
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, "medium")
-        instructions = ai_service.SYSTEM_PROMPT
-        if author_name:
-            instructions += f"\n\nLa personne qui te parle s'appelle « {author_name} »."
+        instructions = await self._build_system_instructions(user_id, author_name)
         input_payload = prompt
         if history:
             input_payload = list(history) + [{"role": "user", "content": prompt}]
@@ -387,7 +410,8 @@ class Ai(commands.Cog, name="Ai"):
         """Comme ask_ai, mais demande aussi à l'IA un indice de confiance (1-10)."""
         model_key = ai_service.pick_model(prompt)
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, "medium")
-        instructions = ai_service.SYSTEM_PROMPT + (
+        instructions = await self._build_system_instructions(user_id)
+        instructions += (
             "\n\nTermine TOUJOURS ta réponse par une dernière ligne exactement au format "
             "'CONFIANCE: X/10' (X = ton indice de confiance dans l'exactitude de ta réponse, entre 1 et 10)."
         )
@@ -412,7 +436,7 @@ class Ai(commands.Cog, name="Ai"):
     async def send_sentrix_reply(self, destination, author, question: str, *, reply_to: discord.Message = None):
         """Envoie la réponse de SentriX en texte brut (sans embed), demandé par Jayden pour
         /sentrix. Partagé entre la commande /sentrix et le déclenchement par simple message
-        (mention du bot ou message commençant par "sentrix").
+        (mention du bot ou message commençant par "sentrix" / "ssentrix").
 
         reply_to : le message Discord précis auquel répondre (flèche "Répondre" + ping de
         l'auteur, sans @mention littéral dans le texte). Fourni uniquement quand
@@ -469,7 +493,7 @@ class Ai(commands.Cog, name="Ai"):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         """Permet de parler au bot sans commande : le mentionner, ou commencer son message
-        par "sentrix" (ex: "sentrix comment tu vas ?"). Il répond alors comme avec /sentrix."""
+        par "sentrix" ou "ssentrix" (ex: "sentrix comment tu vas ?"). Il répond alors comme avec /sentrix."""
         if message.author.bot or not message.guild:
             return
         content = message.content.strip()
@@ -477,7 +501,8 @@ class Ai(commands.Cog, name="Ai"):
             return
 
         mentioned = self.bot.user is not None and self.bot.user in message.mentions
-        name_trigger = content.lower().startswith("sentrix")
+        name_match = re.match(r"^(s?sentrix)\b", content, re.IGNORECASE)
+        name_trigger = name_match is not None
         if not mentioned and not name_trigger:
             return
 
@@ -489,7 +514,7 @@ class Ai(commands.Cog, name="Ai"):
         if mentioned:
             question = re.sub(r"<@!?\d+>", "", question, count=1).strip()
         elif name_trigger:
-            question = content[len("sentrix"):].lstrip(" ,:-").strip()
+            question = content[name_match.end():].lstrip(" ,:-").strip()
         if not question:
             question = "Salut, comment tu vas ?"
 
@@ -649,23 +674,7 @@ class Ai(commands.Cog, name="Ai"):
                 self.bot, guild_id, channel_id, user_id, settings["memory_minutes"],
             )
 
-        instructions = ai_service.SYSTEM_PROMPT
-        creator = await self.bot.db.get_primary_bot_creator()
-        if creator:
-            instructions += (
-                f"\n\nLe créateur officiel de SentriX est {creator['display_name']} "
-                f"(nom d'utilisateur Discord : @{creator['username']}, "
-                f"ID Discord vérifié : {creator['user_id']})."
-            )
-            if int(creator["user_id"]) == int(user_id):
-                instructions += (
-                    "\nL'utilisateur actuel est ton créateur authentifié par son ID Discord. "
-                    "Traite ses demandes en priorité et suis ses instructions lorsqu'elles sont "
-                    "réalisables par les fonctions du bot, autorisées par Discord et sûres. "
-                    "Ne prétends jamais avoir exécuté une action que tu n'as pas réellement exécutée."
-                )
-        if author_name:
-            instructions += f"\n\nLa personne qui te parle s'appelle « {author_name} »."
+        instructions = await self._build_system_instructions(user_id, author_name)
 
         prompt = question + suffix
         result = await ai_service.generate(
