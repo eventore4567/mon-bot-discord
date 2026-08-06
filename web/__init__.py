@@ -36,11 +36,32 @@ _setup_center_search.install(_setup_center)
 _setup_center_explanations.install(_setup_center)
 _setup_center.install(_dashboard, _setup_dashboard, _design_setup_dashboard)
 _embed_center.install(_dashboard)
+
 # Le clic est géré par le script du créateur. Le bouton ne soumet donc pas une seconde fois
 # le formulaire, ce qui empêche l'envoi accidentel de deux messages Discord identiques.
 _embed_center.EMBED_CENTER_HTML = _embed_center.EMBED_CENTER_HTML.replace(
     'id="saveButton" class="btn primary" type="submit"',
     'id="saveButton" class="btn primary" type="button"',
+    1,
+)
+# Un modèle rempli par JavaScript doit lui aussi être conservé immédiatement dans le
+# brouillon, même si l'utilisateur n'a pas encore retouché un champ à la main.
+_embed_center.EMBED_CENTER_HTML = _embed_center.EMBED_CENTER_HTML.replace(
+    '$("applyTemplate").addEventListener("click",applyTemplate);',
+    '$("applyTemplate").addEventListener("click",()=>{applyTemplate();scheduleDraft();});',
+    1,
+)
+
+# Petits correctifs appliqués avant l'injection : les éléments techniques restent dans le
+# body et l'annulation d'un changement de serveur restaure réellement l'ancienne valeur.
+_dashboard_polish.POLISH_JS = _dashboard_polish.POLISH_JS.replace(
+    'document.documentElement.append(progress, offline);\n  document.body.appendChild(health);',
+    'document.body.append(progress, offline, health);',
+    1,
+)
+_dashboard_polish.POLISH_JS = _dashboard_polish.POLISH_JS.replace(
+    'if (!confirmServerChange(event)) return;\n      if (event.target.value',
+    'if (!confirmServerChange(event)) {\n        event.target.value = localStorage.getItem(storageKey("guild")) || "";\n        return;\n      }\n      if (event.target.value',
     1,
 )
 _dashboard_polish.install(_dashboard, _setup_center, _embed_center)
