@@ -22,6 +22,8 @@ WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")         # /weather (sinon fallbac
 # variables d'environnement sans toucher au code, au cas où OpenAI change encore les noms.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
 OPENAI_MODEL_ADVANCED = os.getenv("OPENAI_MODEL_ADVANCED", "gpt-5.6-sol")
+# Modèle d'images séparé : gpt-image-2 prend en charge la génération 4K native.
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
 
 # --- Général ---
 DEFAULT_PREFIX = os.getenv("BOT_PREFIX", "+")
