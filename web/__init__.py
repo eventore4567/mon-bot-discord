@@ -9,6 +9,7 @@ from . import setup_dashboard as _setup_dashboard
 from . import design_setup_dashboard as _design_setup_dashboard
 from . import setup_center as _setup_center
 from . import setup_center_exclusive as _setup_center_exclusive
+from . import setup_center_search as _setup_center_search
 
 
 _original_handle_index = _dashboard.handle_index
@@ -25,4 +26,5 @@ async def _handle_index_without_cache(request):
 
 _dashboard.handle_index = _handle_index_without_cache
 _setup_center_exclusive.install(_setup_center, _setup_dashboard)
+_setup_center_search.install(_setup_center)
 _setup_center.install(_dashboard, _setup_dashboard, _design_setup_dashboard)
