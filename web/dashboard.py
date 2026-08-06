@@ -1,303 +1,795 @@
 """
-Dashboard web de SentriX — tableau de bord en temps réel (serveurs, membres, latence,
-commandes...), inspiré des pages "Observe" de Railway. Tourne dans le même processus que
-le bot via aiohttp (déjà une dépendance du projet), donc pas de service séparé à héberger :
-sur Railway, il suffit de générer un domaine public (Paramètres → Networking → Generate
-Domain) pointant sur le port du bot pour y accéder.
+Application web SentriX.
 
-Protection : si DASHBOARD_TOKEN est défini dans .env, la page et l'API exigent
-`?token=...` (ou l'en-tête X-Dashboard-Token). Sans jeton défini, l'accès est libre —
-recommandé uniquement si le domaine Railway n'est pas généré / reste privé.
+Le dashboard tourne dans le même processus aiohttp que le bot. La page publique affiche
+l'état de SentriX et son lien d'invitation. La partie administration utilise le flux OAuth2
+Discord (identify + guilds), une session opaque côté serveur, un jeton CSRF et une nouvelle
+vérification des permissions Discord à chaque lecture ou modification d'un serveur.
+
+Variables Railway nécessaires pour la connexion :
+- DISCORD_CLIENT_SECRET : secret OAuth2 de l'application Discord ;
+- DASHBOARD_PUBLIC_URL : URL HTTPS publique, sans slash final (recommandé).
+
+Le client ID est lu depuis DISCORD_CLIENT_ID s'il existe, sinon depuis l'identité du bot.
+Aucun token utilisateur, token du bot ou secret OAuth n'est envoyé au navigateur.
 """
 
-import time
 import logging
+import secrets
+import time
+from urllib.parse import urlencode
 
-from aiohttp import web
+import discord
+from aiohttp import BasicAuth, ClientSession, web
 
 import config
-from database.db import now
+from database.db import PRIMARY_CREATOR_ID, now
 
-logger = logging.getLogger("bot")
+logger = logging.getLogger("bot.dashboard")
 
 START_TIME = time.time()
+DISCORD_API = "https://discord.com/api/v10"
+DISCORD_AUTHORIZE = "https://discord.com/oauth2/authorize"
+SESSION_COOKIE = "sentrix_session"
+OAUTH_STATE_COOKIE = "sentrix_oauth_state"
+SESSION_TTL = 12 * 60 * 60
+OAUTH_STATE_TTL = 10 * 60
+MANAGE_GUILD = 1 << 5
+ADMINISTRATOR = 1 << 3
+
+AUTOMOD_FIELDS = {
+    "antispam", "antilink", "antiinvite", "antimention", "anticaps",
+    "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
+    "antinuke", "escalation",
+}
+
+AI_BOOL_FIELDS = {"enabled", "memory_enabled", "logs_enabled"}
+AI_INT_FIELDS = {
+    "cooldown_seconds": (0, 3600),
+    "per_minute_limit": (1, 100),
+    "daily_limit": (1, 10000),
+    "max_question_length": (50, 10000),
+    "memory_minutes": (1, 1440),
+}
+AI_CHOICE_FIELDS = {
+    "default_model": {"terra", "sol"},
+    "reasoning_effort": {"none", "low", "medium", "high", "xhigh", "max"},
+}
+
+TEXT_FIELDS = {
+    "prefix": (1, 5),
+    "welcome_message": (0, 1000),
+    "goodbye_message": (0, 1000),
+    "level_message": (0, 1000),
+}
+
+ROLE_FIELDS = {
+    "mod_role", "admin_role", "mute_role", "verification_role", "verify_role",
+    "autorole", "warn_role", "member_role", "booster_role",
+}
+
+CHANNEL_FIELDS = {
+    "log_channel", "welcome_channel", "goodbye_channel", "rules_channel",
+    "verification_channel", "ticket_log_channel", "level_channel",
+    "suggest_channel", "announce_channel", "giveaway_channel",
+    "bot_commands_channel", "report_channel", "partner_channel", "stats_channel",
+    "afk_channel", "error_channel", "log_messages", "log_members", "log_voice",
+    "log_roles", "log_server", "log_automod", "log_moderation",
+}
+
+BOOL_FIELDS = {"ticket_transcript_dm", "ticket_rating_enabled"}
+INT_FIELDS = {
+    "warn_ban_threshold": (1, 20),
+    "ticket_delete_delay": (0, 3600),
+}
 
 
-def _check_token(request: web.Request) -> bool:
-    if not config.DASHBOARD_TOKEN:
-        return True
-    provided = request.query.get("token") or request.headers.get("X-Dashboard-Token")
-    return provided == config.DASHBOARD_TOKEN
+def _client_id(bot) -> str:
+    configured = (config.DISCORD_CLIENT_ID or "").strip()
+    if configured:
+        return configured
+    return str(bot.user.id) if bot.user else ""
+
+
+def _public_url(request: web.Request) -> str:
+    configured = (config.DASHBOARD_PUBLIC_URL or "").strip().rstrip("/")
+    if configured:
+        return configured
+    scheme = request.headers.get("X-Forwarded-Proto", request.scheme).split(",")[0]
+    host = request.headers.get("X-Forwarded-Host", request.host).split(",")[0]
+    return f"{scheme}://{host}"
+
+
+def _oauth_ready(bot) -> bool:
+    return bool(_client_id(bot) and config.DISCORD_CLIENT_SECRET)
+
+
+def _invite_url(bot, guild_id: int | None = None) -> str | None:
+    client_id = _client_id(bot)
+    if not client_id:
+        return None
+    params = {
+        "client_id": client_id,
+        "permissions": "8",
+        "integration_type": "0",
+        "scope": "bot applications.commands",
+    }
+    if guild_id:
+        params["guild_id"] = str(guild_id)
+        params["disable_guild_select"] = "true"
+    return f"{DISCORD_AUTHORIZE}?{urlencode(params)}"
+
+
+def _avatar_url(user: dict) -> str | None:
+    avatar = user.get("avatar")
+    if not avatar:
+        return None
+    extension = "gif" if avatar.startswith("a_") else "png"
+    return f"https://cdn.discordapp.com/avatars/{user['id']}/{avatar}.{extension}?size=128"
+
+
+def _guild_icon_url(guild: dict) -> str | None:
+    icon = guild.get("icon")
+    if not icon:
+        return None
+    return f"https://cdn.discordapp.com/icons/{guild['id']}/{icon}.png?size=128"
+
+
+def _json_error(message: str, status: int) -> web.Response:
+    return web.json_response({"ok": False, "error": message}, status=status)
+
+
+def _session(request: web.Request) -> dict | None:
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if not session_id:
+        return None
+    session = request.app["sessions"].get(session_id)
+    if not session:
+        return None
+    if session["expires_at"] <= time.time():
+        request.app["sessions"].pop(session_id, None)
+        return None
+    return session
+
+
+def _require_session(request: web.Request) -> tuple[dict | None, web.Response | None]:
+    session = _session(request)
+    if not session:
+        return None, _json_error("Connectez-vous avec Discord pour continuer.", 401)
+    return session, None
+
+
+def _require_csrf(request: web.Request, session: dict) -> web.Response | None:
+    if not secrets.compare_digest(request.headers.get("X-CSRF-Token", ""), session["csrf"]):
+        return _json_error("La session de sécurité a expiré. Rechargez la page.", 403)
+    return None
+
+
+async def _manageable_guild(request: web.Request, guild_id: int):
+    session, error = _require_session(request)
+    if error:
+        return None, None, error
+    guild = request.app["bot"].get_guild(guild_id)
+    if guild is None:
+        return session, None, _json_error("SentriX n'est pas installé sur ce serveur.", 404)
+
+    user_id = int(session["user"]["id"])
+    if user_id == PRIMARY_CREATOR_ID:
+        return session, guild, None
+
+    member = guild.get_member(user_id)
+    if member is None:
+        try:
+            member = await guild.fetch_member(user_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            member = None
+    if member is None or not (member.guild_permissions.administrator or member.guild_permissions.manage_guild):
+        return session, None, _json_error(
+            "Vous devez avoir la permission Gérer le serveur pour modifier cette configuration.", 403
+        )
+    return session, guild, None
+
+
+async def _guild_metrics(db, guild_id: int) -> dict:
+    queries = {
+        "warnings": "SELECT COUNT(*) AS n FROM warnings WHERE guild_id = ?",
+        "open_tickets": "SELECT COUNT(*) AS n FROM tickets WHERE guild_id = ? AND status = 'ouvert'",
+        "profiles": "SELECT COUNT(*) AS n FROM levels WHERE guild_id = ?",
+        "economy_accounts": "SELECT COUNT(*) AS n FROM economy WHERE guild_id = ?",
+        "commands_24h": "SELECT COUNT(*) AS n FROM command_logs WHERE guild_id = ? AND timestamp >= ?",
+    }
+    result = {}
+    for key, query in queries.items():
+        try:
+            params = (guild_id, now() - 86400) if key == "commands_24h" else (guild_id,)
+            row = await db.fetchone(query, params)
+            result[key] = int(row["n"] if row else 0)
+        except Exception:
+            result[key] = 0
+    return result
 
 
 async def handle_index(request: web.Request):
-    if not _check_token(request):
-        return web.Response(text=LOCKED_HTML, content_type="text/html", status=401)
     return web.Response(text=INDEX_HTML, content_type="text/html")
 
 
-async def handle_stats(request: web.Request):
-    if not _check_token(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
-
+async def handle_health(request: web.Request):
     bot = request.app["bot"]
-    db = bot.db
-
-    guilds = bot.guilds
-    guild_count = len(guilds)
-    member_total = sum(g.member_count or 0 for g in guilds)
-    latency_ms = round(bot.latency * 1000) if bot.latency == bot.latency else 0  # NaN-safe
-    uptime_seconds = int(time.time() - START_TIME)
-
-    since_24h = now() - 86400
-    commands_24h = await db.commands_count_since(since_24h)
-    commands_total = await db.commands_count_total()
-    top_rows = await db.top_commands_since(since_24h, limit=5)
-    top_commands = [{"name": r["command_name"], "count": r["c"]} for r in top_rows]
-
-    hourly_rows = await db.commands_hourly_since(since_24h)
-    hourly_map = {r["bucket"]: r["c"] for r in hourly_rows}
-    current_hour_bucket = (int(time.time()) // 3600) * 3600
-    hourly = []
-    for i in range(23, -1, -1):
-        bucket = current_hour_bucket - i * 3600
-        hourly.append(hourly_map.get(bucket, 0))
-
-    top_guilds = sorted(guilds, key=lambda g: g.member_count or 0, reverse=True)[:5]
-
     return web.json_response({
-        "bot_name": bot.user.name if bot.user else "SentriX",
-        "avatar_url": str(bot.user.display_avatar.url) if bot.user else None,
-        "guilds": guild_count,
-        "members": member_total,
-        "latency_ms": latency_ms,
-        "uptime_seconds": uptime_seconds,
-        "commands_24h": commands_24h,
-        "commands_total": commands_total,
-        "top_commands": top_commands,
-        "hourly": hourly,
-        "top_guilds": [{"name": g.name, "members": g.member_count or 0} for g in top_guilds],
-        "generated_at": now(),
+        "ok": True,
+        "discord_ready": bot.is_ready(),
+        "latency_ms": round(bot.latency * 1000) if bot.is_ready() else None,
     })
 
 
+async def handle_public(request: web.Request):
+    bot = request.app["bot"]
+    guilds = bot.guilds
+    return web.json_response({
+        "bot_name": bot.user.name if bot.user else "SentriX",
+        "avatar_url": str(bot.user.display_avatar.url) if bot.user else None,
+        "online": bot.is_ready(),
+        "guilds": len(guilds),
+        "members": sum(g.member_count or 0 for g in guilds),
+        "latency_ms": round(bot.latency * 1000) if bot.is_ready() else None,
+        "uptime_seconds": int(time.time() - START_TIME),
+        "invite_url": _invite_url(bot),
+        "oauth_ready": _oauth_ready(bot),
+    })
+
+
+async def handle_login(request: web.Request):
+    bot = request.app["bot"]
+    if not _oauth_ready(bot):
+        raise web.HTTPFound("/?auth=missing")
+
+    state = secrets.token_urlsafe(32)
+    request.app["oauth_states"][state] = time.time() + OAUTH_STATE_TTL
+    redirect_uri = f"{_public_url(request)}/oauth/callback"
+    params = {
+        "response_type": "code",
+        "client_id": _client_id(bot),
+        "scope": "identify guilds",
+        "state": state,
+        "redirect_uri": redirect_uri,
+        "prompt": "consent",
+    }
+    response = web.HTTPFound(f"{DISCORD_AUTHORIZE}?{urlencode(params)}")
+    response.set_cookie(
+        OAUTH_STATE_COOKIE,
+        state,
+        max_age=OAUTH_STATE_TTL,
+        httponly=True,
+        secure=_public_url(request).startswith("https://"),
+        samesite="Lax",
+    )
+    raise response
+
+
+async def handle_callback(request: web.Request):
+    state = request.query.get("state", "")
+    cookie_state = request.cookies.get(OAUTH_STATE_COOKIE, "")
+    expires_at = request.app["oauth_states"].pop(state, 0)
+    if not state or not secrets.compare_digest(state, cookie_state) or expires_at <= time.time():
+        return web.Response(text=OAUTH_ERROR_HTML, content_type="text/html", status=403)
+    if request.query.get("error"):
+        raise web.HTTPFound("/?auth=denied")
+
+    code = request.query.get("code")
+    if not code:
+        return web.Response(text=OAUTH_ERROR_HTML, content_type="text/html", status=400)
+
+    bot = request.app["bot"]
+    redirect_uri = f"{_public_url(request)}/oauth/callback"
+    try:
+        async with ClientSession() as client:
+            async with client.post(
+                f"{DISCORD_API}/oauth2/token",
+                data={"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
+                auth=BasicAuth(_client_id(bot), config.DISCORD_CLIENT_SECRET),
+            ) as token_response:
+                if token_response.status != 200:
+                    logger.warning("Échange OAuth Discord refusé (%s).", token_response.status)
+                    raise web.HTTPFound("/?auth=failed")
+                token_data = await token_response.json()
+
+            headers = {"Authorization": f"Bearer {token_data['access_token']}"}
+            async with client.get(f"{DISCORD_API}/users/@me", headers=headers) as user_response:
+                user_response.raise_for_status()
+                user = await user_response.json()
+            async with client.get(f"{DISCORD_API}/users/@me/guilds", headers=headers) as guild_response:
+                guild_response.raise_for_status()
+                oauth_guilds = await guild_response.json()
+    except web.HTTPException:
+        raise
+    except Exception:
+        logger.exception("Connexion OAuth Discord impossible.")
+        raise web.HTTPFound("/?auth=failed")
+
+    manageable = []
+    for guild in oauth_guilds:
+        permissions = int(guild.get("permissions", "0"))
+        if int(user["id"]) == PRIMARY_CREATOR_ID or permissions & (ADMINISTRATOR | MANAGE_GUILD):
+            manageable.append({
+                "id": str(guild["id"]),
+                "name": guild["name"],
+                "icon_url": _guild_icon_url(guild),
+                "owner": bool(guild.get("owner")),
+            })
+
+    session_id = secrets.token_urlsafe(48)
+    request.app["sessions"][session_id] = {
+        "user": {
+            "id": str(user["id"]),
+            "username": user.get("global_name") or user.get("username") or "Utilisateur Discord",
+            "avatar_url": _avatar_url(user),
+        },
+        "guilds": manageable,
+        "csrf": secrets.token_urlsafe(32),
+        "expires_at": time.time() + SESSION_TTL,
+    }
+    response = web.HTTPFound("/app")
+    response.set_cookie(
+        SESSION_COOKIE,
+        session_id,
+        max_age=SESSION_TTL,
+        httponly=True,
+        secure=_public_url(request).startswith("https://"),
+        samesite="Lax",
+    )
+    response.del_cookie(OAUTH_STATE_COOKIE)
+    raise response
+
+
+async def handle_logout(request: web.Request):
+    session, error = _require_session(request)
+    if error:
+        return error
+    csrf_error = _require_csrf(request, session)
+    if csrf_error:
+        return csrf_error
+    request.app["sessions"].pop(request.cookies.get(SESSION_COOKIE, ""), None)
+    response = web.json_response({"ok": True})
+    response.del_cookie(SESSION_COOKIE)
+    return response
+
+
+async def handle_me(request: web.Request):
+    session, error = _require_session(request)
+    if error:
+        return error
+    return web.json_response({"user": session["user"], "csrf": session["csrf"]})
+
+
+async def handle_guilds(request: web.Request):
+    session, error = _require_session(request)
+    if error:
+        return error
+    bot = request.app["bot"]
+    guilds = []
+    for item in session["guilds"]:
+        guild_id = int(item["id"])
+        installed = bot.get_guild(guild_id) is not None
+        guilds.append({
+            **item,
+            "installed": installed,
+            "invite_url": None if installed else _invite_url(bot, guild_id),
+        })
+    guilds.sort(key=lambda item: (not item["installed"], item["name"].casefold()))
+    return web.json_response({"guilds": guilds})
+
+
+async def handle_guild(request: web.Request):
+    try:
+        guild_id = int(request.match_info["guild_id"])
+    except ValueError:
+        return _json_error("Identifiant de serveur invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+
+    db = request.app["bot"].db
+    conf = await db.get_guild_config(guild_id)
+    automod = await db.get_automod(guild_id)
+    await db.execute(
+        "INSERT OR IGNORE INTO ai_settings (guild_id, updated_at) VALUES (?, ?)",
+        (guild_id, now()),
+    )
+    ai_settings = await db.fetchone("SELECT * FROM ai_settings WHERE guild_id = ?", (guild_id,))
+    metrics = await _guild_metrics(db, guild_id)
+    roles = [
+        {"id": str(role.id), "name": role.name, "color": str(role.color)}
+        for role in sorted(guild.roles, key=lambda role: role.position, reverse=True)
+        if not role.is_default() and not role.managed
+    ]
+    channels = [
+        {"id": str(channel.id), "name": channel.name, "type": str(channel.type)}
+        for channel in guild.channels
+        if isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel))
+    ]
+    return web.json_response({
+        "guild": {
+            "id": str(guild.id),
+            "name": guild.name,
+            "icon_url": str(guild.icon.url) if guild.icon else None,
+            "members": guild.member_count or 0,
+            "roles_count": len(guild.roles),
+            "channels_count": len(guild.channels),
+        },
+        "settings": dict(conf) if conf else {},
+        "automod": dict(automod) if automod else {},
+        "ai": dict(ai_settings) if ai_settings else {},
+        "roles": roles,
+        "channels": channels,
+        "metrics": metrics,
+    })
+
+
+def _normalise_optional_id(value) -> int | None:
+    if value in (None, "", 0, "0"):
+        return None
+    return int(value)
+
+
+def _validate_settings(guild: discord.Guild, values: dict) -> tuple[dict, str | None]:
+    clean = {}
+    for field, value in values.items():
+        if field in TEXT_FIELDS:
+            minimum, maximum = TEXT_FIELDS[field]
+            text = str(value or "").strip()
+            if not minimum <= len(text) <= maximum:
+                return {}, f"Le champ {field} doit contenir entre {minimum} et {maximum} caractères."
+            clean[field] = text or None
+        elif field == "security_level":
+            if value not in {"faible", "moyen", "eleve"}:
+                return {}, "Le niveau de sécurité doit être faible, moyen ou élevé."
+            clean[field] = value
+        elif field == "xp_multiplier":
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return {}, "Le multiplicateur XP doit être un nombre."
+            if not 0.1 <= number <= 5:
+                return {}, "Le multiplicateur XP doit être compris entre 0,1 et 5."
+            clean[field] = round(number, 2)
+        elif field in INT_FIELDS:
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                return {}, f"Le champ {field} doit être un nombre entier."
+            minimum, maximum = INT_FIELDS[field]
+            if not minimum <= number <= maximum:
+                return {}, f"Le champ {field} doit être compris entre {minimum} et {maximum}."
+            clean[field] = number
+        elif field in BOOL_FIELDS:
+            if value not in (True, False, 0, 1):
+                return {}, f"Le champ {field} doit être activé ou désactivé."
+            clean[field] = int(bool(value))
+        elif field in ROLE_FIELDS:
+            try:
+                role_id = _normalise_optional_id(value)
+            except (TypeError, ValueError):
+                return {}, f"Le rôle choisi pour {field} est invalide."
+            if role_id is not None:
+                role = guild.get_role(role_id)
+                if role is None or role.is_default() or role.managed:
+                    return {}, f"Le rôle choisi pour {field} n'existe plus ou ne peut pas être utilisé."
+            clean[field] = role_id
+        elif field in CHANNEL_FIELDS or field == "ticket_category":
+            try:
+                channel_id = _normalise_optional_id(value)
+            except (TypeError, ValueError):
+                return {}, f"Le salon choisi pour {field} est invalide."
+            if channel_id is not None:
+                channel = guild.get_channel(channel_id)
+                if channel is None:
+                    return {}, f"Le salon choisi pour {field} n'existe plus."
+                if field == "ticket_category" and not isinstance(channel, discord.CategoryChannel):
+                    return {}, "La catégorie des tickets doit être une catégorie Discord."
+            clean[field] = channel_id
+        else:
+            return {}, f"Le réglage {field} n'est pas modifiable depuis le dashboard."
+    return clean, None
+
+
+def _validate_ai(values: dict) -> tuple[dict, str | None]:
+    clean = {}
+    for field, value in values.items():
+        if field in AI_BOOL_FIELDS:
+            if value not in (True, False, 0, 1):
+                return {}, f"Le réglage IA {field} doit être activé ou désactivé."
+            clean[field] = int(bool(value))
+        elif field in AI_INT_FIELDS:
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                return {}, f"Le réglage IA {field} doit être un nombre entier."
+            minimum, maximum = AI_INT_FIELDS[field]
+            if not minimum <= number <= maximum:
+                return {}, f"Le réglage IA {field} doit être compris entre {minimum} et {maximum}."
+            clean[field] = number
+        elif field in AI_CHOICE_FIELDS:
+            if value not in AI_CHOICE_FIELDS[field]:
+                return {}, f"La valeur choisie pour {field} n'est pas reconnue."
+            clean[field] = value
+        else:
+            return {}, f"Le réglage IA {field} n'est pas modifiable depuis le dashboard."
+    return clean, None
+
+
+async def handle_update_guild(request: web.Request):
+    try:
+        guild_id = int(request.match_info["guild_id"])
+    except ValueError:
+        return _json_error("Identifiant de serveur invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+    csrf_error = _require_csrf(request, session)
+    if csrf_error:
+        return csrf_error
+
+    rate_key = (request.cookies.get(SESSION_COOKIE), guild_id)
+    last_write = request.app["write_limits"].get(rate_key, 0)
+    if time.time() - last_write < 1.5:
+        return _json_error("Attendez un instant avant d'enregistrer de nouveau.", 429)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return _json_error("Le formulaire envoyé est invalide.", 400)
+    settings = payload.get("settings", {})
+    automod = payload.get("automod", {})
+    ai_values = payload.get("ai", {})
+    if not isinstance(settings, dict) or not isinstance(automod, dict) or not isinstance(ai_values, dict):
+        return _json_error("Le formulaire envoyé est invalide.", 400)
+    if len(settings) + len(automod) + len(ai_values) > 40:
+        return _json_error("Trop de réglages ont été envoyés en même temps.", 400)
+
+    clean_settings, validation_error = _validate_settings(guild, settings)
+    if validation_error:
+        return _json_error(validation_error, 400)
+    clean_automod = {}
+    for field, value in automod.items():
+        if field not in AUTOMOD_FIELDS:
+            return _json_error(f"Le réglage AutoMod {field} n'est pas autorisé.", 400)
+        if value not in (True, False, 0, 1):
+            return _json_error(f"Le réglage AutoMod {field} doit être activé ou désactivé.", 400)
+        clean_automod[field] = int(bool(value))
+    clean_ai, validation_error = _validate_ai(ai_values)
+    if validation_error:
+        return _json_error(validation_error, 400)
+
+    db = request.app["bot"].db
+    for field, value in clean_settings.items():
+        await db.set_guild_config(guild_id, field, value)
+    for field, value in clean_automod.items():
+        await db.set_automod(guild_id, field, value)
+    if clean_ai:
+        await db.execute(
+            "INSERT OR IGNORE INTO ai_settings (guild_id, updated_at) VALUES (?, ?)",
+            (guild_id, now()),
+        )
+        for field, value in clean_ai.items():
+            await db.execute(
+                f"UPDATE ai_settings SET {field} = ?, updated_at = ? WHERE guild_id = ?",
+                (value, now(), guild_id),
+            )
+    request.app["write_limits"][rate_key] = time.time()
+    logger.info(
+        "Dashboard : %s (%s) a modifié %s réglage(s) du serveur %s (%s).",
+        session["user"]["username"], session["user"]["id"],
+        len(clean_settings) + len(clean_automod) + len(clean_ai), guild.name, guild.id,
+    )
+    return web.json_response({"ok": True, "message": "Configuration enregistrée et appliquée immédiatement."})
+
+
+@web.middleware
+async def security_headers(request: web.Request, handler):
+    response = await handler(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; img-src 'self' https://cdn.discordapp.com data:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://discord.com"
+    )
+    return response
+
+
 def build_app(bot) -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[security_headers], client_max_size=64 * 1024)
     app["bot"] = bot
+    app["sessions"] = {}
+    app["oauth_states"] = {}
+    app["write_limits"] = {}
     app.router.add_get("/", handle_index)
-    app.router.add_get("/api/stats", handle_stats)
+    app.router.add_get("/app", handle_index)
+    app.router.add_get("/health", handle_health)
+    app.router.add_get("/login", handle_login)
+    app.router.add_get("/oauth/callback", handle_callback)
+    app.router.add_post("/logout", handle_logout)
+    app.router.add_get("/api/public", handle_public)
+    app.router.add_get("/api/me", handle_me)
+    app.router.add_get("/api/guilds", handle_guilds)
+    app.router.add_get("/api/guilds/{guild_id}", handle_guild)
+    app.router.add_put("/api/guilds/{guild_id}/settings", handle_update_guild)
     return app
 
 
 async def start_dashboard(bot):
-    """À appeler une fois depuis setup_hook (main.py). Démarre le serveur web en tâche de
-    fond, sans jamais bloquer ni faire planter le bot si le port est indisponible."""
+    """Démarre le dashboard sans empêcher le bot de fonctionner en cas d'erreur web."""
     try:
         app = build_app(bot)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", config.DASHBOARD_PORT)
         await site.start()
-        logger.info(f"Dashboard web démarré sur le port {config.DASHBOARD_PORT}.")
-        if not config.DASHBOARD_TOKEN:
+        logger.info("Application dashboard SentriX démarrée sur le port %s.", config.DASHBOARD_PORT)
+        if not _oauth_ready(bot):
             logger.warning(
-                "DASHBOARD_TOKEN n'est pas défini : le dashboard web est accessible sans "
-                "protection à quiconque connaît l'URL. Définissez DASHBOARD_TOKEN dans .env "
-                "si le domaine Railway est public."
+                "Dashboard en lecture seule : ajoutez DISCORD_CLIENT_SECRET dans Railway pour activer la connexion Discord."
             )
     except Exception:
-        logger.error("Échec du démarrage du dashboard web (le bot continue de fonctionner normalement).")
+        logger.exception("Échec du démarrage du dashboard web ; le bot reste en ligne.")
 
 
-LOCKED_HTML = """<!DOCTYPE html>
-<html lang="fr"><head><meta charset="utf-8"><title>SentriX — Accès refusé</title>
-<style>
-body{background:#100e18;color:#e6e2f2;font-family:-apple-system,Segoe UI,sans-serif;
-display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}
-.card{border:1px solid #2a2540;border-radius:14px;padding:40px 50px;background:#15121f}
-h1{margin:0 0 10px;font-size:22px} p{color:#8b86a3;margin:0}
-code{background:#211d33;padding:2px 8px;border-radius:6px;color:#b794f6}
-</style></head><body>
-<div class="card"><h1>🔒 Accès protégé</h1><p>Ajoutez <code>?token=...</code> à l'URL avec le bon jeton (DASHBOARD_TOKEN).</p></div>
-</body></html>"""
+OAUTH_ERROR_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8"><title>SentriX</title>
+<style>body{background:#090b12;color:#eef1ff;font:16px system-ui;display:grid;place-items:center;height:100vh;margin:0}
+main{max-width:520px;padding:36px;background:#111522;border:1px solid #242b42;border-radius:20px}a{color:#9b8cff}</style>
+<main><h1>Connexion impossible</h1><p>La demande de connexion Discord a expiré ou n'est pas valide.</p><a href="/">Revenir au dashboard</a></main></html>"""
 
 
-INDEX_HTML = """<!DOCTYPE html>
+INDEX_HTML = r"""<!doctype html>
 <html lang="fr">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SentriX — Tableau de bord</title>
-<style>
-  :root{
-    --bg:#0d0b14; --panel:#15121f; --border:#241f36; --border-soft:#1d1930;
-    --text:#eae7f5; --muted:#8b86a3; --accent:#8b5cf6; --accent2:#a855f7;
-    --green:#34d399; --red:#f87171; --yellow:#fbbf24;
-  }
-  *{box-sizing:border-box}
-  body{
-    margin:0; background:var(--bg); color:var(--text);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-    min-height:100vh;
-  }
-  header{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:18px 28px; border-bottom:1px solid var(--border-soft);
-  }
-  .brand{display:flex; align-items:center; gap:12px}
-  .brand img{width:34px; height:34px; border-radius:9px; background:var(--panel)}
-  .brand .fallback{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent2));
-    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px}
-  .brand h1{font-size:16px; margin:0; font-weight:600}
-  .brand span{font-size:12px; color:var(--muted)}
-  .pill{
-    display:flex; align-items:center; gap:8px; border:1px solid var(--border);
-    border-radius:9px; padding:8px 14px; font-size:13px; color:var(--muted);
-    background:var(--panel);
-  }
-  .dot{width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green)}
-  main{max-width:1180px; margin:0 auto; padding:32px 24px 60px}
-  .grid{display:grid; grid-template-columns:repeat(4, 1fr); gap:16px; margin-bottom:16px}
-  @media (max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}
-  .card{
-    border:1px solid var(--border); border-radius:14px; background:var(--panel);
-    padding:18px 20px; min-height:118px; display:flex; flex-direction:column;
-  }
-  .card .label{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px}
-  .card .value{font-size:28px; font-weight:700; line-height:1.1}
-  .card .sub{font-size:12.5px; color:var(--muted); margin-top:4px}
-  .wide{grid-column: span 2}
-  @media (max-width:900px){.wide{grid-column: span 2}}
-  .panel-title{font-size:14px; font-weight:600; margin-bottom:14px; display:flex; align-items:center; gap:8px}
-  .bars{display:flex; align-items:flex-end; gap:3px; height:70px; margin-top:8px}
-  .bars .bar{flex:1; background:linear-gradient(180deg,var(--accent2),var(--accent)); border-radius:3px 3px 0 0; min-height:2px; opacity:.9}
-  .list{display:flex; flex-direction:column; gap:10px; margin-top:4px}
-  .row{display:flex; align-items:center; justify-content:space-between; font-size:13.5px}
-  .row .rank{color:var(--muted); width:20px; display:inline-block}
-  .row .count{color:var(--accent2); font-weight:600}
-  .bottom-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px}
-  @media (max-width:900px){.bottom-grid{grid-template-columns:1fr}}
-  .panel{border:1px solid var(--border); border-radius:14px; background:var(--panel); padding:20px}
-  footer{text-align:center; color:var(--muted); font-size:12px; padding:20px}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#090b12">
+  <title>SentriX — Dashboard</title>
+  <style>
+    :root{--bg:#090b12;--panel:#111522;--panel2:#171c2c;--line:#262d43;--text:#f2f4ff;--muted:#949db5;--brand:#7c6cff;--brand2:#a897ff;--ok:#44d39a;--bad:#ff667d;--warn:#f2bd5a;--shadow:0 24px 70px #0007}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 15% -10%,#33266b55,transparent 35%),var(--bg);color:var(--text);font:15px Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}button,input,select,textarea{font:inherit}a{color:inherit;text-decoration:none}.hidden{display:none!important}
+    .top{height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 5vw;border-bottom:1px solid #ffffff0d;background:#090b12cc;backdrop-filter:blur(14px);position:sticky;top:0;z-index:20}.brand{display:flex;align-items:center;gap:12px;font-weight:800;font-size:18px}.brand-logo{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand),#4736b4);box-shadow:0 0 30px #7c6cff55}.brand-logo img{width:100%;height:100%;border-radius:12px}.status{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:13px}.status i{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 14px var(--ok)}
+    .btn{border:1px solid var(--line);border-radius:11px;padding:11px 16px;background:var(--panel2);color:var(--text);cursor:pointer;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:.18s}.btn:hover{transform:translateY(-1px);border-color:#4d5778}.btn.primary{background:linear-gradient(135deg,var(--brand),#5e4ee5);border-color:transparent;box-shadow:0 12px 28px #5e4ee533}.btn.ghost{background:transparent}.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+    .hero{max-width:1180px;margin:0 auto;padding:90px 28px 70px;display:grid;grid-template-columns:1.15fr .85fr;gap:60px;align-items:center}.eyebrow{display:inline-flex;padding:7px 11px;border:1px solid #6e5dff55;background:#6e5dff14;border-radius:999px;color:var(--brand2);font-weight:700;font-size:12px;letter-spacing:.04em;text-transform:uppercase}.hero h1{font-size:clamp(42px,7vw,78px);line-height:.98;letter-spacing:-.055em;margin:20px 0 22px;max-width:800px}.hero h1 span{color:var(--brand2)}.hero p{font-size:18px;line-height:1.7;color:var(--muted);max-width:680px;margin:0}.actions{display:flex;gap:12px;margin-top:32px;flex-wrap:wrap}.preview{background:linear-gradient(160deg,#171c2c,#0e111c);border:1px solid var(--line);border-radius:24px;padding:18px;box-shadow:var(--shadow);transform:rotate(1deg)}.preview-head{display:flex;align-items:center;justify-content:space-between;padding:8px 6px 18px}.preview-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stat{padding:18px;background:#0d101a;border:1px solid #20263a;border-radius:15px}.stat small{color:var(--muted);display:block;margin-bottom:8px}.stat strong{font-size:26px}.features{max-width:1180px;margin:0 auto;padding:20px 28px 90px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.feature{padding:26px;background:#101421;border:1px solid var(--line);border-radius:18px}.feature b{display:block;font-size:17px;margin-bottom:9px}.feature p{color:var(--muted);line-height:1.6;margin:0}
+    .shell{min-height:100vh;display:grid;grid-template-columns:270px 1fr}.side{border-right:1px solid var(--line);background:#0c0f18;padding:22px;position:sticky;top:0;height:100vh;overflow:auto}.side .brand{margin-bottom:26px}.user{display:flex;gap:11px;align-items:center;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:22px}.avatar{width:38px;height:38px;border-radius:12px;background:#272d43;object-fit:cover}.user b,.user span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.user span{font-size:12px;color:var(--muted);margin-top:2px}.nav-label{font-size:11px;color:#6f7891;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:20px 8px 8px}.nav button{width:100%;border:0;background:transparent;color:var(--muted);padding:11px 12px;text-align:left;border-radius:10px;cursor:pointer;margin:2px 0;font-weight:650}.nav button:hover,.nav button.active{background:#7c6cff18;color:var(--text)}.side-bottom{margin-top:24px;display:grid;gap:8px}.workspace{padding:34px 4vw 70px;min-width:0}.workspace-head{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:28px}.workspace-head h1{margin:0 0 6px;font-size:30px;letter-spacing:-.03em}.workspace-head p{margin:0;color:var(--muted)}.server-select{min-width:260px}.select,input,textarea{width:100%;background:#0c101a;border:1px solid var(--line);color:var(--text);border-radius:11px;padding:11px 12px;outline:none}.select:focus,input:focus,textarea:focus{border-color:var(--brand)}textarea{resize:vertical;min-height:105px}.overview{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}.metric{background:var(--panel);border:1px solid var(--line);padding:18px;border-radius:15px}.metric small{display:block;color:var(--muted);margin-bottom:8px}.metric strong{font-size:24px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden}.panel-head{padding:20px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:20px;align-items:center}.panel-head h2{margin:0 0 5px;font-size:18px}.panel-head p{margin:0;color:var(--muted);font-size:13px}.fields{padding:22px;display:grid;grid-template-columns:1fr 1fr;gap:18px}.field label{display:block;font-weight:700;margin-bottom:7px}.field .hint{color:var(--muted);font-size:12px;margin-top:7px;line-height:1.45}.field.full{grid-column:1/-1}.switch{display:flex;align-items:center;justify-content:space-between;padding:15px;background:#0d111c;border:1px solid #222940;border-radius:13px}.switch div b{display:block}.switch div span{color:var(--muted);font-size:12px}.switch input{appearance:none;width:42px;height:24px;border:0;border-radius:99px;background:#30374c;padding:0;position:relative;cursor:pointer}.switch input:after{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:white;border-radius:50%;transition:.2s}.switch input:checked{background:var(--brand)}.switch input:checked:after{left:21px}.savebar{display:flex;align-items:center;justify-content:flex-end;gap:14px;padding:16px 22px;border-top:1px solid var(--line);background:#0e121d}.save-status{color:var(--muted);font-size:13px}.empty{padding:50px 25px;text-align:center;color:var(--muted)}.toast{position:fixed;right:25px;bottom:25px;max-width:390px;background:#171d2c;border:1px solid #343d59;padding:14px 17px;border-radius:13px;box-shadow:var(--shadow);z-index:50}.toast.bad{border-color:#78354a}.loading{opacity:.55;pointer-events:none}
+    @media(max-width:980px){.hero{grid-template-columns:1fr}.preview{transform:none}.features{grid-template-columns:1fr}.shell{grid-template-columns:1fr}.side{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line)}.nav{display:flex;overflow:auto}.nav button{min-width:max-content}.side-bottom{display:none}.overview{grid-template-columns:1fr 1fr}.workspace-head{align-items:stretch;flex-direction:column}.server-select{min-width:0}.fields{grid-template-columns:1fr}.field.full{grid-column:auto}}
+    @media(max-width:560px){.top{padding:0 18px}.hero{padding:60px 20px}.features{padding:10px 20px 60px}.hero h1{font-size:45px}.overview{grid-template-columns:1fr}.preview-grid{grid-template-columns:1fr}.workspace{padding:25px 16px}.fields{padding:16px}.panel-head{padding:17px}.status span{display:none}}
+  </style>
 </head>
 <body>
-<header>
-  <div class="brand">
-    <div id="avatarWrap"><div class="fallback">S</div></div>
-    <div>
-      <h1 id="botName">SentriX</h1>
-      <span>Tableau de bord en direct</span>
-    </div>
-  </div>
-  <div class="pill"><span class="dot"></span><span id="refreshLabel">Actualisation toutes les 15s</span></div>
-</header>
+  <section id="landing">
+    <header class="top">
+      <div class="brand"><div class="brand-logo" id="publicLogo">S</div><span>SentriX</span></div>
+      <div class="status"><i id="publicDot"></i><span id="publicStatus">Connexion au bot…</span></div>
+    </header>
+    <main class="hero">
+      <div>
+        <div class="eyebrow">Dashboard officiel</div>
+        <h1>Tout votre serveur, <span>au même endroit.</span></h1>
+        <p>Invitez SentriX, choisissez votre serveur puis gérez la sécurité, les logs, les niveaux, les tickets, les rôles et les salons depuis une interface claire.</p>
+        <div class="actions">
+          <a class="btn primary" id="loginButton" href="/login">Se connecter avec Discord</a>
+          <a class="btn" id="inviteButton" href="#" target="_blank" rel="noopener">Ajouter SentriX</a>
+        </div>
+        <p id="authMessage" style="font-size:13px;margin-top:14px"></p>
+      </div>
+      <div class="preview">
+        <div class="preview-head"><b>SentriX en direct</b><span class="status"><i></i><span>Opérationnel</span></span></div>
+        <div class="preview-grid">
+          <div class="stat"><small>Serveurs</small><strong id="publicGuilds">—</strong></div>
+          <div class="stat"><small>Membres protégés</small><strong id="publicMembers">—</strong></div>
+          <div class="stat"><small>Latence</small><strong id="publicLatency">—</strong></div>
+          <div class="stat"><small>Disponibilité</small><strong id="publicUptime">—</strong></div>
+        </div>
+      </div>
+    </main>
+    <section class="features">
+      <article class="feature"><b>Sécurité centralisée</b><p>Activez les protections anti-spam, anti-liens, anti-raid, anti-arnaque et anti-nuke sans chercher une commande.</p></article>
+      <article class="feature"><b>Configuration immédiate</b><p>Chaque modification est validée, enregistrée dans la base du serveur et appliquée immédiatement par SentriX.</p></article>
+      <article class="feature"><b>Accès protégé</b><p>Seuls le créateur de SentriX et les membres autorisés à gérer le serveur peuvent ouvrir sa configuration.</p></article>
+    </section>
+  </section>
 
-<main>
-  <div class="grid">
-    <div class="card">
-      <div class="label">🌐 Serveurs</div>
-      <div class="value" id="guildCount">—</div>
-      <div class="sub" id="memberSub">— membres au total</div>
-    </div>
-    <div class="card">
-      <div class="label">📡 Latence</div>
-      <div class="value" id="latency">—</div>
-      <div class="sub" id="uptime">Uptime —</div>
-    </div>
-    <div class="card">
-      <div class="label">⚡ Commandes (24h)</div>
-      <div class="value" id="cmd24h">—</div>
-      <div class="sub" id="cmdTotal">— au total</div>
-    </div>
-    <div class="card">
-      <div class="label">🏆 Commande la + utilisée</div>
-      <div class="value" id="topCmdName" style="font-size:20px">—</div>
-      <div class="sub" id="topCmdCount">—</div>
-    </div>
-  </div>
+  <section id="dashboard" class="shell hidden">
+    <aside class="side">
+      <div class="brand"><div class="brand-logo" id="appLogo">S</div><span>SentriX</span></div>
+      <div class="user"><div class="brand-logo avatar" id="userAvatar">U</div><div style="min-width:0"><b id="userName">Utilisateur</b><span>Connecté avec Discord</span></div></div>
+      <div class="nav-label">Configuration</div>
+      <nav class="nav" id="navigation">
+        <button data-tab="general" class="active">Général</button>
+        <button data-tab="security">Sécurité</button>
+        <button data-tab="logs">Logs</button>
+        <button data-tab="welcome">Accueil</button>
+        <button data-tab="levels">Niveaux</button>
+        <button data-tab="tickets">Tickets</button>
+        <button data-tab="ai">Intelligence artificielle</button>
+        <button data-tab="roles">Rôles et salons</button>
+      </nav>
+      <div class="side-bottom">
+        <a class="btn primary" id="appInvite" target="_blank" rel="noopener">Ajouter SentriX</a>
+        <button class="btn ghost" id="logoutButton">Se déconnecter</button>
+      </div>
+    </aside>
+    <main class="workspace">
+      <div class="workspace-head">
+        <div><h1 id="pageTitle">Dashboard</h1><p id="pageSubtitle">Choisissez un serveur que vous gérez.</p></div>
+        <select id="serverSelect" class="select server-select"><option value="">Chargement des serveurs…</option></select>
+      </div>
+      <div id="serverContent" class="hidden">
+        <div class="overview">
+          <div class="metric"><small>Membres</small><strong id="metricMembers">—</strong></div>
+          <div class="metric"><small>Commandes sur 24 h</small><strong id="metricCommands">—</strong></div>
+          <div class="metric"><small>Tickets ouverts</small><strong id="metricTickets">—</strong></div>
+          <div class="metric"><small>Avertissements</small><strong id="metricWarnings">—</strong></div>
+        </div>
+        <section class="panel">
+          <header class="panel-head"><div><h2 id="tabTitle">Configuration générale</h2><p id="tabDescription">Réglages essentiels du serveur.</p></div></header>
+          <form id="settingsForm"><div class="fields" id="fields"></div><div class="savebar"><span class="save-status" id="saveStatus">Aucune modification</span><button class="btn primary" type="submit">Enregistrer</button></div></form>
+        </section>
+      </div>
+      <div id="emptyState" class="panel empty">Sélectionnez un serveur pour commencer. Les serveurs sans SentriX proposent directement le bouton d'invitation.</div>
+    </main>
+  </section>
 
-  <div class="bottom-grid">
-    <div class="panel">
-      <div class="panel-title">📈 Commandes exécutées — dernières 24h</div>
-      <div class="bars" id="hourlyBars"></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">🥇 Top commandes (24h)</div>
-      <div class="list" id="topCommandsList"><div class="row"><span class="rank">—</span></div></div>
-    </div>
-  </div>
-
-  <div class="bottom-grid" style="margin-top:16px">
-    <div class="panel" style="grid-column: 1 / -1">
-      <div class="panel-title">🌍 Plus gros serveurs</div>
-      <div class="list" id="topGuildsList"></div>
-    </div>
-  </div>
-</main>
-
-<footer>SentriX — dashboard généré côté bot • données rafraîchies automatiquement</footer>
-
-<script>
-const params = new URLSearchParams(window.location.search);
-const token = params.get("token");
-
-function fmtDuration(sec){
-  const d = Math.floor(sec/86400), h = Math.floor((sec%86400)/3600), m = Math.floor((sec%3600)/60);
-  if(d > 0) return `${d}j ${h}h`;
-  if(h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
-async function refresh(){
-  try{
-    const url = token ? `/api/stats?token=${encodeURIComponent(token)}` : "/api/stats";
-    const res = await fetch(url);
-    if(!res.ok){ document.getElementById("refreshLabel").textContent = "Accès refusé"; return; }
-    const data = await res.json();
-
-    document.getElementById("botName").textContent = data.bot_name || "SentriX";
-    if(data.avatar_url){
-      document.getElementById("avatarWrap").innerHTML = `<img src="${data.avatar_url}">`;
-    }
-    document.getElementById("guildCount").textContent = data.guilds.toLocaleString("fr-FR");
-    document.getElementById("memberSub").textContent = `${data.members.toLocaleString("fr-FR")} membres au total`;
-    document.getElementById("latency").textContent = `${data.latency_ms} ms`;
-    document.getElementById("uptime").textContent = `Uptime ${fmtDuration(data.uptime_seconds)}`;
-    document.getElementById("cmd24h").textContent = data.commands_24h.toLocaleString("fr-FR");
-    document.getElementById("cmdTotal").textContent = `${data.commands_total.toLocaleString("fr-FR")} au total`;
-
-    if(data.top_commands.length){
-      document.getElementById("topCmdName").textContent = data.top_commands[0].name;
-      document.getElementById("topCmdCount").textContent = `${data.top_commands[0].count} utilisations`;
-    } else {
-      document.getElementById("topCmdName").textContent = "Aucune";
-      document.getElementById("topCmdCount").textContent = "—";
-    }
-
-    const max = Math.max(1, ...data.hourly);
-    document.getElementById("hourlyBars").innerHTML = data.hourly.map(v =>
-      `<div class="bar" style="height:${Math.max(2, Math.round((v/max)*100))}%" title="${v}"></div>`
-    ).join("");
-
-    const list = data.top_commands.length ? data.top_commands.map((c,i) =>
-      `<div class="row"><span><span class="rank">${i+1}.</span>${c.name}</span><span class="count">${c.count}</span></div>`
-    ).join("") : `<div class="row"><span class="rank">—</span><span style="color:var(--muted)">Aucune commande enregistrée sur 24h</span></div>`;
-    document.getElementById("topCommandsList").innerHTML = list;
-
-    const guildList = data.top_guilds.length ? data.top_guilds.map((g,i) =>
-      `<div class="row"><span><span class="rank">${i+1}.</span>${g.name}</span><span class="count">${g.members.toLocaleString("fr-FR")}</span></div>`
-    ).join("") : `<div class="row"><span style="color:var(--muted)">Aucun serveur</span></div>`;
-    document.getElementById("topGuildsList").innerHTML = guildList;
-
-    document.getElementById("refreshLabel").textContent = "Actualisation toutes les 15s";
-  } catch(e){
-    document.getElementById("refreshLabel").textContent = "Connexion perdue, nouvelle tentative...";
-  }
-}
-
-refresh();
-setInterval(refresh, 15000);
-</script>
+  <div id="toast" class="toast hidden"></div>
+  <script>
+    const state={publicData:null,user:null,csrf:null,guilds:[],guildData:null,guildId:null,tab:"general",dirty:false};
+    const tabs={
+      general:{title:"Configuration générale",description:"Préfixe, niveau de sécurité et sanctions automatiques.",fields:[
+        {key:"prefix",label:"Préfixe des commandes",type:"text",hint:"Entre 1 et 5 caractères. Le préfixe par défaut est +."},
+        {key:"security_level",label:"Niveau de sécurité",type:"choice",options:[["faible","Faible"],["moyen","Moyen"],["eleve","Élevé"]]},
+        {key:"warn_ban_threshold",label:"Bannissement après avertissements",type:"number",min:1,max:20,hint:"Nombre d'avertissements avant la sanction automatique."}
+      ]},
+      security:{title:"Sécurité et AutoMod",description:"Filtres appliqués automatiquement aux nouveaux messages et événements.",automod:true,fields:[
+        ["antispam","Anti-spam","Limite les messages envoyés trop rapidement."],["antilink","Bloquer les liens","Interdit les liens web non autorisés."],["antiinvite","Bloquer les invitations","Interdit les invitations Discord."],["antimention","Anti-mentions","Bloque les mentions massives."],["anticaps","Anti-majuscules","Limite les messages presque entièrement en majuscules."],["antiemoji","Anti-spam emojis","Limite les messages remplis d'emojis."],["antiraid","Anti-raid","Réagit aux arrivées massives de comptes."],["antibot","Anti-bot","Contrôle l'arrivée de nouveaux bots."],["antiaccount","Comptes récents","Surveille les comptes trop récents."],["antiscam","Anti-arnaque","Détecte les liens et messages suspects."],["antinuke","Anti-nuke","Protège les rôles, salons et bannissements massifs."],["escalation","Sanctions progressives","Augmente la sanction lors des récidives."]
+      ].map(x=>({key:x[0],label:x[1],hint:x[2],type:"switch"}))},
+      logs:{title:"Système de logs",description:"Choisissez un salon différent pour chaque type d'événement.",fields:[
+        ["log_messages","Messages"],["log_members","Membres"],["log_voice","Salons vocaux"],["log_roles","Rôles"],["log_server","Serveur"],["log_automod","AutoMod"],["log_moderation","Modération"],["log_channel","Salon de logs général"]
+      ].map(x=>({key:x[0],label:x[1],type:"channel"}))},
+      welcome:{title:"Accueil des membres",description:"Messages d'arrivée, de départ et rôle automatique.",fields:[
+        {key:"welcome_channel",label:"Salon de bienvenue",type:"channel"},{key:"welcome_message",label:"Message de bienvenue",type:"textarea",hint:"Variables disponibles : {member} et {server}."},{key:"goodbye_channel",label:"Salon de départ",type:"channel"},{key:"goodbye_message",label:"Message de départ",type:"textarea",hint:"Variables disponibles : {member} et {server}."},{key:"autorole",label:"Rôle automatique",type:"role"}
+      ]},
+      levels:{title:"Niveaux et expérience",description:"Configurez la progression et les annonces de niveau.",fields:[
+        {key:"xp_multiplier",label:"Multiplicateur d'XP",type:"number",min:.1,max:5,step:.1},{key:"level_channel",label:"Salon des niveaux",type:"channel"},{key:"level_message",label:"Message de passage de niveau",type:"textarea",hint:"Le membre est mentionné automatiquement lors du passage de niveau."}
+      ]},
+      tickets:{title:"Tickets de support",description:"Réglages généraux appliqués aux tickets configurés.",fields:[
+        {key:"ticket_category",label:"Catégorie des tickets",type:"category"},{key:"ticket_log_channel",label:"Salon des logs tickets",type:"channel"},{key:"ticket_delete_delay",label:"Délai avant suppression (secondes)",type:"number",min:0,max:3600},{key:"ticket_transcript_dm",label:"Envoyer le transcript en message privé",type:"switch",hint:"Envoie une copie au membre lors de la fermeture."},{key:"ticket_rating_enabled",label:"Activer l'évaluation",type:"switch",hint:"Propose au membre de noter le support."}
+      ]},
+      ai:{title:"Intelligence artificielle",description:"Modèle, limites, mémoire et journalisation des réponses de SentriX.",ai:true,fields:[
+        {key:"enabled",label:"Activer l'IA",type:"switch",hint:"Autorise les membres à utiliser les fonctions IA."},
+        {key:"default_model",label:"Modèle par défaut",type:"choice",options:[["terra","Terra — rapide et équilibré"],["sol","Sol — raisonnement avancé"]]},
+        {key:"reasoning_effort",label:"Niveau de raisonnement",type:"choice",options:[["none","Aucun"],["low","Faible"],["medium","Moyen"],["high","Élevé"],["xhigh","Très élevé"],["max","Maximum"]]},
+        {key:"cooldown_seconds",label:"Cooldown par membre (secondes)",type:"number",min:0,max:3600},
+        {key:"per_minute_limit",label:"Limite par minute",type:"number",min:1,max:100},
+        {key:"daily_limit",label:"Limite quotidienne par membre",type:"number",min:1,max:10000},
+        {key:"max_question_length",label:"Longueur maximale d'une question",type:"number",min:50,max:10000},
+        {key:"memory_enabled",label:"Mémoire de conversation",type:"switch",hint:"Conserve temporairement le contexte séparément pour chaque membre et salon."},
+        {key:"memory_minutes",label:"Durée de la mémoire (minutes)",type:"number",min:1,max:1440},
+        {key:"logs_enabled",label:"Journaliser l'utilisation",type:"switch",hint:"Enregistre uniquement les compteurs d'utilisation, pas les conversations."}
+      ]},
+      roles:{title:"Rôles et salons",description:"Reliez les fonctions du bot aux éléments déjà présents sur le serveur.",fields:[
+        ["mod_role","Rôle modérateur","role"],["admin_role","Rôle administrateur","role"],["mute_role","Rôle muet","role"],["warn_role","Rôle d'avertissement","role"],["member_role","Rôle membre","role"],["booster_role","Rôle booster","role"],["verification_role","Rôle de vérification","role"],["rules_channel","Salon du règlement","channel"],["verification_channel","Salon de vérification","channel"],["bot_commands_channel","Salon des commandes","channel"],["suggest_channel","Salon des suggestions","channel"],["announce_channel","Salon des annonces","channel"],["giveaway_channel","Salon des giveaways","channel"],["report_channel","Salon des signalements","channel"],["error_channel","Salon des erreurs","channel"]
+      ].map(x=>({key:x[0],label:x[1],type:x[2]}))}
+    };
+    const $=id=>document.getElementById(id); const esc=v=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+    const number=v=>Number(v||0).toLocaleString("fr-FR");
+    function duration(sec){const d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60);return d?`${d} j ${h} h`:h?`${h} h ${m} min`:`${m} min`;}
+    function toast(message,bad=false){const el=$("toast");el.textContent=message;el.className=`toast${bad?" bad":""}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.add("hidden"),4200);}
+    async function json(url,options={}){const res=await fetch(url,options);let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||"Une erreur est survenue.");return data;}
+    async function loadPublic(){state.publicData=await json("/api/public");const d=state.publicData;$("publicGuilds").textContent=number(d.guilds);$("publicMembers").textContent=number(d.members);$("publicLatency").textContent=d.latency_ms===null?"—":`${d.latency_ms} ms`;$("publicUptime").textContent=duration(d.uptime_seconds);$("publicStatus").textContent=d.online?"SentriX est opérationnel":"Connexion Discord en cours";$("publicDot").style.background=d.online?"var(--ok)":"var(--warn)";for(const id of ["inviteButton","appInvite"]){$(id).href=d.invite_url||"#";}if(d.avatar_url){for(const id of ["publicLogo","appLogo"]){$(id).innerHTML=`<img src="${esc(d.avatar_url)}" alt="">`;}}if(!d.oauth_ready){$("loginButton").classList.add("hidden");$("authMessage").textContent="La connexion Discord sera disponible après l'ajout du secret OAuth dans Railway.";}const auth=new URLSearchParams(location.search).get("auth");if(auth)$("authMessage").textContent=auth==="missing"?"La connexion Discord n'est pas encore configurée.":"La connexion Discord a été annulée ou a échoué.";}
+    async function loadSession(){try{const me=await json("/api/me");state.user=me.user;state.csrf=me.csrf;$("landing").classList.add("hidden");$("dashboard").classList.remove("hidden");$("userName").textContent=me.user.username;if(me.user.avatar_url)$("userAvatar").innerHTML=`<img class="avatar" src="${esc(me.user.avatar_url)}" alt="">`;await loadGuilds();}catch{if(location.pathname==="/app")history.replaceState({},"","/");}}
+    async function loadGuilds(){const data=await json("/api/guilds");state.guilds=data.guilds;const select=$("serverSelect");select.innerHTML='<option value="">Choisissez un serveur</option>'+data.guilds.map(g=>`<option value="${g.installed?esc(g.id):"invite:"+esc(g.id)}">${esc(g.name)}${g.installed?"":" — ajouter SentriX"}</option>`).join("");const first=data.guilds.find(g=>g.installed);if(first){select.value=first.id;await selectGuild(first.id);}}
+    async function selectGuild(value){if(!value){state.guildId=null;$("serverContent").classList.add("hidden");$("emptyState").classList.remove("hidden");return;}if(String(value).startsWith("invite:")){const id=String(value).slice(7),g=state.guilds.find(x=>x.id===id);if(g?.invite_url)window.open(g.invite_url,"_blank","noopener");$("serverSelect").value=state.guildId||"";return;}state.guildId=value;$("serverContent").classList.add("loading");try{state.guildData=await json(`/api/guilds/${value}`);const d=state.guildData;$("pageTitle").textContent=d.guild.name;$("pageSubtitle").textContent=`${number(d.guild.members)} membres · ${d.guild.channels_count} salons · ${d.guild.roles_count} rôles`;$("metricMembers").textContent=number(d.guild.members);$("metricCommands").textContent=number(d.metrics.commands_24h);$("metricTickets").textContent=number(d.metrics.open_tickets);$("metricWarnings").textContent=number(d.metrics.warnings);$("emptyState").classList.add("hidden");$("serverContent").classList.remove("hidden");renderTab();}catch(e){toast(e.message,true);}finally{$("serverContent").classList.remove("loading");}}
+    function optionList(type,current){const list=type==="role"?state.guildData.roles:state.guildData.channels.filter(c=>type!=="category"||c.type==="category");return '<option value="">Non configuré</option>'+list.map(item=>`<option value="${esc(item.id)}" ${String(current||"")===String(item.id)?"selected":""}>${esc(item.name)}${type!=="role"?` — ${esc(item.type)}`:""}</option>`).join("");}
+    function fieldHTML(field){const source=state.tab==="security"?state.guildData.automod:state.tab==="ai"?state.guildData.ai:state.guildData.settings;const value=source[field.key];const hint=field.hint?`<div class="hint">${esc(field.hint)}</div>`:"";if(field.type==="switch")return `<label class="switch full"><div><b>${esc(field.label)}</b><span>${esc(field.hint||"Activation immédiate sur ce serveur.")}</span></div><input data-key="${esc(field.key)}" type="checkbox" ${Number(value)?"checked":""}></label>`;let control="";if(field.type==="choice")control=`<select class="select" data-key="${esc(field.key)}">${field.options.map(o=>`<option value="${esc(o[0])}" ${value===o[0]?"selected":""}>${esc(o[1])}</option>`).join("")}</select>`;else if(["role","channel","category"].includes(field.type))control=`<select class="select" data-key="${esc(field.key)}">${optionList(field.type,value)}</select>`;else if(field.type==="textarea")control=`<textarea data-key="${esc(field.key)}">${esc(value||"")}</textarea>`;else control=`<input data-key="${esc(field.key)}" type="${field.type}" value="${esc(value??"")}" ${field.min!==undefined?`min="${field.min}"`:""} ${field.max!==undefined?`max="${field.max}"`:""} ${field.step!==undefined?`step="${field.step}"`:""}>`;return `<div class="field ${field.type==="textarea"?"full":""}"><label>${esc(field.label)}</label>${control}${hint}</div>`;}
+    function renderTab(){if(!state.guildData)return;const tab=tabs[state.tab];$("tabTitle").textContent=tab.title;$("tabDescription").textContent=tab.description;$("fields").innerHTML=tab.fields.map(fieldHTML).join("");$("saveStatus").textContent="Aucune modification";state.dirty=false;$("fields").querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",()=>{state.dirty=true;$("saveStatus").textContent="Modifications non enregistrées";}));}
+    async function save(event){event.preventDefault();if(!state.guildId||!state.guildData)return;const tab=tabs[state.tab],values={};$("fields").querySelectorAll("[data-key]").forEach(el=>{let value=el.type==="checkbox"?el.checked:el.value;if(el.type==="number"&&value!=="")value=Number(value);values[el.dataset.key]=value;});const body=tab.automod?{automod:values}:tab.ai?{ai:values}:{settings:values};$("settingsForm").classList.add("loading");try{const result=await json(`/api/guilds/${state.guildId}/settings`,{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:JSON.stringify(body)});toast(result.message);state.dirty=false;$("saveStatus").textContent="Configuration enregistrée";await selectGuild(state.guildId);}catch(e){toast(e.message,true);$("saveStatus").textContent="Enregistrement impossible";}finally{$("settingsForm").classList.remove("loading");}}
+    $("serverSelect").addEventListener("change",e=>selectGuild(e.target.value));$("settingsForm").addEventListener("submit",save);$("navigation").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(!button)return;state.tab=button.dataset.tab;$("navigation").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===button));renderTab();});$("logoutButton").addEventListener("click",async()=>{try{await json("/logout",{method:"POST",headers:{"X-CSRF-Token":state.csrf}});}finally{location.href="/";}});window.addEventListener("beforeunload",e=>{if(state.dirty){e.preventDefault();e.returnValue="";}});
+    Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));
+  </script>
 </body>
 </html>"""
