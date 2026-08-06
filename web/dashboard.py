@@ -23,7 +23,7 @@ import discord
 from aiohttp import BasicAuth, ClientSession, web
 
 import config
-from database.db import PRIMARY_CREATOR_ID, now
+from database.db import now
 
 logger = logging.getLogger("bot.dashboard")
 
@@ -34,7 +34,6 @@ SESSION_COOKIE = "sentrix_session"
 OAUTH_STATE_COOKIE = "sentrix_oauth_state"
 SESSION_TTL = 12 * 60 * 60
 OAUTH_STATE_TTL = 10 * 60
-MANAGE_GUILD = 1 << 5
 ADMINISTRATOR = 1 << 3
 
 AUTOMOD_FIELDS = {
@@ -172,28 +171,28 @@ def _require_csrf(request: web.Request, session: dict) -> web.Response | None:
     return None
 
 
+async def _administrator_member(guild: discord.Guild, user_id: int) -> discord.Member | None:
+    """Vérifie les permissions actuelles, sans se fier uniquement à la session OAuth."""
+    member = guild.get_member(user_id)
+    if member is None:
+        try:
+            member = await guild.fetch_member(user_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return None
+    return member if member.guild_permissions.administrator else None
+
+
 async def _manageable_guild(request: web.Request, guild_id: int):
     session, error = _require_session(request)
     if error:
         return None, None, error
     guild = request.app["bot"].get_guild(guild_id)
     if guild is None:
-        return session, None, _json_error("SentriX n'est pas installé sur ce serveur.", 404)
+        return session, None, _json_error("Serveur introuvable ou accès refusé.", 404)
 
     user_id = int(session["user"]["id"])
-    if user_id == PRIMARY_CREATOR_ID:
-        return session, guild, None
-
-    member = guild.get_member(user_id)
-    if member is None:
-        try:
-            member = await guild.fetch_member(user_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            member = None
-    if member is None or not (member.guild_permissions.administrator or member.guild_permissions.manage_guild):
-        return session, None, _json_error(
-            "Vous devez avoir la permission Gérer le serveur pour modifier cette configuration.", 403
-        )
+    if await _administrator_member(guild, user_id) is None:
+        return session, None, _json_error("Serveur introuvable ou accès refusé.", 404)
     return session, guild, None
 
 
@@ -316,7 +315,7 @@ async def handle_callback(request: web.Request):
     manageable = []
     for guild in oauth_guilds:
         permissions = int(guild.get("permissions", "0"))
-        if int(user["id"]) == PRIMARY_CREATOR_ID or permissions & (ADMINISTRATOR | MANAGE_GUILD):
+        if bool(guild.get("owner")) or permissions & ADMINISTRATOR:
             manageable.append({
                 "id": str(guild["id"]),
                 "name": guild["name"],
@@ -373,10 +372,14 @@ async def handle_guilds(request: web.Request):
     if error:
         return error
     bot = request.app["bot"]
+    user_id = int(session["user"]["id"])
     guilds = []
     for item in session["guilds"]:
         guild_id = int(item["id"])
-        installed = bot.get_guild(guild_id) is not None
+        installed_guild = bot.get_guild(guild_id)
+        installed = installed_guild is not None
+        if installed and await _administrator_member(installed_guild, user_id) is None:
+            continue
         guilds.append({
             **item,
             "installed": installed,
@@ -706,6 +709,226 @@ async def handle_delete_social_notification(request: web.Request):
     return web.json_response({"ok": True, "message": "Notification supprimée."})
 
 
+SANCTION_FILTERS = {
+    "all": ("ban", "tempban", "unban", "mute", "unmute", "warn", "clearwarnings"),
+    "ban": ("ban", "tempban", "unban"),
+    "mute": ("mute", "unmute"),
+    "warn": ("warn", "clearwarnings"),
+}
+
+
+def _dashboard_user(bot, guild: discord.Guild, user_id: int) -> dict:
+    user = guild.get_member(user_id) or bot.get_user(user_id)
+    if user is None:
+        return {"id": str(user_id), "name": "Utilisateur inconnu", "avatar_url": None}
+    avatar = getattr(user, "display_avatar", None)
+    return {
+        "id": str(user_id),
+        "name": getattr(user, "display_name", None) or getattr(user, "name", str(user_id)),
+        "avatar_url": str(avatar.url) if avatar else None,
+    }
+
+
+async def handle_sanctions(request: web.Request):
+    try:
+        guild_id = int(request.match_info["guild_id"])
+        limit = min(max(int(request.query.get("limit", "50")), 10), 100)
+        offset = max(int(request.query.get("offset", "0")), 0)
+    except ValueError:
+        return _json_error("Paramètres de recherche invalides.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+
+    sanction_filter = request.query.get("filter", "all").strip().lower()
+    actions = SANCTION_FILTERS.get(sanction_filter)
+    if actions is None:
+        return _json_error("Filtre de sanction invalide.", 400)
+    search = request.query.get("user_id", "").strip()
+    if search and (not search.isdigit() or len(search) > 24):
+        return _json_error("L'identifiant Discord recherché est invalide.", 400)
+
+    placeholders = ",".join("?" for _ in actions)
+    where = f"guild_id = ? AND action IN ({placeholders})"
+    params: list = [guild_id, *actions]
+    if search:
+        where += " AND user_id = ?"
+        params.append(int(search))
+
+    db = request.app["bot"].db
+    total_row = await db.fetchone(f"SELECT COUNT(*) AS n FROM sanctions WHERE {where}", tuple(params))
+    total = int(total_row["n"] if total_row else 0)
+    rows = await db.fetchall(
+        f"""
+        SELECT id, case_number, user_id, moderator_id, action, reason,
+               duration_seconds, created_at
+        FROM sanctions
+        WHERE {where}
+        ORDER BY case_number DESC, id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (*params, limit, offset),
+    )
+
+    user_ids = sorted({int(row["user_id"]) for row in rows})
+    latest_bans: dict[int, str] = {}
+    latest_mutes: dict[int, dict] = {}
+    warn_counts: dict[int, int] = {}
+    if user_ids:
+        user_placeholders = ",".join("?" for _ in user_ids)
+        status_rows = await db.fetchall(
+            f"""
+            SELECT user_id, action, duration_seconds, created_at
+            FROM sanctions
+            WHERE guild_id = ? AND user_id IN ({user_placeholders})
+              AND action IN ('ban', 'tempban', 'unban', 'mute', 'unmute')
+            ORDER BY case_number DESC, id DESC
+            """,
+            (guild_id, *user_ids),
+        )
+        for row in status_rows:
+            user_id = int(row["user_id"])
+            action = row["action"]
+            if action in {"ban", "tempban", "unban"} and user_id not in latest_bans:
+                latest_bans[user_id] = action
+            if action in {"mute", "unmute"} and user_id not in latest_mutes:
+                latest_mutes[user_id] = dict(row)
+        warning_rows = await db.fetchall(
+            f"""
+            SELECT user_id, COUNT(*) AS n
+            FROM warnings
+            WHERE guild_id = ? AND user_id IN ({user_placeholders})
+            GROUP BY user_id
+            """,
+            (guild_id, *user_ids),
+        )
+        warn_counts = {int(row["user_id"]): int(row["n"]) for row in warning_rows}
+
+    current_time = now()
+    bot = request.app["bot"]
+    sanctions = []
+    for row in rows:
+        item = dict(row)
+        user_id = int(item["user_id"])
+        mute_state = latest_mutes.get(user_id)
+        muted = False
+        if mute_state and mute_state["action"] == "mute":
+            duration = mute_state["duration_seconds"]
+            muted = duration is None or int(mute_state["created_at"]) + int(duration) > current_time
+        item["user"] = _dashboard_user(bot, guild, user_id)
+        moderator_id = int(item["moderator_id"] or 0)
+        item["moderator"] = _dashboard_user(bot, guild, moderator_id)
+        item["current_banned"] = latest_bans.get(user_id) in {"ban", "tempban"}
+        item["current_muted"] = muted
+        item["warn_count"] = warn_counts.get(user_id, 0)
+        sanctions.append(item)
+
+    next_offset = offset + len(sanctions)
+    return web.json_response({
+        "ok": True,
+        "sanctions": sanctions,
+        "total": total,
+        "next_offset": next_offset if next_offset < total else None,
+        "filter": sanction_filter,
+    })
+
+
+async def handle_sanction_action(request: web.Request):
+    try:
+        guild_id = int(request.match_info["guild_id"])
+        user_id = int(request.match_info["user_id"])
+    except ValueError:
+        return _json_error("Identifiant Discord invalide.", 400)
+    action = request.match_info["action"].strip().lower()
+    if action not in {"unban", "unmute", "clear-warnings"}:
+        return _json_error("Action de modération invalide.", 400)
+
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+    csrf_error = _require_csrf(request, session)
+    if csrf_error:
+        return csrf_error
+
+    rate_key = (request.cookies.get(SESSION_COOKIE), guild_id, "sanction-action")
+    if time.time() - request.app["write_limits"].get(rate_key, 0) < 1.5:
+        return _json_error("Attendez un instant avant d'effectuer une autre action.", 429)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    reason = str(payload.get("reason") or "Action effectuée depuis le dashboard SentriX").strip()
+    if not reason or len(reason) > 500:
+        return _json_error("La raison doit contenir entre 1 et 500 caractères.", 400)
+
+    bot = request.app["bot"]
+    db = bot.db
+    moderator_id = int(session["user"]["id"])
+    audit_reason = f"{session['user']['username']} ({moderator_id}) via dashboard : {reason}"
+    bot_member = guild.me
+    try:
+        if action == "unban":
+            if bot_member is None or not bot_member.guild_permissions.ban_members:
+                return _json_error("SentriX n'a pas la permission Bannir des membres sur ce serveur.", 403)
+            target = discord.Object(id=user_id)
+            await guild.fetch_ban(target)
+            await guild.unban(target, reason=audit_reason)
+            await db.execute(
+                "DELETE FROM tempactions WHERE guild_id = ? AND user_id = ? AND action = 'ban'",
+                (guild_id, user_id),
+            )
+            await db.record_sanction(guild_id, user_id, moderator_id, "unban", reason)
+            message = f"L'utilisateur {user_id} a été débanni."
+        elif action == "unmute":
+            if bot_member is None or not bot_member.guild_permissions.moderate_members:
+                return _json_error("SentriX n'a pas la permission Exclure temporairement des membres.", 403)
+            member = guild.get_member(user_id)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(user_id)
+                except discord.NotFound:
+                    return _json_error("Ce membre n'est plus présent sur le serveur.", 404)
+            timed_out_until = getattr(member, "timed_out_until", None)
+            if timed_out_until is None or timed_out_until <= discord.utils.utcnow():
+                return _json_error("Ce membre n'est pas actuellement mute.", 409)
+            if member == guild.owner or member.top_role >= bot_member.top_role:
+                return _json_error("Le rôle de SentriX doit être placé au-dessus de celui du membre.", 403)
+            await member.timeout(None, reason=audit_reason)
+            await db.record_sanction(guild_id, user_id, moderator_id, "unmute", reason)
+            message = f"Le mute de l'utilisateur {user_id} a été retiré."
+        else:
+            count_row = await db.fetchone(
+                "SELECT COUNT(*) AS n FROM warnings WHERE guild_id = ? AND user_id = ?",
+                (guild_id, user_id),
+            )
+            count = int(count_row["n"] if count_row else 0)
+            if count == 0:
+                return _json_error("Cet utilisateur n'a aucun avertissement actif.", 409)
+            await db.execute(
+                "DELETE FROM warnings WHERE guild_id = ? AND user_id = ?",
+                (guild_id, user_id),
+            )
+            await db.record_sanction(
+                guild_id, user_id, moderator_id, "clearwarnings",
+                f"{reason} — {count} avertissement(s) retiré(s)",
+            )
+            message = f"{count} avertissement(s) ont été retirés pour l'utilisateur {user_id}."
+    except discord.NotFound:
+        return _json_error("Cette sanction n'est plus active ou l'utilisateur est introuvable.", 404)
+    except discord.Forbidden:
+        return _json_error("Discord a refusé l'action : vérifiez les permissions et la hiérarchie de SentriX.", 403)
+    except discord.HTTPException:
+        logger.exception("Action de sanction impossible depuis le dashboard.")
+        return _json_error("Discord n'a pas pu appliquer cette action. Réessayez dans un instant.", 502)
+
+    request.app["write_limits"][rate_key] = time.time()
+    logger.info(
+        "Dashboard : %s (%s) a effectué %s sur %s dans %s (%s).",
+        session["user"]["username"], moderator_id, action, user_id, guild.name, guild.id,
+    )
+    return web.json_response({"ok": True, "message": message})
+
+
 async def handle_update_guild(request: web.Request):
     try:
         guild_id = int(request.match_info["guild_id"])
@@ -780,6 +1003,8 @@ async def security_headers(request: web.Request, handler):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.path == "/app" or request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "private, no-store"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' https://cdn.discordapp.com data:; "
         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
@@ -809,6 +1034,11 @@ def build_app(bot) -> web.Application:
     app.router.add_delete(
         "/api/guilds/{guild_id}/notifications/{notification_id}",
         handle_delete_social_notification,
+    )
+    app.router.add_get("/api/guilds/{guild_id}/sanctions", handle_sanctions)
+    app.router.add_post(
+        "/api/guilds/{guild_id}/sanctions/{user_id}/{action}",
+        handle_sanction_action,
     )
     return app
 
@@ -851,8 +1081,9 @@ INDEX_HTML = r"""<!doctype html>
     .hero{max-width:1180px;margin:0 auto;padding:90px 28px 70px;display:grid;grid-template-columns:1.15fr .85fr;gap:60px;align-items:center}.eyebrow{display:inline-flex;padding:7px 11px;border:1px solid #6e5dff55;background:#6e5dff14;border-radius:999px;color:var(--brand2);font-weight:700;font-size:12px;letter-spacing:.04em;text-transform:uppercase}.hero h1{font-size:clamp(42px,7vw,78px);line-height:.98;letter-spacing:-.055em;margin:20px 0 22px;max-width:800px}.hero h1 span{color:var(--brand2)}.hero p{font-size:18px;line-height:1.7;color:var(--muted);max-width:680px;margin:0}.actions{display:flex;gap:12px;margin-top:32px;flex-wrap:wrap}.preview{background:linear-gradient(160deg,#171c2c,#0e111c);border:1px solid var(--line);border-radius:24px;padding:18px;box-shadow:var(--shadow);transform:rotate(1deg)}.preview-head{display:flex;align-items:center;justify-content:space-between;padding:8px 6px 18px}.preview-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.stat{padding:18px;background:#0d101a;border:1px solid #20263a;border-radius:15px}.stat small{color:var(--muted);display:block;margin-bottom:8px}.stat strong{font-size:26px}.features{max-width:1180px;margin:0 auto;padding:20px 28px 90px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.feature{padding:26px;background:#101421;border:1px solid var(--line);border-radius:18px}.feature b{display:block;font-size:17px;margin-bottom:9px}.feature p{color:var(--muted);line-height:1.6;margin:0}
     .shell{min-height:100vh;display:grid;grid-template-columns:270px 1fr}.side{border-right:1px solid var(--line);background:#0c0f18;padding:22px;position:sticky;top:0;height:100vh;overflow:auto}.side .brand{margin-bottom:26px}.user{display:flex;gap:11px;align-items:center;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:22px}.avatar{width:38px;height:38px;border-radius:12px;background:#272d43;object-fit:cover}.user b,.user span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.user span{font-size:12px;color:var(--muted);margin-top:2px}.nav-label{font-size:11px;color:#6f7891;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:20px 8px 8px}.nav button{width:100%;border:0;background:transparent;color:var(--muted);padding:11px 12px;text-align:left;border-radius:10px;cursor:pointer;margin:2px 0;font-weight:650}.nav button:hover,.nav button.active{background:#7c6cff18;color:var(--text)}.side-bottom{margin-top:24px;display:grid;gap:8px}.workspace{padding:34px 4vw 70px;min-width:0}.workspace-head{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:28px}.workspace-head h1{margin:0 0 6px;font-size:30px;letter-spacing:-.03em}.workspace-head p{margin:0;color:var(--muted)}.server-select{min-width:260px}.select,input,textarea{width:100%;background:#0c101a;border:1px solid var(--line);color:var(--text);border-radius:11px;padding:11px 12px;outline:none}.select:focus,input:focus,textarea:focus{border-color:var(--brand)}textarea{resize:vertical;min-height:105px}.overview{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}.metric{background:var(--panel);border:1px solid var(--line);padding:18px;border-radius:15px}.metric small{display:block;color:var(--muted);margin-bottom:8px}.metric strong{font-size:24px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden}.panel-head{padding:20px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:20px;align-items:center}.panel-head h2{margin:0 0 5px;font-size:18px}.panel-head p{margin:0;color:var(--muted);font-size:13px}.fields{padding:22px;display:grid;grid-template-columns:1fr 1fr;gap:18px}.field label{display:block;font-weight:700;margin-bottom:7px}.field .hint{color:var(--muted);font-size:12px;margin-top:7px;line-height:1.45}.field.full{grid-column:1/-1}.switch{display:flex;align-items:center;justify-content:space-between;padding:15px;background:#0d111c;border:1px solid #222940;border-radius:13px}.switch div b{display:block}.switch div span{color:var(--muted);font-size:12px}.switch input{appearance:none;width:42px;height:24px;border:0;border-radius:99px;background:#30374c;padding:0;position:relative;cursor:pointer}.switch input:after{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:white;border-radius:50%;transition:.2s}.switch input:checked{background:var(--brand)}.switch input:checked:after{left:21px}.savebar{display:flex;align-items:center;justify-content:flex-end;gap:14px;padding:16px 22px;border-top:1px solid var(--line);background:#0e121d}.save-status{color:var(--muted);font-size:13px}.empty{padding:50px 25px;text-align:center;color:var(--muted)}.toast{position:fixed;right:25px;bottom:25px;max-width:390px;background:#171d2c;border:1px solid #343d59;padding:14px 17px;border-radius:13px;box-shadow:var(--shadow);z-index:50}.toast.bad{border-color:#78354a}.loading{opacity:.55;pointer-events:none}
     .notification-builder{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:18px}.notification-list{grid-column:1/-1;display:grid;gap:10px;margin-top:4px}.notification-list h3{margin:8px 0 2px}.notification-item{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px;background:#0d111c;border:1px solid #222940;border-radius:13px}.notification-item b,.notification-item span{display:block}.notification-item span{color:var(--muted);font-size:12px;margin-top:4px;overflow-wrap:anywhere}.notification-empty{padding:18px;border:1px dashed #343c58;border-radius:13px;color:var(--muted);text-align:center}
+    .sanctions-shell{grid-column:1/-1;display:grid;gap:16px}.sanction-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) 190px auto;gap:10px}.sanction-summary{color:var(--muted);font-size:13px}.sanction-list{display:grid;gap:12px}.sanction-card{padding:17px;background:#0d111c;border:1px solid #222940;border-radius:14px}.sanction-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.sanction-user{display:flex;align-items:center;gap:11px;min-width:0}.sanction-user img,.sanction-avatar{width:42px;height:42px;border-radius:12px;background:#222940;object-fit:cover;display:grid;place-items:center;font-weight:800}.sanction-user b,.sanction-user span{display:block}.sanction-user span{color:var(--muted);font-size:12px;margin-top:3px;overflow-wrap:anywhere}.sanction-badge{padding:6px 9px;border-radius:999px;background:#282f46;color:#c8cee0;font-size:11px;font-weight:800;white-space:nowrap}.sanction-badge.ban{background:#451c28;color:#ff9aaa}.sanction-badge.mute{background:#49391a;color:#ffd98c}.sanction-badge.warn{background:#3d321a;color:#f3c96d}.sanction-badge.positive{background:#153b31;color:#7ce2bd}.sanction-body{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;margin-top:14px}.sanction-body small{display:block;color:var(--muted);margin-bottom:5px}.sanction-body p{margin:0;line-height:1.5;overflow-wrap:anywhere}.sanction-state{margin-top:12px;color:var(--muted);font-size:12px}.sanction-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px;padding-top:13px;border-top:1px solid #222940}.sanction-more{justify-self:center}
     @media(max-width:980px){.hero{grid-template-columns:1fr}.preview{transform:none}.features{grid-template-columns:1fr}.shell{grid-template-columns:1fr}.side{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line)}.nav{display:flex;overflow:auto}.nav button{min-width:max-content}.side-bottom{display:none}.overview{grid-template-columns:1fr 1fr}.workspace-head{align-items:stretch;flex-direction:column}.server-select{min-width:0}.fields{grid-template-columns:1fr}.field.full{grid-column:auto}}
-    @media(max-width:560px){.top{padding:0 18px}.hero{padding:60px 20px}.features{padding:10px 20px 60px}.hero h1{font-size:45px}.overview{grid-template-columns:1fr}.preview-grid{grid-template-columns:1fr}.workspace{padding:25px 16px}.fields{padding:16px}.panel-head{padding:17px}.status span{display:none}}
+    @media(max-width:560px){.sanction-toolbar{grid-template-columns:1fr}.sanction-head,.sanction-body{grid-template-columns:1fr;display:grid}.top{padding:0 18px}.hero{padding:60px 20px}.features{padding:10px 20px 60px}.hero h1{font-size:45px}.overview{grid-template-columns:1fr}.preview-grid{grid-template-columns:1fr}.workspace{padding:25px 16px}.fields{padding:16px}.panel-head{padding:17px}.status span{display:none}}
   </style>
 </head>
 <body>
@@ -885,7 +1116,7 @@ INDEX_HTML = r"""<!doctype html>
     <section class="features">
       <article class="feature"><b>Sécurité centralisée</b><p>Activez les protections anti-spam, anti-liens, anti-raid, anti-arnaque et anti-nuke sans chercher une commande.</p></article>
       <article class="feature"><b>Configuration immédiate</b><p>Chaque modification est validée, enregistrée dans la base du serveur et appliquée immédiatement par SentriX.</p></article>
-      <article class="feature"><b>Accès protégé</b><p>Seuls le créateur de SentriX et les membres autorisés à gérer le serveur peuvent ouvrir sa configuration.</p></article>
+      <article class="feature"><b>Accès protégé</b><p>Seuls les membres avec la permission Administrateur peuvent voir et modifier le serveur concerné. Les autres serveurs restent invisibles.</p></article>
     </section>
   </section>
 
@@ -897,6 +1128,7 @@ INDEX_HTML = r"""<!doctype html>
       <nav class="nav" id="navigation">
         <button data-tab="general" class="active">Général</button>
         <button data-tab="security">Sécurité</button>
+        <button data-tab="sanctions">Sanctions</button>
         <button data-tab="logs">Logs</button>
         <button data-tab="welcome">Accueil</button>
         <button data-tab="levels">Niveaux</button>
@@ -924,7 +1156,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <section class="panel">
           <header class="panel-head"><div><h2 id="tabTitle">Configuration générale</h2><p id="tabDescription">Réglages essentiels du serveur.</p></div></header>
-          <form id="settingsForm"><div class="fields" id="fields"></div><div class="savebar"><span class="save-status" id="saveStatus">Aucune modification</span><button class="btn primary" id="saveButton" type="submit">Enregistrer</button></div></form>
+          <form id="settingsForm"><div class="fields" id="fields"></div><div class="savebar" id="saveBar"><span class="save-status" id="saveStatus">Aucune modification</span><button class="btn primary" id="saveButton" type="submit">Enregistrer</button></div></form>
         </section>
       </div>
       <div id="emptyState" class="panel empty">Sélectionnez un serveur pour commencer. Les serveurs sans SentriX proposent directement le bouton d'invitation.</div>
@@ -933,7 +1165,7 @@ INDEX_HTML = r"""<!doctype html>
 
   <div id="toast" class="toast hidden"></div>
   <script>
-    const state={publicData:null,user:null,csrf:null,guilds:[],guildData:null,guildId:null,tab:"general",dirty:false};
+    const state={publicData:null,user:null,csrf:null,guilds:[],guildData:null,guildId:null,tab:"general",dirty:false,sanctions:[],sanctionNext:null,sanctionLoading:false};
     const tabs={
       general:{title:"Configuration générale",description:"Préfixe, niveau de sécurité et sanctions automatiques.",fields:[
         {key:"prefix",label:"Préfixe des commandes",type:"text",hint:"Entre 1 et 5 caractères. Le préfixe par défaut est +."},
@@ -943,6 +1175,7 @@ INDEX_HTML = r"""<!doctype html>
       security:{title:"Sécurité et AutoMod",description:"Filtres appliqués automatiquement aux nouveaux messages et événements.",automod:true,fields:[
         ["antispam","Anti-spam","Limite les messages envoyés trop rapidement."],["antilink","Bloquer les liens","Interdit les liens web non autorisés."],["antiinvite","Bloquer les invitations","Interdit les invitations Discord."],["antimention","Anti-mentions","Bloque les mentions massives."],["anticaps","Anti-majuscules","Limite les messages presque entièrement en majuscules."],["antiemoji","Anti-spam emojis","Limite les messages remplis d'emojis."],["antiraid","Anti-raid","Réagit aux arrivées massives de comptes."],["antibot","Anti-bot","Contrôle l'arrivée de nouveaux bots."],["antiaccount","Comptes récents","Surveille les comptes trop récents."],["antiscam","Anti-arnaque","Détecte les liens et messages suspects."],["antinuke","Anti-nuke","Protège les rôles, salons et bannissements massifs."],["escalation","Sanctions progressives","Augmente la sanction lors des récidives."]
       ].map(x=>({key:x[0],label:x[1],hint:x[2],type:"switch"}))},
+      sanctions:{title:"Sanctions",description:"Historique des bannissements, mutes et avertissements appliqués par SentriX sur ce serveur.",sanctions:true,fields:[]},
       logs:{title:"Système de logs",description:"Choisissez un salon différent pour chaque type d'événement.",fields:[
         ["log_messages","Messages"],["log_members","Membres"],["log_voice","Salons vocaux"],["log_roles","Rôles"],["log_server","Serveur"],["log_automod","AutoMod"],["log_moderation","Modération"],["log_channel","Salon de logs général"]
       ].map(x=>({key:x[0],label:x[1],type:"channel"}))},
@@ -983,9 +1216,16 @@ INDEX_HTML = r"""<!doctype html>
     async function selectGuild(value){if(!value){state.guildId=null;$("serverContent").classList.add("hidden");$("emptyState").classList.remove("hidden");return;}if(String(value).startsWith("invite:")){const id=String(value).slice(7),g=state.guilds.find(x=>x.id===id);if(g?.invite_url)window.open(g.invite_url,"_blank","noopener");$("serverSelect").value=state.guildId||"";return;}state.guildId=value;$("serverContent").classList.add("loading");try{state.guildData=await json(`/api/guilds/${value}`);const d=state.guildData;$("pageTitle").textContent=d.guild.name;$("pageSubtitle").textContent=`${number(d.guild.members)} membres · ${d.guild.channels_count} salons · ${d.guild.roles_count} rôles`;$("metricMembers").textContent=number(d.guild.members);$("metricCommands").textContent=number(d.metrics.commands_24h);$("metricTickets").textContent=number(d.metrics.open_tickets);$("metricWarnings").textContent=number(d.metrics.warnings);$("emptyState").classList.add("hidden");$("serverContent").classList.remove("hidden");renderTab();}catch(e){toast(e.message,true);}finally{$("serverContent").classList.remove("loading");}}
     function optionList(type,current){const list=type==="role"?state.guildData.roles:state.guildData.channels.filter(c=>type!=="category"||c.type==="category");return '<option value="">Non configuré</option>'+list.map(item=>`<option value="${esc(item.id)}" ${String(current||"")===String(item.id)?"selected":""}>${esc(item.name)}${type!=="role"?` — ${esc(item.type)}`:""}</option>`).join("");}
     function fieldHTML(field){const source=state.tab==="security"?state.guildData.automod:state.tab==="ai"?state.guildData.ai:state.guildData.settings;const value=source[field.key];const hint=field.hint?`<div class="hint">${esc(field.hint)}</div>`:"";if(field.type==="switch")return `<label class="switch full"><div><b>${esc(field.label)}</b><span>${esc(field.hint||"Activation immédiate sur ce serveur.")}</span></div><input data-key="${esc(field.key)}" type="checkbox" ${Number(value)?"checked":""}></label>`;let control="";if(field.type==="choice")control=`<select class="select" data-key="${esc(field.key)}">${field.options.map(o=>`<option value="${esc(o[0])}" ${value===o[0]?"selected":""}>${esc(o[1])}</option>`).join("")}</select>`;else if(["role","channel","category"].includes(field.type))control=`<select class="select" data-key="${esc(field.key)}">${optionList(field.type,value)}</select>`;else if(field.type==="textarea")control=`<textarea data-key="${esc(field.key)}">${esc(value||"")}</textarea>`;else control=`<input data-key="${esc(field.key)}" type="${field.type}" value="${esc(value??"")}" ${field.min!==undefined?`min="${field.min}"`:""} ${field.max!==undefined?`max="${field.max}"`:""} ${field.step!==undefined?`step="${field.step}"`:""}>`;return `<div class="field ${field.type==="textarea"?"full":""}"><label>${esc(field.label)}</label>${control}${hint}</div>`;}
+    function sanctionLabel(action){return ({ban:"Bannissement",tempban:"Ban temporaire",unban:"Débannissement",mute:"Mute",unmute:"Retrait du mute",warn:"Avertissement",clearwarnings:"Warns effacés"})[action]||action;}
+    function sanctionClass(action){if(["ban","tempban"].includes(action))return"ban";if(action==="mute")return"mute";if(action==="warn")return"warn";if(["unban","unmute","clearwarnings"].includes(action))return"positive";return"";}
+    function renderSanctions(){state.sanctions=[];state.sanctionNext=null;$("fields").innerHTML=`<div class="sanctions-shell"><div class="sanction-toolbar"><input id="sanctionSearch" type="text" inputmode="numeric" placeholder="Rechercher avec l'ID Discord"><select class="select" id="sanctionFilter"><option value="all">Toutes les sanctions</option><option value="ban">Bannissements</option><option value="mute">Mutes</option><option value="warn">Avertissements</option></select><button class="btn primary" id="sanctionSearchButton" type="button">Rechercher</button></div><div class="sanction-summary" id="sanctionSummary">Chargement de l'historique…</div><div class="sanction-list" id="sanctionList"><div class="notification-empty">Chargement…</div></div><button class="btn sanction-more hidden" id="sanctionMore" type="button">Afficher la suite</button></div>`;$("sanctionSearchButton").addEventListener("click",()=>loadSanctions(true));$("sanctionFilter").addEventListener("change",()=>loadSanctions(true));$("sanctionMore").addEventListener("click",()=>loadSanctions(false));loadSanctions(true);}
+    function sanctionCard(item,showActions){const user=item.user||{id:item.user_id,name:"Utilisateur inconnu"};const moderator=item.moderator||{id:item.moderator_id,name:"Modérateur inconnu"};const avatar=user.avatar_url?`<img src="${esc(user.avatar_url)}" alt="">`:`<div class="sanction-avatar">${esc(String(user.name||"?").slice(0,1).toUpperCase())}</div>`;const date=new Date(Number(item.created_at)*1000).toLocaleString("fr-FR");const details=item.duration_seconds?`${date} · Durée : ${duration(item.duration_seconds)}`:date;const states=[];if(item.current_banned)states.push("BANNI");if(item.current_muted)states.push("MUTE");if(Number(item.warn_count))states.push(`${number(item.warn_count)} WARN(S)`);let buttons="";if(showActions&&item.current_banned)buttons+=`<button class="btn primary" type="button" data-sanction-action="unban" data-user-id="${esc(user.id)}">Débannir</button>`;if(showActions&&item.current_muted)buttons+=`<button class="btn primary" type="button" data-sanction-action="unmute" data-user-id="${esc(user.id)}">Retirer le mute</button>`;if(showActions&&Number(item.warn_count))buttons+=`<button class="btn danger" type="button" data-sanction-action="clear-warnings" data-user-id="${esc(user.id)}">Effacer les warns</button>`;return `<article class="sanction-card"><div class="sanction-head"><div class="sanction-user">${avatar}<div><b>${esc(user.name)}</b><span>ID membre : ${esc(user.id)} · Dossier #${esc(item.case_number)}</span></div></div><span class="sanction-badge ${sanctionClass(item.action)}">${esc(sanctionLabel(item.action))}</span></div><div class="sanction-body"><div><small>Raison</small><p>${esc(item.reason||"Aucune raison fournie")}</p></div><div><small>Modérateur</small><p>${esc(moderator.name)} · ID ${esc(moderator.id)}<br>${esc(details)}</p></div></div><div class="sanction-state">État actuel : ${states.length?esc(states.join(" · ")):"AUCUNE SANCTION ACTIVE"}</div>${buttons?`<div class="sanction-actions">${buttons}</div>`:""}</article>`;}
+    function renderSanctionRows(total){const list=$("sanctionList");if(!list)return;if(!state.sanctions.length){list.innerHTML='<div class="notification-empty">Aucune sanction trouvée pour cette recherche.</div>';}else{const actionable=new Set();list.innerHTML=state.sanctions.map(item=>{const id=String(item.user?.id||item.user_id),first=!actionable.has(id);actionable.add(id);return sanctionCard(item,first);}).join("");}const shown=state.sanctions.length;$("sanctionSummary").textContent=`${number(total)} dossier(s) trouvé(s) · ${number(shown)} affiché(s)`;$("sanctionMore").classList.toggle("hidden",state.sanctionNext===null);list.querySelectorAll("[data-sanction-action]").forEach(button=>button.addEventListener("click",()=>sanctionAction(button.dataset.userId,button.dataset.sanctionAction)));}
+    async function loadSanctions(reset=true){if(!state.guildId||state.tab!=="sanctions"||state.sanctionLoading)return;const guildId=state.guildId,search=$("sanctionSearch")?.value.trim()||"",filter=$("sanctionFilter")?.value||"all";if(reset){state.sanctions=[];state.sanctionNext=0;$("sanctionList").innerHTML='<div class="notification-empty">Chargement…</div>';}if(state.sanctionNext===null)return;state.sanctionLoading=true;try{const params=new URLSearchParams({limit:"50",offset:String(state.sanctionNext||0),filter});if(search)params.set("user_id",search);const data=await json(`/api/guilds/${guildId}/sanctions?${params}`);if(state.guildId!==guildId||state.tab!=="sanctions")return;state.sanctions=reset?data.sanctions:state.sanctions.concat(data.sanctions);state.sanctionNext=data.next_offset;renderSanctionRows(data.total);}catch(e){toast(e.message,true);if($("sanctionList"))$("sanctionList").innerHTML=`<div class="notification-empty">${esc(e.message)}</div>`;}finally{state.sanctionLoading=false;}}
+    async function sanctionAction(userId,action){const labels={unban:"débannir cet utilisateur",unmute:"retirer le mute de ce membre","clear-warnings":"effacer tous les avertissements actifs de ce membre"};if(!confirm(`Confirmer : ${labels[action]||"effectuer cette action"} ?`))return;try{const result=await json(`/api/guilds/${state.guildId}/sanctions/${userId}/${action}`,{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:"{}"});toast(result.message);await loadSanctions(true);}catch(e){toast(e.message,true);}}
     function renderNotifications(){const rows=state.guildData.social_notifications||[];const textChannels=state.guildData.channels.filter(c=>["text","news"].includes(c.type));const channelOptions='<option value="">Choisissez un salon</option>'+textChannels.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");const roleOptions='<option value="">Choisissez un rôle</option>'+state.guildData.roles.map(r=>`<option value="${esc(r.id)}">${esc(r.name)}</option>`).join("");const list=rows.length?rows.map(n=>`<div class="notification-item"><div><b>${esc(n.platform)} · ${esc(state.guildData.roles.find(r=>String(r.id)===String(n.role_id))?.name||"Rôle supprimé")}</b><span>${esc(n.source_url)} · #${esc(state.guildData.channels.find(c=>String(c.id)===String(n.discord_channel_id))?.name||"salon supprimé")}</span></div><button class="btn danger" type="button" data-delete-notification="${esc(n.id)}">Supprimer</button></div>`).join(""):'<div class="notification-empty">Aucune notification configurée. Ajoutez votre première chaîne ci-dessus.</div>';$("fields").innerHTML=`<div class="notification-builder"><div class="field full"><label>Lien de la chaîne ou du profil</label><input data-key="source_url" type="url" placeholder="https://youtube.com/@votrechaine"><div class="hint">YouTube, TikTok, Twitch, Instagram, X, Facebook, Dailymotion, Vimeo et Kick.</div></div><div class="field"><label>Salon de publication</label><select class="select" data-key="discord_channel_id">${channelOptions}</select></div><div class="field"><label>Rôle à notifier</label><select class="select" data-key="role_id">${roleOptions}</select></div><div class="field full"><label>Texte personnalisé (facultatif)</label><textarea data-key="custom_text" placeholder="Une nouvelle publication vient de sortir !"></textarea></div><div class="field full"><label>Image ou GIF (facultatif)</label><input data-key="image_url" type="url" placeholder="https://exemple.com/image.png"><div class="hint">Utilisez une URL HTTPS directe. Sans image, SentriX utilise la miniature de la publication.</div></div></div><div class="notification-list"><h3>Notifications actives</h3>${list}</div>`;$("fields").querySelectorAll("[data-delete-notification]").forEach(button=>button.addEventListener("click",()=>removeNotification(button.dataset.deleteNotification)));}
-    function renderTab(){if(!state.guildData)return;const tab=tabs[state.tab];$("tabTitle").textContent=tab.title;$("tabDescription").textContent=tab.description;if(tab.notifications)renderNotifications();else $("fields").innerHTML=tab.fields.map(fieldHTML).join("");$("saveButton").textContent=tab.notifications?"Ajouter la notification":"Enregistrer";$("saveStatus").textContent=tab.notifications?"Surveillance toutes les 5 minutes":"Aucune modification";state.dirty=false;$("fields").querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",()=>{state.dirty=true;$("saveStatus").textContent="Modifications non enregistrées";}));}
-    async function save(event){event.preventDefault();if(!state.guildId||!state.guildData)return;const tab=tabs[state.tab],values={};$("fields").querySelectorAll("[data-key]").forEach(el=>{let value=el.type==="checkbox"?el.checked:el.value;if(el.type==="number"&&value!=="")value=Number(value);values[el.dataset.key]=value;});const endpoint=tab.notifications?`/api/guilds/${state.guildId}/notifications`:`/api/guilds/${state.guildId}/settings`;const body=tab.notifications?values:tab.automod?{automod:values}:tab.ai?{ai:values}:{settings:values};$("settingsForm").classList.add("loading");try{const result=await json(endpoint,{method:tab.notifications?"POST":"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:JSON.stringify(body)});toast(result.message);state.dirty=false;$("saveStatus").textContent="Configuration enregistrée";await selectGuild(state.guildId);}catch(e){toast(e.message,true);$("saveStatus").textContent="Enregistrement impossible";}finally{$("settingsForm").classList.remove("loading");}}
+    function renderTab(){if(!state.guildData)return;const tab=tabs[state.tab];$("tabTitle").textContent=tab.title;$("tabDescription").textContent=tab.description;if(tab.sanctions)renderSanctions();else if(tab.notifications)renderNotifications();else $("fields").innerHTML=tab.fields.map(fieldHTML).join("");$("saveBar").classList.toggle("hidden",Boolean(tab.sanctions));$("saveButton").textContent=tab.notifications?"Ajouter la notification":"Enregistrer";$("saveStatus").textContent=tab.notifications?"Surveillance toutes les 5 minutes":"Aucune modification";state.dirty=false;$("fields").querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",()=>{if(tab.sanctions)return;state.dirty=true;$("saveStatus").textContent="Modifications non enregistrées";}));}
+    async function save(event){event.preventDefault();if(!state.guildId||!state.guildData)return;const tab=tabs[state.tab];if(tab.sanctions){await loadSanctions(true);return;}const values={};$("fields").querySelectorAll("[data-key]").forEach(el=>{let value=el.type==="checkbox"?el.checked:el.value;if(el.type==="number"&&value!=="")value=Number(value);values[el.dataset.key]=value;});const endpoint=tab.notifications?`/api/guilds/${state.guildId}/notifications`:`/api/guilds/${state.guildId}/settings`;const body=tab.notifications?values:tab.automod?{automod:values}:tab.ai?{ai:values}:{settings:values};$("settingsForm").classList.add("loading");try{const result=await json(endpoint,{method:tab.notifications?"POST":"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:JSON.stringify(body)});toast(result.message);state.dirty=false;$("saveStatus").textContent="Configuration enregistrée";await selectGuild(state.guildId);}catch(e){toast(e.message,true);$("saveStatus").textContent="Enregistrement impossible";}finally{$("settingsForm").classList.remove("loading");}}
     async function removeNotification(id){if(!state.guildId||!id)return;if(!confirm("Supprimer cette notification automatique ?"))return;try{const result=await json(`/api/guilds/${state.guildId}/notifications/${id}`,{method:"DELETE",headers:{"X-CSRF-Token":state.csrf}});toast(result.message);await selectGuild(state.guildId);}catch(e){toast(e.message,true);}}
     $("serverSelect").addEventListener("change",e=>selectGuild(e.target.value));$("settingsForm").addEventListener("submit",save);$("navigation").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(!button)return;state.tab=button.dataset.tab;$("navigation").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===button));renderTab();});$("logoutButton").addEventListener("click",async()=>{try{await json("/logout",{method:"POST",headers:{"X-CSRF-Token":state.csrf}});}finally{location.href="/";}});window.addEventListener("beforeunload",e=>{if(state.dirty){e.preventDefault();e.returnValue="";}});
     Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));
