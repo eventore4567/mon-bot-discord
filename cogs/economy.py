@@ -1,6 +1,7 @@
 """
 Cog ÉCONOMIE.
-/balance /economy /daily /weekly /work /rob /pay /economyleaderboard /shop /buy
+/balance /economy /daily /weekly /work /rob /pay /economyleaderboard /shop /buy /buyrole
+/shopsetup /shoprole add|remove|price|list
 /inventory /sell /gamble /deposit /withdraw /banque (+bank) /give-money /reset-economy
 
 Toutes les commandes qui affichent un solde (/balance, /economy, /banque, /bank, /stats, /profile)
@@ -42,6 +43,31 @@ def _parse_amount(value: str, available: int) -> int | None:
     except ValueError:
         return None
     return amount
+
+
+def _self_assignable_role_error(guild: discord.Guild, role: discord.Role) -> str | None:
+    """Refuse les rôles impossibles à donner ou permettant une élévation de privilèges."""
+    if role.is_default():
+        return "Le rôle @everyone ne peut pas être vendu."
+    if role.managed:
+        return "Ce rôle est géré par Discord ou une intégration et ne peut pas être attribué."
+    bot_member = guild.me
+    if bot_member is None or role >= bot_member.top_role:
+        return "Placez ce rôle sous le rôle du bot dans Paramètres du serveur > Rôles."
+    permissions = role.permissions
+    dangerous = (
+        permissions.administrator
+        or permissions.manage_guild
+        or permissions.manage_roles
+        or permissions.manage_channels
+        or permissions.ban_members
+        or permissions.kick_members
+        or permissions.moderate_members
+        or permissions.manage_webhooks
+    )
+    if dangerous:
+        return "Un rôle de boutique ne peut pas contenir de permissions d'administration ou de modération."
+    return None
 
 
 class Economy(commands.Cog, name="Economy"):
@@ -191,17 +217,144 @@ class Economy(commands.Cog, name="Economy"):
         """Alias historique de /economyleaderboard — conservé pour ne rien casser."""
         await self.economyleaderboard(ctx)
 
+    @commands.command(name="shopsetup", aliases=["boutiquesetup"])
+    @checks.is_owner_or_admin()
+    async def shopsetup(self, ctx: commands.Context):
+        """Affiche le guide court de configuration de la boutique de rôles."""
+        await self._send_shop_setup(ctx)
+
+    async def _send_shop_setup(self, ctx: commands.Context):
+        await ctx.send(embed=embeds.info(
+            "**Configurer la boutique de rôles**\n"
+            "`+shoprole add @VIP 500` — ajoute un rôle au prix choisi\n"
+            "`+shoprole add @VIP @Booster 500` — ajoute plusieurs rôles au même prix\n"
+            "`+shoprole price @VIP 750` — change le prix\n"
+            "`+shoprole remove @VIP` — retire le rôle de la boutique\n"
+            "`+shoprole list` — affiche la configuration\n\n"
+            "Les membres utilisent `+shop`, puis `+buy <id>` ou `+buyrole @rôle`."
+        ))
+
+    @commands.group(name="shoprole", aliases=["boutiquerole"], invoke_without_command=True)
+    async def shoprole(self, ctx: commands.Context):
+        """Configure les rôles achetables avec l'argent du portefeuille."""
+        await self._send_shop_setup(ctx)
+
+    @shoprole.command(name="add", aliases=["ajouter"])
+    @checks.is_owner_or_admin()
+    async def shoprole_add(
+        self,
+        ctx: commands.Context,
+        roles: commands.Greedy[discord.Role],
+        price: int,
+        *,
+        description: str = "",
+    ):
+        if not roles:
+            return await ctx.send(embed=embeds.error("Mentionnez au moins un rôle à ajouter."))
+        if price < 1 or price > 1_000_000_000_000:
+            return await ctx.send(embed=embeds.error("Le prix doit être compris entre 1 et 1 000 000 000 000."))
+        accepted = []
+        refused = []
+        for role in roles:
+            error = _self_assignable_role_error(ctx.guild, role)
+            if error:
+                refused.append(f"{role.mention} : {error}")
+                continue
+            existing = await self.bot.db.fetchone(
+                "SELECT id FROM shop_items WHERE guild_id = ? AND role_id = ?",
+                (ctx.guild.id, role.id),
+            )
+            if existing:
+                await self.bot.db.execute(
+                    "UPDATE shop_items SET name = ?, price = ?, description = ? WHERE id = ?",
+                    (role.name, price, description.strip(), existing["id"]),
+                )
+                accepted.append(f"{role.mention} (article #{existing['id']} mis à jour)")
+            else:
+                cursor = await self.bot.db.execute(
+                    "INSERT INTO shop_items (guild_id, name, price, description, role_id) VALUES (?, ?, ?, ?, ?)",
+                    (ctx.guild.id, role.name, price, description.strip(), role.id),
+                )
+                accepted.append(f"{role.mention} (article #{cursor.lastrowid})")
+        description_lines = []
+        if accepted:
+            description_lines.append(
+                f"**Ajoutés à {stats_service.format_number(price)} 🪙**\n" + "\n".join(accepted)
+            )
+        if refused:
+            description_lines.append("**Refusés**\n" + "\n".join(refused))
+        kind = "success" if accepted else "danger"
+        await ctx.send(embed=await self._shop_config_embed(ctx.guild.id, "Boutique mise à jour", "\n\n".join(description_lines), kind))
+
+    @shoprole.command(name="remove", aliases=["delete", "retirer"])
+    @checks.is_owner_or_admin()
+    async def shoprole_remove(self, ctx: commands.Context, role: discord.Role):
+        cursor = await self.bot.db.execute(
+            "DELETE FROM shop_items WHERE guild_id = ? AND role_id = ?",
+            (ctx.guild.id, role.id),
+        )
+        if cursor.rowcount < 1:
+            return await ctx.send(embed=embeds.error("Ce rôle n'est pas dans la boutique."))
+        await ctx.send(embed=embeds.success(f"{role.mention} a été retiré de la boutique."))
+
+    @shoprole.command(name="price", aliases=["prix"])
+    @checks.is_owner_or_admin()
+    async def shoprole_price(self, ctx: commands.Context, role: discord.Role, price: int):
+        if price < 1 or price > 1_000_000_000_000:
+            return await ctx.send(embed=embeds.error("Le prix doit être compris entre 1 et 1 000 000 000 000."))
+        cursor = await self.bot.db.execute(
+            "UPDATE shop_items SET price = ?, name = ? WHERE guild_id = ? AND role_id = ?",
+            (price, role.name, ctx.guild.id, role.id),
+        )
+        if cursor.rowcount < 1:
+            return await ctx.send(embed=embeds.error("Ce rôle n'est pas dans la boutique."))
+        await ctx.send(embed=embeds.success(
+            f"Le prix de {role.mention} est maintenant de **{stats_service.format_number(price)} 🪙**."
+        ))
+
+    @shoprole.command(name="list", aliases=["liste"])
+    @checks.is_owner_or_admin()
+    async def shoprole_list(self, ctx: commands.Context):
+        await self._send_shop(ctx)
+
+    async def _shop_config_embed(self, guild_id: int, title: str, description: str, kind: str) -> discord.Embed:
+        design = await self.bot.db.get_design_settings(guild_id)
+        style = design_system.CATEGORY_STYLES["economy"]
+        colour_key = "success_color" if kind == "success" else "danger_color"
+        default = getattr(design_system.COLORS, kind)
+        return design_system.create_embed(
+            title=design_system.kind_title(title, kind=kind, category_emoji=style["emoji"]),
+            description=description,
+            colour=design.get(colour_key, default),
+            footer=design.get("footer"),
+        )
+
     @commands.hybrid_command(name="shop", description="Afficher la boutique du serveur.")
     async def shop(self, ctx: commands.Context):
+        await self._send_shop(ctx)
+
+    async def _send_shop(self, ctx: commands.Context):
         design = await self.bot.db.get_design_settings(ctx.guild.id)
-        items = await self.bot.db.fetchall("SELECT * FROM shop_items WHERE guild_id = ?", (ctx.guild.id,))
+        items = await self.bot.db.fetchall(
+            "SELECT * FROM shop_items WHERE guild_id = ? ORDER BY price ASC, id ASC",
+            (ctx.guild.id,),
+        )
         if not items:
             return await ctx.send(embed=embeds.info("La boutique est vide pour l'instant."))
-        lines = [f"**#{it['id']}** {it['name']} — {stats_service.format_number(it['price'])} 🪙" for it in items]
+        lines = []
+        for item in items:
+            role = ctx.guild.get_role(item["role_id"]) if item["role_id"] else None
+            name = role.mention if role else item["name"]
+            suffix = f" — {item['description']}" if item["description"] else ""
+            if item["role_id"] and role is None:
+                suffix += " — rôle supprimé (achat bloqué)"
+            lines.append(
+                f"**#{item['id']}** {name} — **{stats_service.format_number(item['price'])} 🪙**{suffix}"
+            )
         style = design_system.CATEGORY_STYLES["economy"]
         embed = design_system.create_embed(
-            title=f"🛒 Boutique du serveur",
-            description="\n".join(lines),
+            title="🛒 Boutique de rôles",
+            description="\n".join(lines) + "\n\nAcheter : `+buy <id>` ou `+buyrole @rôle`",
             colour=design.get("primary_color", style["colour"]),
             footer=design.get("footer"),
         )
@@ -213,18 +366,74 @@ class Economy(commands.Cog, name="Economy"):
         item = await self.bot.db.fetchone("SELECT * FROM shop_items WHERE id = ? AND guild_id = ?", (id, ctx.guild.id))
         if not item:
             return await ctx.send(embed=embeds.error("Article introuvable."))
-        await self.bot.db.ensure_economy(ctx.guild.id, ctx.author.id)
-        bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
-        if bal["cash"] < item["price"]:
-            return await ctx.send(embed=embeds.error("Vous n'avez pas assez d'argent."))
-        await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, -item["price"])
-        await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, None, "buy", item["price"], f"Achat : {item['name']}")
+        await self._purchase_item(ctx, item)
+
+    @commands.command(name="buyrole", aliases=["acheterrole"])
+    async def buyrole(self, ctx: commands.Context, role: discord.Role):
+        item = await self.bot.db.fetchone(
+            "SELECT * FROM shop_items WHERE guild_id = ? AND role_id = ?",
+            (ctx.guild.id, role.id),
+        )
+        if not item:
+            return await ctx.send(embed=embeds.error("Ce rôle n'est pas dans la boutique."))
+        await self._purchase_item(ctx, item)
+
+    async def _purchase_item(self, ctx: commands.Context, item):
+        role = ctx.guild.get_role(item["role_id"]) if item["role_id"] else None
+        if item["role_id"]:
+            if role is None:
+                return await ctx.send(embed=embeds.error("Ce rôle n'existe plus. Demandez à un administrateur de corriger la boutique."))
+            role_error = _self_assignable_role_error(ctx.guild, role)
+            if role_error:
+                return await ctx.send(embed=embeds.error(role_error))
+            if role in ctx.author.roles:
+                return await ctx.send(embed=embeds.info("Vous possédez déjà ce rôle. Aucun argent n'a été retiré."))
+
+        status, purchased_item = await self.bot.db.purchase_shop_item(ctx.guild.id, ctx.author.id, item["id"])
+        if status == "not_found":
+            return await ctx.send(embed=embeds.error("Article introuvable ou prix invalide."))
+        if status == "insufficient_funds":
+            return await ctx.send(embed=embeds.error(
+                "Vous n'avez pas assez d'argent dans votre portefeuille. Utilisez `+withdraw` pour retirer de la banque."
+            ))
+        if status == "already_owned" and role is not None:
+            # Cas d'un rôle acheté auparavant puis retiré, ou d'un double-clic : on le
+            # restaure sans facturer une deuxième fois.
+            try:
+                await ctx.author.add_roles(role, reason=f"Restauration achat boutique #{item['id']}")
+            except (discord.Forbidden, discord.HTTPException):
+                return await ctx.send(embed=embeds.error(
+                    "Ce rôle a déjà été acheté, mais Discord refuse de le réattribuer. Vérifiez la hiérarchie des rôles."
+                ))
+            return await ctx.send(embed=embeds.success(
+                f"{role.mention} vous a été restauré sans nouvel achat."
+            ))
+
+        if role is not None:
+            try:
+                await ctx.author.add_roles(role, reason=f"Achat boutique #{purchased_item['id']}")
+            except (discord.Forbidden, discord.HTTPException):
+                await self.bot.db.refund_shop_item(
+                    ctx.guild.id,
+                    ctx.author.id,
+                    purchased_item,
+                    f"Remboursement : attribution du rôle {role.name} impossible",
+                )
+                return await ctx.send(embed=embeds.error(
+                    "Discord a refusé l'attribution du rôle. L'achat a été entièrement remboursé."
+                ))
+            return await ctx.send(embed=embeds.success(
+                f"{role.mention} vous a été attribué pour **{stats_service.format_number(purchased_item['price'])} 🪙**."
+            ))
+
         await self.bot.db.execute(
             "INSERT INTO inventory (guild_id, user_id, item_name, quantity) VALUES (?, ?, ?, 1) "
             "ON CONFLICT(guild_id, user_id, item_name) DO UPDATE SET quantity = quantity + 1",
-            (ctx.guild.id, ctx.author.id, item["name"]),
+            (ctx.guild.id, ctx.author.id, purchased_item["name"]),
         )
-        await ctx.send(embed=embeds.success(f"● Vous avez acheté **{item['name']}** pour {stats_service.format_number(item['price'])} 🪙."))
+        await ctx.send(embed=embeds.success(
+            f"Vous avez acheté **{purchased_item['name']}** pour {stats_service.format_number(purchased_item['price'])} 🪙."
+        ))
 
     @commands.hybrid_command(name="inventory", description="Afficher votre inventaire.", with_app_command=False)
     async def inventory(self, ctx: commands.Context):
