@@ -92,12 +92,32 @@ class Logs(commands.Cog, name="Logs"):
             embed.set_footer(text="SentriX • Journal du serveur")
         return embed
 
+    @staticmethod
+    def _config_value(config, key: str):
+        """Lire une colonne sans faire planter les anciennes bases SQLite."""
+        if config is None:
+            return None
+        try:
+            return config[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+
     async def _send_status(self, ctx: commands.Context):
+        if ctx.guild is None:
+            return await ctx.send("Cette commande doit être utilisée dans un serveur.")
+
+        # ensure_guild répare aussi le cas d'un serveur présent avant l'installation
+        # du module de logs. Une ancienne base reste affichable même si une colonne
+        # de logs n'existe pas encore : elle apparaît simplement non configurée.
+        await self.bot.db.ensure_guild(ctx.guild.id)
         config = await self.bot.db.get_guild_config(ctx.guild.id)
         lines = []
         for _, (config_key, label) in LOG_TYPES.items():
-            channel_id = config[config_key] if config else None
-            channel = ctx.guild.get_channel(channel_id) if channel_id else None
+            channel_id = self._config_value(config, config_key)
+            try:
+                channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+            except (TypeError, ValueError):
+                channel = None
             state = channel.mention if channel else "Non configuré"
             lines.append(f"**{label}** — {state}")
         embed = self._embed("Configuration des logs", COLOURS["member"])
@@ -109,7 +129,12 @@ class Logs(commands.Cog, name="Logs"):
         )
         await ctx.send(embed=embed)
 
-    @commands.group(name="logs", aliases=["log", "logsetup"], invoke_without_command=True)
+    @commands.command(name="logsetup")
+    async def logsetup(self, ctx: commands.Context):
+        """Afficher l'état des logs, sans dépendre du groupe +logs."""
+        await self._send_status(ctx)
+
+    @commands.group(name="logs", aliases=["log"], invoke_without_command=True)
     @checks.is_owner_or_admin()
     async def logs(self, ctx: commands.Context):
         """Afficher ou modifier les salons de journalisation."""
