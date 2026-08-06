@@ -15,6 +15,10 @@ Commandes :
 +aisetup (admin)                  — configuration de l'IA pour ce serveur
 +aidiag (admin)                   — diagnostic technique de la connexion à l'IA (sans la clé)
 
+Messages naturels : « SentriX ouvre-moi setup », « SentriX affiche help » ou
+« SentriX ajoute cet emoji ». Les demandes de liens et d'informations actuelles utilisent
+la recherche web publique avec des sources cliquables.
+
 Moteur : utils/ai_service.py — AsyncOpenAI + Responses API, GPT-5.6 Terra par défaut, Sol
 pour les demandes complexes (code, analyse détaillée...), reasoning effort configurable,
 mémoire de conversation persistante (survit à un redémarrage) séparée par
@@ -28,12 +32,14 @@ config.py). Les erreurs affichées restent génériques ; le détail technique n
 dans les logs serveur (logger "bot.ai").
 """
 
+import copy
 import io
 import json
 import logging
 import re
 import time
 import traceback
+import unicodedata
 
 import discord
 from discord import app_commands
@@ -399,6 +405,7 @@ class Ai(commands.Cog, name="Ai"):
         result = await ai_service.generate(
             input_payload, model_key=model_key, reasoning_effort=reasoning_effort, instructions=instructions,
             guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
+            web_search=ai_service.needs_web_search(prompt),
         )
         if not result.ok:
             return result.error
@@ -421,6 +428,7 @@ class Ai(commands.Cog, name="Ai"):
         result = await ai_service.generate(
             input_payload, model_key=model_key, reasoning_effort=reasoning_effort, instructions=instructions,
             guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
+            web_search=ai_service.needs_web_search(prompt) or command == "fact-check",
         )
         if not result.ok:
             return result.error, 0
@@ -474,9 +482,8 @@ class Ai(commands.Cog, name="Ai"):
         self.histories[author.id] = history[-10:]
 
         content = (answer or "…").strip()
-        if len(content) > 2000:
-            content = content[:1997] + "…"
-        await _send(content=content)
+        for chunk in ai_service.split_for_discord(content):
+            await _send(content=chunk)
 
     @commands.hybrid_command(name="sentrix", description="Demandez n'importe quoi à SentriX, l'IA du bot.")
     @app_commands.describe(question="Votre question, sur n'importe quel sujet")
@@ -489,6 +496,126 @@ class Ai(commands.Cog, name="Ai"):
         # arrive toujours, au pire sous forme d'erreur claire, en moins de 45s).
         async with ctx.typing():
             await self.send_sentrix_reply(ctx, ctx.author, question)
+
+    @staticmethod
+    def _normalize_request(text: str) -> str:
+        normalized = unicodedata.normalize("NFKD", text)
+        return "".join(char for char in normalized if not unicodedata.combining(char)).lower().strip()
+
+    def _natural_command_line(
+        self,
+        question: str,
+        prefix: str,
+        *,
+        has_attachment: bool,
+    ) -> str | None:
+        """Transforme une demande naturelle explicite en commande préfixée existante."""
+        normalized = self._normalize_request(question)
+        action_intent = bool(re.search(
+            r"\b(ouvre|affiche|lance|execute|fais|fait|utilise|ajoute|cree|importe|"
+            r"supprime|enleve|retire|mets|configure)\b",
+            normalized,
+        ))
+
+        if action_intent and re.search(r"\b(setup|configuration)\b", normalized):
+            return f"{prefix}setup"
+        if action_intent and re.search(r"\b(help|aide|commandes)\b", normalized):
+            return f"{prefix}help"
+
+        emoji_action = "emoji" in normalized
+        pasted_emoji = re.search(r"<a?:[A-Za-z0-9_]{2,32}:[0-9]+>", question)
+        named_emoji = re.search(r"[:;]([A-Za-z0-9_]{2,32}):", question)
+        direct_url = re.search(r"https://\S+", question)
+
+        if emoji_action and re.search(r"\b(ajoute|cree|importe)\b", normalized):
+            if pasted_emoji:
+                return f"{prefix}addemoji {pasted_emoji.group(0)}"
+            if named_emoji:
+                command = f"{prefix}addemoji {named_emoji.group(1)}"
+                if direct_url:
+                    command += f" {direct_url.group(0)}"
+                return command
+            tail = re.split(r"\bemoji\b", question, maxsplit=1, flags=re.IGNORECASE)[-1]
+            tail = re.sub(r"^\s*(?:nomme|appele|appelé|avec|de|moi)\s+", "", tail, flags=re.IGNORECASE).strip()
+            if tail:
+                return f"{prefix}addemoji {tail}"
+            if has_attachment:
+                return f"{prefix}addemoji emoji"
+
+        if emoji_action and re.search(r"\b(supprime|enleve|retire)\b", normalized):
+            if pasted_emoji:
+                return f"{prefix}deleteemoji {pasted_emoji.group(0)}"
+            if named_emoji:
+                return f"{prefix}deleteemoji {named_emoji.group(1)}"
+            tail = re.split(r"\bemoji\b", question, maxsplit=1, flags=re.IGNORECASE)[-1]
+            target = tail.strip(" :;,")
+            if target:
+                return f"{prefix}deleteemoji {target}"
+
+        candidates = []
+        excluded = {"ai", "sentrix", "chat", "ask"}
+        for command in self.bot.walk_commands():
+            if command.qualified_name in excluded:
+                continue
+            triggers = [command.qualified_name]
+            parent = command.qualified_name.rsplit(" ", 1)[0] if " " in command.qualified_name else ""
+            triggers.extend(f"{parent} {alias}".strip() for alias in command.aliases)
+            for trigger in triggers:
+                trigger_normalized = self._normalize_request(trigger)
+                match = re.search(
+                    rf"(?<![\w-]){re.escape(trigger_normalized)}(?![\w-])",
+                    normalized,
+                )
+                if match:
+                    candidates.append((len(trigger_normalized), match, command))
+
+        for _, match, command in sorted(candidates, key=lambda item: item[0], reverse=True):
+            direct_request = match.start() == 0 or normalized.startswith("commande ")
+            if not action_intent and not direct_request:
+                continue
+            trailing = question[match.end():].strip()
+            while trailing:
+                cleaned = re.sub(
+                    r"^(?:avec|sur|pour|de|du|la|le|les|moi)\s+",
+                    "",
+                    trailing,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                if cleaned == trailing:
+                    break
+                trailing = cleaned.strip()
+            if not command.clean_params:
+                trailing = ""
+            command_line = f"{prefix}{command.qualified_name}"
+            if trailing:
+                command_line += f" {trailing}"
+            return command_line
+        return None
+
+    async def _invoke_natural_command(
+        self,
+        message: discord.Message,
+        question: str,
+        prefix: str,
+    ) -> bool:
+        command_line = self._natural_command_line(
+            question,
+            prefix,
+            has_attachment=bool(message.attachments),
+        )
+        if not command_line:
+            return False
+
+        # Une copie du message évite de modifier l'événement Discord original. bot.invoke()
+        # conserve alors tous les convertisseurs, checks, permissions et cooldowns normaux.
+        synthetic_message = copy.copy(message)
+        synthetic_message.content = command_line
+        ctx = await self.bot.get_context(synthetic_message)
+        if ctx.command is None:
+            return False
+        await self.bot.invoke(ctx)
+        return True
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -517,6 +644,9 @@ class Ai(commands.Cog, name="Ai"):
             question = content[name_match.end():].lstrip(" ,:-").strip()
         if not question:
             question = "Salut, comment tu vas ?"
+
+        if await self._invoke_natural_command(message, question, prefix):
+            return
 
         async with message.channel.typing():
             await self.send_sentrix_reply(message.channel, message.author, question, reply_to=message)
@@ -681,6 +811,7 @@ class Ai(commands.Cog, name="Ai"):
             prompt, model_key=model_key, reasoning_effort=reasoning_effort,
             previous_response_id=previous_response_id, instructions=instructions,
             guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
+            web_search=ai_service.needs_web_search(question),
         )
 
         if not result.ok:
@@ -833,6 +964,9 @@ class Ai(commands.Cog, name="Ai"):
             "**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n"
             "**+code <demande>** — générer du code\n"
             "**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n"
+            "**SentriX ouvre-moi setup/help** — exécuter une commande en langage naturel\n"
+            "**SentriX ajoute cet emoji** — importer l'emoji collé ou l'image jointe\n"
+            "**SentriX donne-moi le lien de...** — rechercher un lien public avec ses sources\n"
             "**+aisetup** *(admin)* — configurer l'IA sur ce serveur"
         ))
         await ctx.send(embed=e)
