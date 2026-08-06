@@ -82,6 +82,37 @@ class Moderation(commands.Cog):
         "unmute": "🔊 Unmute",
     }
 
+    DM_ACTION_LABELS = {
+        "ban": "bannissement",
+        "tempban": "bannissement temporaire",
+        "kick": "expulsion",
+        "mute": "mute",
+        "warn": "avertissement",
+        "unban": "débannissement",
+        "unmute": "retrait du mute",
+    }
+    DM_ACTION_ALIASES = {
+        "banni": "ban",
+        "bannissement": "ban",
+        "temp-ban": "tempban",
+        "expulsion": "kick",
+        "timeout": "mute",
+        "avertissement": "warn",
+        "demute": "unmute",
+        "démute": "unmute",
+        "deban": "unban",
+        "déban": "unban",
+    }
+    DEFAULT_DM_TEMPLATES = {
+        "ban": "Vous avez été banni de {serveur}.\nRaison : {raison}",
+        "tempban": "Vous avez été banni temporairement de {serveur} pendant {duree}.\nRaison : {raison}",
+        "kick": "Vous avez été expulsé de {serveur}.\nRaison : {raison}",
+        "mute": "Vous avez été rendu muet sur {serveur} pendant {duree}.\nRaison : {raison}",
+        "warn": "Vous avez reçu un avertissement sur {serveur}.\nRaison : {raison}",
+        "unban": "Votre bannissement de {serveur} a été retiré.\nRaison : {raison}",
+        "unmute": "Votre mute sur {serveur} a été retiré.\nRaison : {raison}",
+    }
+
     async def log_sanction(
         self, ctx: commands.Context, action: str, target: discord.abc.User, reason: str,
         duration_seconds: int | None = None, extra_fields: dict | None = None,
@@ -130,6 +161,147 @@ class Moderation(commands.Cog):
         else:
             await ctx.typing()
 
+    @classmethod
+    def _normalise_dm_action(cls, action: str) -> str | None:
+        value = action.casefold().strip()
+        value = cls.DM_ACTION_ALIASES.get(value, value)
+        return value if value in cls.DEFAULT_DM_TEMPLATES else None
+
+    async def _get_sanction_dm_template(self, guild_id: int, action: str) -> str | None:
+        row = await self.bot.db.fetchone(
+            "SELECT message, enabled FROM sanction_dm_templates WHERE guild_id = ? AND action = ?",
+            (guild_id, action),
+        )
+        if row is None:
+            return self.DEFAULT_DM_TEMPLATES[action]
+        if not row["enabled"]:
+            return None
+        return row["message"]
+
+    async def _send_sanction_dm(
+        self,
+        ctx: commands.Context,
+        target: discord.abc.User,
+        action: str,
+        reason: str,
+        duration_seconds: int | None = None,
+    ) -> bool:
+        """Envoyer le MP configuré. Un MP fermé ne bloque jamais la sanction."""
+        template = await self._get_sanction_dm_template(ctx.guild.id, action)
+        if template is None:
+            return False
+        values = {
+            "membre": getattr(target, "display_name", str(target)),
+            "serveur": ctx.guild.name,
+            "raison": reason or "Aucune raison fournie",
+            "duree": helpers.format_duration(duration_seconds) if duration_seconds else "Non précisée",
+            "moderateur": getattr(ctx.author, "display_name", str(ctx.author)),
+            "action": self.DM_ACTION_LABELS[action],
+        }
+        message = template
+        for key, value in values.items():
+            message = message.replace("{" + key + "}", str(value))
+        try:
+            await target.send(message[:1900], allowed_mentions=discord.AllowedMentions.none())
+            return True
+        except discord.HTTPException:
+            return False
+
+    async def _show_sanction_dm_status(self, ctx: commands.Context):
+        rows = await self.bot.db.fetchall(
+            "SELECT action, message, enabled FROM sanction_dm_templates WHERE guild_id = ?",
+            (ctx.guild.id,),
+        )
+        configured = {row["action"]: row for row in rows}
+        lines = []
+        for action, label in self.DM_ACTION_LABELS.items():
+            row = configured.get(action)
+            state = "par défaut" if row is None else ("personnalisé" if row["enabled"] else "désactivé")
+            lines.append(f"**{label.capitalize()}** — {state}")
+        e = embeds.neutral(
+            "Messages privés de sanction",
+            "\n".join(lines)
+            + "\n\nConfiguration simple : +sanctiondm ban Votre texte\n"
+              "Variables : {membre} {serveur} {raison} {duree} {moderateur} {action}",
+        )
+        await ctx.send(embed=e)
+
+    @commands.group(name="sanctiondm", aliases=["dm-sanction"], invoke_without_command=True)
+    @checks.is_owner_or_admin()
+    async def sanctiondm(
+        self,
+        ctx: commands.Context,
+        action: str | None = None,
+        *,
+        message: str | None = None,
+    ):
+        """Configurer le message privé envoyé lors d'une sanction."""
+        if action is None:
+            return await self._show_sanction_dm_status(ctx)
+        normalised = self._normalise_dm_action(action)
+        if normalised is None:
+            return await ctx.send(
+                embed=embeds.error("Action inconnue : ban, tempban, kick, mute, warn, unban ou unmute.")
+            )
+        if not message:
+            return await ctx.send(
+                embed=embeds.error(f"Ajoutez le texte. Exemple : +sanctiondm {normalised} Votre message")
+            )
+        if len(message) > 1900:
+            return await ctx.send(embed=embeds.error("Le message doit contenir au maximum 1 900 caractères."))
+        await self.bot.db.execute(
+            """
+            INSERT INTO sanction_dm_templates (guild_id, action, message, enabled)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(guild_id, action)
+            DO UPDATE SET message = excluded.message, enabled = 1
+            """,
+            (ctx.guild.id, normalised, message),
+        )
+        await ctx.send(
+            embed=embeds.success(
+                f"Le MP de **{self.DM_ACTION_LABELS[normalised]}** est configuré.\n"
+                f"Aperçu :\n{message[:1000]}"
+            )
+        )
+
+    @sanctiondm.command(name="off", aliases=["disable", "desactiver"])
+    @checks.is_owner_or_admin()
+    async def sanctiondm_off(self, ctx: commands.Context, action: str):
+        """Désactiver le MP d'un type de sanction."""
+        normalised = self._normalise_dm_action(action)
+        if normalised is None:
+            return await ctx.send(embed=embeds.error("Action de sanction inconnue."))
+        await self.bot.db.execute(
+            """
+            INSERT INTO sanction_dm_templates (guild_id, action, message, enabled)
+            VALUES (?, ?, '', 0)
+            ON CONFLICT(guild_id, action)
+            DO UPDATE SET enabled = 0
+            """,
+            (ctx.guild.id, normalised),
+        )
+        await ctx.send(embed=embeds.success(f"Le MP de **{self.DM_ACTION_LABELS[normalised]}** est désactivé."))
+
+    @sanctiondm.command(name="reset", aliases=["default", "defaut"])
+    @checks.is_owner_or_admin()
+    async def sanctiondm_reset(self, ctx: commands.Context, action: str):
+        """Remettre le message par défaut d'un type de sanction."""
+        normalised = self._normalise_dm_action(action)
+        if normalised is None:
+            return await ctx.send(embed=embeds.error("Action de sanction inconnue."))
+        await self.bot.db.execute(
+            "DELETE FROM sanction_dm_templates WHERE guild_id = ? AND action = ?",
+            (ctx.guild.id, normalised),
+        )
+        await ctx.send(embed=embeds.success(f"Le MP de **{self.DM_ACTION_LABELS[normalised]}** utilise le texte par défaut."))
+
+    @sanctiondm.command(name="status", aliases=["liste", "list"])
+    @checks.is_owner_or_admin()
+    async def sanctiondm_status(self, ctx: commands.Context):
+        """Afficher l'état des messages privés de sanction."""
+        await self._show_sanction_dm_status(ctx)
+
     async def check_targetable(self, ctx: commands.Context, membre: discord.Member) -> bool:
         err = checks.check_hierarchy(ctx.author, membre)
         if err:
@@ -150,10 +322,7 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
-        try:
-            await membre.send(embed=embeds.warning(f"Vous avez été **banni** de **{ctx.guild.name}**.\nRaison : {raison}"))
-        except discord.Forbidden:
-            pass
+        await self._send_sanction_dm(ctx, membre, "ban", raison)
         await ctx.guild.ban(membre, reason=f"{ctx.author} : {raison}", delete_message_seconds=0)
         e = await self.log_sanction(ctx, "ban", membre, raison)
         await ctx.send(embed=e)
@@ -168,10 +337,7 @@ class Moderation(commands.Cog):
         seconds = helpers.parse_duration(duree)
         if seconds is None:
             return await ctx.send(embed=embeds.error("Durée invalide. Exemples valides : `30m`, `2h`, `1j`."))
-        try:
-            await membre.send(embed=embeds.warning(f"Vous avez été **banni temporairement** de **{ctx.guild.name}** pour {helpers.format_duration(seconds)}.\nRaison : {raison}"))
-        except discord.Forbidden:
-            pass
+        await self._send_sanction_dm(ctx, membre, "tempban", raison, seconds)
         await ctx.guild.ban(membre, reason=f"{ctx.author} (temporaire {duree}) : {raison}", delete_message_seconds=0)
         await self.bot.db.execute(
             "INSERT INTO tempactions (guild_id, user_id, action, expires_at) VALUES (?, ?, 'ban', ?)",
@@ -192,6 +358,7 @@ class Moderation(commands.Cog):
         try:
             user = await self.bot.fetch_user(uid)
             await ctx.guild.unban(user, reason=f"{ctx.author} : {raison}")
+            await self._send_sanction_dm(ctx, user, "unban", raison)
         except discord.NotFound:
             return await ctx.send(embed=embeds.error("Cet utilisateur n'est pas banni ou n'existe pas."))
         e = await self.log_sanction(ctx, "unban", user, raison)
@@ -206,10 +373,7 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
-        try:
-            await membre.send(embed=embeds.warning(f"Vous avez été **expulsé** de **{ctx.guild.name}**.\nRaison : {raison}"))
-        except discord.Forbidden:
-            pass
+        await self._send_sanction_dm(ctx, membre, "kick", raison)
         await ctx.guild.kick(membre, reason=f"{ctx.author} : {raison}")
         e = await self.log_sanction(ctx, "kick", membre, raison)
         await ctx.send(embed=e)
@@ -236,6 +400,7 @@ class Moderation(commands.Cog):
             return await ctx.send(embed=embeds.error("Durée invalide (maximum 28 jours). Exemple : `10m`, `1h`, `1j`."))
         until = discord.utils.utcnow() + timedelta(seconds=seconds)
         await membre.timeout(until, reason=f"{ctx.author} : {raison}")
+        await self._send_sanction_dm(ctx, membre, "mute", raison, seconds)
         e = await self.log_sanction(ctx, "mute", membre, raison, duration_seconds=seconds)
         await ctx.send(embed=e)
 
@@ -245,6 +410,7 @@ class Moderation(commands.Cog):
     async def unmute(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
         await self._ack(ctx)
         await membre.timeout(None, reason=f"{ctx.author} : {raison}")
+        await self._send_sanction_dm(ctx, membre, "unmute", raison)
         e = await self.log_sanction(ctx, "unmute", membre, raison)
         await ctx.send(embed=e)
 
@@ -279,10 +445,7 @@ class Moderation(commands.Cog):
                 except discord.HTTPException:
                     role_note = f"\n⚠️ Impossible d'attribuer le rôle {role.mention} (permissions/hiérarchie)."
 
-        try:
-            await membre.send(embed=embeds.warning(f"Vous avez reçu un **avertissement** sur **{ctx.guild.name}**.\nRaison : {raison}"))
-        except discord.Forbidden:
-            pass
+        await self._send_sanction_dm(ctx, membre, "warn", raison)
         extra = {"📌 Détails": f"Total d'avertissements : {total}{role_note}"}
         e = await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra)
         await ctx.send(embed=e)
@@ -299,13 +462,9 @@ class Moderation(commands.Cog):
                     f"être banni automatiquement : {err}"
                 ))
                 return
-            try:
-                await membre.send(embed=embeds.warning(
-                    f"Vous avez été **banni automatiquement** de **{ctx.guild.name}** pour avoir atteint "
-                    f"**{threshold}** avertissements."
-                ))
-            except discord.Forbidden:
-                pass
+            await self._send_sanction_dm(
+                ctx, membre, "ban", f"Seuil de {threshold} avertissements atteint"
+            )
             try:
                 await ctx.guild.ban(
                     membre, reason=f"Ban automatique : {threshold} avertissements atteints", delete_message_seconds=0
