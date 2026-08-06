@@ -744,7 +744,7 @@ class Ai(commands.Cog, name="Ai"):
         description="Générer une vraie image 4K à partir d'une description.",
         with_app_command=False,
     )
-    @commands.cooldown(1, 180, commands.BucketType.user)
+    @commands.cooldown(1, 300, commands.BucketType.user)
     async def generate_image_command(self, ctx: commands.Context, *, description: str):
         guild_id = ctx.guild.id if ctx.guild else None
         channel_id = ctx.channel.id
@@ -769,7 +769,7 @@ class Ai(commands.Cog, name="Ai"):
             await ctx.defer()
         else:
             thinking_message = await ctx.send(
-                embed=embeds.info("Génération de l'image 4K en cours — cela peut prendre jusqu'à deux minutes.")
+                embed=embeds.info("Génération rapide de l'image 4K en cours…")
             )
 
         async with ctx.typing():
