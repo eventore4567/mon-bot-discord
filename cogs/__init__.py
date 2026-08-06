@@ -2,6 +2,7 @@
 
 from discord.ext import commands
 
+from .dashboard_access import install_dashboard_access
 from .poll_ui import install_poll_ui
 from .server_builder_everyone import install_server_builder_everyone_ping
 
@@ -18,6 +19,7 @@ async def _load_extension_with_sentrix_patches(
     result = await _ORIGINAL_LOAD_EXTENSION(bot, name, package=package)
     if name == "cogs.utility" or name.endswith(".utility"):
         await install_poll_ui(bot)
+        await install_dashboard_access(bot)
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
         await install_server_builder_everyone_ping(bot)
     return result
