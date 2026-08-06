@@ -214,13 +214,62 @@ _WEB_SEARCH_KEYWORDS = (
     "dernieres nouvelles", "latest", "current", "http://", "https://",
 )
 
+_VIDEO_SEARCH_DOMAINS = [
+    "youtube.com", "youtu.be", "tiktok.com", "twitch.tv", "instagram.com",
+    "dailymotion.com", "vimeo.com", "facebook.com", "x.com",
+]
+_VIDEO_SEARCH_TARGETS = (
+    "video", "youtube", "tiktok", "twitch", "short", "shorts", "reel", "clip",
+)
+_VIDEO_SEARCH_ACTIONS = (
+    "donne", "trouve", "cherche", "recherche", "envoie", "montre", "regarde",
+    "lien", "url", "quel", "quelle",
+)
+_VIDEO_SEARCH_INSTRUCTIONS = (
+    "\n\n[Consigne interne de recherche vidéo — ne l'affiche pas à l'utilisateur.]\n"
+    "Corrige silencieusement les fautes dans le titre, le nom du créateur ou de la chaîne, "
+    "puis recherche uniquement des liens publics vérifiables.\n"
+    "- Si le titre, le créateur ou la plateforme désigne clairement une seule vidéo et que "
+    "la correspondance est forte, donne directement cette vidéo avec son titre, sa chaîne "
+    "ou son compte, sa plateforme et son URL cliquable.\n"
+    "- Si la demande est mal orthographiée, incomplète ou ambiguë et qu'aucune correspondance "
+    "unique n'est certaine, propose 3 à 5 résultats plausibles classés par pertinence et "
+    "popularité. Privilégie la publication originale, les chaînes ou comptes officiels et "
+    "les résultats les plus connus. Cherche d'abord sur YouTube, puis TikTok et les autres "
+    "plateformes disponibles.\n"
+    "- N'invente jamais de titre, de chaîne, de compte ou d'URL. N'utilise pas une page de "
+    "résultats de recherche lorsqu'un lien direct vers la vidéo est disponible.\n"
+    "- Pour chaque choix, affiche : titre — chaîne/compte — plateforme — lien direct."
+)
+
+
+def _normalize_video_search_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text or "")
+    return "".join(char for char in normalized if not unicodedata.combining(char)).lower()
+
+
+def is_video_search_request(text: str) -> bool:
+    """Détecte une demande explicite de vidéo ou de lien vers une plateforme vidéo."""
+    if not isinstance(text, str):
+        return False
+    normalized = _normalize_video_search_text(text)
+    has_target = any(target in normalized for target in _VIDEO_SEARCH_TARGETS)
+    has_action = any(action in normalized for action in _VIDEO_SEARCH_ACTIONS)
+    starts_like_request = bool(re.match(
+        r"^(?:un|une|la|le|les)?\s*(?:video|youtube|tiktok|twitch|shorts?|reel|clip)\b",
+        normalized,
+    ))
+    return has_target and (has_action or starts_like_request)
+
 
 def needs_web_search(text: str) -> bool:
     """Détecte les demandes qui exigent des informations ou liens publics actuels."""
     if not isinstance(text, str):
         return False
     lowered = text.lower()
-    return any(keyword in lowered for keyword in _WEB_SEARCH_KEYWORDS)
+    return is_video_search_request(text) or any(
+        keyword in lowered for keyword in _WEB_SEARCH_KEYWORDS
+    )
 
 
 # ---------------------------------------------------------------- ESTIMATION DE TOKENS
@@ -469,7 +518,7 @@ def _value(obj, name: str, default=None):
     return getattr(obj, name, default)
 
 
-def _append_web_citations(text: str, resp) -> str:
+def _append_web_citations(text: str, resp, *, max_sources: int = 5) -> str:
     """Ajoute les URL de recherche sous une forme réellement cliquable dans Discord."""
     citations: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -485,7 +534,7 @@ def _append_web_citations(text: str, resp) -> str:
     missing = [(title, url) for title, url in citations if url not in (text or "")]
     if not missing:
         return text or ""
-    sources = "\n".join(f"- [{title}]({url})" for title, url in missing[:5])
+    sources = "\n".join(f"- [{title}]({url})" for title, url in missing[:max_sources])
     return f"{(text or '').rstrip()}\n\nSources :\n{sources}".strip()
 
 
@@ -653,16 +702,25 @@ async def generate(
     )
 
     model_id = MODEL_IDS.get(model_key, config.OPENAI_MODEL)
+    video_search = web_search and is_video_search_request(filtered_text)
+    effective_prompt = prompt + _VIDEO_SEARCH_INSTRUCTIONS if video_search else prompt
     kwargs = {
         "model": model_id,
         "instructions": instructions,
-        "input": prompt,
+        "input": effective_prompt,
         "reasoning": {"effort": reasoning_effort},
     }
     if previous_response_id:
         kwargs["previous_response_id"] = previous_response_id
     if web_search:
-        kwargs["tools"] = [{"type": "web_search", "search_context_size": "low"}]
+        search_tool = {"type": "web_search", "search_context_size": "low"}
+        if video_search:
+            search_tool = {
+                "type": "web_search",
+                "search_context_size": "medium",
+                "filters": {"allowed_domains": _VIDEO_SEARCH_DOMAINS},
+            }
+        kwargs["tools"] = [search_tool]
         kwargs["tool_choice"] = "required"
 
     log_context = "modèle=%s commande=%s guild=%s salon=%s utilisateur=%s"
@@ -672,7 +730,7 @@ async def generate(
         resp = await client.responses.create(**kwargs)
         text = getattr(resp, "output_text", None) or _extract_text(resp)
         if web_search:
-            text = _append_web_citations(text, resp)
+            text = _append_web_citations(text, resp, max_sources=6 if video_search else 5)
         if contains_sensitive_content(text):
             logger.warning(
                 "Réponse bloquée par le filtre de contenu — commande=%s guild=%s salon=%s utilisateur=%s",
