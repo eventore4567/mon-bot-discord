@@ -269,7 +269,8 @@ class AiSetupView(discord.ui.View):
         await interaction.response.send_modal(AiLimitsModal(self))
 
     @discord.ui.select(placeholder="Modèle par défaut", row=1, options=[
-        discord.SelectOption(label="Terra (équilibré, recommandé)", value=ai_service.MODEL_TERRA, emoji="⚖️"),
+        discord.SelectOption(label="Luna (rapide, recommandé)", value=ai_service.MODEL_LUNA, emoji="⚡"),
+        discord.SelectOption(label="Terra (équilibré)", value=ai_service.MODEL_TERRA, emoji="⚖️"),
         discord.SelectOption(label="Sol (avancé, plus cher)", value=ai_service.MODEL_SOL, emoji="🚀"),
     ])
     async def pick_model(self, interaction: discord.Interaction, select: discord.ui.Select):
@@ -494,7 +495,7 @@ class Ai(commands.Cog, name="Ai"):
         # ctx.typing() donne un retour immédiat ("SentriX est en train d'écrire...") même
         # en préfixe, pour ne jamais laisser l'utilisateur face à un silence total pendant
         # que l'IA réfléchit (voir REQUEST_TIMEOUT_SECONDS dans ai_service.py : la réponse
-        # arrive toujours, au pire sous forme d'erreur claire, en moins de 45s).
+        # arrive toujours, au pire sous forme d'erreur claire, rapidement ou sous forme d'erreur claire).
         async with ctx.typing():
             await self.send_sentrix_reply(ctx, ctx.author, question)
 
@@ -910,7 +911,9 @@ class Ai(commands.Cog, name="Ai"):
                 return {"ok": False, "error": f"📅 Limite quotidienne atteinte ({settings['daily_limit']} demandes/jour). Réessaie demain."}
 
         model_key = ai_service.pick_model(question, forced_advanced=forced_advanced)
-        if settings["default_model"] == ai_service.MODEL_SOL:
+        if settings["default_model"] == ai_service.MODEL_LUNA and not forced_advanced:
+            model_key = ai_service.MODEL_LUNA
+        elif settings["default_model"] == ai_service.MODEL_SOL:
             model_key = ai_service.MODEL_SOL
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, settings["reasoning_effort"])
 
@@ -1166,7 +1169,7 @@ class Ai(commands.Cog, name="Ai"):
                 "RateLimitError": "Limite de débit ou quota/crédit OpenAI épuisé.",
                 "NotFoundError": "Modèle introuvable — vérifie OPENAI_MODEL sur Railway.",
                 "APIConnectionError": "Impossible de joindre l'API OpenAI depuis Railway (problème réseau côté hébergeur).",
-                "APITimeoutError": "L'appel a dépassé le délai maximal (45s) — connexion très lente ou bloquée.",
+                "APITimeoutError": "L'appel a dépassé le délai maximal (15s) — connexion très lente ou bloquée.",
             }
             hint = hints.get(result["error_type"], "Erreur technique — voir les logs du serveur pour le détail complet.")
             e = embeds.error(
@@ -1183,3 +1186,4 @@ class Ai(commands.Cog, name="Ai"):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Ai(bot))
+
