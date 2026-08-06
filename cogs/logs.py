@@ -7,38 +7,20 @@ log_automod. Le cog reste silencieux lorsqu'un salon n'est pas configuré ou ina
 
 from __future__ import annotations
 
-import logging
-
 import discord
 from discord.ext import commands
 
-from utils import checks
+from utils import log_service
 
 
-logger = logging.getLogger(__name__)
-
-
-LOG_TYPES = {
-    "messages": ("log_messages", "Messages"),
-    "membres": ("log_members", "Membres"),
-    "vocaux": ("log_voice", "Vocaux"),
-    "roles": ("log_roles", "Rôles"),
-    "serveur": ("log_server", "Serveur"),
-    "moderation": ("log_moderation", "Modération"),
-    "securite": ("log_automod", "Sécurité"),
-}
-
-LOG_ALIASES = {
-    "message": "messages",
-    "member": "membres",
-    "members": "membres",
-    "vocal": "vocaux",
-    "voice": "vocaux",
-    "role": "roles",
-    "server": "serveur",
-    "mod": "moderation",
-    "security": "securite",
-    "automod": "securite",
+CONFIG_TO_LOG_TYPE = {
+    "log_messages": "messages",
+    "log_members": "members",
+    "log_voice": "voice",
+    "log_roles": "roles",
+    "log_server": "server",
+    "log_moderation": "moderation",
+    "log_automod": "automod",
 }
 
 COLOURS = {
@@ -56,37 +38,16 @@ def _short(value: object, limit: int = 1000) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _normalise_log_type(value: str) -> str | None:
-    key = value.casefold().strip().replace("é", "e").replace("ô", "o")
-    key = LOG_ALIASES.get(key, key)
-    return key if key in LOG_TYPES else None
-
-
 class Logs(commands.Cog, name="Logs"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def _configured_channel(self, guild: discord.Guild, config_key: str):
-        try:
-            config = await self.bot.db.get_guild_config(guild.id)
-            channel_id = config[config_key] if config else None
-        except (KeyError, IndexError, TypeError):
-            return None
-        if not channel_id:
-            return None
-        channel = guild.get_channel(int(channel_id)) or self.bot.get_channel(int(channel_id))
-        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
-            return None
-        return channel
-
     async def _send(self, guild: discord.Guild, config_key: str, embed: discord.Embed):
-        channel = await self._configured_channel(guild, config_key)
-        if channel is None:
+        """Envoyer chaque événement via la configuration de +logsetup."""
+        log_type = CONFIG_TO_LOG_TYPE.get(config_key)
+        if log_type is None:
             return
-        try:
-            await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
-        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-            return
+        await log_service.send_log(self.bot, guild, log_type, embed)
 
     @staticmethod
     def _embed(title: str, colour: int, *, target_id: int | None = None) -> discord.Embed:
@@ -96,102 +57,6 @@ class Logs(commands.Cog, name="Logs"):
         else:
             embed.set_footer(text="SentriX • Journal du serveur")
         return embed
-
-    @staticmethod
-    def _config_value(config, key: str):
-        """Lire une colonne sans faire planter les anciennes bases SQLite."""
-        if config is None:
-            return None
-        try:
-            return config[key]
-        except (KeyError, IndexError, TypeError):
-            return None
-
-    async def _send_status(self, ctx: commands.Context):
-        if ctx.guild is None:
-            return await ctx.send("Cette commande doit être utilisée dans un serveur.")
-
-        # L'affichage doit rester utilisable même si la base Railway est momentanément
-        # verrouillée ou issue d'une ancienne version. Les commandes de configuration
-        # signaleront séparément un éventuel problème d'écriture.
-        try:
-            config = await self.bot.db.get_guild_config(ctx.guild.id)
-        except Exception:
-            logger.exception("Lecture de la configuration des logs impossible pour %s", ctx.guild.id)
-            config = None
-        lines = []
-        for _, (config_key, label) in LOG_TYPES.items():
-            channel_id = self._config_value(config, config_key)
-            try:
-                channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
-            except (TypeError, ValueError):
-                channel = None
-            state = channel.mention if channel else "Non configuré"
-            lines.append(f"**{label}** — {state}")
-        embed = self._embed("Configuration des logs", COLOURS["member"])
-        embed.description = "\n".join(lines)
-        embed.add_field(
-            name="Configuration",
-            value="`+logs set messages #salon`\n`+logs disable messages`",
-            inline=False,
-        )
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException:
-            # Certains proxies/clients Discord refusent occasionnellement un embed alors
-            # qu'un message texte passe. Le panneau reste donc toujours accessible.
-            logger.exception("Envoi de l'embed +logsetup impossible")
-            await ctx.send("**Configuration des logs**\n" + "\n".join(lines))
-
-    @commands.command(name="logsetup")
-    async def logsetup(self, ctx: commands.Context):
-        """Afficher l'état des logs, sans dépendre du groupe +logs."""
-        try:
-            await self._send_status(ctx)
-        except Exception:
-            # Dernier filet de sécurité : cette commande de diagnostic ne doit jamais
-            # retomber sur le message générique du gestionnaire global.
-            logger.exception("Échec inattendu de +logsetup")
-            await ctx.send(
-                "**Configuration des logs**\n"
-                "Le panneau détaillé n'a pas pu être chargé, mais les commandes restent disponibles :\n"
-                "`+logs set messages #salon`\n"
-                "`+logs set membres #salon`\n"
-                "`+logs set moderation #salon`"
-            )
-
-    @commands.group(name="logs", aliases=["log"], invoke_without_command=True)
-    @checks.is_owner_or_admin()
-    async def logs(self, ctx: commands.Context):
-        """Afficher ou modifier les salons de journalisation."""
-        await self._send_status(ctx)
-
-    @logs.command(name="status", aliases=["etat"])
-    @checks.is_owner_or_admin()
-    async def logs_status(self, ctx: commands.Context):
-        await self._send_status(ctx)
-
-    @logs.command(name="set", aliases=["config"])
-    @checks.is_owner_or_admin()
-    async def logs_set(self, ctx: commands.Context, log_type: str, channel: discord.TextChannel):
-        normalised = _normalise_log_type(log_type)
-        if normalised is None:
-            return await ctx.send(
-                "Type inconnu. Utilisez : `messages`, `membres`, `vocaux`, `roles`, `serveur`, `moderation` ou `securite`."
-            )
-        config_key, label = LOG_TYPES[normalised]
-        await self.bot.db.set_guild_config(ctx.guild.id, config_key, channel.id)
-        await ctx.send(f"Logs **{label}** configurés dans {channel.mention}.")
-
-    @logs.command(name="disable", aliases=["off", "desactiver"])
-    @checks.is_owner_or_admin()
-    async def logs_disable(self, ctx: commands.Context, log_type: str):
-        normalised = _normalise_log_type(log_type)
-        if normalised is None:
-            return await ctx.send("Type de logs inconnu.")
-        config_key, label = LOG_TYPES[normalised]
-        await self.bot.db.set_guild_config(ctx.guild.id, config_key, None)
-        await ctx.send(f"Logs **{label}** désactivés.")
 
     # ---------------- Messages ----------------
 
