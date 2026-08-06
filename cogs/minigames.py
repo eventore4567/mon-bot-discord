@@ -223,7 +223,6 @@ class Minigames(commands.Cog, name="Minigames"):
         participants: set[int] = set()
         denied_notified: set[int] = set()
         total_guesses = 0
-        deadline = asyncio.get_running_loop().time() + 60
         try:
             settings = await game_rewards.get_settings(self.bot, ctx.guild.id)
             allowed_roles = set(settings.get("allowed_role_ids", []))
@@ -235,7 +234,7 @@ class Minigames(commands.Cog, name="Minigames"):
                     title="Devine le nombre — partie collective",
                     description=(
                         "J'ai choisi un nombre entre **1 et 100**.\n"
-                        "Tout le monde peut participer : **6 essais par personne** et **60 secondes**.\n"
+                        "Tout le monde peut participer : **6 essais par personne** et **aucune limite de temps**.\n"
                         "Le premier qui trouve gagne. Une réaction vers le haut signifie « plus grand », "
                         "et une réaction vers le bas signifie « plus petit »."
                     ),
@@ -254,13 +253,7 @@ class Minigames(commands.Cog, name="Minigames"):
 
         try:
             while True:
-                remaining_time = deadline - asyncio.get_running_loop().time()
-                if remaining_time <= 0:
-                    break
-                try:
-                    msg = await self.bot.wait_for("message", check=check, timeout=remaining_time)
-                except asyncio.TimeoutError:
-                    break
+                msg = await self.bot.wait_for("message", check=check)
 
                 role_ids = {role.id for role in getattr(msg.author, "roles", [])}
                 role_allowed = (
@@ -320,26 +313,6 @@ class Minigames(commands.Cog, name="Minigames"):
                         mention_author=False,
                         delete_after=8,
                     )
-
-            await self._finish_guess_number_round(
-                ctx,
-                session_id,
-                None,
-                0,
-                participant_count=len(participants),
-                total_guesses=total_guesses,
-            )
-            await ctx.send(
-                embed=await self._embed(
-                    guild_id,
-                    title="Temps écoulé",
-                    description=(
-                        f"Le nombre était **{target}**.\n"
-                        f"Participants : **{len(participants)}** · Réponses : **{total_guesses}**"
-                    ),
-                    kind="warning",
-                )
-            )
         finally:
             self._guess_number_channels.discard(channel_key)
             game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "guess-number")
