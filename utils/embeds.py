@@ -31,33 +31,44 @@ def set_brand_color(color: int) -> None:
     COLOR_BRAND = color
 
 
-def _base(title: str, description: str, color: int) -> discord.Embed:
+def _clip(value: str | None, limit: int) -> str | None:
+    """Respecte les limites Discord sans couper brutalement un message au milieu."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _base(title: str, description: str | None, color: int) -> discord.Embed:
     embed = discord.Embed(
-        title=title,
-        description=description,
+        title=_clip(title, 256),
+        description=_clip(description, 4096),
         color=color,
         timestamp=datetime.now(timezone.utc),
     )
+    footer = _clip(FOOTER_TEXT, 2048) or "SentriX"
     if FOOTER_ICON:
-        embed.set_footer(text=FOOTER_TEXT, icon_url=FOOTER_ICON)
+        embed.set_footer(text=footer, icon_url=FOOTER_ICON)
     else:
-        embed.set_footer(text=FOOTER_TEXT)
+        embed.set_footer(text=footer)
     return embed
 
 
-def success(description: str, title: str = "● Succès") -> discord.Embed:
+def success(description: str, title: str = "Action réussie") -> discord.Embed:
     return _base(title, description, COLOR_SUCCESS)
 
 
-def error(description: str, title: str = "○ Erreur") -> discord.Embed:
+def error(description: str, title: str = "Action impossible") -> discord.Embed:
     return _base(title, description, COLOR_ERROR)
 
 
-def warning(description: str, title: str = "⚠️ Attention") -> discord.Embed:
+def warning(description: str, title: str = "À vérifier") -> discord.Embed:
     return _base(title, description, COLOR_WARNING)
 
 
-def info(description: str, title: str = "ℹ️ Information") -> discord.Embed:
+def info(description: str, title: str = "Information") -> discord.Embed:
     return _base(title, description, COLOR_INFO)
 
 
@@ -89,9 +100,9 @@ def log_entry(
     color: int,
     *,
     cible=None,
-    cible_label: str = "👤 Cible",
+    cible_label: str = "Cible",
     acteur=None,
-    acteur_label: str = "🛠️ Modérateur",
+    acteur_label: str = "Modérateur",
     raison: str | None = None,
     extra: dict | None = None,
 ) -> discord.Embed:
@@ -105,7 +116,7 @@ def log_entry(
     if acteur is not None:
         e.add_field(name=acteur_label, value=_who(acteur), inline=True)
     if raison is not None:
-        e.add_field(name="📄 Raison", value=raison or "Aucune raison fournie", inline=False)
+        e.add_field(name="Raison", value=raison or "Aucune raison fournie", inline=False)
     if extra:
         for name, value in extra.items():
             e.add_field(name=name, value=str(value), inline=False)
