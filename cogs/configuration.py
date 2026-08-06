@@ -1457,7 +1457,9 @@ class LogsSetupView(discord.ui.View):
         select = discord.ui.Select(placeholder="📂 Choisir une catégorie de logs...", options=options, row=0)
         select.callback = self._make_category_callback(select)
         self.add_item(select)
-        close_btn = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.secondary, emoji="○", row=1)
+        # Les symboles typographiques comme "○" ne sont pas des emojis Discord
+        # valides dans un composant et provoquent HTTP 400 / Invalid Form Body.
+        close_btn = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.secondary, row=1)
         close_btn.callback = self._close_clicked
         self.add_item(close_btn)
 
@@ -1508,7 +1510,7 @@ class LogsSetupView(discord.ui.View):
         test_btn.callback = self._test_clicked
         self.add_item(test_btn)
 
-        back_btn = discord.ui.Button(label="Retour", style=discord.ButtonStyle.secondary, emoji="◀", row=0)
+        back_btn = discord.ui.Button(label="Retour", style=discord.ButtonStyle.secondary, row=0)
         back_btn.callback = self._back_clicked
         self.add_item(back_btn)
 
