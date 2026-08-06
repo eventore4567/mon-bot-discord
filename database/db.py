@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
     mute_role INTEGER,
     welcome_channel INTEGER,
     welcome_message TEXT,
+    welcome_image_url TEXT,
     goodbye_channel INTEGER,
     goodbye_message TEXT,
     rules_channel INTEGER,
@@ -69,6 +70,26 @@ CREATE TABLE IF NOT EXISTS guild_config (
     stats_settings_json TEXT DEFAULT '{}',
     design_settings_json TEXT DEFAULT '{}'
 );
+
+CREATE TABLE IF NOT EXISTS social_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    source_url TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    discord_channel_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    custom_text TEXT,
+    image_url TEXT,
+    last_item_id TEXT,
+    last_item_url TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    last_checked_at INTEGER,
+    UNIQUE(guild_id, source_url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_notifications_enabled
+ON social_notifications (enabled, guild_id);
 
 CREATE TABLE IF NOT EXISTS sanction_dm_templates (
     guild_id INTEGER NOT NULL,
@@ -944,6 +965,7 @@ MANAGER_CATEGORIES = {
 # persistant sur l'hébergeur), ces nouvelles colonnes doivent être ajoutées manuellement
 # via ALTER TABLE au démarrage. Voir Database._migrate().
 GUILD_CONFIG_NEW_COLUMNS = {
+    "welcome_image_url": "TEXT",
     "log_messages": "INTEGER",
     "log_members": "INTEGER",
     "log_voice": "INTEGER",
