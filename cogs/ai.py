@@ -11,6 +11,7 @@ Commandes :
 /ask <question>                   — question ponctuelle (sans les boutons)
 +chat-reset                       — réinitialise l'historique legacy
 /summarize, +explain, +image-prompt, +rewrite, +fact-check — outils spécialisés existants
++image <description>               — génère réellement une image 4K (3840 × 2160)
 +improve, +correct, +ai-translate <langue>, +code — nouveaux outils spécialisés
 +aisetup (admin)                  — configuration de l'IA pour ce serveur
 +aidiag (admin)                   — diagnostic technique de la connexion à l'IA (sans la clé)
@@ -512,10 +513,29 @@ class Ai(commands.Cog, name="Ai"):
         """Transforme une demande naturelle explicite en commande préfixée existante."""
         normalized = self._normalize_request(question)
         action_intent = bool(re.search(
-            r"\b(ouvre|affiche|lance|execute|fais|fait|utilise|ajoute|cree|importe|"
+            r"\b(ouvre|affiche|lance|execute|fais|fait|utilise|ajoute|cree|genere|dessine|importe|"
             r"supprime|enleve|retire|mets|configure)\b",
             normalized,
         ))
+
+        image_intent = bool(
+            re.search(r"\b(image|photo|illustration|dessin)\b", normalized)
+            and re.search(r"\b(fais|fait|cree|genere|dessine)\b", normalized)
+        )
+        if image_intent:
+            tail = re.split(
+                r"\b(?:image|photo|illustration|dessin)\b",
+                question,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[-1]
+            tail = re.sub(
+                r"^\s*(?:de|du|d['’]|avec|sur|representant|qui represente)\s*",
+                "",
+                tail,
+                flags=re.IGNORECASE,
+            ).strip(" :,-")
+            return f"{prefix}image" + (f" {tail}" if tail else "")
 
         if action_intent and re.search(r"\b(setup|configuration)\b", normalized):
             return f"{prefix}setup"
@@ -700,6 +720,105 @@ class Ai(commands.Cog, name="Ai"):
         if ai_service.is_error_code(answer):
             return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
         await ctx.send(embed=await self._embed(guild_id, title="Prompt généré", description=answer[:4000]))
+
+    @staticmethod
+    def _prepare_4k_discord_jpeg(data: bytes, max_bytes: int = 7_500_000) -> bytes:
+        """Garantir un JPEG 3840 × 2160 assez léger pour être envoyé sur Discord."""
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as source:
+            image = source.convert("RGB")
+            if image.size != (3840, 2160):
+                image = image.resize((3840, 2160), Image.Resampling.LANCZOS)
+            for quality in (88, 80, 72, 64, 56, 48):
+                output = io.BytesIO()
+                image.save(output, format="JPEG", quality=quality, optimize=True)
+                encoded = output.getvalue()
+                if len(encoded) <= max_bytes:
+                    return encoded
+        raise ValueError("L'image 4K reste trop lourde pour Discord.")
+
+    @commands.hybrid_command(
+        name="image",
+        aliases=["img", "imagine"],
+        description="Générer une vraie image 4K à partir d'une description.",
+        with_app_command=False,
+    )
+    @commands.cooldown(1, 180, commands.BucketType.user)
+    async def generate_image_command(self, ctx: commands.Context, *, description: str):
+        guild_id = ctx.guild.id if ctx.guild else None
+        channel_id = ctx.channel.id
+
+        if guild_id:
+            settings = await ai_service.get_settings(self.bot, guild_id)
+            if not settings["enabled"]:
+                return await ctx.send(embed=embeds.error("L'IA est désactivée sur ce serveur."))
+            if not ai_service.is_channel_allowed(settings, channel_id):
+                return await ctx.send(embed=embeds.error("L'IA n'est pas autorisée dans ce salon."))
+            role_ids = [role.id for role in getattr(ctx.author, "roles", [])]
+            if not ai_service.is_role_allowed(settings, role_ids):
+                return await ctx.send(embed=embeds.error("Tu n'as pas le rôle nécessaire pour générer une image."))
+            problem = ai_service.moderate_input(description, max_length=settings["max_question_length"])
+            if problem:
+                return await ctx.send(embed=embeds.error(problem))
+            used_today = await ai_service.get_daily_usage(self.bot, guild_id, ctx.author.id)
+            if used_today >= settings["daily_limit"]:
+                return await ctx.send(embed=embeds.error(
+                    f"Limite quotidienne atteinte ({settings['daily_limit']} demandes/jour)."
+                ))
+
+        thinking_message = None
+        if ctx.interaction:
+            await ctx.defer()
+        else:
+            thinking_message = await ctx.send(
+                embed=embeds.info("Génération de l'image 4K en cours — cela peut prendre jusqu'à deux minutes.")
+            )
+
+        async with ctx.typing():
+            result = await ai_service.generate_image(
+                description,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                user_id=ctx.author.id,
+            )
+
+        if thinking_message:
+            try:
+                await thinking_message.delete()
+            except discord.HTTPException:
+                pass
+
+        if not result.ok:
+            return await ctx.send(
+                embed=await self._embed(
+                    guild_id,
+                    title=ai_service.error_title(result.error),
+                    description=ai_service.error_message(result.error),
+                    kind="danger",
+                )
+            )
+
+        try:
+            image_bytes = self._prepare_4k_discord_jpeg(result.data)
+        except (OSError, ValueError):
+            logger.error("Impossible de préparer l'image 4K pour Discord\n%s", traceback.format_exc())
+            return await ctx.send(embed=embeds.error("L'image a été générée mais son fichier est trop lourd pour Discord."))
+
+        if guild_id:
+            await ai_service.record_usage(self.bot, guild_id, ctx.author.id, tokens_estimate=0)
+
+        filename = "sentrix-image-4k.jpg"
+        file = discord.File(io.BytesIO(image_bytes), filename=filename)
+        e = await self._embed(
+            guild_id,
+            title="Image 4K générée",
+            description=f"**Demande :** {description[:1000]}",
+        )
+        e.add_field(name="Résolution", value="3840 × 2160", inline=True)
+        e.add_field(name="Modèle", value=result.model or config.OPENAI_IMAGE_MODEL, inline=True)
+        e.set_image(url=f"attachment://{filename}")
+        await ctx.send(embed=e, file=file)
 
     @commands.hybrid_command(name="explain", description="Demander à l'IA d'expliquer un concept simplement.", with_app_command=False)
     @app_commands.describe(sujet="Le concept à expliquer")
@@ -963,7 +1082,8 @@ class Ai(commands.Cog, name="Ai"):
             "**+correct <texte>** — corriger l'orthographe et la grammaire\n"
             "**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n"
             "**+code <demande>** — générer du code\n"
-            "**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n"
+            "**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n"            "**+image <description>** — générer une image 4K (3840 × 2160)\n"
+            "**SentriX fais-moi une image de...** — génération 4K en langage naturel\n"
             "**SentriX ouvre-moi setup/help** — exécuter une commande en langage naturel\n"
             "**SentriX ajoute cet emoji** — importer l'emoji collé ou l'image jointe\n"
             "**SentriX donne-moi le lien de...** — rechercher un lien public avec ses sources\n"
