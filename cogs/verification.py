@@ -599,6 +599,7 @@ class Verification(commands.Cog, name="Verification"):
         await ctx.send(embed=await self._embed(ctx.guild.id, title="Association retirée", kind="success"))
 
     @commands.hybrid_command(name="reactionrole-list", description="Lister les rôles sur réaction configurés.", with_app_command=False)
+    @checks.is_owner_or_admin_for("configuration")
     async def reactionrole_list(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM reaction_roles WHERE guild_id = ?", (ctx.guild.id,))
         if not rows:
