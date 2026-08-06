@@ -549,9 +549,9 @@ async def generate_image(
             model=config.OPENAI_IMAGE_MODEL,
             prompt=prompt,
             size=IMAGE_SIZE_4K,
-            quality="high",
+            quality="low",
             output_format="jpeg",
-            output_compression=85,
+            output_compression=75,
             moderation="auto",
             n=1,
         )
