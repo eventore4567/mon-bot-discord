@@ -15,8 +15,10 @@ from .remove_code_command import install as install_remove_code_command
 from .reply_reference_fix import install as install_reply_reference_fix
 from .rolepanel_more_notifications import install as install_more_notification_roles
 from .rolepanel_notifications import install as install_notification_rolepanel
+from .security_runtime_hardening import install as install_security_hardening
 from .server_builder_channel_guides import install as install_server_builder_channel_guides
 from .server_builder_everyone import install_server_builder_everyone_ping
+from .server_builder_ready_setup import install as install_server_builder_ready_setup
 from .setup_close_fix import install as install_setup_close_fix
 from .ticket_claim_security import install as install_ticket_claim_security
 
@@ -50,6 +52,8 @@ async def _load_extension_with_sentrix_patches(
     # que la commande d'origine n'est pas encore chargée.
     await install_notification_rolepanel(bot)
 
+    if name == "cogs.automod" or name.endswith(".automod"):
+        await install_security_hardening(bot)
     if name == "cogs.ai" or name.endswith(".ai"):
         install_ai_reliability()
         install_remove_code_command(bot)
@@ -71,6 +75,7 @@ async def _load_extension_with_sentrix_patches(
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
         await install_server_builder_everyone_ping(bot)
         install_server_builder_channel_guides(bot)
+        install_server_builder_ready_setup(bot)
     return result
 
 
