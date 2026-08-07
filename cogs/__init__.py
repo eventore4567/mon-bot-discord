@@ -11,6 +11,7 @@ from .help_home_circles import install as install_help_home_circles
 from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
 from .remove_code_command import install as install_remove_code_command
+from .rolepanel_more_notifications import install as install_more_notification_roles
 from .rolepanel_notifications import install as install_notification_rolepanel
 from .server_builder_everyone import install_server_builder_everyone_ping
 from .setup_close_fix import install as install_setup_close_fix
@@ -30,6 +31,10 @@ async def _load_extension_with_sentrix_patches(
     # Idempotent : le moteur est installé dès le premier cog chargé. Il couvre donc aussi
     # les futurs cogs et reste actif même si un module optionnel échoue plus tard.
     install_premium_style(bot)
+
+    # Le catalogue est appliqué avant l'installation du panneau afin que +rolepanel et
+    # +rolepanel-refresh utilisent toujours les 25 rôles de notifications disponibles.
+    install_more_notification_roles()
 
     # Vérifié après chaque extension : dès que l'ancien +rolepanel apparaît, il est remplacé
     # par le panneau persistant de rôles de notifications. L'installateur reste inactif tant
