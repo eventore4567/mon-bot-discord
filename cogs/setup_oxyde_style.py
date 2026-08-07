@@ -156,7 +156,7 @@ def install(bot: commands.Bot) -> None:
         return e
 
     def render_home(self) -> None:
-        """Accueil proche du mockup, mais composé uniquement d'éléments Discord standards."""
+        """Accueil : menu setup + uniquement des boutons de service/liens, sans boutons d'action colorés."""
         self.clear_items()
 
         category_select = discord.ui.Select(
@@ -175,7 +175,8 @@ def install(bot: commands.Bot) -> None:
         category_select.callback = self._make_home_category_callback(category_select)
         self.add_item(category_select)
 
-        # Liens : aucun callback -> ils restent fiables même après un redémarrage du bot.
+        # Tous les boutons d'accueil sont des liens : pas de callback, donc ils restent
+        # fiables même après un redémarrage et ne peuvent pas afficher "l'application ne répond pas".
         invite_url = _invite_url(self.bot)
         dashboard_url = _safe_http_url(os.getenv("DASHBOARD_PUBLIC_URL")) or DASHBOARD_FALLBACK
         support_url = _safe_http_url(os.getenv("SUPPORT_SERVER_URL"))
@@ -189,6 +190,7 @@ def install(bot: commands.Bot) -> None:
                 url=invite_url,
                 row=1,
             ))
+
         self.add_item(discord.ui.Button(
             label="Dashboard",
             emoji="📈",
@@ -196,53 +198,44 @@ def install(bot: commands.Bot) -> None:
             url=dashboard_url,
             row=1,
         ))
+
+        self.add_item(discord.ui.Button(
+            label="Commandes",
+            emoji="⌨️",
+            style=discord.ButtonStyle.link,
+            url=f"{dashboard_url.rstrip('/')}#commands",
+            row=1,
+        ))
+
+        self.add_item(discord.ui.Button(
+            label="Configuration",
+            emoji="⚙️",
+            style=discord.ButtonStyle.link,
+            url=f"{dashboard_url.rstrip('/')}#configuration",
+            row=1,
+        ))
+
         if support_url:
             self.add_item(discord.ui.Button(
                 label="Serveur support",
                 emoji="🎧",
                 style=discord.ButtonStyle.link,
                 url=support_url,
-                row=1,
+                row=2,
             ))
+
         if status_url:
             self.add_item(discord.ui.Button(
                 label="Statut",
                 emoji="📡",
                 style=discord.ButtonStyle.link,
                 url=status_url,
-                row=1,
+                row=2,
             ))
-
-        # Navigation existante : on réutilise les DynamicItem du vrai setup pour garder
-        # la persistance après redémarrage et ne rien casser dans la logique actuelle.
-        self.add_item(configuration.SetupNavButton(
-            "save", self.message_id,
-            label="💾 Enregistrer",
-            style=discord.ButtonStyle.success,
-            row=2,
-        ))
-        self.add_item(configuration.SetupNavButton(
-            "summary", self.message_id,
-            label="📋 Résumé",
-            style=discord.ButtonStyle.primary,
-            row=2,
-        ))
-        self.add_item(configuration.SetupNavButton(
-            "history", self.message_id,
-            label="🕘 Historique",
-            style=discord.ButtonStyle.secondary,
-            row=2,
-        ))
-        self.add_item(configuration.SetupNavButton(
-            "cancel", self.message_id,
-            label="✖ Fermer",
-            style=discord.ButtonStyle.danger,
-            row=2,
-        ))
 
     configuration.SetupView._build_home_embed = build_home_embed
     configuration.SetupView.build_embed = build_embed
     configuration.SetupView._render_home = render_home
 
     _INSTALLED = True
-    logger.info("Style premium stable de +setup chargé (Embed + composants standards).")
+    logger.info("Style premium stable de +setup chargé (boutons de service uniquement).")
