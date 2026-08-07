@@ -18,6 +18,7 @@ from .rolepanel_notifications import install as install_notification_rolepanel
 from .security_runtime_hardening import install as install_security_hardening
 from .server_builder_channel_guides import install as install_server_builder_channel_guides
 from .server_builder_everyone import install_server_builder_everyone_ping
+from .server_builder_existing_bootstrap import install as install_existing_server_bootstrap
 from .server_builder_ready_setup import install as install_server_builder_ready_setup
 from .server_choice_roles import install as install_server_choice_roles
 from .setup_close_fix import install as install_setup_close_fix
@@ -79,6 +80,7 @@ async def _load_extension_with_sentrix_patches(
         await install_server_builder_everyone_ping(bot)
         install_server_builder_channel_guides(bot)
         install_server_builder_ready_setup(bot)
+        install_existing_server_bootstrap(bot)
     return result
 
 
