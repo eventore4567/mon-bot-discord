@@ -6,6 +6,7 @@ from .afk_nickname import install as install_afk_nickname
 from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
 from .dashboard_access import install_dashboard_access
+from .help_complete import install as install_complete_help
 from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
 from .remove_code_command import install as install_remove_code_command
@@ -32,6 +33,9 @@ async def _load_extension_with_sentrix_patches(
         install_remove_code_command(bot)
     if name == "cogs.utility" or name.endswith(".utility"):
         await install_poll_ui(bot)
+        # L'aide complète doit être installée avant l'ajout du bouton dashboard afin que
+        # celui-ci enveloppe bien la nouvelle page d'accueil dynamique.
+        install_complete_help(bot)
         await install_dashboard_access(bot)
         await install_afk_nickname(bot)
         install_afk_signature_fix(bot)
