@@ -66,17 +66,22 @@ def _apply_circle_home(embed: discord.Embed) -> discord.Embed:
 
 
 def _clean_home_components(view: discord.ui.View) -> None:
-    """Retire aussi les emojis du menu et des boutons de la page d'accueil."""
+    """Retire aussi les emojis du menu et des boutons sans pouvoir casser +help."""
     for item in view.children:
-        if isinstance(item, discord.ui.Select):
-            item.placeholder = "Choisissez une catégorie..."
-            for option in item.options:
-                option.label = _circle_label(option.label)[:100]
-                option.emoji = None
-        elif isinstance(item, discord.ui.Button):
-            if item.label:
-                item.label = _circle_label(item.label)[:80]
-            item.emoji = None
+        try:
+            if isinstance(item, discord.ui.Select):
+                item.placeholder = "Choisissez une catégorie..."
+                for option in item.options:
+                    option.label = _circle_label(option.label)[:100]
+                    option.emoji = None
+            elif isinstance(item, discord.ui.Button):
+                if item.label:
+                    item.label = _circle_label(item.label)[:80]
+                item.emoji = None
+        except Exception:
+            # Une différence de version de discord.py ne doit jamais empêcher l'aide
+            # principale de s'afficher. L'embed reste nettoyé même si un composant refuse.
+            logger.debug("Composant de l'accueil help non modifiable.", exc_info=True)
 
 
 def install(bot: commands.Bot) -> None:
