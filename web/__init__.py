@@ -14,6 +14,7 @@ from . import dashboard_explanations_search as _dashboard_explanations_search
 from . import setup_center_explanations as _setup_center_explanations
 from . import embed_center as _embed_center
 from . import dashboard_polish as _dashboard_polish
+from . import persistent_dashboard_sessions as _persistent_dashboard_sessions
 from . import admin_only_dashboard as _admin_only_dashboard
 
 
@@ -65,6 +66,11 @@ _dashboard_polish.POLISH_JS = _dashboard_polish.POLISH_JS.replace(
     1,
 )
 _dashboard_polish.install(_dashboard, _setup_center, _embed_center)
+
+# La connexion Discord reste mémorisée 30 jours, y compris après un redémarrage Railway.
+# Cette couche doit être installée AVANT le verrou Administrateur afin de restaurer la
+# session depuis SQLite avant toute vérification des permissions du serveur.
+_persistent_dashboard_sessions.install(_dashboard)
 
 # Le créateur d'embeds est une page privée au même titre que le dashboard principal.
 _admin_only_dashboard._PRIVATE_PAGE_PATHS.add("/embed-builder")
