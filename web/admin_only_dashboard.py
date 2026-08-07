@@ -28,40 +28,73 @@ ACCESS_DENIED_HTML = """<!doctype html>
   <main>
     <div class="icon">🔒</div>
     <h1>Permission Administrateur obligatoire</h1>
-    <p>Vous êtes connecté à Discord, mais vous ne pouvez pas utiliser le dashboard SentriX sans la permission <b>Administrateur</b> sur au moins un serveur concerné.</p>
-    <div class="notice">Aucun réglage, aucune sanction, aucun log et aucun outil Setup ne sont accessibles tant que cette permission n'est pas accordée.</div>
-    <p>Après avoir reçu la permission Administrateur, reconnectez-vous au dashboard pour actualiser vos serveurs.</p>
-    <div class="actions"><a href="/?public=1">Voir la page publique</a><a class="primary" href="/login">Se reconnecter avec Discord</a></div>
+    <p>Vous êtes connecté à Discord, mais vous ne pouvez pas utiliser le dashboard SentriX sans la permission <b>Administrateur</b> sur au moins un serveur où SentriX est présent.</p>
+    <div class="notice">Les permissions sont vérifiées en direct. Si Administrateur vient d'être ajouté, rechargez simplement la page.</div>
+    <p>Aucun réglage, aucune sanction, aucun log et aucun outil Setup ne sont accessibles sans cette permission.</p>
+    <div class="actions"><a href="/?public=1">Voir la page publique</a><a class="primary" href="/app">Réessayer</a></div>
   </main>
 </body>
 </html>"""
 
 
+def _installed_item(guild, user_id: int, previous: dict | None = None) -> dict:
+    """Construit l'entrée affichée sans dépendre de l'ancien snapshot OAuth."""
+    icon_url = str(guild.icon.url) if getattr(guild, "icon", None) else None
+    return {
+        "id": str(guild.id),
+        "name": guild.name,
+        "icon_url": icon_url,
+        "owner": guild.owner_id == user_id,
+        **({k: v for k, v in (previous or {}).items() if k not in {"id", "name", "icon_url", "owner"}}),
+    }
+
+
 async def _refresh_admin_guilds(request: web.Request, dashboard, session: dict) -> bool:
-    """Revérifie les permissions actuelles et retire les accès devenus invalides."""
+    """Reconstruit les accès depuis Discord au lieu de garder le snapshot OAuth du login.
+
+    Avant ce correctif, la session ne pouvait que RETIRER des serveurs. Si un membre
+    recevait Administrateur après sa connexion, le serveur restait absent jusqu'à une
+    nouvelle connexion OAuth. Désormais les serveurs où le bot est installé sont rescannés
+    à chaque accès et peuvent donc être ajoutés immédiatement.
+    """
     bot = request.app["bot"]
     try:
         user_id = int(session["user"]["id"])
     except (KeyError, TypeError, ValueError):
         return False
 
-    verified: list[dict] = []
+    previous_by_id: dict[int, dict] = {}
+    oauth_only: list[dict] = []
     for item in list(session.get("guilds", [])):
         try:
             guild_id = int(item["id"])
         except (KeyError, TypeError, ValueError):
             continue
+        previous_by_id[guild_id] = item
+        if bot.get_guild(guild_id) is None:
+            # Entrée OAuth pour un serveur où SentriX n'est pas installé. Elle sert uniquement
+            # à afficher le bouton d'invitation et ne donne aucun accès de configuration.
+            oauth_only.append(item)
 
-        guild = bot.get_guild(guild_id)
-        if guild is None:
-            # Le bot n'est pas encore installé. Cette entrée provient du scope OAuth
-            # `guilds`, déjà filtré sur propriétaire/Administrateur, et permet uniquement
-            # d'afficher le bouton d'invitation — aucune configuration n'est accessible.
-            verified.append(item)
+    verified: list[dict] = []
+    seen: set[int] = set()
+
+    # Source de vérité pour les serveurs installés : état Discord actuel du bot.
+    for guild in list(bot.guilds):
+        if await dashboard._administrator_member(guild, user_id) is None:
             continue
+        verified.append(_installed_item(guild, user_id, previous_by_id.get(guild.id)))
+        seen.add(guild.id)
 
-        if await dashboard._administrator_member(guild, user_id) is not None:
+    # Conserve les serveurs OAuth non installés qui avaient déjà été validés au login.
+    for item in oauth_only:
+        try:
+            guild_id = int(item["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if guild_id not in seen:
             verified.append(item)
+            seen.add(guild_id)
 
     session["guilds"] = verified
     return bool(verified)
@@ -145,4 +178,4 @@ def install(dashboard) -> None:
         return app
 
     dashboard.build_app = build_app
-    logger.info("Dashboard verrouillé : permission Administrateur obligatoire.")
+    logger.info("Dashboard verrouillé : permission Administrateur obligatoire, serveurs actualisés en direct.")

@@ -1,14 +1,22 @@
-"""Évite les réponses Discord liées à un message qui peut ensuite être supprimé.
+"""Empêche SentriX de créer des réponses liées à un message supprimable.
 
-Les commandes qui utilisent ctx.reply restent visuellement identiques, mais SentriX envoie
-un message normal dans le salon. Ainsi Discord n'affiche plus « Le message original a été
-supprimé » si le message de commande est effacé ensuite.
+Discord affiche « Le message original a été supprimé » lorsqu'un message du bot possède
+une MessageReference vers un message ensuite effacé. Cette couche neutralise toutes les
+sources habituelles de référence : ctx.reply(), Message.reply() et les send(reference=...).
 """
 from __future__ import annotations
 
+import discord
 from discord.ext import commands
 
 _INSTALLED = False
+
+
+def _clean_reference_kwargs(kwargs: dict) -> dict:
+    kwargs.pop("reference", None)
+    kwargs.pop("mention_author", None)
+    kwargs.pop("fail_if_not_exists", None)
+    return kwargs
 
 
 def install() -> None:
@@ -17,15 +25,28 @@ def install() -> None:
         return
     _INSTALLED = True
 
-    # À ce stade Context.send est déjà enveloppé par le moteur premium SentriX. On le
-    # réutilise volontairement pour conserver exactement le même style, mais sans créer
-    # de MessageReference vers le message de commande.
-    send = commands.Context.send
+    # Les fonctions courantes sont déjà enveloppées par le moteur de style SentriX à ce
+    # stade. On enveloppe donc les versions actuelles afin de conserver exactement le même
+    # rendu tout en supprimant uniquement la référence Discord.
+    context_send = commands.Context.send
+    messageable_send = discord.abc.Messageable.send
 
-    async def reply_without_reference(self: commands.Context, *args, **kwargs):
-        kwargs.pop("mention_author", None)
-        kwargs.pop("fail_if_not_exists", None)
-        kwargs.pop("reference", None)
-        return await send(self, *args, **kwargs)
+    async def context_send_without_reference(self: commands.Context, *args, **kwargs):
+        return await context_send(self, *args, **_clean_reference_kwargs(kwargs))
 
-    commands.Context.reply = reply_without_reference
+    async def context_reply_without_reference(self: commands.Context, *args, **kwargs):
+        return await context_send_without_reference(self, *args, **kwargs)
+
+    async def messageable_send_without_reference(self, *args, **kwargs):
+        return await messageable_send(self, *args, **_clean_reference_kwargs(kwargs))
+
+    async def message_reply_without_reference(self: discord.Message, *args, **kwargs):
+        # Message.reply() ajoute normalement reference=self. On envoie volontairement dans
+        # le salon comme un message normal pour qu'une suppression future n'affiche jamais
+        # le bandeau « message original supprimé ».
+        return await self.channel.send(*args, **_clean_reference_kwargs(kwargs))
+
+    commands.Context.send = context_send_without_reference
+    commands.Context.reply = context_reply_without_reference
+    discord.abc.Messageable.send = messageable_send_without_reference
+    discord.Message.reply = message_reply_without_reference
