@@ -7,6 +7,7 @@ from .ai_reliability import install as install_ai_reliability
 from .dashboard_access import install_dashboard_access
 from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
+from .remove_code_command import install as install_remove_code_command
 from .server_builder_everyone import install_server_builder_everyone_ping
 
 
@@ -27,6 +28,7 @@ async def _load_extension_with_sentrix_patches(
 
     if name == "cogs.ai" or name.endswith(".ai"):
         install_ai_reliability()
+        install_remove_code_command(bot)
     if name == "cogs.utility" or name.endswith(".utility"):
         await install_poll_ui(bot)
         await install_dashboard_access(bot)
