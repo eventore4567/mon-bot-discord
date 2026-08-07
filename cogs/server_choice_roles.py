@@ -102,9 +102,17 @@ class GroupRoleSelect(discord.ui.Select):
                 view=GroupPrivateView(guild, member, self.group_key),
             )
 
+        # Force une lecture Discord fraîche : le rôle ajouté/retiré disparaît immédiatement
+        # du bon menu au lieu d'attendre l'événement de cache on_member_update.
+        fresh_member = member
+        try:
+            fresh_member = await guild.fetch_member(member.id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
+
         await interaction.response.edit_message(
             content=f"✅ {status}",
-            view=GroupPrivateView(guild, member, self.group_key),
+            view=GroupPrivateView(guild, fresh_member, self.group_key),
         )
 
 
@@ -123,9 +131,14 @@ class ServerSelfRoleView(discord.ui.View):
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Serveur introuvable.", ephemeral=True)
         label, _names = ROLE_GROUPS[group_key]
+        member = interaction.user
+        try:
+            member = await interaction.guild.fetch_member(interaction.user.id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
         await interaction.response.send_message(
             f"**{label}** — ajoute ou retire uniquement les rôles que tu veux.",
-            view=GroupPrivateView(interaction.guild, interaction.user, group_key),
+            view=GroupPrivateView(interaction.guild, member, group_key),
             ephemeral=True,
         )
 
