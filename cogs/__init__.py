@@ -3,6 +3,7 @@
 from discord.ext import commands
 
 from .afk_nickname import install as install_afk_nickname
+from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
 from .dashboard_access import install_dashboard_access
 from .poll_ui import install_poll_ui
@@ -33,6 +34,7 @@ async def _load_extension_with_sentrix_patches(
         await install_poll_ui(bot)
         await install_dashboard_access(bot)
         await install_afk_nickname(bot)
+        install_afk_signature_fix(bot)
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
         await install_server_builder_everyone_ping(bot)
     return result
