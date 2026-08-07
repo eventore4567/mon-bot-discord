@@ -389,9 +389,11 @@ def style_kwargs(
             bot_user=bot_user,
         )
         new_kwargs["embed"] = wrapped
-        new_kwargs["content"] = None
         if new_args:
             new_args[0] = None
+            new_kwargs.pop("content", None)
+        else:
+            new_kwargs["content"] = None
 
     if "view" in new_kwargs:
         new_kwargs["view"] = style_view(new_kwargs.get("view"))
