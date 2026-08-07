@@ -11,10 +11,12 @@ from .help_home_circles import install as install_help_home_circles
 from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
 from .remove_code_command import install as install_remove_code_command
+from .reply_reference_fix import install as install_reply_reference_fix
 from .rolepanel_more_notifications import install as install_more_notification_roles
 from .rolepanel_notifications import install as install_notification_rolepanel
 from .server_builder_everyone import install_server_builder_everyone_ping
 from .setup_close_fix import install as install_setup_close_fix
+from .ticket_claim_security import install as install_ticket_claim_security
 
 
 _ORIGINAL_LOAD_EXTENSION = commands.Bot.load_extension
@@ -31,6 +33,9 @@ async def _load_extension_with_sentrix_patches(
     # Idempotent : le moteur est installé dès le premier cog chargé. Il couvre donc aussi
     # les futurs cogs et reste actif même si un module optionnel échoue plus tard.
     install_premium_style(bot)
+    # Les ctx.reply utilisent le même style, mais sans référence au message de commande :
+    # supprimer la commande n'affiche donc plus « Le message original a été supprimé ».
+    install_reply_reference_fix()
 
     # Le catalogue est appliqué avant l'installation du panneau afin que +rolepanel et
     # +rolepanel-refresh utilisent toujours les 25 rôles de notifications disponibles.
@@ -57,6 +62,8 @@ async def _load_extension_with_sentrix_patches(
         install_afk_signature_fix(bot)
     if name == "cogs.configuration" or name.endswith(".configuration"):
         install_setup_close_fix(bot)
+    if name == "cogs.tickets" or name.endswith(".tickets"):
+        install_ticket_claim_security(bot)
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
         await install_server_builder_everyone_ping(bot)
     return result
