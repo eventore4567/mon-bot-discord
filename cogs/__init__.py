@@ -12,6 +12,7 @@ from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
 from .remove_code_command import install as install_remove_code_command
 from .server_builder_everyone import install_server_builder_everyone_ping
+from .setup_close_fix import install as install_setup_close_fix
 
 
 _ORIGINAL_LOAD_EXTENSION = commands.Bot.load_extension
@@ -43,6 +44,8 @@ async def _load_extension_with_sentrix_patches(
         install_help_home_circles(bot)
         await install_afk_nickname(bot)
         install_afk_signature_fix(bot)
+    if name == "cogs.configuration" or name.endswith(".configuration"):
+        install_setup_close_fix(bot)
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
         await install_server_builder_everyone_ping(bot)
     return result
