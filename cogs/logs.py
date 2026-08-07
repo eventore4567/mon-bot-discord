@@ -248,12 +248,10 @@ class Logs(commands.Cog, name="Logs"):
         if guild is None:
             return
 
-        cached_ids = {message.id for message in payload.cached_messages}
+        # L'événement raw est toujours reçu pour une suppression en masse. On s'appuie
+        # donc sur NOTRE cache persistant pour chaque ID, qu'il soit encore ou non dans
+        # le cache interne de discord.py. Cela évite de perdre les messages lors d'un +clear.
         for message_id in payload.message_ids:
-            # Les messages encore présents dans le cache Discord sont traités par
-            # on_message_delete/on_bulk_message_delete selon discord.py ; on ne les double pas ici.
-            if message_id in cached_ids:
-                continue
             row = await self._cached_message_row(payload.guild_id, message_id)
             if row is None:
                 continue
