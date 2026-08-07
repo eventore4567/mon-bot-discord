@@ -1,4 +1,4 @@
-"""Applique la nouvelle configuration prête à l'emploi aux structures SentriX existantes."""
+"""Maintient la structure SentriX existante sans republier les annonces au redémarrage."""
 from __future__ import annotations
 
 import asyncio
@@ -18,6 +18,7 @@ async def _bootstrap(bot: commands.Bot) -> None:
 
     from . import server_builder
     from . import server_builder_ready_setup as ready
+    from .security_runtime_hardening import apply_recommended_security
 
     builder = bot.get_cog("ServerBuilder")
     if builder is None:
@@ -56,11 +57,31 @@ async def _bootstrap(bot: commands.Bot) -> None:
         if author is None:
             continue
 
+        # Au redémarrage, on entretient uniquement la configuration technique.
+        # IMPORTANT : on ne republie plus l'annonce ni le panneau +suivi-bot. Ceux-ci
+        # ne sont créés que lors du premier +create-server ou sur demande explicite.
         try:
-            await ready._finish_ready_setup(bot, builder, guild, author)
-            logger.info("Structure SentriX existante migrée sur %s (%s).", guild.name, guild.id)
+            await ready._ensure_role_panels(bot, guild, choice, author.id)
         except Exception:
-            logger.exception("Migration automatique de la structure SentriX impossible sur %s", guild.id)
+            logger.exception("Migration des panneaux de rôles impossible sur %s", guild.id)
+        try:
+            await ready._ensure_shop(bot, guild, shop, author.id)
+        except Exception:
+            logger.exception("Migration de la boutique impossible sur %s", guild.id)
+        try:
+            await apply_recommended_security(bot, guild)
+        except Exception:
+            logger.exception("Migration de la sécurité impossible sur %s", guild.id)
+        try:
+            await ready._cleanup_old_generated_channels(server_builder, guild)
+        except Exception:
+            logger.exception("Nettoyage de structure impossible sur %s", guild.id)
+
+        logger.info(
+            "Structure SentriX entretenue sur %s (%s), sans republication annonce/suivi.",
+            guild.name,
+            guild.id,
+        )
 
 
 def install(bot: commands.Bot) -> None:
