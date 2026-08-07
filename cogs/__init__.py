@@ -18,15 +18,16 @@ async def _load_extension_with_sentrix_patches(
     package: str | None = None,
 ):
     result = await _ORIGINAL_LOAD_EXTENSION(bot, name, package=package)
+
+    # Idempotent : le moteur est installé dès le premier cog chargé. Il couvre donc aussi
+    # les futurs cogs et reste actif même si un module optionnel échoue plus tard.
+    install_premium_style(bot)
+
     if name == "cogs.utility" or name.endswith(".utility"):
         await install_poll_ui(bot)
         await install_dashboard_access(bot)
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
         await install_server_builder_everyone_ping(bot)
-    # embed_builder est le dernier module de main. Installer le moteur ici garantit que
-    # toutes les commandes, vues persistantes et interactions ont déjà été enregistrées.
-    if name == "cogs.embed_builder" or name.endswith(".embed_builder"):
-        install_premium_style(bot)
     return result
 
 
