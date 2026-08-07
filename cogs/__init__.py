@@ -9,6 +9,7 @@ from .bot_tracker import install as install_bot_tracker
 from .dashboard_access import install_dashboard_access
 from .help_complete import install as install_complete_help
 from .help_home_circles import install as install_help_home_circles
+from .natural_music_intent_guard import install as install_natural_music_intent_guard
 from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
 from .remove_code_command import install as install_remove_code_command
@@ -64,6 +65,7 @@ async def _load_extension_with_sentrix_patches(
         await install_security_hardening(bot)
     if name == "cogs.ai" or name.endswith(".ai"):
         install_ai_reliability()
+        install_natural_music_intent_guard(bot)
         install_remove_code_command(bot)
     if name == "cogs.utility" or name.endswith(".utility"):
         await install_poll_ui(bot)
