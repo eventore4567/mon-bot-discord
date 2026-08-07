@@ -6,6 +6,7 @@ from .afk_nickname import install as install_afk_nickname
 from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
 from .bot_tracker import install as install_bot_tracker
+from .common_command_names import install as install_common_command_names
 from .dashboard_access import install_dashboard_access
 from .generated_logs_sync import install as install_generated_logs_sync
 from .help_complete import install as install_complete_help
@@ -28,6 +29,7 @@ from .server_builder_ready_setup import install as install_server_builder_ready_
 from .server_choice_roles import install as install_server_choice_roles
 from .shop_default_prices import install as install_shop_default_prices
 from .setup_close_fix import install as install_setup_close_fix
+from .setup_oxyde_style import install as install_setup_oxyde_style
 from .ticket_claim_security import install as install_ticket_claim_security
 
 
@@ -87,6 +89,9 @@ async def _load_extension_with_sentrix_patches(
         install_afk_signature_fix(bot)
     if name == "cogs.configuration" or name.endswith(".configuration"):
         install_setup_close_fix(bot)
+        # Refonte visuelle inspirée des panneaux premium/OXYDE, sans toucher à la logique
+        # de persistance, de permissions ni aux callbacks existants de +setup.
+        install_setup_oxyde_style(bot)
     if name == "cogs.tickets" or name.endswith(".tickets"):
         install_ticket_claim_security(bot)
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
@@ -101,6 +106,11 @@ async def _load_extension_with_sentrix_patches(
         # existants, sinon le style global peut provoquer un doublon au redémarrage.
         install_rolepanel_display_fix(bot)
         install_existing_server_bootstrap(bot)
+
+    # Ajoute les noms de commandes familiers après CHAQUE cog chargé. Cela permet aux
+    # aliases de devenir disponibles progressivement sans dépendre de l'ordre des cogs.
+    # Les noms internes restent inchangés : permissions et logique existantes intactes.
+    install_common_command_names(bot)
     return result
 
 
