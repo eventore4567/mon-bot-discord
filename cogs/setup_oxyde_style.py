@@ -1,13 +1,14 @@
-"""Refonte visuelle de +setup inspirée des panneaux premium Discord.
+"""Style premium stable de +setup, inspiré du mockup SentriX/OXYDE.
 
-Le module ne change aucune donnée ni logique de configuration : il remplace uniquement
-la présentation (accueil, palette, titres, footer et navigation d'accueil). Cela permet
-de conserver toute la fiabilité du SetupView existant et ses boutons persistants.
+IMPORTANT : ce module ne touche qu'à la présentation de +setup.
+Il utilise uniquement les composants Discord standards disponibles en discord.py 2.4+
+(Embed, Select, Button). Aucun Components V2, aucune image générée à la volée.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 
 import discord
 from discord.ext import commands
@@ -15,10 +16,9 @@ from discord.ext import commands
 logger = logging.getLogger("bot.setup-premium-style")
 _INSTALLED = False
 
-# Violet profond proche du rendu premium de la référence fournie, tout en restant dans
-# l'identité SentriX.
 PURPLE_MAIN = 0x8B5CF6
 PURPLE_SECONDARY = 0xA855F7
+DASHBOARD_FALLBACK = "https://mon-bot-discord-production-8944.up.railway.app"
 
 
 def _avatar_url(bot: commands.Bot) -> str | None:
@@ -39,12 +39,28 @@ def _set_author(embed: discord.Embed, bot: commands.Bot) -> None:
         embed.set_author(name="SentriX • Configuration")
 
 
-def _status_icon(status: str) -> str:
-    if status == "Configuré":
-        return "🟢"
-    if status == "Partiel":
-        return "🟡"
-    return "⚪"
+def _invite_url(bot: commands.Bot) -> str | None:
+    user = getattr(bot, "user", None)
+    if user is None:
+        return None
+    try:
+        return discord.utils.oauth_url(
+            user.id,
+            permissions=discord.Permissions(administrator=True),
+            scopes=("bot", "applications.commands"),
+        )
+    except Exception:
+        logger.exception("Impossible de générer le lien d'invitation SentriX.")
+        return None
+
+
+def _safe_http_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip()
+    if value.startswith("https://") or value.startswith("http://"):
+        return value
+    return None
 
 
 def install(bot: commands.Bot) -> None:
@@ -54,7 +70,6 @@ def install(bot: commands.Bot) -> None:
 
     from . import configuration
 
-    # Toute l'interface /setup (modals compris) reprend la nouvelle palette.
     configuration.SETUP_COLOR_MAIN = PURPLE_MAIN
     configuration.SETUP_COLOR_SECONDARY = PURPLE_SECONDARY
 
@@ -70,60 +85,52 @@ def install(bot: commands.Bot) -> None:
         partial = sum(1 for _, status in categories if status == "Partiel")
         missing = sum(1 for _, status in categories if status == "Non configuré")
 
-        if missing:
-            global_state = f"⚪ {missing} module(s) à terminer"
-        elif partial:
-            global_state = f"🟡 {partial} module(s) partiellement configuré(s)"
+        if missing == 0 and partial == 0:
+            server_state = "🟢 Configuré"
+        elif missing <= 1:
+            server_state = "🟡 Presque prêt"
         else:
-            global_state = "🟢 Configuration complète"
+            server_state = "🟣 À configurer"
 
         e = discord.Embed(color=PURPLE_MAIN)
-        avatar = _avatar_url(self.bot)
         _set_author(e, self.bot)
-        e.title = "👋・Salut, je suis SentriX"
+        e.title = "👋 • Salut, je suis SentriX"
         e.description = (
-            f"Mon préfixe sur ce serveur est **`{prefix}`**\n"
-            f"Pour obtenir la liste des commandes, tape **`{prefix}help`**.\n"
-            "Je suis aussi disponible en commandes slash `/`.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "**Configure ton serveur depuis ce panneau.** Choisis simplement un module dans "
-            "le menu en dessous : tu n'as pas besoin de retenir toutes les commandes de réglage."
+            "Je suis là pour **protéger, gérer et améliorer ton serveur**.\n"
+            "Configure-moi facilement depuis ce panneau ou avec mes commandes.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"⌨️  Mon préfixe sur ce serveur est **`{prefix}`**\n\n"
+            f"📖  Pour obtenir la liste des commandes, tape **`{prefix}help`**\n\n"
+            "◉  Je suis aussi disponible en **slash commande `/`**."
         )
 
-        server_name = guild.name if guild else "Serveur inconnu"
-        e.add_field(
-            name="⚙️・État de la configuration",
-            value=(
-                f"**Serveur :** {server_name}\n"
-                f"**Modules prêts :** {configured}/{len(categories)}\n"
-                f"**État :** {global_state}"
-            ),
-            inline=False,
-        )
+        e.add_field(name="＃ PRÉFIXE", value=f"**`{prefix}`**", inline=True)
+        e.add_field(name="◈ MODULES", value=f"**{configured}/{len(categories)}** prêts", inline=True)
+        e.add_field(name="◉ SERVEUR", value=server_state, inline=True)
 
-        category_lines = [
-            f"{_status_icon(status)} **{name}** — {status.lower()}"
-            for name, status in categories
-        ]
-        e.add_field(
-            name="📂・Modules",
-            value="\n".join(category_lines),
-            inline=False,
-        )
-        e.add_field(
-            name="💡・Utilisation",
-            value=(
-                "**1.** Choisis un module dans le menu.\n"
-                "**2.** Modifie les rôles, salons ou protections.\n"
-                "**3.** Clique sur **Enregistrer**.\n"
-                "**4.** Utilise **Résumé** pour vérifier que tout est prêt."
-            ),
-            inline=False,
-        )
+        if partial or missing:
+            todo = []
+            for name, status in categories:
+                if status != "Configuré":
+                    todo.append(f"• **{name}** — {status.lower()}")
+            e.add_field(
+                name="⚙️ • Configuration restante",
+                value="\n".join(todo)[:1024],
+                inline=False,
+            )
+        else:
+            e.add_field(
+                name="✅ • Configuration",
+                value="Tous les modules principaux de ce panneau sont configurés.",
+                inline=False,
+            )
 
+        avatar = _avatar_url(self.bot)
         if avatar:
             e.set_thumbnail(url=avatar)
-        e.set_footer(text=f"SentriX • {server_name} • Centre de configuration")
+
+        server_name = guild.name if guild else "Serveur"
+        e.set_footer(text=f"SentriX • {server_name} • Sécurise, automatise, simplifie.")
         return e
 
     async def build_embed(self) -> discord.Embed:
@@ -132,25 +139,26 @@ def install(bot: commands.Bot) -> None:
 
         e = await original_build_embed(self)
         step = configuration.SETUP_STEPS[self.page]
-        avatar = _avatar_url(self.bot)
         guild = self._guild()
+        avatar = _avatar_url(self.bot)
 
         e.colour = discord.Colour(PURPLE_MAIN)
-        e.title = f"{step['icon']}・{step['title']}"
+        e.title = f"{step['icon']} • {step['title']}"
         _set_author(e, self.bot)
         if avatar:
             e.set_thumbnail(url=avatar)
         e.set_footer(
             text=(
                 f"SentriX • {guild.name if guild else 'Serveur'} • "
-                "Les changements indiqués comme immédiats sont déjà enregistrés"
+                "Centre de configuration"
             )
         )
         return e
 
     def render_home(self) -> None:
-        """Accueil compact : un menu principal + quatre boutons, comme les bots premium."""
+        """Accueil proche du mockup, mais composé uniquement d'éléments Discord standards."""
         self.clear_items()
+
         category_select = discord.ui.Select(
             placeholder="⚙️ Choisir un module à configurer",
             options=[
@@ -167,29 +175,69 @@ def install(bot: commands.Bot) -> None:
         category_select.callback = self._make_home_category_callback(category_select)
         self.add_item(category_select)
 
+        # Liens : aucun callback -> ils restent fiables même après un redémarrage du bot.
+        invite_url = _invite_url(self.bot)
+        dashboard_url = _safe_http_url(os.getenv("DASHBOARD_PUBLIC_URL")) or DASHBOARD_FALLBACK
+        support_url = _safe_http_url(os.getenv("SUPPORT_SERVER_URL"))
+        status_url = _safe_http_url(os.getenv("STATUS_PUBLIC_URL"))
+
+        if invite_url:
+            self.add_item(discord.ui.Button(
+                label="Inviter SentriX",
+                emoji="👥",
+                style=discord.ButtonStyle.link,
+                url=invite_url,
+                row=1,
+            ))
+        self.add_item(discord.ui.Button(
+            label="Dashboard",
+            emoji="📈",
+            style=discord.ButtonStyle.link,
+            url=dashboard_url,
+            row=1,
+        ))
+        if support_url:
+            self.add_item(discord.ui.Button(
+                label="Serveur support",
+                emoji="🎧",
+                style=discord.ButtonStyle.link,
+                url=support_url,
+                row=1,
+            ))
+        if status_url:
+            self.add_item(discord.ui.Button(
+                label="Statut",
+                emoji="📡",
+                style=discord.ButtonStyle.link,
+                url=status_url,
+                row=1,
+            ))
+
+        # Navigation existante : on réutilise les DynamicItem du vrai setup pour garder
+        # la persistance après redémarrage et ne rien casser dans la logique actuelle.
         self.add_item(configuration.SetupNavButton(
             "save", self.message_id,
             label="💾 Enregistrer",
             style=discord.ButtonStyle.success,
-            row=1,
+            row=2,
         ))
         self.add_item(configuration.SetupNavButton(
             "summary", self.message_id,
             label="📋 Résumé",
             style=discord.ButtonStyle.primary,
-            row=1,
+            row=2,
         ))
         self.add_item(configuration.SetupNavButton(
             "history", self.message_id,
-            label="📜 Historique",
+            label="🕘 Historique",
             style=discord.ButtonStyle.secondary,
-            row=1,
+            row=2,
         ))
         self.add_item(configuration.SetupNavButton(
             "cancel", self.message_id,
             label="✖ Fermer",
             style=discord.ButtonStyle.danger,
-            row=1,
+            row=2,
         ))
 
     configuration.SetupView._build_home_embed = build_home_embed
@@ -197,4 +245,4 @@ def install(bot: commands.Bot) -> None:
     configuration.SetupView._render_home = render_home
 
     _INSTALLED = True
-    logger.info("Nouveau style premium violet de +setup chargé.")
+    logger.info("Style premium stable de +setup chargé (Embed + composants standards).")
