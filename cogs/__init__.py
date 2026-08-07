@@ -7,9 +7,11 @@ from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
 from .bot_tracker import install as install_bot_tracker
 from .dashboard_access import install_dashboard_access
+from .generated_logs_sync import install as install_generated_logs_sync
 from .help_complete import install as install_complete_help
 from .help_home_circles import install as install_help_home_circles
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
+from .no_auto_tracker import install as install_no_auto_tracker
 from .owner_sanction_immunity import install as install_owner_sanction_immunity
 from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
@@ -46,7 +48,8 @@ async def _load_extension_with_sentrix_patches(
     # Toutes les réponses sont envoyées sans MessageReference. Supprimer le message de
     # commande ne doit donc jamais afficher « Le message original a été supprimé ».
     install_reply_reference_fix()
-    # Le panneau de suivi est chargé une seule fois et actualise son message chaque minute.
+    # Le cog de suivi reste chargé pour conserver +suivi-bot, mais aucun panneau n'est
+    # désormais publié automatiquement par +create-server ou ses migrations.
     await install_bot_tracker(bot)
     # Prix boutique par défaut : VIP 500 pièces, Premium 2 000 pièces.
     await install_shop_default_prices(bot)
@@ -90,6 +93,10 @@ async def _load_extension_with_sentrix_patches(
         await install_server_builder_everyone_ping(bot)
         install_server_builder_channel_guides(bot)
         install_server_builder_ready_setup(bot)
+        # Ne plus recréer le suivi du bot dans annonces à chaque redéploiement.
+        install_no_auto_tracker(bot)
+        # Les salons logs-* générés deviennent la source de vérité du moteur log_settings.
+        install_generated_logs_sync(bot)
         # Important : répare la détection des panneaux AVANT la migration des serveurs
         # existants, sinon le style global peut provoquer un doublon au redémarrage.
         install_rolepanel_display_fix(bot)
