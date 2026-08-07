@@ -201,18 +201,18 @@ def install(bot: commands.Bot) -> None:
         ))
 
         self.add_item(discord.ui.Button(
-            label="Commandes",
-            emoji="⌨️",
+            label="Sécurité",
+            emoji="🛡️",
             style=discord.ButtonStyle.link,
-            url=f"{dashboard_url}/app?guild={guild_id}&tab=commands",
+            url=f"{dashboard_url}/app?guild={guild_id}&tab=security",
             row=1,
         ))
 
         self.add_item(discord.ui.Button(
-            label="Configuration",
-            emoji="⚙️",
+            label="Tickets",
+            emoji="🎫",
             style=discord.ButtonStyle.link,
-            url=f"{dashboard_url}/app?guild={guild_id}&tab=general",
+            url=f"{dashboard_url}/app?guild={guild_id}&tab=tickets",
             row=1,
         ))
 
@@ -239,4 +239,4 @@ def install(bot: commands.Bot) -> None:
     configuration.SetupView._render_home = render_home
 
     _INSTALLED = True
-    logger.info("Style premium stable de +setup chargé (boutons de service + deep links dashboard).")
+    logger.info("Style premium stable de +setup chargé (Dashboard, Sécurité, Tickets + liens optionnels).")
