@@ -1,10 +1,8 @@
 """Panneau de rôles de notifications SentriX.
 
-Remplace proprement l'ancien +rolepanel dès qu'il est chargé :
-- +rolepanel crée/emploie des rôles de notifications standards ;
-- les membres choisissent eux-mêmes leurs notifications dans un menu ;
-- les panneaux sont persistants après redémarrage ;
-- +rolepanel-refresh reconstruit le dernier panneau du serveur.
+Le panneau public reste compact. Chaque membre ouvre un menu privé qui n'affiche que les
+rôles qu'il peut encore ajouter ou retirer. Dès qu'un rôle est pris, il disparaît donc du
+menu personnel sans modifier le panneau pour les autres membres.
 """
 from __future__ import annotations
 
@@ -40,54 +38,99 @@ _INSTALLED = False
 _COG_NAME = "NotificationRolePanels"
 
 
+def _role_description(role_name: str) -> str:
+    return next(
+        (desc for name, desc in DEFAULT_NOTIFICATION_ROLES if name == role_name),
+        "Activer ou désactiver cette notification.",
+    )
+
+
 def _panel_embed(guild: discord.Guild, role_ids: list[int]) -> discord.Embed:
     roles = [guild.get_role(role_id) for role_id in role_ids]
     roles = [role for role in roles if role is not None]
-    lines = [f"● {role.mention}" for role in roles]
     e = discord.Embed(
         title="Notifications",
         description=(
-            "Choisis les notifications que tu veux recevoir avec le menu ci-dessous.\n"
-            "Tu peux modifier tes choix à tout moment."
+            "Choisis uniquement les notifications que tu veux recevoir.\n\n"
+            "Clique sur **Ajouter des notifications** pour prendre des rôles ou sur "
+            "**Retirer des notifications** pour enlever ceux que tu ne veux plus."
         ),
         color=0x7C6CFF,
     )
     e.add_field(
-        name="Rôles disponibles",
-        value="\n".join(lines) if lines else "Aucun rôle disponible.",
+        name="Disponibles",
+        value=f"**{len(roles)}** rôles de notifications configurés.",
+        inline=True,
+    )
+    e.add_field(
+        name="Fonctionnement",
+        value="Tes choix sont privés et le panneau reste identique pour les autres membres.",
         inline=False,
     )
     e.set_footer(text="SentriX • Rôles de notifications")
     return e
 
 
-class NotificationRoleSelect(discord.ui.Select):
-    def __init__(self, guild: discord.Guild, role_ids: list[int]):
-        options: list[discord.SelectOption] = []
-        for role_id in role_ids[:25]:
-            role = guild.get_role(role_id)
-            if role is None:
-                continue
-            description = next(
-                (desc for name, desc in DEFAULT_NOTIFICATION_ROLES if name == role.name),
-                "Activer ou désactiver cette notification.",
+def _manageable_roles(guild: discord.Guild, role_ids: list[int]) -> list[discord.Role]:
+    bot_member = guild.me
+    if bot_member is None:
+        return []
+    roles: list[discord.Role] = []
+    for role_id in role_ids[:25]:
+        role = guild.get_role(role_id)
+        if role is None or role.managed or role >= bot_member.top_role:
+            continue
+        roles.append(role)
+    return roles
+
+
+class PersonalNotificationSelect(discord.ui.Select):
+    def __init__(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        role_ids: list[int],
+        *,
+        mode: str,
+    ):
+        all_roles = _manageable_roles(guild, role_ids)
+        member_role_ids = {role.id for role in member.roles}
+        if mode == "add":
+            roles = [role for role in all_roles if role.id not in member_role_ids]
+            placeholder = "Choisis les notifications à ajouter…"
+        else:
+            roles = [role for role in all_roles if role.id in member_role_ids]
+            placeholder = "Choisis les notifications à retirer…"
+
+        options = [
+            discord.SelectOption(
+                label=role.name[:100],
+                value=str(role.id),
+                description=_role_description(role.name)[:100],
             )
-            options.append(
+            for role in roles[:25]
+        ]
+        if not options:
+            options = [
                 discord.SelectOption(
-                    label=role.name[:100],
-                    value=str(role.id),
-                    description=description[:100],
+                    label="Aucune notification disponible",
+                    value="0",
+                    description=(
+                        "Tu as déjà tous les rôles." if mode == "add"
+                        else "Tu n'as aucun rôle de notification."
+                    ),
                 )
-            )
+            ]
         super().__init__(
-            placeholder="Choisis tes notifications…",
-            min_values=0,
+            placeholder=placeholder,
+            min_values=1,
             max_values=max(1, len(options)),
-            options=options or [discord.SelectOption(label="Aucun rôle disponible", value="0")],
-            custom_id="sentrix:notification-roles",
-            disabled=not bool(options),
+            options=options,
+            custom_id=f"sentrix:notification-private:{mode}",
+            disabled=options[0].value == "0",
         )
-        self.role_ids = [int(option.value) for option in options]
+        self.role_ids = list(role_ids)
+        self.mode = mode
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
@@ -95,68 +138,100 @@ class NotificationRoleSelect(discord.ui.Select):
                 "Ce panneau fonctionne uniquement dans un serveur.", ephemeral=True
             )
 
-        await interaction.response.defer(ephemeral=True)
         member = interaction.user
         guild = interaction.guild
         bot_member = guild.me
         if bot_member is None or not bot_member.guild_permissions.manage_roles:
-            return await interaction.followup.send(
+            return await interaction.response.send_message(
                 "SentriX a besoin de la permission **Gérer les rôles**.", ephemeral=True
             )
 
-        selected_ids = {int(value) for value in self.values if value.isdigit() and value != "0"}
-        managed_ids = set(self.role_ids)
-        current_ids = {role.id for role in member.roles if role.id in managed_ids}
-
-        add_ids = selected_ids - current_ids
-        remove_ids = current_ids - selected_ids
-        blocked: list[str] = []
-        add_roles: list[discord.Role] = []
-        remove_roles: list[discord.Role] = []
-
-        for role_id in add_ids:
+        selected_ids = [int(value) for value in self.values if value.isdigit() and value != "0"]
+        roles: list[discord.Role] = []
+        for role_id in selected_ids:
             role = guild.get_role(role_id)
-            if role is None:
+            if role is None or role.managed or role >= bot_member.top_role:
                 continue
-            if role >= bot_member.top_role or role.managed:
-                blocked.append(role.name)
-                continue
-            add_roles.append(role)
+            roles.append(role)
 
-        for role_id in remove_ids:
-            role = guild.get_role(role_id)
-            if role is None:
-                continue
-            if role >= bot_member.top_role or role.managed:
-                blocked.append(role.name)
-                continue
-            remove_roles.append(role)
+        if not roles:
+            return await interaction.response.edit_message(
+                content="Aucun rôle modifiable n'a été sélectionné.",
+                view=PersonalNotificationView(guild, member, self.role_ids, mode=self.mode),
+            )
 
         try:
-            if add_roles:
-                await member.add_roles(*add_roles, reason="Panneau de notifications SentriX")
-            if remove_roles:
-                await member.remove_roles(*remove_roles, reason="Panneau de notifications SentriX")
+            if self.mode == "add":
+                await member.add_roles(*roles, reason="Panneau de notifications SentriX")
+                text = "Ajouté : " + ", ".join(role.name for role in roles)
+            else:
+                await member.remove_roles(*roles, reason="Panneau de notifications SentriX")
+                text = "Retiré : " + ", ".join(role.name for role in roles)
         except discord.Forbidden:
-            return await interaction.followup.send(
-                "Je ne peux pas modifier un ou plusieurs rôles. Place le rôle SentriX au-dessus des rôles de notifications.",
-                ephemeral=True,
+            return await interaction.response.edit_message(
+                content="SentriX ne peut pas modifier ces rôles. Place son rôle au-dessus des rôles de notifications.",
+                view=None,
             )
         except discord.HTTPException:
-            return await interaction.followup.send(
-                "Discord a refusé la modification. Réessaie dans quelques secondes.", ephemeral=True
+            return await interaction.response.edit_message(
+                content="Discord a refusé la modification. Réessaie dans quelques secondes.",
+                view=PersonalNotificationView(guild, member, self.role_ids, mode=self.mode),
             )
 
-        text = "Tes notifications ont été mises à jour."
-        if blocked:
-            text += " Certains rôles sont placés au-dessus de SentriX : " + ", ".join(blocked)
-        await interaction.followup.send(text, ephemeral=True)
+        # On reconstruit immédiatement le menu : les rôles qui viennent d'être ajoutés
+        # disparaissent de la liste Ajouter, et ceux retirés disparaissent de la liste Retirer.
+        await interaction.response.edit_message(
+            content=f"✅ {text}",
+            view=PersonalNotificationView(guild, member, self.role_ids, mode=self.mode),
+        )
+
+
+class PersonalNotificationView(discord.ui.View):
+    def __init__(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        role_ids: list[int],
+        *,
+        mode: str,
+    ):
+        super().__init__(timeout=180)
+        self.add_item(PersonalNotificationSelect(guild, member, role_ids, mode=mode))
 
 
 class NotificationRoleView(discord.ui.View):
     def __init__(self, guild: discord.Guild, role_ids: list[int]):
         super().__init__(timeout=None)
-        self.add_item(NotificationRoleSelect(guild, role_ids))
+        self.guild_id = guild.id
+        self.role_ids = list(role_ids)
+
+    @discord.ui.button(
+        label="Ajouter des notifications",
+        style=discord.ButtonStyle.primary,
+        custom_id="sentrix:notification-open:add",
+    )
+    async def add_notifications(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Serveur introuvable.", ephemeral=True)
+        await interaction.response.send_message(
+            "Sélectionne les notifications que tu veux recevoir. Les rôles déjà pris ne sont pas affichés.",
+            view=PersonalNotificationView(interaction.guild, interaction.user, self.role_ids, mode="add"),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="Retirer des notifications",
+        style=discord.ButtonStyle.secondary,
+        custom_id="sentrix:notification-open:remove",
+    )
+    async def remove_notifications(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Serveur introuvable.", ephemeral=True)
+        await interaction.response.send_message(
+            "Sélectionne les notifications que tu veux retirer. Seuls tes rôles actuels sont affichés.",
+            view=PersonalNotificationView(interaction.guild, interaction.user, self.role_ids, mode="remove"),
+            ephemeral=True,
+        )
 
 
 class NotificationRolePanels(commands.Cog):
@@ -205,17 +280,12 @@ class NotificationRolePanels(commands.Cog):
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
     async def rolepanel(self, ctx: commands.Context):
-        """Crée les rôles de notifications manquants puis publie le panneau."""
         try:
             roles = await self._ensure_roles(ctx.guild)
         except commands.BotMissingPermissions:
-            return await ctx.send(
-                "SentriX a besoin de la permission **Gérer les rôles** pour créer le panneau."
-            )
+            return await ctx.send("SentriX a besoin de la permission **Gérer les rôles** pour créer le panneau.")
         except discord.Forbidden:
-            return await ctx.send(
-                "Je ne peux pas créer les rôles. Vérifie la permission **Gérer les rôles**."
-            )
+            return await ctx.send("Je ne peux pas créer les rôles. Vérifie la permission **Gérer les rôles**.")
 
         role_ids = [role.id for role in roles]
         view = NotificationRoleView(ctx.guild, role_ids)
@@ -249,7 +319,6 @@ class NotificationRolePanels(commands.Cog):
         except Exception:
             role_ids = []
 
-        # Recrée automatiquement les rôles standards supprimés, puis met à jour la liste.
         roles = await self._ensure_roles(ctx.guild)
         standard_ids = [role.id for role in roles]
         role_ids = list(dict.fromkeys([*role_ids, *standard_ids]))
@@ -273,7 +342,6 @@ class NotificationRolePanels(commands.Cog):
 
 
 async def install(bot: commands.Bot) -> None:
-    """Installe le nouveau rolepanel quand l'ancien est présent, sans doublon de commande."""
     global _INSTALLED
     if _INSTALLED:
         return
@@ -282,7 +350,6 @@ async def install(bot: commands.Bot) -> None:
     if old is None:
         return
 
-    # Prépare la persistance avant de remplacer les anciennes commandes.
     await bot.db.execute(_SCHEMA)
     await bot.db.execute(
         "CREATE INDEX IF NOT EXISTS idx_notification_role_panels_guild "
@@ -296,7 +363,8 @@ async def install(bot: commands.Bot) -> None:
     if bot.get_cog(_COG_NAME) is None:
         await bot.add_cog(NotificationRolePanels(bot))
 
-    # Restaure les panneaux existants après un redémarrage Railway.
+    # Restaure ET migre les anciens panneaux : le gros menu déroulant est remplacé par
+    # deux boutons compacts au redémarrage, sans demander de recréer le message.
     try:
         rows = await bot.db.fetchall("SELECT * FROM notification_role_panels")
         for row in rows:
@@ -310,9 +378,17 @@ async def install(bot: commands.Bot) -> None:
             role_ids = [role_id for role_id in role_ids if guild.get_role(role_id) is not None][:25]
             if not role_ids:
                 continue
-            bot.add_view(NotificationRoleView(guild, role_ids), message_id=int(row["message_id"]))
+            view = NotificationRoleView(guild, role_ids)
+            bot.add_view(view, message_id=int(row["message_id"]))
+            channel = guild.get_channel(int(row["channel_id"]))
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    message = await channel.fetch_message(int(row["message_id"]))
+                    await message.edit(embed=_panel_embed(guild, role_ids), view=view)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
     except Exception:
         logger.exception("Restauration des panneaux de notifications impossible.")
 
     _INSTALLED = True
-    logger.info("+rolepanel mis à jour avec les rôles de notifications.")
+    logger.info("+rolepanel personnel et compact activé.")
