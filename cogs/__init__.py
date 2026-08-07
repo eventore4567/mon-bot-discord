@@ -5,6 +5,7 @@ from discord.ext import commands
 from .afk_nickname import install as install_afk_nickname
 from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
+from .bot_tracker import install as install_bot_tracker
 from .dashboard_access import install_dashboard_access
 from .help_complete import install as install_complete_help
 from .help_home_circles import install as install_help_home_circles
@@ -37,6 +38,8 @@ async def _load_extension_with_sentrix_patches(
     # Toutes les réponses sont envoyées sans MessageReference. Supprimer le message de
     # commande ne doit donc jamais afficher « Le message original a été supprimé ».
     install_reply_reference_fix()
+    # Le panneau de suivi est chargé une seule fois et actualise son message chaque minute.
+    await install_bot_tracker(bot)
 
     # Le catalogue est appliqué avant l'installation du panneau afin que +rolepanel et
     # +rolepanel-refresh utilisent toujours les 25 rôles de notifications disponibles.
