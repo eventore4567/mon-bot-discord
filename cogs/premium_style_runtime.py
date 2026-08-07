@@ -156,7 +156,8 @@ def _patch_webhook_followups(bot: commands.Bot) -> None:
     _ORIGINALS["webhook_send"] = original
 
     async def send(self: discord.Webhook, *args, **kwargs):
-        # Les webhooks entrants qui republient du contenu externe restent inchangés.
+        # Les webhooks entrants utilisés pour republier un contenu externe ne sont pas
+        # des réponses d'interaction et doivent rester exactement tels que configurés.
         if getattr(self, "type", None) == discord.WebhookType.application:
             args, kwargs = premium_style.style_kwargs(
                 args,
@@ -190,6 +191,40 @@ def _patch_design_system() -> None:
     design_system.create_embed = create_embed
 
 
+def _patch_log_service() -> None:
+    """Applique une identité audit cohérente à toutes les catégories de journaux."""
+    try:
+        from utils import log_service
+    except Exception:
+        return
+
+    original = log_service.send_log
+    _ORIGINALS["log_service_send"] = original
+    category_by_type = {
+        "moderation": "moderation",
+        "tickets": "tickets",
+        "automod": "security",
+        "security": "security",
+        "economy": "economy",
+        "levels": "levels",
+        "ai": "ai",
+        "games": "games",
+    }
+
+    async def send_log(bot, guild, log_type, embed, file=None):
+        if isinstance(embed, discord.Embed):
+            premium_style.style_embed(
+                embed,
+                guild=guild,
+                bot_user=getattr(bot, "user", None),
+                category=category_by_type.get(str(log_type), "logs"),
+                log_type=str(log_type),
+            )
+        return await original(bot, guild, log_type, embed, file=file)
+
+    log_service.send_log = send_log
+
+
 def install(bot: commands.Bot) -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -204,6 +239,7 @@ def install(bot: commands.Bot) -> None:
     _patch_interaction_edits(bot)
     _patch_webhook_followups(bot)
     _patch_design_system()
+    _patch_log_service()
 
     logger.info(
         "Identité premium SentriX installée : commandes, interactions, éditions, MP, panneaux et logs harmonisés."
