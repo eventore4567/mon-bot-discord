@@ -1,10 +1,11 @@
-"""Inventaire dynamique et complet des commandes affichées par +help."""
+"""Aide Discord complète, catégorisée et compacte pour SentriX."""
 
 from __future__ import annotations
 
 import logging
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 
 import discord
 from discord.ext import commands
@@ -14,41 +15,259 @@ from utils import embeds
 logger = logging.getLogger("bot.help-complete")
 _INSTALLED = False
 _ALL_VALUE = "__sentrix_all_commands__"
-_OTHER_VALUE = "__sentrix_other_categories__"
 
 
-EXTRA_CATEGORY_LABELS = {
-    "GamesEconomy": "🎮 Récompenses de jeux",
-    "GamesSetup": "🎮 Configuration des jeux",
-    "ShopAdmin": "🛒 Administration de l'économie",
-    "Music": "🎵 Musique",
-    "Levels": "📈 Niveaux / Communauté",
-    "Invites": "📨 Invitations",
-    "Stats": "📊 Statistiques / Développement",
-    "Notifications": "📡 Notifications / Accueil",
-    "Tickets": "🎫 Tickets",
-    "Moderation": "🛡️ Modération",
-    "Security": "🔐 Sécurité avancée",
-    "Automod": "🔒 Sécurité / AutoMod",
-    "Configuration": "⚙️ Configuration",
-    "ServerBuilder": "🏗️ Création de serveur",
-    "Verification": "✅ Vérification / Rôles",
-    "Owner": "🔑 Propriétaire du bot",
-    "EmbedBuilder": "📨 Créateur d'embeds",
-    "Design": "🎨 Design et apparence",
+@dataclass(frozen=True)
+class CategorySpec:
+    key: str
+    emoji: str
+    name: str
+    summary: str
+    section: str
+    roots: frozenset[str] = frozenset()
+    cogs: frozenset[str] = frozenset()
+    prefixes: tuple[str, ...] = ()
+
+    @property
+    def label(self) -> str:
+        return f"{self.emoji} {self.name}"
+
+
+CATEGORIES: tuple[CategorySpec, ...] = (
+    CategorySpec(
+        "ai", "🤖", "Intelligence artificielle",
+        "Questions, rédaction, traduction et génération d’images.",
+        "essential",
+        frozenset({
+            "sentrix", "summarize", "image-prompt", "image", "explain",
+            "rewrite", "fact-check", "ai", "improve", "correct",
+            "ai-translate", "aisetup", "aidiag",
+        }),
+        frozenset({"Ai"}),
+    ),
+    CategorySpec(
+        "information", "ℹ️", "Informations",
+        "Fiches du serveur, des membres, des salons et du bot.",
+        "essential",
+        frozenset({
+            "help", "ping", "avatar", "info", "userinfo", "channelinfo",
+            "membercount", "emoji-list",
+        }),
+        frozenset({"Utility"}),
+    ),
+    CategorySpec(
+        "utility", "🧰", "Outils pratiques",
+        "Rappels, sondages, traduction, météo et outils quotidiens.",
+        "essential",
+        frozenset({
+            "poll", "remind", "reminder-list", "reminder-cancel",
+            "translate", "weather", "suggest", "report-bug", "afk",
+            "roll", "choose",
+        }),
+    ),
+    CategorySpec(
+        "economy", "💰", "Économie et boutique",
+        "Argent, banque, boutique, inventaire et récompenses.",
+        "community",
+        frozenset({
+            "balance", "economy", "daily", "weekly", "work", "rob", "pay",
+            "economyleaderboard", "shop", "buy", "inventory", "sell",
+            "gamble", "deposit", "withdraw", "banque", "stats",
+            "shopsetup", "shoppanel", "shoprole", "give-money",
+            "reset-economy",
+        }),
+        frozenset({"Economy", "ShopAdmin", "GamesEconomy"}),
+    ),
+    CategorySpec(
+        "levels", "📈", "Niveaux et réputation",
+        "XP, profils, classements, réputation et activité vocale.",
+        "community",
+        frozenset({
+            "level", "leaderboard-levels", "profile", "set-bio", "rep",
+            "reputation", "repleaderboard", "voice-time", "set-xp",
+            "add-xp", "reset-levels", "levelcheck", "levelrepair",
+            "repconfig", "repadd", "repremove", "represet", "rephistory",
+        }),
+        frozenset({"Levels"}),
+    ),
+    CategorySpec(
+        "games", "🎮", "Mini-jeux",
+        "Jeux rapides, quiz et parties multijoueurs.",
+        "community",
+        frozenset({
+            "rps", "guess-number", "trivia", "tictactoe", "hangman",
+            "math-quiz", "blackjack", "slots",
+        }),
+        frozenset({"Minigames"}),
+    ),
+    CategorySpec(
+        "music", "🎵", "Musique",
+        "Lecture, file d’attente, volume, boucle et playlists.",
+        "community",
+        frozenset({
+            "join", "leave", "play", "pause", "resume", "skip", "stop",
+            "queue", "nowplaying", "volume", "loop", "shuffle",
+            "remove-from-queue", "clear-queue", "playlist-save",
+            "playlist-load",
+        }),
+        frozenset({"Music"}),
+    ),
+    CategorySpec(
+        "events", "🎉", "Giveaways et événements",
+        "Concours, événements et tournois communautaires.",
+        "community",
+        frozenset({
+            "giveaway-list", "giveaway-create", "giveaway-end",
+            "giveaway-reroll", "giveaway-cancel", "giveaway-blacklist",
+            "giveaway-unblacklist", "event-join", "event-leave",
+            "event-list", "event-create", "event-cancel",
+            "tournament-join", "tournament-list", "tournament-create",
+            "tournament-start",
+        }),
+        frozenset({"Events"}),
+        ("giveaway-", "event-", "tournament-"),
+    ),
+    CategorySpec(
+        "social", "📨", "Invitations et notifications",
+        "Invitations, bonus, accueil et notifications sociales.",
+        "community",
+        frozenset({
+            "invites", "invite-leaderboard", "invited-by",
+            "invitebonushistory", "addbonusinvites", "removebonusinvites",
+            "notifs-ping", "notifs-list", "notifs-remove",
+            "welcome-config",
+        }),
+        frozenset({"Invites", "Notifications"}),
+        ("notifs-",),
+    ),
+    CategorySpec(
+        "tickets", "🎫", "Tickets et support",
+        "Ouverture, configuration, réouverture, transcripts et statistiques.",
+        "community",
+        frozenset({
+            "ticket", "ticketsetup", "ticket-reopen",
+            "tickettranscript", "ticketstats",
+        }),
+        frozenset({"Tickets"}),
+        ("ticket-",),
+    ),
+    CategorySpec(
+        "sanctions", "🔨", "Sanctions et dossiers",
+        "Bans, mutes, avertissements, dossiers et quarantaine.",
+        "staff",
+        frozenset({
+            "ban", "tempban", "unban", "kick", "mute", "unmute", "warn",
+            "unwarn", "warnings", "clearwarnings", "case", "modhistory",
+            "quarantine", "unquarantine", "sanctiondm",
+        }),
+    ),
+    CategorySpec(
+        "moderation", "🛡️", "Modération du serveur",
+        "Messages, salons, pseudos, rôles, vocal et emojis.",
+        "staff",
+        frozenset({
+            "clear", "say", "slowmode", "lock", "unlock", "hide", "show",
+            "nickname", "resetnick", "move", "disconnect", "role-snapshot",
+            "role-restore", "giverole", "removerole", "addemoji",
+            "deleteemoji",
+        }),
+        frozenset({"Moderation"}),
+    ),
+    CategorySpec(
+        "security", "🔒", "AutoMod et sécurité",
+        "Anti-raid, anti-nuke, listes noires, sauvegardes et audits.",
+        "staff",
+        frozenset({
+            "antiaccount", "antibot", "anticaps", "antiemoji",
+            "antiinvite", "antilink", "antimention", "antinuke",
+            "antiraid", "antiscam", "antispam", "automod-escalation",
+            "automod-history", "automod-status", "blacklist-add",
+            "blacklist-list", "blacklist-remove", "blacklist-user",
+            "blacklist-users", "lockdown-server", "permission-audit",
+            "security-check", "security-level", "server-backup",
+            "server-restore", "syncbl", "unblacklist-user",
+            "unlock-server", "unsyncbl", "unwhitelist-domain",
+            "whitelist-domain",
+        }),
+        frozenset({"Automod", "Security"}),
+        ("anti", "automod-", "blacklist-", "antinuke-"),
+    ),
+    CategorySpec(
+        "configuration", "⚙️", "Configuration et logs",
+        "Setup général, commandes, salons ignorés, logs et réglages.",
+        "staff",
+        frozenset({
+            "setup", "logsetup", "logs-status", "config-view",
+            "config-reset", "disablecommand", "enablecommand",
+            "ignorechannel", "unignorechannel", "setwarnrole",
+            "setwarnbanthreshold", "statsconfig",
+        }),
+        frozenset({"Configuration", "GamesSetup"}),
+    ),
+    CategorySpec(
+        "server", "🏗️", "Serveur et structure",
+        "Création, suppression et gestion massive de la structure.",
+        "staff",
+        frozenset({
+            "create-server", "delete-channel", "wipe-server",
+        }),
+        frozenset({"ServerBuilder"}),
+    ),
+    CategorySpec(
+        "roles", "🎭", "Rôles et vérification",
+        "Panels de rôles, réactions, vérification et rôles de masse.",
+        "staff",
+        frozenset({
+            "rolepanel", "rolepanel-refresh", "reactionrole-add",
+            "reactionrole-remove", "reactionrole-list", "verify-panel",
+            "set-nickname", "alias", "roleall", "massrole",
+        }),
+        frozenset({"Verification"}),
+        ("reactionrole-",),
+    ),
+    CategorySpec(
+        "embeds", "📣", "Embeds, annonces et design",
+        "Créateur d’embeds, annonces et apparence de SentriX.",
+        "staff",
+        frozenset({
+            "embed", "embedconfig", "announce", "designsetup",
+        }),
+        frozenset({"EmbedBuilder", "Design"}),
+    ),
+    CategorySpec(
+        "stats", "📊", "Statistiques et diagnostic",
+        "État du bot, croissance, statistiques et diagnostic.",
+        "essential",
+        frozenset({
+            "bot-status", "server-growth", "command-stats", "changelog",
+            "feedback", "botinfo", "diagnostic",
+        }),
+        frozenset({"Stats"}),
+    ),
+    CategorySpec(
+        "owner", "🔑", "Propriétaire du bot",
+        "Blacklists globales, synchronisation, statut et gestion des serveurs.",
+        "staff",
+        frozenset({
+            "bl", "blinfo", "unbl", "editbl", "sync", "syncguild",
+            "setstatus", "status-rotate", "footer", "theme", "set-bot",
+            "bot-servers", "bot-leave",
+        }),
+        frozenset({"Owner"}),
+    ),
+    CategorySpec(
+        "other", "🧩", "Autres commandes",
+        "Commandes actives ne correspondant pas encore à une catégorie dédiée.",
+        "essential",
+    ),
+)
+
+CATEGORY_BY_KEY = {category.key: category for category in CATEGORIES}
+SECTION_TITLES = {
+    "essential": "⭐ Essentiels",
+    "community": "🎉 Communauté",
+    "staff": "🛡️ Administration",
 }
-
-
-def _pretty_cog_name(name: str) -> str:
-    text = re.sub(r"(?<!^)(?=[A-Z])", " ", str(name or "Autres"))
-    text = text.replace("_", " ").replace("-", " ")
-    text = " ".join(text.split()).strip()
-    return text or "Autres commandes"
-
-
-def _category_label(utility, cog_name: str) -> str:
-    label = utility.CATEGORY_LABELS.get(cog_name) or EXTRA_CATEGORY_LABELS.get(cog_name)
-    return label or f"🧩 {_pretty_cog_name(cog_name)}"
 
 
 def _command_is_hidden(command) -> bool:
@@ -61,8 +280,8 @@ def _command_is_hidden(command) -> bool:
 
 
 def _registered_commands(utility, bot: commands.Bot, is_staff: bool) -> list[commands.Command]:
-    """Retourne seulement les commandes réellement enregistrées dans le bot."""
-    commands_found: list[commands.Command] = []
+    """Retourne uniquement les commandes réellement enregistrées dans le bot."""
+    result: list[commands.Command] = []
     seen: set[str] = set()
     for command in bot.walk_commands():
         qualified_name = str(getattr(command, "qualified_name", "") or "").strip()
@@ -78,10 +297,46 @@ def _registered_commands(utility, bot: commands.Bot, is_staff: bool) -> list[com
                 continue
 
         seen.add(qualified_name)
-        commands_found.append(command)
+        result.append(command)
 
-    commands_found.sort(key=lambda item: item.qualified_name.casefold())
-    return commands_found
+    result.sort(key=lambda item: item.qualified_name.casefold())
+    return result
+
+
+def _category_for(command) -> CategorySpec:
+    qualified_name = str(getattr(command, "qualified_name", "") or "").casefold().strip()
+    root = qualified_name.split(" ", 1)[0]
+    cog = getattr(command, "cog", None)
+    cog_name = getattr(cog, "qualified_name", "") if cog else ""
+
+    # Les règles exactes passent avant les règles de cog : un même cog peut contenir
+    # plusieurs catégories logiques, par exemple Utility = informations + outils.
+    for category in CATEGORIES:
+        if category.key == "other":
+            continue
+        if root in category.roots:
+            return category
+        if any(root.startswith(prefix) for prefix in category.prefixes):
+            return category
+
+    for category in CATEGORIES:
+        if category.key != "other" and cog_name in category.cogs:
+            return category
+
+    return CATEGORY_BY_KEY["other"]
+
+
+def _category_entries(utility, bot: commands.Bot, is_staff: bool):
+    grouped: dict[str, list[commands.Command]] = defaultdict(list)
+    for command in _registered_commands(utility, bot, is_staff):
+        grouped[_category_for(command).key].append(command)
+
+    entries = []
+    for category in CATEGORIES:
+        commands_list = grouped.get(category.key, [])
+        if commands_list:
+            entries.append((category, commands_list))
+    return entries
 
 
 def _commands_for_cog(utility, cog, is_staff: bool) -> list[commands.Command]:
@@ -89,59 +344,140 @@ def _commands_for_cog(utility, cog, is_staff: bool) -> list[commands.Command]:
     if bot is None:
         source = list(cog.walk_commands()) if hasattr(cog, "walk_commands") else list(cog.get_commands())
         return [command for command in source if not _command_is_hidden(command)]
-    return [command for command in _registered_commands(utility, bot, is_staff) if command.cog is cog]
-
-
-def _category_entries(utility, bot: commands.Bot, is_staff: bool):
-    grouped: dict[str, list[commands.Command]] = defaultdict(list)
-    for command in _registered_commands(utility, bot, is_staff):
-        cog = getattr(command, "cog", None)
-        cog_name = getattr(cog, "qualified_name", "Sans catégorie") if cog else "Sans catégorie"
-        grouped[cog_name].append(command)
-
-    known_order = {name: index for index, name in enumerate(utility.CATEGORY_LABELS)}
-    entries = [
-        (cog_name, _category_label(utility, cog_name), commands_list)
-        for cog_name, commands_list in grouped.items()
-        if commands_list
+    return [
+        command
+        for command in _registered_commands(utility, bot, is_staff)
+        if command.cog is cog
     ]
-    entries.sort(
-        key=lambda entry: (
-            0 if entry[0] in known_order else 1,
-            known_order.get(entry[0], 10_000),
-            utility.split_category_label(entry[1])[1].casefold(),
-        )
+
+
+def _command_usage(command, prefix: str) -> str:
+    parts = [f"{prefix}{command.qualified_name}"]
+    for name, parameter in getattr(command, "clean_params", {}).items():
+        if name in {"ctx", "context", "interaction", "self"}:
+            continue
+        parts.append(f"<{name}>" if getattr(parameter, "required", False) else f"[{name}]")
+    return " ".join(parts)
+
+
+def _compact_command_line(utility, command, prefix: str, slash_names: set[str], number: int | None = None) -> str:
+    usage = _command_usage(command, prefix)
+    description = re.sub(r"\s+", " ", command.description or "Aucune description.").strip()
+    if len(description) > 105:
+        description = description[:102].rstrip() + "…"
+
+    index = f"`{number:02d}` " if number is not None else ""
+    lock = "🔒 " if utility.is_staff_command(command) else ""
+    slash = "  ·  `slash`" if command.qualified_name in slash_names else ""
+    return f"{index}{lock}**`{usage}`**{slash}\n└ {description}"
+
+
+def _build_pages(
+    utility,
+    bot: commands.Bot,
+    prefix: str,
+    entries,
+    *,
+    all_mode: bool,
+) -> list[discord.Embed]:
+    slash_names = utility.slash_command_names(bot)
+    pages: list[discord.Embed] = []
+    global_index = 0
+
+    for category, commands_list in entries:
+        page_size = 12
+        chunks = [
+            commands_list[index:index + page_size]
+            for index in range(0, len(commands_list), page_size)
+        ]
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            lines = []
+            for command in chunk:
+                global_index += 1
+                lines.append(
+                    _compact_command_line(
+                        utility,
+                        command,
+                        prefix,
+                        slash_names,
+                        global_index if all_mode else None,
+                    )
+                )
+
+            title = (
+                f"📚 Toutes les commandes · {category.name}"
+                if all_mode
+                else category.label
+            )
+            embed = embeds.brand(
+                title,
+                category.summary + "\n\n" + "\n".join(lines),
+            )
+            embed.set_footer(
+                text=(
+                    f"{category.name} • page {chunk_index}/{len(chunks)} • "
+                    f"{len(commands_list)} commande(s) • <obligatoire> [facultatif]"
+                )
+            )
+            pages.append(embed)
+
+    return pages or [embeds.brand("📖 Aide", "Aucune commande visible.")]
+
+
+def _home_embed(utility, bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_staff: bool) -> discord.Embed:
+    entries = _category_entries(utility, bot, is_staff)
+    total = sum(len(commands_list) for _, commands_list in entries)
+    bot_name = bot.user.name if bot.user else "SentriX"
+    server_name = guild.name if guild else "ce serveur"
+
+    embed = embeds.brand(
+        f"✦ Centre d’aide de {bot_name}",
+        (
+            f"Bienvenue sur le centre de commandes de **{server_name}**.\n"
+            "Choisissez une catégorie dans le menu pour obtenir une liste claire, "
+            "ou sélectionnez **Toutes les commandes** pour parcourir l’inventaire complet."
+        ),
     )
-    return entries
+    if bot.user:
+        embed.set_thumbnail(url=bot.user.display_avatar.url)
 
+    for section_key in ("essential", "community", "staff"):
+        section_entries = [
+            (category, commands_list)
+            for category, commands_list in entries
+            if category.section == section_key
+        ]
+        if not section_entries:
+            continue
+        lines = [
+            f"{category.emoji} **{category.name}**  ·  `{len(commands_list)}`"
+            for category, commands_list in section_entries
+        ]
+        embed.add_field(
+            name=SECTION_TITLES[section_key],
+            value="\n".join(lines),
+            inline=section_key != "staff",
+        )
 
-def _chunk_lines(lines: list[str], limit: int = 900) -> list[str]:
-    chunks: list[str] = []
-    current: list[str] = []
-    current_length = 0
-    for line in lines:
-        added = len(line) + (1 if current else 0)
-        if current and current_length + added > limit:
-            chunks.append("\n".join(current))
-            current = [line]
-            current_length = len(line)
-        else:
-            current.append(line)
-            current_length += added
-    if current:
-        chunks.append("\n".join(current))
-    return chunks
+    embed.add_field(
+        name="⌕ Navigation rapide",
+        value=(
+            f"`{prefix}help ban` → détail d’une commande\n"
+            "**Rechercher** → trouver par nom, alias ou description\n"
+            f"**{total} commandes actives** • préfixe `{prefix}`"
+        ),
+        inline=False,
+    )
+    return embed
 
 
 def install(bot: commands.Bot) -> None:
-    """Remplace l'inventaire fixe de +help par les commandes chargées à l'exécution."""
+    """Installe une aide complète, logique et compacte."""
     global _INSTALLED
     if _INSTALLED:
         return
 
     from . import utility
-
-    utility.CATEGORY_LABELS.update(EXTRA_CATEGORY_LABELS)
 
     def visible_commands(cog, is_staff: bool):
         return _commands_for_cog(utility, cog, is_staff)
@@ -157,147 +493,166 @@ def install(bot: commands.Bot) -> None:
         prefix: str,
         is_staff: bool,
     ) -> discord.Embed:
-        entries = _category_entries(utility, active_bot, is_staff)
-        total = sum(len(commands_list) for _, _, commands_list in entries)
-        bot_name = active_bot.user.name if active_bot.user else "SentriX"
-        server_name = guild.name if guild else "ce serveur"
-
-        embed = embeds.brand(
-            f"📖 Centre d'aide de {bot_name}",
-            f"Toutes les commandes réellement chargées sur **{server_name}** sont inventoriées "
-            f"automatiquement. Choisissez une catégorie, affichez **Toutes les commandes**, "
-            f"ou utilisez **Rechercher**.\n\n"
-            f"Pour le détail d'une commande : `{prefix}help nom-de-la-commande`.",
-        )
-        if active_bot.user:
-            embed.set_thumbnail(url=active_bot.user.display_avatar.url)
-
-        category_lines = []
-        for cog_name, label, commands_list in entries:
-            name = utility.split_category_label(label)[1]
-            staff_suffix = " • staff" if cog_name in utility.MEMBER_HIDDEN_CATEGORIES else ""
-            category_lines.append(f"• **{name}** — {len(commands_list)} commande(s){staff_suffix}")
-
-        for index, chunk in enumerate(_chunk_lines(category_lines), start=1):
-            title = "📚 Catégories disponibles" if index == 1 else "📚 Catégories — suite"
-            embed.add_field(name=title, value=chunk, inline=False)
-
-        embed.add_field(
-            name="ℹ️ Inventaire automatique",
-            value=(
-                f"**{total} commande(s)** disponibles pour vous. Une commande ajoutée plus tard "
-                "apparaîtra automatiquement ; une commande supprimée ou masquée disparaîtra de l'aide.\n"
-                f"`[paramètre]` = obligatoire • `(paramètre)` = facultatif • préfixe actuel : `{prefix}`"
-            ),
-            inline=False,
-        )
-        return embed
+        return _home_embed(utility, active_bot, guild, prefix, is_staff)
 
     def search_commands(active_bot: commands.Bot, is_staff: bool, keyword: str):
         normalized = str(keyword or "").casefold().strip()
         results = []
         for command in _registered_commands(utility, active_bot, is_staff):
-            cog = getattr(command, "cog", None)
-            cog_name = getattr(cog, "qualified_name", "Sans catégorie") if cog else "Sans catégorie"
             aliases = " ".join(getattr(command, "aliases", []) or [])
             haystack = f"{command.qualified_name} {aliases} {command.description or ''}".casefold()
             if normalized in haystack:
-                results.append((_category_label(utility, cog_name), command))
+                category = _category_for(command)
+                results.append((category.label, command))
         return results
 
-    class CompleteHelpSelect(discord.ui.Select):
+    def format_command_line(command, prefix: str, slash_names: set[str]) -> str:
+        return _compact_command_line(utility, command, prefix, slash_names)
+
+    class AestheticSearchModal(discord.ui.Modal, title="⌕ Rechercher une commande"):
+        mot_cle = discord.ui.TextInput(
+            label="Nom, alias ou mot-clé",
+            placeholder="Exemple : ticket, ban, musique…",
+            max_length=60,
+        )
+
         def __init__(self, active_bot: commands.Bot, prefix: str, is_staff: bool):
+            super().__init__()
             self.bot = active_bot
             self.prefix = prefix
             self.is_staff = is_staff
-            self.entries = _category_entries(utility, active_bot, is_staff)
 
-            all_count = sum(len(commands_list) for _, _, commands_list in self.entries)
-            options = [
-                discord.SelectOption(
-                    label="Toutes les commandes",
-                    value=_ALL_VALUE,
-                    description=f"{all_count} commande(s) chargée(s)",
+        async def on_submit(self, interaction: discord.Interaction):
+            results = search_commands(self.bot, self.is_staff, self.mot_cle.value)
+            if not results:
+                embed = embeds.brand(
+                    "⌕ Aucun résultat",
+                    f"Aucune commande trouvée pour **{self.mot_cle.value}**.",
                 )
-            ]
-
-            direct_entries = self.entries
-            overflow_entries = []
-            if len(self.entries) > 24:
-                direct_entries = self.entries[:23]
-                overflow_entries = self.entries[23:]
-
-            for cog_name, label, commands_list in direct_entries:
-                options.append(
-                    discord.SelectOption(
-                        label=utility.split_category_label(label)[1][:100],
-                        value=cog_name,
-                        description=f"{len(commands_list)} commande(s)"[:100],
-                    )
+                return await interaction.response.edit_message(
+                    embed=embed,
+                    view=utility.HelpView(self.bot, self.prefix, self.is_staff),
                 )
-
-            if overflow_entries:
-                overflow_count = sum(len(commands_list) for _, _, commands_list in overflow_entries)
-                options.append(
-                    discord.SelectOption(
-                        label="Autres catégories",
-                        value=_OTHER_VALUE,
-                        description=f"{overflow_count} commande(s) supplémentaires",
-                    )
-                )
-
-            super().__init__(placeholder="Choisissez une catégorie...", options=options[:25])
-
-        async def callback(self, interaction: discord.Interaction):
-            selected = self.values[0]
-            if selected == _ALL_VALUE:
-                label = "📚 Toutes les commandes"
-                selected_commands = _registered_commands(utility, self.bot, self.is_staff)
-            elif selected == _OTHER_VALUE:
-                label = "🧩 Autres catégories"
-                selected_commands = [
-                    command
-                    for _, _, commands_list in self.entries[23:]
-                    for command in commands_list
-                ]
-            else:
-                matching = next((entry for entry in self.entries if entry[0] == selected), None)
-                if matching is None:
-                    return await interaction.response.send_message(
-                        "Cette catégorie n'est plus disponible. Relancez +help.",
-                        ephemeral=True,
-                    )
-                _, label, selected_commands = matching
 
             slash_names = utility.slash_command_names(self.bot)
-            lines = [
-                utility.format_command_line(command, self.prefix, slash_names)
-                for command in selected_commands
-            ]
-            if not lines:
-                embed = embeds.brand(label, "Aucune commande visible dans cette catégorie.")
-                return await interaction.response.edit_message(embed=embed, view=self.view)
-
-            chunks = [lines[index:index + 8] for index in range(0, len(lines), 8)]
+            chunks = [results[index:index + 10] for index in range(0, len(results), 10)]
             pages = []
             for page_index, chunk in enumerate(chunks, start=1):
-                embed = embeds.brand(label, "\n\n".join(chunk))
-                embed.set_footer(
-                    text=(
-                        f"Page {page_index}/{len(chunks)} • {len(lines)} commande(s) • "
-                        "[paramètre] = obligatoire, (paramètre) = facultatif"
+                lines = []
+                for label, command in chunk:
+                    lines.append(
+                        f"**{label}**\n"
+                        + _compact_command_line(
+                            utility,
+                            command,
+                            self.prefix,
+                            slash_names,
+                        )
                     )
+                embed = embeds.brand(
+                    f"⌕ Résultats · {self.mot_cle.value}",
+                    "\n\n".join(lines),
+                )
+                embed.set_footer(
+                    text=f"Page {page_index}/{len(chunks)} • {len(results)} résultat(s)"
                 )
                 pages.append(embed)
 
-            home_embed = build_help_home(self.bot, interaction.guild, self.prefix, self.is_staff)
+            home = _home_embed(
+                utility,
+                self.bot,
+                interaction.guild,
+                self.prefix,
+                self.is_staff,
+            )
             view = utility.CategoryHelpView(
                 self.bot,
                 self.prefix,
                 self.is_staff,
                 pages,
                 interaction.user.id,
-                home_embed,
+                home,
+            )
+            await interaction.response.edit_message(embed=pages[0], view=view)
+
+    class AestheticHelpSelect(discord.ui.Select):
+        def __init__(self, active_bot: commands.Bot, prefix: str, is_staff: bool):
+            self.bot = active_bot
+            self.prefix = prefix
+            self.is_staff = is_staff
+            self.entries = _category_entries(utility, active_bot, is_staff)
+
+            total = sum(len(commands_list) for _, commands_list in self.entries)
+            options = [
+                discord.SelectOption(
+                    label="📚 Toutes les commandes",
+                    value=_ALL_VALUE,
+                    description=f"{total} commandes actives",
+                )
+            ]
+            for category, commands_list in self.entries:
+                options.append(
+                    discord.SelectOption(
+                        label=category.label[:100],
+                        value=category.key,
+                        description=(
+                            f"{len(commands_list)} commande(s) • {category.summary}"
+                        )[:100],
+                    )
+                )
+
+            super().__init__(
+                placeholder="Choisissez une catégorie…",
+                options=options[:25],
+            )
+
+        async def callback(self, interaction: discord.Interaction):
+            selected = self.values[0]
+            if selected == _ALL_VALUE:
+                entries = self.entries
+                pages = _build_pages(
+                    utility,
+                    self.bot,
+                    self.prefix,
+                    entries,
+                    all_mode=True,
+                )
+            else:
+                matching = next(
+                    (
+                        (category, commands_list)
+                        for category, commands_list in self.entries
+                        if category.key == selected
+                    ),
+                    None,
+                )
+                if matching is None:
+                    return await interaction.response.send_message(
+                        "Cette catégorie n’est plus disponible. Relancez `+help`.",
+                        ephemeral=True,
+                    )
+                pages = _build_pages(
+                    utility,
+                    self.bot,
+                    self.prefix,
+                    [matching],
+                    all_mode=False,
+                )
+
+            home = _home_embed(
+                utility,
+                self.bot,
+                interaction.guild,
+                self.prefix,
+                self.is_staff,
+            )
+            view = utility.CategoryHelpView(
+                self.bot,
+                self.prefix,
+                self.is_staff,
+                pages,
+                interaction.user.id,
+                home,
             )
             await interaction.response.edit_message(embed=pages[0], view=view)
 
@@ -305,7 +660,11 @@ def install(bot: commands.Bot) -> None:
     utility.category_visible = category_visible
     utility.build_help_home = build_help_home
     utility.search_commands = search_commands
-    utility.HelpSelect = CompleteHelpSelect
+    utility.format_command_line = format_command_line
+    utility.SearchModal = AestheticSearchModal
+    utility.HelpSelect = AestheticHelpSelect
 
     _INSTALLED = True
-    logger.info("Aide complète activée : inventaire dynamique de toutes les commandes chargées.")
+    logger.info(
+        "Aide esthétique activée : catégories logiques, pages compactes et recherche améliorée."
+    )
