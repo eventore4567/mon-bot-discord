@@ -1,0 +1,1 @@
+SentriX dashboard deep-link patch: overview, commands, general; guild-aware URLs.
