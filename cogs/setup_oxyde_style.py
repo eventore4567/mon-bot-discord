@@ -31,6 +31,14 @@ def _avatar_url(bot: commands.Bot) -> str | None:
         return None
 
 
+def _set_author(embed: discord.Embed, bot: commands.Bot) -> None:
+    avatar = _avatar_url(bot)
+    if avatar:
+        embed.set_author(name="SentriX • Configuration", icon_url=avatar)
+    else:
+        embed.set_author(name="SentriX • Configuration")
+
+
 def _status_icon(status: str) -> str:
     if status == "Configuré":
         return "🟢"
@@ -71,10 +79,7 @@ def install(bot: commands.Bot) -> None:
 
         e = discord.Embed(color=PURPLE_MAIN)
         avatar = _avatar_url(self.bot)
-        e.set_author(
-            name="SentriX • Configuration",
-            icon_url=avatar or discord.Embed.Empty,
-        )
+        _set_author(e, self.bot)
         e.title = "👋・Salut, je suis SentriX"
         e.description = (
             f"Mon préfixe sur ce serveur est **`{prefix}`**\n"
@@ -132,10 +137,7 @@ def install(bot: commands.Bot) -> None:
 
         e.colour = discord.Colour(PURPLE_MAIN)
         e.title = f"{step['icon']}・{step['title']}"
-        e.set_author(
-            name="SentriX • Configuration",
-            icon_url=avatar or discord.Embed.Empty,
-        )
+        _set_author(e, self.bot)
         if avatar:
             e.set_thumbnail(url=avatar)
         e.set_footer(
