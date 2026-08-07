@@ -1,12 +1,11 @@
 """Rend +create-server réellement prêt à l'emploi.
 
 Le modèle communauté est allégé, choix-des-rôles devient lecture seule, et le build
-configure automatiquement le rolepanel, la boutique, l'annonce SentriX, le suivi bot
+configure automatiquement les rôles, la boutique, l'annonce SentriX, le suivi bot
 et le profil de sécurité recommandé.
 """
 from __future__ import annotations
 
-import json
 import logging
 import time
 
@@ -53,6 +52,8 @@ def _install_lean_community_template(server_builder) -> int:
             if channel_name.casefold() in excluded:
                 removed += 1
                 continue
+            # Le salon reste visible mais aucun membre ne peut y écrire : seuls les boutons
+            # et menus SentriX servent à prendre/retirer des rôles.
             if channel_name.casefold() == "choix-des-rôles":
                 channel_type = "readonly"
             channels.append((channel_name, channel_type))
@@ -110,10 +111,15 @@ async def _cleanup_old_generated_channels(server_builder, guild: discord.Guild) 
     return removed
 
 
-async def _ensure_role_panel(bot: commands.Bot, guild: discord.Guild, channel: discord.TextChannel, creator_id: int) -> str:
+async def _ensure_role_panels(bot: commands.Bot, guild: discord.Guild, channel: discord.TextChannel, creator_id: int) -> str:
+    # 1) Jeux/plateformes, langues/régions et couleurs.
+    from .server_choice_roles import publish_or_refresh
+    await publish_or_refresh(bot, channel)
+
+    # 2) Notifications : panneau séparé compact, avec menus privés Ajouter/Retirer.
     cog = bot.get_cog("NotificationRolePanels")
     if cog is None:
-        return "module rôles indisponible"
+        return "rôles classiques configurés, notifications indisponibles"
 
     from . import rolepanel_notifications
 
@@ -139,7 +145,7 @@ async def _ensure_role_panel(bot: commands.Bot, guild: discord.Guild, channel: d
 
     await cog._save_panel(message, creator_id, role_ids)
     bot.add_view(rolepanel_notifications.NotificationRoleView(guild, role_ids), message_id=message.id)
-    return f"{len(role_ids)} rôles disponibles"
+    return f"jeux/langues/couleurs + {len(role_ids)} notifications"
 
 
 async def _ensure_shop(bot: commands.Bot, guild: discord.Guild, channel: discord.TextChannel, creator_id: int) -> str:
@@ -279,9 +285,9 @@ async def _finish_ready_setup(bot: commands.Bot, builder_cog, guild: discord.Gui
     announce_status = "salon introuvable"
     try:
         if choice_channel:
-            role_status = await _ensure_role_panel(bot, guild, choice_channel, author.id)
+            role_status = await _ensure_role_panels(bot, guild, choice_channel, author.id)
     except Exception:
-        logger.exception("Configuration automatique du panneau de rôles impossible sur %s", guild.id)
+        logger.exception("Configuration automatique des panneaux de rôles impossible sur %s", guild.id)
         role_status = "erreur de configuration"
     try:
         if shop_channel:
@@ -319,7 +325,6 @@ def install(bot: commands.Bot) -> None:
 
     async def build_server_ready(self, guild: discord.Guild, template_key: str, author: discord.Member):
         result = await original_build(self, guild, template_key, author)
-        # Si le builder principal retourne une erreur, ne poursuit pas une configuration partielle.
         if result.color and result.color.value == 0xED4245:
             return result
         ready = await _finish_ready_setup(bot, self, guild, author)
@@ -352,6 +357,6 @@ def install(bot: commands.Bot) -> None:
     server_builder.ServerBuilder.build_server = build_server_ready
     _INSTALLED = True
     logger.info(
-        "+create-server prêt à l'emploi : rolepanel, boutique, annonces, suivi et sécurité ; %s salons retirés du modèle communauté.",
+        "+create-server prêt à l'emploi : rôles, boutique, annonces, suivi et sécurité ; %s salons retirés du modèle communauté.",
         template_removed,
     )
