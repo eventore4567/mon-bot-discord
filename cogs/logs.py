@@ -3,9 +3,16 @@
 Les salons sont ceux déjà enregistrés par +setup/+create-server dans guild_config :
 log_messages, log_members, log_voice, log_roles, log_server, log_moderation et
 log_automod. Le cog reste silencieux lorsqu'un salon n'est pas configuré ou inaccessible.
+
+Les messages récents sont également conservés dans un cache SentriX persistant afin que
+le journal puisse afficher leur contenu même lorsque Discord les a déjà retirés de son
+cache interne au moment de la suppression.
 """
 
 from __future__ import annotations
+
+import json
+import time
 
 import discord
 from discord.ext import commands
@@ -32,15 +39,36 @@ COLOURS = {
     "moderation": 0xEB459E,
 }
 
+MESSAGE_CACHE_RETENTION_SECONDS = 86400  # 24 h
+MESSAGE_CACHE_CLEANUP_EVERY = 250
+
+MESSAGE_CACHE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS message_log_cache (
+    message_id INTEGER PRIMARY KEY,
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    author_id INTEGER NOT NULL,
+    author_name TEXT NOT NULL,
+    content TEXT,
+    attachments TEXT NOT NULL DEFAULT '[]',
+    stored_at INTEGER NOT NULL
+)
+"""
+
 
 def _short(value: object, limit: int = 1000) -> str:
     text = str(value) if value not in (None, "") else "Aucun"
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _attachment_urls(message: discord.Message) -> list[str]:
+    return [attachment.url for attachment in message.attachments]
+
+
 class Logs(commands.Cog, name="Logs"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._cache_writes = 0
 
     async def _send(self, guild: discord.Guild, config_key: str, embed: discord.Embed):
         """Envoyer chaque événement via la configuration de +logsetup."""
@@ -58,7 +86,111 @@ class Logs(commands.Cog, name="Logs"):
             embed.set_footer(text="SentriX • Journal du serveur")
         return embed
 
+    async def _cache_message(self, message: discord.Message) -> None:
+        """Mémorise un message avant qu'il puisse être supprimé du cache Discord."""
+        if message.guild is None:
+            return
+        try:
+            await self.bot.db.execute(
+                """
+                INSERT INTO message_log_cache
+                    (message_id, guild_id, channel_id, author_id, author_name, content, attachments, stored_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(message_id) DO UPDATE SET
+                    guild_id = excluded.guild_id,
+                    channel_id = excluded.channel_id,
+                    author_id = excluded.author_id,
+                    author_name = excluded.author_name,
+                    content = excluded.content,
+                    attachments = excluded.attachments,
+                    stored_at = excluded.stored_at
+                """,
+                (
+                    message.id,
+                    message.guild.id,
+                    message.channel.id,
+                    message.author.id,
+                    str(message.author),
+                    message.content or "",
+                    json.dumps(_attachment_urls(message), ensure_ascii=False),
+                    int(time.time()),
+                ),
+            )
+            self._cache_writes += 1
+            if self._cache_writes % MESSAGE_CACHE_CLEANUP_EVERY == 0:
+                await self.bot.db.execute(
+                    "DELETE FROM message_log_cache WHERE stored_at < ?",
+                    (int(time.time()) - MESSAGE_CACHE_RETENTION_SECONDS,),
+                )
+        except Exception:
+            # Un problème de cache ne doit jamais empêcher les autres fonctions du bot.
+            return
+
+    async def _cached_message_row(self, guild_id: int, message_id: int):
+        try:
+            return await self.bot.db.fetchone(
+                "SELECT * FROM message_log_cache WHERE guild_id = ? AND message_id = ?",
+                (guild_id, message_id),
+            )
+        except Exception:
+            return None
+
+    async def _forget_cached_message(self, message_id: int) -> None:
+        try:
+            await self.bot.db.execute(
+                "DELETE FROM message_log_cache WHERE message_id = ?",
+                (message_id,),
+            )
+        except Exception:
+            pass
+
+    async def _log_deleted_from_row(
+        self,
+        guild: discord.Guild,
+        row,
+        *,
+        fallback_channel_id: int | None = None,
+    ) -> None:
+        channel_id = int(row["channel_id"] or fallback_channel_id or 0)
+        channel = guild.get_channel(channel_id) if channel_id else None
+        author_id = int(row["author_id"])
+        author_name = row["author_name"] or f"Utilisateur {author_id}"
+        content = row["content"] or ""
+
+        try:
+            attachments = json.loads(row["attachments"] or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            attachments = []
+
+        embed = self._embed("Message supprimé", COLOURS["delete"], target_id=int(row["message_id"]))
+        embed.add_field(
+            name="Auteur",
+            value=f"<@{author_id}>\n`{author_name}`\n`ID: {author_id}`",
+            inline=True,
+        )
+        embed.add_field(
+            name="Salon",
+            value=channel.mention if channel else f"`{channel_id}`",
+            inline=True,
+        )
+        embed.add_field(
+            name="Contenu",
+            value=_short(content, 1024) if content else "*Aucun texte dans ce message.*",
+            inline=False,
+        )
+        if attachments:
+            embed.add_field(
+                name="Pièces jointes",
+                value=_short("\n".join(str(url) for url in attachments), 1024),
+                inline=False,
+            )
+        await self._send(guild, "log_messages", embed)
+
     # ---------------- Messages ----------------
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        await self._cache_message(message)
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
@@ -67,7 +199,11 @@ class Logs(commands.Cog, name="Logs"):
         embed = self._embed("Message supprimé", COLOURS["delete"], target_id=message.id)
         embed.add_field(name="Auteur", value=f"{message.author.mention}\n`{message.author.id}`", inline=True)
         embed.add_field(name="Salon", value=message.channel.mention, inline=True)
-        embed.add_field(name="Contenu", value=_short(message.content, 1024), inline=False)
+        embed.add_field(
+            name="Contenu",
+            value=_short(message.content, 1024) if message.content else "*Aucun texte dans ce message.*",
+            inline=False,
+        )
         if message.attachments:
             embed.add_field(
                 name="Pièces jointes",
@@ -75,6 +211,7 @@ class Logs(commands.Cog, name="Logs"):
                 inline=False,
             )
         await self._send(message.guild, "log_messages", embed)
+        await self._forget_cached_message(message.id)
 
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
@@ -83,14 +220,54 @@ class Logs(commands.Cog, name="Logs"):
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
+
+        row = await self._cached_message_row(payload.guild_id, payload.message_id)
+        if row is not None:
+            await self._log_deleted_from_row(
+                guild,
+                row,
+                fallback_channel_id=payload.channel_id,
+            )
+            await self._forget_cached_message(payload.message_id)
+            return
+
         channel = guild.get_channel(payload.channel_id)
-        embed = self._embed("Message supprimé (non mémorisé)", COLOURS["delete"], target_id=payload.message_id)
+        embed = self._embed("Message supprimé", COLOURS["delete"], target_id=payload.message_id)
         embed.add_field(name="Salon", value=channel.mention if channel else f"`{payload.channel_id}`", inline=False)
-        embed.description = "Le message n'était plus dans le cache ; son contenu ne peut pas être récupéré."
+        embed.description = (
+            "Le contenu n'est pas disponible car SentriX n'avait pas vu ce message avant sa suppression "
+            "(par exemple message envoyé avant le dernier redémarrage)."
+        )
         await self._send(guild, "log_messages", embed)
 
     @commands.Cog.listener()
+    async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent):
+        if payload.guild_id is None:
+            return
+        guild = self.bot.get_guild(payload.guild_id)
+        if guild is None:
+            return
+
+        cached_ids = {message.id for message in payload.cached_messages}
+        for message_id in payload.message_ids:
+            # Les messages encore présents dans le cache Discord sont traités par
+            # on_message_delete/on_bulk_message_delete selon discord.py ; on ne les double pas ici.
+            if message_id in cached_ids:
+                continue
+            row = await self._cached_message_row(payload.guild_id, message_id)
+            if row is None:
+                continue
+            await self._log_deleted_from_row(
+                guild,
+                row,
+                fallback_channel_id=payload.channel_id,
+            )
+            await self._forget_cached_message(message_id)
+
+    @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
+        if after.guild is not None:
+            await self._cache_message(after)
         if before.guild is None or before.content == after.content:
             return
         embed = self._embed("Message modifié", COLOURS["update"], target_id=after.id)
@@ -263,4 +440,12 @@ class Logs(commands.Cog, name="Logs"):
 
 
 async def setup(bot: commands.Bot):
+    await bot.db.execute(MESSAGE_CACHE_SCHEMA)
+    await bot.db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_message_log_cache_stored_at ON message_log_cache(stored_at)"
+    )
+    await bot.db.execute(
+        "DELETE FROM message_log_cache WHERE stored_at < ?",
+        (int(time.time()) - MESSAGE_CACHE_RETENTION_SECONDS,),
+    )
     await bot.add_cog(Logs(bot))
