@@ -19,6 +19,7 @@ from .security_runtime_hardening import install as install_security_hardening
 from .server_builder_channel_guides import install as install_server_builder_channel_guides
 from .server_builder_everyone import install_server_builder_everyone_ping
 from .server_builder_ready_setup import install as install_server_builder_ready_setup
+from .server_choice_roles import install as install_server_choice_roles
 from .setup_close_fix import install as install_setup_close_fix
 from .ticket_claim_security import install as install_ticket_claim_security
 
@@ -42,6 +43,8 @@ async def _load_extension_with_sentrix_patches(
     install_reply_reference_fix()
     # Le panneau de suivi est chargé une seule fois et actualise son message chaque minute.
     await install_bot_tracker(bot)
+    # Boutons persistants pour les rôles jeux/langues/couleurs créés par +create-server.
+    await install_server_choice_roles(bot)
 
     # Le catalogue est appliqué avant l'installation du panneau afin que +rolepanel et
     # +rolepanel-refresh utilisent toujours les 25 rôles de notifications disponibles.
