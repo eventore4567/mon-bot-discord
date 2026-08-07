@@ -13,6 +13,7 @@ from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
 from .remove_code_command import install as install_remove_code_command
 from .reply_reference_fix import install as install_reply_reference_fix
+from .rolepanel_display_fix import install as install_rolepanel_display_fix
 from .rolepanel_more_notifications import install as install_more_notification_roles
 from .rolepanel_notifications import install as install_notification_rolepanel
 from .security_runtime_hardening import install as install_security_hardening
@@ -83,6 +84,9 @@ async def _load_extension_with_sentrix_patches(
         await install_server_builder_everyone_ping(bot)
         install_server_builder_channel_guides(bot)
         install_server_builder_ready_setup(bot)
+        # Important : répare la détection des panneaux AVANT la migration des serveurs
+        # existants, sinon le style global peut provoquer un doublon au redémarrage.
+        install_rolepanel_display_fix(bot)
         install_existing_server_bootstrap(bot)
     return result
 
