@@ -178,9 +178,10 @@ def install(bot: commands.Bot) -> None:
         # Tous les boutons d'accueil sont des liens : pas de callback, donc ils restent
         # fiables même après un redémarrage et ne peuvent pas afficher "l'application ne répond pas".
         invite_url = _invite_url(self.bot)
-        dashboard_url = _safe_http_url(os.getenv("DASHBOARD_PUBLIC_URL")) or DASHBOARD_FALLBACK
+        dashboard_url = (_safe_http_url(os.getenv("DASHBOARD_PUBLIC_URL")) or DASHBOARD_FALLBACK).rstrip("/")
         support_url = _safe_http_url(os.getenv("SUPPORT_SERVER_URL"))
         status_url = _safe_http_url(os.getenv("STATUS_PUBLIC_URL"))
+        guild_id = self.guild_id
 
         if invite_url:
             self.add_item(discord.ui.Button(
@@ -195,7 +196,7 @@ def install(bot: commands.Bot) -> None:
             label="Dashboard",
             emoji="📈",
             style=discord.ButtonStyle.link,
-            url=dashboard_url,
+            url=f"{dashboard_url}/app?guild={guild_id}&tab=overview",
             row=1,
         ))
 
@@ -203,7 +204,7 @@ def install(bot: commands.Bot) -> None:
             label="Commandes",
             emoji="⌨️",
             style=discord.ButtonStyle.link,
-            url=f"{dashboard_url.rstrip('/')}#commands",
+            url=f"{dashboard_url}/app?guild={guild_id}&tab=commands",
             row=1,
         ))
 
@@ -211,7 +212,7 @@ def install(bot: commands.Bot) -> None:
             label="Configuration",
             emoji="⚙️",
             style=discord.ButtonStyle.link,
-            url=f"{dashboard_url.rstrip('/')}#configuration",
+            url=f"{dashboard_url}/app?guild={guild_id}&tab=general",
             row=1,
         ))
 
@@ -238,4 +239,4 @@ def install(bot: commands.Bot) -> None:
     configuration.SetupView._render_home = render_home
 
     _INSTALLED = True
-    logger.info("Style premium stable de +setup chargé (boutons de service uniquement).")
+    logger.info("Style premium stable de +setup chargé (boutons de service + deep links dashboard).")
