@@ -2,6 +2,8 @@
 
 from discord.ext import commands
 
+from .afk_nickname import install as install_afk_nickname
+from .ai_reliability import install as install_ai_reliability
 from .dashboard_access import install_dashboard_access
 from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
@@ -23,9 +25,12 @@ async def _load_extension_with_sentrix_patches(
     # les futurs cogs et reste actif même si un module optionnel échoue plus tard.
     install_premium_style(bot)
 
+    if name == "cogs.ai" or name.endswith(".ai"):
+        install_ai_reliability()
     if name == "cogs.utility" or name.endswith(".utility"):
         await install_poll_ui(bot)
         await install_dashboard_access(bot)
+        await install_afk_nickname(bot)
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
         await install_server_builder_everyone_ping(bot)
     return result
