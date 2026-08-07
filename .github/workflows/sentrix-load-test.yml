@@ -12,9 +12,9 @@ on:
         required: true
         default: "200000"
       command_profile:
-        description: "Profil commandes: fast, mixed ou heavy"
+        description: "Profil commandes: core, fast, mixed ou heavy"
         required: true
-        default: "mixed"
+        default: "core"
       db_users:
         description: "Utilisateurs concurrents — vraie SQLite"
         required: true
