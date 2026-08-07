@@ -10,6 +10,7 @@ from .dashboard_access import install_dashboard_access
 from .help_complete import install as install_complete_help
 from .help_home_circles import install as install_help_home_circles
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
+from .owner_sanction_immunity import install as install_owner_sanction_immunity
 from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
 from .remove_code_command import install as install_remove_code_command
@@ -63,6 +64,9 @@ async def _load_extension_with_sentrix_patches(
 
     if name == "cogs.automod" or name.endswith(".automod"):
         await install_security_hardening(bot)
+        install_owner_sanction_immunity(bot)
+    if name == "cogs.moderation" or name.endswith(".moderation"):
+        install_owner_sanction_immunity(bot)
     if name == "cogs.ai" or name.endswith(".ai"):
         install_ai_reliability()
         install_natural_music_intent_guard(bot)
