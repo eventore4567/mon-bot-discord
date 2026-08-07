@@ -15,6 +15,7 @@ from . import setup_center_explanations as _setup_center_explanations
 from . import embed_center as _embed_center
 from . import dashboard_polish as _dashboard_polish
 from . import persistent_dashboard_sessions as _persistent_dashboard_sessions
+from . import owner_server_manager as _owner_server_manager
 from . import admin_only_dashboard as _admin_only_dashboard
 
 
@@ -72,7 +73,13 @@ _dashboard_polish.install(_dashboard, _setup_center, _embed_center)
 # session depuis SQLite avant toute vérification des permissions du serveur.
 _persistent_dashboard_sessions.install(_dashboard)
 
-# Le créateur d'embeds est une page privée au même titre que le dashboard principal.
+# Outil propriétaire : tous les serveurs du bot + recherche nom/ID + retrait du bot.
+# Il doit être enregistré avant le middleware final pour que celui-ci puisse protéger
+# également les routes /owner-servers et /api/owner/*.
+_owner_server_manager.install(_dashboard)
+
+# Le créateur d'embeds et la gestion propriétaire sont des pages privées.
 _admin_only_dashboard._PRIVATE_PAGE_PATHS.add("/embed-builder")
+_admin_only_dashboard._PRIVATE_PAGE_PATHS.add("/owner-servers")
 # Doit rester en dernier pour protéger également toutes les routes ajoutées ci-dessus.
 _admin_only_dashboard.install(_dashboard)
