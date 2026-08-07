@@ -21,6 +21,7 @@ from .server_builder_everyone import install_server_builder_everyone_ping
 from .server_builder_existing_bootstrap import install as install_existing_server_bootstrap
 from .server_builder_ready_setup import install as install_server_builder_ready_setup
 from .server_choice_roles import install as install_server_choice_roles
+from .shop_default_prices import install as install_shop_default_prices
 from .setup_close_fix import install as install_setup_close_fix
 from .ticket_claim_security import install as install_ticket_claim_security
 
@@ -44,6 +45,8 @@ async def _load_extension_with_sentrix_patches(
     install_reply_reference_fix()
     # Le panneau de suivi est chargé une seule fois et actualise son message chaque minute.
     await install_bot_tracker(bot)
+    # Prix boutique par défaut : VIP 500 pièces, Premium 2 000 pièces.
+    await install_shop_default_prices(bot)
     # Boutons persistants pour les rôles jeux/langues/couleurs créés par +create-server.
     await install_server_choice_roles(bot)
 
