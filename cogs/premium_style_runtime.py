@@ -229,18 +229,29 @@ def install(bot: commands.Bot) -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+
+    patchers = (
+        ("commandes texte", _patch_context_send),
+        ("réponses texte", _patch_context_reply),
+        ("salons et messages privés", lambda: _patch_messageable_send(bot)),
+        ("éditions de messages", lambda: _patch_message_edit(bot)),
+        ("réponses d'interaction", lambda: _patch_interaction_response(bot)),
+        ("éditions d'interaction", lambda: _patch_interaction_edits(bot)),
+        ("follow-ups", lambda: _patch_webhook_followups(bot)),
+        ("ancien design system", _patch_design_system),
+        ("journaux", _patch_log_service),
+    )
+    installed = 0
+    for label, patcher in patchers:
+        try:
+            patcher()
+            installed += 1
+        except Exception:
+            logger.exception("Style premium : installation impossible pour %s.", label)
+
     _INSTALLED = True
-
-    _patch_context_send()
-    _patch_context_reply()
-    _patch_messageable_send(bot)
-    _patch_message_edit(bot)
-    _patch_interaction_response(bot)
-    _patch_interaction_edits(bot)
-    _patch_webhook_followups(bot)
-    _patch_design_system()
-    _patch_log_service()
-
     logger.info(
-        "Identité premium SentriX installée : commandes, interactions, éditions, MP, panneaux et logs harmonisés."
+        "Identité premium SentriX installée : %s/%s couches actives.",
+        installed,
+        len(patchers),
     )
