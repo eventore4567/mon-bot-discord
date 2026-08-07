@@ -7,6 +7,7 @@ from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
 from .dashboard_access import install_dashboard_access
 from .help_complete import install as install_complete_help
+from .help_home_circles import install as install_help_home_circles
 from .poll_ui import install_poll_ui
 from .premium_style_runtime import install as install_premium_style
 from .remove_code_command import install as install_remove_code_command
@@ -37,6 +38,9 @@ async def _load_extension_with_sentrix_patches(
         # celui-ci enveloppe bien la nouvelle page d'accueil dynamique.
         install_complete_help(bot)
         await install_dashboard_access(bot)
+        # Le style sobre passe en dernier pour nettoyer aussi le champ et le bouton du
+        # dashboard sans modifier leur fonctionnement.
+        install_help_home_circles(bot)
         await install_afk_nickname(bot)
         install_afk_signature_fix(bot)
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
