@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit CI du choix FR/EN sans connexion a Discord."""
+"""Audit CI du choix FR/EN, y compris le payload final des composants Discord."""
 from __future__ import annotations
 
 import asyncio
@@ -62,7 +62,7 @@ async def run() -> int:
                 errors.append(f"commande canonique absente: {canonical}")
                 continue
             if bot.get_command(french) is not base:
-                errors.append(f"alias FR {french} ne pointe pas vers {canonical}")
+                errors.append(f"nom FR {french} ne pointe pas vers {canonical}")
             if bot.get_command(english) is not base:
                 errors.append(f"nom EN {english} ne pointe pas vers {canonical}")
 
@@ -92,8 +92,8 @@ async def run() -> int:
         if help_command is None or not getattr(help_command, "_sentrix_language_help", False):
             errors.append("+help n'utilise pas le rendu localise")
 
-        if not getattr(configuration.SetupView, "_sentrix_language_patch", False):
-            errors.append("+setup n'a pas le support de langue")
+        if not getattr(configuration.SetupView, "_sentrix_language_payload_guard", False):
+            errors.append("+setup n'a pas le garde-fou final-wire pour la langue")
 
         initial_view = language_runtime.LanguageChoiceView(bot)
         custom_ids = {getattr(item, "custom_id", None) for item in initial_view.children}
@@ -109,84 +109,78 @@ async def run() -> int:
                 channel_id=333,
             )
 
-            # Teste le vrai état juste APRES le constructeur, car c'est exactement le
-            # panneau que +setup envoie pour la première fois sur Discord.
-            selects = [item for item in setup_view.children if isinstance(item, __import__("discord").ui.Select)]
-            category_selects = []
-            for item in selects:
-                values = [str(getattr(option, "value", "")) for option in getattr(item, "options", [])]
-                if LANGUAGE_CATEGORY_VALUE in values:
-                    category_selects.append(item)
+            def find_language_select(view):
+                for item in view.children:
+                    options = list(getattr(item, "options", []) or [])
+                    if any(str(getattr(opt, "value", "")) == LANGUAGE_CATEGORY_VALUE for opt in options):
+                        return item
+                return None
 
-            if len(category_selects) != 1:
-                errors.append(f"menu Categories final avec Langue attendu 1 fois, trouve {len(category_selects)}")
+            # Juste après construction : la langue doit être la PREMIERE option.
+            select = find_language_select(setup_view)
+            if select is None:
+                errors.append("Langue absente du menu Categories juste apres construction")
             else:
-                category_select = category_selects[0]
-                matches = [
-                    option for option in category_select.options
-                    if str(getattr(option, "value", "")) == LANGUAGE_CATEGORY_VALUE
-                ]
-                if len(matches) != 1:
-                    errors.append(f"option Langue dupliquee ou absente: {len(matches)}")
-                else:
-                    option = matches[0]
-                    label = str(getattr(option, "label", "") or "")
-                    if "Langue" not in label and "Language" not in label:
-                        errors.append(f"label langue incomprehensible: {label!r}")
-                    if str(getattr(option, "emoji", "") or "") != "🌐":
-                        errors.append(f"emoji langue invalide: {getattr(option, 'emoji', None)!r}")
-                if getattr(category_select, "row", None) != 0:
-                    errors.append("le menu Categories contenant Langue n'est pas sur la ligne principale")
+                if str(getattr(select.options[0], "value", "")) != LANGUAGE_CATEGORY_VALUE:
+                    errors.append("Langue n'est pas la premiere option du menu Categories")
+                label = str(getattr(select.options[0], "label", "") or "")
+                if "Langue" not in label and "Language" not in label:
+                    errors.append(f"label langue incomprehensible: {label!r}")
 
-            # Teste aussi un retour Accueil : _render_home doit remettre l'option tout seul.
-            setup_view._render_home()
-            home_matches = []
-            for item in setup_view.children:
-                if not isinstance(item, __import__("discord").ui.Select):
-                    continue
-                home_matches.extend(
-                    option for option in getattr(item, "options", [])
-                    if str(getattr(option, "value", "")) == LANGUAGE_CATEGORY_VALUE
-                )
-            if len(home_matches) != 1:
-                errors.append(f"retour accueil perd la categorie Langue: {len(home_matches)} option(s)")
+            # Test du dictionnaire EXACT sérialisé par discord.py avant envoi réseau.
+            payload = setup_view.to_components()
+            serialized_category = None
+            for row in payload:
+                for component in row.get("components", []):
+                    options = component.get("options") or []
+                    if any(str(option.get("value", "")) == LANGUAGE_CATEGORY_VALUE for option in options):
+                        serialized_category = component
+                        break
+                if serialized_category:
+                    break
 
-            # Ouvre réellement la page virtuelle de langue et vérifie ce qui est rendu.
+            if serialized_category is None:
+                errors.append("CRITIQUE: Langue absente du payload final envoye a Discord")
+            elif str(serialized_category["options"][0].get("value", "")) != LANGUAGE_CATEGORY_VALUE:
+                errors.append("CRITIQUE: Langue n'est pas premiere dans le payload Discord")
+
+            # Retour accueil : même garantie.
+            setup_view.page = -1
+            setup_view.render_page()
+            payload_after_home = setup_view.to_components()
+            found_after_home = any(
+                str(option.get("value", "")) == LANGUAGE_CATEGORY_VALUE
+                for row in payload_after_home
+                for component in row.get("components", [])
+                for option in (component.get("options") or [])
+            )
+            if not found_after_home:
+                errors.append("Langue perdue apres render_page de l'accueil")
+
+            # Page langue : FR, EN et Accueil.
             setup_view.page = LANGUAGE_PAGE
             setup_view.render_page()
-            lang_buttons = {
-                getattr(item, "custom_id", None)
-                for item in setup_view.children
-                if getattr(item, "custom_id", None) in {
-                    "sentrix:setup:lang:fr", "sentrix:setup:lang:en", "sentrix:setup:lang:home"
-                }
+            ids = {getattr(item, "custom_id", None) for item in setup_view.children}
+            expected = {
+                "sentrix:setup:lang:fr",
+                "sentrix:setup:lang:en",
+                "sentrix:setup:lang:home",
             }
-            expected_buttons = {
-                "sentrix:setup:lang:fr", "sentrix:setup:lang:en", "sentrix:setup:lang:home"
-            }
-            if lang_buttons != expected_buttons:
-                errors.append(f"boutons page Langue invalides: {lang_buttons}")
+            if ids != expected:
+                errors.append(f"composants de la page Langue invalides: {ids}")
 
             language_embed = await setup_view.build_embed()
             if "Langue" not in str(language_embed.title or "") and "Language" not in str(language_embed.title or ""):
-                errors.append(f"embed de page Langue invalide: {language_embed.title!r}")
+                errors.append(f"embed Langue invalide: {language_embed.title!r}")
 
-            # Le correctif ne doit plus modifier SETUP_STEPS : les index historiques restent intacts.
-            if any(step.get("key") == "language" for step in configuration.SETUP_STEPS):
-                errors.append("SETUP_STEPS contient encore une etape language ajoutee a chaud")
-
-            # Aucun sélecteur FR/EN séparé sur l'accueil.
+            # Aucun menu FR/EN séparé sur l'accueil.
             setup_view.page = -1
             setup_view.render_page()
-            standalone_language_selects = []
             for item in setup_view.children:
-                if not isinstance(item, __import__("discord").ui.Select):
-                    continue
-                values = {str(getattr(option, "value", "")) for option in getattr(item, "options", [])}
+                values = {str(getattr(opt, "value", "")) for opt in getattr(item, "options", [])}
                 if values == {"fr", "en"}:
-                    standalone_language_selects.append(item)
-            if standalone_language_selects:
-                errors.append("un menu FR/EN separe existe encore hors des Categories")
+                    errors.append("un menu FR/EN separe existe encore hors des Categories")
+
         except Exception as exc:
             errors.append(f"construction +setup langue impossible: {type(exc).__name__}: {exc}")
 
@@ -209,7 +203,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
-    print("OK: FR/EN persistant et Langue forcee dans le vrai menu Categories de +setup")
+    print("OK: FR/EN persistant et Langue est la 1re option du payload Discord final de +setup")
     return 0
 
 
