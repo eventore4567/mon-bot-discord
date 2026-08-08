@@ -149,12 +149,24 @@ async def run() -> int:
         if not command_response_guard._INSTALLED:
             errors.append("le filet de sécurité de réponse des commandes n'est pas installé")
 
+        start_listeners = bot.extra_events.get("on_command", [])
         prefix_listeners = bot.extra_events.get("on_command_completion", [])
+        error_listeners = bot.extra_events.get("on_command_error", [])
         slash_listeners = bot.extra_events.get("on_app_command_completion", [])
+        if not start_listeners:
+            errors.append("listener de mesure de latence des commandes + absent")
         if not prefix_listeners:
             errors.append("listener de réponse de secours des commandes + absent")
+        if not error_listeners:
+            errors.append("listener de récupération des fautes de commandes + absent")
         if not slash_listeners:
             errors.append("listener de réponse de secours des commandes slash absent")
+
+        typo_suggestions = command_response_guard._command_suggestions(bot, "hlep")
+        if "help" not in typo_suggestions:
+            errors.append(
+                "la récupération de faute ne propose pas +help pour la saisie 'hlep'"
+            )
 
         app_commands = list(bot.tree.walk_commands())
         app_names = [command.qualified_name.casefold() for command in app_commands]
@@ -190,6 +202,7 @@ async def run() -> int:
             f"{len(command_catalog_cleanup.RESTORED_COMMANDS)} commandes utiles garanties, "
             f"{len(command_catalog_cleanup.CONFIRMED_DUPLICATE_COMMANDS)} doublons retirés"
         )
+        print("UX commandes: suggestions de fautes + diagnostic de latence actifs")
         print("Catégories +help:")
         for category in help_complete.CATEGORIES:
             count = category_counts.get(category.key, 0)
@@ -221,7 +234,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} problème(s) détecté(s)")
         return 1
-    print("OK: registre complet chargé, catalogue nettoyé, catégories valides, callbacks valides et garde de réponse active")
+    print("OK: registre complet chargé, catalogue nettoyé, catégories valides, UX commandes active, callbacks valides et garde de réponse active")
     return 0
 
 
