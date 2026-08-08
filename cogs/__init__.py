@@ -12,6 +12,7 @@ from .generated_logs_sync import install as install_generated_logs_sync
 from .giveaway_antialt import install as install_giveaway_antialt
 from .help_complete import install as install_complete_help
 from .help_home_circles import install as install_help_home_circles
+from .logs_no_ping import install as install_logs_no_ping
 from .moderation_logs_fix import install as install_moderation_logs_fix
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
 from .no_auto_tracker import install as install_no_auto_tracker
@@ -138,6 +139,9 @@ async def _load_extension_with_sentrix_patches(
     # barre d'accent, sections, séparateurs, thumbnail et boutons intégrés. Un fallback
     # conserve automatiquement l'embed premium si Discord refuse la carte.
     install_premium_logs_v2(bot)
+    # Les mentions restent visibles dans les cartes, mais ne notifient jamais les membres,
+    # rôles, @everyone ou @here. Le reste du bot garde ses vrais pings normalement.
+    install_logs_no_ping()
 
     # Correctifs transversaux issus de la passe de stabilité : reprise des notifications
     # sociales, sérialisation du cache d'invitations et limite de récompenses de jeux.
