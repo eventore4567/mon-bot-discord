@@ -14,6 +14,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def _component_label(item) -> str:
+    """Lit aussi le label d'un DynamicItem Discord (bouton stocké dans .item)."""
+    label = getattr(item, "label", None)
+    if not label:
+        wrapped = getattr(item, "item", None)
+        label = getattr(wrapped, "label", None) if wrapped is not None else None
+    return str(label or "")
+
+
 async def run() -> int:
     errors: list[str] = []
 
@@ -79,16 +88,21 @@ async def run() -> int:
                 message_id=555555555,
                 channel_id=444444444,
             )
-            labels = [str(getattr(item, "label", "") or "") for item in view.children]
+            labels = [_component_label(item) for item in view.children]
+            actions = {str(getattr(item, "action", "") or "") for item in view.children}
             selects = [item for item in view.children if item.__class__.__name__.endswith("Select")]
             if not selects:
                 errors.append("+setup accueil n'a aucun menu de modules")
-            if not any("Résumé" in label for label in labels):
-                errors.append("+setup accueil n'a pas de bouton Résumé")
-            if not any("Historique" in label for label in labels):
-                errors.append("+setup accueil n'a pas de bouton Historique")
-            if not any("Fermer" in label for label in labels):
-                errors.append("+setup accueil n'a pas de bouton Fermer")
+
+            # SetupNavButton est un discord.ui.DynamicItem : selon la version de
+            # discord.py, son label visible vit dans item.item.label. L'action encodée
+            # dans le custom_id est la vraie garantie fonctionnelle et doit être testée.
+            if "summary" not in actions or not any("Résumé" in label for label in labels):
+                errors.append("+setup accueil n'a pas de bouton Résumé fonctionnel")
+            if "history" not in actions or not any("Historique" in label for label in labels):
+                errors.append("+setup accueil n'a pas de bouton Historique fonctionnel")
+            if "cancel" not in actions or not any("Fermer" in label for label in labels):
+                errors.append("+setup accueil n'a pas de bouton Fermer fonctionnel")
             if any("Inviter SentriX" in label for label in labels):
                 errors.append("+setup contient encore l'ancien bouton marketing Inviter SentriX")
 
