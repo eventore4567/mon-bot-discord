@@ -83,6 +83,39 @@ def _install_embed_component_fix(bot: commands.Bot) -> None:
         logger.exception("Impossible d'installer le correctif de composant +embed.")
 
 
+async def _install_configuration_critical_patches(bot: commands.Bot) -> None:
+    """Installe les couches essentielles de +setup dès que Configuration existe.
+
+    Ces correctifs ne doivent pas dépendre des autres installateurs globaux : en production,
+    un échec dans un module non lié pouvait laisser le Cog Configuration chargé tout en
+    sautant la refonte de +setup. On isole donc chaque étape pour garantir le menu final.
+    """
+    steps = (
+        ("fermeture setup", lambda: install_setup_close_fix(bot)),
+        ("synchronisation logs setup", lambda: install_setup_create_logs_sync(bot)),
+        ("style setup", lambda: install_setup_oxyde_style(bot)),
+        ("nettoyage mobile setup", lambda: install_setup_mobile_cleanup(bot)),
+        ("rôle de ping tickets setup", lambda: install_ticket_ping_setup(bot)),
+    )
+    for label, installer in steps:
+        try:
+            installer()
+        except Exception:
+            logger.exception("Échec du correctif %s ; poursuite du chargement de +setup.", label)
+
+    try:
+        await install_language_runtime(bot)
+    except Exception:
+        logger.exception("Échec du moteur de langue pendant le chargement prioritaire de +setup.")
+
+    try:
+        install_language_setup_finalizer(bot)
+    except Exception:
+        logger.exception("Échec du finaliseur de langue pendant le chargement prioritaire de +setup.")
+
+    logger.info("+setup prioritaire installé immédiatement après le Cog Configuration.")
+
+
 async def _load_extension_with_sentrix_patches(
     bot: commands.Bot,
     name: str,
@@ -90,6 +123,13 @@ async def _load_extension_with_sentrix_patches(
     package: str | None = None,
 ):
     result = await _ORIGINAL_LOAD_EXTENSION(bot, name, package=package)
+
+    # IMPORTANT : Configuration est déjà réellement ajoutée au bot à ce point. On installe
+    # immédiatement le nouveau +setup avant tout autre correctif global. Ainsi, même si un
+    # autre module rencontre ensuite un problème avec les données réelles du serveur, le
+    # panneau Catégories et sa langue ne peuvent plus rester sur l'ancien renderer.
+    if name == "cogs.configuration" or name.endswith(".configuration"):
+        await _install_configuration_critical_patches(bot)
 
     # Idempotent : le moteur est installé dès le premier cog chargé. Il couvre donc aussi
     # les futurs cogs et reste actif même si un module optionnel échoue plus tard.
@@ -135,16 +175,13 @@ async def _load_extension_with_sentrix_patches(
         await install_afk_nickname(bot)
         install_afk_signature_fix(bot)
     if name == "cogs.configuration" or name.endswith(".configuration"):
+        # Deuxième passage volontaire et idempotent : il garde la compatibilité avec les
+        # anciennes couches tout en garantissant que le passage prioritaire ci-dessus a déjà
+        # installé le vrai menu avant les modules globaux.
         install_setup_close_fix(bot)
-        # Répare le bouton +setup -> Create Logs : les 7 salons créés sont maintenant
-        # reliés au moteur log_settings, même s'ils existaient déjà avant ce déploiement.
         install_setup_create_logs_sync(bot)
-        # Refonte visuelle inspirée des panneaux premium/OXYDE, sans toucher à la logique
-        # de persistance, de permissions ni aux callbacks existants de +setup.
         install_setup_oxyde_style(bot)
-        # Retire le bloc Modules/✅/⚠️ qui s'empilait verticalement sur mobile.
         install_setup_mobile_cleanup(bot)
-        # Choix du rôle à notifier à l'ouverture d'un ticket directement dans +setup.
         install_ticket_ping_setup(bot)
     if name == "cogs.tickets" or name.endswith(".tickets"):
         install_ticket_claim_security(bot)
