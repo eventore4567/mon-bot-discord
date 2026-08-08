@@ -12,7 +12,16 @@ import asyncio
 import inspect
 import os
 import pathlib
+import sys
 import tempfile
+
+
+# Lorsqu'un script est lancé avec `python tools/xxx.py`, Python met `tools/` en tête du
+# sys.path et non la racine du dépôt. On ajoute explicitement la racine pour importer
+# exactement le même `main.py`, `cogs/`, `database/` et `utils/` que la production.
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 CRITICAL_COMMANDS = {
