@@ -17,6 +17,7 @@ from . import dashboard_polish as _dashboard_polish
 from . import persistent_dashboard_sessions as _persistent_dashboard_sessions
 from . import owner_server_manager as _owner_server_manager
 from . import admin_only_dashboard as _admin_only_dashboard
+from . import ticket_ping_dashboard as _ticket_ping_dashboard
 from . import dashboard_control_center as _dashboard_control_center
 from . import dashboard_deeplinks as _dashboard_deeplinks
 
@@ -79,6 +80,10 @@ _persistent_dashboard_sessions.install(_dashboard)
 # Il doit être enregistré avant le middleware final pour que celui-ci puisse protéger
 # également les routes /owner-servers et /api/owner/*.
 _owner_server_manager.install(_dashboard)
+
+# Le rôle à ping des tickets possède ses propres routes API et son interface, mais réutilise
+# les mêmes contrôles Administrateur/CSRF que le dashboard principal.
+_ticket_ping_dashboard.install(_dashboard)
 
 # Le créateur d'embeds et la gestion propriétaire sont des pages privées.
 _admin_only_dashboard._PRIVATE_PAGE_PATHS.add("/embed-builder")
