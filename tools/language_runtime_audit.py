@@ -22,7 +22,7 @@ async def run() -> int:
 
         import main
         from cogs import common_command_names, configuration, language_runtime
-        from cogs.language_setup_finalizer import LANGUAGE_CATEGORY_VALUE
+        from cogs.language_setup_finalizer import LANGUAGE_CATEGORY_VALUE, LANGUAGE_STEP_KEY
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -98,10 +98,28 @@ async def run() -> int:
         view = language_runtime.LanguageChoiceView(bot)
         custom_ids = {getattr(item, "custom_id", None) for item in view.children}
         if custom_ids != {"sentrix:language:fr", "sentrix:language:en"}:
-            errors.append(f"boutons langue inattendus: {custom_ids}")
+            errors.append(f"boutons langue initiaux inattendus: {custom_ids}")
 
-        # Exigence UX : Langue doit etre une vraie option du meme menu que les autres
-        # categories de +setup. Aucun bouton/menu FR-EN separe ne doit etre necessaire.
+        # La langue doit maintenant être une vraie étape de SETUP_STEPS, donc le même
+        # chemin de rendu que Général/Rôles/Tickets/Logs. C'est plus robuste qu'ajouter une
+        # option au Select une fois le composant déjà construit.
+        language_steps = [
+            (index, step) for index, step in enumerate(configuration.SETUP_STEPS)
+            if step.get("key") == LANGUAGE_STEP_KEY
+        ]
+        if len(language_steps) != 1:
+            errors.append(f"etape native language attendue 1 fois, trouve {len(language_steps)}")
+            language_index = None
+        else:
+            language_index = language_steps[0][0]
+            # Les anciens index doivent rester stables : summary était déjà avant la langue.
+            summary_index = next(
+                (i for i, step in enumerate(configuration.SETUP_STEPS) if step.get("key") == "summary"),
+                None,
+            )
+            if summary_index is None or language_index <= summary_index:
+                errors.append("l'etape Langue deplace les anciens index de +setup")
+
         try:
             setup_view = configuration.SetupView(
                 bot,
@@ -111,28 +129,55 @@ async def run() -> int:
                 channel_id=333,
             )
             selects = [item for item in setup_view.children if item.__class__.__name__.endswith("Select")]
-            category_selects = []
-            for item in selects:
-                values = {str(getattr(option, "value", "")) for option in getattr(item, "options", [])}
-                if LANGUAGE_CATEGORY_VALUE in values:
-                    category_selects.append(item)
 
-            if len(category_selects) != 1:
-                errors.append(f"menu Categories avec Langue attendu 1 fois, trouve {len(category_selects)}")
-            else:
-                category_select = category_selects[0]
-                option = next(
-                    (opt for opt in category_select.options if str(getattr(opt, "value", "")) == LANGUAGE_CATEGORY_VALUE),
-                    None,
-                )
-                if option is None:
-                    errors.append("option Langue absente du menu Categories")
+            if language_index is not None:
+                expected_value = str(language_index)
+                category_selects = []
+                for item in selects:
+                    values = {str(getattr(option, "value", "")) for option in getattr(item, "options", [])}
+                    if expected_value in values:
+                        category_selects.append(item)
+
+                if len(category_selects) != 1:
+                    errors.append(f"menu Categories natif avec Langue attendu 1 fois, trouve {len(category_selects)}")
                 else:
-                    label = str(getattr(option, "label", "") or "")
-                    if "Langue" not in label and "Language" not in label:
-                        errors.append(f"label de categorie langue incomprehensible: {label!r}")
-                if getattr(category_select, "row", None) != 0:
-                    errors.append("le menu Categories contenant Langue n'est pas sur la ligne principale")
+                    category_select = category_selects[0]
+                    option = next(
+                        (opt for opt in category_select.options if str(getattr(opt, "value", "")) == expected_value),
+                        None,
+                    )
+                    if option is None:
+                        errors.append("option Langue native absente du menu Categories")
+                    else:
+                        label = str(getattr(option, "label", "") or "")
+                        if "Langue" not in label and "Language" not in label:
+                            errors.append(f"label de categorie langue incomprehensible: {label!r}")
+                    if getattr(category_select, "row", None) != 0:
+                        errors.append("le menu Categories contenant Langue n'est pas sur la ligne principale")
+
+                # L'ancien identifiant spécial ne doit plus être injecté post-construction.
+                all_values = {
+                    str(getattr(option, "value", ""))
+                    for item in selects for option in getattr(item, "options", [])
+                }
+                if LANGUAGE_CATEGORY_VALUE in all_values:
+                    errors.append("ancienne option de langue post-construction encore presente")
+
+                # Ouvre réellement la catégorie native et vérifie les deux choix visibles.
+                setup_view.page = language_index
+                setup_view.render_page()
+                lang_buttons = {
+                    getattr(item, "custom_id", None)
+                    for item in setup_view.children
+                    if getattr(item, "custom_id", None) in {
+                        "sentrix:setup:lang:fr", "sentrix:setup:lang:en"
+                    }
+                }
+                if lang_buttons != {"sentrix:setup:lang:fr", "sentrix:setup:lang:en"}:
+                    errors.append(f"boutons FR/EN de la categorie native invalides: {lang_buttons}")
+                language_embed = await setup_view.build_embed()
+                if "Langue" not in str(language_embed.title or "") and "Language" not in str(language_embed.title or ""):
+                    errors.append(f"embed de categorie langue invalide: {language_embed.title!r}")
 
             standalone_language_selects = []
             for item in selects:
@@ -141,13 +186,6 @@ async def run() -> int:
                     standalone_language_selects.append(item)
             if standalone_language_selects:
                 errors.append("un menu FR/EN separe existe encore hors des categories")
-
-            standalone_language_buttons = [
-                item for item in setup_view.children
-                if getattr(item, "custom_id", None) == "sentrix:setup:language"
-            ]
-            if standalone_language_buttons:
-                errors.append("un bouton Langue separe existe encore hors des categories")
         except Exception as exc:
             errors.append(f"construction +setup langue impossible: {type(exc).__name__}: {exc}")
 
@@ -170,7 +208,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
-    print("OK: FR/EN persistant et Langue presente directement dans le menu Categories de +setup")
+    print("OK: FR/EN persistant et Langue est une vraie etape native du menu Categories de +setup")
     return 0
 
 
