@@ -1,9 +1,12 @@
 """Expérience et fiabilité des commandes SentriX.
 
-Cette couche garde les réponses normales des commandes, mais ajoute trois filets de sécurité :
+Cette couche garde les réponses normales des commandes, mais ajoute des filets de sécurité
+transversaux qui s'appliquent automatiquement à TOUT le registre actif :
 - une commande valide qui se termine sans réponse reçoit un accusé de succès ;
-- une faute de frappe sur une commande `+` propose automatiquement les commandes proches ;
-- les commandes lentes sont signalées dans les logs afin de repérer les régressions de latence.
+- une faute de frappe sur une commande `+`, y compris une sous-commande, propose les noms proches ;
+- les commandes préfixées et slash lentes sont signalées dans les logs ;
+- le catalogue de suggestions est construit depuis walk_commands(), donc une future commande
+  bénéficie du système sans ajout manuel.
 
 Les erreurs métier restent gérées par les handlers globaux de main.py.
 """
@@ -26,26 +29,36 @@ _INSTALLED = False
 _SLOW_COMMAND_SECONDS = 2.0
 _UNKNOWN_REPLY_COOLDOWN = 3.0
 _UNKNOWN_REPLY_LAST: dict[int, float] = {}
+_SLASH_STARTS: dict[int, float] = {}
 
 
 def _command_suggestions(bot: commands.Bot, typed: str) -> list[str]:
-    """Retourne jusqu'à 3 noms canoniques proches, sans exposer les commandes cachées."""
+    """Retourne jusqu'à 3 commandes/sous-commandes proches, sans exposer les cachées."""
     typed = (typed or "").casefold().strip()
     if not typed:
         return []
 
-    # Les alias participent à la recherche, mais la réponse affiche toujours le nom
-    # canonique pour ne pas remplir l'aide de doublons historiques.
+    # walk_commands() couvre aussi les sous-commandes de groupes. Les alias participent à
+    # la recherche, mais l'utilisateur reçoit toujours le nom canonique complet.
     lookup: dict[str, str] = {}
-    for command in bot.commands:
+    for command in bot.walk_commands():
         if getattr(command, "hidden", False):
             continue
-        canonical = str(command.name)
+        canonical = str(command.qualified_name).strip()
+        if not canonical:
+            continue
         lookup[canonical.casefold()] = canonical
-        for alias in getattr(command, "aliases", ()):
-            lookup[str(alias).casefold()] = canonical
 
-    matches = difflib.get_close_matches(typed, list(lookup), n=6, cutoff=0.52)
+        parent = getattr(command, "parent", None)
+        parent_name = str(getattr(parent, "qualified_name", "") or "").strip()
+        for alias in getattr(command, "aliases", ()):
+            alias_name = str(alias).strip()
+            if not alias_name:
+                continue
+            qualified_alias = f"{parent_name} {alias_name}".strip() if parent_name else alias_name
+            lookup[qualified_alias.casefold()] = canonical
+
+    matches = difflib.get_close_matches(typed, list(lookup), n=8, cutoff=0.52)
     result: list[str] = []
     for match in matches:
         canonical = lookup[match]
@@ -54,6 +67,33 @@ def _command_suggestions(bot: commands.Bot, typed: str) -> list[str]:
         if len(result) >= 3:
             break
     return result
+
+
+def _typed_command_path(bot: commands.Bot, ctx: commands.Context) -> str:
+    """Reconstruit le chemin saisi pour pouvoir corriger aussi `+groupe sous-commnde`."""
+    invoked = str(getattr(ctx, "invoked_with", "") or "").strip()
+    message = getattr(ctx, "message", None)
+    content = str(getattr(message, "content", "") or "")
+    prefix = str(getattr(ctx, "clean_prefix", None) or "+")
+
+    if content.startswith(prefix):
+        content = content[len(prefix):].strip()
+    parts = content.split()
+    if not parts:
+        return invoked
+
+    root = bot.get_command(parts[0])
+    if not isinstance(root, commands.Group):
+        return parts[0]
+
+    # Une erreur CommandNotFound à l'intérieur d'un groupe signifie que les premiers mots
+    # décrivent encore un chemin de commande, pas des arguments. On conserve uniquement la
+    # profondeur maximale réellement possible sous ce groupe pour éviter d'inclure le texte
+    # libre placé après une commande.
+    max_depth = 1
+    for child in root.walk_commands():
+        max_depth = max(max_depth, len(str(child.qualified_name).split()))
+    return " ".join(parts[:max_depth])
 
 
 def _allow_unknown_reply(user_id: int) -> bool:
@@ -71,6 +111,18 @@ def _allow_unknown_reply(user_id: int) -> bool:
         for uid in stale:
             _UNKNOWN_REPLY_LAST.pop(uid, None)
     return True
+
+
+def _record_slash_start(interaction: discord.Interaction) -> None:
+    """Mémorise le début d'une interaction slash sans modifier l'objet discord.py."""
+    _SLASH_STARTS[int(interaction.id)] = time.perf_counter()
+    if len(_SLASH_STARTS) > 5000:
+        # Une interaction normale vit quelques secondes. Les entrées plus vieilles ne
+        # peuvent être que des interactions interrompues avant completion.
+        now = time.perf_counter()
+        stale = [key for key, stamp in _SLASH_STARTS.items() if now - stamp > 300.0]
+        for key in stale:
+            _SLASH_STARTS.pop(key, None)
 
 
 def install(bot: commands.Bot) -> None:
@@ -96,7 +148,11 @@ def install(bot: commands.Bot) -> None:
     async def mark_prefix_command_start(ctx: commands.Context) -> None:
         ctx._sentrix_command_started_at = time.perf_counter()
 
-    def log_command_duration(ctx: commands.Context, *, failed: bool) -> None:
+    async def mark_slash_command_start(interaction: discord.Interaction) -> None:
+        if interaction.type is discord.InteractionType.application_command:
+            _record_slash_start(interaction)
+
+    def log_prefix_duration(ctx: commands.Context, *, failed: bool) -> None:
         started = getattr(ctx, "_sentrix_command_started_at", None)
         if started is None:
             return
@@ -112,8 +168,26 @@ def install(bot: commands.Bot) -> None:
             "erreur" if failed else "succès",
         )
 
+    def log_slash_duration(
+        interaction: discord.Interaction,
+        command: discord.app_commands.Command | discord.app_commands.ContextMenu,
+    ) -> None:
+        started = _SLASH_STARTS.pop(int(interaction.id), None)
+        if started is None:
+            return
+        elapsed = max(0.0, time.perf_counter() - started)
+        if elapsed < _SLOW_COMMAND_SECONDS:
+            return
+        logger.warning(
+            "Commande lente : /%s a pris %.2fs (user=%s, guild=%s, état=succès).",
+            getattr(command, "qualified_name", getattr(command, "name", "inconnue")),
+            elapsed,
+            getattr(interaction.user, "id", None),
+            interaction.guild_id,
+        )
+
     async def ensure_prefix_command_response(ctx: commands.Context) -> None:
-        log_command_duration(ctx, failed=False)
+        log_prefix_duration(ctx, failed=False)
 
         # Les slash/hybrid slash utilisent l'événement app_command_completion ci-dessous.
         if getattr(ctx, "interaction", None) is not None:
@@ -151,7 +225,7 @@ def install(bot: commands.Bot) -> None:
             if author is None or not _allow_unknown_reply(author.id):
                 return
 
-            typed = str(getattr(ctx, "invoked_with", "") or "").strip()
+            typed = _typed_command_path(bot, ctx)
             if not typed:
                 return
             prefix = str(getattr(ctx, "clean_prefix", None) or "+")
@@ -176,12 +250,13 @@ def install(bot: commands.Bot) -> None:
                 pass
             return
 
-        log_command_duration(ctx, failed=True)
+        log_prefix_duration(ctx, failed=True)
 
     async def ensure_slash_command_response(
         interaction: discord.Interaction,
         command: discord.app_commands.Command | discord.app_commands.ContextMenu,
     ) -> None:
+        log_slash_duration(interaction, command)
         try:
             if interaction.response.is_done():
                 return
@@ -208,10 +283,11 @@ def install(bot: commands.Bot) -> None:
             )
 
     bot.add_listener(mark_prefix_command_start, "on_command")
+    bot.add_listener(mark_slash_command_start, "on_interaction")
     bot.add_listener(ensure_prefix_command_response, "on_command_completion")
     bot.add_listener(improve_prefix_command_error, "on_command_error")
     bot.add_listener(ensure_slash_command_response, "on_app_command_completion")
     _INSTALLED = True
     logger.info(
-        "Expérience commandes activée : réponse garantie, suggestions de fautes et diagnostic de latence."
+        "Expérience TOUTES commandes activée : réponses garanties, suggestions groupes/sous-commandes et diagnostic préfixe/slash."
     )
