@@ -14,6 +14,7 @@ import os
 import pathlib
 import sys
 import tempfile
+from collections import Counter
 
 
 # Lorsqu'un script est lancé avec `python tools/xxx.py`, Python met `tools/` en tête du
@@ -50,7 +51,7 @@ async def run() -> int:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-ci.db")
 
         import main
-        from cogs import command_response_guard
+        from cogs import command_response_guard, help_category_rework, help_complete
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -135,9 +136,34 @@ async def run() -> int:
             duplicates = sorted({name for name in app_names if app_names.count(name) > 1})
             errors.append("commandes slash dupliquées: " + ", ".join(duplicates))
 
+        # L'aide doit utiliser le rework canonique, et aucune commande active ne doit
+        # retomber dans « Autres commandes ». Ainsi une future commande oubliée casse la
+        # CI immédiatement au lieu d'apparaître dans une mauvaise rubrique sur Discord.
+        if not help_category_rework._INSTALLED:
+            errors.append("le rework des catégories +help n'est pas installé")
+
+        category_counts: Counter[str] = Counter()
+        uncategorized: list[str] = []
+        for command in active:
+            category = help_complete._category_for(command)
+            category_counts[category.key] += 1
+            if category.key == "other":
+                cog = getattr(command, "cog", None)
+                cog_name = getattr(cog, "qualified_name", "Sans cog") if cog else "Sans cog"
+                uncategorized.append(f"{command.qualified_name} [{cog_name}]")
+        if uncategorized:
+            errors.append(
+                "commandes sans catégorie logique: " + ", ".join(sorted(uncategorized))
+            )
+
         print(f"SentriX command runtime audit: {len(active)} commande(s) texte/hybride")
         print(f"SentriX command runtime audit: {len(app_commands)} commande(s) slash enregistrée(s)")
         print(f"Extensions: {len(loaded)}/{len(main.EXTENSIONS)} chargées")
+        print("Catégories +help:")
+        for category in help_complete.CATEGORIES:
+            count = category_counts.get(category.key, 0)
+            if count:
+                print(f"  {category.key}: {count}")
         print("Commandes actives:")
         for name in sorted(command.qualified_name for command in active):
             print(f"  + {name}")
@@ -164,7 +190,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} problème(s) détecté(s)")
         return 1
-    print("OK: registre complet chargé, callbacks valides et garde de réponse active")
+    print("OK: registre complet chargé, catégories valides, callbacks valides et garde de réponse active")
     return 0
 
 
