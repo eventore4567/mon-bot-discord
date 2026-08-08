@@ -3,7 +3,8 @@
 
 Vérifie les erreurs qui peuvent casser un déploiement avant même de lancer Discord :
 syntaxe Python, extensions manquantes, imports relatifs cassés dans cogs/__init__.py,
-limites de texte des slash commands et appels bloquants time.sleep() dans une coroutine.
+limites de texte des slash commands, emojis de composants connus comme invalides et appels
+bloquants time.sleep() dans une coroutine.
 """
 from __future__ import annotations
 
@@ -18,6 +19,11 @@ ROOT_FILES = ("main.py", "config.py")
 errors: list[str] = []
 warnings: list[str] = []
 checked = 0
+
+# Discord refuse certains glyphes décoratifs lorsqu'ils sont envoyés dans le champ
+# `emoji` d'un composant, même s'ils sont parfaitement valides dans un label. `○` a déjà
+# provoqué un HTTP 400 / 50035 sur +embed ; ce garde-fou empêche sa réintroduction.
+INVALID_COMPONENT_EMOJI_LITERALS = frozenset({"○"})
 
 
 def source_files() -> list[pathlib.Path]:
@@ -90,6 +96,29 @@ def check_decorator_limits(path: pathlib.Path, tree: ast.AST) -> None:
                         )
 
 
+def check_component_emoji_literals(path: pathlib.Path, tree: ast.AST) -> None:
+    """Bloque les glyphes déjà connus pour faire rejeter un composant par Discord."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = call_name(node)
+        if not (
+            name.endswith("discord.ui.button")
+            or name.endswith("ui.button")
+            or name.endswith("discord.ui.Button")
+            or name.endswith("ui.Button")
+        ):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "emoji":
+                continue
+            value = literal_str(kw.value)
+            if value in INVALID_COMPONENT_EMOJI_LITERALS:
+                errors.append(
+                    f"{path.relative_to(ROOT)}:{node.lineno}: emoji de composant Discord invalide connu: {value!r}"
+                )
+
+
 def check_async_blocking_sleep(path: pathlib.Path, tree: ast.AST) -> None:
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.AsyncFunctionDef):
@@ -157,6 +186,7 @@ def main() -> int:
             continue
         checked += 1
         check_decorator_limits(path, tree)
+        check_component_emoji_literals(path, tree)
         check_async_blocking_sleep(path, tree)
 
     try:
