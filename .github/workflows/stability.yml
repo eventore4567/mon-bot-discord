@@ -38,6 +38,9 @@ jobs:
         run: python tools/command_runtime_audit.py
 
       - name: Embed component UI audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-embed-ui-audit.db"
         run: |
           python - <<'PY'
           import cogs
