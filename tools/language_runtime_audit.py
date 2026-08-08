@@ -106,7 +106,8 @@ async def run() -> int:
         if custom_ids != {"sentrix:language:fr", "sentrix:language:en"}:
             errors.append(f"boutons langue inattendus: {custom_ids}")
 
-        # Construction du setup : le selecteur doit etre visible sur l'accueil.
+        # Construction du setup : le changement de langue doit etre impossible a rater.
+        # On exige a la fois le menu FR/EN ET un bouton visible dans la rangée d'actions.
         try:
             setup_view = configuration.SetupView(
                 bot,
@@ -118,10 +119,26 @@ async def run() -> int:
             language_selects = [
                 item for item in setup_view.children
                 if item.__class__.__name__.endswith("Select")
-                and any(getattr(option, "value", None) in {"fr", "en"} for option in getattr(item, "options", []))
+                and {getattr(option, "value", None) for option in getattr(item, "options", [])} == {"fr", "en"}
             ]
             if not language_selects:
                 errors.append("aucun selecteur FR/EN sur l'accueil +setup")
+            else:
+                if getattr(language_selects[0], "row", None) != 3:
+                    errors.append("le selecteur FR/EN n'est pas place sur la ligne dediee du +setup")
+
+            language_buttons = [
+                item for item in setup_view.children
+                if getattr(item, "custom_id", None) == "sentrix:setup:language"
+            ]
+            if not language_buttons:
+                errors.append("aucun bouton Langue visible sur l'accueil +setup")
+            else:
+                label = str(getattr(language_buttons[0], "label", "") or "")
+                if "Langue" not in label and "Language" not in label:
+                    errors.append(f"label du bouton langue incomprehensible: {label!r}")
+                if getattr(language_buttons[0], "row", None) != 1:
+                    errors.append("le bouton Langue n'est pas dans la rangee d'actions principale")
         except Exception as exc:
             errors.append(f"construction +setup langue impossible: {type(exc).__name__}: {exc}")
 
@@ -144,7 +161,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
-    print("OK: FR/EN persistant, aucune copie de commande, help/setup localises")
+    print("OK: FR/EN persistant, aucune copie de commande, bouton + menu langue visibles dans +setup")
     return 0
 
 
