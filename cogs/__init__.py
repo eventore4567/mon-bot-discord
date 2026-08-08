@@ -33,6 +33,7 @@ from .shop_default_prices import install as install_shop_default_prices
 from .setup_close_fix import install as install_setup_close_fix
 from .setup_create_logs_sync import install as install_setup_create_logs_sync
 from .setup_oxyde_style import install as install_setup_oxyde_style
+from .stability_runtime import install as install_stability_runtime
 from .ticket_claim_security import install as install_ticket_claim_security
 from .ticket_ping_role import install_setup_ui as install_ticket_ping_setup
 from .ticket_ping_role import install_ticket_runtime as install_ticket_ping_runtime
@@ -127,6 +128,10 @@ async def _load_extension_with_sentrix_patches(
     # Discord quand SentriX a déjà produit une fiche de sanction détaillée.
     # Appelé après chaque extension : le patch attend simplement que le cog Logs existe.
     install_moderation_logs_fix(bot)
+
+    # Correctifs transversaux issus de la passe de stabilité : reprise des notifications
+    # sociales, sérialisation du cache d'invitations et limite de récompenses de jeux.
+    install_stability_runtime(bot, name)
 
     # Ajoute les noms de commandes familiers après CHAQUE cog chargé. Cela permet aux
     # aliases de devenir disponibles progressivement sans dépendre de l'ordre des cogs.
