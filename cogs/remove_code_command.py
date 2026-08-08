@@ -6,12 +6,19 @@ import logging
 
 from discord.ext import commands
 
+from .command_catalog_cleanup import install as install_command_catalog_cleanup
+
 logger = logging.getLogger("bot.remove-code-command")
 _INSTALLED = False
 
 
 def install(bot: commands.Bot) -> None:
-    """Masque puis désenregistre +code après le chargement du cog IA."""
+    """Applique le catalogue canonique puis retire l'ancienne commande +code."""
+    # Cette fonction est appelée pendant le chargement du cog IA, donc avant le pruning
+    # final de main.setup_hook(). Les commandes directes utiles sont ainsi restaurées avant
+    # que le registre et +help soient construits définitivement.
+    install_command_catalog_cleanup(bot)
+
     global _INSTALLED
     if _INSTALLED:
         return
