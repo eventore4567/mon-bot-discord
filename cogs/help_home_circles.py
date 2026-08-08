@@ -7,6 +7,8 @@ import logging
 import discord
 from discord.ext import commands
 
+from .help_category_rework import install as install_help_category_rework
+
 logger = logging.getLogger("bot.help-home-circles")
 _INSTALLED = False
 _CIRCLE = "●"
@@ -85,11 +87,14 @@ def _clean_home_components(view: discord.ui.View) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    """Installe le style après l'aide complète et le bouton dashboard."""
-    del bot  # Le patch agit sur les classes déjà chargées.
+    """Installe les catégories canoniques puis le style sobre de +help."""
     global _INSTALLED
     if _INSTALLED:
         return
+
+    # Le classement doit être en place avant que le dashboard et le style n'enveloppent
+    # l'accueil. Cela garantit que menu, recherche et pages utilisent les mêmes catégories.
+    install_help_category_rework(bot)
 
     from . import help_complete, utility
 
@@ -118,4 +123,4 @@ def install(bot: commands.Bot) -> None:
     utility.HelpView.__init__ = help_view_init
 
     _INSTALLED = True
-    logger.info("Accueil de +help simplifié : emojis remplacés par des cercles noirs.")
+    logger.info("Accueil de +help simplifié : catégories canoniques et cercles noirs actifs.")
