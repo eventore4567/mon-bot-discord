@@ -12,6 +12,7 @@ from .generated_logs_sync import install as install_generated_logs_sync
 from .giveaway_antialt import install as install_giveaway_antialt
 from .help_complete import install as install_complete_help
 from .help_home_circles import install as install_help_home_circles
+from .moderation_logs_fix import install as install_moderation_logs_fix
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
 from .no_auto_tracker import install as install_no_auto_tracker
 from .owner_sanction_immunity import install as install_owner_sanction_immunity
@@ -117,6 +118,11 @@ async def _load_extension_with_sentrix_patches(
         # existants, sinon le style global peut provoquer un doublon au redémarrage.
         install_rolepanel_display_fix(bot)
         install_existing_server_bootstrap(bot)
+
+    # Répare le routage de logs-modération et supprime les doublons générés par les
+    # événements Discord quand SentriX a déjà produit une fiche de sanction détaillée.
+    # Appelé après chaque extension : le patch attend simplement que le cog Logs existe.
+    install_moderation_logs_fix(bot)
 
     # Ajoute les noms de commandes familiers après CHAQUE cog chargé. Cela permet aux
     # aliases de devenir disponibles progressivement sans dépendre de l'ordre des cogs.
