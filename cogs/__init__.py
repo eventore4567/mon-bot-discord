@@ -16,6 +16,7 @@ from .generated_logs_sync import install as install_generated_logs_sync
 from .giveaway_antialt import install as install_giveaway_antialt
 from .help_complete import install as install_complete_help
 from .help_home_circles import install as install_help_home_circles
+from .language_runtime import install as install_language_runtime
 from .logs_no_ping import install as install_logs_no_ping
 from .moderation_logs_fix import install as install_moderation_logs_fix
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
@@ -189,10 +190,10 @@ async def _load_extension_with_sentrix_patches(
     # sociales, sérialisation du cache d'invitations et limite de récompenses de jeux.
     install_stability_runtime(bot, name)
 
-    # Ajoute les noms de commandes familiers après CHAQUE cog chargé. Cela permet aux
-    # aliases de devenir disponibles progressivement sans dépendre de l'ordre des cogs.
-    # Les noms internes restent inchangés : permissions et logique existantes intactes.
+    # Les aliases techniques historiques sont poses d'abord ; le moteur de langue retire
+    # ensuite les anciens alias FR globaux et relie FR/EN aux memes objets commandes.
     install_common_command_names(bot)
+    await install_language_runtime(bot)
 
     # Dernier filet de sécurité : après toutes les couches de rendu/réponse, une commande
     # valide ne peut plus se terminer silencieusement. Les réponses normales restent intactes.
