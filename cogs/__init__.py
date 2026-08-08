@@ -62,20 +62,20 @@ def _install_embed_component_fix(bot: commands.Bot) -> None:
     try:
         from . import embed_builder
 
-        patched = False
-        for callback in getattr(embed_builder.EmbedBuilderView, "__view_children_items__", []):
-            if getattr(callback, "__name__", "") != "cancel":
-                continue
-            kwargs = getattr(callback, "__discord_ui_model_kwargs__", None)
-            if isinstance(kwargs, dict):
-                kwargs["emoji"] = "❌"
-                patched = True
+        if not getattr(embed_builder.EmbedBuilderView, "_sentrix_cancel_emoji_fix", False):
+            original_init = embed_builder.EmbedBuilderView.__init__
+
+            def patched_init(self, *args, **kwargs):
+                original_init(self, *args, **kwargs)
+                for item in self.children:
+                    if isinstance(item, discord.ui.Button) and item.label == "Annuler":
+                        item.emoji = "❌"
+
+            embed_builder.EmbedBuilderView.__init__ = patched_init
+            embed_builder.EmbedBuilderView._sentrix_cancel_emoji_fix = True
 
         bot._sentrix_embed_component_fix = True
-        logger.info(
-            "Correctif +embed installé : emoji du bouton Annuler %s.",
-            "remplacé par ❌" if patched else "déjà compatible",
-        )
+        logger.info("Correctif +embed installé : emoji du bouton Annuler remplacé par ❌.")
     except Exception:
         logger.exception("Impossible d'installer le correctif de composant +embed.")
 
