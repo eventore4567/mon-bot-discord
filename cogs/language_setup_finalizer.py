@@ -145,6 +145,15 @@ def install(bot: commands.Bot) -> None:
     except Exception:
         return
 
+    # cogs.__init__ appelle les installateurs après chaque extension. Importer le module
+    # configuration trop tôt est possible, mais son extension officielle n'a alors pas
+    # encore installé le style +setup. Si on patchait ici, setup_oxyde_style écraserait
+    # ensuite notre menu — c'était précisément la cause du bug visible en production.
+    # On attend donc que le Cog Configuration soit réellement chargé, puis on s'installe
+    # en DERNIER par-dessus toutes les couches setup.
+    if bot.get_cog("Configuration") is None:
+        return
+
     view_cls = getattr(configuration, "SetupView", None)
     if view_cls is None or getattr(view_cls, "_sentrix_native_language", False):
         return
@@ -294,5 +303,5 @@ def install(bot: commands.Bot) -> None:
     view_cls._sentrix_native_language = True
 
     logger.info(
-        "+setup v3 actif : Langue/Language est une vraie catégorie, première option du menu Discord."
+        "+setup v3 actif APRÈS Configuration : Langue/Language est la première catégorie réelle."
     )
