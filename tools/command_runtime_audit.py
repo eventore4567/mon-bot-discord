@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Audit runtime du registre de commandes SentriX sans se connecter à Discord.
+
+Le test charge la vraie base temporaire et les vraies extensions comme en production, puis
+inspecte toutes les commandes réellement enregistrées. Il ne lance volontairement aucune
+sanction/ticket/écriture sur un vrai serveur Discord : ces actions nécessitent un contexte
+Discord réel et ne doivent jamais être simulées sur la production depuis la CI.
+"""
+from __future__ import annotations
+
+import asyncio
+import inspect
+import os
+import pathlib
+import tempfile
+
+
+CRITICAL_COMMANDS = {
+    "help",
+    "ping",
+    "setup",
+    "ticket",
+    "ban",
+    "mute",
+    "warn",
+    "bl",
+    "giveaway-create",
+    "guess-number",
+    "ai",
+    "play",
+    "rolepanel",
+}
+
+
+async def run() -> int:
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    with tempfile.TemporaryDirectory(prefix="sentrix-command-audit-") as temp_dir:
+        os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
+        os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-ci.db")
+
+        import main
+        from cogs import command_response_guard
+
+        bot = main.BotAllInOne()
+        await bot.db.connect()
+
+        loaded: list[str] = []
+        for extension in main.EXTENSIONS:
+            try:
+                await bot.load_extension(extension)
+                loaded.append(extension)
+            except Exception as exc:  # CI doit afficher le module précis qui casse.
+                errors.append(f"extension {extension}: {type(exc).__name__}: {exc}")
+
+        if len(loaded) != len(main.EXTENSIONS):
+            errors.append(
+                f"extensions chargées: {len(loaded)}/{len(main.EXTENSIONS)}"
+            )
+
+        # Reproduit le nettoyage effectué par setup_hook avant la synchro des slash.
+        bot._prune_redundant_commands()
+
+        active = list(bot.walk_commands())
+        qualified = [command.qualified_name.casefold() for command in active]
+        if not active:
+            errors.append("aucune commande enregistrée")
+        if len(qualified) != len(set(qualified)):
+            duplicates = sorted({name for name in qualified if qualified.count(name) > 1})
+            errors.append("commandes dupliquées: " + ", ".join(duplicates))
+
+        for command in active:
+            callback = getattr(command, "callback", None)
+            if callback is None or not inspect.iscoroutinefunction(callback):
+                errors.append(
+                    f"callback non asynchrone/invalide: {command.qualified_name}"
+                )
+            try:
+                _ = command.signature
+            except Exception as exc:
+                errors.append(
+                    f"signature impossible pour {command.qualified_name}: {type(exc).__name__}: {exc}"
+                )
+
+        missing_critical = sorted(
+            name for name in CRITICAL_COMMANDS if bot.get_command(name) is None
+        )
+        if missing_critical:
+            errors.append(
+                "commandes critiques absentes: " + ", ".join(missing_critical)
+            )
+
+        pruned_still_visible = sorted(
+            name for name in main.PRUNED_COMMANDS if bot.get_command(name) is not None
+        )
+        if pruned_still_visible:
+            errors.append(
+                "commandes censées être retirées encore visibles: "
+                + ", ".join(pruned_still_visible)
+            )
+
+        registered_roots = {command.name.casefold() for command in bot.commands}
+        unknown_permissions = sorted(registered_roots - main.KNOWN_PERMISSION_COMMANDS)
+        if unknown_permissions:
+            # La production les bloque déjà en fail-closed. On les signale sans casser la
+            # CI pour permettre une décision explicite sur leur niveau d'accès ensuite.
+            warnings.append(
+                "commandes protégées par fail-closed à classifier: "
+                + ", ".join(unknown_permissions)
+            )
+
+        if not command_response_guard._INSTALLED:
+            errors.append("le filet de sécurité de réponse des commandes n'est pas installé")
+
+        prefix_listeners = bot.extra_events.get("on_command_completion", [])
+        slash_listeners = bot.extra_events.get("on_app_command_completion", [])
+        if not prefix_listeners:
+            errors.append("listener de réponse de secours des commandes + absent")
+        if not slash_listeners:
+            errors.append("listener de réponse de secours des commandes slash absent")
+
+        app_commands = list(bot.tree.walk_commands())
+        app_names = [command.qualified_name.casefold() for command in app_commands]
+        if len(app_names) != len(set(app_names)):
+            duplicates = sorted({name for name in app_names if app_names.count(name) > 1})
+            errors.append("commandes slash dupliquées: " + ", ".join(duplicates))
+
+        print(f"SentriX command runtime audit: {len(active)} commande(s) texte/hybride")
+        print(f"SentriX command runtime audit: {len(app_commands)} commande(s) slash enregistrée(s)")
+        print(f"Extensions: {len(loaded)}/{len(main.EXTENSIONS)} chargées")
+        print("Commandes actives:")
+        for name in sorted(command.qualified_name for command in active):
+            print(f"  + {name}")
+        for warning in warnings:
+            print(f"[WARN] {warning}")
+        for error in errors:
+            print(f"[ERROR] {error}")
+
+        # Plusieurs patches lancent des tâches de bootstrap qui attendent on_ready().
+        # Elles sont annulées proprement puisque la CI ne se connecte jamais à Discord.
+        current = asyncio.current_task()
+        pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+        close_db = getattr(bot.db, "close", None)
+        if close_db:
+            result = close_db()
+            if inspect.isawaitable(result):
+                await result
+
+    if errors:
+        print(f"ECHEC: {len(errors)} problème(s) détecté(s)")
+        return 1
+    print("OK: registre complet chargé, callbacks valides et garde de réponse active")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(run()))
