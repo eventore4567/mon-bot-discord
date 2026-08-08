@@ -7,6 +7,7 @@ import logging
 import discord
 from discord.ext import commands
 
+from .command_clarity import install as install_command_clarity
 from .help_category_rework import install as install_help_category_rework
 
 logger = logging.getLogger("bot.help-home-circles")
@@ -122,5 +123,11 @@ def install(bot: commands.Bot) -> None:
 
     utility.HelpView.__init__ = help_view_init
 
+    # Dernière couche : les commandes restent exactement les mêmes, mais leur fiche
+    # devient compréhensible pour quelqu'un qui ne connaît ni le jargon Discord ni les
+    # noms techniques. Comme elle est installée après le classement et le style, elle
+    # s'applique à toutes les pages, à la recherche et à +help <commande>.
+    install_command_clarity(bot)
+
     _INSTALLED = True
-    logger.info("Accueil de +help simplifié : catégories canoniques et cercles noirs actifs.")
+    logger.info("Accueil de +help simplifié : catégories canoniques, cercles noirs et aide claire actifs.")
