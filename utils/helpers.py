@@ -90,13 +90,15 @@ class ConfirmView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger, emoji="●")
+    # De vrais emojis Unicode sont obligatoires dans le champ `emoji` d'un composant.
+    # Les anciens glyphes ● / ○ pouvaient être refusés par Discord avec HTTP 400 / 50035.
+    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger, emoji="✅")
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = True
         self.stop()
         await interaction.response.defer()
 
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="○")
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="❌")
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = False
         self.stop()
