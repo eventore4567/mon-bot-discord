@@ -19,6 +19,7 @@ from . import owner_server_manager as _owner_server_manager
 from . import admin_only_dashboard as _admin_only_dashboard
 from . import dashboard_control_center as _dashboard_control_center
 from . import ticket_ping_dashboard as _ticket_ping_dashboard
+from . import dashboard_oxyde_theme as _dashboard_oxyde_theme
 from . import dashboard_deeplinks as _dashboard_deeplinks
 
 
@@ -94,6 +95,10 @@ _dashboard_control_center.install(_dashboard)
 
 # Réglage Tickets : rôle indépendant à notifier lors de chaque nouvelle ouverture.
 _ticket_ping_dashboard.install(_dashboard)
+
+# Habillage final noir/violet inspiré du panneau OXYDE demandé. Il ne modifie aucune API :
+# uniquement CSS + un hero SentriX qui se restaure lors des changements de serveur/onglet.
+_dashboard_oxyde_theme.install(_dashboard)
 
 # Deep links du +setup : doit s'exécuter après les autres injections HTML pour cibler
 # l'interface finale réellement envoyée au navigateur.

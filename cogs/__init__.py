@@ -6,6 +6,7 @@ from .afk_nickname import install as install_afk_nickname
 from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
 from .bot_tracker import install as install_bot_tracker
+from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
 from .dashboard_access import install_dashboard_access
 from .generated_logs_sync import install as install_generated_logs_sync
@@ -151,6 +152,10 @@ async def _load_extension_with_sentrix_patches(
     # aliases de devenir disponibles progressivement sans dépendre de l'ordre des cogs.
     # Les noms internes restent inchangés : permissions et logique existantes intactes.
     install_common_command_names(bot)
+
+    # Dernier filet de sécurité : après toutes les couches de rendu/réponse, une commande
+    # valide ne peut plus se terminer silencieusement. Les réponses normales restent intactes.
+    install_command_response_guard(bot)
     return result
 
 
