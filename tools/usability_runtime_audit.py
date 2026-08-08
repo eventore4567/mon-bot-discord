@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Audit CI des améliorations d'utilisation quotidiennes SentriX."""
+"""Audit CI des améliorations d'utilisation quotidiennes SentriX.
+
+Les anciens alias français globaux ont été remplacés par le vrai mode de langue par
+serveur. Cet audit vérifie donc la fiabilité commune (résolution d'ID, aide au ping) et
+laisse les traductions FR/EN au language_runtime_audit dédié.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -14,24 +19,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-EXPECTED_ALIASES = {
-    "aide": "help",
-    "bannir": "ban",
-    "debannir": "unban",
-    "avertir": "warn",
-    "muet": "mute",
-    "configurer": "setup",
-    "securite": "security-check",
-    "solde": "balance",
-    "boutique": "shop",
-    "niveau": "level",
-    "profil": "profile",
-    "sondage": "poll",
-    "meteo": "weather",
-    "traduire": "translate",
-}
-
-
 async def run() -> int:
     errors: list[str] = []
 
@@ -41,7 +28,7 @@ async def run() -> int:
 
         import main
         from discord.ext import commands
-        from cogs import common_command_names
+        from cogs import common_command_names, language_runtime
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -59,14 +46,42 @@ async def run() -> int:
 
         bot._prune_redundant_commands()
 
-        for alias, canonical in EXPECTED_ALIASES.items():
-            resolved = bot.get_command(alias)
+        # Les alias FR ad hoc de l'ancienne passe ne doivent plus exister comme système
+        # indépendant. Les noms traduits sont désormais gérés par language_runtime.
+        if common_command_names.FRENCH_COMMAND_ALIASES:
+            errors.append("les anciens alias français globaux sont encore actifs")
+
+        critical = {
+            "help": ("aide", "help"),
+            "ban": ("bannir", "ban"),
+            "unban": ("debannir", "unban"),
+            "warn": ("avertir", "warn"),
+            "mute": ("rendre-muet", "mute"),
+            "setup": ("configurer", "setup"),
+            "security-check": ("verifier-securite", "security"),
+            "balance": ("solde", "balance"),
+            "shop": ("boutique", "shop"),
+            "level": ("niveau", "level"),
+            "profile": ("profil", "profile"),
+            "poll": ("sondage", "poll"),
+            "weather": ("meteo", "weather"),
+            "translate": ("traduire", "translate"),
+        }
+        for canonical, (french, english) in critical.items():
             target = bot.get_command(canonical)
             if target is None:
                 errors.append(f"commande canonique absente: {canonical}")
                 continue
-            if resolved is not target:
-                errors.append(f"alias +{alias} ne pointe pas vers +{canonical}")
+            if language_runtime.localized_command_name(target, language_runtime.LANG_FR) != french:
+                errors.append(
+                    f"nom FR inattendu pour {canonical}: "
+                    f"{language_runtime.localized_command_name(target, language_runtime.LANG_FR)!r}"
+                )
+            if language_runtime.localized_command_name(target, language_runtime.LANG_EN) != english:
+                errors.append(
+                    f"nom EN inattendu pour {canonical}: "
+                    f"{language_runtime.localized_command_name(target, language_runtime.LANG_EN)!r}"
+                )
 
         if not getattr(commands.UserConverter.convert, "_sentrix_resilient_user_converter", False):
             errors.append("UserConverter n'a pas le fallback fetch_user pour les IDs hors cache")
@@ -74,14 +89,13 @@ async def run() -> int:
         if not common_command_names._USER_CONVERTER_PATCHED:
             errors.append("flag de résolution utilisateur robuste inactif")
 
-        if not getattr(bot, "_sentrix_mention_help_listener", False):
-            errors.append("aide lors d'une mention directe de SentriX non installée")
+        # Le listener historique a volontairement été remplacé par le listener localisé.
+        if not getattr(bot, "_sentrix_language_listeners", False):
+            errors.append("listener d'aide localisé lors d'une mention directe de SentriX non installé")
 
-        # Les alias français sont secondaires : +help doit continuer à afficher le nom
-        # préféré existant plutôt que remplacer toute l'interface par les alias.
         help_command = bot.get_command("help")
-        if help_command is not None and common_command_names.preferred_name(help_command) != "help":
-            errors.append("l'alias +aide a remplacé le nom préféré de +help")
+        if help_command is None or not getattr(help_command, "_sentrix_language_help", False):
+            errors.append("+help n'utilise pas le rendu de langue par serveur")
 
         current = asyncio.current_task()
         pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
@@ -97,13 +111,13 @@ async def run() -> int:
                 await result
 
     print(f"Usability audit: {loaded}/{len(main.EXTENSIONS)} extensions chargées")
-    print(f"Usability audit: {len(EXPECTED_ALIASES)} alias français critiques vérifiés")
+    print(f"Usability audit: {len(critical)} commandes critiques FR/EN vérifiées")
     for error in errors:
         print(f"[ERROR] {error}")
     if errors:
         print(f"ECHEC: {len(errors)} problème(s) d'utilisation")
         return 1
-    print("OK: alias français, résolution des IDs et aide au ping direct sont actifs")
+    print("OK: langue par serveur, résolution des IDs et aide au ping direct sont actives")
     return 0
 
 
