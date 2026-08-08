@@ -1,0 +1,48 @@
+name: SentriX Stability
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Static repository audit
+        run: python tools/repo_audit.py
+
+      - name: Compile active Python sources
+        run: python -m compileall -q main.py config.py cogs database utils web tools
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Import smoke test
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-ci.db"
+        run: |
+          python - <<'PY'
+          import importlib
+          import main
+
+          imported = []
+          for module in main.EXTENSIONS:
+              importlib.import_module(module)
+              imported.append(module)
+          print(f"OK: {len(imported)} extensions SentriX importées")
+          PY
