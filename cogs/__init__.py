@@ -17,6 +17,7 @@ from .giveaway_antialt import install as install_giveaway_antialt
 from .help_complete import install as install_complete_help
 from .help_home_circles import install as install_help_home_circles
 from .language_runtime import install as install_language_runtime
+from .language_setup_finalizer import install as install_language_setup_finalizer
 from .logs_no_ping import install as install_logs_no_ping
 from .moderation_logs_fix import install as install_moderation_logs_fix
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
@@ -190,10 +191,13 @@ async def _load_extension_with_sentrix_patches(
     # sociales, sérialisation du cache d'invitations et limite de récompenses de jeux.
     install_stability_runtime(bot, name)
 
-    # Les aliases techniques historiques sont poses d'abord ; le moteur de langue retire
-    # ensuite les anciens alias FR globaux et relie FR/EN aux memes objets commandes.
+    # Les aliases techniques historiques sont posés d'abord ; le moteur de langue retire
+    # ensuite les anciens alias FR globaux et relie FR/EN aux mêmes objets commandes.
     install_common_command_names(bot)
     await install_language_runtime(bot)
+    # +setup possède plusieurs couches visuelles qui peuvent remplacer render_page/build_embed.
+    # Ce finaliseur enveloppe toujours la version réellement active en dernier.
+    install_language_setup_finalizer(bot)
 
     # Dernier filet de sécurité : après toutes les couches de rendu/réponse, une commande
     # valide ne peut plus se terminer silencieusement. Les réponses normales restent intactes.
