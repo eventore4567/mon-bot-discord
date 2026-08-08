@@ -1,9 +1,10 @@
-"""Rendu autoritaire de la langue dans le vrai menu Catégories de +setup.
+"""Rendu final de +setup et nettoyage des anciennes commandes slash locales.
 
-Cette couche ne modifie plus le payload après coup. Elle construit directement le menu
-final affiché par Discord et place `🌐 Langue du serveur` / `🌐 Server language` en
-première option. Cela évite les conflits entre les anciennes couches de style, de
-traduction et de nettoyage mobile.
+Cette couche est volontairement la dernière autorité sur l'accueil de +setup :
+- Langue / Server language est une vraie catégorie, toujours première ;
+- le panneau est réappliqué juste après sa création, pas seulement via un patch de classe ;
+- les anciennes copies de commandes slash créées par +syncguild sont supprimées au ready ;
+- +syncguild ne recrée plus de copies locales qui apparaissent en double dans Discord.
 """
 from __future__ import annotations
 
@@ -13,13 +14,14 @@ import os
 import discord
 from discord.ext import commands
 
+from utils import embeds
 from . import language_runtime
 
 logger = logging.getLogger("bot.language-setup-finalizer")
 
 LANGUAGE_CATEGORY_VALUE = "__sentrix_language__"
 LANGUAGE_PAGE = -20260809
-_SETUP_BUILD_MARKER = "Interface setup v3"
+_SETUP_BUILD_MARKER = "Interface setup v4"
 
 
 def _can_change_language(interaction: discord.Interaction) -> bool:
@@ -36,7 +38,6 @@ def _is_english(view) -> bool:
 
 
 def _step_meta(step: dict) -> tuple[str, str]:
-    """Retourne toujours les intitulés premium, même si l'ancienne couche visuelle a raté son installation."""
     try:
         from . import setup_oxyde_style
         meta = setup_oxyde_style.STEP_META.get(step.get("key"), {})
@@ -55,13 +56,13 @@ def _language_embed(view) -> discord.Embed:
         embed = discord.Embed(
             title="🌐 Server language",
             description=(
-                "Choose the language SentriX should use for command names, help and the "
-                "main configuration interfaces on this server."
+                "Choose the language used by SentriX for command names, help and the main "
+                "configuration interfaces on this server."
             ),
             color=0x8B5CF6,
         )
         embed.add_field(name="Current language", value=f"**{current}**", inline=False)
-        embed.add_field(name="Available", value="🇫🇷 **Français**\n🇬🇧 **English**", inline=False)
+        embed.add_field(name="Available languages", value="🇫🇷 **Français**\n🇬🇧 **English**", inline=False)
     else:
         embed = discord.Embed(
             title="🌐 Langue du serveur",
@@ -72,8 +73,7 @@ def _language_embed(view) -> discord.Embed:
             color=0x8B5CF6,
         )
         embed.add_field(name="Langue actuelle", value=f"**{current}**", inline=False)
-        embed.add_field(name="Disponible", value="🇫🇷 **Français**\n🇬🇧 **English**", inline=False)
-
+        embed.add_field(name="Langues disponibles", value="🇫🇷 **Français**\n🇬🇧 **English**", inline=False)
     embed.set_footer(text=f"SentriX • {_SETUP_BUILD_MARKER}")
     return embed
 
@@ -139,46 +139,117 @@ def _render_language_page(view) -> None:
     view.add_item(home)
 
 
+def _install_local_slash_cleanup(bot: commands.Bot) -> None:
+    """Supprime au démarrage les copies *guild-scoped* créées par l'ancien +syncguild.
+
+    Les vraies commandes SentriX sont globales. Garder en plus une copie locale fait
+    apparaître deux /setup (et potentiellement deux exemplaires de beaucoup d'autres
+    commandes) dans le sélecteur Discord.
+    """
+    if getattr(bot, "_sentrix_local_slash_cleanup_listener", False):
+        return
+
+    async def cleanup_local_slash_commands() -> None:
+        if getattr(bot, "_sentrix_local_slash_cleanup_done", False):
+            return
+        bot._sentrix_local_slash_cleanup_done = True
+        total_removed = 0
+        for guild in list(bot.guilds):
+            try:
+                local_commands = await bot.tree.fetch_commands(guild=guild)
+            except discord.HTTPException:
+                logger.warning("Impossible de lire les commandes slash locales de %s (%s).", guild.name, guild.id)
+                continue
+            if not local_commands:
+                continue
+            try:
+                bot.tree.clear_commands(guild=guild)
+                await bot.tree.sync(guild=guild)
+                total_removed += len(local_commands)
+                logger.warning(
+                    "Nettoyage slash local : %s ancienne(s) commande(s) supprimée(s) de %s (%s).",
+                    len(local_commands), guild.name, guild.id,
+                )
+            except discord.HTTPException:
+                logger.exception("Impossible de supprimer les anciennes commandes slash locales de %s.", guild.id)
+        logger.info("Nettoyage slash local terminé : %s ancienne(s) commande(s) supprimée(s).", total_removed)
+
+    bot.add_listener(cleanup_local_slash_commands, "on_ready")
+    bot._sentrix_local_slash_cleanup_listener = True
+
+
+def _patch_syncguild(bot: commands.Bot) -> None:
+    """Empêche +syncguild de recréer les doublons global + serveur."""
+    command = bot.get_command("syncguild")
+    if command is None or getattr(command, "_sentrix_no_local_copy", False):
+        return
+
+    async def safe_syncguild(cog, ctx: commands.Context):
+        if not ctx.guild:
+            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+        try:
+            existing = await bot.tree.fetch_commands(guild=ctx.guild)
+            bot.tree.clear_commands(guild=ctx.guild)
+            await bot.tree.sync(guild=ctx.guild)
+            await bot.tree.sync()
+        except discord.HTTPException as exc:
+            return await ctx.send(embed=embeds.error(f"Discord a refusé la synchronisation : `{exc}`"))
+
+        await ctx.send(embed=embeds.success(
+            f"Synchronisation terminée. **{len(existing)}** ancienne(s) commande(s) locale(s) "
+            "ont été supprimée(s). SentriX utilise maintenant uniquement les commandes slash globales, "
+            "ce qui évite les doublons comme `/setup` affiché deux fois."
+        ))
+
+    command.callback = safe_syncguild
+    command.description = "Nettoyer les anciennes copies slash locales et resynchroniser les commandes globales."
+    command._sentrix_no_local_copy = True
+    logger.info("+syncguild sécurisé : aucune copie locale des commandes globales ne sera recréée.")
+
+
 def install(bot: commands.Bot) -> None:
+    # Ces deux garde-fous doivent pouvoir s'installer même avant Configuration.
+    _install_local_slash_cleanup(bot)
+    _patch_syncguild(bot)
+
     try:
         from . import configuration
     except Exception:
         return
 
-    # cogs.__init__ appelle les installateurs après chaque extension. Importer le module
-    # configuration trop tôt est possible, mais son extension officielle n'a alors pas
-    # encore installé le style +setup. Si on patchait ici, setup_oxyde_style écraserait
-    # ensuite notre menu — c'était précisément la cause du bug visible en production.
-    # On attend donc que le Cog Configuration soit réellement chargé, puis on s'installe
-    # en DERNIER par-dessus toutes les couches setup.
     if bot.get_cog("Configuration") is None:
         return
 
     view_cls = getattr(configuration, "SetupView", None)
-    if view_cls is None or getattr(view_cls, "_sentrix_native_language", False):
+    config_cls = getattr(configuration, "Configuration", None)
+    if view_cls is None or config_cls is None:
         return
 
-    # On capture les renderers actuellement actifs (style premium, nettoyage mobile,
-    # traduction). La page Langue et l'accueil passent ensuite par notre rendu unique ;
-    # les autres pages gardent exactement leur logique existante.
+    # Une installation v4 par processus. Les anciens marqueurs v1/v2/v3 sont ignorés :
+    # ils ne doivent plus pouvoir bloquer cette version.
+    if getattr(view_cls, "_sentrix_setup_v4", False):
+        return
+
     current_render_page = view_cls.render_page
     current_build_embed = view_cls.build_embed
+    current_open_setup = config_cls._open_setup_panel
 
     def render_home(self) -> None:
         self.clear_items()
         english = _is_english(self)
 
-        language_option = discord.SelectOption(
-            label="Server language" if english else "Langue du serveur",
-            value=LANGUAGE_CATEGORY_VALUE,
-            description=(
-                "Switch SentriX between English and French"
-                if english else
-                "Passer SentriX en français ou en anglais"
-            ),
-            emoji="🌐",
-        )
-        options = [language_option]
+        options = [
+            discord.SelectOption(
+                label="Server language" if english else "Langue du serveur",
+                value=LANGUAGE_CATEGORY_VALUE,
+                description=(
+                    "Switch the whole SentriX interface between English and French"
+                    if english else
+                    "Passer toute l'interface SentriX en français ou en anglais"
+                ),
+                emoji="🌐",
+            )
+        ]
 
         for index, step in enumerate(configuration.SETUP_STEPS):
             if step.get("key") == "summary":
@@ -187,14 +258,12 @@ def install(bot: commands.Bot) -> None:
             if english:
                 title = language_runtime._english_setup_text(title) or title
                 summary = language_runtime._english_setup_text(summary) or summary
-            options.append(
-                discord.SelectOption(
-                    label=title[:100],
-                    value=str(index),
-                    description=summary[:100],
-                    emoji=str(step.get("icon") or "⚙️"),
-                )
-            )
+            options.append(discord.SelectOption(
+                label=title[:100],
+                value=str(index),
+                description=summary[:100],
+                emoji=str(step.get("icon") or "⚙️"),
+            ))
 
         category_select = discord.ui.Select(
             placeholder=(
@@ -204,6 +273,7 @@ def install(bot: commands.Bot) -> None:
             ),
             options=options[:25],
             row=0,
+            custom_id="sentrix:setup:v4:category",
         )
 
         async def category_callback(interaction: discord.Interaction) -> None:
@@ -212,17 +282,13 @@ def install(bot: commands.Bot) -> None:
             selected = category_select.values[0]
             if selected == LANGUAGE_CATEGORY_VALUE:
                 self.page = LANGUAGE_PAGE
-                self.render_page()
-                return await interaction.response.edit_message(
-                    embed=await self.build_embed(), view=self
-                )
-
-            try:
-                self.page = int(selected)
-            except (TypeError, ValueError):
-                return await interaction.response.send_message(
-                    "Invalid category. / Catégorie invalide.", ephemeral=True
-                )
+            else:
+                try:
+                    self.page = int(selected)
+                except (TypeError, ValueError):
+                    return await interaction.response.send_message(
+                        "Invalid category. / Catégorie invalide.", ephemeral=True
+                    )
             self.render_page()
             try:
                 await self.persist_session()
@@ -279,29 +345,48 @@ def install(bot: commands.Bot) -> None:
             return _language_embed(self)
 
         embed = await current_build_embed(self)
+        english = _is_english(self)
+        if english:
+            try:
+                language_runtime._translate_setup_embed(embed)
+            except Exception:
+                logger.debug("Traduction du panneau +setup impossible.", exc_info=True)
+
         if getattr(self, "page", None) == -1:
-            # La langue est désormais une vraie catégorie : on retire les anciens champs
-            # de langue séparés pour que l'accueil reste propre.
             for index in range(len(embed.fields) - 1, -1, -1):
                 name = str(embed.fields[index].name or "").strip()
                 if name in {"🌐 Langue", "🌐 Language"}:
                     embed.remove_field(index)
-
             footer = str(embed.footer.text or "").strip() if embed.footer else ""
             if _SETUP_BUILD_MARKER not in footer:
                 footer = f"{footer} • {_SETUP_BUILD_MARKER}" if footer else f"SentriX • {_SETUP_BUILD_MARKER}"
                 embed.set_footer(text=footer)
         return embed
 
-    # Autorité finale : constructeur, retour accueil et sérialisation utilisent tous
-    # réellement ces composants ; aucun ajout tardif au payload n'est nécessaire.
+    async def open_setup_panel(self, *args, **kwargs):
+        """Réapplique explicitement le rendu v4 au message réellement envoyé à Discord."""
+        result = await current_open_setup(self, *args, **kwargs)
+        try:
+            message, view = result
+            view.page = -1
+            view.render_page()
+            await message.edit(embed=await view.build_embed(), view=view)
+        except Exception:
+            logger.exception("Impossible de forcer le rendu +setup v4 après création du panneau.")
+        return result
+
     view_cls._render_home = render_home
     view_cls.render_page = render_page
     view_cls.build_embed = build_embed
     view_cls._sentrix_language_patch = True
     view_cls._sentrix_language_payload_guard = True
     view_cls._sentrix_native_language = True
+    view_cls._sentrix_setup_v4 = True
+
+    if not getattr(config_cls._open_setup_panel, "_sentrix_setup_v4", False):
+        open_setup_panel._sentrix_setup_v4 = True
+        config_cls._open_setup_panel = open_setup_panel
 
     logger.info(
-        "+setup v3 actif APRÈS Configuration : Langue/Language est la première catégorie réelle."
+        "+setup v4 ACTIF : 🌐 Langue/Language est la première catégorie et le panneau final est réédité après création."
     )
