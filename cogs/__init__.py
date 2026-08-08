@@ -31,6 +31,7 @@ from .server_builder_ready_setup import install as install_server_builder_ready_
 from .server_choice_roles import install as install_server_choice_roles
 from .shop_default_prices import install as install_shop_default_prices
 from .setup_close_fix import install as install_setup_close_fix
+from .setup_create_logs_sync import install as install_setup_create_logs_sync
 from .setup_oxyde_style import install as install_setup_oxyde_style
 from .ticket_claim_security import install as install_ticket_claim_security
 from .ticket_ping_role import install_setup_ui as install_ticket_ping_setup
@@ -93,6 +94,9 @@ async def _load_extension_with_sentrix_patches(
         install_afk_signature_fix(bot)
     if name == "cogs.configuration" or name.endswith(".configuration"):
         install_setup_close_fix(bot)
+        # Répare le bouton +setup -> Create Logs : les 7 salons créés sont maintenant
+        # reliés au moteur log_settings, même s'ils existaient déjà avant ce déploiement.
+        install_setup_create_logs_sync(bot)
         # Refonte visuelle inspirée des panneaux premium/OXYDE, sans toucher à la logique
         # de persistance, de permissions ni aux callbacks existants de +setup.
         install_setup_oxyde_style(bot)
@@ -119,8 +123,8 @@ async def _load_extension_with_sentrix_patches(
         install_rolepanel_display_fix(bot)
         install_existing_server_bootstrap(bot)
 
-    # Répare le routage de logs-modération et supprime les doublons générés par les
-    # événements Discord quand SentriX a déjà produit une fiche de sanction détaillée.
+    # Répare le routage des logs et supprime les doublons générés par les événements
+    # Discord quand SentriX a déjà produit une fiche de sanction détaillée.
     # Appelé après chaque extension : le patch attend simplement que le cog Logs existe.
     install_moderation_logs_fix(bot)
 
