@@ -51,7 +51,12 @@ async def run() -> int:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-ci.db")
 
         import main
-        from cogs import command_response_guard, help_category_rework, help_complete
+        from cogs import (
+            command_catalog_cleanup,
+            command_response_guard,
+            help_category_rework,
+            help_complete,
+        )
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -67,6 +72,16 @@ async def run() -> int:
         if len(loaded) != len(main.EXTENSIONS):
             errors.append(
                 f"extensions chargées: {len(loaded)}/{len(main.EXTENSIONS)}"
+            )
+
+        if not command_catalog_cleanup._INSTALLED:
+            errors.append("la politique de catalogue complet des commandes n'est pas installée")
+
+        expected_pruned = command_catalog_cleanup.CONFIRMED_DUPLICATE_COMMANDS
+        if main.PRUNED_COMMANDS != expected_pruned:
+            errors.append(
+                "politique de pruning inattendue: "
+                + ", ".join(sorted(main.PRUNED_COMMANDS ^ expected_pruned))
             )
 
         # Reproduit le nettoyage effectué par setup_hook avant la synchro des slash.
@@ -99,6 +114,17 @@ async def run() -> int:
         if missing_critical:
             errors.append(
                 "commandes critiques absentes: " + ", ".join(missing_critical)
+            )
+
+        restored_missing = sorted(
+            name
+            for name in command_catalog_cleanup.RESTORED_COMMANDS
+            if bot.get_command(name) is None
+        )
+        if restored_missing:
+            errors.append(
+                "commandes utiles censées être restaurées mais absentes: "
+                + ", ".join(restored_missing)
             )
 
         pruned_still_visible = sorted(
@@ -159,6 +185,11 @@ async def run() -> int:
         print(f"SentriX command runtime audit: {len(active)} commande(s) texte/hybride")
         print(f"SentriX command runtime audit: {len(app_commands)} commande(s) slash enregistrée(s)")
         print(f"Extensions: {len(loaded)}/{len(main.EXTENSIONS)} chargées")
+        print(
+            "Catalogue: "
+            f"{len(command_catalog_cleanup.RESTORED_COMMANDS)} commandes utiles garanties, "
+            f"{len(command_catalog_cleanup.CONFIRMED_DUPLICATE_COMMANDS)} doublons retirés"
+        )
         print("Catégories +help:")
         for category in help_complete.CATEGORIES:
             count = category_counts.get(category.key, 0)
@@ -190,7 +221,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} problème(s) détecté(s)")
         return 1
-    print("OK: registre complet chargé, catégories valides, callbacks valides et garde de réponse active")
+    print("OK: registre complet chargé, catalogue nettoyé, catégories valides, callbacks valides et garde de réponse active")
     return 0
 
 
