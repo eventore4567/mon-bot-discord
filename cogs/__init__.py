@@ -31,6 +31,8 @@ from .shop_default_prices import install as install_shop_default_prices
 from .setup_close_fix import install as install_setup_close_fix
 from .setup_oxyde_style import install as install_setup_oxyde_style
 from .ticket_claim_security import install as install_ticket_claim_security
+from .ticket_ping_role import install_setup_ui as install_ticket_ping_setup
+from .ticket_ping_role import install_ticket_runtime as install_ticket_ping_runtime
 
 
 _ORIGINAL_LOAD_EXTENSION = commands.Bot.load_extension
@@ -92,8 +94,12 @@ async def _load_extension_with_sentrix_patches(
         # Refonte visuelle inspirée des panneaux premium/OXYDE, sans toucher à la logique
         # de persistance, de permissions ni aux callbacks existants de +setup.
         install_setup_oxyde_style(bot)
+        # Choix du rôle à notifier à l'ouverture d'un ticket directement dans +setup.
+        install_ticket_ping_setup(bot)
     if name == "cogs.tickets" or name.endswith(".tickets"):
         install_ticket_claim_security(bot)
+        # Le rôle de ping est indépendant du rôle staff qui gère les permissions du salon.
+        install_ticket_ping_runtime(bot)
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
         await install_server_builder_everyone_ping(bot)
         install_server_builder_channel_guides(bot)
