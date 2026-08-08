@@ -87,21 +87,21 @@ def _render_language_page(view) -> None:
         label="Français",
         emoji="🇫🇷",
         style=discord.ButtonStyle.success if current == language_runtime.LANG_FR else discord.ButtonStyle.secondary,
-        custom_id="sentrix:setup:v4:lang:fr",
+        custom_id="sentrix:setup:lang:fr",
         row=0,
     )
     en = discord.ui.Button(
         label="English",
         emoji="🇬🇧",
         style=discord.ButtonStyle.success if current == language_runtime.LANG_EN else discord.ButtonStyle.secondary,
-        custom_id="sentrix:setup:v4:lang:en",
+        custom_id="sentrix:setup:lang:en",
         row=0,
     )
     home = discord.ui.Button(
         label="Home" if english else "Accueil",
         emoji="🏠",
         style=discord.ButtonStyle.secondary,
-        custom_id="sentrix:setup:v4:lang:home",
+        custom_id="sentrix:setup:lang:home",
         row=1,
     )
 
