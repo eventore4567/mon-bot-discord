@@ -1,14 +1,14 @@
-"""Langue FR/EN de +setup, garantie jusque dans le payload envoyé à Discord.
+"""Rendu autoritaire de la langue dans le vrai menu Catégories de +setup.
 
-Le menu de langue a déjà été ajouté à plusieurs couches de rendu. Le problème réel est
-qu'un autre renderer peut reconstruire le Select après ces patches. Cette version agit
-également au dernier moment, dans ``View.to_components()``, juste avant que discord.py
-sérialise les composants. Si l'accueil +setup est envoyé, ``🌐 Langue du serveur`` est donc
-forcément la PREMIÈRE option du vrai menu Catégories.
+Cette couche ne modifie plus le payload après coup. Elle construit directement le menu
+final affiché par Discord et place `🌐 Langue du serveur` / `🌐 Server language` en
+première option. Cela évite les conflits entre les anciennes couches de style, de
+traduction et de nettoyage mobile.
 """
 from __future__ import annotations
 
 import logging
+import os
 
 import discord
 from discord.ext import commands
@@ -16,8 +16,10 @@ from discord.ext import commands
 from . import language_runtime
 
 logger = logging.getLogger("bot.language-setup-finalizer")
+
 LANGUAGE_CATEGORY_VALUE = "__sentrix_language__"
 LANGUAGE_PAGE = -20260809
+_SETUP_BUILD_MARKER = "Interface setup v3"
 
 
 def _can_change_language(interaction: discord.Interaction) -> bool:
@@ -29,132 +31,84 @@ def _can_change_language(interaction: discord.Interaction) -> bool:
     )
 
 
-def _language_text(language: str) -> tuple[str, str]:
-    if language == language_runtime.LANG_EN:
-        return "🌐 Server language", "Choose French or English for SentriX."
-    return "🌐 Langue du serveur", "Choisir Français ou English pour SentriX."
+def _is_english(view) -> bool:
+    return language_runtime.cached_language(view.bot, view.guild_id) == language_runtime.LANG_EN
 
 
-def _remove_old_language_controls(view) -> None:
-    """Retire les anciens contrôles FR/EN séparés. La langue reste uniquement en Catégories."""
-    for item in list(view.children):
-        if isinstance(item, discord.ui.Select):
-            values = {
-                str(getattr(option, "value", ""))
-                for option in getattr(item, "options", [])
-            }
-            if values == {language_runtime.LANG_FR, language_runtime.LANG_EN}:
-                view.remove_item(item)
-                continue
+def _step_meta(step: dict) -> tuple[str, str]:
+    """Retourne toujours les intitulés premium, même si l'ancienne couche visuelle a raté son installation."""
+    try:
+        from . import setup_oxyde_style
+        meta = setup_oxyde_style.STEP_META.get(step.get("key"), {})
+    except Exception:
+        meta = {}
 
-        label = str(getattr(item, "label", "") or "")
-        if getattr(item, "custom_id", None) == "sentrix:setup:language" or label in {
-            "🌐 Langue", "🌐 Language", "🌐 Langue / Language"
-        }:
-            view.remove_item(item)
+    title = str(meta.get("title") or step.get("title") or step.get("key") or "Configuration")
+    summary = str(meta.get("summary") or step.get("description") or "Configurer ce module.")
+    return title, summary
 
 
-def _find_category_select(view) -> discord.ui.Select | None:
-    """Repère le menu principal de +setup à partir de ses valeurs numériques historiques."""
-    found: list[discord.ui.Select] = []
-    for item in view.children:
-        if not isinstance(item, discord.ui.Select):
-            continue
-        options = list(getattr(item, "options", []) or [])
-        if not options:
-            continue
-        numeric_count = sum(
-            1 for option in options
-            if str(getattr(option, "value", "")).isdigit()
+def _language_embed(view) -> discord.Embed:
+    english = _is_english(view)
+    current = "English" if english else "Français"
+    if english:
+        embed = discord.Embed(
+            title="🌐 Server language",
+            description=(
+                "Choose the language SentriX should use for command names, help and the "
+                "main configuration interfaces on this server."
+            ),
+            color=0x8B5CF6,
         )
-        if numeric_count >= 3:
-            found.append(item)
+        embed.add_field(name="Current language", value=f"**{current}**", inline=False)
+        embed.add_field(name="Available", value="🇫🇷 **Français**\n🇬🇧 **English**", inline=False)
+    else:
+        embed = discord.Embed(
+            title="🌐 Langue du serveur",
+            description=(
+                "Choisis la langue utilisée par SentriX pour les noms de commandes, l'aide "
+                "et les principales interfaces de configuration de ce serveur."
+            ),
+            color=0x8B5CF6,
+        )
+        embed.add_field(name="Langue actuelle", value=f"**{current}**", inline=False)
+        embed.add_field(name="Disponible", value="🇫🇷 **Français**\n🇬🇧 **English**", inline=False)
 
-    return max(found, key=lambda item: len(item.options)) if found else None
-
-
-def _ensure_language_option(view, language: str) -> bool:
-    """Insère Langue en PREMIER dans le Select Catégories réellement sérialisé."""
-    select = _find_category_select(view)
-    if select is None:
-        logger.error("+setup: Select Catégories introuvable juste avant envoi Discord.")
-        return False
-
-    # Mutation EN PLACE de la liste interne : on ne dépend pas d'un setter de discord.py.
-    options = select.options
-    options[:] = [
-        option for option in options
-        if str(getattr(option, "value", "")) != LANGUAGE_CATEGORY_VALUE
-    ]
-
-    if len(options) >= 25:
-        logger.error("+setup: Select Catégories plein, impossible d'insérer la langue.")
-        return False
-
-    label, description = _language_text(language)
-    options.insert(
-        0,
-        discord.SelectOption(
-            label=label,
-            value=LANGUAGE_CATEGORY_VALUE,
-            description=description,
-        ),
-    )
-
-    # Le callback est attaché au Select final. Les autres catégories continuent d'utiliser
-    # exactement leur callback d'origine.
-    if not getattr(select, "_sentrix_language_callback", False):
-        original_callback = select.callback
-
-        async def callback(interaction: discord.Interaction):
-            selected = select.values[0] if select.values else None
-            if selected != LANGUAGE_CATEGORY_VALUE:
-                return await original_callback(interaction)
-
-            if not _can_change_language(interaction):
-                return await interaction.response.send_message(
-                    "Permission Administrateur requise. / Administrator permission required.",
-                    ephemeral=True,
-                )
-
-            view.page = LANGUAGE_PAGE
-            view.render_page()
-            await view._refresh_message(interaction)
-
-        select.callback = callback
-        select._sentrix_language_callback = True
-
-    return True
+    embed.set_footer(text=f"SentriX • {_SETUP_BUILD_MARKER}")
+    return embed
 
 
-def _render_language_page(view, language: str) -> None:
+def _render_language_page(view) -> None:
     view.clear_items()
+    english = _is_english(view)
+    current = language_runtime.LANG_EN if english else language_runtime.LANG_FR
 
     fr = discord.ui.Button(
         label="Français",
         emoji="🇫🇷",
-        style=discord.ButtonStyle.success if language == language_runtime.LANG_FR else discord.ButtonStyle.secondary,
+        style=discord.ButtonStyle.success if current == language_runtime.LANG_FR else discord.ButtonStyle.secondary,
         custom_id="sentrix:setup:lang:fr",
         row=0,
     )
     en = discord.ui.Button(
         label="English",
         emoji="🇬🇧",
-        style=discord.ButtonStyle.success if language == language_runtime.LANG_EN else discord.ButtonStyle.secondary,
+        style=discord.ButtonStyle.success if current == language_runtime.LANG_EN else discord.ButtonStyle.secondary,
         custom_id="sentrix:setup:lang:en",
         row=0,
     )
     home = discord.ui.Button(
-        label="🏠 Home" if language == language_runtime.LANG_EN else "🏠 Accueil",
+        label="Home" if english else "Accueil",
+        emoji="🏠",
         style=discord.ButtonStyle.secondary,
         custom_id="sentrix:setup:lang:home",
         row=1,
     )
 
-    async def choose(interaction: discord.Interaction, choice: str):
+    async def choose(interaction: discord.Interaction, choice: str) -> None:
         if not _can_change_language(interaction):
             return await interaction.response.send_message(
-                "Permission Administrateur requise. / Administrator permission required.",
+                "Administrator permission required. / Permission Administrateur requise.",
                 ephemeral=True,
             )
         await language_runtime.set_language(view.bot, view.guild_id, choice)
@@ -162,20 +116,20 @@ def _render_language_page(view, language: str) -> None:
         try:
             await view.persist_session()
         except Exception:
-            logger.debug("+setup: session non persistée après changement de langue.", exc_info=True)
+            logger.debug("Session +setup non persistée après changement de langue.", exc_info=True)
         view.render_page()
-        await view._refresh_message(interaction)
+        await interaction.response.edit_message(embed=await view.build_embed(), view=view)
 
-    async def choose_fr(interaction: discord.Interaction):
+    async def choose_fr(interaction: discord.Interaction) -> None:
         await choose(interaction, language_runtime.LANG_FR)
 
-    async def choose_en(interaction: discord.Interaction):
+    async def choose_en(interaction: discord.Interaction) -> None:
         await choose(interaction, language_runtime.LANG_EN)
 
-    async def go_home(interaction: discord.Interaction):
+    async def go_home(interaction: discord.Interaction) -> None:
         view.page = -1
         view.render_page()
-        await view._refresh_message(interaction)
+        await interaction.response.edit_message(embed=await view.build_embed(), view=view)
 
     fr.callback = choose_fr
     en.callback = choose_en
@@ -185,31 +139,6 @@ def _render_language_page(view, language: str) -> None:
     view.add_item(home)
 
 
-def _language_embed(language: str) -> discord.Embed:
-    current = "English" if language == language_runtime.LANG_EN else "Français"
-    if language == language_runtime.LANG_EN:
-        embed = discord.Embed(
-            title="🌐 Server language",
-            description="Choose the language SentriX should use on this server.",
-            color=0x8B5CF6,
-        )
-        embed.add_field(name="Current language", value=f"**{current}**", inline=False)
-    else:
-        embed = discord.Embed(
-            title="🌐 Langue du serveur",
-            description="Choisis la langue que SentriX doit utiliser sur ce serveur.",
-            color=0x8B5CF6,
-        )
-        embed.add_field(name="Langue actuelle", value=f"**{current}**", inline=False)
-
-    embed.add_field(
-        name="Available choices" if language == language_runtime.LANG_EN else "Choix disponibles",
-        value="🇫🇷 **Français**\n🇬🇧 **English**",
-        inline=False,
-    )
-    return embed
-
-
 def install(bot: commands.Bot) -> None:
     try:
         from . import configuration
@@ -217,108 +146,153 @@ def install(bot: commands.Bot) -> None:
         return
 
     view_cls = getattr(configuration, "SetupView", None)
-    if view_cls is None:
+    if view_cls is None or getattr(view_cls, "_sentrix_native_language", False):
         return
 
-    # Premier rendu / retour accueil.
-    current_init = view_cls.__init__
-    if not getattr(current_init, "_sentrix_language_wire_init", False):
-        def init(self, *args, **kwargs):
-            current_init(self, *args, **kwargs)
-            if getattr(self, "page", None) == -1:
-                _remove_old_language_controls(self)
-                _ensure_language_option(self, language_runtime.cached_language(self.bot, self.guild_id))
+    # On capture les renderers actuellement actifs (style premium, nettoyage mobile,
+    # traduction). La page Langue et l'accueil passent ensuite par notre rendu unique ;
+    # les autres pages gardent exactement leur logique existante.
+    current_render_page = view_cls.render_page
+    current_build_embed = view_cls.build_embed
 
-        init._sentrix_language_wire_init = True
-        view_cls.__init__ = init
+    def render_home(self) -> None:
+        self.clear_items()
+        english = _is_english(self)
 
-    current_home = view_cls._render_home
-    if not getattr(current_home, "_sentrix_language_wire_home", False):
-        def render_home(self):
-            current_home(self)
-            _remove_old_language_controls(self)
-            _ensure_language_option(self, language_runtime.cached_language(self.bot, self.guild_id))
+        language_option = discord.SelectOption(
+            label="Server language" if english else "Langue du serveur",
+            value=LANGUAGE_CATEGORY_VALUE,
+            description=(
+                "Switch SentriX between English and French"
+                if english else
+                "Passer SentriX en français ou en anglais"
+            ),
+            emoji="🌐",
+        )
+        options = [language_option]
 
-        render_home._sentrix_language_wire_home = True
-        view_cls._render_home = render_home
-
-    current_render = view_cls.render_page
-    if not getattr(current_render, "_sentrix_language_wire_render", False):
-        def render_page(self):
-            language = language_runtime.cached_language(self.bot, self.guild_id)
-            if getattr(self, "page", None) == LANGUAGE_PAGE:
-                _render_language_page(self, language)
-                return
-
-            current_render(self)
-            _remove_old_language_controls(self)
-            if getattr(self, "page", None) == -1:
-                _ensure_language_option(self, language)
-
-            if language == language_runtime.LANG_EN:
-                for item in self.children:
-                    if isinstance(item, discord.ui.Button):
-                        item.label = language_runtime._english_setup_text(item.label)
-                    elif isinstance(item, discord.ui.Select):
-                        item.placeholder = language_runtime._english_setup_text(item.placeholder)
-                        for option in item.options:
-                            if str(getattr(option, "value", "")) == LANGUAGE_CATEGORY_VALUE:
-                                continue
-                            option.label = language_runtime._english_setup_text(option.label)
-                            option.description = language_runtime._english_setup_text(option.description)
-
-        render_page._sentrix_language_wire_render = True
-        view_cls.render_page = render_page
-
-    # GARDE-FEU FINAL : discord.py appelle to_components() juste avant d'envoyer la vue.
-    # Même si une autre couche a reconstruit le Select après render_page, la langue est
-    # réinsérée ici dans le payload réellement transmis à Discord.
-    current_to_components = view_cls.to_components
-    if not getattr(current_to_components, "_sentrix_language_final_wire", False):
-        def to_components(self):
-            if getattr(self, "page", None) == -1:
-                _remove_old_language_controls(self)
-                _ensure_language_option(self, language_runtime.cached_language(self.bot, self.guild_id))
-            return current_to_components(self)
-
-        to_components._sentrix_language_final_wire = True
-        view_cls.to_components = to_components
-
-    current_build = view_cls.build_embed
-    if not getattr(current_build, "_sentrix_language_wire_build", False):
-        async def build_embed(self):
-            language = await language_runtime.get_language(self.bot, self.guild_id)
-            if getattr(self, "page", None) == LANGUAGE_PAGE:
-                return _language_embed(language)
-
-            embed = await current_build(self)
-            if language == language_runtime.LANG_EN:
-                language_runtime._translate_setup_embed(embed)
-
-            if getattr(self, "page", None) == -1:
-                # Marqueur visible : si ce champ n'est pas présent, le message observé vient
-                # d'un ancien panneau/ancienne instance et non du nouveau renderer.
-                for index in range(len(embed.fields) - 1, -1, -1):
-                    if str(embed.fields[index].name or "").strip() in {"🌐 Langue", "🌐 Language"}:
-                        embed.remove_field(index)
-                current = "English" if language == language_runtime.LANG_EN else "Français"
-                embed.add_field(
-                    name="🌐 Language" if language == language_runtime.LANG_EN else "🌐 Langue",
-                    value=(
-                        f"Current: **{current}** • first option in **Categories**."
-                        if language == language_runtime.LANG_EN
-                        else f"Actuelle : **{current}** • première option dans **Catégories**."
-                    ),
-                    inline=False,
+        for index, step in enumerate(configuration.SETUP_STEPS):
+            if step.get("key") == "summary":
+                continue
+            title, summary = _step_meta(step)
+            if english:
+                title = language_runtime._english_setup_text(title) or title
+                summary = language_runtime._english_setup_text(summary) or summary
+            options.append(
+                discord.SelectOption(
+                    label=title[:100],
+                    value=str(index),
+                    description=summary[:100],
+                    emoji=str(step.get("icon") or "⚙️"),
                 )
-            return embed
+            )
 
-        build_embed._sentrix_language_wire_build = True
-        view_cls.build_embed = build_embed
+        category_select = discord.ui.Select(
+            placeholder=(
+                "Choose what you want to configure…"
+                if english else
+                "Choisis ce que tu veux configurer…"
+            ),
+            options=options[:25],
+            row=0,
+        )
 
-    # Marqueur de diagnostic pour les audits et les futurs correctifs.
+        async def category_callback(interaction: discord.Interaction) -> None:
+            if not category_select.values:
+                return await interaction.response.defer()
+            selected = category_select.values[0]
+            if selected == LANGUAGE_CATEGORY_VALUE:
+                self.page = LANGUAGE_PAGE
+                self.render_page()
+                return await interaction.response.edit_message(
+                    embed=await self.build_embed(), view=self
+                )
+
+            try:
+                self.page = int(selected)
+            except (TypeError, ValueError):
+                return await interaction.response.send_message(
+                    "Invalid category. / Catégorie invalide.", ephemeral=True
+                )
+            self.render_page()
+            try:
+                await self.persist_session()
+            except Exception:
+                logger.debug("Session +setup non persistée après navigation.", exc_info=True)
+            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+
+        category_select.callback = category_callback
+        self.add_item(category_select)
+
+        self.add_item(configuration.SetupNavButton(
+            "summary", self.message_id,
+            label="📋 Summary" if english else "📋 Résumé",
+            style=discord.ButtonStyle.primary,
+            row=1,
+        ))
+        self.add_item(configuration.SetupNavButton(
+            "history", self.message_id,
+            label="📜 History" if english else "📜 Historique",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        ))
+        self.add_item(configuration.SetupNavButton(
+            "cancel", self.message_id,
+            label="Close" if english else "Fermer",
+            style=discord.ButtonStyle.danger,
+            row=1,
+        ))
+
+        dashboard_url = os.getenv(
+            "DASHBOARD_PUBLIC_URL",
+            "https://mon-bot-discord-production-8944.up.railway.app",
+        ).strip().rstrip("/")
+        if dashboard_url.startswith(("https://", "http://")):
+            self.add_item(discord.ui.Button(
+                label="Open web dashboard" if english else "Ouvrir le dashboard web",
+                emoji="🌐",
+                style=discord.ButtonStyle.link,
+                url=f"{dashboard_url}/app?guild={self.guild_id}&tab=overview",
+                row=2,
+            ))
+
+    def render_page(self) -> None:
+        if getattr(self, "page", None) == -1:
+            render_home(self)
+            return
+        if getattr(self, "page", None) == LANGUAGE_PAGE:
+            _render_language_page(self)
+            return
+        current_render_page(self)
+
+    async def build_embed(self) -> discord.Embed:
+        if getattr(self, "page", None) == LANGUAGE_PAGE:
+            return _language_embed(self)
+
+        embed = await current_build_embed(self)
+        if getattr(self, "page", None) == -1:
+            # La langue est désormais une vraie catégorie : on retire les anciens champs
+            # de langue séparés pour que l'accueil reste propre.
+            for index in range(len(embed.fields) - 1, -1, -1):
+                name = str(embed.fields[index].name or "").strip()
+                if name in {"🌐 Langue", "🌐 Language"}:
+                    embed.remove_field(index)
+
+            footer = str(embed.footer.text or "").strip() if embed.footer else ""
+            if _SETUP_BUILD_MARKER not in footer:
+                footer = f"{footer} • {_SETUP_BUILD_MARKER}" if footer else f"SentriX • {_SETUP_BUILD_MARKER}"
+                embed.set_footer(text=footer)
+        return embed
+
+    # Autorité finale : constructeur, retour accueil et sérialisation utilisent tous
+    # réellement ces composants ; aucun ajout tardif au payload n'est nécessaire.
+    view_cls._render_home = render_home
+    view_cls.render_page = render_page
+    view_cls.build_embed = build_embed
     view_cls._sentrix_language_patch = True
     view_cls._sentrix_language_payload_guard = True
+    view_cls._sentrix_native_language = True
+
     logger.info(
-        "+setup FR/EN final-wire actif : Langue est forcée en 1re option au moment de la sérialisation Discord."
+        "+setup v3 actif : Langue/Language est une vraie catégorie, première option du menu Discord."
     )
