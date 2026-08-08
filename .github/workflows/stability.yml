@@ -31,6 +31,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Command registry runtime audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-command-audit.db"
+        run: python tools/command_runtime_audit.py
+
       - name: Import smoke test
         env:
           DISCORD_TOKEN: "ci.fake.token"
