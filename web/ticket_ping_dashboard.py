@@ -30,28 +30,49 @@ TICKET_PING_JS = r"""
   window.__sentrixTicketPingDashboard = true;
   if (typeof state === "undefined" || typeof renderTab !== "function" || typeof json !== "function") return;
 
+  const escapeHtml = typeof esc === "function" ? esc : value => String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
   async function renderTicketPingRole() {
     if (state.tab !== "tickets" || !state.guildId || !state.guildData) return;
+
+    const guildId = String(state.guildId);
     const fields = document.getElementById("fields");
-    if (!fields || document.getElementById("ticketPingRoleField")) return;
+    if (!fields) return;
+
+    const existing = document.getElementById("ticketPingRoleField");
+    if (existing) {
+      if (existing.dataset.guildId === guildId) return;
+      existing.remove();
+    }
 
     let data;
     try {
-      data = await json(`/api/guilds/${state.guildId}/ticket-ping-role`);
+      data = await json(`/api/guilds/${guildId}/ticket-ping-role`);
     } catch (error) {
       if (typeof toast === "function") toast(error.message, true);
       return;
     }
-    if (state.tab !== "tickets") return;
+
+    // L'utilisateur peut changer de serveur pendant la requête : ne jamais injecter les
+    // données du serveur précédent dans l'interface du nouveau.
+    if (state.tab !== "tickets" || String(state.guildId) !== guildId || !state.guildData) return;
 
     const wrapper = document.createElement("div");
     wrapper.id = "ticketPingRoleField";
+    wrapper.dataset.guildId = guildId;
     wrapper.className = "field full";
-    const current = String(data.role_id || "");
-    const options = ['<option value="">Aucun rôle — ne rien ping</option>']
+
+    let savedValue = String(data.role_id || "");
+    const options = ['<option value="">Aucun rôle — comportement staff normal</option>']
       .concat((state.guildData.roles || []).map(role =>
-        `<option value="${esc(role.id)}" ${String(role.id)===current?"selected":""}>${esc(role.name)}</option>`
+        `<option value="${escapeHtml(role.id)}" ${String(role.id)===savedValue?"selected":""}>${escapeHtml(role.name)}</option>`
       )).join("");
+
     wrapper.innerHTML = `
       <label>🔔 Rôle à ping à l'ouverture d'un ticket</label>
       <select class="select" id="ticketPingRoleSelect">${options}</select>
@@ -59,18 +80,25 @@ TICKET_PING_JS = r"""
     fields.insertBefore(wrapper, fields.firstChild);
 
     const select = document.getElementById("ticketPingRoleSelect");
+    if (!select) return;
+
     select.addEventListener("change", async () => {
+      const requestedValue = select.value || null;
       select.disabled = true;
       try {
-        const result = await json(`/api/guilds/${state.guildId}/ticket-ping-role`, {
+        const result = await json(`/api/guilds/${guildId}/ticket-ping-role`, {
           method:"PUT",
           headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},
-          body:JSON.stringify({role_id: select.value || null})
+          body:JSON.stringify({role_id: requestedValue})
         });
+        savedValue = String(result.role_id || "");
+        select.value = savedValue;
         if (typeof toast === "function") toast(result.message);
       } catch (error) {
+        // Avant ce correctif, un PUT refusé laissait visuellement le mauvais rôle sélectionné
+        // jusqu'au rechargement de la page. On restaure maintenant la dernière valeur sauvée.
+        select.value = savedValue;
         if (typeof toast === "function") toast(error.message, true);
-        await renderTicketPingRole();
       } finally {
         select.disabled = false;
       }
@@ -78,18 +106,24 @@ TICKET_PING_JS = r"""
   }
 
   const originalRenderTab = renderTab;
-  renderTab = function sentrixTicketPingRenderTab() {
-    const result = originalRenderTab();
+  renderTab = function sentrixTicketPingRenderTab(...args) {
+    const result = originalRenderTab.apply(this, args);
     if (state.tab === "tickets") setTimeout(renderTicketPingRole, 0);
     return result;
   };
 
-  const originalSelectGuild = selectGuild;
-  selectGuild = async function sentrixTicketPingSelectGuild(value) {
-    const result = await originalSelectGuild(value);
-    if (state.tab === "tickets") setTimeout(renderTicketPingRole, 0);
-    return result;
-  };
+  // Certaines versions du dashboard peuvent charger cette couche avant selectGuild : le
+  // réglage doit rester optionnel au lieu de casser tout le script avec une ReferenceError.
+  if (typeof selectGuild === "function") {
+    const originalSelectGuild = selectGuild;
+    selectGuild = async function sentrixTicketPingSelectGuild(...args) {
+      const result = await originalSelectGuild.apply(this, args);
+      if (state.tab === "tickets") setTimeout(renderTicketPingRole, 0);
+      return result;
+    };
+  }
+
+  if (state.tab === "tickets") setTimeout(renderTicketPingRole, 0);
 })();
 </script>
 """
@@ -117,8 +151,10 @@ def install(dashboard) -> None:
             (guild_id,),
         )
         role_id = int(row["role_id"]) if row and row["role_id"] else None
-        if role_id and guild.get_role(role_id) is None:
-            role_id = None
+        if role_id:
+            role = guild.get_role(role_id)
+            if role is None or role.is_default() or role.managed:
+                role_id = None
         return web.json_response({"ok": True, "role_id": str(role_id) if role_id else None})
 
     async def put_ping_role(request: web.Request):
