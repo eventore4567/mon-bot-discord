@@ -3,14 +3,13 @@
 
 Vérifie les erreurs qui peuvent casser un déploiement avant même de lancer Discord :
 syntaxe Python, extensions manquantes, imports relatifs cassés dans cogs/__init__.py,
-limites de texte Discord connues et appels bloquants time.sleep() dans une coroutine.
+limites de texte des slash commands et appels bloquants time.sleep() dans une coroutine.
 """
 from __future__ import annotations
 
 import ast
 import pathlib
 import re
-import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE_DIRS = ("cogs", "database", "utils", "web", "tools")
@@ -34,6 +33,12 @@ def literal_str(node: ast.AST | None) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
+def literal_bool(node: ast.AST | None) -> bool | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return node.value
+    return None
+
+
 def call_name(node: ast.Call) -> str:
     parts: list[str] = []
     cur: ast.AST | None = node.func
@@ -53,24 +58,35 @@ def check_decorator_limits(path: pathlib.Path, tree: ast.AST) -> None:
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        for dec in node.decorator_list:
-            if not isinstance(dec, ast.Call):
-                continue
+
+        decorators = [dec for dec in node.decorator_list if isinstance(dec, ast.Call)]
+        # Une hybrid command explicitement prefix-only n'est jamais envoyée à l'API
+        # slash de Discord : sa description n'est donc pas soumise à la limite des 100.
+        slash_disabled = False
+        for dec in decorators:
             name = call_name(dec)
-            if any(name.endswith(suffix) for suffix in command_suffixes):
+            if not any(name.endswith(suffix) for suffix in command_suffixes):
+                continue
+            for kw in dec.keywords:
+                if kw.arg == "with_app_command" and literal_bool(kw.value) is False:
+                    slash_disabled = True
+
+        for dec in decorators:
+            name = call_name(dec)
+            if not slash_disabled and any(name.endswith(suffix) for suffix in command_suffixes):
                 for kw in dec.keywords:
                     if kw.arg == "description":
                         value = literal_str(kw.value)
                         if value is not None and len(value) > 100:
                             errors.append(
-                                f"{path.relative_to(ROOT)}:{node.lineno}: description Discord >100 caractères ({len(value)})"
+                                f"{path.relative_to(ROOT)}:{node.lineno}: description slash >100 caractères ({len(value)})"
                             )
-            if name.endswith("app_commands.describe"):
+            if not slash_disabled and name.endswith("app_commands.describe"):
                 for kw in dec.keywords:
                     value = literal_str(kw.value)
                     if value is not None and len(value) > 100:
                         errors.append(
-                            f"{path.relative_to(ROOT)}:{node.lineno}: description de paramètre '{kw.arg}' >100 caractères ({len(value)})"
+                            f"{path.relative_to(ROOT)}:{node.lineno}: description du paramètre '{kw.arg}' >100 caractères ({len(value)})"
                         )
 
 
@@ -79,11 +95,9 @@ def check_async_blocking_sleep(path: pathlib.Path, tree: ast.AST) -> None:
         if not isinstance(fn, ast.AsyncFunctionDef):
             continue
         for node in ast.walk(fn):
-            if not isinstance(node, ast.Call):
-                continue
-            if call_name(node) == "time.sleep":
+            if isinstance(node, ast.Call) and call_name(node) == "time.sleep":
                 errors.append(
-                    f"{path.relative_to(ROOT)}:{node.lineno}: time.sleep() bloque la boucle asyncio dans '{fn.name}'"
+                    f"{path.relative_to(ROOT)}:{node.lineno}: time.sleep() bloque asyncio dans '{fn.name}'"
                 )
 
 
@@ -118,10 +132,13 @@ def check_cogs_relative_imports() -> None:
 
 
 def check_obvious_conflict_markers(path: pathlib.Path, text: str) -> None:
-    for marker in ("<<<<<<< ", "=======\n", ">>>>>>> "):
-        if marker in text:
-            errors.append(f"{path.relative_to(ROOT)}: marqueur de conflit Git détecté ({marker.strip()})")
-            return
+    # Un vrai conflit Git occupe le début d'une ligne. Les séparateurs décoratifs
+    # "# ======" utilisés dans le code ne doivent jamais être signalés.
+    match = re.search(r"(?m)^(?:<<<<<<< .+|=======|>>>>>>> .+)$", text)
+    if match:
+        errors.append(
+            f"{path.relative_to(ROOT)}:{text[:match.start()].count(chr(10)) + 1}: marqueur de conflit Git détecté"
+        )
 
 
 def main() -> int:
