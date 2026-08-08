@@ -17,6 +17,7 @@ from . import dashboard_polish as _dashboard_polish
 from . import persistent_dashboard_sessions as _persistent_dashboard_sessions
 from . import owner_server_manager as _owner_server_manager
 from . import admin_only_dashboard as _admin_only_dashboard
+from . import dashboard_control_center as _dashboard_control_center
 from . import dashboard_deeplinks as _dashboard_deeplinks
 
 
@@ -84,6 +85,11 @@ _admin_only_dashboard._PRIVATE_PAGE_PATHS.add("/embed-builder")
 _admin_only_dashboard._PRIVATE_PAGE_PATHS.add("/owner-servers")
 # Doit rester en dernier pour protéger également toutes les routes ajoutées ci-dessus.
 _admin_only_dashboard.install(_dashboard)
+
+# Centre de contrôle : uniquement de l'UI autour des routes et champs déjà sûrs.
+# Il est injecté avant les deep links afin que les nouveaux onglets puissent aussi être
+# ouverts directement par une URL partageable.
+_dashboard_control_center.install(_dashboard)
 
 # Deep links du +setup : doit s'exécuter après les autres injections HTML pour cibler
 # l'interface finale réellement envoyée au navigateur.

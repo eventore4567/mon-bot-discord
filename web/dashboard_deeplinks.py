@@ -26,8 +26,9 @@ DEEPLINK_RUNTIME_JS = r"""
   window.__sentrixDeepLinkRuntime = true;
 
   const allowedTabs = new Set([
-    "overview", "commands", "general", "security", "sanctions", "logs",
-    "welcome", "levels", "tickets", "ai", "notifications", "roles"
+    "control", "overview", "commands", "general", "security", "sanctions", "logs",
+    "welcome", "levels", "tickets", "ai", "notifications", "roles",
+    "community", "verification", "staff"
   ]);
   const params = new URLSearchParams(location.search);
   const incomingTab = params.get("tab");
