@@ -17,6 +17,7 @@ from .natural_music_intent_guard import install as install_natural_music_intent_
 from .no_auto_tracker import install as install_no_auto_tracker
 from .owner_sanction_immunity import install as install_owner_sanction_immunity
 from .poll_ui import install_poll_ui
+from .premium_logs import install as install_premium_logs
 from .premium_style_runtime import install as install_premium_style
 from .remove_code_command import install as install_remove_code_command
 from .reply_reference_fix import install as install_reply_reference_fix
@@ -128,6 +129,12 @@ async def _load_extension_with_sentrix_patches(
     # Discord quand SentriX a déjà produit une fiche de sanction détaillée.
     # Appelé après chaque extension : le patch attend simplement que le cog Logs existe.
     install_moderation_logs_fix(bot)
+
+    # Style premium appliqué EN DERNIER sur le moteur de logs : les infos d'Audit Log
+    # (staff/autre bot), la déduplication et l'auto-réparation ont donc déjà été faites.
+    # Les embeds gagnent couleurs par action, identité/thumbnail, détails de timeout et
+    # boutons pratiques pour afficher/copier les IDs.
+    install_premium_logs(bot)
 
     # Correctifs transversaux issus de la passe de stabilité : reprise des notifications
     # sociales, sérialisation du cache d'invitations et limite de récompenses de jeux.
