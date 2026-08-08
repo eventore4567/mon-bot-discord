@@ -22,6 +22,7 @@ async def run() -> int:
 
         import main
         from cogs import common_command_names, configuration, language_runtime
+        from cogs.language_setup_finalizer import LANGUAGE_CATEGORY_VALUE
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -38,7 +39,6 @@ async def run() -> int:
 
         bot._prune_redundant_commands()
 
-        # Preference persistante.
         await language_runtime.set_language(bot, 123456789, language_runtime.LANG_EN)
         if await language_runtime.get_language(bot, 123456789) != language_runtime.LANG_EN:
             errors.append("la preference English n'est pas persistante")
@@ -46,11 +46,9 @@ async def run() -> int:
         if await language_runtime.get_language(bot, 123456789) != language_runtime.LANG_FR:
             errors.append("la preference Francais n'est pas persistante")
 
-        # Les anciens alias FR ad hoc ne doivent plus etre la source de verite.
         if common_command_names.FRENCH_COMMAND_ALIASES:
             errors.append("FRENCH_COMMAND_ALIASES n'a pas ete desactive")
 
-        # Les traductions pointent vers LE MEME objet commande, donc aucune copie fonctionnelle.
         checks = [
             ("ban", "bannir", "ban"),
             ("help", "aide", "help"),
@@ -68,9 +66,6 @@ async def run() -> int:
             if bot.get_command(english) is not base:
                 errors.append(f"nom EN {english} ne pointe pas vers {canonical}")
 
-        # Chaque commande a exactement un nom d'affichage par langue et aucun conflit dans
-        # un meme groupe. Les alias peuvent exister dans le registre, mais walk_commands()
-        # ne doit jamais contenir de copie supplementaire.
         seen_objects = set()
         collisions: dict[tuple[int, str, str], str] = {}
         visible = 0
@@ -98,16 +93,15 @@ async def run() -> int:
             errors.append("+help n'utilise pas le rendu localise")
 
         if not getattr(configuration.SetupView, "_sentrix_language_patch", False):
-            errors.append("+setup n'a pas le selecteur de langue")
+            errors.append("+setup n'a pas le support de langue")
 
-        # La vue initiale doit survivre aux redemarrages et proposer exactement FR/EN.
         view = language_runtime.LanguageChoiceView(bot)
         custom_ids = {getattr(item, "custom_id", None) for item in view.children}
         if custom_ids != {"sentrix:language:fr", "sentrix:language:en"}:
             errors.append(f"boutons langue inattendus: {custom_ids}")
 
-        # Construction du setup : le changement de langue doit etre impossible a rater.
-        # On exige a la fois le menu FR/EN ET un bouton visible dans la rangée d'actions.
+        # Exigence UX : Langue doit etre une vraie option du meme menu que les autres
+        # categories de +setup. Aucun bouton/menu FR-EN separe ne doit etre necessaire.
         try:
             setup_view = configuration.SetupView(
                 bot,
@@ -116,29 +110,44 @@ async def run() -> int:
                 message_id=222,
                 channel_id=333,
             )
-            language_selects = [
-                item for item in setup_view.children
-                if item.__class__.__name__.endswith("Select")
-                and {getattr(option, "value", None) for option in getattr(item, "options", [])} == {"fr", "en"}
-            ]
-            if not language_selects:
-                errors.append("aucun selecteur FR/EN sur l'accueil +setup")
-            else:
-                if getattr(language_selects[0], "row", None) != 3:
-                    errors.append("le selecteur FR/EN n'est pas place sur la ligne dediee du +setup")
+            selects = [item for item in setup_view.children if item.__class__.__name__.endswith("Select")]
+            category_selects = []
+            for item in selects:
+                values = {str(getattr(option, "value", "")) for option in getattr(item, "options", [])}
+                if LANGUAGE_CATEGORY_VALUE in values:
+                    category_selects.append(item)
 
-            language_buttons = [
+            if len(category_selects) != 1:
+                errors.append(f"menu Categories avec Langue attendu 1 fois, trouve {len(category_selects)}")
+            else:
+                category_select = category_selects[0]
+                option = next(
+                    (opt for opt in category_select.options if str(getattr(opt, "value", "")) == LANGUAGE_CATEGORY_VALUE),
+                    None,
+                )
+                if option is None:
+                    errors.append("option Langue absente du menu Categories")
+                else:
+                    label = str(getattr(option, "label", "") or "")
+                    if "Langue" not in label and "Language" not in label:
+                        errors.append(f"label de categorie langue incomprehensible: {label!r}")
+                if getattr(category_select, "row", None) != 0:
+                    errors.append("le menu Categories contenant Langue n'est pas sur la ligne principale")
+
+            standalone_language_selects = []
+            for item in selects:
+                values = {str(getattr(option, "value", "")) for option in getattr(item, "options", [])}
+                if values == {"fr", "en"}:
+                    standalone_language_selects.append(item)
+            if standalone_language_selects:
+                errors.append("un menu FR/EN separe existe encore hors des categories")
+
+            standalone_language_buttons = [
                 item for item in setup_view.children
                 if getattr(item, "custom_id", None) == "sentrix:setup:language"
             ]
-            if not language_buttons:
-                errors.append("aucun bouton Langue visible sur l'accueil +setup")
-            else:
-                label = str(getattr(language_buttons[0], "label", "") or "")
-                if "Langue" not in label and "Language" not in label:
-                    errors.append(f"label du bouton langue incomprehensible: {label!r}")
-                if getattr(language_buttons[0], "row", None) != 1:
-                    errors.append("le bouton Langue n'est pas dans la rangee d'actions principale")
+            if standalone_language_buttons:
+                errors.append("un bouton Langue separe existe encore hors des categories")
         except Exception as exc:
             errors.append(f"construction +setup langue impossible: {type(exc).__name__}: {exc}")
 
@@ -161,7 +170,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
-    print("OK: FR/EN persistant, aucune copie de commande, bouton + menu langue visibles dans +setup")
+    print("OK: FR/EN persistant et Langue presente directement dans le menu Categories de +setup")
     return 0
 
 
