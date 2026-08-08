@@ -1,5 +1,8 @@
 """Initialisation commune des cogs SentriX."""
 
+import logging
+
+import discord
 from discord.ext import commands
 
 from .afk_nickname import install as install_afk_nickname
@@ -43,7 +46,38 @@ from .ticket_ping_role import install_setup_ui as install_ticket_ping_setup
 from .ticket_ping_role import install_ticket_runtime as install_ticket_ping_runtime
 
 
+logger = logging.getLogger("bot.cogs")
 _ORIGINAL_LOAD_EXTENSION = commands.Bot.load_extension
+
+
+def _install_embed_component_fix(bot: commands.Bot) -> None:
+    """Corrige le bouton Annuler de +embed qui envoyait `emoji=○` à Discord.
+
+    `○` est un symbole Unicode valide dans un label, mais ce n'est pas un emoji de
+    composant accepté par l'API Discord. Le serveur répond alors 400 / 50035 et refuse
+    tout le panneau. On remplace uniquement l'emoji du bouton par un vrai emoji.
+    """
+    if getattr(bot, "_sentrix_embed_component_fix", False):
+        return
+    try:
+        from . import embed_builder
+
+        if not getattr(embed_builder.EmbedBuilderView, "_sentrix_cancel_emoji_fix", False):
+            original_init = embed_builder.EmbedBuilderView.__init__
+
+            def patched_init(self, *args, **kwargs):
+                original_init(self, *args, **kwargs)
+                for item in self.children:
+                    if isinstance(item, discord.ui.Button) and item.label == "Annuler":
+                        item.emoji = "❌"
+
+            embed_builder.EmbedBuilderView.__init__ = patched_init
+            embed_builder.EmbedBuilderView._sentrix_cancel_emoji_fix = True
+
+        bot._sentrix_embed_component_fix = True
+        logger.info("Correctif +embed installé : emoji du bouton Annuler remplacé par ❌.")
+    except Exception:
+        logger.exception("Impossible d'installer le correctif de composant +embed.")
 
 
 async def _load_extension_with_sentrix_patches(
@@ -127,6 +161,10 @@ async def _load_extension_with_sentrix_patches(
         # existants, sinon le style global peut provoquer un doublon au redémarrage.
         install_rolepanel_display_fix(bot)
         install_existing_server_bootstrap(bot)
+    if name == "cogs.embed_builder" or name.endswith(".embed_builder"):
+        # Discord rejetait entièrement +embed car le bouton Annuler utilisait le symbole ○
+        # dans le champ emoji. Le patch s'applique après le chargement réel du cog.
+        _install_embed_component_fix(bot)
 
     # Répare le routage des logs et supprime les doublons générés par les événements
     # Discord quand SentriX a déjà produit une fiche de sanction détaillée.

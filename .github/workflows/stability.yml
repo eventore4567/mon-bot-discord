@@ -37,6 +37,26 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-command-audit.db"
         run: python tools/command_runtime_audit.py
 
+      - name: Embed component UI audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-embed-ui-audit.db"
+        run: |
+          python - <<'PY'
+          import cogs
+          from cogs import embed_builder
+
+          class DummyBot:
+              pass
+
+          bot = DummyBot()
+          cogs._install_embed_component_fix(bot)
+          view = embed_builder.EmbedBuilderView(None, embed_builder.EmbedDraft(), 1)
+          cancel = next(item for item in view.children if getattr(item, "label", None) == "Annuler")
+          assert str(cancel.emoji) == "❌", f"Emoji Annuler invalide: {cancel.emoji!r}"
+          print("OK: +embed construit un bouton Annuler avec un vrai emoji Discord")
+          PY
+
       - name: Import smoke test
         env:
           DISCORD_TOKEN: "ci.fake.token"
