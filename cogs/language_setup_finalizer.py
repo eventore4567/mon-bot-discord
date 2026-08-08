@@ -1,16 +1,9 @@
 """Applique la langue sur la version FINALE de +setup.
 
-`language_runtime` peut être importé avant le chargement officiel du cog Configuration.
-Les couches setup premium/tickets remplacent ensuite `SetupView.build_embed/render_page`.
-Ce finaliseur se réexécute après chaque extension et enveloppe uniquement les méthodes
-actuelles si elles ne portent pas déjà son marqueur. Le sélecteur FR/EN survit donc à
-toutes les autres couches de rendu.
-
-Le changement de langue est volontairement exposé de DEUX façons sur l'accueil :
-- un bouton très visible « Langue / Language » dans la rangée d'actions ;
-- le menu déroulant FR/EN en dessous.
-Ainsi, même si Discord compacte les composants sur mobile, l'administrateur garde toujours
-un accès évident au réglage sans nouvelle commande dédiée.
+La langue doit apparaitre comme une vraie entree du menu des categories de +setup.
+Les autres couches UI peuvent remplacer render_page/build_embed ; ce finaliseur est donc
+applique en dernier et transforme le menu principal sans modifier la logique des autres
+modules.
 """
 from __future__ import annotations
 
@@ -22,6 +15,7 @@ from discord.ext import commands
 from . import language_runtime
 
 logger = logging.getLogger("bot.language-setup-finalizer")
+LANGUAGE_CATEGORY_VALUE = "__sentrix_language__"
 
 
 def _is_language_select(item) -> bool:
@@ -29,6 +23,25 @@ def _is_language_select(item) -> bool:
         return False
     values = {str(getattr(option, "value", "")) for option in getattr(item, "options", [])}
     return values == {language_runtime.LANG_FR, language_runtime.LANG_EN}
+
+
+def _is_category_select(item) -> bool:
+    if not isinstance(item, discord.ui.Select):
+        return False
+    options = list(getattr(item, "options", []) or [])
+    if not options:
+        return False
+    values = [str(getattr(option, "value", "")) for option in options]
+    return all(value.isdigit() for value in values)
+
+
+def _can_change_language(interaction: discord.Interaction) -> bool:
+    member = interaction.user
+    return bool(
+        isinstance(member, discord.Member)
+        and interaction.guild is not None
+        and (member.guild_permissions.administrator or member.id == interaction.guild.owner_id)
+    )
 
 
 def install(bot: commands.Bot) -> None:
@@ -50,7 +63,6 @@ def install(bot: commands.Bot) -> None:
             if language == language_runtime.LANG_EN:
                 language_runtime._translate_setup_embed(embed)
             if getattr(self, "page", None) == -1:
-                # Evite un doublon si une ancienne couche de langue a déjà ajouté le champ.
                 for index in range(len(embed.fields) - 1, -1, -1):
                     if str(embed.fields[index].name or "").strip() in {"🌐 Langue", "🌐 Language"}:
                         embed.remove_field(index)
@@ -75,7 +87,8 @@ def install(bot: commands.Bot) -> None:
             current_render(self)
             language = language_runtime.cached_language(self.bot, self.guild_id)
 
-            # Nettoie d'anciens composants langue avant d'ajouter la version finale.
+            # Les anciennes versions ajoutaient un bouton et un select FR/EN separes.
+            # On les retire : la langue vit maintenant DANS le menu Categories.
             for item in list(self.children):
                 if _is_language_select(item):
                     self.remove_item(item)
@@ -99,77 +112,104 @@ def install(bot: commands.Bot) -> None:
             if getattr(self, "page", None) != -1:
                 return
 
-            # Bouton visible au même niveau que Résumé/Historique/Fermer. Il ouvre un petit
-            # panneau privé FR/EN : impossible de devoir chercher le réglage tout en bas.
-            language_button = discord.ui.Button(
-                label="🌐 Language" if language == language_runtime.LANG_EN else "🌐 Langue",
-                style=discord.ButtonStyle.secondary,
-                row=1,
-                custom_id="sentrix:setup:language",
-            )
+            category_select = next((item for item in self.children if _is_category_select(item)), None)
+            if category_select is None:
+                logger.error("Impossible de trouver le menu Categories de +setup pour y ajouter la langue.")
+                return
 
-            async def open_language_picker(interaction: discord.Interaction):
-                member = interaction.user
-                if not isinstance(member, discord.Member) or (
-                    not member.guild_permissions.administrator
-                    and member.id != interaction.guild.owner_id
-                ):
+            option_label = "🌐 Server language" if language == language_runtime.LANG_EN else "🌐 Langue du serveur"
+            option_description = (
+                "Choose French or English for SentriX."
+                if language == language_runtime.LANG_EN
+                else "Choisir Francais ou English pour SentriX."
+            )
+            category_select.append_option(
+                discord.SelectOption(
+                    label=option_label,
+                    value=LANGUAGE_CATEGORY_VALUE,
+                    description=option_description,
+                )
+            )
+            original_callback = category_select.callback
+
+            async def category_callback(interaction: discord.Interaction):
+                if not category_select.values or category_select.values[0] != LANGUAGE_CATEGORY_VALUE:
+                    return await original_callback(interaction)
+
+                if not _can_change_language(interaction):
                     return await interaction.response.send_message(
                         "Administrator permission required. / Permission Administrateur requise.",
                         ephemeral=True,
                     )
+
+                picker = discord.ui.View(timeout=90)
+                fr_button = discord.ui.Button(
+                    label="Francais",
+                    emoji="🇫🇷",
+                    style=discord.ButtonStyle.primary,
+                )
+                en_button = discord.ui.Button(
+                    label="English",
+                    emoji="🇬🇧",
+                    style=discord.ButtonStyle.secondary,
+                )
+
+                async def choose_language(choice_interaction: discord.Interaction, choice: str):
+                    if not _can_change_language(choice_interaction):
+                        return await choice_interaction.response.send_message(
+                            "Administrator permission required. / Permission Administrateur requise.",
+                            ephemeral=True,
+                        )
+                    await language_runtime.set_language(self.bot, self.guild_id, choice)
+                    self.render_page()
+                    chosen_label = "English" if choice == language_runtime.LANG_EN else "Francais"
+                    confirmation = discord.Embed(
+                        title="🌐 Language changed" if choice == language_runtime.LANG_EN else "🌐 Langue modifiee",
+                        description=(
+                            f"Server language is now **{chosen_label}**."
+                            if choice == language_runtime.LANG_EN
+                            else f"La langue du serveur est maintenant **{chosen_label}**."
+                        ),
+                        color=0x8B5CF6,
+                    )
+                    await choice_interaction.response.edit_message(embed=confirmation, view=None)
+
+                    # Rafraichit aussi le vrai +setup pour que la categorie et tout le panneau
+                    # passent immediatement dans la nouvelle langue.
+                    try:
+                        channel = self.bot.get_channel(self.channel_id)
+                        if channel is not None:
+                            message = await channel.fetch_message(self.message_id)
+                            await message.edit(embed=await self.build_embed(), view=self)
+                    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                        logger.exception("Langue changee mais rafraichissement du panneau +setup impossible.")
+
+                async def choose_fr(choice_interaction: discord.Interaction):
+                    await choose_language(choice_interaction, language_runtime.LANG_FR)
+
+                async def choose_en(choice_interaction: discord.Interaction):
+                    await choose_language(choice_interaction, language_runtime.LANG_EN)
+
+                fr_button.callback = choose_fr
+                en_button.callback = choose_en
+                picker.add_item(fr_button)
+                picker.add_item(en_button)
+
                 title = "🌐 Choose the server language" if language == language_runtime.LANG_EN else "🌐 Choisir la langue du serveur"
                 text = (
-                    "Choose **English** or **Francais** below. The command names and SentriX interfaces will follow this choice."
+                    "Choose **English** or **Francais** below."
                     if language == language_runtime.LANG_EN
-                    else "Choisis **Français** ou **English** ci-dessous. Les noms des commandes et les interfaces SentriX suivront ce choix."
+                    else "Choisis **Francais** ou **English** ci-dessous."
                 )
                 await interaction.response.send_message(
                     embed=discord.Embed(title=title, description=text, color=0x8B5CF6),
-                    view=language_runtime.LanguageChoiceView(self.bot),
+                    view=picker,
                     ephemeral=True,
                 )
 
-            language_button.callback = open_language_picker
-            self.add_item(language_button)
-
-            selector = discord.ui.Select(
-                placeholder="🌐 Language / Langue",
-                min_values=1,
-                max_values=1,
-                options=[
-                    discord.SelectOption(
-                        label="🇫🇷 Francais",
-                        value=language_runtime.LANG_FR,
-                        description="Noms de commandes et interfaces en francais",
-                    ),
-                    discord.SelectOption(
-                        label="🇬🇧 English",
-                        value=language_runtime.LANG_EN,
-                        description="Command names and interfaces in English",
-                    ),
-                ],
-                row=3,
-            )
-
-            async def language_callback(interaction: discord.Interaction):
-                member = interaction.user
-                if not isinstance(member, discord.Member) or (
-                    not member.guild_permissions.administrator
-                    and member.id != interaction.guild.owner_id
-                ):
-                    return await interaction.response.send_message(
-                        "Administrator permission required. / Permission Administrateur requise.",
-                        ephemeral=True,
-                    )
-                await language_runtime.set_language(self.bot, self.guild_id, selector.values[0])
-                self.render_page()
-                await interaction.response.edit_message(embed=await self.build_embed(), view=self)
-
-            selector.callback = language_callback
-            self.add_item(selector)
+            category_select.callback = category_callback
 
         render_page._sentrix_final_language_render = True
         view_cls.render_page = render_page
 
-    logger.info("Langue +setup finalisée : bouton visible + sélecteur FR/EN après toutes les couches UI.")
+    logger.info("Langue +setup finalisee : entree Langue ajoutee directement au menu Categories.")
