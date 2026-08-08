@@ -9,6 +9,7 @@ from .bot_tracker import install as install_bot_tracker
 from .common_command_names import install as install_common_command_names
 from .dashboard_access import install_dashboard_access
 from .generated_logs_sync import install as install_generated_logs_sync
+from .giveaway_antialt import install as install_giveaway_antialt
 from .help_complete import install as install_complete_help
 from .help_home_circles import install as install_help_home_circles
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
@@ -100,6 +101,10 @@ async def _load_extension_with_sentrix_patches(
         install_ticket_claim_security(bot)
         # Le rôle de ping est indépendant du rôle staff qui gère les permissions du salon.
         install_ticket_ping_runtime(bot)
+    if name == "cogs.events" or name.endswith(".events"):
+        # Les participations giveaway passent par une vérification réseau à empreinte HMAC :
+        # une connexion ne peut valider qu'un compte par giveaway, sans stocker l'IP brute.
+        await install_giveaway_antialt(bot)
     if name == "cogs.server_builder" or name.endswith(".server_builder"):
         await install_server_builder_everyone_ping(bot)
         install_server_builder_channel_guides(bot)
