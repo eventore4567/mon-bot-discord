@@ -39,6 +39,7 @@ from .server_choice_roles import install as install_server_choice_roles
 from .shop_default_prices import install as install_shop_default_prices
 from .setup_close_fix import install as install_setup_close_fix
 from .setup_create_logs_sync import install as install_setup_create_logs_sync
+from .setup_mobile_cleanup import install as install_setup_mobile_cleanup
 from .setup_oxyde_style import install as install_setup_oxyde_style
 from .stability_runtime import install as install_stability_runtime
 from .ticket_claim_security import install as install_ticket_claim_security
@@ -139,6 +140,8 @@ async def _load_extension_with_sentrix_patches(
         # Refonte visuelle inspirée des panneaux premium/OXYDE, sans toucher à la logique
         # de persistance, de permissions ni aux callbacks existants de +setup.
         install_setup_oxyde_style(bot)
+        # Retire le bloc Modules/✅/⚠️ qui s'empilait verticalement sur mobile.
+        install_setup_mobile_cleanup(bot)
         # Choix du rôle à notifier à l'ouverture d'un ticket directement dans +setup.
         install_ticket_ping_setup(bot)
     if name == "cogs.tickets" or name.endswith(".tickets"):
