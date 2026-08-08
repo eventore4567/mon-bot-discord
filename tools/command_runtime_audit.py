@@ -149,18 +149,42 @@ async def run() -> int:
         if not command_response_guard._INSTALLED:
             errors.append("le filet de sécurité de réponse des commandes n'est pas installé")
 
-        start_listeners = bot.extra_events.get("on_command", [])
-        prefix_listeners = bot.extra_events.get("on_command_completion", [])
-        error_listeners = bot.extra_events.get("on_command_error", [])
-        slash_listeners = bot.extra_events.get("on_app_command_completion", [])
-        if not start_listeners:
-            errors.append("listener de mesure de latence des commandes + absent")
-        if not prefix_listeners:
-            errors.append("listener de réponse de secours des commandes + absent")
-        if not error_listeners:
-            errors.append("listener de récupération des fautes de commandes + absent")
-        if not slash_listeners:
-            errors.append("listener de réponse de secours des commandes slash absent")
+        # Le système qualité doit couvrir commandes préfixées ET slash : départ,
+        # completion, erreurs et interactions. Une régression d'un listener casse la CI.
+        required_listeners = {
+            "on_command": "mesure de départ des commandes +",
+            "on_command_completion": "réponse/mesure de fin des commandes +",
+            "on_command_error": "suggestions et diagnostic d'erreur des commandes +",
+            "on_interaction": "mesure de départ des commandes slash",
+            "on_app_command_completion": "réponse/mesure de fin des commandes slash",
+        }
+        for event_name, label in required_listeners.items():
+            if not bot.extra_events.get(event_name, []):
+                errors.append(f"listener absent: {label} ({event_name})")
+
+        # Garantie demandée : TOUTE commande visible, y compris les sous-commandes, doit
+        # participer au correcteur de fautes. On simule une faute simple en ajoutant un
+        # caractère : le nom canonique doit rester dans les 3 suggestions.
+        suggestion_failures: list[str] = []
+        suggestion_covered = 0
+        for command in active:
+            if getattr(command, "hidden", False):
+                continue
+            canonical = str(command.qualified_name).strip()
+            if not canonical:
+                continue
+            suggestion_covered += 1
+            typo = canonical + "x"
+            suggestions = command_response_guard._command_suggestions(bot, typo)
+            if canonical not in suggestions:
+                suggestion_failures.append(
+                    f"{canonical} -> {typo!r} => {suggestions!r}"
+                )
+        if suggestion_failures:
+            errors.append(
+                "correcteur de fautes incomplet pour certaines commandes: "
+                + " ; ".join(suggestion_failures[:20])
+            )
 
         typo_suggestions = command_response_guard._command_suggestions(bot, "hlep")
         if "help" not in typo_suggestions:
@@ -202,7 +226,8 @@ async def run() -> int:
             f"{len(command_catalog_cleanup.RESTORED_COMMANDS)} commandes utiles garanties, "
             f"{len(command_catalog_cleanup.CONFIRMED_DUPLICATE_COMMANDS)} doublons retirés"
         )
-        print("UX commandes: suggestions de fautes + diagnostic de latence actifs")
+        print(f"Correcteur de fautes: {suggestion_covered} commande(s) visible(s) couvertes")
+        print("UX commandes: réponses garanties + diagnostic de latence préfixe/slash actifs")
         print("Catégories +help:")
         for category in help_complete.CATEGORIES:
             count = category_counts.get(category.key, 0)
@@ -234,7 +259,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} problème(s) détecté(s)")
         return 1
-    print("OK: registre complet chargé, catalogue nettoyé, catégories valides, UX commandes active, callbacks valides et garde de réponse active")
+    print("OK: toutes les commandes actives sont chargées, classées, couvertes par le correcteur et protégées par les garde-fous UX")
     return 0
 
 
