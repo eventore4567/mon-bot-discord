@@ -1,11 +1,27 @@
-"""Ajoute des noms de commandes courts et familiers sans casser les noms internes."""
+"""Ajoute des noms de commandes courts et familiers sans casser les noms internes.
+
+Cette couche améliore aussi l'usage quotidien :
+- alias français simples pour les commandes les plus utilisées ;
+- résolution robuste des utilisateurs par ID/mention, même hors cache Discord ;
+- réponse courte lorsqu'un membre mentionne uniquement SentriX pour retrouver le préfixe.
+"""
 from __future__ import annotations
 
 import logging
+import re
+import time
+
+import discord
 from discord.ext import commands
+
+import config
+from utils import embeds
 
 logger = logging.getLogger("bot.common-command-names")
 _HELP_PATCHED = False
+_USER_CONVERTER_PATCHED = False
+_MENTION_COOLDOWN_SECONDS = 5.0
+_MENTION_LAST: dict[int, float] = {}
 
 # Ne jamais renommer ces commandes, conformément au choix du propriétaire.
 PROTECTED_NAMES = {"bl", "blacklist-add", "blacklist-list", "blacklist-remove"}
@@ -111,6 +127,57 @@ PREFERRED_COMMAND_NAMES: dict[str, str] = {
     "bot-leave": "leaveserver",
 }
 
+# Alias secondaires : ils ne remplacent PAS le nom affiché dans +help. Ils permettent
+# simplement de taper des commandes évidentes en français sans apprendre le nom anglais.
+FRENCH_COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
+    "help": ("aide",),
+    "avatar": ("pp",),
+    "userinfo": ("utilisateur",),
+    "membercount": ("membres",),
+    "poll": ("sondage",),
+    "remind": ("rappel",),
+    "translate": ("traduire",),
+    "weather": ("meteo",),
+    "correct": ("corriger",),
+    "rewrite": ("reformuler",),
+    "summarize": ("resumer",),
+    "explain": ("expliquer",),
+    "ban": ("bannir",),
+    "unban": ("debannir",),
+    "kick": ("expulser",),
+    "warn": ("avertir",),
+    "warnings": ("avertissements",),
+    "unwarn": ("retireravertissement",),
+    "clearwarnings": ("effaceravertissements",),
+    "mute": ("muet",),
+    "unmute": ("demuet",),
+    "clear": ("effacer",),
+    "lock": ("verrouiller",),
+    "unlock": ("deverrouiller",),
+    "slowmode": ("ralenti",),
+    "setup": ("configurer", "configuration"),
+    "diagnostic": ("verifierbot",),
+    "security-check": ("securite",),
+    "balance": ("solde",),
+    "inventory": ("inventaire",),
+    "daily": ("quotidien",),
+    "weekly": ("hebdo",),
+    "work": ("travailler",),
+    "pay": ("payer",),
+    "shop": ("boutique",),
+    "level": ("niveau",),
+    "leaderboard-levels": ("classementniveaux",),
+    "profile": ("profil",),
+    "ticket": ("support",),
+    "giveaway-list": ("concours",),
+    "invite-leaderboard": ("classementinvites",),
+    "play": ("jouer",),
+    "queue": ("file",),
+    "skip": ("suivant",),
+    "stop": ("arreter",),
+    "nowplaying": ("encours",),
+}
+
 
 def preferred_name(command: commands.Command) -> str:
     extras = getattr(command, "extras", {}) or {}
@@ -143,6 +210,122 @@ def _register_alias(bot: commands.Bot, command: commands.Command, preferred: str
     bot.all_commands[preferred] = command
     command.extras["sentrix_preferred_name"] = preferred
     return True
+
+
+def _register_secondary_alias(bot: commands.Bot, command: commands.Command, alias: str) -> bool:
+    """Ajoute un alias sans modifier le nom conseillé/affiché de la commande."""
+    if command.parent is not None:
+        return False
+    alias = str(alias or "").casefold().strip()
+    if not alias or alias == str(command.name).casefold():
+        return False
+
+    existing = bot.all_commands.get(alias)
+    if existing is not None:
+        return existing is command
+
+    aliases = getattr(command, "aliases", None)
+    if isinstance(aliases, list) and alias not in aliases:
+        aliases.append(alias)
+    bot.all_commands[alias] = command
+    return True
+
+
+def _patch_user_converter() -> None:
+    """Accepte un ID/une mention utilisateur même si l'utilisateur n'est pas en cache.
+
+    C'est particulièrement important pour +bl / +unbl : un propriétaire doit pouvoir viser
+    un compte qui n'est actuellement dans aucun serveur partagé avec SentriX.
+    """
+    global _USER_CONVERTER_PATCHED
+    if _USER_CONVERTER_PATCHED:
+        return
+
+    current = commands.UserConverter.convert
+    if getattr(current, "_sentrix_resilient_user_converter", False):
+        _USER_CONVERTER_PATCHED = True
+        return
+
+    async def convert_with_fetch_fallback(self, ctx: commands.Context, argument: str):
+        try:
+            return await current(self, ctx, argument)
+        except commands.UserNotFound as original_error:
+            text = str(argument or "").strip()
+            match = re.fullmatch(r"<@!?(\d{15,25})>", text) or re.fullmatch(r"(\d{15,25})", text)
+            if not match:
+                raise
+
+            user_id = int(match.group(1))
+            cached = ctx.bot.get_user(user_id)
+            if cached is not None:
+                return cached
+            try:
+                return await ctx.bot.fetch_user(user_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                raise original_error
+
+    convert_with_fetch_fallback._sentrix_resilient_user_converter = True
+    commands.UserConverter.convert = convert_with_fetch_fallback
+    _USER_CONVERTER_PATCHED = True
+    logger.info("Résolution utilisateur renforcée : ID/mention hors cache pris en charge.")
+
+
+async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
+    """Quand quelqu'un ping uniquement SentriX, lui indique immédiatement comment commencer."""
+    if message.author.bot or bot.user is None:
+        return
+
+    content = str(message.content or "").strip()
+    if content not in {f"<@{bot.user.id}>", f"<@!{bot.user.id}>"}:
+        return
+
+    now = time.monotonic()
+    user_id = int(message.author.id)
+    if now - _MENTION_LAST.get(user_id, 0.0) < _MENTION_COOLDOWN_SECONDS:
+        return
+    _MENTION_LAST[user_id] = now
+    if len(_MENTION_LAST) > 5000:
+        cutoff = now - 60.0
+        for key, stamp in list(_MENTION_LAST.items()):
+            if stamp < cutoff:
+                _MENTION_LAST.pop(key, None)
+
+    prefix = config.DEFAULT_PREFIX
+    if message.guild is not None:
+        cached = getattr(bot, "prefix_cache", {}).get(message.guild.id)
+        if cached:
+            prefix = cached
+        else:
+            try:
+                conf = await bot.db.get_guild_config(message.guild.id)
+                if conf and conf["prefix"]:
+                    prefix = conf["prefix"]
+            except Exception:
+                pass
+
+    try:
+        await message.channel.send(
+            embed=embeds.neutral(
+                "👋 Besoin d'aide ?",
+                f"Mon préfixe sur ce serveur est **`{prefix}`**.\n"
+                f"Tape **`{prefix}help`** pour voir les commandes ou **`{prefix}setup`** pour configurer le serveur.",
+            ),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+
+
+def _install_mention_listener(bot: commands.Bot) -> None:
+    if getattr(bot, "_sentrix_mention_help_listener", False):
+        return
+
+    async def listener(message: discord.Message):
+        await _mention_help(bot, message)
+
+    bot.add_listener(listener, "on_message")
+    bot._sentrix_mention_help_listener = True
+    logger.info("Aide au ping direct activée : @SentriX affiche le préfixe et +help.")
 
 
 def _patch_help_renderers() -> None:
@@ -209,13 +392,25 @@ def _patch_help_renderers() -> None:
 
 
 def install(bot: commands.Bot) -> None:
+    _patch_user_converter()
+    _install_mention_listener(bot)
+
     added = 0
+    french_added = 0
     for command in list(bot.walk_commands()):
         if command.parent is not None:
             continue
+
         preferred = PREFERRED_COMMAND_NAMES.get(str(command.name))
         if preferred and _register_alias(bot, command, preferred):
             added += 1
+
+        for alias in FRENCH_COMMAND_ALIASES.get(str(command.name), ()):
+            if _register_secondary_alias(bot, command, alias):
+                french_added += 1
+
     _patch_help_renderers()
     if added:
         logger.info("%s alias de commandes familiers ajoutés.", added)
+    if french_added:
+        logger.info("%s alias français simples disponibles.", french_added)
