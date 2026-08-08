@@ -14,7 +14,8 @@ logger = logging.getLogger("bot.command-catalog-cleanup")
 _INSTALLED = False
 
 # Commandes auparavant retirées uniquement parce qu'elles étaient accessibles depuis un
-# panneau +setup. Elles restent utiles en accès direct et doivent donc exister dans +help.
+# panneau +setup, plus +code qui reste utile comme raccourci IA spécialisé. Elles doivent
+# toutes exister dans le registre et donc apparaître automatiquement dans +help.
 RESTORED_COMMANDS = frozenset({
     "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs",
     "setwelcomechannel", "setgoodbyechannel", "setwelcomemessage",
@@ -23,7 +24,7 @@ RESTORED_COMMANDS = frozenset({
     "setgiveawaychannel", "verify-setup", "set-level-role",
     "remove-level-role", "level-roles", "ticketpanel", "ticketpanel-toggle",
     "tickettype", "ticketform", "ticketconfig", "ticketlogs", "ticketlimit",
-    "ticketautoclose",
+    "ticketautoclose", "code",
 })
 
 # Alias confirmés qui font exactement la même chose qu'une commande principale. Ils sont
@@ -33,16 +34,15 @@ CONFIRMED_DUPLICATE_COMMANDS = frozenset({
     "me",                 # stats
     "rank",               # level
     "buyrole",            # buy
-    "ask",                # ai
-    "chat",               # ai
-    "chat-reset",         # reset géré par l'IA principale
+    "ask",                # ancienne entrée IA, remplacée par ai
+    "chat",               # même pipeline que ai
+    "chat-reset",         # ancien reset, remplacé proprement par +ai reset
     "embed-create",       # embed create
     "latency",            # ping
     "levelroles",         # statsconfig ouvert directement sur la page niveaux
 })
 
-# +code est déjà supprimée par remove_code_command.py : ancienne commande devenue inutile.
-INTENTIONALLY_REMOVED_COMMANDS = CONFIRMED_DUPLICATE_COMMANDS | {"code"}
+INTENTIONALLY_REMOVED_COMMANDS = CONFIRMED_DUPLICATE_COMMANDS
 
 
 def install(bot: commands.Bot) -> None:
@@ -63,7 +63,7 @@ def install(bot: commands.Bot) -> None:
 
     _INSTALLED = True
     logger.info(
-        "Catalogue complet activé : %s commandes directes restaurées, %s doublons retirés.",
+        "Catalogue complet activé : %s commandes utiles garanties, %s doublons retirés.",
         len(RESTORED_COMMANDS),
         len(CONFIRMED_DUPLICATE_COMMANDS),
     )
