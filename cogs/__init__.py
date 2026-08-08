@@ -18,6 +18,7 @@ from .no_auto_tracker import install as install_no_auto_tracker
 from .owner_sanction_immunity import install as install_owner_sanction_immunity
 from .poll_ui import install_poll_ui
 from .premium_logs import install as install_premium_logs
+from .premium_logs_v2 import install as install_premium_logs_v2
 from .premium_style_runtime import install as install_premium_style
 from .remove_code_command import install as install_remove_code_command
 from .reply_reference_fix import install as install_reply_reference_fix
@@ -132,9 +133,11 @@ async def _load_extension_with_sentrix_patches(
 
     # Style premium appliqué EN DERNIER sur le moteur de logs : les infos d'Audit Log
     # (staff/autre bot), la déduplication et l'auto-réparation ont donc déjà été faites.
-    # Les embeds gagnent couleurs par action, identité/thumbnail, détails de timeout et
-    # boutons pratiques pour afficher/copier les IDs.
     install_premium_logs(bot)
+    # Sur discord.py >= 2.6, transforme les embeds en cartes Components V2 avec vraie
+    # barre d'accent, sections, séparateurs, thumbnail et boutons intégrés. Un fallback
+    # conserve automatiquement l'embed premium si Discord refuse la carte.
+    install_premium_logs_v2(bot)
 
     # Correctifs transversaux issus de la passe de stabilité : reprise des notifications
     # sociales, sérialisation du cache d'invitations et limite de récompenses de jeux.
