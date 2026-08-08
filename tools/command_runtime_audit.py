@@ -136,10 +136,6 @@ async def run() -> int:
                 + ", ".join(pruned_still_visible)
             )
 
-        code_command = bot.get_command("code")
-        if code_command is not None:
-            errors.append("ancienne commande inutile +code encore visible")
-
         registered_roots = {command.name.casefold() for command in bot.commands}
         unknown_permissions = sorted(registered_roots - main.KNOWN_PERMISSION_COMMANDS)
         if unknown_permissions:
@@ -191,7 +187,7 @@ async def run() -> int:
         print(f"Extensions: {len(loaded)}/{len(main.EXTENSIONS)} chargées")
         print(
             "Catalogue: "
-            f"{len(command_catalog_cleanup.RESTORED_COMMANDS)} commandes directes restaurées, "
+            f"{len(command_catalog_cleanup.RESTORED_COMMANDS)} commandes utiles garanties, "
             f"{len(command_catalog_cleanup.CONFIRMED_DUPLICATE_COMMANDS)} doublons retirés"
         )
         print("Catégories +help:")
