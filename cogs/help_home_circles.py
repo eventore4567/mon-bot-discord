@@ -87,6 +87,73 @@ def _clean_home_components(view: discord.ui.View) -> None:
             logger.debug("Composant de l'accueil help non modifiable.", exc_info=True)
 
 
+async def _configured_prefix(bot: commands.Bot, message: discord.Message) -> str:
+    """Retourne le préfixe configuré sans faire de requête DB inutile."""
+    if message.guild is None:
+        return "+"
+
+    cached = getattr(bot, "prefix_cache", {}).get(message.guild.id)
+    if cached:
+        return str(cached)
+
+    try:
+        conf = await bot.db.get_guild_config(message.guild.id)
+        prefix = conf["prefix"] if conf and conf["prefix"] else "+"
+    except Exception:
+        prefix = "+"
+    return str(prefix)
+
+
+def _install_plus_help_shortcut(bot: commands.Bot) -> None:
+    """Garantit que le message exact ``+help`` ouvre toujours l'aide.
+
+    Le préfixe d'un serveur peut être personnalisé. Historiquement, dans ce cas,
+    ``+help`` n'était plus reconnu. On garde donc ``+help`` comme raccourci universel
+    sans modifier le préfixe des autres commandes et sans demander d'argument après help.
+    """
+    if getattr(bot, "_sentrix_plus_help_shortcut", False):
+        return
+
+    async def plus_help_listener(message: discord.Message):
+        if message.author.bot:
+            return
+        if str(message.content or "").strip().casefold() != "+help":
+            return
+
+        # Si + est déjà le préfixe actif, le moteur normal de discord.py traite la
+        # commande. Ne rien faire ici évite une double réponse.
+        if await _configured_prefix(bot, message) == "+":
+            return
+
+        help_command = bot.get_command("help")
+        if help_command is None:
+            return
+
+        try:
+            ctx = await bot.get_context(message)
+            if ctx.command is not None:
+                return
+
+            # get_context n'a pas reconnu le préfixe +, donc sa vue pointe encore sur
+            # le texte brut « +help ». On la place en fin de message pour que la
+            # commande help ne reçoive AUCUN argument parasite.
+            ctx.command = help_command
+            ctx.invoked_with = "help"
+            ctx.prefix = "+"
+            view = getattr(ctx, "view", None)
+            if view is not None:
+                view.index = len(view.buffer)
+                view.previous = view.index
+
+            await bot.invoke(ctx)
+        except Exception:
+            logger.exception("Le raccourci universel +help a échoué.")
+
+    bot.add_listener(plus_help_listener, "on_message")
+    bot._sentrix_plus_help_shortcut = True
+    logger.info("Raccourci universel +help actif : aucun argument requis.")
+
+
 def install(bot: commands.Bot) -> None:
     """Installe les catégories canoniques puis le style sobre de +help."""
     global _INSTALLED
@@ -122,6 +189,10 @@ def install(bot: commands.Bot) -> None:
         _clean_home_components(self)
 
     utility.HelpView.__init__ = help_view_init
+
+    # +help reste toujours disponible directement, même si le serveur utilise un autre
+    # préfixe pour le reste des commandes.
+    _install_plus_help_shortcut(bot)
 
     # Dernière couche : les commandes restent exactement les mêmes, mais leur fiche
     # devient compréhensible pour quelqu'un qui ne connaît ni le jargon Discord ni les
