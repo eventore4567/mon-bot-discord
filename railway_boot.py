@@ -12,14 +12,25 @@ import traceback
 
 from discord.ext import commands
 
+import config
+
+
+class SentriXAutoShardedBot(commands.AutoShardedBot):
+    """AutoShardedBot qui respecte SHARD_COUNT quand l'opérateur veut le figer."""
+
+    def __init__(self, *args, **kwargs):
+        if config.SHARD_COUNT > 0:
+            kwargs.setdefault("shard_count", config.SHARD_COUNT)
+        super().__init__(*args, **kwargs)
+
+
 # IMPORTANT : main.BotAllInOne est défini en héritant de commands.Bot. Sur le bootstrap
-# Railway uniquement, on remplace cette classe de base AVANT d'importer main afin d'obtenir
-# AutoShardedBot sans dupliquer les centaines de lignes du point d'entrée historique.
+# Railway uniquement, on remplace cette classe de base AVANT d'importer main. Avec
+# SHARD_COUNT=0, discord.py demande automatiquement à Discord le nombre recommandé.
 if not getattr(commands, "_sentrix_auto_sharded_bootstrap", False):
-    commands.Bot = commands.AutoShardedBot
+    commands.Bot = SentriXAutoShardedBot
     commands._sentrix_auto_sharded_bootstrap = True
 
-import config
 import main as bot_main
 
 
@@ -37,8 +48,9 @@ async def run() -> None:
     await bot.db.connect()
     logger.info("Base prête pour le démarrage anticipé du dashboard Railway.")
     logger.info(
-        "Sharding production actif : %s (0/None signifie détermination automatique par Discord).",
-        getattr(bot, "shard_count", None),
+        "Sharding production actif : configuration=%s, runtime=%s.",
+        config.SHARD_COUNT or "auto",
+        getattr(bot, "shard_count", None) or "auto",
     )
 
     real_start_dashboard = bot_main.start_dashboard
