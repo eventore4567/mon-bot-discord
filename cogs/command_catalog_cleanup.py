@@ -24,14 +24,15 @@ RESTORED_COMMANDS = frozenset({
     "setgiveawaychannel", "verify-setup", "set-level-role",
     "remove-level-role", "level-roles", "ticketpanel", "ticketpanel-toggle",
     "tickettype", "ticketform", "ticketconfig", "ticketlogs", "ticketlimit",
-    "ticketautoclose", "code",
+    "ticketautoclose", "code", "me",
 })
 
 # Alias confirmés qui font exactement la même chose qu'une commande principale. Ils sont
 # retirés du registre pour éviter un +help rempli de doublons inutiles.
+# +me est volontairement conservé : c'est le raccourci personnel naturel pour afficher
+# toutes ses statistiques (niveau, XP, messages, vocal, économie, réputation, etc.).
 CONFIRMED_DUPLICATE_COMMANDS = frozenset({
     "leaderboard-money",  # economyleaderboard
-    "me",                 # stats
     "rank",               # level
     "buyrole",            # buy
     "ask",                # ancienne entrée IA, remplacée par ai
