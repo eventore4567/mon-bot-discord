@@ -1,0 +1,637 @@
+"""Style final et sans emoji pour toute l'interface +help SentriX.
+
+Cette couche est volontairement installee apres le moteur de langue. Elle devient donc
+la source visuelle finale de +help, sans modifier le registre, les permissions ou la
+logique des commandes.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Iterable
+
+import discord
+from discord.ext import commands
+
+from utils import embeds
+
+logger = logging.getLogger("bot.help-clean-style")
+
+ACCENT = 0x6D5DFB
+_ALL_VALUE = "__sentrix_clean_all__"
+
+
+def _brand(title: str, description: str = "") -> discord.Embed:
+    embed = embeds.brand(title, description)
+    embed.colour = discord.Colour(ACCENT)
+    return embed
+
+
+def _language(bot: commands.Bot, guild_id: int | None) -> str:
+    from . import language_runtime
+
+    return language_runtime.cached_language(bot, guild_id)
+
+
+def _category_text(category, language: str) -> tuple[str, str]:
+    from . import language_runtime
+
+    return language_runtime._category_text(category, language)
+
+
+def _help_entries(bot: commands.Bot, is_staff: bool):
+    from . import language_runtime
+
+    return language_runtime._help_entries(bot, is_staff)
+
+
+def _usage(command: commands.Command, prefix: str, language: str) -> str:
+    from . import language_runtime
+
+    return language_runtime._command_usage(command, prefix, language)
+
+
+def _summary(command: commands.Command, language: str) -> str:
+    from . import language_runtime
+
+    return language_runtime._summary(command, language)
+
+
+def _is_staff(command: commands.Command) -> bool:
+    from . import utility
+
+    return utility.is_staff_command(command)
+
+
+def _command_line(
+    utility,
+    command: commands.Command,
+    prefix: str,
+    language: str,
+    number: int | None = None,
+) -> str:
+    del utility
+    usage = _usage(command, prefix, language)
+    access = "STAFF" if _is_staff(command) else ("MEMBER" if language == "en" else "MEMBRE")
+    index = f"`{number:02d}`  " if number is not None else ""
+    return f"{index}`{usage}`  `{access}`\n{_summary(command, language)}"
+
+
+def _help_home(
+    bot: commands.Bot,
+    guild: discord.Guild | None,
+    prefix: str,
+    is_staff: bool,
+    language: str,
+) -> discord.Embed:
+    entries = _help_entries(bot, is_staff)
+    total = sum(len(commands_list) for _, commands_list in entries)
+    server_name = guild.name if guild else ("this server" if language == "en" else "ce serveur")
+
+    if language == "en":
+        embed = _brand(
+            "SENTRIX / COMMAND CENTER",
+            (
+                f"Commands available on **{server_name}**. Select a category below or use search.\n\n"
+                f"**{total} active commands**  |  prefix `{prefix}`"
+            ),
+        )
+        section_names = {
+            "essential": "ESSENTIALS",
+            "community": "COMMUNITY",
+            "staff": "ADMINISTRATION",
+        }
+        navigation = (
+            f"`{prefix}help ban`  -  open a command sheet\n"
+            "Search  -  find a command by name or keyword\n"
+            "Language  -  English"
+        )
+        navigation_title = "NAVIGATION"
+    else:
+        embed = _brand(
+            "SENTRIX / COMMANDES",
+            (
+                f"Commandes disponibles sur **{server_name}**. Choisis une categorie ou utilise la recherche.\n\n"
+                f"**{total} commandes actives**  |  prefixe `{prefix}`"
+            ),
+        )
+        section_names = {
+            "essential": "ESSENTIELS",
+            "community": "COMMUNAUTE",
+            "staff": "ADMINISTRATION",
+        }
+        navigation = (
+            f"`{prefix}aide bannir`  -  ouvrir la fiche d'une commande\n"
+            "Rechercher  -  trouver une commande par nom ou mot-cle\n"
+            "Langue  -  Francais"
+        )
+        navigation_title = "NAVIGATION"
+
+    if bot.user:
+        embed.set_thumbnail(url=bot.user.display_avatar.url)
+
+    for section in ("essential", "community", "staff"):
+        rows: list[str] = []
+        for category, commands_list in entries:
+            if getattr(category, "section", "") != section:
+                continue
+            name, _ = _category_text(category, language)
+            unit = "commands" if language == "en" else "commandes"
+            rows.append(f"**{name}**  -  `{len(commands_list)} {unit}`")
+        if rows:
+            embed.add_field(
+                name=section_names[section],
+                value="\n".join(rows),
+                inline=section != "staff",
+            )
+
+    embed.add_field(name=navigation_title, value=navigation, inline=False)
+    embed.set_footer(
+        text=(
+            "SentriX | Select a category to continue"
+            if language == "en"
+            else "SentriX | Selectionne une categorie pour continuer"
+        )
+    )
+    return embed
+
+
+def _category_pages(
+    bot: commands.Bot,
+    prefix: str,
+    language: str,
+    category,
+    commands_list: list[commands.Command],
+) -> list[discord.Embed]:
+    del bot
+    name, summary = _category_text(category, language)
+    chunks = [commands_list[index:index + 10] for index in range(0, len(commands_list), 10)] or [[]]
+    pages: list[discord.Embed] = []
+    for page_number, chunk in enumerate(chunks, start=1):
+        lines = [_command_line(None, command, prefix, language) for command in chunk]
+        body = summary
+        if lines:
+            body += "\n\n" + "\n\n".join(lines)
+        embed = _brand(f"SENTRIX / {name.upper()}", body)
+        if language == "en":
+            embed.set_footer(
+                text=f"Page {page_number}/{len(chunks)} | {len(commands_list)} commands | <required> [optional]"
+            )
+        else:
+            embed.set_footer(
+                text=f"Page {page_number}/{len(chunks)} | {len(commands_list)} commandes | <obligatoire> [facultatif]"
+            )
+        pages.append(embed)
+    return pages
+
+
+def _all_pages(bot: commands.Bot, prefix: str, language: str, is_staff: bool) -> list[discord.Embed]:
+    commands_with_category: list[tuple[object, commands.Command]] = []
+    for category, command_list in _help_entries(bot, is_staff):
+        commands_with_category.extend((category, command) for command in command_list)
+
+    chunks = [
+        commands_with_category[index:index + 10]
+        for index in range(0, len(commands_with_category), 10)
+    ] or [[]]
+    pages: list[discord.Embed] = []
+    for page_number, chunk in enumerate(chunks, start=1):
+        lines: list[str] = []
+        base_index = (page_number - 1) * 10
+        for offset, (category, command) in enumerate(chunk, start=1):
+            category_name, _ = _category_text(category, language)
+            lines.append(
+                _command_line(None, command, prefix, language, base_index + offset)
+                + f"\n`{category_name}`"
+            )
+        title = "SENTRIX / ALL COMMANDS" if language == "en" else "SENTRIX / TOUTES LES COMMANDES"
+        description = "\n\n".join(lines) if lines else ("No command." if language == "en" else "Aucune commande.")
+        embed = _brand(title, description)
+        embed.set_footer(
+            text=(
+                f"Page {page_number}/{len(chunks)} | {len(commands_with_category)} commands"
+                if language == "en"
+                else f"Page {page_number}/{len(chunks)} | {len(commands_with_category)} commandes"
+            )
+        )
+        pages.append(embed)
+    return pages
+
+
+def _text_has_emoji(value: str | None) -> bool:
+    """Utilitaire egalement exploite par l'audit CI."""
+    if not value:
+        return False
+    for char in str(value):
+        code = ord(char)
+        if 0x1F000 <= code <= 0x1FAFF or 0x2600 <= code <= 0x27BF:
+            return True
+    return False
+
+
+def _embed_has_emoji(embed: discord.Embed) -> bool:
+    values: list[str | None] = [embed.title, embed.description]
+    values.extend(field.name for field in embed.fields)
+    values.extend(field.value for field in embed.fields)
+    if embed.footer:
+        values.append(embed.footer.text)
+    return any(_text_has_emoji(value) for value in values)
+
+
+class CleanHelpSearchModal(discord.ui.Modal):
+    def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool, language: str, author_id: int):
+        super().__init__(title="Search a command" if language == "en" else "Rechercher une commande")
+        self.bot = bot
+        self.prefix = prefix
+        self.is_staff = is_staff
+        self.language = language
+        self.author_id = author_id
+        self.query = discord.ui.TextInput(
+            label="Name or keyword" if language == "en" else "Nom ou mot-cle",
+            placeholder="ticket, ban, music..." if language == "en" else "ticket, bannir, musique...",
+            max_length=60,
+        )
+        self.add_item(self.query)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        from . import help_complete, language_runtime, utility
+
+        needle = language_runtime._strip_accents(str(self.query.value).casefold())
+        results: list[commands.Command] = []
+        for command in help_complete._registered_commands(utility, self.bot, self.is_staff):
+            haystack = " ".join(
+                (
+                    command.qualified_name,
+                    language_runtime.localized_command_name(command, self.language),
+                    language_runtime.localized_command_name(command, language_runtime.LANG_FR),
+                    language_runtime.localized_command_name(command, language_runtime.LANG_EN),
+                    _summary(command, self.language),
+                )
+            )
+            if needle in language_runtime._strip_accents(haystack.casefold()):
+                results.append(command)
+
+        if not results:
+            text = "No command found for this search." if self.language == "en" else "Aucune commande trouvee pour cette recherche."
+            embed = _brand("SENTRIX / SEARCH" if self.language == "en" else "SENTRIX / RECHERCHE", text)
+            return await interaction.response.edit_message(
+                embed=embed,
+                view=CleanHelpHomeView(self.bot, self.prefix, self.is_staff, self.language, self.author_id),
+            )
+
+        chunks = [results[index:index + 10] for index in range(0, len(results), 10)]
+        pages: list[discord.Embed] = []
+        for page_number, chunk in enumerate(chunks, start=1):
+            lines = [_command_line(None, command, self.prefix, self.language) for command in chunk]
+            embed = _brand(
+                "SENTRIX / SEARCH" if self.language == "en" else "SENTRIX / RECHERCHE",
+                "\n\n".join(lines),
+            )
+            embed.set_footer(text=f"Page {page_number}/{len(chunks)} | {len(results)}")
+            pages.append(embed)
+
+        home = _help_home(self.bot, interaction.guild, self.prefix, self.is_staff, self.language)
+        await interaction.response.edit_message(
+            embed=pages[0],
+            view=CleanHelpPagesView(
+                self.bot,
+                self.prefix,
+                self.is_staff,
+                self.language,
+                self.author_id,
+                pages,
+                home,
+            ),
+        )
+
+
+class CleanHelpSelect(discord.ui.Select):
+    def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool, language: str, author_id: int):
+        self.bot = bot
+        self.prefix = prefix
+        self.is_staff = is_staff
+        self.language = language
+        self.author_id = author_id
+        self.entries = _help_entries(bot, is_staff)
+        total = sum(len(commands_list) for _, commands_list in self.entries)
+
+        all_label = "All commands" if language == "en" else "Toutes les commandes"
+        options: list[discord.SelectOption] = [
+            discord.SelectOption(
+                label=all_label,
+                value=_ALL_VALUE,
+                description=(f"{total} active commands" if language == "en" else f"{total} commandes actives"),
+            )
+        ]
+        for category, commands_list in self.entries:
+            name, summary = _category_text(category, language)
+            unit = "commands" if language == "en" else "commandes"
+            options.append(
+                discord.SelectOption(
+                    label=name[:100],
+                    value=category.key,
+                    description=f"{len(commands_list)} {unit} | {summary}"[:100],
+                )
+            )
+
+        super().__init__(
+            placeholder="Select a category..." if language == "en" else "Selectionne une categorie...",
+            options=options[:25],
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author_id:
+            text = "This menu belongs to another user." if self.language == "en" else "Ce menu appartient a une autre personne."
+            return await interaction.response.send_message(text, ephemeral=True)
+
+        selected = self.values[0]
+        if selected == _ALL_VALUE:
+            pages = _all_pages(self.bot, self.prefix, self.language, self.is_staff)
+        else:
+            matching = next(
+                ((category, commands_list) for category, commands_list in self.entries if category.key == selected),
+                None,
+            )
+            if matching is None:
+                return await interaction.response.defer()
+            pages = _category_pages(self.bot, self.prefix, self.language, *matching)
+
+        home = _help_home(self.bot, interaction.guild, self.prefix, self.is_staff, self.language)
+        await interaction.response.edit_message(
+            embed=pages[0],
+            view=CleanHelpPagesView(
+                self.bot,
+                self.prefix,
+                self.is_staff,
+                self.language,
+                self.author_id,
+                pages,
+                home,
+            ),
+        )
+
+
+class CleanHelpHomeView(discord.ui.View):
+    def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool, language: str, author_id: int):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.prefix = prefix
+        self.is_staff = is_staff
+        self.language = language
+        self.author_id = author_id
+        self.add_item(CleanHelpSelect(bot, prefix, is_staff, language, author_id))
+
+        search = discord.ui.Button(
+            label="Search" if language == "en" else "Rechercher",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+
+        async def search_callback(interaction: discord.Interaction):
+            if interaction.user.id != author_id:
+                text = "This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne."
+                return await interaction.response.send_message(text, ephemeral=True)
+            await interaction.response.send_modal(
+                CleanHelpSearchModal(bot, prefix, is_staff, language, author_id)
+            )
+
+        search.callback = search_callback
+        self.add_item(search)
+
+
+class CleanHelpPagesView(discord.ui.View):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        prefix: str,
+        is_staff: bool,
+        language: str,
+        author_id: int,
+        pages: list[discord.Embed],
+        home_embed: discord.Embed,
+    ):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.prefix = prefix
+        self.is_staff = is_staff
+        self.language = language
+        self.author_id = author_id
+        self.pages = pages
+        self.home_embed = home_embed
+        self.index = 0
+
+        self.add_item(CleanHelpSelect(bot, prefix, is_staff, language, author_id))
+
+        previous = discord.ui.Button(
+            label="Previous" if language == "en" else "Precedent",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=len(pages) <= 1,
+        )
+        home = discord.ui.Button(
+            label="Home" if language == "en" else "Accueil",
+            style=discord.ButtonStyle.primary,
+            row=1,
+        )
+        next_button = discord.ui.Button(
+            label="Next" if language == "en" else "Suivant",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=len(pages) <= 1,
+        )
+        search = discord.ui.Button(
+            label="Search" if language == "en" else "Rechercher",
+            style=discord.ButtonStyle.secondary,
+            row=2,
+        )
+
+        def refresh() -> None:
+            previous.disabled = self.index <= 0
+            next_button.disabled = self.index >= len(self.pages) - 1
+
+        async def previous_callback(interaction: discord.Interaction):
+            if interaction.user.id != author_id:
+                text = "This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne."
+                return await interaction.response.send_message(text, ephemeral=True)
+            self.index = max(0, self.index - 1)
+            refresh()
+            await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+        async def home_callback(interaction: discord.Interaction):
+            if interaction.user.id != author_id:
+                text = "This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne."
+                return await interaction.response.send_message(text, ephemeral=True)
+            await interaction.response.edit_message(
+                embed=self.home_embed,
+                view=CleanHelpHomeView(bot, prefix, is_staff, language, author_id),
+            )
+
+        async def next_callback(interaction: discord.Interaction):
+            if interaction.user.id != author_id:
+                text = "This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne."
+                return await interaction.response.send_message(text, ephemeral=True)
+            self.index = min(len(self.pages) - 1, self.index + 1)
+            refresh()
+            await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+        async def search_callback(interaction: discord.Interaction):
+            if interaction.user.id != author_id:
+                text = "This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne."
+                return await interaction.response.send_message(text, ephemeral=True)
+            await interaction.response.send_modal(
+                CleanHelpSearchModal(bot, prefix, is_staff, language, author_id)
+            )
+
+        previous.callback = previous_callback
+        home.callback = home_callback
+        next_button.callback = next_callback
+        search.callback = search_callback
+        self.add_item(previous)
+        self.add_item(home)
+        self.add_item(next_button)
+        self.add_item(search)
+        refresh()
+
+
+async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = None):
+    from . import help_complete, language_runtime, utility
+
+    bot = cog.bot
+    language = await language_runtime.get_language(bot, ctx.guild.id if ctx.guild else None)
+    conf = await bot.db.get_guild_config(ctx.guild.id) if ctx.guild else None
+    prefix = conf["prefix"] if conf and conf["prefix"] else "+"
+    is_staff = await cog._user_is_staff(ctx)
+
+    if commande:
+        command = language_runtime.resolve_localized_command(bot, commande, language)
+        if command is None or (utility.is_staff_command(command) and not is_staff):
+            if language == "en":
+                text = f"Command `{commande}` was not found or you do not have access. Use `{prefix}help` to return."
+                title = "SENTRIX / COMMAND NOT FOUND"
+            else:
+                text = f"La commande `{commande}` est introuvable ou tu n'y as pas acces. Utilise `{prefix}aide` pour revenir."
+                title = "SENTRIX / COMMANDE INTROUVABLE"
+            return await ctx.send(embed=_brand(title, text))
+
+        category = help_complete._category_for(command)
+        category_name, _ = _category_text(category, language)
+        command_title = language_runtime._title(command, language).upper()
+        embed = _brand(f"SENTRIX / {command_title}", _summary(command, language))
+        if bot.user:
+            embed.set_thumbnail(url=bot.user.display_avatar.url)
+
+        parameters: list[str] = []
+        for name, parameter in getattr(command, "clean_params", {}).items():
+            if name in {"ctx", "context", "interaction", "self"}:
+                continue
+            display = language_runtime._param_name(name, language)
+            if language == "en":
+                status = "required" if getattr(parameter, "required", False) else "optional"
+            else:
+                status = "obligatoire" if getattr(parameter, "required", False) else "facultatif"
+            parameters.append(f"- **{display}** - {status}")
+
+        if language == "en":
+            embed.add_field(name="SYNTAX", value=f"`{_usage(command, prefix, language)}`", inline=False)
+            embed.add_field(name="PARAMETERS", value="\n".join(parameters) if parameters else "No parameters.", inline=False)
+            access = "Staff only" if utility.is_staff_command(command) else "Members"
+            embed.add_field(name="ACCESS", value=f"{category_name} | {access}", inline=False)
+            embed.set_footer(text="SentriX | Command sheet")
+        else:
+            embed.add_field(name="SYNTAXE", value=f"`{_usage(command, prefix, language)}`", inline=False)
+            embed.add_field(name="PARAMETRES", value="\n".join(parameters) if parameters else "Aucun parametre.", inline=False)
+            access = "Staff uniquement" if utility.is_staff_command(command) else "Membres"
+            embed.add_field(name="ACCES", value=f"{category_name} | {access}", inline=False)
+            embed.set_footer(text="SentriX | Fiche commande")
+        return await ctx.send(embed=embed)
+
+    home = _help_home(bot, ctx.guild, prefix, is_staff, language)
+    return await ctx.send(
+        embed=home,
+        view=CleanHelpHomeView(bot, prefix, is_staff, language, ctx.author.id),
+    )
+
+
+_clean_help_callback._sentrix_help_clean_v8 = True
+
+
+def _fallback_home(utility, bot: commands.Bot, guild, prefix: str, is_staff: bool) -> discord.Embed:
+    del utility
+    return _help_home(bot, guild, prefix, is_staff, _language(bot, guild.id if guild else None))
+
+
+def _fallback_pages(utility, bot: commands.Bot, prefix: str, entries: Iterable, *, all_mode: bool):
+    del utility
+    language = _language(bot, None)
+    if all_mode:
+        flattened: list[tuple[object, commands.Command]] = []
+        for category, command_list in entries:
+            flattened.extend((category, command) for command in command_list)
+        chunks = [flattened[index:index + 10] for index in range(0, len(flattened), 10)] or [[]]
+        pages: list[discord.Embed] = []
+        for page_number, chunk in enumerate(chunks, start=1):
+            lines = []
+            for offset, (category, command) in enumerate(chunk, start=1):
+                name, _ = _category_text(category, language)
+                lines.append(_command_line(None, command, prefix, language, (page_number - 1) * 10 + offset) + f"\n`{name}`")
+            embed = _brand("SENTRIX / TOUTES LES COMMANDES", "\n\n".join(lines))
+            embed.set_footer(text=f"Page {page_number}/{len(chunks)}")
+            pages.append(embed)
+        return pages
+    pages: list[discord.Embed] = []
+    for category, command_list in entries:
+        pages.extend(_category_pages(bot, prefix, language, category, command_list))
+    return pages
+
+
+def _fallback_command_line(utility, command, prefix: str, slash_names: set[str], number: int | None = None):
+    del slash_names
+    return _command_line(utility, command, prefix, _language(getattr(command.cog, "bot", None), None) if getattr(command, "cog", None) else "fr", number)
+
+
+def install(bot: commands.Bot) -> None:
+    """Installe le rendu final une fois la commande +help reellement chargee."""
+    help_command = bot.get_command("help")
+    if help_command is None:
+        return
+    if getattr(bot, "_sentrix_help_clean_v8", False):
+        return
+
+    from . import help_complete, language_runtime, utility
+
+    # Le moteur de langue resout ces noms au moment de l'appel. Les remplacer ici suffit
+    # donc a rendre accueil, categories, recherche et fiches de commandes coherents.
+    language_runtime._command_line = _command_line
+    language_runtime._help_home = _help_home
+    language_runtime._build_category_pages = _category_pages
+    language_runtime.LanguageHelpSearchModal = CleanHelpSearchModal
+    language_runtime.LanguageHelpSelect = CleanHelpSelect
+    language_runtime.LanguageHelpHomeView = CleanHelpHomeView
+    language_runtime.LanguageHelpPagesView = CleanHelpPagesView
+    language_runtime._localized_help_callback = _clean_help_callback
+
+    # Le callback est lie directement a l'objet commande pour rester prioritaire meme si
+    # une ancienne couche de langue a deja pose son marqueur d'installation.
+    help_command.callback = _clean_help_callback
+    help_command._sentrix_language_help = True
+    help_command._sentrix_help_clean_v8 = True
+
+    # Fallback hors mode localise : aucun ancien rendu ne doit pouvoir remettre des emojis.
+    help_complete._home_embed = _fallback_home
+    help_complete._build_pages = _fallback_pages
+    help_complete._compact_command_line = _fallback_command_line
+    try:
+        help_complete.CategorySpec.label = property(lambda self: self.name)
+    except Exception:
+        logger.debug("Impossible de remplacer CategorySpec.label", exc_info=True)
+
+    # Les etiquettes historiques restent uniquement des metadonnees. On les normalise
+    # aussi afin que toute future vue de secours parte deja d'un texte propre.
+    cleaned_labels = {}
+    for cog_name, label in utility.CATEGORY_LABELS.items():
+        _, clean = utility.split_category_label(label)
+        cleaned_labels[cog_name] = clean
+    utility.CATEGORY_LABELS = cleaned_labels
+
+    bot._sentrix_help_clean_v8 = True
+    logger.info("+help V8 actif : interface complete sans emoji, style premium et navigation propre.")
