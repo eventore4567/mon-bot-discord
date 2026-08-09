@@ -17,13 +17,15 @@ async def install(bot: commands.Bot):
         try:
             await self.bot.wait_until_ready()
         except RuntimeError:
-            return
+            # Bot construit hors connexion (audits CI) : aucune boucle de fond ne doit
+            # exécuter son premier tick contre un client Discord jamais démarré.
+            raise asyncio.CancelledError
 
     async def ready_backup(self):
         try:
             await self.bot.wait_until_ready()
         except RuntimeError:
-            return
+            raise asyncio.CancelledError
         await asyncio.sleep(90)
 
     if not getattr(module.EnterpriseSuite, "_sentrix_safe_before_loops", False):
