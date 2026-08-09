@@ -419,7 +419,7 @@ def install(bot: commands.Bot) -> None:
                 status = statuses[index] if index < len(statuses) else "Partiel"
                 lines.append(f"**{title}** — {_status_text(status, english)}")
             embed.add_field(
-                name="Modules" if english else "Modules",
+                name="Modules",
                 value="\n".join(lines)[:1024],
                 inline=False,
             )
@@ -430,7 +430,7 @@ def install(bot: commands.Bot) -> None:
             english = _is_english(self)
             current = "English" if english else "Français"
             embed = discord.Embed(
-                title="SENTRIX / LANGUAGE" if english else "SENTRIX / LANGUE",
+                title="SENTRIX / Language" if english else "SENTRIX / Langue",
                 description=(
                     "Choose the language used for commands, help and the main SentriX interfaces."
                     if english else
