@@ -91,6 +91,12 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-bot-excellence-audit.db"
         run: python tools/bot_excellence_audit.py
 
+      - name: Bot Mastery audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-bot-mastery-audit.db"
+        run: python tools/bot_mastery_audit.py
+
       - name: Dashboard interaction audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
