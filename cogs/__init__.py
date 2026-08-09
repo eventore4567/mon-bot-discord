@@ -1,5 +1,14 @@
-"""Initialisation commune des cogs SentriX."""
+"""Initialisation commune des cogs SentriX.
 
+Ce module conserve la compatibilité avec l'architecture historique de SentriX, mais
+centralise désormais l'installation des correctifs runtime : chaque installateur est
+isolé, journalisé et ne peut plus empêcher les suivants de s'installer s'il rencontre
+une erreur. L'ordre des couches critiques de +setup est volontairement conservé.
+"""
+
+from __future__ import annotations
+
+import inspect
 import logging
 
 import discord
@@ -53,13 +62,29 @@ logger = logging.getLogger("bot.cogs")
 _ORIGINAL_LOAD_EXTENSION = commands.Bot.load_extension
 
 
-def _install_embed_component_fix(bot: commands.Bot) -> None:
-    """Corrige le bouton Annuler de +embed qui envoyait `emoji=○` à Discord.
+def _matches(name: str, extension: str) -> bool:
+    return name == extension or name.endswith("." + extension.rsplit(".", 1)[-1])
 
-    `○` est un symbole Unicode valide dans un label, mais ce n'est pas un emoji de
-    composant accepté par l'API Discord. Le serveur répond alors 400 / 50035 et refuse
-    tout le panneau. On remplace uniquement l'emoji du bouton par un vrai emoji.
+
+async def _run_installer(label: str, installer, *args):
+    """Exécute un installateur sync ou async sans casser la chaîne de démarrage.
+
+    Les extensions elles-mêmes continuent à lever leurs erreurs normalement. Seules les
+    couches runtime optionnelles sont isolées : une erreur de style, dashboard ou panel
+    ne doit jamais empêcher une protection sécurité ou le moteur de langue de s'installer.
     """
+    try:
+        result = installer(*args)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+    except Exception:
+        logger.exception("Échec du correctif runtime « %s » ; poursuite du chargement.", label)
+        return None
+
+
+def _install_embed_component_fix(bot: commands.Bot) -> None:
+    """Corrige le bouton Annuler de +embed qui envoyait `emoji=○` à Discord."""
     if getattr(bot, "_sentrix_embed_component_fix", False):
         return
     try:
@@ -84,36 +109,94 @@ def _install_embed_component_fix(bot: commands.Bot) -> None:
 
 
 async def _install_configuration_critical_patches(bot: commands.Bot) -> None:
-    """Installe les couches essentielles de +setup dès que Configuration existe.
-
-    Ces correctifs ne doivent pas dépendre des autres installateurs globaux : en production,
-    un échec dans un module non lié pouvait laisser le Cog Configuration chargé tout en
-    sautant la refonte de +setup. On isole donc chaque étape pour garantir le menu final.
-    """
-    steps = (
-        ("fermeture setup", lambda: install_setup_close_fix(bot)),
-        ("synchronisation logs setup", lambda: install_setup_create_logs_sync(bot)),
-        ("style setup", lambda: install_setup_oxyde_style(bot)),
-        ("nettoyage mobile setup", lambda: install_setup_mobile_cleanup(bot)),
-        ("rôle de ping tickets setup", lambda: install_ticket_ping_setup(bot)),
-    )
-    for label, installer in steps:
-        try:
-            installer()
-        except Exception:
-            logger.exception("Échec du correctif %s ; poursuite du chargement de +setup.", label)
-
-    try:
-        await install_language_runtime(bot)
-    except Exception:
-        logger.exception("Échec du moteur de langue pendant le chargement prioritaire de +setup.")
-
-    try:
-        install_language_setup_finalizer(bot)
-    except Exception:
-        logger.exception("Échec du finaliseur de langue pendant le chargement prioritaire de +setup.")
-
+    """Installe les couches essentielles de +setup immédiatement après Configuration."""
+    await _run_installer("fermeture setup", install_setup_close_fix, bot)
+    await _run_installer("synchronisation logs setup", install_setup_create_logs_sync, bot)
+    await _run_installer("style setup", install_setup_oxyde_style, bot)
+    await _run_installer("nettoyage mobile setup", install_setup_mobile_cleanup, bot)
+    await _run_installer("rôle de ping tickets setup", install_ticket_ping_setup, bot)
+    await _run_installer("moteur de langue setup", install_language_runtime, bot)
+    await _run_installer("finaliseur de langue setup", install_language_setup_finalizer, bot)
     logger.info("+setup prioritaire installé immédiatement après le Cog Configuration.")
+
+
+async def _install_common_runtime(bot: commands.Bot) -> None:
+    """Couches idempotentes qui peuvent être appelées après chaque extension."""
+    await _run_installer("style premium", install_premium_style, bot)
+    await _run_installer("réponses sans référence fragile", install_reply_reference_fix)
+    await _run_installer("suivi bot", install_bot_tracker, bot)
+    await _run_installer("prix boutique par défaut", install_shop_default_prices, bot)
+    await _run_installer("rôles de choix serveur", install_server_choice_roles, bot)
+    await _run_installer("catalogue rôles notifications", install_more_notification_roles)
+    await _run_installer("panel rôles notifications", install_notification_rolepanel, bot)
+
+
+async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
+    """Correctifs qui ne doivent être posés qu'une fois leur cog cible chargé."""
+    if _matches(name, "cogs.automod"):
+        await _run_installer("renforcement sécurité", install_security_hardening, bot)
+        await _run_installer("immunité propriétaire sanctions", install_owner_sanction_immunity, bot)
+
+    if _matches(name, "cogs.moderation"):
+        await _run_installer("immunité propriétaire sanctions", install_owner_sanction_immunity, bot)
+
+    if _matches(name, "cogs.ai"):
+        await _run_installer("fiabilité IA", install_ai_reliability)
+        await _run_installer("garde intention musique", install_natural_music_intent_guard, bot)
+        await _run_installer("suppression ancienne commande code", install_remove_code_command, bot)
+
+    if _matches(name, "cogs.utility"):
+        await _run_installer("interface sondages", install_poll_ui, bot)
+        await _run_installer("aide complète", install_complete_help, bot)
+        await _run_installer("accès dashboard depuis aide", install_dashboard_access, bot)
+        await _run_installer("style accueil aide", install_help_home_circles, bot)
+        await _run_installer("pseudo AFK", install_afk_nickname, bot)
+        await _run_installer("signature AFK", install_afk_signature_fix, bot)
+
+    if _matches(name, "cogs.configuration"):
+        # Deuxième passage volontaire : ces installateurs sont idempotents et doivent
+        # rester compatibles avec les anciennes couches qui peuvent remplacer des vues.
+        await _run_installer("fermeture setup (final)", install_setup_close_fix, bot)
+        await _run_installer("synchronisation logs setup (final)", install_setup_create_logs_sync, bot)
+        await _run_installer("style setup (final)", install_setup_oxyde_style, bot)
+        await _run_installer("nettoyage mobile setup (final)", install_setup_mobile_cleanup, bot)
+        await _run_installer("rôle de ping tickets setup (final)", install_ticket_ping_setup, bot)
+
+    if _matches(name, "cogs.tickets"):
+        await _run_installer("sécurité claim tickets", install_ticket_claim_security, bot)
+        await _run_installer("rôle de ping tickets runtime", install_ticket_ping_runtime, bot)
+
+    if _matches(name, "cogs.events"):
+        await _run_installer("anti-alt giveaway", install_giveaway_antialt, bot)
+
+    if _matches(name, "cogs.server_builder"):
+        await _run_installer("ping everyone server builder", install_server_builder_everyone_ping, bot)
+        await _run_installer("guides salons server builder", install_server_builder_channel_guides, bot)
+        await _run_installer("ready setup server builder", install_server_builder_ready_setup, bot)
+        await _run_installer("désactivation auto tracker", install_no_auto_tracker, bot)
+        await _run_installer("synchronisation logs générés", install_generated_logs_sync, bot)
+        await _run_installer("affichage rolepanel", install_rolepanel_display_fix, bot)
+        await _run_installer("bootstrap serveurs existants", install_existing_server_bootstrap, bot)
+
+    if _matches(name, "cogs.embed_builder"):
+        _install_embed_component_fix(bot)
+
+
+async def _install_log_stack(bot: commands.Bot) -> None:
+    """Ordre important : routage -> style -> Components V2 -> mentions silencieuses."""
+    await _run_installer("routage logs modération", install_moderation_logs_fix, bot)
+    await _run_installer("style premium logs", install_premium_logs, bot)
+    await _run_installer("Components V2 logs", install_premium_logs_v2, bot)
+    await _run_installer("mentions silencieuses logs", install_logs_no_ping)
+
+
+async def _install_finalizers(bot: commands.Bot, name: str) -> None:
+    """Dernières couches, toujours dans le même ordre déterministe."""
+    await _run_installer("stabilité transversale", install_stability_runtime, bot, name)
+    await _run_installer("aliases techniques", install_common_command_names, bot)
+    await _run_installer("moteur de langue", install_language_runtime, bot)
+    await _run_installer("finaliseur langue setup", install_language_setup_finalizer, bot)
+    await _run_installer("garde de réponse commandes", install_command_response_guard, bot)
 
 
 async def _load_extension_with_sentrix_patches(
@@ -122,123 +205,18 @@ async def _load_extension_with_sentrix_patches(
     *,
     package: str | None = None,
 ):
+    """Charge une vraie extension puis applique les couches SentriX de façon déterministe."""
     result = await _ORIGINAL_LOAD_EXTENSION(bot, name, package=package)
 
-    # IMPORTANT : Configuration est déjà réellement ajoutée au bot à ce point. On installe
-    # immédiatement le nouveau +setup avant tout autre correctif global. Ainsi, même si un
-    # autre module rencontre ensuite un problème avec les données réelles du serveur, le
-    # panneau Catégories et sa langue ne peuvent plus rester sur l'ancien renderer.
-    if name == "cogs.configuration" or name.endswith(".configuration"):
+    # Configuration est déjà réellement ajoutée à ce point : le setup critique doit être
+    # installé AVANT toutes les autres couches, exactement comme dans l'architecture V6/V7.
+    if _matches(name, "cogs.configuration"):
         await _install_configuration_critical_patches(bot)
 
-    # Idempotent : le moteur est installé dès le premier cog chargé. Il couvre donc aussi
-    # les futurs cogs et reste actif même si un module optionnel échoue plus tard.
-    install_premium_style(bot)
-    # Toutes les réponses sont envoyées sans MessageReference. Supprimer le message de
-    # commande ne doit donc jamais afficher « Le message original a été supprimé ».
-    install_reply_reference_fix()
-    # Le cog de suivi reste chargé pour conserver +suivi-bot, mais aucun panneau n'est
-    # désormais publié automatiquement par +create-server ou ses migrations.
-    await install_bot_tracker(bot)
-    # Prix boutique par défaut : VIP 500 pièces, Premium 2 000 pièces.
-    await install_shop_default_prices(bot)
-    # Boutons persistants pour les rôles jeux/langues/couleurs créés par +create-server.
-    await install_server_choice_roles(bot)
-
-    # Le catalogue est appliqué avant l'installation du panneau afin que +rolepanel et
-    # +rolepanel-refresh utilisent toujours les 25 rôles de notifications disponibles.
-    install_more_notification_roles()
-
-    # Vérifié après chaque extension : dès que l'ancien +rolepanel apparaît, il est remplacé
-    # par le panneau persistant de rôles de notifications. L'installateur reste inactif tant
-    # que la commande d'origine n'est pas encore chargée.
-    await install_notification_rolepanel(bot)
-
-    if name == "cogs.automod" or name.endswith(".automod"):
-        await install_security_hardening(bot)
-        install_owner_sanction_immunity(bot)
-    if name == "cogs.moderation" or name.endswith(".moderation"):
-        install_owner_sanction_immunity(bot)
-    if name == "cogs.ai" or name.endswith(".ai"):
-        install_ai_reliability()
-        install_natural_music_intent_guard(bot)
-        install_remove_code_command(bot)
-    if name == "cogs.utility" or name.endswith(".utility"):
-        await install_poll_ui(bot)
-        # L'aide complète doit être installée avant l'ajout du bouton dashboard afin que
-        # celui-ci enveloppe bien la nouvelle page d'accueil dynamique.
-        install_complete_help(bot)
-        await install_dashboard_access(bot)
-        # Le style sobre passe en dernier pour nettoyer aussi le champ et le bouton du
-        # dashboard sans modifier leur fonctionnement.
-        install_help_home_circles(bot)
-        await install_afk_nickname(bot)
-        install_afk_signature_fix(bot)
-    if name == "cogs.configuration" or name.endswith(".configuration"):
-        # Deuxième passage volontaire et idempotent : il garde la compatibilité avec les
-        # anciennes couches tout en garantissant que le passage prioritaire ci-dessus a déjà
-        # installé le vrai menu avant les modules globaux.
-        install_setup_close_fix(bot)
-        install_setup_create_logs_sync(bot)
-        install_setup_oxyde_style(bot)
-        install_setup_mobile_cleanup(bot)
-        install_ticket_ping_setup(bot)
-    if name == "cogs.tickets" or name.endswith(".tickets"):
-        install_ticket_claim_security(bot)
-        # Le rôle de ping est indépendant du rôle staff qui gère les permissions du salon.
-        install_ticket_ping_runtime(bot)
-    if name == "cogs.events" or name.endswith(".events"):
-        # Les participations giveaway passent par une vérification réseau à empreinte HMAC :
-        # une connexion ne peut valider qu'un compte par giveaway, sans stocker l'IP brute.
-        await install_giveaway_antialt(bot)
-    if name == "cogs.server_builder" or name.endswith(".server_builder"):
-        await install_server_builder_everyone_ping(bot)
-        install_server_builder_channel_guides(bot)
-        install_server_builder_ready_setup(bot)
-        # Ne plus recréer le suivi du bot dans annonces à chaque redéploiement.
-        install_no_auto_tracker(bot)
-        # Les salons logs-* générés deviennent la source de vérité du moteur log_settings.
-        install_generated_logs_sync(bot)
-        # Important : répare la détection des panneaux AVANT la migration des serveurs
-        # existants, sinon le style global peut provoquer un doublon au redémarrage.
-        install_rolepanel_display_fix(bot)
-        install_existing_server_bootstrap(bot)
-    if name == "cogs.embed_builder" or name.endswith(".embed_builder"):
-        # Discord rejetait entièrement +embed car le bouton Annuler utilisait le symbole ○
-        # dans le champ emoji. Le patch s'applique après le chargement réel du cog.
-        _install_embed_component_fix(bot)
-
-    # Répare le routage des logs et supprime les doublons générés par les événements
-    # Discord quand SentriX a déjà produit une fiche de sanction détaillée.
-    # Appelé après chaque extension : le patch attend simplement que le cog Logs existe.
-    install_moderation_logs_fix(bot)
-
-    # Style premium appliqué EN DERNIER sur le moteur de logs : les infos d'Audit Log
-    # (staff/autre bot), la déduplication et l'auto-réparation ont donc déjà été faites.
-    install_premium_logs(bot)
-    # Sur discord.py >= 2.6, transforme les embeds en cartes Components V2 avec vraie
-    # barre d'accent, sections, séparateurs, thumbnail et boutons intégrés. Un fallback
-    # conserve automatiquement l'embed premium si Discord refuse la carte.
-    install_premium_logs_v2(bot)
-    # Les mentions restent visibles dans les cartes, mais ne notifient jamais les membres,
-    # rôles, @everyone ou @here. Le reste du bot garde ses vrais pings normalement.
-    install_logs_no_ping()
-
-    # Correctifs transversaux issus de la passe de stabilité : reprise des notifications
-    # sociales, sérialisation du cache d'invitations et limite de récompenses de jeux.
-    install_stability_runtime(bot, name)
-
-    # Les aliases techniques historiques sont posés d'abord ; le moteur de langue retire
-    # ensuite les anciens alias FR globaux et relie FR/EN aux mêmes objets commandes.
-    install_common_command_names(bot)
-    await install_language_runtime(bot)
-    # +setup possède plusieurs couches visuelles qui peuvent remplacer render_page/build_embed.
-    # Ce finaliseur enveloppe toujours la version réellement active en dernier.
-    install_language_setup_finalizer(bot)
-
-    # Dernier filet de sécurité : après toutes les couches de rendu/réponse, une commande
-    # valide ne peut plus se terminer silencieusement. Les réponses normales restent intactes.
-    install_command_response_guard(bot)
+    await _install_common_runtime(bot)
+    await _install_extension_specific(bot, name)
+    await _install_log_stack(bot)
+    await _install_finalizers(bot, name)
     return result
 
 
