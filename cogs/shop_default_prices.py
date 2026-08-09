@@ -10,6 +10,7 @@ from discord.ext import commands
 from .antinuke_rollback import install as install_antinuke_rollback
 from .content_filter_policy import install as install_content_filter_policy
 from .feature_systems import install as install_feature_systems
+from .security_owner_immunity_final import install as install_security_owner_immunity_final
 from .security_v2_backup_schema_fix import install as install_security_v2_backup_schema_fix
 from .security_v2_runtime import install as install_security_v2_runtime
 from .wipe_owner_only import install as install_wipe_owner_only
@@ -23,9 +24,7 @@ SHOP_DEFAULTS = (
 
 
 def _patch_create_server_defaults() -> None:
-    """Applique les nouveaux prix au module +create-server sans dupliquer sa logique."""
     from . import server_builder_ready_setup
-
     server_builder_ready_setup.SHOP_DEFAULTS = SHOP_DEFAULTS
 
 
@@ -34,7 +33,6 @@ async def _update_existing_shops(bot: commands.Bot) -> None:
         await bot.wait_until_ready()
     except RuntimeError:
         return
-
     for guild in bot.guilds:
         changed = False
         for role_name, price, description in SHOP_DEFAULTS:
@@ -52,23 +50,22 @@ async def _update_existing_shops(bot: commands.Bot) -> None:
                 (role.name, price, description, row["id"]),
             )
             changed = True
-
-        if not changed:
-            continue
-        economy = bot.get_cog("Economy")
-        if economy is not None:
-            try:
-                await economy._refresh_shop_panels(guild)
-            except Exception:
-                logger.exception("Impossible d'actualiser le panneau boutique sur %s", guild.id)
+        if changed:
+            economy = bot.get_cog("Economy")
+            if economy is not None:
+                try:
+                    await economy._refresh_shop_panels(guild)
+                except Exception:
+                    logger.exception("Impossible d'actualiser le panneau boutique sur %s", guild.id)
 
 
 async def install(bot: commands.Bot) -> None:
-    """Installation idempotente par instance de bot, compatible reload et CI."""
+    """Installation idempotente des correctifs transversaux SentriX."""
     install_security_v2_backup_schema_fix()
     await install_antinuke_rollback(bot)
     await install_security_v2_runtime(bot)
     install_content_filter_policy(bot)
+    install_security_owner_immunity_final(bot)
     await install_feature_systems(bot)
     install_wipe_owner_only(bot)
     _patch_create_server_defaults()
