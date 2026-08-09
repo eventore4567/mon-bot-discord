@@ -26,6 +26,7 @@ from . import dashboard_deeplinks as _dashboard_deeplinks
 from . import dashboard_safe_plus as _dashboard_safe_plus
 from . import dashboard_profile_images as _dashboard_profile_images
 from . import dashboard_role_channel_search as _dashboard_role_channel_search
+from . import dashboard_system_features as _dashboard_system_features
 
 
 # Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
@@ -168,3 +169,4 @@ _dashboard.INDEX_HTML = _main_html
 _dashboard_safe_plus.install(_dashboard)
 _dashboard_profile_images.install(_dashboard)
 _dashboard_role_channel_search.install(_dashboard, _setup_center)
+_dashboard_system_features.install(_dashboard)
