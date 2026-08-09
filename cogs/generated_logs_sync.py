@@ -15,7 +15,6 @@ from discord.ext import commands
 from utils import log_service
 
 logger = logging.getLogger("bot.generated-logs-sync")
-_INSTALLED = False
 
 LOG_CHANNELS = {
     "messages": "logs-messages",
@@ -85,7 +84,11 @@ async def sync_generated_logs(bot: commands.Bot, guild: discord.Guild) -> int:
 
 
 async def _bootstrap(bot: commands.Bot) -> None:
-    await bot.wait_until_ready()
+    try:
+        await bot.wait_until_ready()
+    except RuntimeError:
+        # Les audits chargent le bot hors connexion Discord : aucun bootstrap distant à faire.
+        return
     await asyncio.sleep(4)
     for guild in list(bot.guilds):
         try:
@@ -95,22 +98,21 @@ async def _bootstrap(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    global _INSTALLED
-    if _INSTALLED:
-        return
-
+    """Installe le hook une seule fois et le bootstrap une fois par instance de bot."""
     from . import server_builder
 
     original = server_builder.ServerBuilder._configure_bot_channels
     if not getattr(original, "_sentrix_log_settings_sync", False):
         async def configure_with_log_sync(self, guild, role_map, category_map, channel_map, staff_role_name):
             result = await original(self, guild, role_map, category_map, channel_map, staff_role_name)
-            await sync_generated_logs(bot, guild)
+            await sync_generated_logs(self.bot, guild)
             return result
 
         configure_with_log_sync._sentrix_log_settings_sync = True
         server_builder.ServerBuilder._configure_bot_channels = configure_with_log_sync
 
+    if getattr(bot, "_sentrix_generated_logs_sync_installed", False):
+        return
+    bot._sentrix_generated_logs_sync_installed = True
     asyncio.create_task(_bootstrap(bot), name="sentrix-generated-logs-sync")
-    _INSTALLED = True
     logger.info("Synchronisation automatique des salons LOGS SentriX activée.")
