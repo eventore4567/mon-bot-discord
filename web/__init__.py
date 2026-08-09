@@ -23,6 +23,7 @@ from . import dashboard_control_center as _dashboard_control_center
 from . import ticket_ping_dashboard as _ticket_ping_dashboard
 from . import dashboard_oxyde_theme as _dashboard_oxyde_theme
 from . import dashboard_deeplinks as _dashboard_deeplinks
+from . import dashboard_safe_plus as _dashboard_safe_plus
 
 
 # Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
@@ -160,3 +161,7 @@ _main_html = _main_html.replace(
 if 'id="sentrix-core-recovery"' not in _main_html:
     _main_html = _main_html.replace("</body>", _CORE_RECOVERY_JS + "\n</body>", 1)
 _dashboard.INDEX_HTML = _main_html
+
+# Enrichissement final volontairement sans monkey-patch : il ajoute les détails/indicateurs
+# après la restauration de l'interface stable et ne remplace aucune fonction critique.
+_dashboard_safe_plus.install(_dashboard)
