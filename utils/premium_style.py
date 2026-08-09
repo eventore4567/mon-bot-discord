@@ -1,7 +1,9 @@
 """Identité visuelle globale premium de SentriX.
 
 Ce module ne contient aucune logique métier. Il harmonise uniquement les messages,
-embeds et composants Discord afin que tous les cogs partagent la même présentation.
+embeds et composants Discord afin que tous les cogs partagent exactement la même
+présentation : titres de catégorie, informations essentielles, couleurs d'état,
+champs lisibles et boutons sobres. Le rendu reste volontairement sans décoration emoji.
 """
 
 from __future__ import annotations
@@ -21,15 +23,15 @@ COLORS: dict[str, int] = {
     "danger": 0xED4245,
     "neutral": 0x4B5563,
     "moderation": 0xE05A67,
-    "security": 0x9B6DDE,
+    "security": 0x7A68D8,
     "tickets": 0x4C9AFF,
-    "economy": 0xE8B84A,
-    "levels": 0x45C98A,
-    "games": 0x33B5C7,
-    "music": 0xD968A6,
-    "events": 0xF08A5D,
-    "invites": 0x35B7A0,
-    "ai": 0x8E6CE8,
+    "economy": 0xD6A94A,
+    "levels": 0x45B889,
+    "games": 0x33A8B8,
+    "music": 0xC7689D,
+    "events": 0xDA8058,
+    "invites": 0x35A794,
+    "ai": 0x8069D8,
     "configuration": 0x6C5CE7,
     "logs": 0x667085,
     "utility": 0x5865F2,
@@ -65,6 +67,21 @@ LEADING_DECORATION = re.compile(
     flags=re.UNICODE,
 )
 SPACE_RE = re.compile(r"[ \t]{2,}")
+SENTRIX_TITLE_RE = re.compile(r"^SENTRIX\s*/\s*", re.IGNORECASE)
+
+
+_GENERIC_TITLES = {
+    "action terminée",
+    "action terminee",
+    "action impossible",
+    "vérification nécessaire",
+    "verification necessaire",
+    "information",
+    "succès",
+    "succes",
+    "erreur",
+    "avertissement",
+}
 
 
 def clip(value: Any, limit: int) -> str:
@@ -125,6 +142,8 @@ def infer_category(*, command: Any = None, embed: discord.Embed | None = None, h
         "moderation": "moderation",
         "automod": "security",
         "security": "security",
+        "securitycommandcenter": "security",
+        "securityv2runtime": "security",
         "tickets": "tickets",
         "economy": "economy",
         "levels": "levels",
@@ -145,16 +164,16 @@ def infer_category(*, command: Any = None, embed: discord.Embed | None = None, h
     haystack = f"{cog_name} {command_name} {title}"
     rules = (
         ("moderation", ("moderation", "sanction", "warn", "mute", "kick", "ban", "quarantaine")),
-        ("security", ("automod", "security", "sécurité", "antinuke", "anti-", "blacklist")),
+        ("security", ("automod", "security", "sécurité", "antinuke", "anti-", "blacklist", "whitelist")),
         ("tickets", ("ticket", "support")),
-        ("economy", ("economy", "économie", "balance", "banque", "shop", "argent")),
-        ("levels", ("level", "niveau", "xp", "réputation", "reputation")),
-        ("games", ("game", "jeu", "trivia", "slots", "blackjack", "quiz")),
+        ("economy", ("economy", "économie", "balance", "banque", "shop", "argent", "daily", "work")),
+        ("levels", ("level", "niveau", "xp", "réputation", "reputation", "leaderboard")),
+        ("games", ("game", "jeu", "trivia", "slots", "blackjack", "quiz", "guess")),
         ("music", ("music", "musique", "playlist", "queue", "lecture")),
         ("events", ("event", "giveaway", "tournoi", "tournament", "événement")),
         ("invites", ("invite", "invitation")),
         ("ai", (" ai", "intelligence", "sentrix", "openai", "image")),
-        ("configuration", ("configuration", "setup", "config", "rôle", "salon", "serveur")),
+        ("configuration", ("configuration", "setup", "config", "rôle", "salon", "serveur", "create-server", "wipe-server")),
         ("logs", ("log", "journal", "audit")),
     )
     for category, words in rules:
@@ -170,8 +189,42 @@ def _footer_text(*, guild: discord.Guild | None = None, requester: Any = None) -
     if requester is not None:
         display = getattr(requester, "display_name", None) or getattr(requester, "name", None)
         if display:
-            parts.append(f"demandé par {clip(display, 40)}")
-    return " • ".join(parts)
+            parts.append(clip(display, 40))
+    return " / ".join(parts)
+
+
+def _canonical_title(category: str, *, log_type: str | None = None) -> str:
+    label = CATEGORY_NAMES.get(category, "Information")
+    if log_type:
+        return clip(f"SENTRIX / JOURNAL {label}".upper(), 256)
+    return clip(f"SENTRIX / {label}".upper(), 256)
+
+
+def _detail_title(original_title: Any, category: str) -> str | None:
+    if not original_title:
+        return None
+    cleaned = clean_title(original_title)
+    if SENTRIX_TITLE_RE.match(cleaned):
+        return None
+    lowered = cleaned.casefold()
+    if lowered in _GENERIC_TITLES:
+        return None
+    if lowered == CATEGORY_NAMES.get(category, "").casefold():
+        return None
+    return cleaned
+
+
+def _merge_detail(description: Any, detail: str | None) -> str | None:
+    body = clip(description, 4096) if description else ""
+    if not detail:
+        return body or None
+    marker = f"**{detail}**"
+    if body.startswith(marker):
+        return body
+    if not body:
+        return marker
+    merged = f"{marker}\n{body}"
+    return clip(merged, 4096)
 
 
 def style_embed(
@@ -193,76 +246,54 @@ def style_embed(
     kind = kind or infer_kind(embed)
 
     original_title = getattr(embed, "title", None)
-    if original_title:
-        embed.title = clean_title(original_title)
-    elif embed.description:
-        embed.title = {
-            "success": "Action terminée",
-            "warning": "Vérification nécessaire",
-            "danger": "Action impossible",
-            "info": CATEGORY_NAMES.get(category, "Information"),
-        }.get(kind, "Information")
-
-    if embed.description:
-        embed.description = clip(embed.description, 4096)
+    detail = _detail_title(original_title, category)
+    embed.title = _canonical_title(category, log_type=log_type)
+    embed.description = _merge_detail(getattr(embed, "description", None), detail)
 
     current_colour = getattr(getattr(embed, "colour", None), "value", 0) or 0
     state_colour = COLORS.get(kind)
     category_colour = COLORS.get(category, COLORS["brand"])
-    if kind in {"success", "warning", "danger"}:
+    if kind in {"success", "warning", "danger"} and state_colour:
         embed.colour = discord.Colour(state_colour)
     elif not current_colour or current_colour in SYSTEM_COLOURS:
         embed.colour = discord.Colour(category_colour)
 
-    author_label = "SentriX"
-    if log_type:
-        author_label = f"SentriX • Journal {CATEGORY_NAMES.get(category, category.title())}"
-    elif category != "brand":
-        author_label = f"SentriX • {CATEGORY_NAMES.get(category, category.title())}"
-
-    current_author = getattr(embed, "author", None)
-    current_author_name = getattr(current_author, "name", None) if current_author else None
-    if not current_author_name:
-        icon_url = None
-        if bot_user is not None:
-            avatar = getattr(bot_user, "display_avatar", None)
-            icon_url = str(avatar.url) if avatar else None
-        embed.set_author(name=clip(author_label, 256), icon_url=icon_url)
-
+    # Le titre suffit pour identifier SentriX et la catégorie. On n'ajoute plus un second
+    # bandeau auteur automatiquement : cela rend les réponses nettement plus légères.
     if embed.timestamp is None:
         embed.timestamp = datetime.now(timezone.utc)
 
     current_footer = getattr(embed, "footer", None)
     footer_text = getattr(current_footer, "text", None) if current_footer else None
     footer_icon = getattr(current_footer, "icon_url", None) if current_footer else None
-    if not footer_text or str(footer_text).startswith("SentriX") or "Page " in str(footer_text):
-        text = _footer_text(guild=guild, requester=requester)
-        if footer_text and "Page " in str(footer_text):
-            footer_value = str(footer_text)
-            text = footer_value if "SentriX" in footer_value else f"{clip(footer_value, 1700)} • {text}"
-        if footer_icon:
-            embed.set_footer(text=clip(text, 2048), icon_url=footer_icon)
-        else:
-            embed.set_footer(text=clip(text, 2048))
+    base_footer = _footer_text(guild=guild, requester=requester)
+    if footer_text and "Page " in str(footer_text):
+        page_text = clean_title(footer_text, fallback="")
+        final_footer = f"{page_text} / {base_footer}" if page_text else base_footer
+    elif not footer_text or str(footer_text).startswith("SentriX"):
+        final_footer = base_footer
+    else:
+        final_footer = clip(str(footer_text), 2048)
+    if footer_icon:
+        embed.set_footer(text=clip(final_footer, 2048), icon_url=footer_icon)
+    else:
+        embed.set_footer(text=clip(final_footer, 2048))
 
+    fields = list(embed.fields[:25])
     if len(embed.fields) > 25:
-        fields = list(embed.fields[:25])
         embed.clear_fields()
         for field in fields:
-            embed.add_field(
-                name=clip(field.name, 256) or "Détail",
-                value=clip(field.value, 1024) or "—",
-                inline=field.inline,
-            )
-    else:
-        for index, field in enumerate(list(embed.fields)):
-            if len(field.name) > 256 or len(field.value) > 1024:
-                embed.set_field_at(
-                    index,
-                    name=clip(field.name, 256) or "Détail",
-                    value=clip(field.value, 1024) or "—",
-                    inline=field.inline,
-                )
+            embed.add_field(name=field.name, value=field.value, inline=field.inline)
+
+    for index, field in enumerate(list(embed.fields)):
+        field_name = clean_title(field.name, "INFORMATION").upper()
+        field_value = clip(field.value, 1024) or "—"
+        embed.set_field_at(
+            index,
+            name=clip(field_name, 256),
+            value=field_value,
+            inline=bool(field.inline),
+        )
     return embed
 
 
@@ -294,13 +325,7 @@ def content_embed(
     text = clip(content, 4096)
     kind = infer_kind(content=text)
     category = infer_category(command=command)
-    title = {
-        "success": "Action terminée",
-        "warning": "Vérification nécessaire",
-        "danger": "Action impossible",
-        "info": CATEGORY_NAMES.get(category, "Information"),
-    }.get(kind, "Information")
-    embed = discord.Embed(title=title, description=text)
+    embed = discord.Embed(description=text)
     return style_embed(
         embed,
         command=command,
@@ -322,11 +347,16 @@ def style_view(view: discord.ui.View | None) -> discord.ui.View | None:
         label = str(item.label or "").casefold()
         custom_id = str(item.custom_id or "").casefold()
         haystack = f"{label} {custom_id}"
-        if any(word in haystack for word in ("supprimer", "delete", "fermer", "close", "annuler", "cancel", "ban", "reset", "wipe")):
+        if any(word in haystack for word in (
+            "supprimer", "delete", "fermer", "close", "annuler", "cancel",
+            "ban", "reset", "wipe", "retirer", "remove",
+        )):
             item.style = discord.ButtonStyle.danger
-        elif any(word in haystack for word in ("enregistrer", "save", "confirmer", "confirm", "valider", "verify", "créer", "create", "envoyer", "send")):
-            item.style = discord.ButtonStyle.success
-        elif any(word in haystack for word in ("accueil", "home", "ouvrir", "open", "continuer", "next", "suivant")):
+        elif any(word in haystack for word in (
+            "enregistrer", "save", "confirmer", "confirm", "valider", "verify",
+            "créer", "create", "envoyer", "send", "activer", "enable",
+        )):
+            # Une seule couleur d'action principale, plutôt que des rangées de boutons verts.
             item.style = discord.ButtonStyle.primary
         else:
             item.style = discord.ButtonStyle.secondary
