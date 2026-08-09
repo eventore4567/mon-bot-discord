@@ -10,6 +10,7 @@ from discord.ext import commands
 from .antinuke_rollback import install as install_antinuke_rollback
 from .content_filter_policy import install as install_content_filter_policy
 from .feature_systems import install as install_feature_systems
+from .security_v2_backup_schema_fix import install as install_security_v2_backup_schema_fix
 from .security_v2_runtime import install as install_security_v2_runtime
 from .wipe_owner_only import install as install_wipe_owner_only
 
@@ -29,9 +30,6 @@ def _patch_create_server_defaults() -> None:
 
 
 async def _update_existing_shops(bot: commands.Bot) -> None:
-    # Les audits runtime chargent les extensions sans login Discord. Dans ce cas
-    # wait_until_ready() lève RuntimeError : ce n'est pas une panne du bot et la tâche
-    # doit simplement se terminer proprement au lieu de créer une exception orpheline.
     try:
         await bot.wait_until_ready()
     except RuntimeError:
@@ -66,15 +64,8 @@ async def _update_existing_shops(bot: commands.Bot) -> None:
 
 
 async def install(bot: commands.Bot) -> None:
-    """Installation idempotente par instance de bot, compatible reload et CI.
-
-    Les installateurs transversaux sont volontairement appelés AVANT le garde idempotent :
-    ce fichier est repassé après chaque extension par cogs/__init__.py. Ainsi les protections
-    anti-nuke, le rollback V2 et la politique de filtres sont branchés dès qu'AutoMod devient
-    disponible, +wipe-server est verrouillé dès que ServerBuilder est chargé, et Economy/Levels
-    sont patchés exactement lorsqu'ils deviennent disponibles, sans modifier la liste principale
-    des extensions.
-    """
+    """Installation idempotente par instance de bot, compatible reload et CI."""
+    install_security_v2_backup_schema_fix()
     await install_antinuke_rollback(bot)
     await install_security_v2_runtime(bot)
     install_content_filter_policy(bot)
