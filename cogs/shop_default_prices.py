@@ -8,11 +8,13 @@ import discord
 from discord.ext import commands
 
 from .antinuke_rollback import install as install_antinuke_rollback
+from .command_policy_expansion import install as install_command_policy_expansion
 from .content_filter_policy import install as install_content_filter_policy
 from .feature_systems import install as install_feature_systems
 from .security_owner_immunity_final import install as install_security_owner_immunity_final
 from .security_v2_backup_schema_fix import install as install_security_v2_backup_schema_fix
 from .security_v2_runtime import install as install_security_v2_runtime
+from .slash_command_budget import install as install_slash_command_budget
 from .wipe_owner_only import install as install_wipe_owner_only
 
 logger = logging.getLogger("bot.shop-default-prices")
@@ -61,6 +63,12 @@ async def _update_existing_shops(bot: commands.Bot) -> None:
 
 async def install(bot: commands.Bot) -> None:
     """Installation idempotente des correctifs transversaux SentriX."""
+    # Ces deux garde-fous doivent être posés très tôt : ils garantissent que tous les cogs
+    # texte continuent de se charger même lorsque Discord approche sa limite slash globale,
+    # et que les commandes dynamiques sont toujours classées dans +help/fail-closed.
+    install_slash_command_budget(bot)
+    install_command_policy_expansion()
+
     install_security_v2_backup_schema_fix()
     await install_antinuke_rollback(bot)
     await install_security_v2_runtime(bot)
