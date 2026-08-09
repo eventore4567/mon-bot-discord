@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 
 from .antinuke_rollback import install as install_antinuke_rollback
+from .content_filter_policy import install as install_content_filter_policy
 from .feature_systems import install as install_feature_systems
 from .wipe_owner_only import install as install_wipe_owner_only
 
@@ -68,11 +69,13 @@ async def install(bot: commands.Bot) -> None:
 
     Les installateurs transversaux sont volontairement appelés AVANT le garde idempotent :
     ce fichier est repassé après chaque extension par cogs/__init__.py. Ainsi les protections
-    anti-nuke sont branchées dès qu'AutoMod devient disponible, +wipe-server est verrouillé
-    dès que ServerBuilder est chargé, et Economy/Levels sont patchés exactement lorsqu'ils
-    deviennent disponibles, sans modifier la liste principale des extensions.
+    anti-nuke et la politique de filtres sont branchées dès qu'AutoMod devient disponible,
+    +wipe-server est verrouillé dès que ServerBuilder est chargé, et Economy/Levels sont
+    patchés exactement lorsqu'ils deviennent disponibles, sans modifier la liste principale
+    des extensions.
     """
     await install_antinuke_rollback(bot)
+    install_content_filter_policy(bot)
     await install_feature_systems(bot)
     install_wipe_owner_only(bot)
     _patch_create_server_defaults()
