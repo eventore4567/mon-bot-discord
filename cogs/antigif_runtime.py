@@ -3,6 +3,10 @@
 Ajoute la commande texte ``+antigif on|off`` sans modifier le schéma historique
 ``automod_settings``. Le réglage est stocké dans sa propre table SQLite afin de rester
 compatible avec les bases déjà déployées.
+
+Le propriétaire réel du serveur est toujours immunisé. Le filtre reconnaît les fichiers,
+les embeds Discord et les principaux liens/fournisseurs de GIF ; il supprime uniquement le
+message concerné et n'applique aucune sanction au membre.
 """
 
 from __future__ import annotations
@@ -19,13 +23,29 @@ from utils import embeds, checks
 
 logger = logging.getLogger("bot.antigif")
 
-_GIF_FILE_RE = re.compile(r"https?://[^\s<>]+\.gif(?:\?[^\s<>]*)?", re.IGNORECASE)
+_GIF_FILE_RE = re.compile(
+    r"https?://[^\s<>]+\.(?:gif|gifv)(?:[?#][^\s<>]*)?",
+    re.IGNORECASE,
+)
 _GIF_PROVIDER_RE = re.compile(
-    r"https?://(?:[^/]+\.)?(?:tenor\.com|giphy\.com)(?:/|$)",
+    r"https?://(?:[^/]+\.)?(?:tenor\.com|giphy\.com|gfycat\.com|redgifs\.com|klipy\.com)(?:/|$)",
+    re.IGNORECASE,
+)
+_GIF_QUERY_RE = re.compile(
+    r"https?://[^\s<>]+(?:[?&](?:format|fm)=gif(?:[&#]|$)|[?&]animated=true(?:[&#]|$))",
     re.IGNORECASE,
 )
 _ON_VALUES = {"on", "oui", "activer", "active", "enable", "enabled", "1"}
 _OFF_VALUES = {"off", "non", "desactiver", "désactiver", "disable", "disabled", "0"}
+
+
+def _looks_like_gif_url(value: str | None) -> bool:
+    text = str(value or "")
+    return bool(
+        _GIF_FILE_RE.search(text)
+        or _GIF_PROVIDER_RE.search(text)
+        or _GIF_QUERY_RE.search(text)
+    )
 
 
 class AntiGifRuntime:
@@ -81,16 +101,21 @@ class AntiGifRuntime:
         for attachment in message.attachments:
             filename = str(getattr(attachment, "filename", "") or "").casefold()
             content_type = str(getattr(attachment, "content_type", "") or "").casefold()
-            if filename.endswith(".gif") or content_type == "image/gif":
+            if filename.endswith((".gif", ".gifv")) or content_type == "image/gif":
+                return True
+            if _looks_like_gif_url(getattr(attachment, "url", None)):
+                return True
+            if _looks_like_gif_url(getattr(attachment, "proxy_url", None)):
                 return True
 
+        # Liens collés dans le message : .gif/.gifv, Tenor/Giphy/etc. et proxies animés.
         content = str(message.content or "")
-        if _GIF_FILE_RE.search(content) or _GIF_PROVIDER_RE.search(content):
+        if _looks_like_gif_url(content):
             return True
 
         # Le sélecteur GIF Discord et certains services envoient un embed de type gifv.
-        # Cette vérification permet de bloquer aussi les fournisseurs qui ne sont pas
-        # explicitement listés ci-dessus.
+        # Cette vérification bloque aussi les liens dont l'URL finale n'est ajoutée qu'après
+        # la création de l'embed par Discord.
         for embed in message.embeds:
             if str(getattr(embed, "type", "") or "").casefold() == "gifv":
                 return True
@@ -100,17 +125,22 @@ class AntiGifRuntime:
                 getattr(getattr(embed, "image", None), "url", None),
                 getattr(getattr(embed, "thumbnail", None), "url", None),
                 getattr(getattr(embed, "video", None), "url", None),
+                getattr(getattr(embed, "provider", None), "url", None),
             ]
-            for value in candidates:
-                text = str(value or "")
-                if _GIF_FILE_RE.search(text) or _GIF_PROVIDER_RE.search(text):
-                    return True
+            if any(_looks_like_gif_url(value) for value in candidates):
+                return True
 
         return False
 
     async def handle_message(self, message: discord.Message) -> None:
         if message.guild is None or message.author.bot:
             return
+
+        # Immunité absolue du propriétaire du serveur : même avec Anti-GIF activé, ses
+        # fichiers, liens et embeds GIF restent autorisés.
+        if message.author.id == message.guild.owner_id:
+            return
+
         if not await self.is_enabled(message.guild.id):
             return
         if not self.message_contains_gif(message):
@@ -124,10 +154,12 @@ class AntiGifRuntime:
             logger.exception("Impossible de supprimer un GIF dans %s", message.guild.id)
             return
 
+        # Politique SentriX : un filtre de contenu supprime seulement le contenu interdit.
+        # Pas de mute, kick ou ban pour un GIF.
         try:
             await message.channel.send(
                 embed=embeds.warning(
-                    "Les GIFs sont désactivés sur ce serveur."
+                    "Les GIFs sont désactivés sur ce serveur : le message a simplement été supprimé."
                 ),
                 delete_after=5,
                 allowed_mentions=discord.AllowedMentions.none(),
@@ -189,7 +221,7 @@ def install(bot: commands.Bot) -> None:
             await runtime.set_enabled(ctx.guild.id, True)
             return await ctx.send(
                 embed=embeds.success(
-                    "Anti-GIF activé. Les GIFs envoyés seront automatiquement supprimés."
+                    "Anti-GIF activé. Les GIFs et liens GIF seront automatiquement supprimés, sans sanction du membre."
                 )
             )
         if value in _OFF_VALUES:
@@ -229,4 +261,4 @@ def install(bot: commands.Bot) -> None:
     except RuntimeError:
         pass
 
-    logger.info("Anti-GIF installé : +antigif on/off et suppression automatique des GIFs.")
+    logger.info("Anti-GIF installé : +antigif on/off, liens GIF inclus, suppression seule.")
