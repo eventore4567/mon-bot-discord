@@ -30,6 +30,24 @@ DEFAULT_PREFIX = os.getenv("BOT_PREFIX", "+")
 DEFAULT_LANGUAGE = "fr"
 DATABASE_PATH = os.getenv("DATABASE_PATH", "database/bot.db")
 
+# --- Scalabilité Enterprise ---
+# AutoShardedBot calcule automatiquement le nombre recommandé par Discord si SHARD_COUNT
+# vaut 0. Une valeur explicite permet de figer le nombre de shards sur un gros déploiement.
+try:
+    SHARD_COUNT = max(0, int(os.getenv("SHARD_COUNT", "0") or 0))
+except ValueError:
+    SHARD_COUNT = 0
+# PostgreSQL et Redis sont optionnels : EnterpriseInfra les active automatiquement si les
+# URLs sont présentes, sinon SQLite/caches locaux restent le fallback sans casser le bot.
+POSTGRES_URL = (os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL") or "").strip()
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+# Mode canary pour un service de test séparé. Ne jamais l'activer sur le service principal.
+CANARY_MODE = os.getenv("SENTRIX_CANARY_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
+try:
+    CANARY_GUILD_ID = int(os.getenv("CANARY_GUILD_ID", "0") or 0)
+except ValueError:
+    CANARY_GUILD_ID = 0
+
 # --- Application dashboard (voir web/dashboard.py) ---
 # Port d'écoute : Railway fournit automatiquement la variable PORT, sinon 8080 en local.
 DASHBOARD_PORT = int(os.getenv("PORT", "8080"))
