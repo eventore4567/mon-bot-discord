@@ -29,6 +29,7 @@ from . import dashboard_role_channel_search as _dashboard_role_channel_search
 from . import dashboard_system_features as _dashboard_system_features
 from . import setup_center_systems_rework as _setup_center_systems_rework
 from . import setup_center_security_v2 as _setup_center_security_v2
+from . import dashboard_no_decorative_icons as _dashboard_no_decorative_icons
 
 
 # Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
@@ -179,3 +180,14 @@ _dashboard.INDEX_HTML = _dashboard.INDEX_HTML.replace(_dashboard_system_features
 _dashboard.INDEX_HTML = _dashboard.INDEX_HTML.replace(_dashboard_system_features.SYSTEMS_JS, "")
 _setup_center_systems_rework.install(_setup_center)
 _setup_center_security_v2.install(_dashboard, _setup_center)
+
+# Toujours en dernier : retire les emojis/icônes décoratifs ajoutés par n'importe quelle
+# couche précédente, sans toucher aux photos de profil ni au contenu configuré par l'utilisateur.
+_dashboard_no_decorative_icons.install(
+    _dashboard,
+    _setup_center,
+    _setup_dashboard,
+    _design_setup_dashboard,
+    _embed_center,
+    _owner_server_manager,
+)
