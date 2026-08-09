@@ -15,4 +15,6 @@ COPY . .
 # variable PORT au runtime, cette ligne ne sert que de documentation pour Docker.
 EXPOSE 8080
 
-CMD ["python3", "main.py"]
+# Démarre d'abord le serveur HTTP du dashboard, puis le bot Discord. Cela évite les
+# 502 Railway pendant que les cogs et les commandes slash terminent leur initialisation.
+CMD ["python3", "railway_boot.py"]
