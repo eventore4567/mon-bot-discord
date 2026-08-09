@@ -88,6 +88,72 @@ def _route_paths(app) -> set[str]:
     return {getattr(route.resource, "canonical", str(route.resource)) for route in app.router.routes()}
 
 
+async def _audit_preban_appeal_delivery(bot, service) -> None:
+    """Reproduit le bug réel : le lien doit partir avant guild.ban(), pas après."""
+    moderation = bot.get_cog("Moderation")
+    assert moderation is not None, "Cog Moderation absent"
+    assert getattr(type(moderation)._send_sanction_dm, "_sentrix_preban_appeal", False), (
+        "le MP de ban n'est pas branché au recours pré-ban"
+    )
+    assert getattr(type(service).create_appeal_for_ban, "_sentrix_preban_reuse", False), (
+        "on_member_ban recréerait encore un second recours"
+    )
+
+    class FakeGuild:
+        id = 991001
+        name = "Serveur CI"
+
+    class FakeAuthor:
+        id = 991002
+        display_name = "Moderateur CI"
+
+        def __str__(self):
+            return self.display_name
+
+    class FakeTarget:
+        id = 991003
+        display_name = "Membre CI"
+
+        def __init__(self):
+            self.messages = []
+
+        def __str__(self):
+            return self.display_name
+
+        async def send(self, content, **kwargs):
+            self.messages.append(str(content))
+            return None
+
+    class FakeContext:
+        guild = FakeGuild()
+        author = FakeAuthor()
+
+    target = FakeTarget()
+    delivered = await moderation._send_sanction_dm(
+        FakeContext(), target, "ban", "Test lien de recours"
+    )
+    assert delivered is True
+    assert len(target.messages) >= 2, "le MP de recours pré-ban n'a pas été envoyé"
+    appeal_dm = target.messages[-1]
+    assert "/appeal/" in appeal_dm, "le MP pré-ban ne contient aucun lien de recours"
+    assert config.DASHBOARD_PUBLIC_URL in appeal_dm, "le lien de recours n'utilise pas le dashboard public"
+
+    before = await bot.db.fetchone(
+        "SELECT COUNT(*) AS n FROM ban_appeals WHERE guild_id=? AND user_id=? AND status='awaiting_user'",
+        (FakeGuild.id, target.id),
+    )
+    assert int(before["n"]) == 1, "un recours unique doit exister avant le ban"
+
+    # Simule l'événement Discord reçu juste après le ban. Il doit réutiliser le token déjà
+    # remis au membre et surtout ne pas créer un deuxième recours inaccessible.
+    await service.create_appeal_for_ban(FakeGuild(), target)
+    after = await bot.db.fetchone(
+        "SELECT COUNT(*) AS n FROM ban_appeals WHERE guild_id=? AND user_id=? AND status='awaiting_user'",
+        (FakeGuild.id, target.id),
+    )
+    assert int(after["n"]) == 1, "on_member_ban a dupliqué le recours pré-ban"
+
+
 async def run() -> None:
     db_path = Path(os.environ["DATABASE_PATH"])
     for suffix in ("", "-wal", "-shm"):
@@ -117,6 +183,10 @@ async def run() -> None:
         tables = {str(row["name"]) for row in rows}
         missing_tables = REQUIRED_TABLES - tables
         assert not missing_tables, f"tables Enterprise manquantes: {sorted(missing_tables)}"
+
+        # Régression ciblée : le membre doit recevoir son URL de recours AVANT d'être
+        # réellement banni, puis on_member_ban doit réutiliser ce même recours.
+        await _audit_preban_appeal_delivery(bot, service)
 
         # La suite ne doit pas regonfler le catalogue de commandes publiques.
         names = {command.name for command in bot.commands}
@@ -174,7 +244,7 @@ async def run() -> None:
         assert hasattr(config, "CANARY_GUILD_ID")
 
         print(f"Enterprise audit: {loaded}/{len(main.EXTENSIONS)} extensions chargées")
-        print("OK: recours, modmail, sharding, PostgreSQL/Redis optionnels, monitoring, backups, canary, automatisations, analytics, recommandations et permissions dashboard validés")
+        print("OK: recours pré-ban, modmail, sharding, PostgreSQL/Redis optionnels, monitoring, backups, canary, automatisations, analytics, recommandations et permissions dashboard validés")
     finally:
         if service is None:
             service = bot.get_cog("EnterpriseSuite")
