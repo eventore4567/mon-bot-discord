@@ -7,17 +7,20 @@ import logging
 from discord.ext import commands
 
 from .command_catalog_cleanup import install as install_command_catalog_cleanup
+from .operations_center import install as install_operations_center
 
 logger = logging.getLogger("bot.remove-code-command")
 _INSTALLED = False
 
 
-def install(bot: commands.Bot) -> None:
-    """Applique le catalogue canonique et conserve désormais +code comme commande utile."""
+async def install(bot: commands.Bot) -> None:
+    """Applique le catalogue canonique, Operations et conserve +code comme commande utile."""
     # Cette fonction est appelée pendant le chargement du cog IA, donc avant le pruning
-    # final de main.setup_hook(). Les commandes directes utiles sont ainsi restaurées avant
-    # que le registre et +help soient construits définitivement.
+    # final de main.setup_hook(). À ce moment AutoMod/Tickets/Configuration sont déjà
+    # chargés : Operations peut brancher ses checks, diagnostics et scopes sans ajouter
+    # de nouvelle commande publique au catalogue.
     install_command_catalog_cleanup(bot)
+    await install_operations_center(bot)
 
     global _INSTALLED
     if _INSTALLED:
