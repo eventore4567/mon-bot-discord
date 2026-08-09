@@ -61,6 +61,12 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-help-style-audit.db"
         run: python tools/help_clean_style_audit.py
 
+      - name: All commands no-emoji audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-no-emoji-audit.db"
+        run: python tools/no_emoji_commands_audit.py
+
       - name: Everyday usability audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
@@ -89,8 +95,8 @@ jobs:
           cogs._install_embed_component_fix(bot)
           view = embed_builder.EmbedBuilderView(None, embed_builder.EmbedDraft(), 1)
           cancel = next(item for item in view.children if getattr(item, "label", None) == "Annuler")
-          assert str(cancel.emoji) == "❌", f"Emoji Annuler invalide: {cancel.emoji!r}"
-          print("OK: +embed construit un bouton Annuler avec un vrai emoji Discord")
+          assert cancel.emoji is None, f"Le bouton Annuler doit rester sans emoji: {cancel.emoji!r}"
+          print("OK: +embed construit un bouton Annuler uniquement textuel")
           PY
 
       - name: Import smoke test
