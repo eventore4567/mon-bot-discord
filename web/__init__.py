@@ -25,6 +25,7 @@ from . import dashboard_oxyde_theme as _dashboard_oxyde_theme
 from . import dashboard_deeplinks as _dashboard_deeplinks
 from . import dashboard_safe_plus as _dashboard_safe_plus
 from . import dashboard_profile_images as _dashboard_profile_images
+from . import dashboard_role_channel_search as _dashboard_role_channel_search
 
 
 # Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
@@ -163,7 +164,7 @@ if 'id="sentrix-core-recovery"' not in _main_html:
     _main_html = _main_html.replace("</body>", _CORE_RECOVERY_JS + "\n</body>", 1)
 _dashboard.INDEX_HTML = _main_html
 
-# Enrichissement final volontairement sans monkey-patch : il ajoute les détails/indicateurs
-# après la restauration de l'interface stable et ne remplace aucune fonction critique.
+# Enrichissements finaux sans monkey-patch des fonctions critiques du dashboard.
 _dashboard_safe_plus.install(_dashboard)
 _dashboard_profile_images.install(_dashboard)
+_dashboard_role_channel_search.install(_dashboard, _setup_center)
