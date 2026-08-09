@@ -7,6 +7,7 @@ import logging
 import discord
 from discord.ext import commands
 
+from .antigif_runtime import install as install_antigif_runtime
 from .command_clarity import install as install_command_clarity
 from .help_category_rework import install as install_help_category_rework
 
@@ -163,6 +164,13 @@ def install(bot: commands.Bot) -> None:
     # Le classement doit être en place avant que le dashboard et le style n'enveloppent
     # l'accueil. Cela garantit que menu, recherche et pages utilisent les mêmes catégories.
     install_help_category_rework(bot)
+
+    # Le filtre anti-GIF est chargé ici car ce runtime est lui-même installé une fois
+    # pendant le chargement du cog Utility. Il reste indépendant de l'interface d'aide.
+    try:
+        install_antigif_runtime(bot)
+    except Exception:
+        logger.exception("Impossible d'installer le runtime anti-GIF.")
 
     from . import help_complete, utility
 
