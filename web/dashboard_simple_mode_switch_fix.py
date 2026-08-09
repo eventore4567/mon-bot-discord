@@ -49,7 +49,51 @@ SWITCH_JS = r"""
     try { localStorage.setItem(MODE_KEY, mode); } catch (_) {}
   }
 
+  function currentMode(){
+    try {
+      if (localStorage.getItem(MODE_KEY) === "advanced") return "advanced";
+    } catch (_) {}
+    return document.body && document.body.classList.contains("sx-simple-advanced") ? "advanced" : "simple";
+  }
+
+  function setTextIfChanged(node, value){
+    if (node && node.textContent !== value) node.textContent = value;
+  }
+
+  function ensureEscapeButton(){
+    if (!document.body) return null;
+    let button = byId("sxModeEscape");
+    if (button) return button;
+    button = document.createElement("button");
+    button.id = "sxModeEscape";
+    button.type = "button";
+    document.body.appendChild(button);
+    return button;
+  }
+
+  function syncControls(mode){
+    const advanced = mode === "advanced";
+    const simpleButton = byId("sxUseSimple");
+    const advancedButton = byId("sxUseAdvanced");
+    if (simpleButton) {
+      simpleButton.disabled = false;
+      simpleButton.setAttribute("aria-pressed", advanced ? "false" : "true");
+    }
+    if (advancedButton) {
+      advancedButton.disabled = false;
+      advancedButton.setAttribute("aria-pressed", advanced ? "true" : "false");
+    }
+
+    const floating = ensureEscapeButton();
+    if (floating) {
+      const label = advanced ? "Mode simple" : "Mode avancé";
+      setTextIfChanged(floating, label);
+      floating.setAttribute("aria-label", advanced ? "Passer au mode simple" : "Passer au mode avancé");
+    }
+  }
+
   function apply(mode){
+    if (!document.body) return;
     const advanced = mode === "advanced";
     persist(advanced ? "advanced" : "simple");
 
@@ -64,46 +108,16 @@ SWITCH_JS = r"""
     const back = byId("sxSimpleBack");
     if (back) back.style.removeProperty("display");
 
-    const simpleButton = byId("sxUseSimple");
-    const advancedButton = byId("sxUseAdvanced");
-    if (simpleButton) {
-      simpleButton.disabled = false;
-      simpleButton.setAttribute("aria-pressed", advanced ? "false" : "true");
-    }
-    if (advancedButton) {
-      advancedButton.disabled = false;
-      advancedButton.setAttribute("aria-pressed", advanced ? "true" : "false");
-    }
-
-    const floating = byId("sxModeEscape");
-    if (floating) {
-      floating.textContent = advanced ? "Mode simple" : "Mode avancé";
-      floating.setAttribute("aria-label", advanced ? "Passer au mode simple" : "Passer au mode avancé");
-    }
+    syncControls(advanced ? "advanced" : "simple");
 
     if (!advanced) {
       const message = byId("sxSimpleMessage");
-      if (message && !message.textContent.trim()) message.textContent = "Choisissez un serveur puis une action.";
+      if (message && !message.textContent.trim()) {
+        message.textContent = "Choisissez un serveur puis une action.";
+      }
     }
 
     window.scrollTo({top:0, behavior:"smooth"});
-  }
-
-  function currentMode(){
-    try {
-      if (localStorage.getItem(MODE_KEY) === "advanced") return "advanced";
-    } catch (_) {}
-    return document.body.classList.contains("sx-simple-advanced") ? "advanced" : "simple";
-  }
-
-  function ensureEscapeButton(){
-    if (!document.body || byId("sxModeEscape")) return;
-    const button = document.createElement("button");
-    button.id = "sxModeEscape";
-    button.type = "button";
-    button.textContent = currentMode() === "advanced" ? "Mode simple" : "Mode avancé";
-    button.setAttribute("aria-label", button.textContent === "Mode simple" ? "Passer au mode simple" : "Passer au mode avancé");
-    document.body.appendChild(button);
   }
 
   document.addEventListener("click", event => {
@@ -111,29 +125,15 @@ SWITCH_JS = r"""
     if (!target) return;
 
     event.preventDefault();
-    event.stopImmediatePropagation();
+    event.stopPropagation();
 
-    if (target.id === "sxUseAdvanced") {
-      apply("advanced");
-      return;
-    }
-    if (target.id === "sxUseSimple") {
-      apply("simple");
-      return;
-    }
-    apply(currentMode() === "advanced" ? "simple" : "advanced");
+    if (target.id === "sxUseAdvanced") return apply("advanced");
+    if (target.id === "sxUseSimple") return apply("simple");
+    return apply(currentMode() === "advanced" ? "simple" : "advanced");
   }, true);
 
   function start(){
-    ensureEscapeButton();
-    const mode = currentMode();
-    const floating = byId("sxModeEscape");
-    if (floating) floating.textContent = mode === "advanced" ? "Mode simple" : "Mode avancé";
-
-    const simpleButton = byId("sxUseSimple");
-    const advancedButton = byId("sxUseAdvanced");
-    if (simpleButton) simpleButton.disabled = false;
-    if (advancedButton) advancedButton.disabled = false;
+    syncControls(currentMode());
   }
 
   if (document.readyState === "loading") {
@@ -142,8 +142,17 @@ SWITCH_JS = r"""
     start();
   }
 
-  const observer = new MutationObserver(() => start());
-  observer.observe(document.documentElement, {childList:true, subtree:true});
+  // Le dashboard simple construit certains boutons après DOMContentLoaded. On réessaie
+  // quelques fois seulement. Surtout pas de MutationObserver qui se déclenche sur ses
+  // propres modifications DOM et peut bloquer entièrement la page.
+  let retries = 0;
+  const timer = setInterval(() => {
+    retries += 1;
+    start();
+    if ((byId("sxUseSimple") && byId("sxUseAdvanced")) || retries >= 20) {
+      clearInterval(timer);
+    }
+  }, 250);
 })();
 </script>
 """
@@ -166,4 +175,4 @@ def install(dashboard) -> None:
         html = html.replace("</body>", SWITCH_JS + "\n</body>", 1)
         dashboard.INDEX_HTML = html
 
-    logger.info("Bascule Mode simple / Mode avancé du dashboard renforcée.")
+    logger.info("Bascule Mode simple / Mode avancé du dashboard renforcée sans boucle DOM.")
