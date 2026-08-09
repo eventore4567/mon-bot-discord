@@ -3,7 +3,7 @@
 
 Les anciens alias français globaux ont été remplacés par le vrai mode de langue par
 serveur. Cet audit vérifie donc la fiabilité commune (résolution d'ID, aide au ping) et
-laisse les traductions FR/EN au language_runtime_audit dédié.
+les noms FR/EN des commandes quotidiennes canoniques, dont le centre `+security` V3.
 """
 from __future__ import annotations
 
@@ -58,7 +58,9 @@ async def run() -> int:
             "warn": ("avertir", "warn"),
             "mute": ("rendre-muet", "mute"),
             "setup": ("configurer", "setup"),
-            "security-check": ("verifier-securite", "security"),
+            # V3 possède maintenant une vraie racine +security. L'ancien security-check
+            # reste seulement comme compatibilité masquée et ne doit plus dicter le nom.
+            "security": ("securite", "security"),
             "balance": ("solde", "balance"),
             "shop": ("boutique", "shop"),
             "level": ("niveau", "level"),
@@ -72,33 +74,55 @@ async def run() -> int:
             if target is None:
                 errors.append(f"commande canonique absente: {canonical}")
                 continue
-            if language_runtime.localized_command_name(target, language_runtime.LANG_FR) != french:
+            fr_name = language_runtime.localized_command_name(
+                target,
+                language_runtime.LANG_FR,
+            )
+            en_name = language_runtime.localized_command_name(
+                target,
+                language_runtime.LANG_EN,
+            )
+            if fr_name != french:
                 errors.append(
-                    f"nom FR inattendu pour {canonical}: "
-                    f"{language_runtime.localized_command_name(target, language_runtime.LANG_FR)!r}"
+                    f"nom FR inattendu pour {canonical}: {fr_name!r}"
                 )
-            if language_runtime.localized_command_name(target, language_runtime.LANG_EN) != english:
+            if en_name != english:
                 errors.append(
-                    f"nom EN inattendu pour {canonical}: "
-                    f"{language_runtime.localized_command_name(target, language_runtime.LANG_EN)!r}"
+                    f"nom EN inattendu pour {canonical}: {en_name!r}"
                 )
 
-        if not getattr(commands.UserConverter.convert, "_sentrix_resilient_user_converter", False):
-            errors.append("UserConverter n'a pas le fallback fetch_user pour les IDs hors cache")
+        if not getattr(
+            commands.UserConverter.convert,
+            "_sentrix_resilient_user_converter",
+            False,
+        ):
+            errors.append(
+                "UserConverter n'a pas le fallback fetch_user pour les IDs hors cache"
+            )
 
         if not common_command_names._USER_CONVERTER_PATCHED:
             errors.append("flag de résolution utilisateur robuste inactif")
 
         # Le listener historique a volontairement été remplacé par le listener localisé.
         if not getattr(bot, "_sentrix_language_listeners", False):
-            errors.append("listener d'aide localisé lors d'une mention directe de SentriX non installé")
+            errors.append(
+                "listener d'aide localisé lors d'une mention directe de SentriX non installé"
+            )
 
         help_command = bot.get_command("help")
-        if help_command is None or not getattr(help_command, "_sentrix_language_help", False):
+        if help_command is None or not getattr(
+            help_command,
+            "_sentrix_language_help",
+            False,
+        ):
             errors.append("+help n'utilise pas le rendu de langue par serveur")
 
         current = asyncio.current_task()
-        pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
+        pending = [
+            task
+            for task in asyncio.all_tasks()
+            if task is not current and not task.done()
+        ]
         for task in pending:
             task.cancel()
         if pending:

@@ -41,6 +41,7 @@ COG_DEFAULT_CATEGORY: dict[str, str] = {
     "Automod": "security",
     "Security": "security",
     "SecurityHardening": "security",
+    "SecurityCommandCenter": "security",
     "Configuration": "configuration",
     "GamesSetup": "configuration",
     "ServerBuilder": "server",
