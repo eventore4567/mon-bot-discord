@@ -11,6 +11,7 @@ from discord.ext import commands
 from .antigif_runtime import install as install_antigif_runtime
 from .command_clarity import install as install_command_clarity
 from .help_category_rework import install as install_help_category_rework
+from .server_builder_moderation_space import install as install_server_builder_moderation_space
 
 logger = logging.getLogger("bot.help-home-circles")
 _INSTALLED = False
@@ -127,7 +128,13 @@ def _install_plus_help_shortcut(bot: commands.Bot) -> None:
 
 
 def _patch_clean_help_callback_compat() -> None:
-    """Corrige le bug où discord.py demandait `ctx` après +help."""
+    """Accepte toutes les formes d'appel internes de discord.py pour +help.
+
+    Plusieurs couches de SentriX remplacent le callback de la commande après sa création.
+    discord.py peut alors transmettre le Cog, le Context et une valeur transformée en
+    positionnel, tout en conservant `commande` en mot-clé. On localise donc explicitement
+    le vrai Context au lieu d'imposer une signature fragile.
+    """
     try:
         from . import help_clean_style
 
@@ -135,20 +142,55 @@ def _patch_clean_help_callback_compat() -> None:
         if getattr(original, "_sentrix_ctx_compat", False):
             return
 
-        async def compatible_help_callback(cog_or_ctx, ctx: commands.Context | None = None, *, commande: str = None):
-            # Selon l'ordre des patches, la commande peut être liée au Cog Utility ou
-            # temporairement vue comme autonome. Les deux formes sont acceptées.
-            if isinstance(cog_or_ctx, commands.Context) and ctx is None:
-                real_ctx = cog_or_ctx
-                utility_cog = real_ctx.bot.get_cog("Utility")
-                if utility_cog is None:
-                    utility_cog = SimpleNamespace(bot=real_ctx.bot)
-                return await original(utility_cog, real_ctx, commande=commande)
-            return await original(cog_or_ctx, ctx, commande=commande)
+        async def compatible_help_callback(*args, **kwargs):
+            commande = kwargs.get("commande")
 
+            real_ctx = next(
+                (value for value in args if isinstance(value, commands.Context)),
+                None,
+            )
+            if real_ctx is None:
+                raise TypeError("Context Discord introuvable pour +help")
+
+            # Récupère un éventuel argument de commande transmis en positionnel.
+            if commande is None:
+                try:
+                    ctx_index = args.index(real_ctx)
+                except ValueError:
+                    ctx_index = -1
+                for value in args[ctx_index + 1 :]:
+                    if isinstance(value, str) and value.strip():
+                        commande = value.strip()
+                        break
+
+            utility_cog = real_ctx.bot.get_cog("Utility")
+            callback_cog = next(
+                (
+                    value
+                    for value in args
+                    if value is not real_ctx
+                    and hasattr(value, "bot")
+                    and hasattr(value, "_user_is_staff")
+                ),
+                None,
+            )
+            if callback_cog is None:
+                callback_cog = utility_cog
+            if callback_cog is None:
+                callback_cog = SimpleNamespace(bot=real_ctx.bot)
+
+                async def _user_is_staff(_ctx):
+                    return False
+
+                callback_cog._user_is_staff = _user_is_staff
+
+            return await original(callback_cog, real_ctx, commande=commande)
+
+        compatible_help_callback.__name__ = "help_cmd"
+        compatible_help_callback.__doc__ = getattr(original, "__doc__", None)
         compatible_help_callback._sentrix_ctx_compat = True
         help_clean_style._clean_help_callback = compatible_help_callback
-        logger.info("Correctif +help installé : ctx n'est plus un argument utilisateur.")
+        logger.info("Correctif +help installé : callback compatible avec tous les appels discord.py.")
     except Exception:
         logger.exception("Impossible d'installer le correctif callback +help.")
 
@@ -164,6 +206,13 @@ def install(bot: commands.Bot) -> None:
         install_antigif_runtime(bot)
     except Exception:
         logger.exception("Impossible d'installer le runtime anti-GIF.")
+
+    # ServerBuilder est chargé avant Utility dans main.py : à ce moment, ses modèles sont
+    # donc déjà disponibles et peuvent être enrichis avant le prochain +create-server.
+    try:
+        install_server_builder_moderation_space(bot)
+    except Exception:
+        logger.exception("Impossible d'ajouter automatiquement LOGS/MODÉRATION à +create-server.")
 
     from . import help_complete, utility
 
