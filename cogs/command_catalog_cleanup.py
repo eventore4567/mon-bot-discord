@@ -1,13 +1,11 @@
 """Politique canonique du catalogue de commandes SentriX.
 
-Objectif : garder toutes les commandes qui apportent une vraie action, même lorsqu'un
-panneau +setup permet aussi d'atteindre le même réglage, retirer uniquement les vrais
-doublons et afficher des noms courts pour les commandes pénibles à taper.
+Objectif : garder les commandes qui apportent une vraie action, fusionner les anciens
+réglages dans les centres +security / +setup et retirer les entrées réellement inutiles.
 
-Les anciens noms longs restent acceptés en compatibilité afin de ne casser aucun panneau,
-script, ancien message d'aide ou habitude existante. +help présente en priorité le nom
-court. Les commandes déjà courtes (ban, warn, antilink, antispam, antinuke, etc.) ne sont
-pas supprimées.
+Le code interne des commandes fusionnées reste chargé : les panneaux, services et données
+historiques continuent donc de fonctionner. Seule leur ancienne entrée publique disparaît
+du registre Discord, de +help et des commandes slash.
 """
 from __future__ import annotations
 
@@ -18,53 +16,110 @@ from discord.ext import commands
 logger = logging.getLogger("bot.command-catalog-cleanup")
 _INSTALLED = False
 
-# Commandes auparavant retirées uniquement parce qu'elles étaient accessibles depuis un
-# panneau +setup, plus +code qui reste utile comme raccourci IA spécialisé. Elles doivent
-# toutes exister dans le registre et donc apparaître automatiquement dans +help.
+# Commandes uniques qui avaient autrefois été masquées uniquement parce qu'un panneau
+# proposait aussi la fonction. Elles restent publiques : elles apportent encore une action
+# utile qu'on ne veut pas perdre pendant le nettoyage du catalogue.
 RESTORED_COMMANDS = frozenset({
-    "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs",
-    "setwelcomechannel", "setgoodbyechannel", "setwelcomemessage",
-    "setgoodbyemessage", "setticketlogchannel", "setautorole", "createrole",
-    "setlevelchannel", "setsuggestchannel", "setannouncechannel",
-    "setgiveawaychannel", "verify-setup", "set-level-role",
+    "logs", "createrole", "verify-setup", "set-level-role",
     "remove-level-role", "level-roles", "ticketpanel", "ticketpanel-toggle",
     "tickettype", "ticketform", "ticketconfig", "ticketlogs", "ticketlimit",
     "ticketautoclose", "code", "me",
 })
 
-# Alias confirmés qui font exactement la même chose qu'une commande principale. Ils sont
-# retirés du registre pour éviter un +help rempli de doublons inutiles.
-# +me est volontairement conservé : c'est le raccourci personnel naturel pour afficher
-# toutes ses statistiques (niveau, XP, messages, vocal, économie, réputation, etc.).
-CONFIRMED_DUPLICATE_COMMANDS = frozenset({
+# 9 vrais doublons : aucune fonction n'est perdue, une commande canonique existe déjà.
+PURE_DUPLICATE_COMMANDS = frozenset({
     "leaderboard-money",  # economyleaderboard
     "rank",               # level
     "buyrole",            # buy
-    "ask",                # ancienne entrée IA, remplacée par ai
-    "chat",               # même pipeline que ai
-    "chat-reset",         # ancien reset, remplacé proprement par +ai reset
+    "ask",                # ai
+    "chat",               # ai
+    "chat-reset",         # ai reset
     "embed-create",       # embed create
     "latency",            # ping
-    "levelroles",         # statsconfig ouvert directement sur la page niveaux
+    "levelroles",         # statsconfig / level-roles
 })
 
-INTENTIONALLY_REMOVED_COMMANDS = CONFIRMED_DUPLICATE_COMMANDS
+# Anciens réglages désormais regroupés dans le centre +setup ou le dashboard.
+SETUP_MERGED_COMMANDS = frozenset({
+    "config-view", "config-reset", "create-logs", "logsetup", "logs-status",
+    "designsetup", "welcome-config", "shopsetup", "ticketsetup", "aisetup",
+    "setwelcomechannel", "setwelcomemessage", "setgoodbyechannel",
+    "setgoodbyemessage", "setlogchannel", "setticketlogchannel", "setmodrole",
+    "setwarnrole", "setannouncechannel", "setgiveawaychannel",
+    "setsuggestchannel", "setlevelchannel", "setautorole", "setprefix",
+})
 
-# Rework demandé : les commandes utiles ne sont PAS supprimées juste parce que leur nom
-# est long. Elles reçoivent un nom officiel court. L'ancien nom reste un alias silencieux
-# pour compatibilité, tandis que +help affiche le raccourci ci-dessous.
+# Anciennes entrées de sécurité dont la fonction est maintenant implémentée directement
+# dans +security. On ne retire PAS quarantine/backup/role-restore/etc. ici : les wrappers
+# avancés +security réutilisent encore leurs implémentations internes.
+SECURITY_MERGED_COMMANDS = frozenset({
+    "antinuke-whitelist-add", "antinuke-whitelist-list",
+    "antinuke-whitelist-remove", "automod-exempt-role-add",
+    "automod-exempt-role-remove", "automod-history", "automod-status",
+    "security-check", "security-level", "security-repair",
+    "whitelist-domain", "unwhitelist-domain",
+})
+
+# Ancienne blacklist serveur remplacée par +security blacklist ...
+BLACKLIST_MERGED_COMMANDS = frozenset({
+    "blacklist-add", "blacklist-list", "blacklist-remove",
+    "blacklist-user", "blacklist-users", "unblacklist-user",
+})
+
+# Commandes réellement retirées car trop secondaires/techniques pour le catalogue public.
+# Les fonctions principales équivalentes restent accessibles via +health ou le dashboard
+# quand c'est pertinent ; les outils propriétaire très niche disparaissent volontairement.
+LOW_VALUE_REMOVED_COMMANDS = frozenset({
+    "aidiag", "diagnostic", "bot-status", "command-stats", "bot-servers",
+    "bot-leave", "levelcheck", "levelrepair", "status-rotate",
+})
+
+MERGED_COMMANDS = (
+    SETUP_MERGED_COMMANDS
+    | SECURITY_MERGED_COMMANDS
+    | BLACKLIST_MERGED_COMMANDS
+)
+
+INTENTIONALLY_REMOVED_COMMANDS = (
+    PURE_DUPLICATE_COMMANDS
+    | MERGED_COMMANDS
+    | LOW_VALUE_REMOVED_COMMANDS
+)
+
+# Compatibilité avec les audits / couches plus anciennes qui importaient ce nom.
+CONFIRMED_DUPLICATE_COMMANDS = PURE_DUPLICATE_COMMANDS
+
+# Documentation machine-lisible des destinations des commandes fusionnées. La CI vérifie
+# que la racine cible existe réellement après le nettoyage.
+MERGED_COMMAND_TARGETS: dict[str, str] = {
+    # Setup / dashboard.
+    **{name: "setup" for name in SETUP_MERGED_COMMANDS},
+    # Sécurité.
+    "antinuke-whitelist-add": "security whitelist user-add",
+    "antinuke-whitelist-list": "security whitelist users",
+    "antinuke-whitelist-remove": "security whitelist user-remove",
+    "automod-exempt-role-add": "security whitelist role-add",
+    "automod-exempt-role-remove": "security whitelist role-remove",
+    "automod-history": "security history",
+    "automod-status": "security status",
+    "security-check": "security scan",
+    "security-level": "security level",
+    "security-repair": "security repair",
+    "whitelist-domain": "security whitelist domain-add",
+    "unwhitelist-domain": "security whitelist domain-remove",
+    # Blacklist serveur.
+    "blacklist-add": "security blacklist word-add",
+    "blacklist-list": "security blacklist words",
+    "blacklist-remove": "security blacklist word-remove",
+    "blacklist-user": "security blacklist user-add",
+    "blacklist-users": "security blacklist users",
+    "unblacklist-user": "security blacklist user-remove",
+}
+
+# Les commandes longues encore nécessaires reçoivent un raccourci officiel. Elles ne sont
+# pas supprimées car +security les utilise encore comme moteur interne pour certaines
+# actions avancées.
 SHORT_COMMAND_NAMES: dict[str, str] = {
-    # Sécurité / AutoMod avancé.
-    "antinuke-whitelist-add": "nukeadd",
-    "antinuke-whitelist-list": "nukewl",
-    "antinuke-whitelist-remove": "nukedel",
-    "automod-exempt-role-add": "exemptadd",
-    "automod-exempt-role-remove": "exemptdel",
-    "automod-history": "amodlog",
-    "automod-status": "amod",
-    "security-check": "secscan",
-    "security-level": "seclevel",
-    "security-repair": "secfix",
     "permission-audit": "perms",
     "quarantine": "quar",
     "unquarantine": "unquar",
@@ -72,92 +127,53 @@ SHORT_COMMAND_NAMES: dict[str, str] = {
     "role-restore": "roleload",
     "server-backup": "backup",
     "server-restore": "restore",
-    "whitelist-domain": "domainadd",
-    "unwhitelist-domain": "domaindel",
     "lockdown-server": "lockdown",
     "unlock-server": "unlockdown",
-
-    # Logs / configuration.
-    "logs-status": "logstatus",
-    "logsetup": "logconfig",
-    "create-logs": "createlogs",
-    "config-view": "config",
-    "config-reset": "resetconfig",
-    "designsetup": "design",
-    "ticketsetup": "ticketcfg",
-    "shopsetup": "shopcfg",
-    "welcome-config": "welcome",
-
-    # Anciennes commandes set... : gardées, mais beaucoup plus rapides à taper.
-    "setwelcomechannel": "welcomech",
-    "setwelcomemessage": "welcomemsg",
-    "setgoodbyechannel": "goodbyech",
-    "setgoodbyemessage": "goodbyemsg",
-    "setlogchannel": "logch",
-    "setticketlogchannel": "ticketlog",
-    "setmodrole": "modrole",
-    "setwarnrole": "warnrole",
-    "setannouncechannel": "announcech",
-    "setgiveawaychannel": "giveawaych",
-    "setsuggestchannel": "suggestch",
-    "setlevelchannel": "levelch",
-
-    # Diagnostics / blacklist utilisateur.
-    "diagnostic": "diag",
-    "blacklist-user": "bluser",
-    "unblacklist-user": "unbluser",
 }
 
-# Ces noms sont volontairement conservés tels quels. Ils sont courts, très reconnaissables
-# ou avaient déjà été explicitement protégés dans SentriX.
+# Noms courts et importants à ne jamais renommer/supprimer par une future couche d'alias.
 KEEP_AS_IS = frozenset({
     "antiaccount", "antibot", "anticaps", "antiemoji", "antiinvite", "antilink",
-    "antimention", "antinuke", "antiraid", "antiscam", "antispam", "aidiag",
-    "bl", "blacklist-add", "blacklist-list", "blacklist-remove",
+    "antimention", "antinuke", "antiraid", "antiscam", "antispam", "bl",
 })
 
 
 def _install_short_command_names() -> None:
-    """Branche les nouveaux noms sur le moteur d'alias/help déjà utilisé par SentriX."""
+    """Branche les raccourcis conservés sur le moteur d'alias/help SentriX."""
     try:
         from . import common_command_names
     except Exception:
         logger.exception("Impossible de charger le moteur de noms courts SentriX.")
         return
 
-    # Le moteur common_command_names ajoute l'alias au registre et mémorise le nom comme
-    # nom préféré. Il est réappliqué après chaque extension, donc les cogs chargés plus
-    # tard récupèrent eux aussi automatiquement leur raccourci.
     common_command_names.PREFERRED_COMMAND_NAMES.update(SHORT_COMMAND_NAMES)
-
-    # Les commandes protégées conservent exactement leur nom historique.
-    common_command_names.PROTECTED_NAMES.update({
-        "bl", "blacklist-add", "blacklist-list", "blacklist-remove",
-    })
+    common_command_names.PROTECTED_NAMES.update({"bl"})
 
 
 def install(bot: commands.Bot) -> None:
-    """Applique la politique avant le nettoyage final exécuté dans main.setup_hook()."""
+    """Applique le catalogue slim avant le pruning final de main.setup_hook()."""
     del bot
     global _INSTALLED
     if _INSTALLED:
         return
 
-    # main est déjà chargé lorsque le premier cog passe par le loader SentriX. Modifier
-    # ces ensembles ici permet de conserver le mécanisme de pruning existant sans toucher
-    # aux implémentations internes utilisées par les anciens panneaux persistants.
     import main
 
-    main.COMMANDS_REPLACED_BY_SETUP = frozenset()
-    main.EXACT_DUPLICATE_COMMANDS = CONFIRMED_DUPLICATE_COMMANDS
-    main.PRUNED_COMMANDS = CONFIRMED_DUPLICATE_COMMANDS
+    # Le moteur de pruning de main retire les commandes du préfixe, de +help et du tree
+    # slash après le chargement de tous les cogs. Les implémentations Python restent dans
+    # leurs cogs afin que les panneaux/services internes ne soient pas détruits.
+    main.COMMANDS_REPLACED_BY_SETUP = MERGED_COMMANDS
+    main.EXACT_DUPLICATE_COMMANDS = PURE_DUPLICATE_COMMANDS | LOW_VALUE_REMOVED_COMMANDS
+    main.PRUNED_COMMANDS = INTENTIONALLY_REMOVED_COMMANDS
 
     _install_short_command_names()
 
     _INSTALLED = True
     logger.info(
-        "Catalogue SentriX rework : %s commandes utiles garanties, %s vrais doublons retirés, %s noms longs raccourcis.",
+        "Catalogue SentriX slim : %s racines retirées (%s doublons, %s fusionnées, %s faibles), %s commandes uniques garanties.",
+        len(INTENTIONALLY_REMOVED_COMMANDS),
+        len(PURE_DUPLICATE_COMMANDS),
+        len(MERGED_COMMANDS),
+        len(LOW_VALUE_REMOVED_COMMANDS),
         len(RESTORED_COMMANDS),
-        len(CONFIRMED_DUPLICATE_COMMANDS),
-        len(SHORT_COMMAND_NAMES),
     )
