@@ -7,6 +7,8 @@ import logging
 import discord
 from discord.ext import commands
 
+from .feature_systems import install as install_feature_systems
+
 logger = logging.getLogger("bot.shop-default-prices")
 
 SHOP_DEFAULTS = (
@@ -60,7 +62,14 @@ async def _update_existing_shops(bot: commands.Bot) -> None:
 
 
 async def install(bot: commands.Bot) -> None:
-    """Installation idempotente par instance de bot, compatible reload et CI."""
+    """Installation idempotente par instance de bot, compatible reload et CI.
+
+    L'installateur des interrupteurs est volontairement appelé AVANT le garde idempotent :
+    ce fichier est repassé après chaque extension par cogs/__init__.py. Ainsi Economy et
+    Levels sont patchés exactement lorsqu'ils deviennent disponibles, sans modifier la liste
+    principale des extensions.
+    """
+    await install_feature_systems(bot)
     _patch_create_server_defaults()
     if getattr(bot, "_sentrix_shop_default_prices_installed", False):
         return
