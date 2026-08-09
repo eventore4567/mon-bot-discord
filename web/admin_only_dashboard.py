@@ -124,8 +124,14 @@ def install(dashboard) -> None:
     async def administrator_only(request: web.Request, handler):
         path = request.path
 
+        # Le formulaire de recours est volontairement public : son token aléatoire est
+        # l'autorisation d'accès. Il ne doit surtout pas être bloqué par le verrou admin
+        # général, sinon un membre banni voit bien la page mais toutes ses requêtes API
+        # retournent 401 et le bouton « Envoyer le recours » semble ne rien faire.
+        public_appeal_api = path.startswith("/api/appeal/")
         if (
             path in {"/health", "/login", "/oauth/callback", "/logout", "/api/public"}
+            or public_appeal_api
             or request.method == "OPTIONS"
         ):
             return await handler(request)
