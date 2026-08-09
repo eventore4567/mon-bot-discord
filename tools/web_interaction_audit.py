@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from web import dashboard, operations_center, setup_center
 from web import enterprise_suite
