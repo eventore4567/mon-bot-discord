@@ -1,0 +1,48 @@
+# Secrets / local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+secrets.json
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Runtime data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+logs/
+*.log
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Temporary local archives and generated files
+*.zip
+*.tar
+*.tar.gz
+*.tmp
+*.bak.new
+backup_phase*/

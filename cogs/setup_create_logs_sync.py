@@ -21,8 +21,6 @@ from discord.ext import commands
 from utils import log_service
 
 logger = logging.getLogger("bot.setup-create-logs-sync")
-_INSTALLED = False
-_BOOTSTRAP_STARTED = False
 
 # Colonnes écrites par Configuration.create_log_channels -> types lus par log_service.
 COLUMN_TO_LOG_TYPE = {
@@ -135,7 +133,11 @@ async def sync_setup_created_logs(
 
 
 async def _bootstrap(bot: commands.Bot) -> None:
-    await bot.wait_until_ready()
+    try:
+        await bot.wait_until_ready()
+    except RuntimeError:
+        # En CI le client Discord n'est jamais authentifié : rien à réparer côté guildes.
+        return
     await asyncio.sleep(3)
     for guild in list(bot.guilds):
         try:
@@ -149,10 +151,7 @@ async def _bootstrap(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    global _INSTALLED, _BOOTSTRAP_STARTED
-    if _INSTALLED:
-        return
-
+    """Patche Configuration une fois, puis lance un bootstrap par instance de bot."""
     from . import configuration
 
     original = configuration.Configuration.create_log_channels
@@ -167,9 +166,8 @@ def install(bot: commands.Bot) -> None:
         create_log_channels_synced._sentrix_log_settings_sync = True
         configuration.Configuration.create_log_channels = create_log_channels_synced
 
-    if not _BOOTSTRAP_STARTED:
-        asyncio.create_task(_bootstrap(bot), name="sentrix-setup-create-logs-sync")
-        _BOOTSTRAP_STARTED = True
-
-    _INSTALLED = True
+    if getattr(bot, "_sentrix_setup_create_logs_sync_installed", False):
+        return
+    bot._sentrix_setup_create_logs_sync_installed = True
+    asyncio.create_task(_bootstrap(bot), name="sentrix-setup-create-logs-sync")
     logger.info("Synchronisation +setup -> Create Logs avec log_settings activée.")

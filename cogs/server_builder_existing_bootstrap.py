@@ -8,11 +8,15 @@ import discord
 from discord.ext import commands
 
 logger = logging.getLogger("bot.server-builder.bootstrap")
-_INSTALLED = False
 
 
 async def _bootstrap(bot: commands.Bot) -> None:
-    await bot.wait_until_ready()
+    try:
+        await bot.wait_until_ready()
+    except RuntimeError:
+        # Les audits chargent les extensions sans login Discord ; aucune guilde distante
+        # n'est alors disponible et le bootstrap doit se terminer silencieusement.
+        return
     # Laisse les derniers cogs (économie, stats, etc.) terminer leur chargement.
     await asyncio.sleep(3)
 
@@ -85,8 +89,7 @@ async def _bootstrap(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    global _INSTALLED
-    if _INSTALLED:
+    if getattr(bot, "_sentrix_existing_server_bootstrap_installed", False):
         return
-    _INSTALLED = True
+    bot._sentrix_existing_server_bootstrap_installed = True
     asyncio.create_task(_bootstrap(bot), name="sentrix-existing-server-bootstrap")
