@@ -246,8 +246,15 @@ def style_embed(
     kind = kind or infer_kind(embed)
 
     original_title = getattr(embed, "title", None)
-    detail = _detail_title(original_title, category)
-    embed.title = _canonical_title(category, log_type=log_type)
+    cleaned_original = clean_title(original_title) if original_title else ""
+    if cleaned_original and SENTRIX_TITLE_RE.match(cleaned_original):
+        # Les centres spécialisés (+help, +security, +setup...) ont déjà un titre métier
+        # précis. On le conserve au lieu de le remplacer par une catégorie générique.
+        embed.title = clip(cleaned_original.upper(), 256)
+        detail = None
+    else:
+        detail = _detail_title(original_title, category)
+        embed.title = _canonical_title(category, log_type=log_type)
     embed.description = _merge_detail(getattr(embed, "description", None), detail)
 
     current_colour = getattr(getattr(embed, "colour", None), "value", 0) or 0
