@@ -1,8 +1,10 @@
 """Audit CI des interactions web SentriX.
 
-Vérifie deux régressions qui rendent visuellement les boutons « morts » :
+Vérifie les régressions qui rendent visuellement les boutons « morts » :
 - le verrou Administrateur ne doit jamais intercepter l'API publique /api/appeal/{token};
-- chaque bloc JavaScript inline des pages avancées doit être syntaxiquement valide.
+- chaque bloc JavaScript inline des pages avancées doit être syntaxiquement valide ;
+- chaque bouton statique des centres Operations/Enterprise et de la page Recours doit
+  réellement être référencé par leur JavaScript.
 
 Node est déjà disponible sur les runners GitHub Actions (actions/* l'utilise) et sert ici
 uniquement de parseur JavaScript, sans réseau ni exécution du code du dashboard.
@@ -75,18 +77,19 @@ def main() -> None:
     for name, html in pages.items():
         check_js(name, html)
 
-    # Les deux pages nouvelles sont très interactives : chaque bouton statique doit avoir
-    # une référence dans leur JavaScript. Les pages historiques ont des boutons servis par
-    # plusieurs couches et sont couvertes par leurs audits dédiés.
-    check_button_bindings("enterprise_suite.ENTERPRISE_HTML", enterprise_suite.ENTERPRISE_HTML)
-    check_button_bindings("enterprise_suite.APPEAL_HTML", enterprise_suite.APPEAL_HTML)
+    for name, html in (
+        ("operations_center.OPERATIONS_HTML", operations_center.OPERATIONS_HTML),
+        ("enterprise_suite.ENTERPRISE_HTML", enterprise_suite.ENTERPRISE_HTML),
+        ("enterprise_suite.APPEAL_HTML", enterprise_suite.APPEAL_HTML),
+    ):
+        check_button_bindings(name, html)
 
     appeal_html = enterprise_suite.APPEAL_HTML
     assert "Envoyer le recours" in appeal_html
     assert "/api/appeal/" in appeal_html
     assert "method:'POST'" in appeal_html or 'method:"POST"' in appeal_html
 
-    print("OK: API recours publique, scripts dashboard valides et boutons Enterprise/Recours branchés")
+    print("OK: API recours publique, scripts dashboard valides et boutons Operations/Enterprise/Recours branchés")
 
 
 if __name__ == "__main__":
