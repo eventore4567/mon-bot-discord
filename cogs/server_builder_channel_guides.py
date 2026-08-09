@@ -6,6 +6,8 @@ import logging
 import discord
 from discord.ext import commands
 
+from .server_builder_moderation_space import install as install_required_spaces
+
 logger = logging.getLogger("bot.server-builder.guides")
 _INSTALLED = False
 
@@ -109,10 +111,14 @@ async def _configure_safe_defaults(cog, guild: discord.Guild) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    del bot
     global _INSTALLED
     if _INSTALLED:
         return
+
+    # IMPORTANT : ce module est installé immédiatement après le chargement du Cog
+    # ServerBuilder. La garantie STAFF/MODÉRATION/LOGS ne dépend donc plus du chargement
+    # ultérieur de +help/Utility.
+    install_required_spaces(bot)
 
     from . import server_builder
 
@@ -132,4 +138,4 @@ def install(bot: commands.Bot) -> None:
     server_builder.ServerBuilder._publish_welcome_content = publish_every_channel
     server_builder.ServerBuilder._configure_bot_channels = configure_everything_safe
     _INSTALLED = True
-    logger.info("+create-server enrichi : guides de salons et réglages SentriX par défaut activés.")
+    logger.info("+create-server enrichi : espaces internes garantis, guides de salons et réglages SentriX par défaut activés.")
