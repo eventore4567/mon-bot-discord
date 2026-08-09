@@ -1,7 +1,7 @@
 """Audit CI minimal de la couche SentriX Security V2.
 
 Le but est d'empêcher une régression silencieuse des branchements critiques : compteur
-anti-nuke, rollback rôles, incidents, sauvegardes auto et onglet dashboard.
+anti-nuke, rollback rôles, incidents, sauvegardes auto, règles propriétaire et dashboard.
 """
 from __future__ import annotations
 
@@ -38,9 +38,21 @@ def main() -> None:
     require(runtime, 'name="incidents"', "+security incidents")
     require(runtime, 'name="antinuke-config"', "+security antinuke-config")
 
+    backup_fix = read("cogs/security_v2_backup_schema_fix.py")
+    require(backup_fix, '"overwrites": _snapshot_overwrites(category)', "overwrites catégories backup auto")
+    require(backup_fix, '"overwrites": _snapshot_overwrites(channel)', "overwrites salons backup auto")
+
+    owner = read("cogs/security_owner_immunity_final.py")
+    require(owner, "security whitelist domain-add", "whitelist domaine owner-only")
+    require(owner, "security whitelist role-add", "whitelist rôle owner-only")
+    require(owner, "message.author.id == message.guild.owner_id", "immunité Anti-GIF propriétaire")
+    require(owner, "_late_reapply", "repatch propriétaire après chargement tardif")
+
     common = read("cogs/shop_default_prices.py")
     require(common, "install_security_v2_runtime", "chargement runtime commun")
     require(common, "await install_security_v2_runtime(bot)", "exécution runtime commun")
+    require(common, "install_security_owner_immunity_final", "règles propriétaire finales")
+    require(common, "install_security_v2_backup_schema_fix", "compatibilité backup auto")
 
     dashboard = read("web/setup_center_security_v2.py")
     require(dashboard, 'data-tab="security"', "onglet Sécurité V2")
@@ -51,7 +63,7 @@ def main() -> None:
     require(web_init, "setup_center_security_v2", "import dashboard sécurité")
     require(web_init, "_setup_center_security_v2.install", "installation dashboard sécurité")
 
-    print("OK: Security V2 — compteur, rollback, incidents, backups, commandes et dashboard branchés")
+    print("OK: Security V2 — compteur, rollback, incidents, backups, propriétaire, commandes et dashboard branchés")
 
 
 if __name__ == "__main__":
