@@ -39,6 +39,8 @@ CRITICAL_COMMANDS = {
     "ai",
     "play",
     "rolepanel",
+    "security",
+    "health",
 }
 
 
@@ -75,9 +77,13 @@ async def run() -> int:
             )
 
         if not command_catalog_cleanup._INSTALLED:
-            errors.append("la politique de catalogue complet des commandes n'est pas installée")
+            errors.append("la politique de catalogue slim des commandes n'est pas installée")
 
-        expected_pruned = command_catalog_cleanup.CONFIRMED_DUPLICATE_COMMANDS
+        expected_pruned = command_catalog_cleanup.INTENTIONALLY_REMOVED_COMMANDS
+        if len(expected_pruned) != 60:
+            errors.append(
+                f"le nettoyage doit retirer exactement 60 racines, obtenu: {len(expected_pruned)}"
+            )
         if main.PRUNED_COMMANDS != expected_pruned:
             errors.append(
                 "politique de pruning inattendue: "
@@ -123,7 +129,7 @@ async def run() -> int:
         )
         if restored_missing:
             errors.append(
-                "commandes utiles censées être restaurées mais absentes: "
+                "commandes uniques censées rester actives mais absentes: "
                 + ", ".join(restored_missing)
             )
 
@@ -134,6 +140,17 @@ async def run() -> int:
             errors.append(
                 "commandes censées être retirées encore visibles: "
                 + ", ".join(pruned_still_visible)
+            )
+
+        # Toute commande fusionnée doit pointer vers un centre encore réellement actif.
+        missing_merge_targets: list[str] = []
+        for legacy_name, target in command_catalog_cleanup.MERGED_COMMAND_TARGETS.items():
+            root = target.split()[0]
+            if bot.get_command(root) is None:
+                missing_merge_targets.append(f"{legacy_name} -> {target}")
+        if missing_merge_targets:
+            errors.append(
+                "destinations de fusion absentes: " + ", ".join(missing_merge_targets)
             )
 
         registered_roots = {command.name.casefold() for command in bot.commands}
@@ -222,9 +239,12 @@ async def run() -> int:
         print(f"SentriX command runtime audit: {len(app_commands)} commande(s) slash enregistrée(s)")
         print(f"Extensions: {len(loaded)}/{len(main.EXTENSIONS)} chargées")
         print(
-            "Catalogue: "
-            f"{len(command_catalog_cleanup.RESTORED_COMMANDS)} commandes utiles garanties, "
-            f"{len(command_catalog_cleanup.CONFIRMED_DUPLICATE_COMMANDS)} doublons retirés"
+            "Catalogue slim: "
+            f"{len(command_catalog_cleanup.INTENTIONALLY_REMOVED_COMMANDS)} racines retirées "
+            f"({len(command_catalog_cleanup.PURE_DUPLICATE_COMMANDS)} doublons, "
+            f"{len(command_catalog_cleanup.MERGED_COMMANDS)} fusionnées, "
+            f"{len(command_catalog_cleanup.LOW_VALUE_REMOVED_COMMANDS)} faibles), "
+            f"{len(command_catalog_cleanup.RESTORED_COMMANDS)} commandes uniques garanties"
         )
         print(f"Correcteur de fautes: {suggestion_covered} commande(s) visible(s) couvertes")
         print("UX commandes: réponses garanties + diagnostic de latence préfixe/slash actifs")
