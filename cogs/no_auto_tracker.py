@@ -15,7 +15,6 @@ import discord
 from discord.ext import commands
 
 logger = logging.getLogger("bot.no-auto-tracker")
-_INSTALLED = False
 _MIGRATION_KEY = "remove_auto_announcement_tracker_v1"
 
 
@@ -27,7 +26,11 @@ def _plain(value: str) -> str:
 
 
 async def _cleanup_previous_automatic_trackers(bot: commands.Bot) -> None:
-    await bot.wait_until_ready()
+    try:
+        await bot.wait_until_ready()
+    except RuntimeError:
+        # Audit/CI : les extensions sont chargées sans authentifier le client Discord.
+        return
     await asyncio.sleep(5)
     await bot.db.execute(
         "CREATE TABLE IF NOT EXISTS sentrix_runtime_migrations "
@@ -71,10 +74,7 @@ async def _cleanup_previous_automatic_trackers(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    global _INSTALLED
-    if _INSTALLED:
-        return
-
+    """Installation idempotente par bot afin de rester correcte après un reload."""
     from . import server_builder_ready_setup as ready
 
     original = ready._ensure_announcements
@@ -92,9 +92,11 @@ def install(bot: commands.Bot) -> None:
         ensure_announcements_without_tracker._sentrix_no_auto_tracker = True
         ready._ensure_announcements = ensure_announcements_without_tracker
 
+    if getattr(bot, "_sentrix_no_auto_tracker_installed", False):
+        return
+    bot._sentrix_no_auto_tracker_installed = True
     asyncio.create_task(
         _cleanup_previous_automatic_trackers(bot),
         name="sentrix-remove-old-auto-tracker",
     )
-    _INSTALLED = True
     logger.info("Publication automatique de +suivi-bot désactivée ; commande manuelle conservée.")
