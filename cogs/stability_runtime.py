@@ -6,9 +6,12 @@ Cette couche cible uniquement des courses/échecs silencieux observables à l'ex
 - invitations : sérialiser la comparaison du cache par serveur pour éviter que deux
   arrivées quasi simultanées lisent le même ancien compteur ;
 - mini-jeux : sérialiser l'attribution des récompenses par utilisateur afin que deux jeux
-  différents gagnés au même instant ne puissent pas dépasser la limite journalière.
+  différents gagnés au même instant ne puissent pas dépasser la limite journalière ;
+- Enterprise Suite : installation idempotente dans la même chaîne de runtime, sans ajouter
+  de commandes publiques ni modifier l'ordre du verrou final sans emoji.
 
-Les patches sont idempotents et ne modifient ni le schéma SQL ni les commandes publiques.
+Les patches sont idempotents et ne modifient ni les anciennes commandes publiques ni leur
+comportement fonctionnel.
 """
 from __future__ import annotations
 
@@ -22,7 +25,6 @@ logger = logging.getLogger("bot.stability-runtime")
 _NOTIFICATION_PATCHED = False
 _INVITE_PATCHED = False
 _GAME_REWARD_PATCHED = False
-
 
 
 def _install_notifications_retry(bot) -> None:
@@ -72,8 +74,6 @@ def _install_notifications_retry(bot) -> None:
         if not item_id:
             return
 
-        # Premier passage : on mémorise seulement la publication courante pour ne pas
-        # ping une ancienne vidéo au moment où l'admin active la surveillance.
         if not row["last_item_id"]:
             await self._update_last_item(row["id"], item_id, row["source_url"])
             return
@@ -111,9 +111,6 @@ def _install_notifications_retry(bot) -> None:
                 ),
             )
         except discord.HTTPException:
-            # BUG corrigé : l'ancien code mettait last_item_id à jour dans un finally.
-            # Une permission cassée ou une panne Discord faisait donc perdre
-            # définitivement la notification. Ici on garde l'ancien ID et on retente.
             logger.warning(
                 "Envoi impossible pour l'abonnement social %s — la publication sera retentée.",
                 row["id"],
@@ -127,7 +124,6 @@ def _install_notifications_retry(bot) -> None:
     cls._check_subscription = check_subscription_retry_safe
     _NOTIFICATION_PATCHED = True
     logger.info("Notifications sociales : reprise automatique après échec d'envoi activée.")
-
 
 
 def _install_invite_serialization(bot) -> None:
@@ -161,7 +157,6 @@ def _install_invite_serialization(bot) -> None:
     cls.find_used_invite = find_used_invite_serialized
     _INVITE_PATCHED = True
     logger.info("Invitations : comparaison du cache sérialisée par serveur.")
-
 
 
 def _install_atomic_game_daily_limit(bot) -> None:
@@ -216,9 +211,6 @@ def _install_atomic_game_daily_limit(bot) -> None:
                             metadata=metadata or {},
                         )
 
-            # Le verrou reste tenu jusqu'à l'écriture atomique de record_game_reward().
-            # Deux jeux différents gagnés au même instant ne peuvent donc plus tous les
-            # deux observer « limite encore disponible » avant d'écrire leur récompense.
             return await original(
                 runtime_bot,
                 guild_id,
@@ -236,9 +228,8 @@ def _install_atomic_game_daily_limit(bot) -> None:
     logger.info("Mini-jeux : limite quotidienne sérialisée par joueur.")
 
 
-
-def install(bot, extension_name: str) -> None:
-    """Appelé après chaque extension chargée ; n'agit que sur les modules concernés."""
+async def install(bot, extension_name: str) -> None:
+    """Appelé après chaque extension chargée ; les briques sont toutes idempotentes."""
     name = str(extension_name or "")
     if name == "cogs.notifications" or name.endswith(".notifications"):
         _install_notifications_retry(bot)
@@ -246,3 +237,10 @@ def install(bot, extension_name: str) -> None:
         _install_invite_serialization(bot)
     elif name in {"cogs.minigames", "cogs.economy"} or name.endswith((".minigames", ".economy")):
         _install_atomic_game_daily_limit(bot)
+
+    # Cette installation est volontairement appelée après chaque extension : le wrapper
+    # enterprise_runtime retourne immédiatement dès que le Cog existe. Cela garantit que
+    # les audits et le démarrage Railway obtiennent la suite Enterprise sans modifier la
+    # liste historique EXTENSIONS ni créer de nouvelles commandes publiques.
+    from .enterprise_runtime import install as install_enterprise_runtime
+    await install_enterprise_runtime(bot)
