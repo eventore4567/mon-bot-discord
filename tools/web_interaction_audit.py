@@ -4,7 +4,9 @@ Vérifie les régressions qui rendent visuellement les boutons « morts » :
 - le verrou Administrateur ne doit jamais intercepter l'API publique /api/appeal/{token};
 - chaque bloc JavaScript inline des pages avancées doit être syntaxiquement valide ;
 - chaque bouton statique des centres Operations/Enterprise et de la page Recours doit
-  réellement être référencé par leur JavaScript.
+  réellement être référencé par leur JavaScript ;
+- le mode simplifié du dashboard principal doit rester installé et offrir un retour vers
+  le mode avancé sans remplacer le moteur historique du dashboard.
 
 Node est déjà disponible sur les runners GitHub Actions (actions/* l'utilise) et sert ici
 uniquement de parseur JavaScript, sans réseau ni exécution du code du dashboard.
@@ -89,7 +91,20 @@ def main() -> None:
     assert "/api/appeal/" in appeal_html
     assert "method:'POST'" in appeal_html or 'method:"POST"' in appeal_html
 
-    print("OK: API recours publique, scripts dashboard valides et boutons Operations/Enterprise/Recours branchés")
+    main_html = dashboard.INDEX_HTML
+    assert 'id="sentrix-simple-dashboard-js"' in main_html, "Le mode simplifié n'est plus injecté dans /app."
+    assert "Dashboard simplifié" in main_html
+    assert "Mode simple" in main_html and "Mode avancé" in main_html
+    assert "Que voulez-vous faire ?" in main_html
+    assert "Retour à l'accueil simple" in main_html
+    assert "data-sx-destination" in main_html
+
+    simple_source = (ROOT / "web" / "dashboard_simple_mode.py").read_text(encoding="utf-8")
+    assert "selectGuild =" not in simple_source and "renderTab =" not in simple_source, (
+        "Le mode simplifié ne doit pas remplacer les fonctions historiques du dashboard."
+    )
+
+    print("OK: API recours publique, scripts dashboard valides, boutons secondaires branchés et mode simplifié installé")
 
 
 if __name__ == "__main__":
