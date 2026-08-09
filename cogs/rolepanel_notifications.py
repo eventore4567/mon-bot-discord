@@ -82,7 +82,6 @@ def _catalog_role_ids(guild: discord.Guild) -> list[int]:
 
 
 def _merge_role_ids(guild: discord.Guild, role_ids: list[int] | None) -> list[int]:
-    """Conserve les IDs historiques puis complète avec le catalogue actuellement chargé."""
     result: list[int] = []
     for raw in role_ids or []:
         try:
@@ -160,8 +159,7 @@ class PersonalNotificationSelect(discord.ui.Select):
         self.mode = mode
 
     async def callback(self, interaction: discord.Interaction):
-        # On accuse réception AVANT les appels Discord (ajout/retrait de rôle). Cela évite
-        # définitivement « SentriX n'a pas répondu à temps » quand l'API Discord ralentit.
+        # ACK avant toute action réseau : Discord ne peut plus afficher « n'a pas répondu ».
         if not interaction.response.is_done():
             await interaction.response.defer()
 
@@ -238,12 +236,7 @@ class PersonalNotificationView(discord.ui.View):
 
 
 class NotificationRoleView(discord.ui.View):
-    """Vue publique persistante.
-
-    ``guild`` et ``role_ids`` sont optionnels afin de pouvoir enregistrer une vue globale.
-    Cette vue globale sert de filet de sécurité aux anciens messages qui n'ont plus de ligne
-    SQL ou dont la vue message-spécifique n'a pas été restaurée après un redémarrage.
-    """
+    """Vue publique persistante avec fallback global pour les anciens messages."""
 
     def __init__(
         self,
@@ -258,13 +251,12 @@ class NotificationRoleView(discord.ui.View):
         return _merge_role_ids(guild, self.role_ids)
 
     async def _open(self, interaction: discord.Interaction, mode: str) -> None:
-        # Réponse immédiate : aucune DB, aucun fetch et aucune modification de rôle avant
-        # l'ACK Discord. Même sous charge, le bouton ne peut plus expirer après 3 secondes.
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             if not interaction.response.is_done():
-                return await interaction.response.send_message("Serveur introuvable.", ephemeral=True)
+                await interaction.response.send_message("Serveur introuvable.", ephemeral=True)
             return
 
+        # ACK immédiat. Le menu est construit seulement après l'accusé de réception Discord.
         await interaction.response.defer(ephemeral=True, thinking=True)
         role_ids = self._resolved_role_ids(interaction.guild)
         if not role_ids:
@@ -273,19 +265,14 @@ class NotificationRoleView(discord.ui.View):
                 view=None,
             )
 
-        if mode == "add":
-            text = "Sélectionne les notifications que tu veux recevoir. Les rôles déjà pris ne sont pas affichés."
-        else:
-            text = "Sélectionne les notifications que tu veux retirer. Seuls tes rôles actuels sont affichés."
-
+        text = (
+            "Sélectionne les notifications que tu veux recevoir. Les rôles déjà pris ne sont pas affichés."
+            if mode == "add"
+            else "Sélectionne les notifications que tu veux retirer. Seuls tes rôles actuels sont affichés."
+        )
         await interaction.edit_original_response(
             content=text,
-            view=PersonalNotificationView(
-                interaction.guild,
-                interaction.user,
-                role_ids,
-                mode=mode,
-            ),
+            view=PersonalNotificationView(interaction.guild, interaction.user, role_ids, mode=mode),
         )
 
     @discord.ui.button(
@@ -430,7 +417,7 @@ async def _restore_saved_views(bot: commands.Bot) -> None:
         role_ids = _merge_role_ids(guild, stored_ids)
         view = NotificationRoleView(guild, role_ids)
 
-        # Message-specific : remplace dans le ViewStore une éventuelle ancienne vue cassée.
+        # Remplace dans le ViewStore une éventuelle ancienne vue message-spécifique cassée.
         bot.add_view(view, message_id=int(row["message_id"]))
 
         channel = guild.get_channel(int(row["channel_id"]))
@@ -448,31 +435,48 @@ async def install(bot: commands.Bot) -> None:
     if _INSTALLED:
         return
 
-    # IMPORTANT : l'ancien code quittait ici si +rolepanel n'était pas encore chargé.
-    # Le cog pouvait alors être forcé plus tard sans restaurer les vues persistantes, ce
-    # qui produisait exactement « SentriX n'a pas répondu à temps » sur les boutons.
     await bot.db.execute(_SCHEMA)
     await bot.db.execute(
         "CREATE INDEX IF NOT EXISTS idx_notification_role_panels_guild "
         "ON notification_role_panels (guild_id, created_at)"
     )
 
-    if bot.get_command("rolepanel") is not None:
-        bot.remove_command("rolepanel")
+    # Toujours disponible, même avant le chargement de l'ancienne commande +rolepanel.
+    # Cette vue globale suffit déjà à rendre les anciens boutons cliquables après restart.
+    if not getattr(bot, "_sentrix_notification_global_view_registered", False):
+        bot.add_view(NotificationRoleView())
+        bot._sentrix_notification_global_view_registered = True
+
+    # Au READY, le cache des guilds est complet : on réattache une vue précise à chaque
+    # message sauvegardé et on remplace les handlers devenus obsolètes.
+    if not getattr(bot, "_sentrix_notification_restore_listener", False):
+        async def restore_on_ready() -> None:
+            try:
+                await _restore_saved_views(bot)
+            except Exception:
+                logger.exception("Restauration READY des panneaux de notifications impossible.")
+
+        bot.add_listener(restore_on_ready, "on_ready")
+        bot._sentrix_notification_restore_listener = True
+
+    # L'ancien +rolepanel est défini dans une extension chargée plus tard. On ne doit pas
+    # ajouter notre Cog avant cette extension, sinon discord.py refuse son chargement pour
+    # doublon de commande. On garde donc les vues actives et on réessaie au prochain cog.
+    old = bot.get_command("rolepanel")
+    if old is None:
+        return
+
+    bot.remove_command("rolepanel")
     if bot.get_command("rolepanel-refresh") is not None:
         bot.remove_command("rolepanel-refresh")
 
     if bot.get_cog(_COG_NAME) is None:
         await bot.add_cog(NotificationRolePanels(bot))
 
-    # Filet global : il répond aussi aux anciens panneaux dont la ligne SQL n'existe plus.
-    if not getattr(bot, "_sentrix_notification_global_view_registered", False):
-        bot.add_view(NotificationRoleView())
-        bot._sentrix_notification_global_view_registered = True
-
-    await _restore_saved_views(bot)
+    if bot.is_ready():
+        await _restore_saved_views(bot)
 
     _INSTALLED = True
     logger.info(
-        "+rolepanel V2 actif : ACK immédiat + vue persistante globale + restauration des panneaux."
+        "+rolepanel V2 actif : ACK immédiat + fallback persistant + restauration READY."
     )
