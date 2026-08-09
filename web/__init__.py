@@ -28,6 +28,7 @@ from . import dashboard_profile_images as _dashboard_profile_images
 from . import dashboard_role_channel_search as _dashboard_role_channel_search
 from . import dashboard_system_features as _dashboard_system_features
 from . import setup_center_systems_rework as _setup_center_systems_rework
+from . import setup_center_security_v2 as _setup_center_security_v2
 
 
 # Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
@@ -177,3 +178,4 @@ _dashboard_system_features.install(_dashboard)
 _dashboard.INDEX_HTML = _dashboard.INDEX_HTML.replace(_dashboard_system_features.SYSTEMS_CSS, "")
 _dashboard.INDEX_HTML = _dashboard.INDEX_HTML.replace(_dashboard_system_features.SYSTEMS_JS, "")
 _setup_center_systems_rework.install(_setup_center)
+_setup_center_security_v2.install(_dashboard, _setup_center)
