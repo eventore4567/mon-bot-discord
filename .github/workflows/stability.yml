@@ -43,6 +43,12 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-security-audit.db"
         run: python tools/security_runtime_audit.py
 
+      - name: Security V2 audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-security-v2-audit.db"
+        run: python tools/security_v2_audit.py
+
       - name: Command clarity and setup UX audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
