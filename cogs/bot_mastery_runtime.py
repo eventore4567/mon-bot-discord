@@ -801,10 +801,6 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
     def cog_unload(self):
         self.maintenance.cancel()
 
-    @maintenance.before_loop
-    async def before_maintenance(self):
-        await self.bot.wait_until_ready()
-
     @tasks.loop(seconds=60)
     async def maintenance(self):
         if self._shutting_down:
@@ -823,6 +819,10 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
                 await self._database_maintenance()
         except Exception as exc:
             await self._record_runtime_error("mastery_maintenance", exc, None)
+
+    @maintenance.before_loop
+    async def before_maintenance(self):
+        await self.bot.wait_until_ready()
 
     async def prepare_shutdown(self) -> None:
         self._shutting_down = True
@@ -1531,7 +1531,7 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
         except (discord.Forbidden, discord.HTTPException):
             return
         except Exception as exc:
-            await self._record_runtime_error("webhook_antinu ke", exc, guild.id)
+            await self._record_runtime_error("webhook_antinuke", exc, guild.id)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
