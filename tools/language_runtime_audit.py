@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit CI du choix FR/EN, y compris le payload final et le point d'ouverture +setup."""
+"""Audit CI du choix FR/EN, du payload Discord final et du vrai Cog +setup."""
 from __future__ import annotations
 
 import asyncio
@@ -97,18 +97,25 @@ async def run() -> int:
         if not getattr(configuration.SetupView, "_sentrix_setup_v6", False):
             errors.append("configuration.SetupView ne pointe pas vers Setup V6")
 
+        # Teste la cible REELLEMENT résolue par self._open_setup_panel sur le Cog vivant.
+        # Le niveau classe peut être restauré par discord.py pendant le chargement d'une
+        # extension ; l'attribut d'instance doit rester la V6 et prend priorité en Python.
         config_cog = bot.get_cog("Configuration")
-        open_panel = getattr(type(config_cog), "_open_setup_panel", None) if config_cog else None
-        if open_panel is None or not getattr(open_panel, "_sentrix_setup_v6", False):
-            stored = getattr(getattr(configuration, "Configuration", object), "_sentrix_open_setup_panel_v6", None)
+        bound_open = getattr(config_cog, "_open_setup_panel", None) if config_cog else None
+        bound_func = getattr(bound_open, "__func__", bound_open)
+        if bound_func is None or not getattr(bound_func, "_sentrix_setup_v6", False):
             errors.append(
-                "Configuration._open_setup_panel n'utilise pas directement la V6 | "
-                f"cog={type(config_cog).__module__ + '.' + type(config_cog).__qualname__ if config_cog else None} | "
-                f"open={getattr(open_panel, '__module__', None)}.{getattr(open_panel, '__qualname__', None)} | "
-                f"marker={getattr(open_panel, '_sentrix_setup_v6', None)} | "
-                f"stored={getattr(stored, '__module__', None)}.{getattr(stored, '__qualname__', None)} | "
-                f"stored_marker={getattr(stored, '_sentrix_setup_v6', None)} | same={open_panel is stored}"
+                "Le Cog Configuration actif n'utilise pas l'ouverture V6 | "
+                f"bound={getattr(bound_func, '__module__', None)}.{getattr(bound_func, '__qualname__', None)} | "
+                f"marker={getattr(bound_func, '_sentrix_setup_v6', None)} | "
+                f"instance_flag={getattr(config_cog, '_sentrix_setup_v6_bound', None) if config_cog else None}"
             )
+        if config_cog is not None and not getattr(config_cog, "_sentrix_setup_v6_bound", False):
+            errors.append("le verrou V6 n'est pas pose sur l'instance Configuration active")
+
+        setup_command = bot.get_command("setup")
+        if setup_command is None or getattr(setup_command, "cog", None) is not config_cog:
+            errors.append("la commande +setup n'est pas rattachee au Cog Configuration teste")
 
         initial_view = language_runtime.LanguageChoiceView(bot)
         custom_ids = {getattr(item, "custom_id", None) for item in initial_view.children}
@@ -117,11 +124,7 @@ async def run() -> int:
 
         try:
             setup_view = configuration.SetupView(
-                bot,
-                guild_id=123456789,
-                author_id=111,
-                message_id=222,
-                channel_id=333,
+                bot, guild_id=123456789, author_id=111, message_id=222, channel_id=333,
             )
 
             def find_language_select(view):
@@ -190,6 +193,7 @@ async def run() -> int:
             footer = str(home_embed.footer.text or "") if home_embed.footer else ""
             if "Interface setup v6" not in footer:
                 errors.append(f"marqueur V6 absent du footer: {footer!r}")
+
             for item in setup_view.children:
                 values = {str(getattr(opt, "value", "")) for opt in getattr(item, "options", [])}
                 if values == {"fr", "en"}:
@@ -217,7 +221,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
-    print("OK: V6 directe, FR/EN persistant et Langue est la 1re option du payload Discord final de +setup")
+    print("OK: Cog actif lie a V6, FR/EN persistant et Langue premiere dans le payload Discord de +setup")
     return 0
 
 
