@@ -45,3 +45,4 @@ logs/
 *.tar.gz
 *.tmp
 *.bak.new
+backup_phase*/
