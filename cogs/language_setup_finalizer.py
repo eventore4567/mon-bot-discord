@@ -1,15 +1,15 @@
-"""Setup V6 : panneau direct, langue native et verrou final sur l'ouverture +setup.
+"""Setup V6 : panneau direct, langue native et verrou sur l'instance active.
 
-La V6 ne repasse plus par l'ancien _open_setup_panel. Le message envoyé par +setup est
-construit directement avec SetupViewV6, ce qui garantit que la catégorie Langue est
-présente. L'installation est rappelée après chaque extension et réattache toujours le
-point d'ouverture V6 : aucun ancien wrapper chargé ensuite ne peut reprendre la main.
+Le point important est que +setup utilise toujours l'instance réelle du Cog Configuration.
+La V6 est donc liée directement à cette instance, en plus du remplacement de classe :
+un ancien wrapper ne peut plus remettre le renderer historique pour la commande vivante.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import types
 
 import discord
 from discord.ext import commands
@@ -122,6 +122,13 @@ def _patch_syncguild(bot: commands.Bot) -> None:
     command._sentrix_no_local_copy_v6 = True
 
 
+def _bind_live_opener(config_cog, config_cls, direct_open) -> None:
+    """Lie la V6 à l'objet Cog réellement utilisé par les commandes en production."""
+    config_cls._open_setup_panel = direct_open
+    config_cog._open_setup_panel = types.MethodType(direct_open, config_cog)
+    config_cog._sentrix_setup_v6_bound = True
+
+
 def install(bot: commands.Bot) -> None:
     _install_local_slash_cleanup(bot)
     _patch_syncguild(bot)
@@ -133,18 +140,16 @@ def install(bot: commands.Bot) -> None:
 
     config_cls = getattr(configuration, "Configuration", None)
     base_view_cls = getattr(configuration, "SetupView", None)
-    if bot.get_cog("Configuration") is None or config_cls is None or base_view_cls is None:
+    config_cog = bot.get_cog("Configuration")
+    if config_cog is None or config_cls is None or base_view_cls is None:
         return
 
-    # IMPORTANT : cet installateur est rappelé après chaque extension. Si la V6 existe
-    # déjà, on ne recrée pas une nouvelle sous-classe ; on réattache simplement son vrai
-    # point d'ouverture. C'est le verrou qui empêche un ancien patch chargé plus tard de
-    # remettre l'ancien panneau sans la catégorie Langue.
+    # L'installateur est rappelé après chaque extension. Si la V6 existe déjà, on relie
+    # à nouveau l'ouverture à l'INSTANCE vivante ; c'est elle que setup_wizard utilise.
     if getattr(base_view_cls, "_sentrix_setup_v6", False):
         direct_open = getattr(config_cls, "_sentrix_open_setup_panel_v6", None)
         if direct_open is not None:
-            config_cls._open_setup_panel = direct_open
-            logger.debug("Verrou +setup V6 réappliqué après chargement d'une extension.")
+            _bind_live_opener(config_cog, config_cls, direct_open)
         return
 
     class SetupViewV6(base_view_cls):
@@ -347,7 +352,6 @@ def install(bot: commands.Bot) -> None:
                     logger.debug("Traduction d'une page +setup impossible.", exc_info=True)
             return embed
 
-    # Toutes les restaurations de session qui consultent configuration.SetupView utilisent V6.
     configuration.SetupView = SetupViewV6
 
     async def open_setup_panel_v6(self, ctx_or_channel, *, author: discord.Member = None):
@@ -399,8 +403,8 @@ def install(bot: commands.Bot) -> None:
 
     open_setup_panel_v6._sentrix_setup_v6 = True
     config_cls._sentrix_open_setup_panel_v6 = open_setup_panel_v6
-    config_cls._open_setup_panel = open_setup_panel_v6
+    _bind_live_opener(config_cog, config_cls, open_setup_panel_v6)
 
     logger.info(
-        "+setup V6 DIRECT actif : ouverture verrouillée, 🌐 Langue première catégorie, renderer historique contourné."
+        "+setup V6 DIRECT actif : ouverture liée à l'instance Configuration, 🌐 Langue première catégorie."
     )
