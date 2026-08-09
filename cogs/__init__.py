@@ -66,6 +66,16 @@ def _matches(name: str, extension: str) -> bool:
     return name == extension or name.endswith("." + extension.rsplit(".", 1)[-1])
 
 
+def _discord_session_started(bot: commands.Bot) -> bool:
+    """Vrai après l'authentification HTTP Discord.
+
+    setup_hook() s'exécute après static_login(), donc en production le token HTTP est déjà
+    présent. Les audits CI construisent seulement l'objet Bot : ils ne doivent pas lancer
+    des bootstraps qui attendent on_ready(), sinon discord.py lève RuntimeError.
+    """
+    return bool(getattr(getattr(bot, "http", None), "token", None))
+
+
 async def _run_installer(label: str, installer, *args):
     """Exécute un installateur sync ou async sans casser la chaîne de démarrage.
 
@@ -184,7 +194,11 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
 
 async def _install_log_stack(bot: commands.Bot) -> None:
     """Ordre important : routage -> style -> Components V2 -> mentions silencieuses."""
-    await _run_installer("routage logs modération", install_moderation_logs_fix, bot)
+    # Le réparateur universel crée un bootstrap qui attend on_ready(). En production,
+    # setup_hook() est déjà post-login. Dans les audits hors connexion on diffère ce seul
+    # installateur ; les autres couches visuelles/stateless restent pleinement testées.
+    if _discord_session_started(bot):
+        await _run_installer("routage logs modération", install_moderation_logs_fix, bot)
     await _run_installer("style premium logs", install_premium_logs, bot)
     await _run_installer("Components V2 logs", install_premium_logs_v2, bot)
     await _run_installer("mentions silencieuses logs", install_logs_no_ping)
