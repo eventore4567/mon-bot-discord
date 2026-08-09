@@ -79,6 +79,12 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-operations-audit.db"
         run: python tools/operations_center_audit.py
 
+      - name: Enterprise Suite audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-enterprise-audit.db"
+        run: python tools/enterprise_suite_audit.py
+
       - name: Everyday usability audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
