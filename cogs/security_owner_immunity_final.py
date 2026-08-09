@@ -8,6 +8,7 @@ Les checks s'ajoutent aux checks existants : ils ne les élargissent jamais.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from types import MethodType
 
@@ -72,6 +73,26 @@ def _patch_antigif(bot: commands.Bot) -> None:
     logger.info("Immunité Anti-GIF du propriétaire réel activée.")
 
 
+async def _late_reapply(bot: commands.Bot) -> None:
+    # Utility charge le runtime Anti-GIF après certaines couches communes. On repasse
+    # quelques fois pour garantir la règle même si l'ordre des extensions change.
+    for _ in range(8):
+        await asyncio.sleep(1)
+        _guard_whitelists(bot)
+        _patch_antigif(bot)
+        if getattr(bot, "_sentrix_antigif_runtime", None) is not None:
+            runtime = bot._sentrix_antigif_runtime
+            func = getattr(runtime.handle_message, "__func__", runtime.handle_message)
+            if getattr(func, "_sentrix_owner_antigif_immunity", False):
+                break
+
+
 def install(bot: commands.Bot) -> None:
     _guard_whitelists(bot)
     _patch_antigif(bot)
+    if not getattr(bot, "_sentrix_owner_final_repatch", False):
+        bot._sentrix_owner_final_repatch = True
+        try:
+            asyncio.create_task(_late_reapply(bot), name="sentrix-owner-security-repatch")
+        except RuntimeError:
+            pass
