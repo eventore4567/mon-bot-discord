@@ -8,10 +8,12 @@ Cette couche cible uniquement des courses/échecs silencieux observables à l'ex
 - mini-jeux : sérialiser l'attribution des récompenses par utilisateur afin que deux jeux
   différents gagnés au même instant ne puissent pas dépasser la limite journalière ;
 - Enterprise Suite : installation idempotente dans la même chaîne de runtime, sans ajouter
-  de commandes publiques ni modifier l'ordre du verrou final sans emoji.
+  de commandes publiques ni modifier l'ordre du verrou final sans emoji ;
+- Excellence Runtime : vitesse, anti-crash, AutoMod progressif, économie atomique,
+  mini-jeux, tickets, notifications, diagnostics et anti-abus, sans dashboard.
 
 Les patches sont idempotents et ne modifient ni les anciennes commandes publiques ni leur
-comportement fonctionnel.
+comportement fonctionnel attendu.
 """
 from __future__ import annotations
 
@@ -244,3 +246,9 @@ async def install(bot, extension_name: str) -> None:
     # liste historique EXTENSIONS ni créer de nouvelles commandes publiques.
     from .enterprise_runtime import install as install_enterprise_runtime
     await install_enterprise_runtime(bot)
+
+    # Même principe pour le runtime d'excellence : aucune commande publique nouvelle,
+    # aucune route web. Les patches deviennent actifs seulement lorsque leur cog cible
+    # vient d'être chargé, ce qui évite les dépendances d'ordre fragiles.
+    from .bot_excellence_runtime import install as install_bot_excellence_runtime
+    await install_bot_excellence_runtime(bot, name)
