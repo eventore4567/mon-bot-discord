@@ -125,6 +125,15 @@ def install(*modules) -> None:
             logger.exception("Impossible d'installer le centre Enterprise du dashboard.")
 
     all_modules = tuple(modules) + ((enterprise_module,) if enterprise_module is not None else ())
+
+    # Filet de sécurité uniquement sur les pages secondaires. Il est volontairement
+    # installé avant le nettoyage visuel final et ne touche jamais au JavaScript de /app.
+    try:
+        from . import secondary_interaction_reliability
+        secondary_interaction_reliability.install(*all_modules)
+    except Exception:
+        logger.exception("Impossible d'installer la fiabilité des interactions secondaires.")
+
     candidate_names = (
         "INDEX_HTML",
         "SETUP_CENTER_HTML",
