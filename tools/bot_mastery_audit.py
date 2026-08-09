@@ -65,8 +65,17 @@ REQUIRED_MARKERS = (
 def static_audit() -> None:
     source = (ROOT / "cogs" / "bot_mastery_runtime.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
-    assert "dashboard" not in source.casefold(), "Mastery doit rester indépendant du dashboard"
-    assert "web." not in source, "Mastery ne doit importer aucune route web"
+
+    # Mastery doit rester bot-only. On contrôle les imports réels via l'AST afin que
+    # les commentaires/docstrings puissent expliquer explicitement qu'il n'utilise pas le dashboard.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert not alias.name.startswith("web"), f"Import web interdit: {alias.name}"
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            assert not module.startswith("web"), f"Import web interdit: {module}"
+
     for marker in REQUIRED_MARKERS:
         assert marker in source, f"Fonction Mastery manquante: {marker}"
 
