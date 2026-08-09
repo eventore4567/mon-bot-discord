@@ -2,6 +2,7 @@
 """Audit ciblé du rework visuel global et des outils serveur dashboard."""
 from __future__ import annotations
 
+import asyncio
 import inspect
 
 import discord
@@ -10,7 +11,7 @@ from utils import premium_style
 from web import dashboard_server_tools
 
 
-def main() -> int:
+async def main() -> int:
     errors: list[str] = []
 
     class FakeCommand:
@@ -61,6 +62,8 @@ def main() -> int:
     if "Configurer avec ce modèle" not in dashboard_server_tools.SERVER_TOOLS_JS:
         errors.append("bouton create-server dashboard absent")
 
+    view.stop()
+
     if errors:
         for error in errors:
             print(f"[ERROR] {error}")
@@ -72,4 +75,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(asyncio.run(main()))
