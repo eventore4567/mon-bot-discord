@@ -1,7 +1,9 @@
-"""Initialisation sécurisée du dashboard SentriX.
+"""Initialisation du dashboard SentriX en mode stable.
 
-Le dashboard principal reste stable. Les améliorations visuelles et les outils avancés sont
-chargés par des modules séparés afin qu'une erreur reste isolée.
+Les routes avancées restent chargées, mais la page principale /app utilise volontairement
+le HTML/JavaScript natif de web.dashboard. Les anciennes couches visuelles injectaient
+plusieurs wrappers autour de renderTab/selectGuild/fetch et pouvaient finir par bloquer les
+clics. On conserve donc leurs routes serveur, puis on restaure l'interface principale sûre.
 """
 
 from . import dashboard as _dashboard
@@ -23,11 +25,13 @@ from . import dashboard_oxyde_theme as _dashboard_oxyde_theme
 from . import dashboard_deeplinks as _dashboard_deeplinks
 
 
+# Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
+_CORE_INDEX_HTML = _dashboard.INDEX_HTML
 _original_handle_index = _dashboard.handle_index
 
 
 async def _handle_index_without_cache(request):
-    """Force le navigateur à récupérer la dernière interface après un correctif."""
+    """Force toujours le navigateur à récupérer la dernière interface corrigée."""
     response = await _original_handle_index(request)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -36,6 +40,9 @@ async def _handle_index_without_cache(request):
 
 
 _dashboard.handle_index = _handle_index_without_cache
+
+# Les modules suivants conservent leurs routes/API/pages secondaires. Leurs injections dans
+# INDEX_HTML seront volontairement annulées plus bas pour éviter les conflits JavaScript.
 _dashboard_explanations_search.install(_dashboard)
 _setup_center_exclusive.install(_setup_center, _setup_dashboard)
 _setup_center_search.install(_setup_center)
@@ -43,23 +50,18 @@ _setup_center_explanations.install(_setup_center)
 _setup_center.install(_dashboard, _setup_dashboard, _design_setup_dashboard)
 _embed_center.install(_dashboard)
 
-# Le clic est géré par le script du créateur. Le bouton ne soumet donc pas une seconde fois
-# le formulaire, ce qui empêche l'envoi accidentel de deux messages Discord identiques.
+# Correctifs propres aux pages secondaires.
 _embed_center.EMBED_CENTER_HTML = _embed_center.EMBED_CENTER_HTML.replace(
     'id="saveButton" class="btn primary" type="submit"',
     'id="saveButton" class="btn primary" type="button"',
     1,
 )
-# Un modèle rempli par JavaScript doit lui aussi être conservé immédiatement dans le
-# brouillon, même si l'utilisateur n'a pas encore retouché un champ à la main.
 _embed_center.EMBED_CENTER_HTML = _embed_center.EMBED_CENTER_HTML.replace(
     '$("applyTemplate").addEventListener("click",applyTemplate);',
     '$("applyTemplate").addEventListener("click",()=>{applyTemplate();scheduleDraft();});',
     1,
 )
 
-# Petits correctifs appliqués avant l'injection : les éléments techniques restent dans le
-# body et l'annulation d'un changement de serveur restaure réellement l'ancienne valeur.
 _dashboard_polish.POLISH_JS = _dashboard_polish.POLISH_JS.replace(
     'document.documentElement.append(progress, offline);\n  document.body.appendChild(health);',
     'document.body.append(progress, offline, health);',
@@ -72,34 +74,89 @@ _dashboard_polish.POLISH_JS = _dashboard_polish.POLISH_JS.replace(
 )
 _dashboard_polish.install(_dashboard, _setup_center, _embed_center)
 
-# La connexion Discord reste mémorisée 30 jours, y compris après un redémarrage Railway.
-# Cette couche doit être installée AVANT le verrou Administrateur afin de restaurer la
-# session depuis SQLite avant toute vérification des permissions du serveur.
+# Sessions persistantes et routes propriétaires restent actives côté serveur.
 _persistent_dashboard_sessions.install(_dashboard)
-
-# Outil propriétaire : tous les serveurs du bot + recherche nom/ID + retrait du bot.
-# Il doit être enregistré avant le middleware final pour que celui-ci puisse protéger
-# également les routes /owner-servers et /api/owner/*.
 _owner_server_manager.install(_dashboard)
-
-# Le créateur d'embeds et la gestion propriétaire sont des pages privées.
 _admin_only_dashboard._PRIVATE_PAGE_PATHS.add("/embed-builder")
 _admin_only_dashboard._PRIVATE_PAGE_PATHS.add("/owner-servers")
-# Doit rester en dernier pour protéger également toutes les routes ajoutées ci-dessus.
 _admin_only_dashboard.install(_dashboard)
 
-# Centre de contrôle : uniquement de l'UI autour des routes et champs déjà sûrs.
-# Il est injecté avant les deep links afin que les nouveaux onglets puissent aussi être
-# ouverts directement par une URL partageable.
+# Conserve aussi les API ajoutées par ces modules. Leur UI principale sera retirée juste après.
 _dashboard_control_center.install(_dashboard)
-
-# Réglage Tickets : rôle indépendant à notifier lors de chaque nouvelle ouverture.
 _ticket_ping_dashboard.install(_dashboard)
-
-# Habillage final noir/violet inspiré du panneau OXYDE demandé. Il ne modifie aucune API :
-# uniquement CSS + un hero SentriX qui se restaure lors des changements de serveur/onglet.
 _dashboard_oxyde_theme.install(_dashboard)
-
-# Deep links du +setup : doit s'exécuter après les autres injections HTML pour cibler
-# l'interface finale réellement envoyée au navigateur.
 _dashboard_deeplinks.install(_dashboard)
+
+
+# Filet de sécurité spécifique au démarrage Railway : le serveur HTTP peut répondre avant
+# que Discord ait fini de connecter le bot. Le bouton de connexion reste visible et la liste
+# des serveurs se recharge automatiquement dès que SentriX devient prêt, sans F5 manuel.
+_CORE_RECOVERY_JS = r"""
+<script id="sentrix-core-recovery">
+(() => {
+  "use strict";
+  if (window.__sentrixCoreRecovery) return;
+  window.__sentrixCoreRecovery = true;
+
+  const login = document.getElementById("loginButton");
+  if (login) login.classList.remove("hidden");
+
+  let attempts = 0;
+  let guildReloading = false;
+  const refreshRuntime = async () => {
+    attempts += 1;
+    try {
+      const response = await fetch("/api/public", {cache:"no-store", credentials:"same-origin"});
+      if (!response.ok) return;
+      const data = await response.json();
+
+      const status = document.getElementById("publicStatus");
+      const dot = document.getElementById("publicDot");
+      if (status) status.textContent = data.online ? "SentriX est opérationnel" : "Connexion Discord en cours";
+      if (dot) dot.style.background = data.online ? "var(--ok)" : "var(--warn)";
+
+      if (login) {
+        login.classList.remove("hidden");
+        login.setAttribute("aria-disabled", data.oauth_ready ? "false" : "true");
+        login.title = data.oauth_ready ? "Se connecter avec Discord" : "SentriX termine son démarrage — réessayez dans quelques secondes";
+      }
+
+      if (
+        data.online &&
+        typeof state !== "undefined" &&
+        state.user &&
+        typeof loadGuilds === "function" &&
+        !guildReloading &&
+        (!state.guildId || !state.guildData)
+      ) {
+        guildReloading = true;
+        try { await loadGuilds(); } catch (_) {}
+        finally { guildReloading = false; }
+      }
+
+      if (data.online && data.oauth_ready && attempts >= 6) clearInterval(timer);
+    } catch (_) {
+      // Le script principal affiche déjà les erreurs réseau. Ce polling reste silencieux.
+    }
+    if (attempts >= 90) clearInterval(timer);
+  };
+
+  const timer = setInterval(refreshRuntime, 2000);
+  setTimeout(refreshRuntime, 100);
+})();
+</script>
+"""
+
+
+# IMPORTANT : on restaure la page principale d'origine après TOUS les installateurs.
+# Cela supprime les anciens intercepts de clics/fetch et les wrappers imbriqués qui rendaient
+# parfois toute l'interface inerte, tout en gardant les routes backend installées ci-dessus.
+_main_html = _CORE_INDEX_HTML
+_main_html = _main_html.replace(
+    '$("loginButton").classList.add("hidden");',
+    '',
+    1,
+)
+if 'id="sentrix-core-recovery"' not in _main_html:
+    _main_html = _main_html.replace("</body>", _CORE_RECOVERY_JS + "\n</body>", 1)
+_dashboard.INDEX_HTML = _main_html
