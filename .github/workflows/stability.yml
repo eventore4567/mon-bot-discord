@@ -67,6 +67,12 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-no-emoji-audit.db"
         run: python tools/no_emoji_commands_audit.py
 
+      - name: Global command style and dashboard server tools audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-style-dashboard-audit.db"
+        run: python tools/command_style_dashboard_tools_audit.py
+
       - name: Everyday usability audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
