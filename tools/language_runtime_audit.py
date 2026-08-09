@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit CI du choix FR/EN, y compris le payload final des composants Discord."""
+"""Audit CI du choix FR/EN, du payload Discord final et du vrai Cog +setup."""
 from __future__ import annotations
 
 import asyncio
@@ -94,6 +94,28 @@ async def run() -> int:
 
         if not getattr(configuration.SetupView, "_sentrix_language_payload_guard", False):
             errors.append("+setup n'a pas le garde-fou final-wire pour la langue")
+        if not getattr(configuration.SetupView, "_sentrix_setup_v6", False):
+            errors.append("configuration.SetupView ne pointe pas vers Setup V6")
+
+        # Teste la cible REELLEMENT résolue par self._open_setup_panel sur le Cog vivant.
+        # Le niveau classe peut être restauré par discord.py pendant le chargement d'une
+        # extension ; l'attribut d'instance doit rester la V6 et prend priorité en Python.
+        config_cog = bot.get_cog("Configuration")
+        bound_open = getattr(config_cog, "_open_setup_panel", None) if config_cog else None
+        bound_func = getattr(bound_open, "__func__", bound_open)
+        if bound_func is None or not getattr(bound_func, "_sentrix_setup_v6", False):
+            errors.append(
+                "Le Cog Configuration actif n'utilise pas l'ouverture V6 | "
+                f"bound={getattr(bound_func, '__module__', None)}.{getattr(bound_func, '__qualname__', None)} | "
+                f"marker={getattr(bound_func, '_sentrix_setup_v6', None)} | "
+                f"instance_flag={getattr(config_cog, '_sentrix_setup_v6_bound', None) if config_cog else None}"
+            )
+        if config_cog is not None and not getattr(config_cog, "_sentrix_setup_v6_bound", False):
+            errors.append("le verrou V6 n'est pas pose sur l'instance Configuration active")
+
+        setup_command = bot.get_command("setup")
+        if setup_command is None or getattr(setup_command, "cog", None) is not config_cog:
+            errors.append("la commande +setup n'est pas rattachee au Cog Configuration teste")
 
         initial_view = language_runtime.LanguageChoiceView(bot)
         custom_ids = {getattr(item, "custom_id", None) for item in initial_view.children}
@@ -102,11 +124,7 @@ async def run() -> int:
 
         try:
             setup_view = configuration.SetupView(
-                bot,
-                guild_id=123456789,
-                author_id=111,
-                message_id=222,
-                channel_id=333,
+                bot, guild_id=123456789, author_id=111, message_id=222, channel_id=333,
             )
 
             def find_language_select(view):
@@ -116,7 +134,6 @@ async def run() -> int:
                         return item
                 return None
 
-            # Juste après construction : la langue doit être la PREMIERE option.
             select = find_language_select(setup_view)
             if select is None:
                 errors.append("Langue absente du menu Categories juste apres construction")
@@ -127,7 +144,6 @@ async def run() -> int:
                 if "Langue" not in label and "Language" not in label:
                     errors.append(f"label langue incomprehensible: {label!r}")
 
-            # Test du dictionnaire EXACT sérialisé par discord.py avant envoi réseau.
             payload = setup_view.to_components()
             serialized_category = None
             for row in payload:
@@ -144,7 +160,6 @@ async def run() -> int:
             elif str(serialized_category["options"][0].get("value", "")) != LANGUAGE_CATEGORY_VALUE:
                 errors.append("CRITIQUE: Langue n'est pas premiere dans le payload Discord")
 
-            # Retour accueil : même garantie.
             setup_view.page = -1
             setup_view.render_page()
             payload_after_home = setup_view.to_components()
@@ -157,25 +172,28 @@ async def run() -> int:
             if not found_after_home:
                 errors.append("Langue perdue apres render_page de l'accueil")
 
-            # Page langue : FR, EN et Accueil.
             setup_view.page = LANGUAGE_PAGE
             setup_view.render_page()
             ids = {getattr(item, "custom_id", None) for item in setup_view.children}
             expected = {
-                "sentrix:setup:lang:fr",
-                "sentrix:setup:lang:en",
-                "sentrix:setup:lang:home",
+                "sentrix:setup:v6:lang:fr",
+                "sentrix:setup:v6:lang:en",
+                "sentrix:setup:v6:lang:home",
             }
             if ids != expected:
-                errors.append(f"composants de la page Langue invalides: {ids}")
+                errors.append(f"composants de la page Langue V6 invalides: {ids}")
 
             language_embed = await setup_view.build_embed()
             if "Langue" not in str(language_embed.title or "") and "Language" not in str(language_embed.title or ""):
                 errors.append(f"embed Langue invalide: {language_embed.title!r}")
 
-            # Aucun menu FR/EN séparé sur l'accueil.
             setup_view.page = -1
             setup_view.render_page()
+            home_embed = await setup_view.build_embed()
+            footer = str(home_embed.footer.text or "") if home_embed.footer else ""
+            if "Interface setup v6" not in footer:
+                errors.append(f"marqueur V6 absent du footer: {footer!r}")
+
             for item in setup_view.children:
                 values = {str(getattr(opt, "value", "")) for opt in getattr(item, "options", [])}
                 if values == {"fr", "en"}:
@@ -203,7 +221,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
-    print("OK: FR/EN persistant et Langue est la 1re option du payload Discord final de +setup")
+    print("OK: Cog actif lie a V6, FR/EN persistant et Langue premiere dans le payload Discord de +setup")
     return 0
 
 
