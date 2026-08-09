@@ -16,6 +16,7 @@ import time
 from types import MethodType
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from utils import checks
@@ -51,7 +52,7 @@ async def _guild_owner_only_interaction(interaction: discord.Interaction) -> boo
     guild = interaction.guild
     if guild is not None and interaction.user.id == guild.owner_id:
         return True
-    raise discord.app_commands.CheckFailure(
+    raise app_commands.CheckFailure(
         "Seul le propriétaire du serveur Discord peut modifier une whitelist ou une exemption de sécurité."
     )
 
