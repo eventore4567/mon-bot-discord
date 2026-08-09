@@ -112,11 +112,20 @@ def _inject(html: str) -> str:
 
 
 def install(*modules) -> None:
-    """Applique le nettoyage en DERNIER sur les pages web connues de SentriX."""
+    """Installe les derniers outils sûrs puis nettoie toutes les pages en dernier."""
     global _INSTALLED
     if _INSTALLED:
         return
     _INSTALLED = True
+
+    # Le premier module passé par web.__init__ est toujours web.dashboard. On branche ici
+    # les outils serveur afin qu'ils soient eux aussi soumis au nettoyage final sans emoji.
+    if modules:
+        try:
+            from . import dashboard_server_tools
+            dashboard_server_tools.install(modules[0])
+        except Exception:
+            logger.exception("Impossible d'installer les outils serveur du dashboard.")
 
     candidate_names = (
         "INDEX_HTML",
