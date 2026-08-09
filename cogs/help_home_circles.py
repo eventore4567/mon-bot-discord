@@ -134,6 +134,10 @@ def _patch_clean_help_callback_compat() -> None:
     discord.py peut alors transmettre le Cog, le Context et une valeur transformée en
     positionnel, tout en conservant `commande` en mot-clé. On localise donc explicitement
     le vrai Context au lieu d'imposer une signature fragile.
+
+    Le wrapper conserve également les marqueurs de la couche V8 : le callback final reste
+    identifiable comme V8 par les audits et les garde-fous, au lieu de perdre son identité
+    simplement parce qu'une couche de compatibilité de signature l'enveloppe.
     """
     try:
         from . import help_clean_style
@@ -152,7 +156,6 @@ def _patch_clean_help_callback_compat() -> None:
             if real_ctx is None:
                 raise TypeError("Context Discord introuvable pour +help")
 
-            # Récupère un éventuel argument de commande transmis en positionnel.
             if commande is None:
                 try:
                     ctx_index = args.index(real_ctx)
@@ -189,6 +192,11 @@ def _patch_clean_help_callback_compat() -> None:
         compatible_help_callback.__name__ = "help_cmd"
         compatible_help_callback.__doc__ = getattr(original, "__doc__", None)
         compatible_help_callback._sentrix_ctx_compat = True
+        compatible_help_callback._sentrix_help_clean_v8 = bool(
+            getattr(original, "_sentrix_help_clean_v8", False)
+        )
+        # Conserver un lien de diagnostic explicite vers la fonction réellement appelée.
+        compatible_help_callback.__wrapped__ = original
         help_clean_style._clean_help_callback = compatible_help_callback
         logger.info("Correctif +help installé : callback compatible avec tous les appels discord.py.")
     except Exception:
@@ -207,8 +215,6 @@ def install(bot: commands.Bot) -> None:
     except Exception:
         logger.exception("Impossible d'installer le runtime anti-GIF.")
 
-    # ServerBuilder est chargé avant Utility dans main.py : à ce moment, ses modèles sont
-    # donc déjà disponibles et peuvent être enrichis avant le prochain +create-server.
     try:
         install_server_builder_moderation_space(bot)
     except Exception:
