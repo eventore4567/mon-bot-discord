@@ -149,6 +149,11 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
         await _run_installer("centre de commandes sécurité", install_security_command_center, bot)
         await _run_installer("immunité propriétaire sanctions", install_owner_sanction_immunity, bot)
 
+    if _matches(name, "cogs.security_tools"):
+        # security_tools est chargé après AutoMod : un second passage masque ses anciens
+        # noms (quarantine, permission-audit, server-backup...) au profit de +security.
+        await _run_installer("centre de commandes sécurité avancé", install_security_command_center, bot)
+
     if _matches(name, "cogs.moderation"):
         await _run_installer("immunité propriétaire sanctions", install_owner_sanction_immunity, bot)
 
