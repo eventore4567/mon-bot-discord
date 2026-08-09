@@ -41,6 +41,7 @@ from .reply_reference_fix import install as install_reply_reference_fix
 from .rolepanel_display_fix import install as install_rolepanel_display_fix
 from .rolepanel_more_notifications import install as install_more_notification_roles
 from .rolepanel_notifications import install as install_notification_rolepanel
+from .security_command_center import install as install_security_command_center
 from .security_runtime_hardening import install as install_security_hardening
 from .server_builder_channel_guides import install as install_server_builder_channel_guides
 from .server_builder_everyone import install_server_builder_everyone_ping
@@ -145,6 +146,7 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
     """Correctifs qui ne doivent être posés qu'une fois leur cog cible chargé."""
     if _matches(name, "cogs.automod"):
         await _run_installer("renforcement sécurité", install_security_hardening, bot)
+        await _run_installer("centre de commandes sécurité", install_security_command_center, bot)
         await _run_installer("immunité propriétaire sanctions", install_owner_sanction_immunity, bot)
 
     if _matches(name, "cogs.moderation"):
