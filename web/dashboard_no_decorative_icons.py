@@ -15,15 +15,12 @@ _INSTALLED = False
 
 CLEAN_CSS = r"""
 <style id="sentrix-no-decorative-icons-css">
-  /* Les anciens blocs servant uniquement à afficher un pictogramme disparaissent. */
   .sx-system-icon,
   .decorative-icon,
   .status-icon,
   .check-icon,
   .emoji-icon,
   [data-decorative-icon="true"]{display:none!important}
-
-  /* Évite qu'un ancien emplacement d'icône laisse une grosse colonne vide. */
   .sx-system-tile>div:first-child{min-width:0}
   button,.btn,.tab,label,h1,h2,h3,h4,h5,h6{font-family:inherit}
 </style>
@@ -37,8 +34,6 @@ CLEAN_JS = r"""
   if (window.__sentrixNoDecorativeIcons) return;
   window.__sentrixNoDecorativeIcons = true;
 
-  // Emoji Unicode + dingbats + variation selectors. On garde la ponctuation normale,
-  // les puces sobres et le texte saisi/configuré par les utilisateurs.
   const emojiRE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0E}\u{FE0F}]/gu;
   const uiSelector = [
     "button", ".btn", ".tab", "nav", "aside", ".navigation", "#navigation",
@@ -64,9 +59,6 @@ CLEAN_JS = r"""
       while (walker.nextNode()) nodes.push(walker.currentNode);
       nodes.forEach(cleanTextNode);
     }
-
-    // Un élément explicitement prévu uniquement pour une icône devient inutile une fois
-    // son pictogramme retiré. On ne touche jamais aux avatars, images ou aperçus.
     if (element.matches(".sx-system-icon,.decorative-icon,.status-icon,.check-icon,.emoji-icon,[data-decorative-icon='true']")) {
       element.style.display = "none";
     }
@@ -118,15 +110,21 @@ def install(*modules) -> None:
         return
     _INSTALLED = True
 
-    # Le premier module passé par web.__init__ est toujours web.dashboard. On branche ici
-    # les outils serveur afin qu'ils soient eux aussi soumis au nettoyage final sans emoji.
+    enterprise_module = None
     if modules:
         try:
             from . import dashboard_server_tools
             dashboard_server_tools.install(modules[0])
         except Exception:
             logger.exception("Impossible d'installer les outils serveur du dashboard.")
+        try:
+            from . import enterprise_suite
+            enterprise_suite.install(modules[0])
+            enterprise_module = enterprise_suite
+        except Exception:
+            logger.exception("Impossible d'installer le centre Enterprise du dashboard.")
 
+    all_modules = tuple(modules) + ((enterprise_module,) if enterprise_module is not None else ())
     candidate_names = (
         "INDEX_HTML",
         "SETUP_CENTER_HTML",
@@ -134,9 +132,12 @@ def install(*modules) -> None:
         "DESIGN_SETUP_HTML",
         "EMBED_CENTER_HTML",
         "OWNER_SERVERS_HTML",
+        "OPERATIONS_HTML",
+        "ENTERPRISE_HTML",
+        "APPEAL_HTML",
     )
     changed = 0
-    for module in modules:
+    for module in all_modules:
         if module is None:
             continue
         for name in candidate_names:
