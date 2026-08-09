@@ -100,7 +100,15 @@ async def run() -> int:
         config_cog = bot.get_cog("Configuration")
         open_panel = getattr(type(config_cog), "_open_setup_panel", None) if config_cog else None
         if open_panel is None or not getattr(open_panel, "_sentrix_setup_v6", False):
-            errors.append("Configuration._open_setup_panel n'utilise pas directement la V6")
+            stored = getattr(getattr(configuration, "Configuration", object), "_sentrix_open_setup_panel_v6", None)
+            errors.append(
+                "Configuration._open_setup_panel n'utilise pas directement la V6 | "
+                f"cog={type(config_cog).__module__ + '.' + type(config_cog).__qualname__ if config_cog else None} | "
+                f"open={getattr(open_panel, '__module__', None)}.{getattr(open_panel, '__qualname__', None)} | "
+                f"marker={getattr(open_panel, '_sentrix_setup_v6', None)} | "
+                f"stored={getattr(stored, '__module__', None)}.{getattr(stored, '__qualname__', None)} | "
+                f"stored_marker={getattr(stored, '_sentrix_setup_v6', None)} | same={open_panel is stored}"
+            )
 
         initial_view = language_runtime.LanguageChoiceView(bot)
         custom_ids = {getattr(item, "custom_id", None) for item in initial_view.children}
