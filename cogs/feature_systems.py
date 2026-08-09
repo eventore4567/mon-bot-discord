@@ -7,6 +7,7 @@ installée avant eux puis repassée après chaque extension. Elle :
 - empêche les achats depuis les anciens panneaux persistants de boutique ;
 - empêche les gains d'argent externes (+ mini-jeux) ;
 - empêche tout nouveau gain d'XP sans arrêter les statistiques de messages ;
+- masque les données des systèmes coupés dans /stats et les classements ;
 - conserve toutes les données pour une réactivation ultérieure.
 """
 from __future__ import annotations
@@ -216,6 +217,18 @@ def _disabled_embed(system: str) -> discord.Embed:
     )
 
 
+def _remove_fields(embed: discord.Embed, predicate) -> discord.Embed:
+    """Supprime en ordre inverse les champs correspondant au système coupé."""
+    for index in range(len(embed.fields) - 1, -1, -1):
+        try:
+            field_name = str(embed.fields[index].name or "")
+        except (AttributeError, IndexError):
+            continue
+        if predicate(field_name.casefold()):
+            embed.remove_field(index)
+    return embed
+
+
 def _patch_levels(bot: commands.Bot) -> None:
     cog = bot.get_cog("Levels")
     if cog is None or getattr(cog, "_sentrix_feature_guard", False):
@@ -248,6 +261,34 @@ def _patch_levels(bot: commands.Bot) -> None:
                 return _disabled_embed("economy")
             return await original_economy_embed(guild, member, *args, **kwargs)
         cog.build_economy_embed = MethodType(guarded_economy_embed, cog)
+
+    original_stats_embed = getattr(cog, "build_stats_embed", None)
+    if original_stats_embed is not None:
+        async def guarded_stats_embed(_self, guild: discord.Guild, member: discord.Member, *args, **kwargs):
+            embed = await original_stats_embed(guild, member, *args, **kwargs)
+            features = await get_system_features(bot.db, guild.id)
+            if not features.get("economy_enabled", True):
+                _remove_fields(embed, lambda name: "économie" in name or "economie" in name)
+            if not features.get("levels_enabled", True):
+                _remove_fields(
+                    embed,
+                    lambda name: any(token in name for token in ("niveau", "progression", "prochain rôle", "prochain role"))
+                    or "classement" in name,
+                )
+            return embed
+        cog.build_stats_embed = MethodType(guarded_stats_embed, cog)
+
+    original_ranks_embed = getattr(cog, "build_ranks_embed", None)
+    if original_ranks_embed is not None:
+        async def guarded_ranks_embed(_self, guild: discord.Guild, member: discord.Member, *args, **kwargs):
+            embed = await original_ranks_embed(guild, member, *args, **kwargs)
+            features = await get_system_features(bot.db, guild.id)
+            if not features.get("economy_enabled", True):
+                _remove_fields(embed, lambda name: "économie" in name or "economie" in name)
+            if not features.get("levels_enabled", True):
+                _remove_fields(embed, lambda name: "xp" in name or "niveau" in name)
+            return embed
+        cog.build_ranks_embed = MethodType(guarded_ranks_embed, cog)
 
     logger.info("Garde niveaux installée : XP et affichages niveau/économie respectent les interrupteurs.")
 
