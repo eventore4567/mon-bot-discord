@@ -1,8 +1,9 @@
-"""Setup V6 : panneau direct, langue native et nettoyage des anciens slash locaux.
+"""Setup V6 : panneau direct, langue native et verrou final sur l'ouverture +setup.
 
 La V6 ne repasse plus par l'ancien _open_setup_panel. Le message envoyé par +setup est
 construit directement avec SetupViewV6, ce qui garantit que la catégorie Langue est
-présente même si une ancienne couche visuelle a conservé une référence au vieux renderer.
+présente. L'installation est rappelée après chaque extension et réattache toujours le
+point d'ouverture V6 : aucun ancien wrapper chargé ensuite ne peut reprendre la main.
 """
 from __future__ import annotations
 
@@ -134,7 +135,16 @@ def install(bot: commands.Bot) -> None:
     base_view_cls = getattr(configuration, "SetupView", None)
     if bot.get_cog("Configuration") is None or config_cls is None or base_view_cls is None:
         return
+
+    # IMPORTANT : cet installateur est rappelé après chaque extension. Si la V6 existe
+    # déjà, on ne recrée pas une nouvelle sous-classe ; on réattache simplement son vrai
+    # point d'ouverture. C'est le verrou qui empêche un ancien patch chargé plus tard de
+    # remettre l'ancien panneau sans la catégorie Langue.
     if getattr(base_view_cls, "_sentrix_setup_v6", False):
+        direct_open = getattr(config_cls, "_sentrix_open_setup_panel_v6", None)
+        if direct_open is not None:
+            config_cls._open_setup_panel = direct_open
+            logger.debug("Verrou +setup V6 réappliqué après chargement d'une extension.")
         return
 
     class SetupViewV6(base_view_cls):
@@ -337,7 +347,7 @@ def install(bot: commands.Bot) -> None:
                     logger.debug("Traduction d'une page +setup impossible.", exc_info=True)
             return embed
 
-    # Toutes les restaurations de session qui consultent configuration.SetupView utiliseront V6.
+    # Toutes les restaurations de session qui consultent configuration.SetupView utilisent V6.
     configuration.SetupView = SetupViewV6
 
     async def open_setup_panel_v6(self, ctx_or_channel, *, author: discord.Member = None):
@@ -351,7 +361,6 @@ def install(bot: commands.Bot) -> None:
         channel = getattr(ctx_or_channel, "channel", None)
         channel_id = channel.id if channel is not None else ctx_or_channel.id
 
-        # Charge la langue réelle avant de construire les composants (cached_language est ensuite instantané).
         await language_runtime.get_language(self.bot, guild.id)
 
         rows = await self.bot.db.list_bot_managers(guild.id)
@@ -385,13 +394,13 @@ def install(bot: commands.Bot) -> None:
         await view.persist_session()
         await message.edit(embed=await view.build_embed(), view=view)
 
-        # Ne ralentit pas l'ouverture du panneau : le nettoyage des anciens slash part en arrière-plan.
         asyncio.create_task(_purge_local_slash_for_guild(self.bot, guild), name=f"sentrix-slash-clean-{guild.id}")
         return message, view
 
     open_setup_panel_v6._sentrix_setup_v6 = True
+    config_cls._sentrix_open_setup_panel_v6 = open_setup_panel_v6
     config_cls._open_setup_panel = open_setup_panel_v6
 
     logger.info(
-        "+setup V6 DIRECT actif : _open_setup_panel remplacé, 🌐 Langue première catégorie, renderer historique contourné."
+        "+setup V6 DIRECT actif : ouverture verrouillée, 🌐 Langue première catégorie, renderer historique contourné."
     )
