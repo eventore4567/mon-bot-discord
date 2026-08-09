@@ -32,6 +32,17 @@ def install(bot: commands.Bot) -> None:
     skipped: list[str] = []
     bot._sentrix_skipped_global_slash = skipped
 
+    def _call_original(command, *, guild=None, guilds=None, override: bool = False):
+        # discord.py utilise un sentinel interne pour distinguer « argument absent » de
+        # « argument explicitement None ». Ne jamais transmettre guild=None ET guilds=None,
+        # sinon _retrieve_guild_ids considère que les deux options ont été fournies.
+        kwargs = {"override": override}
+        if guild is not None:
+            kwargs["guild"] = guild
+        if guilds is not None:
+            kwargs["guilds"] = guilds
+        return original_add(command, **kwargs)
+
     def budgeted_add(
         _tree,
         command,
@@ -43,7 +54,7 @@ def install(bot: commands.Bot) -> None:
         # Les limites de commandes de serveur sont indépendantes. On ne touche donc jamais
         # aux commandes explicitement guild-scoped.
         if guild is not None or guilds is not None:
-            return original_add(command, guild=guild, guilds=guilds, override=override)
+            return _call_original(command, guild=guild, guilds=guilds, override=override)
 
         # ContextMenu a ses propres quotas. Le budget ici vise uniquement les commandes /
         # de type chat-input (Command et Group).
@@ -71,7 +82,7 @@ def install(bot: commands.Bot) -> None:
                 )
                 return None
 
-        return original_add(command, guild=guild, guilds=guilds, override=override)
+        return _call_original(command, override=override)
 
     tree.add_command = MethodType(budgeted_add, tree)
     logger.info("Budget slash SentriX actif : maximum %s commandes chat-input globales.", GLOBAL_CHAT_INPUT_BUDGET)
