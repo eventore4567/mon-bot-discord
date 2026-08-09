@@ -18,6 +18,7 @@ from .afk_nickname import install as install_afk_nickname
 from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
 from .bot_tracker import install as install_bot_tracker
+from .command_no_emoji_runtime import install as install_command_no_emoji
 from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
 from .dashboard_access import install_dashboard_access
@@ -96,7 +97,7 @@ async def _run_installer(label: str, installer, *args):
 
 
 def _install_embed_component_fix(bot: commands.Bot) -> None:
-    """Corrige le bouton Annuler de +embed qui envoyait `emoji=○` à Discord."""
+    """Garantit que le bouton Annuler de +embed n'utilise aucun emoji."""
     if getattr(bot, "_sentrix_embed_component_fix", False):
         return
     try:
@@ -109,13 +110,13 @@ def _install_embed_component_fix(bot: commands.Bot) -> None:
                 original_init(self, *args, **kwargs)
                 for item in self.children:
                     if isinstance(item, discord.ui.Button) and item.label == "Annuler":
-                        item.emoji = "❌"
+                        item.emoji = None
 
             embed_builder.EmbedBuilderView.__init__ = patched_init
             embed_builder.EmbedBuilderView._sentrix_cancel_emoji_fix = True
 
         bot._sentrix_embed_component_fix = True
-        logger.info("Correctif +embed installé : emoji du bouton Annuler remplacé par ❌.")
+        logger.info("Correctif +embed installé : bouton Annuler sans emoji.")
     except Exception:
         logger.exception("Impossible d'installer le correctif de composant +embed.")
 
@@ -220,6 +221,9 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     await _run_installer("finaliseur langue setup", install_language_setup_finalizer, bot)
     await _run_installer("style final aide sans emoji", install_help_clean_style, bot)
     await _run_installer("garde de réponse commandes", install_command_response_guard, bot)
+    # Toujours en dernier : aucune autre couche ne doit pouvoir réintroduire une décoration
+    # emoji dans une réponse de commande après ce point.
+    await _run_installer("politique finale commandes sans emoji", install_command_no_emoji, bot)
 
 
 async def _load_extension_with_sentrix_patches(
