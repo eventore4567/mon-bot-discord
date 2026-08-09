@@ -21,6 +21,7 @@ from . import dashboard_control_center as _dashboard_control_center
 from . import ticket_ping_dashboard as _ticket_ping_dashboard
 from . import dashboard_oxyde_theme as _dashboard_oxyde_theme
 from . import dashboard_deeplinks as _dashboard_deeplinks
+from . import dashboard_stability as _dashboard_stability
 
 
 _original_handle_index = _dashboard.handle_index
@@ -103,3 +104,7 @@ _dashboard_oxyde_theme.install(_dashboard)
 # Deep links du +setup : doit s'exécuter après les autres injections HTML pour cibler
 # l'interface finale réellement envoyée au navigateur.
 _dashboard_deeplinks.install(_dashboard)
+
+# Dernière couche : récupération des erreurs, validation des sessions, protection contre
+# les doubles enregistrements et les changements de serveur concurrents.
+_dashboard_stability.install(_dashboard)
