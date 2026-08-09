@@ -49,6 +49,12 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-ux-audit.db"
         run: python tools/ux_quality_audit.py
 
+      - name: Help V8 clean style audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-help-style-audit.db"
+        run: python tools/help_clean_style_audit.py
+
       - name: Everyday usability audit
         env:
           DISCORD_TOKEN: "ci.fake.token"

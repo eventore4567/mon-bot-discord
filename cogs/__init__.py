@@ -23,6 +23,7 @@ from .common_command_names import install as install_common_command_names
 from .dashboard_access import install_dashboard_access
 from .generated_logs_sync import install as install_generated_logs_sync
 from .giveaway_antialt import install as install_giveaway_antialt
+from .help_clean_style import install as install_help_clean_style
 from .help_complete import install as install_complete_help
 from .help_home_circles import install as install_help_home_circles
 from .language_runtime import install as install_language_runtime
@@ -217,6 +218,7 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     await _run_installer("aliases techniques", install_common_command_names, bot)
     await _run_installer("moteur de langue", install_language_runtime, bot)
     await _run_installer("finaliseur langue setup", install_language_setup_finalizer, bot)
+    await _run_installer("style final aide sans emoji", install_help_clean_style, bot)
     await _run_installer("garde de réponse commandes", install_command_response_guard, bot)
 
 
