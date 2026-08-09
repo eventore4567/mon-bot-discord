@@ -66,6 +66,12 @@ class SystemFeatureCommands(commands.Cog, name="SystemFeatures"):
         if ctx.guild is None or ctx.command is None:
             return True
 
+        # Les interrupteurs doivent TOUJOURS rester accessibles aux administrateurs, sinon
+        # +level-system off bloquerait lui-même +level-system on et rendrait la désactivation
+        # irréversible sans modifier la base à la main.
+        if getattr(ctx.command, "cog_name", None) == "SystemFeatures":
+            return True
+
         if getattr(ctx.command, "cog_name", None) == "Economy":
             if not await is_system_enabled(self.bot.db, ctx.guild.id, "economy"):
                 raise checks.BotPermissionError(
