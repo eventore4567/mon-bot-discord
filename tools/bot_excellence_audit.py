@@ -39,14 +39,15 @@ def static_audit() -> None:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
 
-    # Cette couche doit améliorer le bot existant sans gonfler le catalogue de commandes.
-    forbidden = ("hybrid_command", "command(", "hybrid_group", "app_commands.command")
-    for marker in forbidden:
-        assert marker not in source, f"Le runtime Excellence ne doit pas créer de commande publique: {marker}"
-
-    # Le dashboard ne doit pas être une dépendance de cette amélioration bot-only.
-    assert "web." not in source
-    assert "dashboard" not in source.casefold()
+    # Cette couche doit rester bot-only : aucun import depuis le package web.
+    # On vérifie les imports via l'AST plutôt qu'un simple mot dans les commentaires/docstrings.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert not alias.name.startswith("web"), f"Import web interdit: {alias.name}"
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            assert not module.startswith("web"), f"Import web interdit: {module}"
 
     required_markers = (
         "_install_ai_concurrency",
@@ -65,13 +66,23 @@ def static_audit() -> None:
     for marker in required_markers:
         assert marker in source, f"Fonction Excellence manquante: {marker}"
 
-    # Vérifie qu'aucun décorateur de commande n'est caché derrière une forme AST inhabituelle.
+    # Vérifie précisément les décorateurs : get_command(...) et autres appels internes sont
+    # autorisés, mais le runtime ne doit créer aucune nouvelle commande publique.
+    forbidden_decorators = (
+        "commands.command",
+        "commands.hybrid_command",
+        "commands.group",
+        "commands.hybrid_group",
+        "app_commands.command",
+    )
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for decorator in node.decorator_list:
             text = ast.unparse(decorator)
-            assert not any(token in text for token in ("commands.command", "commands.hybrid_command", "commands.hybrid_group", "app_commands.command")), text
+            assert not any(token in text for token in forbidden_decorators), (
+                f"Le runtime Excellence ne doit pas créer de commande publique: {text}"
+            )
 
 
 async def schema_audit() -> None:
