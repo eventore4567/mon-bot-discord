@@ -29,6 +29,7 @@ from . import dashboard_role_channel_search as _dashboard_role_channel_search
 from . import dashboard_system_features as _dashboard_system_features
 from . import setup_center_systems_rework as _setup_center_systems_rework
 from . import setup_center_security_v2 as _setup_center_security_v2
+from . import operations_center as _operations_center
 from . import dashboard_no_decorative_icons as _dashboard_no_decorative_icons
 
 
@@ -181,6 +182,10 @@ _dashboard.INDEX_HTML = _dashboard.INDEX_HTML.replace(_dashboard_system_features
 _setup_center_systems_rework.install(_setup_center)
 _setup_center_security_v2.install(_dashboard, _setup_center)
 
+# Operations est une page secondaire isolée + des routes backend. Installation ici, avant
+# le démarrage HTTP anticipé de Railway, afin que /operations existe dès le premier bind.
+_operations_center.install(_dashboard)
+
 # Toujours en dernier : retire les emojis/icônes décoratifs ajoutés par n'importe quelle
 # couche précédente, sans toucher aux photos de profil ni au contenu configuré par l'utilisateur.
 _dashboard_no_decorative_icons.install(
@@ -190,4 +195,5 @@ _dashboard_no_decorative_icons.install(
     _design_setup_dashboard,
     _embed_center,
     _owner_server_manager,
+    _operations_center,
 )
