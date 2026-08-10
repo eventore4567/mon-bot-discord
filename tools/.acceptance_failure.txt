@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/home/runner/work/mon-bot-discord/mon-bot-discord/tools/run_acceptance_diagnostic.py", line 13, in <module>
+    from tools import user_acceptance_audit
+ModuleNotFoundError: No module named 'tools'
