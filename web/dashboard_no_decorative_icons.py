@@ -112,6 +112,13 @@ def install(*modules) -> None:
 
     enterprise_module = None
     if modules:
+        # /health est renforcé ici, avant que build_app() ne lie les routes. Ce correctif
+        # ne modifie aucune page ni interaction du dashboard.
+        try:
+            from . import production_health
+            production_health.install(modules[0])
+        except Exception:
+            logger.exception("Impossible d'installer le healthcheck de production.")
         try:
             from . import dashboard_server_tools
             dashboard_server_tools.install(modules[0])
