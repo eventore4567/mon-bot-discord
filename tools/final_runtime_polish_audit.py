@@ -62,6 +62,10 @@ async def run() -> int:
         if infra is None or not getattr(infra, "_sentrix_external_canary", False):
             errors.append("+security infra n'est pas patché pour Canary externe")
 
+        canary_boot = (ROOT / "railway_canary_boot.py").read_text(encoding="utf-8")
+        if "bot._persistence_check_done = True" not in canary_boot:
+            errors.append("le Canary peut encore envoyer le faux MP de perte de persistance")
+
         current = asyncio.current_task()
         pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
         for task in pending:
@@ -75,7 +79,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} problème(s)")
         return 1
-    print("OK: +help sans argument public et Canary externe sans faux malus readiness")
+    print("OK: +help sans argument public, Canary externe sans faux malus et sans MP de persistance")
     return 0
 
 
