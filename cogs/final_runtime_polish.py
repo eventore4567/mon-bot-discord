@@ -64,21 +64,20 @@ def _patch_help(bot: commands.Bot) -> None:
     language_runtime._help_home = root_only_home
 
     async def root_only_callback(cog, ctx: commands.Context):
-        # Le callback V8 reçoit volontairement uniquement cog + ctx. La recherche détaillée
-        # reste dans les boutons/menu de l'interface au lieu d'être un argument de +help.
+        # Le callback V8 reçoit uniquement cog + ctx en interne. La recherche détaillée
+        # reste dans les boutons/menu ; aucune donnée n'est demandée après +help.
         return await help_clean_style._clean_help_callback(cog, ctx)
 
     root_only_callback._sentrix_help_clean_v8 = True
     root_only_callback._sentrix_help_root_only = True
     command.callback = root_only_callback
 
-    # discord.py a mémorisé les paramètres du callback d'origine lors de la création de la
-    # Command. On retire explicitement tout paramètre utilisateur tout en gardant self/ctx
-    # internes afin que clean_params et la syntaxe publique deviennent vides.
-    items = list(getattr(command, "params", {}).items())
-    keep_count = 2 if command.cog is not None else 1
-    command.params = OrderedDict(items[:keep_count])
-    command.usage = None
+    # Command.params représente UNIQUEMENT les arguments saisis par l'utilisateur pour le
+    # parseur de commandes. cog et ctx sont injectés par discord.py et ne doivent donc pas
+    # être présents ici. Une table vide garantit que +help n'affiche ni <ctx>, ni
+    # <commande>, et n'attend aucune valeur après le nom de la commande.
+    command.params = OrderedDict()
+    command.usage = ""
     command._sentrix_help_root_only = True
 
 
@@ -105,8 +104,6 @@ def _patch_canary_readiness(bot: commands.Bot) -> None:
             result["score"] = score
             result.setdefault("infra", {})["canary_external"] = True
 
-            # L'audit original a déjà écrit sa ligne. Corrige aussi la dernière ligne pour
-            # que l'historique stocké corresponde exactement au score affiché.
             try:
                 await bot_obj.db.execute(
                     "UPDATE guild_readiness_audits SET score=?, findings_json=? "
