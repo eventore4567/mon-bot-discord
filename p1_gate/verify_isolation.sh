@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+POLICY="$HERE/network_policy.sh"
+A_NET=sx-p1-a; B_NET=sx-p1-b; A=sx-p1-a-box; B=sx-p1-b-box
+cleanup(){ sudo bash "$POLICY" remove "$A_NET" 2>/dev/null || true; docker rm -f "$A" "$B" 2>/dev/null || true; docker network rm "$A_NET" "$B_NET" 2>/dev/null || true; }
+trap cleanup EXIT
+cleanup
+docker network create --subnet 172.30.10.0/24 "$A_NET" >/dev/null
+docker network create --subnet 172.30.11.0/24 "$B_NET" >/dev/null
+sudo bash "$POLICY" apply "$A_NET"
+common=(--runtime=runsc --read-only --cap-drop=ALL --security-opt=no-new-privileges:true --pids-limit=64 --memory=128m --memory-swap=128m --tmpfs /tmp:rw,noexec,nosuid,nodev,size=33554432)
+docker run -d --name "$B" --network "$B_NET" "${common[@]}" --cpus=1 python:3.12-alpine python -m http.server 8080 >/dev/null
+docker run -d --name "$A" --network "$A_NET" "${common[@]}" --cpus=.25 python:3.12-alpine sh -c 'sleep infinity' >/dev/null
+[[ "$(docker inspect -f '{{.HostConfig.Runtime}}' "$A")" == runsc ]]
+[[ "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$A")" == true ]]
+[[ "$(docker inspect -f '{{.HostConfig.PidsLimit}}' "$A")" == 64 ]]
+[[ "$(docker inspect -f '{{.HostConfig.Memory}}' "$A")" == 134217728 ]]
+[[ "$(docker inspect -f '{{.HostConfig.NanoCpus}}' "$A")" == 250000000 ]]
+! docker exec "$A" sh -c 'touch /forbidden' 2>/dev/null
+! docker exec "$A" test -S /var/run/docker.sock
+docker exec "$A" python -c "import urllib.request; r=urllib.request.urlopen('https://example.com',timeout=10); assert 200 <= r.status < 400"
+docker exec "$A" python -c "import socket; s=socket.socket(); s.settimeout(2); rc=s.connect_ex(('169.254.169.254',80)); assert rc != 0"
+BIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$B")"
+docker exec "$A" python -c "import socket; s=socket.socket(); s.settimeout(2); rc=s.connect_ex(('$BIP',8080)); assert rc != 0"
+docker exec -d "$A" python -c 'while True: pass'
+timeout 5 docker exec "$B" python -c 'print("neighbor-healthy")' >/dev/null
+echo 'P1 REAL ISOLATION PASS'
