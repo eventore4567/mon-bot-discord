@@ -30,10 +30,26 @@ jobs:
             echo 'Bootstrap parts are not complete yet.'
             exit 0
           fi
-          cat .bootstrap/part*.b64 | base64 -d > /tmp/sentrix-platform.tar.xz
-          tar -xJf /tmp/sentrix-platform.tar.xz
+
+          # Reuse the exact P0 bundle that previously passed the P0 gate.
+          P0_COMMIT=c57f07299bbdeaa4a4444bb54f4b3dc28da6085e
+          git fetch --no-tags --depth=1 origin "$P0_COMMIT"
+          : > /tmp/p0.b64
+          for n in 01 02 03 04 05 06 07 08 09 10; do
+            git show "$P0_COMMIT:tools/platform_p0/bundle.part${n}.b64" >> /tmp/p0.b64
+          done
+          base64 -d /tmp/p0.b64 > /tmp/sentrix-platform-p0.zip
+          unzip -q -o /tmp/sentrix-platform-p0.zip
+
+          # Overlay only P1-P6/new V1 files, keeping bootstrap uploads small.
+          cat .bootstrap/delta.part*.b64 | base64 -d > /tmp/platform-delta.tar.xz
+          tar -xJf /tmp/platform-delta.tar.xz
+
           test -f sentrix-platform/pyproject.toml
+          test -f sentrix-platform/agents/node_agent/main.py
           test -f sentrix-platform/tests/v1/test_p6_canary_dashboard.py
+          test -f sentrix-platform/services/identify_broker/broker.py
+
           rm -rf .bootstrap
           rm -f .github/workflows/platform-bootstrap.yml
           git config user.name 'sentrix-platform-bot'
