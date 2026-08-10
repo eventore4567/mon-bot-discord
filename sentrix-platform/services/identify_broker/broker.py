@@ -15,11 +15,11 @@ from services.identify_broker.model import Reservation, ReservationState
 from services.identify_broker.store import MemoryIdentifyStore
 
 
-class BudgetUnavailable(RuntimeError):
+class BudgetUnavailable(RuntimeError):  # noqa: N818 - public domain exception name
     pass
 
 
-class BucketCoolingDown(RuntimeError):
+class BucketCoolingDown(RuntimeError):  # noqa: N818 - public domain exception name
     pass
 
 
