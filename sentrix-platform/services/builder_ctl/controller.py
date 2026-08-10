@@ -11,7 +11,7 @@ from services.builder_ctl.models import BuildRequest
 from services.builder_ctl.scanner import SecretFinding, scan_tree
 
 
-class BuildRejected(RuntimeError):
+class BuildRejected(RuntimeError):  # noqa: N818 - public domain exception name
     def __init__(self, findings: list[SecretFinding]) -> None:
         super().__init__("source scan rejected build")
         self.findings = findings
@@ -45,7 +45,7 @@ def make_release_identity(*, digest: str, config: bytes, secret_version: int) ->
 def sanitized_build_environment(extra: dict[str, str] | None = None) -> dict[str, str]:
     """Builds start from an allowlist, never from ``os.environ``."""
     env = {
-        "HOME": "/tmp/home",
+        "HOME": "/tmp/home",  # noqa: S108 - isolated container tmpfs home
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "LANG": "C.UTF-8",
         "CI": "1",
