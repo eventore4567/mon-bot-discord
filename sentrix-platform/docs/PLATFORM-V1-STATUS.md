@@ -23,3 +23,7 @@ The repository's deterministic V1 gate proves all logic that does not require
 third-party credentials. Live P3/P6 validation is intentionally a separate gate:
 a green unit test is never presented as evidence that Discord accepted a real
 Gateway session.
+
+The branch-level `SentriX Platform V1 Gate` is the authoritative integrated
+verification gate. P2→P6 must not be promoted from this branch while that gate
+is red.
