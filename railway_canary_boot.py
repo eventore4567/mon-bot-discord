@@ -51,16 +51,51 @@ async def _no_dashboard(_bot):
     return None
 
 
+async def _run_canary_self_test(bot) -> tuple[bool, str]:
+    """Valide le minimum vital d'un build avant de déclarer le Canary sain."""
+    target = bot.get_guild(config.CANARY_GUILD_ID)
+    if target is None:
+        return False, "serveur canary introuvable"
+
+    required_cogs = ("Moderation", "Automod", "Tickets", "Utility")
+    missing_cogs = [name for name in required_cogs if bot.get_cog(name) is None]
+    if missing_cogs:
+        return False, "cogs manquants: " + ", ".join(missing_cogs)
+
+    required_commands = ("help", "ping", "security", "ticket", "ban")
+    missing_commands = [name for name in required_commands if bot.get_command(name) is None]
+    if missing_commands:
+        return False, "commandes manquantes: " + ", ".join(missing_commands)
+
+    try:
+        row = await asyncio.wait_for(bot.db.fetchone("PRAGMA quick_check"), timeout=5.0)
+        db_ok = bool(row and str(row[0]).casefold() == "ok")
+    except Exception as exc:
+        return False, f"SQLite: {type(exc).__name__}"
+    if not db_ok:
+        return False, "SQLite quick_check en échec"
+
+    help_command = bot.get_command("help")
+    if help_command is None or getattr(help_command, "clean_params", None):
+        return False, "+help expose encore des paramètres"
+
+    return True, "cogs, commandes, help et SQLite validés"
+
+
 async def _start_health(bot):
     async def health(_request):
         target = bot.get_guild(config.CANARY_GUILD_ID)
-        ready = bool(bot.is_ready() and target is not None)
+        self_test_ok = bool(getattr(bot, "_sentrix_canary_self_test_passed", False))
+        ready = bool(bot.is_ready() and target is not None and self_test_ok)
         payload = {
             "ok": ready,
             "mode": "canary",
             "discord_ready": bot.is_ready(),
             "canary_guild_ready": target is not None,
+            "self_test": self_test_ok,
+            "self_test_detail": getattr(bot, "_sentrix_canary_self_test_detail", "en attente"),
             "guild_id": config.CANARY_GUILD_ID,
+            "commit_sha": (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "")[:80],
             "latency_ms": round(bot.latency * 1000) if bot.is_ready() else None,
         }
         return web.json_response(payload, status=200 if ready else 503)
@@ -84,6 +119,8 @@ async def run() -> None:
     # perte de volume Railway et envoie un MP à chaque redéploiement. On le désactive
     # uniquement sur le bot Beta/Canary ; la protection reste active en production.
     bot._persistence_check_done = True
+    bot._sentrix_canary_self_test_passed = False
+    bot._sentrix_canary_self_test_detail = "en attente du démarrage Discord"
 
     await bot.db.connect()
 
@@ -105,6 +142,14 @@ async def run() -> None:
                     await guild.leave()
                 except Exception:
                     logger.exception("Impossible de quitter un serveur non-canary %s.", guild.id)
+
+        passed, detail = await _run_canary_self_test(bot)
+        bot._sentrix_canary_self_test_passed = passed
+        bot._sentrix_canary_self_test_detail = detail
+        if passed:
+            logger.info("Canary self-test réussi : %s", detail)
+        else:
+            logger.error("Canary self-test ÉCHEC : %s", detail)
 
     try:
         async with bot:
