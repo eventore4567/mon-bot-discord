@@ -110,7 +110,8 @@ async def identify_ready(token: str, gateway_url: str, *, hold_seconds: float = 
             async for raw in websocket:
                 payload = json.loads(str(raw))
                 if payload.get("op") in {7, 9}:
-                    raise RuntimeError(f"Discord ended canary session with opcode {payload.get('op')}")
+                    opcode = payload.get("op")
+                    raise RuntimeError(f"Discord ended canary session with opcode {opcode}")
 
         heartbeat_task = asyncio.create_task(heartbeat())
         drain_task = asyncio.create_task(drain())
