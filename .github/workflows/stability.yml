@@ -24,7 +24,7 @@ jobs:
         run: python tools/repo_audit.py
 
       - name: Compile active Python sources
-        run: python -m compileall -q main.py config.py cogs database utils web tools
+        run: python -m compileall -q main.py config.py railway_boot.py railway_canary_boot.py cogs database utils web tools
 
       - name: Install runtime dependencies
         run: |
@@ -96,6 +96,17 @@ jobs:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-bot-mastery-audit.db"
         run: python tools/bot_mastery_audit.py
+
+      - name: Production readiness audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-production-readiness-audit.db"
+        run: python tools/production_readiness_audit.py
+
+      - name: Database load stress audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python tools/load_stress_audit.py
 
       - name: Dashboard interaction audit
         env:
