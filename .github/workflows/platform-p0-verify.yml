@@ -46,8 +46,7 @@ jobs:
 
       - name: Extraire sentrix-platform
         run: |
-          mkdir -p /tmp/sentrix-platform
-          base64 --decode tools/platform_p0/sentrix-platform.zip.b64 > /tmp/sentrix-platform.zip
+          cat tools/platform_p0/bundle.part*.b64 | base64 --decode > /tmp/sentrix-platform.zip
           unzip -q /tmp/sentrix-platform.zip -d /tmp/platform-src
           test -f /tmp/platform-src/sentrix-platform/pyproject.toml
 
