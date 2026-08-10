@@ -114,6 +114,11 @@ jobs:
           DISCORD_TOKEN: "ci.fake.token"
         run: python tools/load_stress_audit.py
 
+      - name: Production phase gate
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python tools/production_phase_audit.py
+
       - name: Dashboard interaction audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
