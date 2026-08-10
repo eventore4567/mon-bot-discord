@@ -1,14 +1,4 @@
-"""Budget global de commandes slash SentriX.
-
-Discord impose une limite stricte au nombre de commandes application globales. SentriX
-possède beaucoup plus de commandes texte que cette limite ; sans garde, charger un cog tardif
-peut lever CommandLimitReached et empêcher AUSSI ses commandes + de se charger.
-
-Cette couche conserve les commandes slash enregistrées en premier et, une fois un budget sûr
-atteint, ignore uniquement les nouvelles racines slash globales. Les commandes préfixées +
-continuent donc toutes de se charger. Les commandes guild-scoped et context menus ne sont pas
-concernés par ce budget chat-input global.
-"""
+"""Budget et sélection canonique des commandes slash SentriX."""
 from __future__ import annotations
 
 import logging
@@ -19,11 +9,69 @@ from discord import app_commands
 from discord.ext import commands
 
 logger = logging.getLogger("bot.slash-budget")
-GLOBAL_CHAT_INPUT_BUDGET = 95
+GLOBAL_CHAT_INPUT_BUDGET = 100
+
+
+def _preferred_names() -> set[str]:
+    from .command_catalog_cleanup import NORMAL_DIRECT_COMMANDS
+    return {("nick" if name == "nickname" else name) for name in NORMAL_DIRECT_COMMANDS}
+
+
+def _excluded_names() -> set[str]:
+    from .command_catalog_cleanup import ADMIN_DIRECT_COMMANDS, MERGED_COMMANDS
+    return set(ADMIN_DIRECT_COMMANDS) | set(MERGED_COMMANDS)
+
+
+def _global_roots(tree) -> list:
+    try:
+        return list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
+    except Exception:
+        return [
+            item for item in tree.get_commands(guild=None)
+            if isinstance(item, (app_commands.Command, app_commands.Group))
+        ]
+
+
+def finalize(bot: commands.Bot) -> None:
+    """Écarte les racines fusionnées/admin et garantit au maximum 100 racines /."""
+    tree = bot.tree
+    preferred = _preferred_names()
+    excluded = _excluded_names()
+
+    for item in list(_global_roots(tree)):
+        name = str(getattr(item, "name", "") or "").casefold()
+        if name in excluded:
+            try:
+                tree.remove_command(name, type=discord.AppCommandType.chat_input)
+            except TypeError:
+                tree.remove_command(name)
+
+    roots = _global_roots(tree)
+    if len(roots) <= GLOBAL_CHAT_INPUT_BUDGET:
+        return
+
+    keep: set[str] = set()
+    for item in roots:
+        name = str(getattr(item, "name", "") or "").casefold()
+        if name in preferred and len(keep) < GLOBAL_CHAT_INPUT_BUDGET:
+            keep.add(name)
+    for item in roots:
+        name = str(getattr(item, "name", "") or "").casefold()
+        if name not in keep and len(keep) < GLOBAL_CHAT_INPUT_BUDGET:
+            keep.add(name)
+
+    for item in list(roots):
+        name = str(getattr(item, "name", "") or "").casefold()
+        if name not in keep:
+            try:
+                tree.remove_command(name, type=discord.AppCommandType.chat_input)
+            except TypeError:
+                tree.remove_command(name)
 
 
 def install(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_slash_budget_installed", False):
+        finalize(bot)
         return
     bot._sentrix_slash_budget_installed = True
 
@@ -33,9 +81,6 @@ def install(bot: commands.Bot) -> None:
     bot._sentrix_skipped_global_slash = skipped
 
     def _call_original(command, *, guild=None, guilds=None, override: bool = False):
-        # discord.py utilise un sentinel interne pour distinguer « argument absent » de
-        # « argument explicitement None ». Ne jamais transmettre guild=None ET guilds=None,
-        # sinon _retrieve_guild_ids considère que les deux options ont été fournies.
         kwargs = {"override": override}
         if guild is not None:
             kwargs["guild"] = guild
@@ -51,38 +96,45 @@ def install(bot: commands.Bot) -> None:
         guilds=None,
         override: bool = False,
     ):
-        # Les limites de commandes de serveur sont indépendantes. On ne touche donc jamais
-        # aux commandes explicitement guild-scoped.
         if guild is not None or guilds is not None:
             return _call_original(command, guild=guild, guilds=guilds, override=override)
 
-        # ContextMenu a ses propres quotas. Le budget ici vise uniquement les commandes /
-        # de type chat-input (Command et Group).
         if isinstance(command, (app_commands.Command, app_commands.Group)):
-            try:
-                roots = tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)
-                root_count = len(roots)
-            except Exception:
-                roots = tree.get_commands(guild=None)
-                root_count = sum(
-                    1 for item in roots
-                    if isinstance(item, (app_commands.Command, app_commands.Group))
-                )
-
-            # override d'une commande existante ne consomme pas une nouvelle racine.
-            name = str(getattr(command, "name", "") or "")
-            existing = next((item for item in roots if getattr(item, "name", None) == name), None)
-            if existing is None and root_count >= GLOBAL_CHAT_INPUT_BUDGET:
-                skipped.append(name or repr(command))
-                logger.warning(
-                    "Budget slash SentriX atteint (%s racines) : /%s non enregistré ; "
-                    "la commande + reste disponible.",
-                    GLOBAL_CHAT_INPUT_BUDGET,
-                    name or "inconnue",
-                )
+            name = str(getattr(command, "name", "") or "").casefold()
+            if name in _excluded_names():
+                skipped.append(name)
                 return None
+
+            roots = _global_roots(tree)
+            existing = next(
+                (item for item in roots if str(getattr(item, "name", "")).casefold() == name),
+                None,
+            )
+            if existing is None and len(roots) >= GLOBAL_CHAT_INPUT_BUDGET:
+                preferred = _preferred_names()
+                if name in preferred:
+                    victim = next(
+                        (
+                            item for item in roots
+                            if str(getattr(item, "name", "")).casefold() not in preferred
+                        ),
+                        None,
+                    )
+                    if victim is not None:
+                        victim_name = str(getattr(victim, "name", "")).casefold()
+                        try:
+                            tree.remove_command(victim_name, type=discord.AppCommandType.chat_input)
+                        except TypeError:
+                            tree.remove_command(victim_name)
+                    else:
+                        skipped.append(name)
+                        return None
+                else:
+                    skipped.append(name)
+                    return None
 
         return _call_original(command, override=override)
 
     tree.add_command = MethodType(budgeted_add, tree)
-    logger.info("Budget slash SentriX actif : maximum %s commandes chat-input globales.", GLOBAL_CHAT_INPUT_BUDGET)
+    finalize(bot)
+    logger.info("Budget slash SentriX actif : maximum %s racines.", GLOBAL_CHAT_INPUT_BUDGET)
