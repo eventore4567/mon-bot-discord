@@ -1,0 +1,36 @@
+name: SentriX Platform Fast Quality Gate
+
+on:
+  push:
+    branches:
+      - chatgpt/platform-v1-full
+    paths:
+      - 'sentrix-platform/**/*.py'
+      - 'sentrix-platform/pyproject.toml'
+      - '.github/workflows/platform-quality.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: sentrix-platform-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: sentrix-platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install quality tooling
+        run: pip install -e '.[dev]'
+      - name: Ruff
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Mypy
+        run: mypy libs services agents

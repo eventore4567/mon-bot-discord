@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sentrix
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  # PgBouncer en mode TRANSACTION des le dev : c'est la configuration qui rend
+  # un SET persistant dangereux. La tester tot evite de decouvrir le probleme
+  # en production (cas d'attaque n.10).
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: sentrix_app
+      DB_PASSWORD: app_dev_only
+      DB_NAME: sentrix
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      AUTH_TYPE: scram-sha-256
+    ports: ["6432:5432"]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:

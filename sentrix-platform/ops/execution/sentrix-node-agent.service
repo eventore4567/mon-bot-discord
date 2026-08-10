@@ -1,0 +1,22 @@
+[Unit]
+Description=SentriX Execution Plane node-agent
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/sentrix-platform
+EnvironmentFile=/etc/sentrix/node-agent.env
+ExecStart=/opt/sentrix-platform/.venv/bin/python -m agents.node_agent.main
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/sentrix-agent /run /var/run
+
+[Install]
+WantedBy=multi-user.target

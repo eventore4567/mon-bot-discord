@@ -1,0 +1,62 @@
+name: SentriX Platform Live Discord Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      gate:
+        description: 'Live proof to run'
+        required: true
+        type: choice
+        options:
+          - p3
+          - p6
+      bake_seconds:
+        description: 'P6 canary bake duration in seconds (frozen target: 1800)'
+        required: false
+        default: '1800'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  p3-identify-accounting:
+    if: ${{ inputs.gate == 'p3' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: sentrix-platform
+    env:
+      SENTRIX_P3_DISCORD_TOKEN: ${{ secrets.SENTRIX_P3_DISCORD_TOKEN }}
+      SENTRIX_LIVE_MIN_REMAINING: '10'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install live probe
+        run: pip install -e . 'websockets>=14,<16'
+      - name: Verify real IdentifyBroker accounting against Discord
+        run: python ops/live/discord_live_gate.py p3
+
+  p6-distinct-canary:
+    if: ${{ inputs.gate == 'p6' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: sentrix-platform
+    env:
+      SENTRIX_P6_CANARY_TOKEN: ${{ secrets.SENTRIX_P6_CANARY_TOKEN }}
+      SENTRIX_P6_PROD_TOKEN: ${{ secrets.SENTRIX_P6_PROD_TOKEN }}
+      SENTRIX_LIVE_MIN_REMAINING: '10'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install live probe
+        run: pip install -e . 'websockets>=14,<16'
+      - name: Verify distinct canary application and bake
+        run: python ops/live/discord_live_gate.py p6 --bake-seconds '${{ inputs.bake_seconds }}'
