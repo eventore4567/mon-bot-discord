@@ -103,6 +103,12 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-production-readiness-audit.db"
         run: python tools/production_readiness_audit.py
 
+      - name: Final help and canary polish audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-final-polish-audit.db"
+        run: python tools/final_runtime_polish_audit.py
+
       - name: Database load stress audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
