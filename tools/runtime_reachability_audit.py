@@ -20,15 +20,13 @@ def module_name(path: pathlib.Path) -> str:
 
 
 def runtime_files() -> list[pathlib.Path]:
-    result: list[pathlib.Path] = []
+    # Tous les .py a la racine sont aussi audites : cela attrape notamment les anciens
+    # fichiers de migration/depot accidentellement laisses hors de cogs/.
+    result: list[pathlib.Path] = list(ROOT.glob("*.py"))
     for folder in RUNTIME_DIRS:
         base = ROOT / folder
         if base.exists():
             result.extend(p for p in base.rglob("*.py") if "__pycache__" not in p.parts)
-    for name in ("main.py", "config.py", "railway_boot.py", "railway_canary_boot.py"):
-        path = ROOT / name
-        if path.exists():
-            result.append(path)
     return sorted(set(result))
 
 
@@ -140,7 +138,7 @@ def analyze() -> tuple[list[str], set[str], list[str]]:
     candidates = [
         path.relative_to(ROOT).as_posix()
         for path in FILES
-        if PATH_TO_MODULE[path] not in reachable and path.relative_to(ROOT).as_posix() != "config.py"
+        if PATH_TO_MODULE[path] not in reachable
     ]
     return candidates, reachable, parse_errors
 
