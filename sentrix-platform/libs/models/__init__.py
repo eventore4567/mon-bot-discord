@@ -99,7 +99,7 @@ class EnvironmentCreate(_In):
     kind: EnvKind
     discord_application_id: str | None = Field(default=None, max_length=32)
     runtime_mode: RuntimeMode = "generic"
-    secret_provider: SecretProvider = "env"
+    secret_provider: SecretProvider = "env"  # noqa: S105 - provider name, not a secret
 
 
 class EnvironmentOut(_Out):
