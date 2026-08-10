@@ -32,17 +32,21 @@ jobs:
           fi
 
           # Reuse the exact P0 bundle that previously passed the P0 gate.
+          # part07/part10 had repaired split copies committed alongside them;
+          # those split copies are the canonical reconstruction inputs.
           P0_COMMIT=c57f07299bbdeaa4a4444bb54f4b3dc28da6085e
           git fetch --no-tags --depth=1 origin "$P0_COMMIT"
           : > /tmp/p0.b64
-          for n in 01 02 03 04 05 06 07 08 09 10; do
+          for n in 01 02 03 04 05 06 07a 07b 08 09 10a 10b; do
             git show "$P0_COMMIT:tools/platform_p0/bundle.part${n}.b64" >> /tmp/p0.b64
           done
           base64 -d /tmp/p0.b64 > /tmp/sentrix-platform-p0.zip
+          unzip -tq /tmp/sentrix-platform-p0.zip
           unzip -q -o /tmp/sentrix-platform-p0.zip
 
           # Overlay only P1-P6/new V1 files, keeping bootstrap uploads small.
           cat .bootstrap/delta.part*.b64 | base64 -d > /tmp/platform-delta.tar.xz
+          xz -t /tmp/platform-delta.tar.xz
           tar -xJf /tmp/platform-delta.tar.xz
 
           test -f sentrix-platform/pyproject.toml
