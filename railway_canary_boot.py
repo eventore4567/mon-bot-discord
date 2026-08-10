@@ -78,6 +78,13 @@ async def _start_health(bot):
 async def run() -> None:
     bot = bot_main.BotAllInOne()
     bot_main.start_dashboard = _no_dashboard
+
+    # La base Canary est volontairement séparée de la production et peut être vide au
+    # démarrage. Le diagnostic générique de main.py interprète sinon ce cas comme une
+    # perte de volume Railway et envoie un MP à chaque redéploiement. On le désactive
+    # uniquement sur le bot Beta/Canary ; la protection reste active en production.
+    bot._persistence_check_done = True
+
     await bot.db.connect()
 
     original_connect = bot.db.connect
