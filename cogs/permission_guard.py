@@ -201,11 +201,14 @@ async def evaluate_command_access(
         return AccessDecision(False, "Commande impossible a identifier.", "invalid")
 
     public, owner_only, custom, discord_permissions, categories = _policy_sets(bot)
-    user_id = getattr(author, "id", None)
-    owner = bool(user_id is not None and await _is_verified_owner(bot, int(user_id)))
 
+    # Chemin ultra-court : la grande majorite des usages normaux ne doit pas faire une
+    # requete DB uniquement pour savoir si l'utilisateur est proprietaire du bot.
     if name in public:
         return AccessDecision(True, policy="public")
+
+    user_id = getattr(author, "id", None)
+    owner = bool(user_id is not None and await _is_verified_owner(bot, int(user_id)))
 
     if name in owner_only:
         if owner:
@@ -267,12 +270,25 @@ async def _interaction_blacklist_reason(bot: commands.Bot, author: Any) -> str |
     user_id = getattr(author, "id", None)
     if user_id is None:
         return None
-    if await _is_verified_owner(bot, int(user_id)):
-        return None
+    user_id = int(user_id)
+
+    # Le cache est le chemin normal et ne coute aucune I/O. On ne touche la DB que dans
+    # le cas rare ou l'utilisateur est effectivement present dans la blacklist.
     cache = getattr(bot, "blacklist_cache", {})
-    reason = cache.get(int(user_id)) if isinstance(cache, dict) else None
+    reason = cache.get(user_id) if isinstance(cache, dict) else None
     if reason is None:
         return None
+
+    if user_id == PRIMARY_CREATOR_ID or user_id in config.OWNER_IDS:
+        return None
+    try:
+        if await bot.db.is_bot_creator(user_id):
+            return None
+    except Exception:
+        # Ici l'utilisateur est deja dans la blacklist : en cas de panne DB, rester
+        # fail-closed est plus sur que de le laisser passer par erreur.
+        logger.exception("Verification proprietaire impossible pour user blacklist=%s", user_id)
+
     return str(reason or "Aucune raison fournie")
 
 
@@ -362,7 +378,7 @@ def install(bot: commands.Bot) -> None:
 
     prefix_permission_guard._sentrix_permission_guard = True
     # setup_hook() ajoutera ce callback comme check global apres le chargement des cogs.
-    # En remplaçant la methode sur l'instance avant ce moment, prefixe et slash partagent
+    # En remplacant la methode sur l'instance avant ce moment, prefixe et slash partagent
     # exactement la meme matrice.
     bot.global_permission_check = prefix_permission_guard
 
@@ -374,7 +390,7 @@ def install(bot: commands.Bot) -> None:
             previous = await previous
         if previous is False:
             return False
-        if interaction.type is not discord.InteractionType.application_command:
+        if interaction.type != discord.InteractionType.application_command:
             return True
 
         decision = await evaluate_interaction_access(bot, interaction)
