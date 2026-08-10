@@ -3,6 +3,7 @@ name: SentriX Platform V1 Gate
 on:
   push:
     branches:
+      - main
       - chatgpt/platform-v1-full
     paths:
       - 'sentrix-platform/**'
