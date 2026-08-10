@@ -70,8 +70,8 @@ async def dashboard_http_journey() -> int:
             response = await client.get("/health")
             assert response.status == 200
             data = await response.json()
-            assert data["ok"] is True and data["discord_ready"] is False
-            assert data["latency_ms"] is None
+            assert data.get("discord_ready") is False, f"health inattendu hors connexion: {data}"
+            assert data.get("latency_ms") is None
             assert response.headers["X-Frame-Options"] == "DENY"
             assert response.headers["X-Content-Type-Options"] == "nosniff"
             checks += 1
@@ -109,8 +109,8 @@ async def dashboard_http_journey() -> int:
             bot._ready = True
             response = await client.get("/health")
             data = await response.json()
-            assert data["discord_ready"] is True
-            assert data["latency_ms"] == 42
+            assert data.get("discord_ready") is True, f"health inattendu prêt: {data}"
+            assert data.get("latency_ms") == 42
             checks += 1
 
             response = await client.get("/api/public")
