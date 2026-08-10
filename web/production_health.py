@@ -5,6 +5,8 @@ import time
 
 from aiohttp import web
 
+from .production_observability import build_runtime_snapshot
+
 _INSTALLED = False
 
 
@@ -41,19 +43,29 @@ def install(dashboard_module) -> None:
             except Exception as exc:
                 infra_state = {"postgres_online": False, "redis_online": False, "error": str(exc)[:300]}
 
+        runtime_observability = await build_runtime_snapshot(bot)
         uptime = int(time.time() - dashboard_module.START_TIME)
         # Le dashboard se lie volontairement avant Discord. Durant les 90 premières
         # secondes, HTTP reste 200 pour ne pas transformer un déploiement normal en panne,
         # mais discord_ready=false permet au moniteur externe de patienter/retester.
         healthy = db_ok and discord_ready
         status = 200 if healthy or uptime < 90 else 503
+        if not healthy:
+            health_level = "starting" if uptime < 90 else "unavailable"
+        elif runtime_observability.get("available") and runtime_observability.get("status") in {"degraded", "stale"}:
+            health_level = "degraded"
+        else:
+            health_level = "healthy"
+
         payload = {
             "ok": healthy,
+            "health_level": health_level,
             "discord_ready": discord_ready,
             "database_ok": db_ok,
             "latency_ms": round(bot.latency * 1000) if discord_ready else None,
             "uptime_seconds": uptime,
             "shards": int(getattr(bot, "shard_count", 1) or 1),
+            "runtime_observability": runtime_observability,
         }
         if durable_state is not None:
             payload["durable_database"] = durable_state
