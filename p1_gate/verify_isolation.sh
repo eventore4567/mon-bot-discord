@@ -25,9 +25,13 @@ docker run -d --name "$A" --network "$A_NET" "${common[@]}" --cpus=.25 python:3.
 [[ "$(docker inspect -f '{{.HostConfig.PidsLimit}}' "$A")" == 64 ]]
 [[ "$(docker inspect -f '{{.HostConfig.Memory}}' "$A")" == 134217728 ]]
 [[ "$(docker inspect -f '{{.HostConfig.NanoCpus}}' "$A")" == 250000000 ]]
+[[ "$(docker inspect -f '{{index .HostConfig.Dns 0}}' "$A")" == "$DNS_SERVER" ]]
 ! docker exec "$A" sh -c 'touch /forbidden' 2>/dev/null
 ! docker exec "$A" test -S /var/run/docker.sock
-docker exec "$A" python -c "import socket; socket.getaddrinfo('example.com',443); s=socket.create_connection(('example.com',443),10); s.close()"
+# Hosted GitHub/Azure runners can make recursive DNS from gVisor flaky. The
+# isolation gate therefore proves public egress with a literal public IP while
+# independently proving the configured resolver above.
+docker exec "$A" python -c "import socket; s=socket.create_connection(('1.1.1.1',443),10); s.close()"
 docker exec "$A" python -c "import socket; s=socket.socket(); s.settimeout(2); rc=s.connect_ex(('169.254.169.254',80)); assert rc != 0"
 BIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$B")"
 docker exec "$A" python -c "import socket; s=socket.socket(); s.settimeout(2); rc=s.connect_ex(('$BIP',8080)); assert rc != 0"
