@@ -15,16 +15,19 @@ from aiohttp import web
 from discord.ext import commands
 
 # Le mode doit être défini AVANT l'import de config/main.
+CANARY_TOKEN = os.getenv("CANARY_BOT_TOKEN", "").strip()
+PRODUCTION_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
+if not CANARY_TOKEN:
+    raise RuntimeError("CANARY_BOT_TOKEN manquant pour le service SentriX Canary.")
+if PRODUCTION_TOKEN and CANARY_TOKEN == PRODUCTION_TOKEN:
+    raise RuntimeError("CANARY_BOT_TOKEN doit être différent du DISCORD_TOKEN de production.")
 os.environ["SENTRIX_CANARY_MODE"] = "1"
 os.environ["DATABASE_PATH"] = os.getenv("CANARY_DATABASE_PATH", "database/canary.db")
+# config.py exige DISCORD_TOKEN ; le service Canary n'a pas besoin du secret production.
+os.environ.setdefault("DISCORD_TOKEN", "canary-token-not-used-by-bootstrap")
 
 import config
 
-CANARY_TOKEN = os.getenv("CANARY_BOT_TOKEN", "").strip()
-if not CANARY_TOKEN:
-    raise RuntimeError("CANARY_BOT_TOKEN manquant pour le service SentriX Canary.")
-if CANARY_TOKEN == (config.DISCORD_TOKEN or ""):
-    raise RuntimeError("CANARY_BOT_TOKEN doit être différent du DISCORD_TOKEN de production.")
 if not config.CANARY_GUILD_ID:
     raise RuntimeError("CANARY_GUILD_ID manquant pour le service SentriX Canary.")
 
