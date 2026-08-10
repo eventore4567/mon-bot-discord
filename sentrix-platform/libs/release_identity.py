@@ -33,7 +33,9 @@ class ReleaseIdentity:
 
     @property
     def stable_key(self) -> str:
-        payload = f"{self.image_digest.removeprefix('sha256:')}:{self.config_hash.removeprefix('sha256:')}:{self.secret_version}"
+        digest = self.image_digest.removeprefix("sha256:")
+        config = self.config_hash.removeprefix("sha256:")
+        payload = f"{digest}:{config}:{self.secret_version}"
         return hashlib.sha256(payload.encode()).hexdigest()
 
 
