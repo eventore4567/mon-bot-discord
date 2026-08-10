@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import hashlib
+import ipaddress
 import json
 import os
 import subprocess
@@ -97,10 +98,13 @@ class Cache:
 
 
 class DockerRuntime:
-    def __init__(self, node_id, policy_script=None, control_plane_cidrs=()):
+    def __init__(self, node_id, policy_script=None, control_plane_cidrs=(), dns_servers=("1.1.1.1", "8.8.8.8")):
         self.node_id = node_id
         self.policy_script = policy_script
         self.control_plane_cidrs = tuple(control_plane_cidrs)
+        self.dns_servers = tuple(str(ipaddress.ip_address(x)) for x in dns_servers)
+        if not self.dns_servers or any(not ipaddress.ip_address(x).is_global for x in self.dns_servers):
+            raise ValueError("dns servers must be public IP addresses")
 
     def run(self, argv, check=True):
         p = subprocess.run(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -132,11 +136,13 @@ class DockerRuntime:
             self.run(["docker", "rm", "-f", item.container_name], False)
         self.ensure_network(item)
         mem = f"{item.limits.memory_mb}m"
+        dns_args = [arg for server in self.dns_servers for arg in ("--dns", server)]
         return self.run([
             "docker", "run", "-d", "--name", item.container_name, "--runtime=runsc", "--network", item.network_name,
             "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges:true", "--pids-limit", str(item.limits.pids),
             "--memory", mem, "--memory-swap", mem, "--cpus", str(item.limits.cpus),
             "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=67108864",
+            *dns_args,
             "--label", "sentrix.managed=true", "--label", f"sentrix.node_id={self.node_id}",
             "--label", f"sentrix.instance_id={item.id}", "--label", f"sentrix.org_id={item.org_id}", item.image, *item.command,
         ])
