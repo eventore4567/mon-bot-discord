@@ -22,7 +22,10 @@ async def test_agent_pull_requires_token_and_only_returns_assigned(
     env_a, env_b = uuid7(), uuid7()
     inst_a, inst_b = uuid7(), uuid7()
     await admin_conn.execute(
-        "INSERT INTO nodes (id, cell_id, name, agent_token_sha256) VALUES ($1,$2,$3,$4),($5,$2,$6,$7)",
+        (
+            "INSERT INTO nodes (id, cell_id, name, agent_token_sha256) "
+            "VALUES ($1,$2,$3,$4),($5,$2,$6,$7)"
+        ),
         node_a,
         CELL,
         f"node-a-{node_a}",
@@ -32,7 +35,10 @@ async def test_agent_pull_requires_token_and_only_returns_assigned(
         hashlib.sha256(token_b).digest(),
     )
     await admin_conn.execute(
-        "INSERT INTO environments (id,org_id,bot_id,kind,cell_id) VALUES ($1,$2,$3,'prod',$4),($5,$6,$7,'prod',$4)",
+        (
+            "INSERT INTO environments (id,org_id,bot_id,kind,cell_id) "
+            "VALUES ($1,$2,$3,'prod',$4),($5,$6,$7,'prod',$4)"
+        ),
         env_a,
         a.org_id,
         a.bot_id,
@@ -42,7 +48,10 @@ async def test_agent_pull_requires_token_and_only_returns_assigned(
         b.bot_id,
     )
     await admin_conn.execute(
-        "INSERT INTO instances (id,org_id,env_id,cell_id,node_id,image_ref) VALUES ($1,$2,$3,$4,$5,'img-a'),($6,$7,$8,$4,$9,'img-b')",
+        (
+            "INSERT INTO instances (id,org_id,env_id,cell_id,node_id,image_ref) "
+            "VALUES ($1,$2,$3,$4,$5,'img-a'),($6,$7,$8,$4,$9,'img-b')"
+        ),
         inst_a,
         a.org_id,
         env_a,
