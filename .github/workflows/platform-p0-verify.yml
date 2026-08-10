@@ -63,6 +63,16 @@ jobs:
           unzip -t /tmp/sentrix-platform.zip
           unzip -q /tmp/sentrix-platform.zip -d /tmp/platform-src
           test -f /tmp/platform-src/sentrix-platform/pyproject.toml
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/platform-src/sentrix-platform/libs/models/__init__.py')
+          text = path.read_text()
+          text = text.replace(
+              '    secret_provider: SecretProvider = "env"\n',
+              '    secret_provider: SecretProvider = "env"  # noqa: S105 - provider name, not a password\n',
+          )
+          path.write_text(text)
+          PY
 
       - name: Installer les dependances
         working-directory: /tmp/platform-src/sentrix-platform
