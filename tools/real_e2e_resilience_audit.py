@@ -13,7 +13,6 @@ import os
 import pathlib
 import sys
 import tempfile
-from types import SimpleNamespace
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -48,73 +47,80 @@ class _DummyBot:
 
 
 async def dashboard_http_journey() -> int:
-    """Teste le dashboard via un vrai serveur HTTP aiohttp local."""
+    """Teste le dashboard via un vrai serveur HTTP aiohttp local + SQLite réel."""
     from aiohttp.test_utils import TestClient, TestServer
 
     import config
     import web as sentrix_web  # noqa: F401 - active les installateurs du package web
+    from database.db import Database
     from web import dashboard
 
     old_secret = config.DISCORD_CLIENT_SECRET
     config.DISCORD_CLIENT_SECRET = ""
-    bot = _DummyBot()
-    client = TestClient(TestServer(dashboard.build_app(bot)))
-    await client.start_server()
     checks = 0
-    try:
-        response = await client.get("/health")
-        assert response.status == 200
-        data = await response.json()
-        assert data["ok"] is True and data["discord_ready"] is False
-        assert data["latency_ms"] is None
-        assert response.headers["X-Frame-Options"] == "DENY"
-        assert response.headers["X-Content-Type-Options"] == "nosniff"
-        checks += 1
+    with tempfile.TemporaryDirectory(prefix="sentrix-dashboard-http-") as folder:
+        db = Database(str(pathlib.Path(folder) / "dashboard.db"))
+        await db.connect()
+        bot = _DummyBot()
+        bot.db = db
+        client = TestClient(TestServer(dashboard.build_app(bot)))
+        try:
+            await client.start_server()
 
-        response = await client.get("/api/public")
-        assert response.status == 200
-        data = await response.json()
-        assert data["bot_name"] == "SentriX"
-        assert data["online"] is False and data["guilds"] == 0
-        assert data["oauth_ready"] is False
-        assert response.headers.get("Cache-Control") == "private, no-store"
-        checks += 1
-
-        response = await client.get("/app")
-        assert response.status == 200
-        html = await response.text()
-        assert 'id="sentrix-core-recovery"' in html
-        assert "Mode simple" in html and "Mode avancé" in html
-        assert "loginButton" in html
-        assert response.headers.get("Cache-Control") == "private, no-store"
-        checks += 1
-
-        for path in ("/api/me", "/api/guilds", "/api/guilds/123456"):
-            response = await client.get(path)
-            assert response.status == 401, f"{path}: attendu 401, reçu {response.status}"
-            payload = await response.json()
-            assert payload.get("ok") is False
+            response = await client.get("/health")
+            assert response.status == 200
+            data = await response.json()
+            assert data["ok"] is True and data["discord_ready"] is False
+            assert data["latency_ms"] is None
+            assert response.headers["X-Frame-Options"] == "DENY"
+            assert response.headers["X-Content-Type-Options"] == "nosniff"
             checks += 1
 
-        response = await client.get("/login", allow_redirects=False)
-        assert response.status in {302, 303}
-        assert response.headers.get("Location") == "/?auth=missing"
-        checks += 1
+            response = await client.get("/api/public")
+            assert response.status == 200
+            data = await response.json()
+            assert data["bot_name"] == "SentriX"
+            assert data["online"] is False and data["guilds"] == 0
+            assert data["oauth_ready"] is False
+            assert response.headers.get("Cache-Control") == "private, no-store"
+            checks += 1
 
-        bot._ready = True
-        response = await client.get("/health")
-        data = await response.json()
-        assert data["discord_ready"] is True
-        assert data["latency_ms"] == 42
-        checks += 1
+            response = await client.get("/app")
+            assert response.status == 200
+            html = await response.text()
+            assert 'id="sentrix-core-recovery"' in html
+            assert "Mode simple" in html and "Mode avancé" in html
+            assert "loginButton" in html
+            assert response.headers.get("Cache-Control") == "private, no-store"
+            checks += 1
 
-        response = await client.get("/api/public")
-        data = await response.json()
-        assert data["online"] is True and data["latency_ms"] == 42
-        checks += 1
-    finally:
-        await client.close()
-        config.DISCORD_CLIENT_SECRET = old_secret
+            for path in ("/api/me", "/api/guilds", "/api/guilds/123456"):
+                response = await client.get(path)
+                assert response.status == 401, f"{path}: attendu 401, reçu {response.status}"
+                payload = await response.json()
+                assert payload.get("ok") is False
+                checks += 1
+
+            response = await client.get("/login", allow_redirects=False)
+            assert response.status in {302, 303}
+            assert response.headers.get("Location") == "/?auth=missing"
+            checks += 1
+
+            bot._ready = True
+            response = await client.get("/health")
+            data = await response.json()
+            assert data["discord_ready"] is True
+            assert data["latency_ms"] == 42
+            checks += 1
+
+            response = await client.get("/api/public")
+            data = await response.json()
+            assert data["online"] is True and data["latency_ms"] == 42
+            checks += 1
+        finally:
+            await client.close()
+            await db.close()
+            config.DISCORD_CLIENT_SECRET = old_secret
     return checks
 
 
