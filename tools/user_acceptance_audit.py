@@ -42,7 +42,7 @@ MEMBER_JOURNEYS = {
 
 STAFF_JOURNEYS = {
     "moderation": ("ban", "unban", "mute", "warn"),
-    "configuration": ("setup", "create-server", "rolepanel", "logsetup"),
+    "configuration": ("setup", "create-server", "rolepanel", "logs"),
     "securite": ("security", "health"),
     "evenements": ("giveaway-create", "notifs-ping"),
     "jeux": ("gamesetup",),
@@ -121,7 +121,7 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
     os.environ["DATABASE_PATH"] = path
 
     import main
-    from cogs import command_no_emoji_runtime, command_response_guard, help_complete
+    from cogs import command_catalog_cleanup, command_no_emoji_runtime, command_response_guard, help_complete
     import web
     from web import dashboard, enterprise_suite, operations_center
 
@@ -137,14 +137,12 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
         boot_seconds = time.perf_counter() - started
 
         assert loaded == len(main.EXTENSIONS), f"extensions chargées: {loaded}/{len(main.EXTENSIONS)}"
-        # Large marge runner CI : une dérive au-delà de 25 s signale un vrai problème de boot.
         assert boot_seconds < 25.0, f"chargement des cogs anormalement lent: {boot_seconds:.2f}s"
 
         active = list(bot.walk_commands())
         names = [cmd.qualified_name.casefold() for cmd in active]
         assert len(names) == len(set(names)), "commandes texte/hybrides dupliquées"
 
-        # Parcours membre : la commande doit exister ET être explicitement publique.
         member_checked = 0
         for journey, commands in MEMBER_JOURNEYS.items():
             for name in commands:
@@ -155,7 +153,6 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
                 assert category.key != "other", f"parcours membre {journey}: +{name} mal classé dans +help"
                 member_checked += 1
 
-        # Parcours staff : présents, classés, mais jamais publics par erreur.
         staff_checked = 0
         for journey, commands in STAFF_JOURNEYS.items():
             for name in commands:
@@ -172,7 +169,15 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
             assert command is not None, f"commande propriétaire +{name} absente"
             assert name in main.OWNER_ONLY_COMMANDS, f"commande propriétaire +{name} n'est plus owner-only"
 
-        # Les 36 commandes récupérées doivent toutes être réellement chargées.
+        # Les anciennes commandes fusionnées ne doivent pas réapparaître. Leur destination
+        # canonique (+setup ou +security) doit en revanche rester accessible.
+        merged_checked = 0
+        for old_name, target in command_catalog_cleanup.MERGED_COMMAND_TARGETS.items():
+            assert bot.get_command(old_name) is None, f"ancienne commande fusionnée +{old_name} réapparue"
+            target_root = target.split()[0]
+            assert bot.get_command(target_root) is not None, f"destination +{target_root} absente pour +{old_name}"
+            merged_checked += 1
+
         missing_games = sorted(name for name in RECOVERED_GAMES if bot.get_command(name) is None)
         assert not missing_games, "jeux récupérés absents: " + ", ".join(missing_games)
         for name in sorted(RECOVERED_GAMES - {"gamesetup"}):
@@ -181,11 +186,9 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
             assert help_complete._category_for(command).key == "games", f"jeu +{name} hors catégorie Jeux"
         assert help_complete._category_for(bot.get_command("gamesetup")).key == "configuration"
 
-        # Budget Discord : le plafond porte sur les racines slash, pas sur les sous-commandes.
         slash_roots = list(bot.tree.get_commands())
         assert len(slash_roots) <= 95, f"budget slash dépassé: {len(slash_roots)} racines"
 
-        # Garde-fous transversaux qui déterminent ce que voit un utilisateur.
         assert command_response_guard._INSTALLED, "filet de réponse des commandes absent"
         assert command_no_emoji_runtime._INSTALLED, "politique sans emoji non installée"
         assert getattr(bot, "_sentrix_no_emoji_commands", False), "politique sans emoji non appliquée au bot"
@@ -195,7 +198,6 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
         for event in ("on_command", "on_command_completion", "on_command_error", "on_interaction", "on_app_command_completion"):
             assert bot.extra_events.get(event, []), f"listener UX manquant: {event}"
 
-        # Dashboard : vérifie les points de navigation réellement visibles par l'utilisateur.
         html = dashboard.INDEX_HTML
         assert 'id="sentrix-simple-dashboard-js"' in html, "mode simple dashboard absent"
         assert 'id="sentrix-core-recovery"' in html, "récupération dashboard au boot absente"
@@ -204,7 +206,7 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
         assert "loginButton" in html, "bouton de connexion Discord absent"
         assert "Envoyer le recours" in enterprise_suite.APPEAL_HTML, "parcours recours de ban absent"
         assert "OPERATIONS_HTML" in dir(operations_center), "page Operations absente"
-        assert web is not None  # importe volontairement tout web/__init__.py
+        assert web is not None
 
         return {
             "extensions": loaded,
@@ -212,6 +214,7 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
             "slash_roots": len(slash_roots),
             "member_checks": member_checked,
             "staff_checks": staff_checked,
+            "merged_checks": merged_checked,
             "boot_seconds": round(boot_seconds, 3),
         }
     finally:
@@ -231,19 +234,17 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
 async def main_audit() -> None:
     with tempfile.TemporaryDirectory(prefix="sentrix-user-acceptance-") as folder:
         root = pathlib.Path(folder)
-        persistence_path = str(root / "persistence.db")
-        runtime_path = str(root / "runtime.db")
-        await persistence_journey(persistence_path)
-        metrics = await runtime_journey(runtime_path)
+        await persistence_journey(str(root / "persistence.db"))
+        metrics = await runtime_journey(str(root / "runtime.db"))
 
     print(
         "User acceptance: "
         f"{metrics['extensions']} extensions, {metrics['commands']} commandes, "
         f"{metrics['slash_roots']} racines slash, "
         f"{metrics['member_checks']} contrôles membre, {metrics['staff_checks']} contrôles staff, "
-        f"boot={metrics['boot_seconds']}s"
+        f"{metrics['merged_checks']} routes fusionnées, boot={metrics['boot_seconds']}s"
     )
-    print("OK: parcours membre/staff, jeux, permissions, dashboard, no-emoji et persistance après redémarrage validés")
+    print("OK: parcours membre/staff, routes fusionnées, jeux, permissions, dashboard, no-emoji et persistance après redémarrage validés")
 
 
 if __name__ == "__main__":
