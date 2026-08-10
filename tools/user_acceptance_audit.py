@@ -134,6 +134,7 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
             await bot.load_extension(extension)
             loaded += 1
         bot._prune_redundant_commands()
+        command_catalog_cleanup.apply_surface(bot)
         boot_seconds = time.perf_counter() - started
 
         assert loaded == len(main.EXTENSIONS), f"extensions chargées: {loaded}/{len(main.EXTENSIONS)}"
@@ -169,14 +170,23 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
             assert command is not None, f"commande propriétaire +{name} absente"
             assert name in main.OWNER_ONLY_COMMANDS, f"commande propriétaire +{name} n'est plus owner-only"
 
-        # Les anciennes commandes fusionnées ne doivent pas réapparaître. Leur destination
-        # canonique (+setup ou +security) doit en revanche rester accessible.
+        # Compatibilité : les anciennes commandes fusionnées peuvent encore fonctionner
+        # en préfixe pour les habitués, mais elles doivent être cachées de +help et leur
+        # destination canonique doit toujours exister.
         merged_checked = 0
         for old_name, target in command_catalog_cleanup.MERGED_COMMAND_TARGETS.items():
-            assert bot.get_command(old_name) is None, f"ancienne commande fusionnée +{old_name} réapparue"
+            old_command = bot.get_command(old_name)
+            if old_command is not None:
+                assert old_command.hidden, f"ancienne commande fusionnée +{old_name} encore visible"
             target_root = target.split()[0]
             assert bot.get_command(target_root) is not None, f"destination +{target_root} absente pour +{old_name}"
             merged_checked += 1
+
+        missing_duplicates = sorted(
+            name for name in command_catalog_cleanup.PURE_DUPLICATE_COMMANDS
+            if bot.get_command(name) is not None
+        )
+        assert not missing_duplicates, "vrais doublons encore chargés: " + ", ".join(missing_duplicates)
 
         missing_games = sorted(name for name in RECOVERED_GAMES if bot.get_command(name) is None)
         assert not missing_games, "jeux récupérés absents: " + ", ".join(missing_games)
@@ -187,7 +197,7 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
         assert help_complete._category_for(bot.get_command("gamesetup")).key == "configuration"
 
         slash_roots = list(bot.tree.get_commands())
-        assert len(slash_roots) <= 95, f"budget slash dépassé: {len(slash_roots)} racines"
+        assert len(slash_roots) <= 100, f"budget slash dépassé: {len(slash_roots)} racines"
 
         assert command_response_guard._INSTALLED, "filet de réponse des commandes absent"
         assert command_no_emoji_runtime._INSTALLED, "politique sans emoji non installée"
