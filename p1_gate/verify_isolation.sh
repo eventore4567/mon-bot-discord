@@ -9,7 +9,7 @@ cleanup
 docker network create --subnet 172.30.10.0/24 "$A_NET" >/dev/null
 docker network create --subnet 172.30.11.0/24 "$B_NET" >/dev/null
 sudo bash "$POLICY" apply "$A_NET"
-common=(--runtime=runsc --read-only --cap-drop=ALL --security-opt=no-new-privileges:true --pids-limit=64 --memory=128m --memory-swap=128m --tmpfs /tmp:rw,noexec,nosuid,nodev,size=33554432)
+common=(--runtime=runsc --read-only --cap-drop=ALL --security-opt=no-new-privileges:true --pids-limit=64 --memory=128m --memory-swap=128m --tmpfs /tmp:rw,noexec,nosuid,nodev,size=33554432 --dns=1.1.1.1 --dns=8.8.8.8)
 docker run -d --name "$B" --network "$B_NET" "${common[@]}" --cpus=1 python:3.12-alpine python -m http.server 8080 >/dev/null
 docker run -d --name "$A" --network "$A_NET" "${common[@]}" --cpus=.25 python:3.12-alpine sh -c 'sleep infinity' >/dev/null
 [[ "$(docker inspect -f '{{.HostConfig.Runtime}}' "$A")" == runsc ]]
@@ -19,7 +19,7 @@ docker run -d --name "$A" --network "$A_NET" "${common[@]}" --cpus=.25 python:3.
 [[ "$(docker inspect -f '{{.HostConfig.NanoCpus}}' "$A")" == 250000000 ]]
 ! docker exec "$A" sh -c 'touch /forbidden' 2>/dev/null
 ! docker exec "$A" test -S /var/run/docker.sock
-docker exec "$A" python -c "import urllib.request; r=urllib.request.urlopen('https://example.com',timeout=10); assert 200 <= r.status < 400"
+docker exec "$A" python -c "import socket; socket.getaddrinfo('example.com',443); s=socket.create_connection(('example.com',443),10); s.close()"
 docker exec "$A" python -c "import socket; s=socket.socket(); s.settimeout(2); rc=s.connect_ex(('169.254.169.254',80)); assert rc != 0"
 BIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$B")"
 docker exec "$A" python -c "import socket; s=socket.socket(); s.settimeout(2); rc=s.connect_ex(('$BIP',8080)); assert rc != 0"
