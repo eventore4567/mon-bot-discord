@@ -141,7 +141,7 @@ jobs:
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-user-acceptance.db"
-        run: python tools/user_acceptance_audit.py
+        run: python tools/user_acceptance_entry.py
 
       - name: Embed component UI audit
         env:
