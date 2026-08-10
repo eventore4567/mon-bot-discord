@@ -35,6 +35,7 @@ from .moderation_logs_fix import install as install_moderation_logs_fix
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
 from .no_auto_tracker import install as install_no_auto_tracker
 from .owner_sanction_immunity import install as install_owner_sanction_immunity
+from .permission_guard import install as install_permission_guard
 from .poll_ui import install_poll_ui
 from .premium_logs import install as install_premium_logs
 from .premium_logs_v2 import install as install_premium_logs_v2
@@ -217,6 +218,9 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     await _run_installer("aide racine et canary externe", install_final_runtime_polish, bot)
     await _run_installer("garde de réponse commandes", install_command_response_guard, bot)
     await _run_installer("politique finale commandes sans emoji", install_command_no_emoji, bot)
+    # Toujours en dernier : aucun runtime charge ensuite ne doit pouvoir reclasser help
+    # ou contourner la matrice de permissions des commandes slash.
+    await _run_installer("permissions commandes", install_permission_guard, bot)
 
 
 async def _load_extension_with_sentrix_patches(
