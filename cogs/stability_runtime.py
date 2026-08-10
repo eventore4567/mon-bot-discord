@@ -10,7 +10,9 @@ Cette couche cible uniquement des courses/échecs silencieux observables à l'ex
 - Enterprise Suite : installation idempotente dans la même chaîne de runtime, sans ajouter
   de commandes publiques ni modifier l'ordre du verrou final sans emoji ;
 - Excellence Runtime : vitesse, anti-crash, AutoMod progressif, économie atomique,
-  mini-jeux, tickets, notifications, diagnostics et anti-abus, sans dashboard.
+  mini-jeux, tickets, notifications, diagnostics et anti-abus, sans dashboard ;
+- Production Phase : SLO, historique boot/crash, métriques de latence, reconnexion
+  PostgreSQL/Redis et garde finale des erreurs de commande, sans nouvelle commande.
 
 Les patches sont idempotents et ne modifient ni les anciennes commandes publiques ni leur
 comportement fonctionnel attendu.
@@ -252,3 +254,9 @@ async def install(bot, extension_name: str) -> None:
     # vient d'être chargé, ce qui évite les dépendances d'ordre fragiles.
     from .bot_excellence_runtime import install as install_bot_excellence_runtime
     await install_bot_excellence_runtime(bot, name)
+
+    # Dernière couche bot-only : supervision SLO, boot/crash, agrégation de latence et
+    # reconnexion de l'infrastructure externe. Elle se réapplique après chaque extension
+    # pour rester au-dessus des wrappers installés plus tard (notamment arrêt gracieux).
+    from .production_phase_runtime import install as install_production_phase_runtime
+    await install_production_phase_runtime(bot, name)
