@@ -1,9 +1,8 @@
-"""Démarrage Railway résilient et shardé pour SentriX.
+"""Démarrage Railway résilient, durable et shardé pour SentriX.
 
-Le serveur HTTP est ouvert AVANT le chargement complet des cogs Discord. Railway peut
-donc joindre immédiatement le port $PORT au lieu d'afficher un 502 pendant le démarrage.
-En production, BotAllInOne hérite d'AutoShardedBot : Discord répartit automatiquement les
-serveurs entre plusieurs shards quand l'application grandit, sans changer les commandes.
+Le serveur HTTP est ouvert avant le chargement complet des cogs Discord. Quand PostgreSQL
+est configuré, le bootstrap tente aussi de restaurer la base SQLite principale depuis son
+dernier snapshot durable si le fichier local a disparu ou est invalide.
 """
 
 import asyncio
@@ -13,6 +12,7 @@ import traceback
 from discord.ext import commands
 
 import config
+from utils.durable_database import DurableDatabaseReplica
 
 
 class SentriXAutoShardedBot(commands.AutoShardedBot):
@@ -42,8 +42,31 @@ async def _dashboard_already_started(_bot):
     return None
 
 
+async def _prepare_durable_store(bot) -> DurableDatabaseReplica:
+    durable = DurableDatabaseReplica(config.DATABASE_PATH)
+    bot.sentrix_durable_store = durable
+    if not durable.configured:
+        logger.info("PostgreSQL durable non configuré ; démarrage SQLite normal.")
+        return durable
+    try:
+        connected = await asyncio.wait_for(durable.connect(), timeout=8)
+        if connected:
+            result = await asyncio.wait_for(durable.restore_latest_if_needed(), timeout=20)
+            if result.get("restored"):
+                logger.warning("Base restaurée depuis PostgreSQL avant connexion SQLite : %s", result)
+            else:
+                logger.info("Restauration PostgreSQL non nécessaire : %s", result.get("reason"))
+    except Exception:
+        logger.warning(
+            "Préparation PostgreSQL durable impossible ; le démarrage local continue :\n%s",
+            traceback.format_exc(),
+        )
+    return durable
+
+
 async def run() -> None:
     bot = bot_main.BotAllInOne()
+    durable = await _prepare_durable_store(bot)
 
     await bot.db.connect()
     logger.info("Base prête pour le démarrage anticipé du dashboard Railway.")
@@ -71,6 +94,16 @@ async def run() -> None:
         logger.critical("Le processus Discord s'est arrêté :\n%s", traceback.format_exc())
         raise
     finally:
+        # Dernier snapshot cohérent avant fermeture de la connexion SQLite. Si PostgreSQL
+        # est absent, snapshot() retourne immédiatement sans gêner l'arrêt.
+        try:
+            if durable.configured:
+                await asyncio.wait_for(
+                    durable.snapshot(reason="graceful_shutdown", clean_shutdown=True),
+                    timeout=45,
+                )
+        except Exception:
+            logger.warning("Snapshot durable d'arrêt impossible :\n%s", traceback.format_exc())
         try:
             infra = getattr(bot, "sentrix_infra", None)
             if infra is not None:
@@ -81,6 +114,10 @@ async def run() -> None:
             await bot.db.close()
         except Exception:
             logger.warning("Fermeture de la base impossible :\n%s", traceback.format_exc())
+        try:
+            await durable.close()
+        except Exception:
+            logger.warning("Fermeture du stockage durable impossible :\n%s", traceback.format_exc())
 
 
 if __name__ == "__main__":
