@@ -1,0 +1,111 @@
+name: SentriX Platform V1 Gate
+
+on:
+  push:
+    branches:
+      - chatgpt/platform-v1-full
+    paths:
+      - 'sentrix-platform/**'
+      - '.github/workflows/platform-v1.yml'
+  pull_request:
+    paths:
+      - 'sentrix-platform/**'
+      - '.github/workflows/platform-v1.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  database-and-core:
+    name: P0-P6 database + deterministic core
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentrix_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sentrix_test
+      MIGRATIONS_DATABASE_URL: postgresql://sentrix_migrator:migrator_dev_only@localhost:5432/sentrix_test
+      SUPERUSER_URL: postgresql://postgres:postgres@localhost:5432/sentrix_test
+    defaults:
+      run:
+        working-directory: sentrix-platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+      - name: Install platform
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+      - name: Bootstrap database roles
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql "$SUPERUSER_URL" -v ON_ERROR_STOP=1 -f ops/bootstrap/roles.sql
+          psql "$SUPERUSER_URL" -v ON_ERROR_STOP=1 \
+            -c "GRANT CREATE, USAGE ON SCHEMA public TO sentrix_migrator;" \
+            -c "GRANT USAGE ON SCHEMA public TO sentrix_app;"
+      - name: Verify app role cannot bypass RLS
+        run: |
+          result=$(psql "$SUPERUSER_URL" -tAc "SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname='sentrix_app'")
+          test "$result" = 'f'
+      - name: Apply all P0-P6 migrations twice
+        run: |
+          python -m libs.db.migrate
+          output=$(python -m libs.db.migrate)
+          echo "$output"
+          echo "$output" | grep -q 'deja a jour'
+      - name: P0/P1 security and integration suites
+        run: |
+          pytest tests/security -v -m security --tb=short --strict-markers
+          pytest tests/unit tests/integration -v --tb=short
+      - name: P2-P6 deterministic contract suite
+        run: pytest tests/v1 -v --tb=short
+      - name: Static quality gates
+        run: |
+          ruff check .
+          ruff format --check .
+          mypy libs services agents
+
+  gvisor-security:
+    name: P1/P2/P5 real gVisor proofs
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: sentrix-platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install minimal Python dependencies
+        run: pip install -e .
+      - name: Install gVisor runsc
+        run: sudo ./ops/execution/install-gvisor.sh
+      - name: Verify cgroups v2
+        run: test -f /sys/fs/cgroup/cgroup.controllers
+      - name: P1 chaos and network isolation
+        run: |
+          sudo -E env PATH="$PATH" PYTHONPATH="$PWD" ./ops/ci/p1-chaos.sh
+          sudo -E env PATH="$PATH" PYTHONPATH="$PWD" ./ops/ci/p1-isolation.sh
+      - name: P2 hostile build sandbox
+        run: sudo -E env PATH="$PATH" PYTHONPATH="$PWD" ./ops/ci/p2-build-sandbox.sh
+      - name: P5 tmpfs secret inspection proof
+        run: sudo -E env PATH="$PATH" PYTHONPATH="$PWD" ./ops/ci/p5-tmpfs-secret.sh
