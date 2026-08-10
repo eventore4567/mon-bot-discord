@@ -71,7 +71,6 @@ async def run() -> int:
         slash_command_budget.finalize(bot)
 
         active = list(bot.walk_commands())
-        roots = {command.name.casefold(): command for command in bot.commands}
         qualified = [command.qualified_name.casefold() for command in active]
         if not active:
             errors.append("aucune commande enregistrée")
@@ -118,8 +117,6 @@ async def run() -> int:
         if removed_still_present:
             errors.append("vrais doublons encore enregistrés: " + ", ".join(removed_still_present))
 
-        # Les anciennes commandes fusionnées restent compatibles en + lorsqu'elles existent,
-        # mais ne doivent plus encombrer +help.
         merged_visible = sorted(
             name for name in command_catalog_cleanup.MERGED_COMMANDS
             if (command := bot.get_command(name)) is not None and not command.hidden
@@ -140,7 +137,6 @@ async def run() -> int:
         if "help" not in main.PUBLIC_COMMANDS:
             errors.append("+help n'est pas classé PUBLIC_COMMANDS")
 
-        # Vérifications de permission sensibles demandées.
         owner_expected = {
             "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
             "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
@@ -169,6 +165,11 @@ async def run() -> int:
 
         app_roots = list(bot.tree.get_commands())
         app_root_names = {str(command.name).casefold() for command in app_roots}
+        expected_slash = {
+            "nick" if name == "nickname" else name
+            for name in command_catalog_cleanup.NORMAL_DIRECT_COMMANDS
+        }
+        missing_slash_direct = sorted(expected_slash - app_root_names)
         if len(app_roots) > slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET:
             errors.append(f"trop de racines slash: {len(app_roots)}/100")
         if "nick" not in app_root_names:
@@ -216,6 +217,8 @@ async def run() -> int:
         print(f"SentriX audit: {len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)} commandes normales directes")
         print(f"SentriX audit: {len(command_catalog_cleanup.ADMIN_DIRECT_COMMANDS)} commandes admin directes + uniquement")
         print(f"SentriX audit: {len(command_catalog_cleanup.GAME_COMMANDS)} jeux directs")
+        if missing_slash_direct:
+            print("Slash directs absents: " + ", ".join(missing_slash_direct))
         print(f"Extensions: {len(loaded)}/{len(main.EXTENSIONS)} chargées")
         print("Catégories visibles +help:")
         for category in help_complete.CATEGORIES:
