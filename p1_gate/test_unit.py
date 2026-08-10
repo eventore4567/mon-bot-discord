@@ -54,9 +54,10 @@ class Tests(unittest.TestCase):
     def test_stopped(self):
         with tempfile.TemporaryDirectory() as d:
             c=Client([inst('stopped')]); r=Runtime(); r.running.add('i1'); Agent(c,Cache(Path(d)/'s'),r).tick(); self.assertNotIn('i1',r.running)
-    def test_dns_servers_must_be_public(self):
+    def test_dns_servers_are_configurable_ip_addresses(self):
         self.assertEqual(DockerRuntime('n').dns_servers, ('1.1.1.1','8.8.8.8'))
-        with self.assertRaises(ValueError): DockerRuntime('n', dns_servers=('10.0.0.53',))
+        self.assertEqual(DockerRuntime('n', dns_servers=('10.0.0.53',)).dns_servers, ('10.0.0.53',))
+        with self.assertRaises(ValueError): DockerRuntime('n', dns_servers=('not-an-ip',))
     def test_runtime_source_forbids_unsafe_flags(self):
         src=Path(__file__).with_name('node_agent.py').read_text()
         self.assertIn('--runtime=runsc',src); self.assertIn('--read-only',src); self.assertIn('--cap-drop=ALL',src); self.assertIn('--dns',src)
