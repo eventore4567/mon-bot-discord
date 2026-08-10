@@ -70,6 +70,7 @@ class EnterpriseInfra:
                         ON sentrix_enterprise_metrics (metric_name, created_at DESC);
                         """
                     )
+                self.postgres_error = None
                 logger.info("PostgreSQL enterprise connecté.")
             except Exception as exc:
                 self.postgres_error = f"{type(exc).__name__}: {exc}"[:500]
@@ -88,6 +89,7 @@ class EnterpriseInfra:
                     socket_timeout=5,
                 )
                 await self.redis.ping()
+                self.redis_error = None
                 logger.info("Redis enterprise connecté.")
             except Exception as exc:
                 self.redis_error = f"{type(exc).__name__}: {exc}"[:500]
@@ -107,6 +109,20 @@ class EnterpriseInfra:
                 await self.pg_pool.close()
             except Exception:
                 pass
+        self.redis = None
+        self.pg_pool = None
+
+    async def reconnect(self) -> None:
+        """Recrée proprement les connexions externes après une panne transitoire.
+
+        Le runtime production limite lui-même la fréquence des tentatives. Cette méthode
+        ne boucle donc jamais et conserve le fallback SQLite si Railway/PostgreSQL/Redis
+        restent indisponibles.
+        """
+        await self.close()
+        self.postgres_error = None
+        self.redis_error = None
+        await self.connect()
 
     async def incr(self, key: str, amount: int = 1, *, ttl: int = 120) -> int | None:
         if self.redis is None:
