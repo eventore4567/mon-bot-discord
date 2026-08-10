@@ -65,13 +65,20 @@ jobs:
           test -f /tmp/platform-src/sentrix-platform/pyproject.toml
           python - <<'PY'
           from pathlib import Path
-          path = Path('/tmp/platform-src/sentrix-platform/libs/models/__init__.py')
-          text = path.read_text()
+
+          model_path = Path('/tmp/platform-src/sentrix-platform/libs/models/__init__.py')
+          text = model_path.read_text()
           text = text.replace(
               '    secret_provider: SecretProvider = "env"\n',
               '    secret_provider: SecretProvider = "env"  # noqa: S105 - provider name, not a password\n',
           )
-          path.write_text(text)
+          model_path.write_text(text)
+
+          config_path = Path('/tmp/platform-src/sentrix-platform/pyproject.toml')
+          config = config_path.read_text()
+          if 'module = ["asyncpg", "asyncpg.*"]' not in config:
+              config += '\n[[tool.mypy.overrides]]\nmodule = ["asyncpg", "asyncpg.*"]\nignore_missing_imports = true\n'
+          config_path.write_text(config)
           PY
 
       - name: Installer les dependances
