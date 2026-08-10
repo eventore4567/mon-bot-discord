@@ -19,7 +19,7 @@ class DeploymentStatus(StrEnum):
     FAILED = "failed"
 
 
-class StaleFencingToken(RuntimeError):
+class StaleFencingToken(RuntimeError):  # noqa: N818 - public domain exception name
     pass
 
 
