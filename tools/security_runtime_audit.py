@@ -32,7 +32,11 @@ async def run() -> int:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "security.db")
 
         import main
-        from cogs import security_command_center, security_runtime_hardening
+        from cogs import (
+            command_catalog_cleanup,
+            security_command_center,
+            security_runtime_hardening,
+        )
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -61,8 +65,6 @@ async def run() -> int:
         if not getattr(bot, "_sentrix_security_command_center_v3", False):
             errors.append("marqueur Security V3 absent")
 
-        # Les tables sont la garantie que les événements anti-nuke et snapshots PANIC
-        # ne disparaissent pas simplement parce que le processus redémarre.
         expected_tables = {"antinuke_events", "panic_snapshots", "security_events"}
         rows = await bot.db.fetchall(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?)",
@@ -73,9 +75,6 @@ async def run() -> int:
         if missing_tables:
             errors.append("tables sécurité absentes: " + ", ".join(missing_tables))
 
-        # Vérifie que le compteur utilise bien SQLite et non uniquement nuke_tracker :
-        # on vide volontairement le compteur mémoire entre les appels 2 et 3. Le troisième
-        # doit quand même atteindre le seuil grâce aux deux événements stockés en base.
         if automod is not None:
             guild = DummyGuild(987654321)
             actor_id = 123456789
@@ -118,7 +117,6 @@ async def run() -> int:
             if not getattr(panic, "checks", None):
                 errors.append("+panic legacy n'a aucun verrou d'accès")
 
-        # Surface V3 : chaque famille demandée doit exister sous une seule racine.
         expected_v3 = {
             "security",
             "security status",
@@ -164,14 +162,20 @@ async def run() -> int:
             if getattr(root, "cog", None) is not command_center:
                 errors.append("+security n'appartient pas au SecurityCommandCenter")
 
-        # Les anciens noms restent exécutables pour compatibilité, mais ne doivent plus
-        # polluer +help. On vérifie tous ceux qui sont chargés dans cet audit.
+        # Les anciens noms restent masqués, sauf ceux que la nouvelle surface canonique
+        # conserve volontairement en commande directe (antiraid, antinuke, blacklist,
+        # panic, quarantine...). Dans tous les cas leurs checks restent obligatoires.
+        direct = set(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)
         for legacy_name in sorted(security_command_center.LEGACY_SECURITY_ROOTS):
             command = bot.get_command(legacy_name)
-            if command is not None and not command.hidden:
+            if command is None:
+                continue
+            if legacy_name not in direct and not command.hidden:
                 errors.append(f"ancienne commande non masquée: +{legacy_name}")
+            if legacy_name in direct and legacy_name not in main.PUBLIC_COMMANDS:
+                if not getattr(command, "checks", None) and legacy_name not in main.DISCORD_PERMISSION_COMMANDS:
+                    errors.append(f"commande sécurité directe sans verrou local: +{legacy_name}")
 
-        # Pas d'adresse IP dans le schéma des nouvelles protections défensives.
         schema_rows = await bot.db.fetchall(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?)",
             tuple(sorted(expected_tables)),
@@ -185,8 +189,6 @@ async def run() -> int:
                     f"champ réseau privé inattendu dans le schéma: {marker}"
                 )
 
-        # Les cogs avancés créent une boucle qui attend on_ready ; l'audit ne se connecte
-        # pas à Discord, donc on l'annule proprement avant de fermer SQLite.
         current = asyncio.current_task()
         pending = [
             task
