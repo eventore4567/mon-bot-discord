@@ -17,7 +17,7 @@ from uuid import UUID
 from libs.runtime_models import AgentDesiredInstance, AgentObservedInstance
 
 
-class RuntimeErrorP1(RuntimeError):
+class RuntimeErrorP1(RuntimeError):  # noqa: N818 - stable public P1 exception
     pass
 
 
@@ -72,13 +72,14 @@ class DockerRuntime:
     async def preflight(self) -> None:
         if platform.system() != "Linux":
             raise RuntimeErrorP1("Execution Plane P1 exige un hote Linux")
-        if not Path("/sys/fs/cgroup/cgroup.controllers").exists():
+        cgroup_controllers = Path("/sys/fs/cgroup/cgroup.controllers")
+        if not await asyncio.to_thread(cgroup_controllers.exists):
             raise RuntimeErrorP1("cgroups v2 requis")
         runtimes_raw = await self.runner.run(self.docker, "info", "--format", "{{json .Runtimes}}")
         runtimes = json.loads(runtimes_raw or "{}")
         if self.runtime not in runtimes:
             raise RuntimeErrorP1(f"runtime gVisor {self.runtime!r} absent de Docker")
-        if not self.egress_script.exists():
+        if not await asyncio.to_thread(self.egress_script.exists):
             raise RuntimeErrorP1(f"script egress absent: {self.egress_script}")
 
     async def _container_id(self, instance_id: UUID) -> str | None:
@@ -185,7 +186,7 @@ class DockerRuntime:
             self.runtime,
             "--read-only",
             "--tmpfs",
-            "/tmp:rw,noexec,nosuid,nodev,size=64m",
+            "/tmp:rw,noexec,nosuid,nodev,size=64m",  # noqa: S108 - sandbox tmpfs
             "--cap-drop",
             "ALL",
             "--security-opt",
