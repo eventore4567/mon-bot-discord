@@ -1,14 +1,8 @@
-"""Correctifs finaux SentriX pour +help et la lecture du Canary externe.
+"""Correctifs finaux SentriX pour +help, le Canary et la surface de commandes.
 
-- +help devient une commande d'accueil sans argument public : aucune demande de nom de
-  commande et aucun paramètre ctx/commande visible. La recherche reste disponible dans
-  l'interface interactive après ouverture.
-- Le Canary est un service Railway séparé par conception. Le process de production ne
-  doit donc pas perdre 2 points uniquement parce que CANARY_GUILD_ID n'est pas injecté
-  localement dans le service principal.
-
-Cette couche est réappliquée après help_clean_style à chaque chargement d'extension afin
-qu'aucun ancien finaliseur ne puisse réintroduire l'ancien comportement.
+Cette couche est réappliquée après les autres finaliseurs à chaque chargement d'extension.
+Elle garantit donc aussi que +help reste public et que la politique permissions/catalogue
+est la dernière décision appliquée au runtime.
 """
 from __future__ import annotations
 
@@ -34,8 +28,6 @@ def _patch_help(bot: commands.Bot) -> None:
 
     from . import help_clean_style, language_runtime
 
-    # Conserve une seule référence vers le vrai générateur V8 afin d'éviter toute
-    # récursion lors des passages successifs du loader.
     original_home = getattr(help_clean_style, "_sentrix_root_only_original_home", None)
     if original_home is None:
         original_home = help_clean_style._help_home
@@ -64,28 +56,29 @@ def _patch_help(bot: commands.Bot) -> None:
     language_runtime._help_home = root_only_home
 
     async def root_only_callback(cog, ctx: commands.Context):
-        # Le callback V8 reçoit uniquement cog + ctx en interne. La recherche détaillée
-        # reste dans les boutons/menu ; aucune donnée n'est demandée après +help.
         return await help_clean_style._clean_help_callback(cog, ctx)
 
     root_only_callback._sentrix_help_clean_v8 = True
     root_only_callback._sentrix_help_root_only = True
     command.callback = root_only_callback
-
-    # Command.params représente UNIQUEMENT les arguments saisis par l'utilisateur pour le
-    # parseur de commandes. cog et ctx sont injectés par discord.py et ne doivent donc pas
-    # être présents ici. Une table vide garantit que +help n'affiche ni <ctx>, ni
-    # <commande>, et n'attend aucune valeur après le nom de la commande.
     command.params = OrderedDict()
     command.usage = ""
     command._sentrix_help_root_only = True
+
+    # Invariant de sécurité/UX : l'aide est une commande membre, jamais staff-only.
+    command.hidden = False
+    local_checks = getattr(command, "checks", None)
+    if isinstance(local_checks, list):
+        local_checks.clear()
+    app = getattr(command, "app_command", None)
+    app_checks = getattr(app, "checks", None)
+    if isinstance(app_checks, list):
+        app_checks.clear()
 
 
 def _patch_canary_readiness(bot: commands.Bot) -> None:
     from . import production_readiness_runtime as prod
 
-    # En mode Canary, le service de test doit continuer à exiger son propre guild ID.
-    # Le correctif ci-dessous vise uniquement le service production.
     if not getattr(prod, "_sentrix_external_canary_audit_patch", False):
         original_audit = prod.audit_guild_configuration
 
@@ -94,7 +87,10 @@ def _patch_canary_readiness(bot: commands.Bot) -> None:
             if _truthy("SENTRIX_CANARY_MODE"):
                 return result
 
-            findings = [item for item in result.get("findings", []) if str(item.get("title", "")).casefold() != "canary"]
+            findings = [
+                item for item in result.get("findings", [])
+                if str(item.get("title", "")).casefold() != "canary"
+            ]
             if len(findings) == len(result.get("findings", [])):
                 return result
 
@@ -140,13 +136,40 @@ def _patch_canary_readiness(bot: commands.Bot) -> None:
             ]
             if durable.get("last_snapshot_at"):
                 lines.append(f"Dernier snapshot PostgreSQL : <t:{int(durable['last_snapshot_at'])}:R>")
-            await ctx.send(embed=discord.Embed(title="Infrastructure SentriX", description="\n".join(lines), color=0x5865F2))
+            await ctx.send(
+                embed=discord.Embed(
+                    title="Infrastructure SentriX",
+                    description="\n".join(lines),
+                    color=0x5865F2,
+                )
+            )
 
         infra_external_callback._sentrix_external_canary = True
         infra_command.callback = infra_external_callback
         infra_command._sentrix_external_canary = True
 
 
+def _install_command_surface(bot: commands.Bot) -> None:
+    """Réapplique toujours en dernier les décisions catalogue et permissions."""
+    from . import (
+        command_access_policy_v2,
+        command_catalog_cleanup,
+        command_centers_v2,
+        command_direct_aliases_v2,
+        slash_command_budget,
+    )
+
+    # Le budget est installé avant les nouveaux centres/alias pour que leur ajout ne puisse
+    # jamais dépasser la limite Discord.
+    slash_command_budget.install(bot)
+    command_centers_v2.install(bot)
+    command_direct_aliases_v2.install(bot)
+    command_catalog_cleanup.install(bot)
+    command_access_policy_v2.install(bot)
+    slash_command_budget.finalize(bot)
+
+
 def install(bot: commands.Bot) -> None:
     _patch_help(bot)
     _patch_canary_readiness(bot)
+    _install_command_surface(bot)
