@@ -98,13 +98,15 @@ class Cache:
 
 
 class DockerRuntime:
-    def __init__(self, node_id, policy_script=None, control_plane_cidrs=(), dns_servers=("1.1.1.1", "8.8.8.8")):
+    def __init__(self, node_id, policy_script=None, control_plane_cidrs=(), dns_servers=None):
         self.node_id = node_id
         self.policy_script = policy_script
         self.control_plane_cidrs = tuple(control_plane_cidrs)
+        if dns_servers is None:
+            dns_servers = tuple(x.strip() for x in os.getenv("SENTRIX_DNS_SERVERS", "1.1.1.1,8.8.8.8").split(",") if x.strip())
         self.dns_servers = tuple(str(ipaddress.ip_address(x)) for x in dns_servers)
-        if not self.dns_servers or any(not ipaddress.ip_address(x).is_global for x in self.dns_servers):
-            raise ValueError("dns servers must be public IP addresses")
+        if not self.dns_servers:
+            raise ValueError("at least one dns server is required")
 
     def run(self, argv, check=True):
         p = subprocess.run(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -127,7 +129,9 @@ class DockerRuntime:
         if not self.run(["docker", "network", "ls", "--filter", f"name=^{item.network_name}$", "--format", "{{.Name}}"], False):
             self.run(["docker", "network", "create", "--driver", "bridge", "--label", "sentrix.managed=true", item.network_name])
         if self.policy_script:
-            self.run([self.policy_script, "apply", item.network_name, *self.control_plane_cidrs])
+            dns_policy_args = [arg for server in self.dns_servers for arg in ("--dns", server)]
+            deny_args = [arg for cidr in self.control_plane_cidrs for arg in ("--deny", cidr)]
+            self.run([self.policy_script, "apply", item.network_name, *dns_policy_args, *deny_args])
 
     def ensure_running(self, item):
         if self.running(item):
