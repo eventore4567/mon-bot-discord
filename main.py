@@ -45,6 +45,7 @@ EXTENSIONS = [
     "cogs.economy",
     "cogs.levels",
     "cogs.minigames",
+    "cogs.games_economy",
     "cogs.music",
     "cogs.events",
     "cogs.verification",
@@ -110,6 +111,13 @@ PUBLIC_COMMANDS = frozenset({
     # Mini-jeux
     "rps", "guess-number", "trivia", "tictactoe", "hangman", "math-quiz",
     "blackjack", "slots",
+    "coinflip", "dice", "luckyroll", "highlow", "memory", "reaction",
+    "scramble", "wordgame", "emojiquiz", "colorquiz", "fasttype", "duel",
+    "connect4", "numberduel", "reactionduel", "quizduel", "triviastart",
+    "wordrace", "reactionevent", "guessrace", "mathrace", "lastmessage",
+    "emoji-race", "adventure", "dungeon", "mining", "fishing", "treasure",
+    "hunt", "explore", "gamehistory", "gameprofile", "gamestats", "gametop",
+    "dailygames",
     # Musique
     "join", "leave", "play", "pause", "resume", "skip", "stop", "queue",
     "nowplaying", "volume", "loop", "shuffle", "remove-from-queue",
@@ -165,6 +173,7 @@ CATEGORY_COMMANDS = {
     }),
     "economie": frozenset({
         "shopsetup", "shoppanel", "shoprole", "give-money", "reset-economy",
+        "gamesetup",
     }),
     "ai": frozenset({"aisetup", "aidiag"}),
     "complete": frozenset({"wipe-server", "roleall", "massrole"}),
