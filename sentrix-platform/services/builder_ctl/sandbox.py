@@ -34,7 +34,7 @@ def docker_command(name: str, spec: BuildSandboxSpec) -> list[str]:
         "--network",
         spec.network_name,
         "--tmpfs",
-        "/tmp:rw,noexec,nosuid,nodev,size=268435456",
+        "/tmp:rw,noexec,nosuid,nodev,size=268435456",  # noqa: S108 - sandbox tmpfs
         "--tmpfs",
         "/work:rw,nosuid,nodev,size=1073741824",
     ]
