@@ -22,6 +22,7 @@ from .command_no_emoji_runtime import install as install_command_no_emoji
 from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
 from .dashboard_access import install_dashboard_access
+from .final_runtime_polish import install as install_final_runtime_polish
 from .generated_logs_sync import install as install_generated_logs_sync
 from .giveaway_antialt import install as install_giveaway_antialt
 from .help_clean_style import install as install_help_clean_style
@@ -152,8 +153,6 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
         await _run_installer("immunité propriétaire sanctions", install_owner_sanction_immunity, bot)
 
     if _matches(name, "cogs.security_tools"):
-        # security_tools est chargé après AutoMod : un second passage masque ses anciens
-        # noms (quarantine, permission-audit, server-backup...) au profit de +security.
         await _run_installer("centre de commandes sécurité avancé", install_security_command_center, bot)
 
     if _matches(name, "cogs.moderation"):
@@ -173,8 +172,6 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
         await _run_installer("signature AFK", install_afk_signature_fix, bot)
 
     if _matches(name, "cogs.configuration"):
-        # Deuxième passage volontaire : ces installateurs sont idempotents et doivent
-        # rester compatibles avec les anciennes couches qui peuvent remplacer des vues.
         await _run_installer("fermeture setup (final)", install_setup_close_fix, bot)
         await _run_installer("synchronisation logs setup (final)", install_setup_create_logs_sync, bot)
         await _run_installer("style setup (final)", install_setup_oxyde_style, bot)
@@ -203,9 +200,6 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
 
 async def _install_log_stack(bot: commands.Bot) -> None:
     """Ordre important : routage -> style -> Components V2 -> mentions silencieuses."""
-    # Le réparateur universel crée un bootstrap qui attend on_ready(). En production,
-    # setup_hook() est déjà post-login. Dans les audits hors connexion on diffère ce seul
-    # installateur ; les autres couches visuelles/stateless restent pleinement testées.
     if _discord_session_started(bot):
         await _run_installer("routage logs modération", install_moderation_logs_fix, bot)
     await _run_installer("style premium logs", install_premium_logs, bot)
@@ -220,9 +214,8 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     await _run_installer("moteur de langue", install_language_runtime, bot)
     await _run_installer("finaliseur langue setup", install_language_setup_finalizer, bot)
     await _run_installer("style final aide sans emoji", install_help_clean_style, bot)
+    await _run_installer("aide racine et canary externe", install_final_runtime_polish, bot)
     await _run_installer("garde de réponse commandes", install_command_response_guard, bot)
-    # Toujours en dernier : aucune autre couche ne doit pouvoir réintroduire une décoration
-    # emoji dans une réponse de commande après ce point.
     await _run_installer("politique finale commandes sans emoji", install_command_no_emoji, bot)
 
 
@@ -235,8 +228,6 @@ async def _load_extension_with_sentrix_patches(
     """Charge une vraie extension puis applique les couches SentriX de façon déterministe."""
     result = await _ORIGINAL_LOAD_EXTENSION(bot, name, package=package)
 
-    # Configuration est déjà réellement ajoutée à ce point : le setup critique doit être
-    # installé AVANT toutes les autres couches, exactement comme dans l'architecture V6/V7.
     if _matches(name, "cogs.configuration"):
         await _install_configuration_critical_patches(bot)
 
