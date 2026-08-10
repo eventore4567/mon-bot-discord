@@ -65,7 +65,6 @@ def _patch_help(bot: commands.Bot) -> None:
     command.usage = ""
     command._sentrix_help_root_only = True
 
-    # Invariant de sécurité/UX : l'aide est une commande membre, jamais staff-only.
     command.hidden = False
     local_checks = getattr(command, "checks", None)
     if isinstance(local_checks, list):
@@ -156,15 +155,15 @@ def _install_command_surface(bot: commands.Bot) -> None:
         command_catalog_cleanup,
         command_centers_v2,
         command_direct_aliases_v2,
+        command_hybrid_slash_restore_v3,
         slash_command_budget,
     )
 
-    # Le budget est installé avant les nouveaux centres/alias pour que leur ajout ne puisse
-    # jamais dépasser la limite Discord.
     slash_command_budget.install(bot)
     command_centers_v2.install(bot)
     command_direct_aliases_v2.install(bot)
     command_catalog_cleanup.install(bot)
+    command_hybrid_slash_restore_v3.install(bot)
     command_access_policy_v2.install(bot)
     slash_command_budget.finalize(bot)
 
