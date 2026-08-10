@@ -76,7 +76,7 @@ jobs:
           cat tools/platform_p1/overlay.part*.b64 | base64 --decode > /tmp/sentrix-platform-p1-overlay.zip
           unzip -t /tmp/sentrix-platform-p1-overlay.zip
           unzip -oq /tmp/sentrix-platform-p1-overlay.zip -d /tmp/platform-src/sentrix-platform
-          cat tools/platform_p1/hotfix*.b64 | base64 --decode > /tmp/sentrix-platform-p1-hotfix.zip
+          cat tools/platform_p1/hotfix01.part*.b64 | base64 --decode > /tmp/sentrix-platform-p1-hotfix.zip
           unzip -t /tmp/sentrix-platform-p1-hotfix.zip
           unzip -oq /tmp/sentrix-platform-p1-hotfix.zip -d /tmp/platform-src/sentrix-platform
           test -f /tmp/platform-src/sentrix-platform/agents/node_agent/main.py
@@ -154,7 +154,7 @@ jobs:
           unzip -q /tmp/sentrix-platform-p0.zip -d /tmp/platform-src
           cat tools/platform_p1/overlay.part*.b64 | base64 --decode > /tmp/sentrix-platform-p1-overlay.zip
           unzip -oq /tmp/sentrix-platform-p1-overlay.zip -d /tmp/platform-src/sentrix-platform
-          cat tools/platform_p1/hotfix*.b64 | base64 --decode > /tmp/sentrix-platform-p1-hotfix.zip
+          cat tools/platform_p1/hotfix01.part*.b64 | base64 --decode > /tmp/sentrix-platform-p1-hotfix.zip
           unzip -oq /tmp/sentrix-platform-p1-hotfix.zip -d /tmp/platform-src/sentrix-platform
           chmod +x /tmp/platform-src/sentrix-platform/ops/ci/*.sh /tmp/platform-src/sentrix-platform/ops/execution/*.sh
       - name: Installer les dependances Python minimales
