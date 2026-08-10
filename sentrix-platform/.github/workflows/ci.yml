@@ -1,0 +1,130 @@
+name: P0 Security Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PGHOST: localhost
+  PGPORT: "5432"
+  SUPERUSER_URL: postgresql://postgres:postgres@localhost:5432/sentrix_test
+  MIGRATIONS_DATABASE_URL: postgresql://sentrix_migrator:migrator_dev_only@localhost:5432/sentrix_test
+  TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sentrix_test
+
+jobs:
+  security-gate:
+    name: P0 Security Gate
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentrix_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer le client PostgreSQL
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Attendre PostgreSQL
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -p 5432 -U postgres && exit 0
+            sleep 2
+          done
+          echo "PostgreSQL indisponible" >&2
+          exit 1
+
+      - name: Installer les dependances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # ---------------------------------------------------------------- roles
+      - name: Creer les roles (ops/bootstrap/roles.sql)
+        env:
+          PGPASSWORD: postgres
+        run: psql "$SUPERUSER_URL" -v ON_ERROR_STOP=1 -f ops/bootstrap/roles.sql
+
+      - name: Accorder CREATE sur le schema au migrator
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # Depuis PostgreSQL 15, le schema public n'accorde plus CREATE a PUBLIC :
+          # sans ce GRANT, les migrations echouent en 42501.
+          psql "$SUPERUSER_URL" -v ON_ERROR_STOP=1 \
+            -c "GRANT CREATE, USAGE ON SCHEMA public TO sentrix_migrator;" \
+            -c "GRANT USAGE ON SCHEMA public TO sentrix_app;"
+
+      - name: Verifier que sentrix_app n'a PAS BYPASSRLS
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # Garde-fou independant de la suite de tests : si ce role gagnait
+          # BYPASSRLS, toutes les attaques passeraient sans rien prouver.
+          result=$(psql "$SUPERUSER_URL" -tAc \
+            "SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname='sentrix_app'")
+          echo "sentrix_app privilegie : $result"
+          test "$result" = "f" || { echo "sentrix_app est privilegie" >&2; exit 1; }
+
+      # ----------------------------------------------------------- migrations
+      - name: Appliquer les migrations
+        run: python -m libs.db.migrate
+
+      - name: Verifier l'idempotence des migrations
+        run: |
+          # Un second passage ne doit rien appliquer et ne doit pas signaler de
+          # derive de checksum.
+          output=$(python -m libs.db.migrate)
+          echo "$output"
+          echo "$output" | grep -q "deja a jour" || {
+            echo "les migrations ne sont pas idempotentes" >&2; exit 1; }
+
+      # ------------------------------------------------ LE GATE : 12 attaques
+      - name: "GATE : 12 attaques cross-tenant"
+        run: pytest tests/security -v -m security --tb=short --strict-markers
+
+      - name: Tests unitaires et d'integration
+        run: pytest tests/unit tests/integration -v --tb=short
+
+      # ---------------------------------------------------------- qualite
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+      - name: mypy
+        run: mypy libs services
+
+      - name: Recapitulatif
+        if: always()
+        run: |
+          echo "### P0 Security Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- PostgreSQL 16, role applicatif sans BYPASSRLS" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Migrations appliquees et idempotentes" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 12 attaques cross-tenant" >> "$GITHUB_STEP_SUMMARY"
+          echo "- ruff + mypy strict" >> "$GITHUB_STEP_SUMMARY"
