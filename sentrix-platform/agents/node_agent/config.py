@@ -21,7 +21,7 @@ class AgentConfig:
     control_plane_cidrs: tuple[str, ...] = ()
 
     @classmethod
-    def from_env(cls) -> "AgentConfig":
+    def from_env(cls) -> AgentConfig:
         token = os.environ["SENTRIX_NODE_TOKEN"]
         if len(token) < 16:
             raise RuntimeError("SENTRIX_NODE_TOKEN doit contenir au moins 16 caracteres")
@@ -37,7 +37,9 @@ class AgentConfig:
             control_plane_url=os.environ["SENTRIX_CONTROL_PLANE_URL"].rstrip("/"),
             node_id=UUID(os.environ["SENTRIX_NODE_ID"]),
             node_token=token,
-            cache_path=Path(os.environ.get("SENTRIX_AGENT_CACHE", "/var/lib/sentrix-agent/desired.json")),
+            cache_path=Path(
+                os.environ.get("SENTRIX_AGENT_CACHE", "/var/lib/sentrix-agent/desired.json")
+            ),
             poll_seconds=float(os.environ.get("SENTRIX_AGENT_POLL_SECONDS", "5")),
             docker_bin=os.environ.get("SENTRIX_DOCKER_BIN", "docker"),
             runtime=runtime,

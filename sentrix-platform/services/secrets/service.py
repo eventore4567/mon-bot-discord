@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from services.secrets.crypto import EnvelopeCipher, SecretEnvelope
@@ -35,7 +35,9 @@ class SecretService:
     values: dict[tuple[str, str], StoredSecret] = field(default_factory=dict)
     audit: list[dict[str, object]] = field(default_factory=list)
 
-    def put(self, environment_id: str, name: str, plaintext: bytes, *, provider: str) -> StoredSecret:
+    def put(
+        self, environment_id: str, name: str, plaintext: bytes, *, provider: str
+    ) -> StoredSecret:
         if provider not in {"tmpfs_file", "env"}:
             raise ValueError("unknown secret provider")
         if not plaintext:
@@ -46,18 +48,27 @@ class SecretService:
         fingerprint = hashlib.sha256(plaintext).hexdigest()[:16]
         stored = StoredSecret(environment_id, name, envelope, fingerprint, provider)
         self.values[(environment_id, name)] = stored
-        self.audit.append({"action": "secret.put", "environment_id": environment_id, "name": name, "version": version})
+        self.audit.append(
+            {
+                "action": "secret.put",
+                "environment_id": environment_id,
+                "name": name,
+                "version": version,
+            }
+        )
         return stored
 
     def materialize(self, environment_id: str, name: str, *, actor: str) -> bytes:
         stored = self.values[(environment_id, name)]
-        self.audit.append({
-            "action": "secret.access",
-            "environment_id": environment_id,
-            "name": name,
-            "version": stored.envelope.version,
-            "actor": actor,
-        })
+        self.audit.append(
+            {
+                "action": "secret.access",
+                "environment_id": environment_id,
+                "name": name,
+                "version": stored.envelope.version,
+                "actor": actor,
+            }
+        )
         return self.cipher.decrypt(stored.envelope, environment_id=environment_id)
 
 

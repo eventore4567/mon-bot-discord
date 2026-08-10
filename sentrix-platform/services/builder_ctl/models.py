@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,7 +15,9 @@ class BuildRequest:
 
     @property
     def cache_key(self) -> str:
-        payload = "\0".join((self.repository, self.commit_sha, self.builder_image, *self.build_args))
+        payload = "\0".join(
+            (self.repository, self.commit_sha, self.builder_image, *self.build_args)
+        )
         return hashlib.sha256(payload.encode()).hexdigest()
 
 

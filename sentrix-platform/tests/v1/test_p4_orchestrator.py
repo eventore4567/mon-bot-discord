@@ -4,7 +4,12 @@ import pytest
 
 from services.orchestrator.command_sync import needs_sync
 from services.orchestrator.engine import DeploymentEngine, DeploymentHooks
-from services.orchestrator.store import Deployment, DeploymentStatus, MemoryWorkflowStore, StaleFencingToken
+from services.orchestrator.store import (
+    Deployment,
+    DeploymentStatus,
+    MemoryWorkflowStore,
+    StaleFencingToken,
+)
 from services.scheduler.planner import plan_for
 
 
@@ -24,7 +29,9 @@ class Hooks:
 
 
 def dep(identifier: str = "d1") -> Deployment:
-    return Deployment(identifier, "env", "release-new", "release-old", active_release_id="release-old")
+    return Deployment(
+        identifier, "env", "release-new", "release-old", active_release_id="release-old"
+    )
 
 
 def test_broken_release_auto_rolls_back_without_intervention() -> None:

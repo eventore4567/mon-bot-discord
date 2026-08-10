@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import hmac
+from dataclasses import dataclass, field
 from typing import Protocol
 
 

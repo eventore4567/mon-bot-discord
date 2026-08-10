@@ -108,9 +108,7 @@ def test_tenant_context_is_centralised_in_libs_db() -> None:
             if ANY_TENANT_GUC.search(text):
                 offenders.append(f"{path.relative_to(ROOT)}:{lineno}")
 
-    assert not offenders, (
-        f"app.current_org reference hors de libs/db : {offenders}"
-    )
+    assert not offenders, f"app.current_org reference hors de libs/db : {offenders}"
 
 
 def test_libs_db_uses_set_config_not_set_local() -> None:
@@ -155,9 +153,7 @@ def test_rls_context_helper_fails_closed_on_missing_or_empty_guc() -> None:
 
 
 def test_discord_application_uniqueness_applies_only_after_verification() -> None:
-    migration = (ROOT / "migrations" / "0004_bots_environments.sql").read_text(
-        encoding="utf-8"
-    )
+    migration = (ROOT / "migrations" / "0004_bots_environments.sql").read_text(encoding="utf-8")
     assert "environments_discord_app_verified_uniq" in migration
     assert "discord_application_verified_at IS NOT NULL" in migration
     assert "WHERE discord_application_id IS NOT NULL" in migration

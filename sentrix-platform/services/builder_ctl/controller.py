@@ -52,7 +52,11 @@ def sanitized_build_environment(extra: dict[str, str] | None = None) -> dict[str
     }
     if extra:
         for key, value in extra.items():
-            if key.startswith(("SENTRIX_", "DISCORD_")) or key in {"DATABASE_URL", "REDIS_URL", "GITHUB_TOKEN"}:
+            if key.startswith(("SENTRIX_", "DISCORD_")) or key in {
+                "DATABASE_URL",
+                "REDIS_URL",
+                "GITHUB_TOKEN",
+            }:
                 raise ValueError(f"forbidden build environment key: {key}")
             env[key] = value
     return env

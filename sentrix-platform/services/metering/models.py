@@ -14,5 +14,8 @@ class UsageSample:
     log_bytes: int
 
     def validate(self) -> None:
-        if min(self.ts_ms, self.cpu_millis, self.memory_bytes, self.egress_bytes, self.log_bytes) < 0:
+        if (
+            min(self.ts_ms, self.cpu_millis, self.memory_bytes, self.egress_bytes, self.log_bytes)
+            < 0
+        ):
             raise ValueError("usage samples cannot contain negative counters")

@@ -51,7 +51,9 @@ class MemoryWorkflowStore:
     effects: set[tuple[str, str]] = field(default_factory=set)
     attempts: list[tuple[str, str, int, str]] = field(default_factory=list)
 
-    def acquire(self, deployment_id: str, worker: str, now: float, ttl: float = 15.0) -> Lease | None:
+    def acquire(
+        self, deployment_id: str, worker: str, now: float, ttl: float = 15.0
+    ) -> Lease | None:
         current = self.leases.get(deployment_id)
         if current and current.expires_at > now and current.owner != worker:
             return None
@@ -64,13 +66,19 @@ class MemoryWorkflowStore:
         self.leases[deployment_id] = lease
         return lease
 
-    def renew(self, deployment_id: str, worker: str, token: int, now: float, ttl: float = 15.0) -> None:
+    def renew(
+        self, deployment_id: str, worker: str, token: int, now: float, ttl: float = 15.0
+    ) -> None:
         self.assert_fence(deployment_id, token, worker)
         self.leases[deployment_id].expires_at = now + ttl
 
     def assert_fence(self, deployment_id: str, token: int, worker: str | None = None) -> None:
         current = self.leases.get(deployment_id)
-        if current is None or current.fencing_token != token or (worker is not None and current.owner != worker):
+        if (
+            current is None
+            or current.fencing_token != token
+            or (worker is not None and current.owner != worker)
+        ):
             raise StaleFencingToken("stale deployment fencing token")
 
     def once(self, deployment_id: str, token: int, key: str, fn: object) -> bool:

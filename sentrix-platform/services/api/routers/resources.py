@@ -169,9 +169,7 @@ async def get_bot(
 # ---------------------------------------------------------------------- environnements
 
 
-@router.post(
-    "/environments", response_model=EnvironmentOut, status_code=status.HTTP_201_CREATED
-)
+@router.post("/environments", response_model=EnvironmentOut, status_code=status.HTTP_201_CREATED)
 async def create_environment(
     payload: EnvironmentCreate,
     request: Request,

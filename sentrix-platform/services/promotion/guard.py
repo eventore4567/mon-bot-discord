@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 _DESTRUCTIVE_SQL = re.compile(
     r"\b(?:DROP\s+(?:TABLE|COLUMN|CONSTRAINT|TYPE)|ALTER\s+(?:TABLE\s+\S+\s+)?COLUMN\s+\S+\s+TYPE|TRUNCATE\s+TABLE)\b",
@@ -51,5 +51,7 @@ def decide_promotion(
     if canary.observed_until - canary.started_at < bake_seconds:
         return PromotionDecision(False, "canary bake time incomplete")
     if contains_destructive_migration(migration_sql) and not human_confirmed_destructive:
-        return PromotionDecision(False, "destructive migration requires explicit human confirmation", True)
+        return PromotionDecision(
+            False, "destructive migration requires explicit human confirmation", True
+        )
     return PromotionDecision(True, "promotion gates passed")

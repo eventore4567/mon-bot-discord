@@ -8,7 +8,7 @@ import logging
 from agents.node_agent.cache import DesiredCache
 from agents.node_agent.client import ControlPlaneClient
 from agents.node_agent.docker_runtime import DockerRuntime
-from libs.runtime_models import AgentDesiredInstance, AgentObservedInstance
+from libs.runtime_models import AgentObservedInstance
 
 log = logging.getLogger("sentrix.node-agent")
 

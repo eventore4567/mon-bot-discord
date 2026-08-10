@@ -22,7 +22,7 @@ async def main() -> None:
     # import discord and construct the user's Client/Bot here.
     # token_path is the recommended tmpfs_file provider.
     token_path = os.environ.get("SENTRIX_DISCORD_TOKEN_FILE", "/run/secrets/discord_token")
-    with open(token_path, "r", encoding="utf-8") as handle:
+    with open(token_path, encoding="utf-8") as handle:
         token = handle.read().strip()
     if not token:
         raise RuntimeError("empty Discord token")

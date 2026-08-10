@@ -3,15 +3,19 @@ from __future__ import annotations
 import pytest
 
 from libs.managed_runtime import GatewayIdentifyGate
-from services.identify_broker.broker import BucketCoolingDown, BudgetUnavailable, IdentifyBroker
 from services.identify_broker.breaker import CircuitBreaker
+from services.identify_broker.broker import BucketCoolingDown, BudgetUnavailable, IdentifyBroker
 from services.identify_broker.model import IdentifyBudget, ReservationState
 from services.identify_broker.store import MemoryIdentifyStore
 
 
-def broker_for(*, remaining: int = 20, max_concurrency: int = 1, failures: int = 5) -> IdentifyBroker:
+def broker_for(
+    *, remaining: int = 20, max_concurrency: int = 1, failures: int = 5
+) -> IdentifyBroker:
     store = MemoryIdentifyStore()
-    store.budgets["app"] = IdentifyBudget("app", 1000, remaining, 60_000, max_concurrency, rollback_reserve=2, floor=3)
+    store.budgets["app"] = IdentifyBudget(
+        "app", 1000, remaining, 60_000, max_concurrency, rollback_reserve=2, floor=3
+    )
     broker = IdentifyBroker(store)
     broker.breakers["app"] = CircuitBreaker(max_failures=failures, base_backoff_seconds=1)
     return broker

@@ -6,7 +6,9 @@ from typing import Any
 
 
 def command_schema_hash(commands: list[dict[str, Any]]) -> str:
-    canonical = json.dumps(commands, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    canonical = json.dumps(
+        commands, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode()
     return hashlib.sha256(canonical).hexdigest()
 
 

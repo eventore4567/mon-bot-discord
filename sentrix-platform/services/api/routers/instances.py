@@ -11,7 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from libs import audit
 from libs.ids import uuid7
-from libs.runtime_models import InstanceCreate, InstanceDesiredUpdate, InstanceOut, InstanceStatusOut
+from libs.runtime_models import (
+    InstanceCreate,
+    InstanceDesiredUpdate,
+    InstanceOut,
+    InstanceStatusOut,
+)
 from services.api.deps import AppState, OrgContext, get_state, map_pg_error, require_org
 
 router = APIRouter(prefix="/v1/orgs/{org_id}", tags=["instances"])
@@ -131,7 +136,9 @@ async def get_instance_status(
     state: Annotated[AppState, Depends(get_state)],
 ) -> InstanceStatusOut:
     async with state.db.tenant_tx(ctx.org_id) as conn:
-        row = await conn.fetchrow("SELECT * FROM instance_status WHERE instance_id = $1", instance_id)
+        row = await conn.fetchrow(
+            "SELECT * FROM instance_status WHERE instance_id = $1", instance_id
+        )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "statut indisponible")
     return InstanceStatusOut.model_validate(dict(row))

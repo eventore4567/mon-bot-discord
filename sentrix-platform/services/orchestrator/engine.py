@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from services.orchestrator.store import Deployment, DeploymentStatus, MemoryWorkflowStore
 
@@ -44,20 +44,28 @@ class DeploymentEngine:
             step = _STEPS[dep.step_index]
             try:
                 if step == "test":
-                    self.store.once(dep.id, lease.fencing_token, "test", lambda: self.hooks.test(dep))
+                    self.store.once(
+                        dep.id, lease.fencing_token, "test", lambda: self.hooks.test(dep)
+                    )
                 elif step == "prewarm":
-                    self.store.once(dep.id, lease.fencing_token, "prewarm", lambda: self.hooks.prewarm(dep))
+                    self.store.once(
+                        dep.id, lease.fencing_token, "prewarm", lambda: self.hooks.prewarm(dep)
+                    )
                 elif step == "handover":
+
                     def do_handover() -> None:
                         self.hooks.handover(dep)
                         dep.active_release_id = dep.release_id
+
                     self.store.once(dep.id, lease.fencing_token, "handover", do_handover)
                 elif step == "health":
                     healthy = self.hooks.health(dep)
                     if not healthy:
+
                         def do_rollback() -> None:
                             self.hooks.rollback(dep)
                             dep.active_release_id = dep.previous_release_id
+
                         self.store.once(dep.id, lease.fencing_token, "rollback", do_rollback)
                         dep.status = DeploymentStatus.ROLLED_BACK
                         dep.error = "health window failed"
@@ -69,9 +77,11 @@ class DeploymentEngine:
             except Exception as exc:
                 # A failure before handover leaves the previous release active.
                 if dep.active_release_id == dep.release_id and dep.previous_release_id is not None:
+
                     def do_rollback_error() -> None:
                         self.hooks.rollback(dep)
                         dep.active_release_id = dep.previous_release_id
+
                     self.store.once(dep.id, lease.fencing_token, "rollback", do_rollback_error)
                     dep.status = DeploymentStatus.ROLLED_BACK
                 else:

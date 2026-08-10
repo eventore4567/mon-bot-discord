@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import base64
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from urllib.parse import quote
 
 import pytest
@@ -14,7 +14,12 @@ from services.log_ingest.quota import OrgLogQuota
 from services.log_ingest.redaction import SecretRedactor
 from services.metering.models import UsageSample
 from services.secrets.crypto import EnvelopeCipher, LocalAesKms
-from services.secrets.service import SecretService, TmpfsSecretSpec, provider_exposure, write_tmpfs_secret
+from services.secrets.service import (
+    SecretService,
+    TmpfsSecretSpec,
+    provider_exposure,
+    write_tmpfs_secret,
+)
 
 
 def service() -> SecretService:
@@ -46,7 +51,9 @@ def test_rotation_increments_version_without_reexposing_value() -> None:
 def test_tmpfs_file_has_owner_only_permissions_and_no_env_contract() -> None:
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
-        path = write_tmpfs_secret(root, TmpfsSecretSpec("/run/secrets/discord_token"), b"abc123-secret")
+        path = write_tmpfs_secret(
+            root, TmpfsSecretSpec("/run/secrets/discord_token"), b"abc123-secret"
+        )
         assert path.read_bytes() == b"abc123-secret"
         assert os.stat(path).st_mode & 0o777 == 0o400
     assert provider_exposure("tmpfs_file").startswith("low:")

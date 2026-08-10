@@ -8,18 +8,30 @@ from services.promotion.guard import CanaryResult, contains_destructive_migratio
 
 
 def canary(*, healthy: bool = True, app: str = "canary-app", duration: float = 120) -> CanaryResult:
-    return CanaryResult(healthy=healthy, started_at=10, observed_until=10 + duration, application_id=app)
+    return CanaryResult(
+        healthy=healthy, started_at=10, observed_until=10 + duration, application_id=app
+    )
 
 
 def test_canary_requires_distinct_discord_application_and_full_bake() -> None:
-    assert not decide_promotion(prod_application_id="prod", canary=canary(app="prod"), bake_seconds=60).allowed
-    assert not decide_promotion(prod_application_id="prod", canary=canary(healthy=False), bake_seconds=60).allowed
-    assert not decide_promotion(prod_application_id="prod", canary=canary(duration=59), bake_seconds=60).allowed
-    assert decide_promotion(prod_application_id="prod", canary=canary(duration=60), bake_seconds=60).allowed
+    assert not decide_promotion(
+        prod_application_id="prod", canary=canary(app="prod"), bake_seconds=60
+    ).allowed
+    assert not decide_promotion(
+        prod_application_id="prod", canary=canary(healthy=False), bake_seconds=60
+    ).allowed
+    assert not decide_promotion(
+        prod_application_id="prod", canary=canary(duration=59), bake_seconds=60
+    ).allowed
+    assert decide_promotion(
+        prod_application_id="prod", canary=canary(duration=60), bake_seconds=60
+    ).allowed
 
 
 def test_red_canary_never_promotes() -> None:
-    decision = decide_promotion(prod_application_id="prod", canary=canary(healthy=False), bake_seconds=0)
+    decision = decide_promotion(
+        prod_application_id="prod", canary=canary(healthy=False), bake_seconds=0
+    )
     assert decision.allowed is False
     assert "unhealthy" in decision.reason
 
@@ -27,7 +39,9 @@ def test_red_canary_never_promotes() -> None:
 def test_destructive_schema_blocks_without_explicit_human_confirmation() -> None:
     sql = "ALTER TABLE users DROP COLUMN legacy_field;"
     assert contains_destructive_migration(sql)
-    blocked = decide_promotion(prod_application_id="prod", canary=canary(), bake_seconds=60, migration_sql=sql)
+    blocked = decide_promotion(
+        prod_application_id="prod", canary=canary(), bake_seconds=60, migration_sql=sql
+    )
     assert not blocked.allowed and blocked.requires_human_confirmation
     allowed = decide_promotion(
         prod_application_id="prod",

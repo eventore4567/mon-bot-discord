@@ -53,12 +53,20 @@ class FakeRuntime:
 @pytest.mark.asyncio
 async def test_control_plane_outage_reuses_cache(tmp_path: Path) -> None:
     spec = AgentDesiredInstance(
-        instance_id=uuid4(), desired_state="running", image_ref="img", command=[],
-        cpu_millis=100, memory_mb=64, pids_limit=32, generation=1,
+        instance_id=uuid4(),
+        desired_state="running",
+        image_ref="img",
+        command=[],
+        cpu_millis=100,
+        memory_mb=64,
+        pids_limit=32,
+        generation=1,
     )
     client = FakeClient([spec])
     runtime = FakeRuntime()
-    reconciler = Reconciler(client, runtime, DesiredCache(tmp_path / "cache.json"), poll_seconds=0.01)  # type: ignore[arg-type]
+    reconciler = Reconciler(
+        client, runtime, DesiredCache(tmp_path / "cache.json"), poll_seconds=0.01
+    )  # type: ignore[arg-type]
 
     fresh, _ = await reconciler.reconcile_once()
     assert fresh is True

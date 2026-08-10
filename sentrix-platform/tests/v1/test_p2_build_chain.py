@@ -3,13 +3,19 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import pytest
 
 from libs.release_identity import ReleaseIdentity, hash_config
-from services.builder_ctl.controller import BuildRejected, BuildCache, cache_lookup, preflight_source, sanitized_build_environment
+from services.builder_ctl.controller import (
+    BuildCache,
+    BuildRejected,
+    cache_lookup,
+    preflight_source,
+    sanitized_build_environment,
+)
 from services.builder_ctl.models import BuildRequest, BuildSandboxSpec
 from services.builder_ctl.sandbox import docker_command
 from services.webhook_gw.security import MemoryDeliveryDeduper, WebhookAuthError
@@ -19,25 +25,45 @@ from services.webhook_gw.service import accept_push
 @pytest.mark.asyncio
 async def test_webhook_hmac_and_delivery_dedup() -> None:
     secret = b"webhook-secret"
-    body = json.dumps({
-        "repository": {"full_name": "owner/repo"},
-        "after": "a" * 40,
-        "ref": "refs/heads/main",
-    }).encode()
+    body = json.dumps(
+        {
+            "repository": {"full_name": "owner/repo"},
+            "after": "a" * 40,
+            "ref": "refs/heads/main",
+        }
+    ).encode()
     sig = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
     deduper = MemoryDeliveryDeduper()
-    first = await accept_push(body=body, signature=sig, delivery_id="d-1", webhook_secret=secret, deduper=deduper)
+    first = await accept_push(
+        body=body, signature=sig, delivery_id="d-1", webhook_secret=secret, deduper=deduper
+    )
     assert first is not None and first.commit_sha == "a" * 40
-    assert await accept_push(body=body, signature=sig, delivery_id="d-1", webhook_secret=secret, deduper=deduper) is None
-    assert await accept_push(body=body, signature=sig, delivery_id="d-1", webhook_secret=secret, deduper=deduper) is None
+    assert (
+        await accept_push(
+            body=body, signature=sig, delivery_id="d-1", webhook_secret=secret, deduper=deduper
+        )
+        is None
+    )
+    assert (
+        await accept_push(
+            body=body, signature=sig, delivery_id="d-1", webhook_secret=secret, deduper=deduper
+        )
+        is None
+    )
     with pytest.raises(WebhookAuthError):
-        await accept_push(body=body, signature="sha256=00", delivery_id="d-2", webhook_secret=secret, deduper=deduper)
+        await accept_push(
+            body=body,
+            signature="sha256=00",
+            delivery_id="d-2",
+            webhook_secret=secret,
+            deduper=deduper,
+        )
 
 
 def test_source_scanner_rejects_hardcoded_discord_token_before_build() -> None:
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
-        (root / "bot.py").write_text('DISCORD_TOKEN="M' + 'A' * 23 + '.AAAAAA.' + 'B' * 30 + '"')
+        (root / "bot.py").write_text('DISCORD_TOKEN="M' + "A" * 23 + ".AAAAAA." + "B" * 30 + '"')
         with pytest.raises(BuildRejected):
             preflight_source(root)
 

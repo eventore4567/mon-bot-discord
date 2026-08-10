@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 # Discord bot tokens have changed shape over time. The scanner intentionally
 # favors false positives: a rejected build is safer than shipping a live token.
 _TOKEN_PATTERNS = (
-    re.compile(rb"(?<![A-Za-z0-9_-])[MN][A-Za-z0-9_-]{20,30}\.[A-Za-z0-9_-]{5,8}\.[A-Za-z0-9_-]{25,80}(?![A-Za-z0-9_-])"),
-    re.compile(rb"(?i)(?:discord[_-]?token|bot[_-]?token|DISCORD_TOKEN)\s*[:=]\s*['\"]?[A-Za-z0-9_.-]{40,}"),
+    re.compile(
+        rb"(?<![A-Za-z0-9_-])[MN][A-Za-z0-9_-]{20,30}\.[A-Za-z0-9_-]{5,8}\.[A-Za-z0-9_-]{25,80}(?![A-Za-z0-9_-])"
+    ),
+    re.compile(
+        rb"(?i)(?:discord[_-]?token|bot[_-]?token|DISCORD_TOKEN)\s*[:=]\s*['\"]?[A-Za-z0-9_.-]{40,}"
+    ),
 )
 
 

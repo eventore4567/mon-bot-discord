@@ -6,9 +6,9 @@ an opcode 2 may be sent. A crash in between safely over-counts by one.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import time
 import uuid
+from dataclasses import dataclass, field
 
 from services.identify_broker.breaker import CircuitBreaker
 from services.identify_broker.model import Reservation, ReservationState

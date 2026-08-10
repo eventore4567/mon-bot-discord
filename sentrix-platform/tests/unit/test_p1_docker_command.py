@@ -24,12 +24,14 @@ class FakeRunner:
             self.inspect_id = "cid-new"
             return "cid-new"
         if len(args) >= 2 and args[1] == "inspect":
-            return json.dumps([
-                {
-                    "State": {"Running": True, "ExitCode": 0},
-                    "Config": {"Labels": {"sentrix.generation": "4"}},
-                }
-            ])
+            return json.dumps(
+                [
+                    {
+                        "State": {"Running": True, "ExitCode": 0},
+                        "Config": {"Labels": {"sentrix.generation": "4"}},
+                    }
+                ]
+            )
         return ""
 
 

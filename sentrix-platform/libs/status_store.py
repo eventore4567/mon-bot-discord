@@ -13,7 +13,9 @@ from uuid import UUID
 
 
 class StatusStore(Protocol):
-    async def heartbeat(self, node_id: UUID, payload: dict[str, object], *, ttl: int = 30) -> None: ...
+    async def heartbeat(
+        self, node_id: UUID, payload: dict[str, object], *, ttl: int = 30
+    ) -> None: ...
 
     async def close(self) -> None: ...
 

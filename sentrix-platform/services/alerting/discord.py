@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 _ALLOWED = {"crash", "deployment_failed", "identify_breaker", "identify_budget_low", "log_quota"}
 
 
@@ -19,13 +18,19 @@ class Alert:
         if self.kind not in _ALLOWED:
             raise ValueError("unsupported alert kind")
         return {
-            "embeds": [{
-                "title": self.title[:256],
-                "description": self.detail[:4000],
-                "fields": [
-                    {"name": "Type", "value": self.kind, "inline": True},
-                    {"name": "Environment", "value": self.environment_id[:1024], "inline": True},
-                ],
-            }],
+            "embeds": [
+                {
+                    "title": self.title[:256],
+                    "description": self.detail[:4000],
+                    "fields": [
+                        {"name": "Type", "value": self.kind, "inline": True},
+                        {
+                            "name": "Environment",
+                            "value": self.environment_id[:1024],
+                            "inline": True,
+                        },
+                    ],
+                }
+            ],
             "allowed_mentions": {"parse": []},
         }

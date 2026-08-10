@@ -7,8 +7,8 @@ stores a plaintext DEK inside a SecretEnvelope.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from typing import Protocol
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM

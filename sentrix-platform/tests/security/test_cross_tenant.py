@@ -53,7 +53,8 @@ def client_factory(app_db: Database):  # type: ignore[no-untyped-def]
 
 
 async def test_01_read_other_org_project_returns_404(
-    tenants: tuple[Tenant, Tenant], client_factory  # type: ignore[no-untyped-def]
+    tenants: tuple[Tenant, Tenant],
+    client_factory,  # type: ignore[no-untyped-def]
 ) -> None:
     """A lit le projet de B -> 404 (pas 403 : ne pas reveler l'existence)."""
     a, b = tenants
@@ -68,7 +69,8 @@ async def test_01_read_other_org_project_returns_404(
 
 
 async def test_02_create_bot_with_foreign_project_rejected(
-    tenants: tuple[Tenant, Tenant], client_factory  # type: ignore[no-untyped-def]
+    tenants: tuple[Tenant, Tenant],
+    client_factory,  # type: ignore[no-untyped-def]
 ) -> None:
     """A cree un bot pointant vers le projet de B -> rejet (FK composite -> 404)."""
     a, b = tenants
@@ -280,7 +282,8 @@ async def test_10_set_local_does_not_leak_across_transactions(
 
 
 async def test_11_session_replay_on_other_org_rejected(
-    tenants: tuple[Tenant, Tenant], client_factory  # type: ignore[no-untyped-def]
+    tenants: tuple[Tenant, Tenant],
+    client_factory,  # type: ignore[no-untyped-def]
 ) -> None:
     """Le jeton de A, rejoue sur une ressource de B, est rejete (404)."""
     a, b = tenants
@@ -293,9 +296,7 @@ async def test_11_session_replay_on_other_org_rejected(
             response = await client.get(path)
             assert response.status_code == 404, path
 
-        response = await client.post(
-            f"/v1/orgs/{b.org_id}/projects", json={"name": "intrusion"}
-        )
+        response = await client.post(f"/v1/orgs/{b.org_id}/projects", json={"name": "intrusion"})
         assert response.status_code == 404
 
 

@@ -163,7 +163,11 @@ class DockerRuntime:
 
     async def start(self, spec: AgentDesiredInstance) -> ContainerObservation:
         current = await self.observe(spec.instance_id)
-        if current.container_id and current.state == "running" and current.generation == spec.generation:
+        if (
+            current.container_id
+            and current.state == "running"
+            and current.generation == spec.generation
+        ):
             return current
         if current.container_id:
             await self.runner.run(self.docker, "rm", "-f", current.container_id, check=False)
@@ -242,7 +246,9 @@ class DockerRuntime:
         return result
 
     @staticmethod
-    def to_report(observation: ContainerObservation, *, detail: str | None = None) -> AgentObservedInstance:
+    def to_report(
+        observation: ContainerObservation, *, detail: str | None = None
+    ) -> AgentObservedInstance:
         running = observation.state == "running"
         return AgentObservedInstance(
             instance_id=observation.instance_id,

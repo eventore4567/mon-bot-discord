@@ -32,7 +32,8 @@ def client_factory(app_db: Database):  # type: ignore[no-untyped-def]
 
 
 async def test_full_crud_flow(
-    tenants: tuple[Tenant, Tenant], client_factory  # type: ignore[no-untyped-def]
+    tenants: tuple[Tenant, Tenant],
+    client_factory,  # type: ignore[no-untyped-def]
 ) -> None:
     a, _ = tenants
     async with client_factory(a.user_id) as client:
@@ -102,9 +103,7 @@ async def test_failed_mutation_leaves_no_audit_entry(
 ) -> None:
     """Une mutation annulee n'ecrit pas d'audit : meme transaction, meme sort."""
     a, b = tenants
-    before = await admin_conn.fetchval(
-        "SELECT count(*) FROM audit_log WHERE org_id = $1", a.org_id
-    )
+    before = await admin_conn.fetchval("SELECT count(*) FROM audit_log WHERE org_id = $1", a.org_id)
 
     async with client_factory(a.user_id) as client:
         response = await client.post(
@@ -113,9 +112,7 @@ async def test_failed_mutation_leaves_no_audit_entry(
         )
         assert response.status_code == 404
 
-    after = await admin_conn.fetchval(
-        "SELECT count(*) FROM audit_log WHERE org_id = $1", a.org_id
-    )
+    after = await admin_conn.fetchval("SELECT count(*) FROM audit_log WHERE org_id = $1", a.org_id)
     assert after == before
 
 
@@ -126,9 +123,7 @@ async def test_unauthenticated_request_rejected(app_db: Database) -> None:
         assert response.status_code == 401
 
 
-async def test_tampered_session_rejected(
-    tenants: tuple[Tenant, Tenant], app_db: Database
-) -> None:
+async def test_tampered_session_rejected(tenants: tuple[Tenant, Tenant], app_db: Database) -> None:
     a, _ = tenants
     codec = SessionCodec(SESSION_SECRET)
     app = create_app(db=app_db, sessions=codec)

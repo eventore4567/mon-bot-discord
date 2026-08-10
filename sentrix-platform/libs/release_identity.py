@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import re
+from dataclasses import dataclass
 
 _SHA256 = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 
