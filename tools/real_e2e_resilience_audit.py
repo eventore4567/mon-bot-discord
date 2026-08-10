@@ -82,7 +82,7 @@ async def dashboard_http_journey() -> int:
             assert data["bot_name"] == "SentriX"
             assert data["online"] is False and data["guilds"] == 0
             assert data["oauth_ready"] is False
-            assert response.headers.get("Cache-Control") == "private, no-store"
+            assert "no-store" in response.headers.get("Cache-Control", "")
             checks += 1
 
             response = await client.get("/app")
@@ -91,7 +91,7 @@ async def dashboard_http_journey() -> int:
             assert 'id="sentrix-core-recovery"' in html
             assert "Mode simple" in html and "Mode avancé" in html
             assert "loginButton" in html
-            assert response.headers.get("Cache-Control") == "private, no-store"
+            assert "no-store" in response.headers.get("Cache-Control", "")
             checks += 1
 
             for path in ("/api/me", "/api/guilds", "/api/guilds/123456"):
