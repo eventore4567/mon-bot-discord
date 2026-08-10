@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import pathlib
+import sys
 import traceback
 
-from tools import user_acceptance_audit
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def github_escape(value: str) -> str:
@@ -13,6 +17,7 @@ def github_escape(value: str) -> str:
 
 if __name__ == "__main__":
     try:
+        from tools import user_acceptance_audit
         asyncio.run(user_acceptance_audit.main_audit())
     except Exception as exc:
         traceback.print_exc()
