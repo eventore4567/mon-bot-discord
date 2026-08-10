@@ -119,6 +119,7 @@ jobs:
       - name: Ruff
         working-directory: /tmp/platform-src/sentrix-platform
         run: |
+          ruff format .
           ruff check .
           ruff format --check .
 
