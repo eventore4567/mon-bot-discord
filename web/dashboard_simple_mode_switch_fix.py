@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 
+from . import dashboard_button_feedback
+
 logger = logging.getLogger("bot.dashboard.simple-mode-switch-fix")
 _INSTALLED = False
 
@@ -184,5 +186,9 @@ def install(dashboard) -> None:
             html = html.replace("</head>", SWITCH_CSS + "\n</head>", 1)
         html = html.replace("</body>", SWITCH_JS + "\n</body>", 1)
         dashboard.INDEX_HTML = html
+
+    # Micro-interaction globale : léger zoom/relief au survol, compression au clic et
+    # petit son synthétique après le premier geste utilisateur (restriction navigateur).
+    dashboard_button_feedback.install(dashboard)
 
     logger.info("Bascule Mode simple / Mode avancé du dashboard renforcée sans boucle DOM.")
