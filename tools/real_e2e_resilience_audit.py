@@ -299,7 +299,8 @@ async def full_runtime_journey(folder: pathlib.Path) -> int:
     metrics = await runtime_journey(str(folder / "real-e2e-runtime.db"))
     assert int(metrics["extensions"]) > 0
     assert int(metrics["commands"]) > 0
-    assert int(metrics["slash_roots"]) <= 95
+    # La surface V3 utilise volontairement le plafond Discord complet : 100 racines slash.
+    assert int(metrics["slash_roots"]) <= 100
     return 1
 
 
