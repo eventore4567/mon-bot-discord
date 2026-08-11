@@ -33,6 +33,15 @@ if not getattr(commands, "_sentrix_auto_sharded_bootstrap", False):
 
 import main as bot_main
 
+# Extensions complémentaires chargées sur les instances Railway. +drop reste une commande
+# texte uniquement afin de ne consommer aucun emplacement slash supplémentaire.
+if "cogs.drop" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.drop")
+bot_main.CATEGORY_COMMANDS["economie"] = (
+    bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
+)
+bot_main.KNOWN_PERMISSION_COMMANDS = bot_main.KNOWN_PERMISSION_COMMANDS | frozenset({"drop"})
+
 
 logger = logging.getLogger("bot.railway")
 
