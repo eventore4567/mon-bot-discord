@@ -40,6 +40,7 @@ from .poll_ui import install_poll_ui
 from .premium_logs import install as install_premium_logs
 from .premium_logs_v2 import install as install_premium_logs_v2
 from .premium_style_runtime import install as install_premium_style
+from .public_language_choice import install as install_public_language_choice
 from .remove_code_command import install as install_remove_code_command
 from .reply_reference_fix import install as install_reply_reference_fix
 from .rolepanel_display_fix import install as install_rolepanel_display_fix
@@ -130,6 +131,7 @@ async def _install_configuration_critical_patches(bot: commands.Bot) -> None:
     await _run_installer("style setup", install_setup_oxyde_style, bot)
     await _run_installer("nettoyage mobile setup", install_setup_mobile_cleanup, bot)
     await _run_installer("rôle de ping tickets setup", install_ticket_ping_setup, bot)
+    await _run_installer("choix de langue public", install_public_language_choice, bot)
     await _run_installer("moteur de langue setup", install_language_runtime, bot)
     await _run_installer("finaliseur de langue setup", install_language_setup_finalizer, bot)
     logger.info("+setup prioritaire installé immédiatement après le Cog Configuration.")
@@ -212,6 +214,7 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     """Dernières couches, toujours dans le même ordre déterministe."""
     await _run_installer("stabilité transversale", install_stability_runtime, bot, name)
     await _run_installer("aliases techniques", install_common_command_names, bot)
+    await _run_installer("choix de langue public", install_public_language_choice, bot)
     await _run_installer("moteur de langue", install_language_runtime, bot)
     await _run_installer("finaliseur langue setup", install_language_setup_finalizer, bot)
     await _run_installer("style final aide sans emoji", install_help_clean_style, bot)
