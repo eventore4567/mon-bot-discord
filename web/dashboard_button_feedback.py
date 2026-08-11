@@ -8,7 +8,7 @@ logger = logging.getLogger("bot.dashboard.button-feedback")
 
 FEEDBACK_CSS = r"""
 <style id="sentrix-button-feedback-css">
-  button,.btn,a.btn,[role="button"]{
+  button,.btn,a.btn,[role="button"],input[type="submit"],input[type="button"],input[type="reset"]{
     transform-origin:center;
     transition:
       transform .14s cubic-bezier(.2,.8,.2,1),
@@ -20,7 +20,10 @@ FEEDBACK_CSS = r"""
     button:not(:disabled):hover,
     .btn:not([aria-disabled="true"]):hover,
     a.btn:hover,
-    [role="button"]:not([aria-disabled="true"]):hover{
+    [role="button"]:not([aria-disabled="true"]):hover,
+    input[type="submit"]:not(:disabled):hover,
+    input[type="button"]:not(:disabled):hover,
+    input[type="reset"]:not(:disabled):hover{
       transform:translateY(-2px) scale(1.035);
       filter:brightness(1.06);
       box-shadow:0 9px 24px rgba(0,0,0,.22);
@@ -29,14 +32,19 @@ FEEDBACK_CSS = r"""
   button:not(:disabled):active,
   .btn:not([aria-disabled="true"]):active,
   a.btn:active,
-  [role="button"]:not([aria-disabled="true"]):active{
+  [role="button"]:not([aria-disabled="true"]):active,
+  input[type="submit"]:not(:disabled):active,
+  input[type="button"]:not(:disabled):active,
+  input[type="reset"]:not(:disabled):active{
     transform:translateY(0) scale(.975);
     transition-duration:.07s;
   }
   @media (prefers-reduced-motion:reduce){
-    button,.btn,a.btn,[role="button"]{transition:none!important}
+    button,.btn,a.btn,[role="button"],input[type="submit"],input[type="button"],input[type="reset"]{transition:none!important}
     button:hover,.btn:hover,a.btn:hover,[role="button"]:hover,
-    button:active,.btn:active,a.btn:active,[role="button"]:active{transform:none!important}
+    input[type="submit"]:hover,input[type="button"]:hover,input[type="reset"]:hover,
+    button:active,.btn:active,a.btn:active,[role="button"]:active,
+    input[type="submit"]:active,input[type="button"]:active,input[type="reset"]:active{transform:none!important}
   }
 </style>
 """
@@ -49,7 +57,7 @@ FEEDBACK_JS = r"""
   if (window.__sentrixButtonFeedback) return;
   window.__sentrixButtonFeedback = true;
 
-  const interactiveSelector = 'button,.btn,a.btn,[role="button"]';
+  const interactiveSelector = 'button,.btn,a.btn,[role="button"],input[type="submit"],input[type="button"],input[type="reset"]';
   const canHover = window.matchMedia && window.matchMedia('(hover:hover) and (pointer:fine)').matches;
   let audioContext = null;
   let unlocked = false;
