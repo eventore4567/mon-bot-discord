@@ -18,31 +18,51 @@ _BRANDING_INSTALLED = False
 _ORIGINALS: dict[str, Any] = {}
 
 
+def _railway_service_name() -> str:
+    return (os.getenv("RAILWAY_SERVICE_NAME") or "").strip()
+
+
+def _is_odboug_instance() -> bool:
+    explicit = (os.getenv("BOT_BRAND_LABEL") or "").strip().casefold()
+    if explicit:
+        return explicit == "odboug"
+    return "odboug" in _railway_service_name().casefold()
+
+
 def _instance_brand() -> str:
     """Nom affiche dans les embeds pour cette instance uniquement.
 
-    Sans variable Railway, le comportement historique reste strictement SentriX. Une
-    deuxieme instance peut donc partager exactement le meme depot/code tout en utilisant
-    sa propre identite visuelle.
+    Une variable BOT_BRAND_LABEL explicite reste prioritaire. Sur Railway, le service
+    Bot'Odboug est aussi reconnu automatiquement via RAILWAY_SERVICE_NAME. Le service
+    principal mon-bot-discord ne correspond pas et conserve donc strictement SentriX.
     """
-    value = (os.getenv("BOT_BRAND_LABEL") or "SentriX").strip()
-    return (value or "SentriX")[:48]
+    explicit = (os.getenv("BOT_BRAND_LABEL") or "").strip()
+    if explicit:
+        return explicit[:48]
+    if _is_odboug_instance():
+        return "Odboug"
+    return "SentriX"
 
 
 def _instance_display_name() -> str:
     """Pseudo serveur optionnel du compte bot, sans toucher au bot SentriX principal."""
-    value = (os.getenv("BOT_DISPLAY_NAME") or "").strip()
-    return value[:32]
+    explicit = (os.getenv("BOT_DISPLAY_NAME") or "").strip()
+    if explicit:
+        return explicit[:32]
+    if _is_odboug_instance():
+        return "[+] Bot'Odboug |"
+    return ""
 
 
 def _configure_instance_branding() -> None:
     """Rend le moteur premium multi-instance sans dupliquer le code du bot.
 
-    Exemple Railway pour Bot'Odboug :
+    Bot'Odboug peut etre configure explicitement avec :
       BOT_BRAND_LABEL=Odboug
       BOT_DISPLAY_NAME=[+] Bot'Odboug |
 
-    Le service SentriX principal ne definit rien et garde donc tous ses titres/footers.
+    Sur Railway ces deux valeurs sont aussi deduites automatiquement lorsque le nom du
+    service contient "Odboug". Le service SentriX principal reste donc inchange.
     """
     global _BRANDING_INSTALLED
     if _BRANDING_INSTALLED:
@@ -54,8 +74,6 @@ def _configure_instance_branding() -> None:
         return
 
     original_style_embed = premium_style.style_embed
-    # Les anciens embeds peuvent deja arriver avec "SENTRIX / ...". Le wrapper les
-    # convertit avant le moteur premium ; la regexp reconnait ensuite la marque locale.
     premium_style.SENTRIX_TITLE_RE = re.compile(
         rf"^(?:SENTRIX|{re.escape(brand)})\s*/\s*",
         re.IGNORECASE,
@@ -95,12 +113,7 @@ def _configure_instance_branding() -> None:
 
 
 async def _apply_instance_display_name(bot: commands.Bot, guild: discord.Guild | None = None) -> None:
-    """Applique un pseudo propre a cette instance sur ses serveurs Discord.
-
-    On utilise le pseudo de serveur plutot que de modifier le username global de
-    l'application Discord : aucun risque de renommer une autre application et pas de
-    limite de changement de username a gerer.
-    """
+    """Applique un pseudo propre a cette instance sur ses serveurs Discord."""
     display_name = _instance_display_name()
     if not display_name:
         return
@@ -139,6 +152,89 @@ def _install_instance_display_name(bot: commands.Bot) -> None:
     bot.add_listener(instance_branding_ready, "on_ready")
     bot.add_listener(instance_branding_guild_join, "on_guild_join")
     bot._sentrix_instance_display_name = True
+
+
+def _wake_word_pattern() -> re.Pattern[str]:
+    configured = [
+        item.strip()
+        for item in (os.getenv("BOT_WAKE_WORDS") or "").split(",")
+        if item.strip()
+    ]
+    brand = _instance_brand()
+    words = configured or [brand]
+    if brand.casefold() == "odboug":
+        words.extend(["odboug", "bot odboug", "bot'odboug", "bot’odboug"])
+    unique = []
+    seen = set()
+    for word in words:
+        key = word.casefold()
+        if key not in seen:
+            seen.add(key)
+            unique.append(word)
+    alternatives = "|".join(re.escape(word).replace(r"\ ", r"\s+") for word in unique)
+    return re.compile(rf"^(?:{alternatives})\b", re.IGNORECASE)
+
+
+def _install_instance_wake_word(bot: commands.Bot) -> None:
+    """Permet a une instance marquee Odboug de repondre a "Odboug ..." naturellement.
+
+    SentriX garde son listener historique dans cogs.ai ; cette couche ne s'active que pour
+    une marque differente afin d'eviter toute double reponse sur le bot principal.
+    """
+    if _instance_brand().casefold() == "sentrix":
+        return
+    if getattr(bot, "_sentrix_instance_wake_word", False):
+        return
+
+    pattern = _wake_word_pattern()
+
+    async def instance_wake_word(message: discord.Message):
+        if message.author.bot or not message.guild:
+            return
+        content = (message.content or "").strip()
+        if not content:
+            return
+
+        prefix = (
+            bot.prefix_cache.get(message.guild.id, "+")
+            if hasattr(bot, "prefix_cache")
+            else "+"
+        )
+        if content.startswith(prefix):
+            return
+
+        match = pattern.match(content)
+        if match is None:
+            return
+
+        ai_cog = bot.get_cog("Ai")
+        if ai_cog is None:
+            return
+
+        question = content[match.end():].lstrip(" ,:-").strip()
+        if not question:
+            question = "Salut, comment tu vas ?"
+
+        invoke_natural = getattr(ai_cog, "_invoke_natural_command", None)
+        if callable(invoke_natural):
+            try:
+                if await invoke_natural(message, question, prefix):
+                    return
+            except Exception:
+                logger.exception("Commande naturelle Odboug impossible.")
+
+        send_reply = getattr(ai_cog, "send_sentrix_reply", None)
+        if not callable(send_reply):
+            return
+        try:
+            async with message.channel.typing():
+                await send_reply(message.channel, message.author, question, reply_to=message)
+        except Exception:
+            logger.exception("Reponse naturelle Odboug impossible.")
+
+    bot.add_listener(instance_wake_word, "on_message")
+    bot._sentrix_instance_wake_word = True
+    logger.info("Mot de reveil naturel actif pour %s.", _instance_brand())
 
 
 def _bot_user_from_context(ctx: commands.Context):
@@ -282,8 +378,6 @@ def _patch_webhook_followups(bot: commands.Bot) -> None:
     _ORIGINALS["webhook_send"] = original
 
     async def send(self: discord.Webhook, *args, **kwargs):
-        # Les webhooks entrants utilises pour republier un contenu externe ne sont pas
-        # des reponses d'interaction et doivent rester exactement tels que configures.
         if getattr(self, "type", None) == discord.WebhookType.application:
             args, kwargs = premium_style.style_kwargs(
                 args,
@@ -355,6 +449,7 @@ def install(bot: commands.Bot) -> None:
     global _INSTALLED
     _configure_instance_branding()
     _install_instance_display_name(bot)
+    _install_instance_wake_word(bot)
     if _INSTALLED:
         return
 
