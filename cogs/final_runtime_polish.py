@@ -15,7 +15,7 @@ from collections import OrderedDict
 import discord
 from discord.ext import commands
 
-from . import bot_experience_v5
+from . import bot_experience_v5, bot_experience_v6
 
 logger = logging.getLogger("bot.final-runtime-polish")
 
@@ -260,6 +260,7 @@ def install(bot: commands.Bot) -> None:
     # embeds pour une seule faute comme +balnce.
     bot_experience_v5._install_reply_and_dm_conversations(bot)
     bot_experience_v5._install_ai_pipeline_upgrade(bot)
+    bot_experience_v6.install(bot)
     _schedule_community_growth(bot)
     _patch_help(bot)
     _patch_canary_readiness(bot)
