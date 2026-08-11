@@ -91,6 +91,11 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-enterprise-audit.db"
         run: python tools/enterprise_suite_audit.py
 
+      - name: Multi-instance isolation and AI V2 audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python tools/instance_isolation_audit.py
+
       - name: Bot Excellence audit
         env:
           DISCORD_TOKEN: "ci.fake.token"

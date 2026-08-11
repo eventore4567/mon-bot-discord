@@ -1,4 +1,4 @@
-"""Durabilité du stockage principal SentriX via snapshots PostgreSQL.
+"""Durabilité du stockage principal via snapshots PostgreSQL.
 
 Le runtime historique reste compatible SQLite (plusieurs centaines de requêtes et
 migrations utilisent sa syntaxe). Cette couche rend néanmoins cette base durable :
@@ -6,10 +6,12 @@ migrations utilisent sa syntaxe). Cette couche rend néanmoins cette base durabl
 - compression gzip + SHA-256 ;
 - stockage des snapshots dans PostgreSQL quand POSTGRES_URL/DATABASE_URL existe ;
 - restauration automatique au boot si le fichier local a disparu ou est invalide ;
-- rétention bornée des snapshots PostgreSQL.
+- rétention bornée des snapshots PostgreSQL ;
+- isolation par instance : SentriX et Bot'Odboug ne peuvent jamais restaurer la base de
+  l'autre, même si le même PostgreSQL est branché par erreur.
 
 Le stockage externe est volontairement fail-open : une panne PostgreSQL ne doit jamais
-empêcher SentriX de démarrer avec une base locale saine.
+empêcher le bot de démarrer avec une base locale saine.
 """
 from __future__ import annotations
 
@@ -24,6 +26,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from utils.instance_identity import instance_key
+
 logger = logging.getLogger("bot.durable-db")
 
 try:
@@ -35,6 +39,7 @@ except Exception:  # pragma: no cover - dépendance optionnelle
 PG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS sentrix_main_db_snapshots (
     id BIGSERIAL PRIMARY KEY,
+    instance_key TEXT NOT NULL DEFAULT 'sentrix',
     checksum TEXT NOT NULL,
     compressed_data BYTEA NOT NULL,
     compressed_size BIGINT NOT NULL,
@@ -43,8 +48,10 @@ CREATE TABLE IF NOT EXISTS sentrix_main_db_snapshots (
     reason TEXT NOT NULL DEFAULT 'periodic',
     created_at BIGINT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_sentrix_main_db_snapshots_time
-ON sentrix_main_db_snapshots (created_at DESC);
+ALTER TABLE sentrix_main_db_snapshots
+ADD COLUMN IF NOT EXISTS instance_key TEXT NOT NULL DEFAULT 'sentrix';
+CREATE INDEX IF NOT EXISTS idx_sentrix_main_db_snapshots_instance_time
+ON sentrix_main_db_snapshots (instance_key, created_at DESC);
 """
 
 
@@ -103,6 +110,7 @@ class DurableDatabaseReplica:
     def __init__(self, sqlite_path: str) -> None:
         self.sqlite_path = Path(sqlite_path)
         self.postgres_url = (os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL") or "").strip()
+        self.instance_key = instance_key()
         self.keep = _env_int("SENTRIX_PG_SNAPSHOT_KEEP", 12, 2, 96)
         self.interval_seconds = _env_int("SENTRIX_PG_SNAPSHOT_INTERVAL", 900, 300, 86400)
         self.force_restore = _truthy("SENTRIX_RESTORE_FROM_POSTGRES", False)
@@ -141,12 +149,12 @@ class DurableDatabaseReplica:
                 await conn.execute(PG_SCHEMA)
                 await conn.fetchval("SELECT 1")
             self.error = None
-            logger.info("Stockage durable PostgreSQL connecté.")
+            logger.info("Stockage durable PostgreSQL connecté pour instance=%s.", self.instance_key)
             return True
         except Exception as exc:
             self.pool = None
             self.error = f"{type(exc).__name__}: {exc}"[:500]
-            logger.warning("PostgreSQL durable indisponible ; SentriX conserve le stockage local.")
+            logger.warning("PostgreSQL durable indisponible ; stockage local conservé.")
             return False
 
     async def close(self) -> None:
@@ -161,7 +169,7 @@ class DurableDatabaseReplica:
         return await asyncio.to_thread(_sqlite_healthy_sync, self.sqlite_path)
 
     async def restore_latest_if_needed(self) -> dict[str, Any]:
-        """Restaure seulement si le stockage local est absent/invalide, sauf option force."""
+        """Restaure seulement la dernière sauvegarde de CETTE instance."""
         local_ok = await self._local_healthy()
         if local_ok and not self.force_restore:
             return {"restored": False, "reason": "local_healthy"}
@@ -172,7 +180,9 @@ class DurableDatabaseReplica:
             try:
                 row = await self.pool.fetchrow(
                     "SELECT id,checksum,compressed_data,sqlite_size,created_at "
-                    "FROM sentrix_main_db_snapshots ORDER BY created_at DESC,id DESC LIMIT 1"
+                    "FROM sentrix_main_db_snapshots WHERE instance_key=$1 "
+                    "ORDER BY created_at DESC,id DESC LIMIT 1",
+                    self.instance_key,
                 )
                 if not row:
                     return {"restored": False, "reason": "no_snapshot"}
@@ -204,12 +214,17 @@ class DurableDatabaseReplica:
                     except OSError:
                         pass
                 self.last_restore_at = int(time.time())
-                logger.warning("Base principale restaurée depuis le snapshot PostgreSQL #%s.", row["id"])
+                logger.warning(
+                    "Base principale restaurée depuis le snapshot PostgreSQL #%s (instance=%s).",
+                    row["id"],
+                    self.instance_key,
+                )
                 return {
                     "restored": True,
                     "snapshot_id": int(row["id"]),
                     "created_at": int(row["created_at"]),
                     "sqlite_size": int(row["sqlite_size"]),
+                    "instance_key": self.instance_key,
                 }
             except Exception as exc:
                 self.error = f"{type(exc).__name__}: {exc}"[:500]
@@ -235,8 +250,9 @@ class DurableDatabaseReplica:
                 ts = int(time.time())
                 row = await self.pool.fetchrow(
                     "INSERT INTO sentrix_main_db_snapshots "
-                    "(checksum,compressed_data,compressed_size,sqlite_size,clean_shutdown,reason,created_at) "
-                    "VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+                    "(instance_key,checksum,compressed_data,compressed_size,sqlite_size,clean_shutdown,reason,created_at) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+                    self.instance_key,
                     checksum,
                     compressed,
                     len(compressed),
@@ -246,8 +262,10 @@ class DurableDatabaseReplica:
                     ts,
                 )
                 await self.pool.execute(
-                    "DELETE FROM sentrix_main_db_snapshots WHERE id IN ("
-                    "SELECT id FROM sentrix_main_db_snapshots ORDER BY created_at DESC,id DESC OFFSET $1)",
+                    "DELETE FROM sentrix_main_db_snapshots WHERE instance_key=$1 AND id IN ("
+                    "SELECT id FROM sentrix_main_db_snapshots WHERE instance_key=$1 "
+                    "ORDER BY created_at DESC,id DESC OFFSET $2)",
+                    self.instance_key,
                     self.keep,
                 )
                 self.last_snapshot_at = ts
@@ -259,6 +277,7 @@ class DurableDatabaseReplica:
                     "created_at": ts,
                     "sqlite_size": sqlite_size,
                     "compressed_size": len(compressed),
+                    "instance_key": self.instance_key,
                 }
             except Exception as exc:
                 self.error = f"{type(exc).__name__}: {exc}"[:500]
@@ -279,6 +298,7 @@ class DurableDatabaseReplica:
             except Exception as exc:
                 self.error = f"{type(exc).__name__}: {exc}"[:500]
         return {
+            "instance_key": self.instance_key,
             "configured": self.configured,
             "postgres_online": pg_ok,
             "local_sqlite_ok": local_ok,
