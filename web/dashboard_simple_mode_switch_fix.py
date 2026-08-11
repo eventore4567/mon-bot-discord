@@ -164,6 +164,16 @@ def install(dashboard) -> None:
         return
     _INSTALLED = True
 
+    # Le mode simple vient juste d'être assemblé à ce stade. On applique donc ici la
+    # carte Community, indépendamment du démarrage asynchrone du cog Community Growth.
+    # Cela garantit que le bouton reste visible même si Discord/SQLite met quelques
+    # secondes de plus à initialiser les fonctions communautaires.
+    try:
+        from . import community_card_polish
+        community_card_polish.install(dashboard)
+    except Exception:
+        logger.exception("Impossible d'exposer le Centre communauté dans le mode simple.")
+
     html = getattr(dashboard, "INDEX_HTML", "")
     if not isinstance(html, str) or "</body>" not in html:
         logger.warning("Correctif de bascule dashboard non installé : INDEX_HTML indisponible.")
