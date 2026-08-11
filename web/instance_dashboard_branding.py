@@ -20,6 +20,16 @@ def install(dashboard, *modules) -> None:
     if _INSTALLED:
         return
     _INSTALLED = True
+
+    # Le durcissement de rendu s'applique aux deux instances, avant le remplacement de marque.
+    try:
+        from web import community_growth_security
+        for module in modules:
+            if hasattr(module, "COMMUNITY_HTML"):
+                community_growth_security.install(module)
+    except Exception:
+        logger.exception("Durcissement du dashboard communautaire impossible.")
+
     brand = brand_label()
     if brand.casefold() == "sentrix":
         return
