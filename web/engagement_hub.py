@@ -1,7 +1,10 @@
-"""Dashboard Engagement V3 pour SentriX et Bot'Odboug."""
+"""Dashboard Engagement V3 pour SentriX et Bot'Odboug.
+
+La page et ses routes sont enregistrées avant le bind HTTP. Le bootstrap runtime reste
+volontairement tolérant aux faux objets bot utilisés par les audits synthétiques.
+"""
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
 
@@ -15,7 +18,9 @@ _INSTALLED = False
 
 
 def _service(request: web.Request):
-    return request.app["bot"].get_cog("EngagementSuite")
+    bot = request.app.get("bot")
+    getter = getattr(bot, "get_cog", None)
+    return getter("EngagementSuite") if callable(getter) else None
 
 
 async def _payload(request: web.Request) -> dict:
@@ -42,7 +47,9 @@ async def _admin_ctx(dashboard, request: web.Request, *, write: bool = False):
             return None, None, None, csrf_error
     service = _service(request)
     if service is None:
-        return None, None, None, dashboard._json_error("Engagement V3 démarre. Réessaie dans quelques secondes.", 503)
+        return None, None, None, dashboard._json_error(
+            "Engagement V3 démarre. Réessaie dans quelques secondes.", 503
+        )
     return session, guild, service, None
 
 
@@ -50,7 +57,9 @@ async def _member_ctx(dashboard, request: web.Request, guild_id: int):
     session, error = dashboard._require_session(request)
     if error or not session:
         return None, None, None, error
-    guild = request.app["bot"].get_guild(int(guild_id))
+    bot = request.app.get("bot")
+    get_guild = getattr(bot, "get_guild", None)
+    guild = get_guild(int(guild_id)) if callable(get_guild) else None
     if guild is None:
         return None, None, None, dashboard._json_error("Serveur introuvable.", 404)
     user_id = int(session["user"]["id"])
@@ -73,7 +82,11 @@ async def handle_page(request: web.Request):
     session, error = dashboard._require_session(request)
     if error or not session:
         raise web.HTTPFound("/login?next=/engagement")
-    return web.Response(text=ENGAGEMENT_HTML, content_type="text/html", headers={"Cache-Control": "no-store"})
+    return web.Response(
+        text=ENGAGEMENT_HTML,
+        content_type="text/html",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
 
 
 async def handle_profile_page(request: web.Request):
@@ -81,7 +94,11 @@ async def handle_profile_page(request: web.Request):
     session, error = dashboard._require_session(request)
     if error or not session:
         raise web.HTTPFound(f"/login?next={request.path}")
-    return web.Response(text=PROFILE_HTML, content_type="text/html", headers={"Cache-Control": "no-store"})
+    return web.Response(
+        text=PROFILE_HTML,
+        content_type="text/html",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
 
 
 async def api_options(dashboard, request: web.Request):
@@ -94,7 +111,11 @@ async def api_options(dashboard, request: web.Request):
         "brand": brand_label(),
         "settings": settings,
         "text_channels": [{"id": str(c.id), "name": c.name} for c in guild.text_channels],
-        "roles": [{"id": str(r.id), "name": r.name} for r in guild.roles if not r.is_default() and not r.managed],
+        "roles": [
+            {"id": str(r.id), "name": r.name}
+            for r in guild.roles
+            if not r.is_default() and not r.managed
+        ],
     })
 
 
@@ -103,8 +124,7 @@ async def api_settings_put(dashboard, request: web.Request):
     if error:
         return error
     try:
-        data = await _payload(request)
-        settings = await service.update_settings(guild, data)
+        settings = await service.update_settings(guild, await _payload(request))
     except (TypeError, ValueError) as exc:
         return dashboard._json_error(str(exc), 400)
     return web.json_response({"ok": True, "settings": settings})
@@ -131,7 +151,12 @@ async def api_profile_self(dashboard, request: web.Request):
     if error:
         return error
     profile = await service.profile(guild, int(session["user"]["id"]))
-    return web.json_response({"ok": True, "brand": brand_label(), "guild_name": guild.name, "profile": profile})
+    return web.json_response({
+        "ok": True,
+        "brand": brand_label(),
+        "guild_name": guild.name,
+        "profile": profile,
+    })
 
 
 async def api_suggestions_get(dashboard, request: web.Request):
@@ -141,7 +166,10 @@ async def api_suggestions_get(dashboard, request: web.Request):
     status = str(request.query.get("status") or "all")
     if status not in {"all", "pending", "accepted", "refused", "in_progress", "done"}:
         status = "all"
-    return web.json_response({"ok": True, "suggestions": await service.list_suggestions(guild.id, status)})
+    return web.json_response({
+        "ok": True,
+        "suggestions": await service.list_suggestions(guild.id, status),
+    })
 
 
 async def api_suggestion_review(dashboard, request: web.Request):
@@ -150,7 +178,7 @@ async def api_suggestion_review(dashboard, request: web.Request):
         return error
     try:
         data = await _payload(request)
-        result = await service.review_suggestion(
+        suggestion = await service.review_suggestion(
             guild,
             int(request.match_info["suggestion_id"]),
             str(data.get("status") or "pending"),
@@ -158,7 +186,7 @@ async def api_suggestion_review(dashboard, request: web.Request):
         )
     except (TypeError, ValueError) as exc:
         return dashboard._json_error(str(exc), 400)
-    return web.json_response({"ok": True, "suggestion": result})
+    return web.json_response({"ok": True, "suggestion": suggestion})
 
 
 async def api_reviews_get(dashboard, request: web.Request):
@@ -168,7 +196,10 @@ async def api_reviews_get(dashboard, request: web.Request):
     status = str(request.query.get("status") or "pending")
     if status not in {"all", "pending", "ignored", "reviewed", "action_taken"}:
         status = "pending"
-    return web.json_response({"ok": True, "reviews": await service.list_reviews(guild.id, status)})
+    return web.json_response({
+        "ok": True,
+        "reviews": await service.list_reviews(guild.id, status),
+    })
 
 
 async def api_review_resolve(dashboard, request: web.Request):
@@ -177,7 +208,11 @@ async def api_review_resolve(dashboard, request: web.Request):
         return error
     try:
         data = await _payload(request)
-        await service.resolve_review(guild.id, int(request.match_info["review_id"]), str(data.get("status") or "reviewed"))
+        await service.resolve_review(
+            guild.id,
+            int(request.match_info["review_id"]),
+            str(data.get("status") or "reviewed"),
+        )
     except (TypeError, ValueError) as exc:
         return dashboard._json_error(str(exc), 400)
     return web.json_response({"ok": True})
@@ -209,10 +244,9 @@ async def api_changelog_get(dashboard, request: web.Request):
 
 
 async def api_changelog_post(dashboard, request: web.Request):
-    session, guild, service, error = await _admin_ctx(dashboard, request, write=True)
+    _session, _guild, service, error = await _admin_ctx(dashboard, request, write=True)
     if error:
         return error
-    del guild
     try:
         data = await _payload(request)
         item_id = await service.add_changelog(
@@ -229,17 +263,19 @@ def _brand_html(source: str) -> str:
     return source.replace("{{BRAND}}", html.escape(brand_label()))
 
 
-ENGAGEMENT_HTML = _brand_html(r'''<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{BRAND}} Engagement V3</title><style>
-:root{--bg:#080a10;--panel:#10131b;--panel2:#151925;--line:#252b3a;--text:#f4f6fb;--muted:#949caf;--accent:#7d8cff;--ok:#63d59a;--danger:#ff7287;--warn:#e9bd67}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 12% -10%,#20284c 0,transparent 34%),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.shell{max-width:1320px;margin:0 auto;padding:26px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:20px}.brand{font-size:25px;font-weight:900;letter-spacing:-.04em}.brand small{display:block;font-size:11px;color:var(--muted);letter-spacing:.11em;text-transform:uppercase;margin-top:5px}.toolbar{display:flex;gap:8px;flex-wrap:wrap}.btn,.back{border:1px solid var(--line);background:#171b27;color:var(--text);border-radius:11px;padding:10px 13px;font-weight:760;text-decoration:none;cursor:pointer}.btn.primary{background:var(--accent);border-color:var(--accent)}.btn.danger{background:#211116;border-color:#5b2931;color:#ffdbe1}.layout{display:grid;grid-template-columns:240px 1fr;gap:16px}.side,.card{border:1px solid var(--line);background:rgba(16,19,27,.94);border-radius:18px;box-shadow:0 16px 45px rgba(0,0,0,.18)}.side{padding:11px;height:max-content;position:sticky;top:16px}.nav{display:block;width:100%;border:0;background:transparent;color:var(--muted);text-align:left;padding:11px;border-radius:10px;font-weight:740;cursor:pointer}.nav.active,.nav:hover{background:var(--panel2);color:var(--text)}.main{display:grid;gap:14px}.card{padding:19px}.card h2{font-size:18px;margin:0 0 6px}.card p{margin:0 0 15px;color:var(--muted);line-height:1.5}.row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.field{display:grid;gap:6px;margin-bottom:11px}label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:800}input,select,textarea{width:100%;border:1px solid var(--line);background:#0b0e15;color:var(--text);border-radius:10px;padding:10px 11px;outline:none}textarea{min-height:85px;resize:vertical}.switch{display:flex;align-items:center;gap:8px;padding:8px 0}.switch input{width:auto}.hidden{display:none!important}.notice{border:1px solid #2a385d;background:#0d1422;color:#d4dcff;padding:11px 13px;border-radius:11px;margin-bottom:14px}.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.metric{border:1px solid var(--line);background:#0d1017;border-radius:13px;padding:14px}.metric b{display:block;font-size:20px}.metric span{color:var(--muted);font-size:11px}.list{display:grid;gap:9px}.item{border:1px solid var(--line);background:#0d1017;border-radius:13px;padding:13px}.item strong{display:block}.meta{color:var(--muted);font-size:12px}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:4px 7px;font-size:10px;color:var(--muted)}pre{white-space:pre-wrap;background:#090c12;border:1px solid var(--line);padding:14px;border-radius:12px;color:#dce2ff}@media(max-width:900px){.shell{padding:14px}.layout{grid-template-columns:1fr}.side{position:static;display:flex;overflow:auto}.nav{white-space:nowrap}.grid4{grid-template-columns:repeat(2,1fr)}.row{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}@media(max-width:520px){.grid4{grid-template-columns:1fr}}
+ENGAGEMENT_HTML = _brand_html(r'''<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{BRAND}} Engagement V3</title><style>
+:root{--bg:#080a10;--panel:#10131b;--panel2:#151925;--line:#252b3a;--text:#f4f6fb;--muted:#949caf;--accent:#7d8cff;--danger:#ff7287}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 12% -10%,#20284c 0,transparent 34%),var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}.shell{max-width:1320px;margin:auto;padding:26px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:20px}.brand{font-size:25px;font-weight:900}.brand small{display:block;font-size:11px;color:var(--muted);letter-spacing:.11em;text-transform:uppercase}.toolbar{display:flex;gap:8px;flex-wrap:wrap}.btn,.back{border:1px solid var(--line);background:#171b27;color:var(--text);border-radius:11px;padding:10px 13px;font-weight:760;text-decoration:none;cursor:pointer}.btn.primary{background:var(--accent);border-color:var(--accent)}.btn.danger{background:#211116;border-color:#5b2931;color:#ffdbe1}.layout{display:grid;grid-template-columns:240px 1fr;gap:16px}.side,.card{border:1px solid var(--line);background:rgba(16,19,27,.94);border-radius:18px}.side{padding:11px;height:max-content;position:sticky;top:16px}.nav{display:block;width:100%;border:0;background:transparent;color:var(--muted);text-align:left;padding:11px;border-radius:10px;font-weight:740;cursor:pointer}.nav.active,.nav:hover{background:var(--panel2);color:var(--text)}.main{display:grid;gap:14px}.card{padding:19px}.card h2{font-size:18px;margin:0 0 6px}.card p{margin:0 0 15px;color:var(--muted);line-height:1.5}.row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.field{display:grid;gap:6px;margin-bottom:11px}label{font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:800}input,select,textarea{width:100%;border:1px solid var(--line);background:#0b0e15;color:var(--text);border-radius:10px;padding:10px 11px}textarea{min-height:85px}.switch{display:flex;align-items:center;gap:8px;padding:8px 0}.switch input{width:auto}.hidden{display:none!important}.notice{border:1px solid #2a385d;background:#0d1422;color:#d4dcff;padding:11px 13px;border-radius:11px;margin-bottom:14px}.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.metric,.item{border:1px solid var(--line);background:#0d1017;border-radius:13px;padding:13px}.metric b{display:block;font-size:20px}.metric span,.meta{color:var(--muted);font-size:12px}.list{display:grid;gap:9px}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:4px 7px;font-size:10px;color:var(--muted)}pre{white-space:pre-wrap;background:#090c12;border:1px solid var(--line);padding:14px;border-radius:12px;color:#dce2ff}@media(max-width:900px){.shell{padding:14px}.layout{grid-template-columns:1fr}.side{position:static;display:flex;overflow:auto}.nav{white-space:nowrap}.grid4{grid-template-columns:repeat(2,1fr)}.row{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}@media(max-width:520px){.grid4{grid-template-columns:1fr}}
 </style></head><body><div class="shell"><div class="top"><div class="brand">{{BRAND}}<small>Engagement V3</small></div><div class="toolbar"><a class="back" href="/app">Dashboard</a><a class="back" href="/community">Communauté</a></div></div><div id="notice" class="notice">Chargement...</div><div class="layout"><aside class="side"><button class="nav active" data-tab="overview">Vue d'ensemble</button><button class="nav" data-tab="onboarding">Onboarding</button><button class="nav" data-tab="quests">Quêtes & saisons</button><button class="nav" data-tab="suggestions">Suggestions</button><button class="nav" data-tab="starboard">Starboard</button><button class="nav" data-tab="moderation">Modération contextuelle</button><button class="nav" data-tab="tickets">IA tickets</button><button class="nav" data-tab="changelog">Changelog</button></aside><main class="main">
-<section id="tab-overview" class="card"><h2>Centre d'engagement</h2><p>Un seul centre pour les profils, quêtes, saisons, suggestions, starboard, onboarding et outils IA du staff.</p><div class="field"><label>Serveur</label><select id="guild"></select></div><div class="grid4"><div class="metric"><b id="mSeason">—</b><span>Saison active</span></div><div class="metric"><b id="mLeader">—</b><span>Top membre</span></div><div class="metric"><b>6</b><span>Quêtes actives</span></div><div class="metric"><b>10</b><span>Succès intégrés</span></div></div><h2 style="margin-top:20px">Classement saisonnier</h2><div id="leaderboard" class="list"></div></section>
-<section id="tab-onboarding" class="card hidden"><h2>Onboarding V2</h2><p>Les nouveaux choisissent leur langue de profil, leurs rôles et valident le règlement depuis un panneau interactif.</p><div class="switch"><input id="onboardingEnabled" type="checkbox"><label for="onboardingEnabled">Activer l'onboarding</label></div><div class="field"><label>Salon onboarding</label><select id="onboardingChannel"></select></div><div class="field"><label>Rôles proposés (Ctrl/Cmd pour plusieurs)</label><select id="onboardingRoles" multiple size="8"></select></div><button class="btn primary" id="saveOnboarding">Enregistrer</button></section>
-<section id="tab-quests" class="card hidden"><h2>Profils, quêtes et saisons</h2><p>Points d'engagement, succès, 3 quêtes quotidiennes, 3 hebdomadaires et classement de saison.</p><div class="switch"><input id="profilesEnabled" type="checkbox"><label for="profilesEnabled">Profils membres</label></div><div class="switch"><input id="questsEnabled" type="checkbox"><label for="questsEnabled">Quêtes automatiques</label></div><div class="field"><label>Durée d'une saison (jours)</label><input id="seasonDays" type="number" min="7" max="120"></div><button class="btn primary" id="saveQuests">Enregistrer</button></section>
-<section id="tab-suggestions" class="card hidden"><h2>Suggestions V2</h2><p>Les messages envoyés dans le salon choisi deviennent automatiquement des cartes de suggestion avec votes et statut staff.</p><div class="switch"><input id="suggestionsEnabled" type="checkbox"><label for="suggestionsEnabled">Activer les suggestions</label></div><div class="field"><label>Salon suggestions</label><select id="suggestionsChannel"></select></div><div class="toolbar"><button class="btn primary" id="saveSuggestions">Enregistrer</button><button class="btn" id="refreshSuggestions">Actualiser</button></div><div id="suggestions" class="list" style="margin-top:14px"></div></section>
-<section id="tab-starboard" class="card hidden"><h2>Starboard</h2><p>Les messages populaires sont republiés automatiquement à partir d'un seuil de réactions.</p><div class="switch"><input id="starboardEnabled" type="checkbox"><label for="starboardEnabled">Activer le starboard</label></div><div class="row"><div class="field"><label>Salon starboard</label><select id="starboardChannel"></select></div><div class="field"><label>Emoji</label><input id="starboardEmoji" value="⭐"></div></div><div class="field"><label>Seuil de réactions</label><input id="starboardThreshold" type="number" min="2" max="50"></div><button class="btn primary" id="saveStarboard">Enregistrer</button></section>
-<section id="tab-moderation" class="card hidden"><h2>Modération contextuelle</h2><p>Détecte les répétitions agressives, spam, mentions massives et messages à risque. Aucune sanction automatique : le staff décide.</p><div class="switch"><input id="contextEnabled" type="checkbox"><label for="contextEnabled">Activer la file de révision</label></div><div class="field"><label>Salon d'alertes staff</label><select id="contextChannel"></select></div><div class="toolbar"><button class="btn primary" id="saveContext">Enregistrer</button><button class="btn" id="refreshReviews">Actualiser</button></div><div id="reviews" class="list" style="margin-top:14px"></div></section>
-<section id="tab-tickets" class="card hidden"><h2>IA dans les tickets</h2><p>Choisis un salon de ticket : {{BRAND}} lit l'historique récent et génère un résumé neutre avec la prochaine action conseillée.</p><div class="switch"><input id="ticketAiEnabled" type="checkbox"><label for="ticketAiEnabled">Activer le résumé IA</label></div><div class="field"><label>Salon à résumer</label><select id="ticketChannel"></select></div><div class="toolbar"><button class="btn" id="saveTicketAi">Enregistrer</button><button class="btn primary" id="summarizeTicket">Résumer ce ticket</button></div><pre id="ticketSummary">Aucun résumé généré.</pre></section>
-<section id="tab-changelog" class="card hidden"><h2>Centre de mises à jour</h2><p>Journal des grosses nouveautés du bot. Tu peux aussi publier une entrée manuellement.</p><div class="row"><div class="field"><label>Version</label><input id="changeVersion" placeholder="V3.1"></div><div class="field"><label>Titre</label><input id="changeTitle" placeholder="Nouvelle mise à jour"></div></div><div class="field"><label>Détails</label><textarea id="changeBody"></textarea></div><button class="btn primary" id="publishChange">Publier</button><div id="changelog" class="list" style="margin-top:14px"></div></section>
+<section id="tab-overview" class="card"><h2>Centre d'engagement</h2><p>Profils, quêtes, saisons, suggestions, starboard, onboarding et outils IA du staff.</p><div class="field"><label>Serveur</label><select id="guild"></select></div><div class="grid4"><div class="metric"><b id="mSeason">—</b><span>Saison</span></div><div class="metric"><b id="mLeader">—</b><span>Top membre</span></div><div class="metric"><b>6</b><span>Quêtes actives</span></div><div class="metric"><b>10</b><span>Succès</span></div></div><h2 style="margin-top:20px">Classement saisonnier</h2><div id="leaderboard" class="list"></div></section>
+<section id="tab-onboarding" class="card hidden"><h2>Onboarding V2</h2><p>Langue de profil, rôles d'intérêt et validation du règlement.</p><div class="switch"><input id="onboardingEnabled" type="checkbox"><label for="onboardingEnabled">Activer l'onboarding</label></div><div class="field"><label>Salon onboarding</label><select id="onboardingChannel"></select></div><div class="field"><label>Rôles proposés (Ctrl/Cmd pour plusieurs)</label><select id="onboardingRoles" multiple size="8"></select></div><button class="btn primary" id="saveOnboarding">Enregistrer</button></section>
+<section id="tab-quests" class="card hidden"><h2>Profils, quêtes et saisons</h2><p>Points d'engagement, succès, quêtes quotidiennes/hebdomadaires et classement de saison.</p><div class="switch"><input id="profilesEnabled" type="checkbox"><label for="profilesEnabled">Profils membres</label></div><div class="switch"><input id="questsEnabled" type="checkbox"><label for="questsEnabled">Quêtes automatiques</label></div><div class="field"><label>Durée d'une saison (jours)</label><input id="seasonDays" type="number" min="7" max="120"></div><button class="btn primary" id="saveQuests">Enregistrer</button></section>
+<section id="tab-suggestions" class="card hidden"><h2>Suggestions V2</h2><p>Le salon choisi devient un vrai système de suggestions avec votes, statuts et réponse staff.</p><div class="switch"><input id="suggestionsEnabled" type="checkbox"><label for="suggestionsEnabled">Activer les suggestions</label></div><div class="field"><label>Salon suggestions</label><select id="suggestionsChannel"></select></div><div class="toolbar"><button class="btn primary" id="saveSuggestions">Enregistrer</button><button class="btn" id="refreshSuggestions">Actualiser</button></div><div id="suggestions" class="list" style="margin-top:14px"></div></section>
+<section id="tab-starboard" class="card hidden"><h2>Starboard</h2><p>Republie les messages populaires dans un salon dédié.</p><div class="switch"><input id="starboardEnabled" type="checkbox"><label for="starboardEnabled">Activer le starboard</label></div><div class="row"><div class="field"><label>Salon starboard</label><select id="starboardChannel"></select></div><div class="field"><label>Emoji</label><input id="starboardEmoji" value="⭐"></div></div><div class="field"><label>Seuil de réactions</label><input id="starboardThreshold" type="number" min="2" max="50"></div><button class="btn primary" id="saveStarboard">Enregistrer</button></section>
+<section id="tab-moderation" class="card hidden"><h2>Modération contextuelle</h2><p>Détecte spam, répétitions agressives, mentions massives et messages à risque. Le staff décide toujours de la sanction.</p><div class="switch"><input id="contextEnabled" type="checkbox"><label for="contextEnabled">Activer la file de révision</label></div><div class="field"><label>Salon d'alertes staff</label><select id="contextChannel"></select></div><div class="toolbar"><button class="btn primary" id="saveContext">Enregistrer</button><button class="btn" id="refreshReviews">Actualiser</button></div><div id="reviews" class="list" style="margin-top:14px"></div></section>
+<section id="tab-tickets" class="card hidden"><h2>IA dans les tickets</h2><p>Génère un résumé neutre du salon choisi avec la prochaine action conseillée.</p><div class="switch"><input id="ticketAiEnabled" type="checkbox"><label for="ticketAiEnabled">Activer le résumé IA</label></div><div class="field"><label>Salon à résumer</label><select id="ticketChannel"></select></div><div class="toolbar"><button class="btn" id="saveTicketAi">Enregistrer</button><button class="btn primary" id="summarizeTicket">Résumer ce ticket</button></div><pre id="ticketSummary">Aucun résumé généré.</pre></section>
+<section id="tab-changelog" class="card hidden"><h2>Centre de mises à jour</h2><p>Journal des grosses nouveautés du bot.</p><div class="row"><div class="field"><label>Version</label><input id="changeVersion" placeholder="V3.1"></div><div class="field"><label>Titre</label><input id="changeTitle" placeholder="Nouvelle mise à jour"></div></div><div class="field"><label>Détails</label><textarea id="changeBody"></textarea></div><button class="btn primary" id="publishChange">Publier</button><div id="changelog" class="list" style="margin-top:14px"></div></section>
 </main></div></div><script>
 const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));let csrf='',guildId='',opts={};
 async function api(url,opt={}){opt.credentials='same-origin';opt.headers={'Content-Type':'application/json',...(opt.headers||{})};if(opt.method&&opt.method!=='GET')opt.headers['X-CSRF-Token']=csrf;const r=await fetch(url,opt);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Erreur serveur');return d}function notice(t,ok=true){$('notice').textContent=t;$('notice').style.borderColor=ok?'#294537':'#5b2931'}function fill(id,items,empty='Aucun'){const e=$(id);e.innerHTML=`<option value="">${esc(empty)}</option>`+items.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}function selectedValues(id){return [...$(id).selectedOptions].map(x=>x.value).filter(Boolean)}
@@ -250,7 +286,7 @@ $('guild').onchange=async()=>{guildId=$('guild').value;await loadAll()};document
 </script></body></html>''')
 
 
-PROFILE_HTML = _brand_html(r'''<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mon profil · {{BRAND}}</title><style>:root{--bg:#080a10;--panel:#111520;--line:#272d3c;--text:#f5f6fa;--muted:#929bad;--accent:#7d8cff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -20%,#202a50,transparent 42%),var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}.wrap{max-width:900px;margin:0 auto;padding:30px 16px}.card{background:rgba(17,21,32,.96);border:1px solid var(--line);border-radius:20px;padding:22px;margin-bottom:14px}.head{display:flex;gap:14px;align-items:center}.avatar{width:72px;height:72px;border-radius:50%;object-fit:cover;background:#181d2b}.muted{color:var(--muted)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:16px}.metric{border:1px solid var(--line);border-radius:12px;padding:12px}.metric b{display:block;font-size:19px}.quest{border:1px solid var(--line);border-radius:11px;padding:11px;margin:8px 0}.bar{height:7px;background:#202536;border-radius:99px;overflow:hidden;margin-top:8px}.bar span{display:block;height:100%;background:var(--accent)}.badges{display:flex;gap:7px;flex-wrap:wrap}.badge{border:1px solid var(--line);border-radius:999px;padding:7px 9px;font-size:12px}@media(max-width:650px){.metrics{grid-template-columns:repeat(2,1fr)}} </style></head><body><div class="wrap"><div id="notice" class="card muted">Chargement du profil...</div><div id="content" class="hidden"></div></div><script>const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const guild=location.pathname.split('/')[3];async function api(u){const r=await fetch(u,{credentials:'same-origin',cache:'no-store'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Erreur');return d}async function boot(){const d=await api(`/api/engagement/profile/${guild}`),p=d.profile,m=p.member;document.getElementById('notice').remove();const c=document.getElementById('content');c.className='';c.innerHTML=`<div class="card"><div class="head"><img class="avatar" src="${esc(p.avatar_url)}"><div><h1>${esc(p.display_name)}</h1><div class="muted">${esc(d.guild_name)} · ${esc(d.brand)}</div></div></div><div class="metrics"><div class="metric"><b>${m.points||0}</b><span>Points</span></div><div class="metric"><b>${m.message_count||0}</b><span>Messages</span></div><div class="metric"><b>${Math.floor((m.voice_seconds||0)/60)} min</b><span>Vocal</span></div><div class="metric"><b>#${p.season.rank||'—'}</b><span>Rang saison</span></div></div></div><div class="card"><h2>Quêtes</h2>${p.quests.map(q=>`<div class="quest"><b>${esc(q.label)}</b><div class="muted">${q.progress}/${q.target} · ${q.reward} points ${q.claimed?'· terminée':''}</div><div class="bar"><span style="width:${Math.min(100,Math.round(q.progress/q.target*100))}%"></span></div></div>`).join('')}</div><div class="card"><h2>Succès</h2><div class="badges">${p.achievements.length?p.achievements.map(a=>`<span class="badge">${esc(a.label)}</span>`).join(''):'<span class="muted">Aucun succès pour le moment.</span>'}</div></div>`}boot().catch(e=>document.getElementById('notice').textContent=e.message);</script></body></html>''').replace('<div id="content" class="hidden"></div>','<div id="content" style="display:none"></div>').replace("c.className='';","c.style.display='block';")
+PROFILE_HTML = _brand_html(r'''<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mon profil · {{BRAND}}</title><style>:root{--bg:#080a10;--panel:#111520;--line:#272d3c;--text:#f5f6fa;--muted:#929bad;--accent:#7d8cff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -20%,#202a50,transparent 42%),var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}.wrap{max-width:900px;margin:0 auto;padding:30px 16px}.card{background:rgba(17,21,32,.96);border:1px solid var(--line);border-radius:20px;padding:22px;margin-bottom:14px}.head{display:flex;gap:14px;align-items:center}.avatar{width:72px;height:72px;border-radius:50%;object-fit:cover;background:#181d2b}.muted{color:var(--muted)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:16px}.metric{border:1px solid var(--line);border-radius:12px;padding:12px}.metric b{display:block;font-size:19px}.quest{border:1px solid var(--line);border-radius:11px;padding:11px;margin:8px 0}.bar{height:7px;background:#202536;border-radius:99px;overflow:hidden;margin-top:8px}.bar span{display:block;height:100%;background:var(--accent)}.badges{display:flex;gap:7px;flex-wrap:wrap}.badge{border:1px solid var(--line);border-radius:999px;padding:7px 9px;font-size:12px}@media(max-width:650px){.metrics{grid-template-columns:repeat(2,1fr)}}</style></head><body><div class="wrap"><div id="notice" class="card muted">Chargement du profil...</div><div id="content" style="display:none"></div></div><script>const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const guild=location.pathname.split('/')[3];async function api(u){const r=await fetch(u,{credentials:'same-origin',cache:'no-store'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Erreur');return d}async function boot(){const d=await api(`/api/engagement/profile/${guild}`),p=d.profile,m=p.member;document.getElementById('notice').remove();const c=document.getElementById('content');c.style.display='block';c.innerHTML=`<div class="card"><div class="head"><img class="avatar" src="${esc(p.avatar_url)}"><div><h1>${esc(p.display_name)}</h1><div class="muted">${esc(d.guild_name)} · ${esc(d.brand)}</div></div></div><div class="metrics"><div class="metric"><b>${m.points||0}</b><span>Points</span></div><div class="metric"><b>${m.message_count||0}</b><span>Messages</span></div><div class="metric"><b>${Math.floor((m.voice_seconds||0)/60)} min</b><span>Vocal</span></div><div class="metric"><b>#${p.season.rank||'—'}</b><span>Rang saison</span></div></div></div><div class="card"><h2>Quêtes</h2>${p.quests.map(q=>`<div class="quest"><b>${esc(q.label)}</b><div class="muted">${q.progress}/${q.target} · ${q.reward} points ${q.claimed?'· terminée':''}</div><div class="bar"><span style="width:${Math.min(100,Math.round(q.progress/q.target*100))}%"></span></div></div>`).join('')}</div><div class="card"><h2>Succès</h2><div class="badges">${p.achievements.length?p.achievements.map(a=>`<span class="badge">${esc(a.label)}</span>`).join(''):'<span class="muted">Aucun succès pour le moment.</span>'}</div></div>`}boot().catch(e=>document.getElementById('notice').textContent=e.message);</script></body></html>''')
 
 
 def install(dashboard, community_module=None) -> None:
@@ -259,7 +295,6 @@ def install(dashboard, community_module=None) -> None:
         return
     _INSTALLED = True
 
-    # Ajoute une entrée visible dans le centre Communauté existant.
     if community_module is not None and isinstance(getattr(community_module, "COMMUNITY_HTML", None), str):
         marker = '<a class="back" href="/enterprise">Enterprise</a>'
         link = marker + '<a class="back" href="/engagement">Engagement V3</a>'
@@ -273,7 +308,12 @@ def install(dashboard, community_module=None) -> None:
         app["dashboard_module"] = dashboard
 
         async def startup_engagement(_app):
-            if bot.get_cog("EngagementSuite") is not None:
+            # Les audits E2E emploient un _DummyBot sans cogs/base de données. Dans ce cas
+            # les routes doivent rester testables, mais aucun runtime Discord ne doit démarrer.
+            getter = getattr(bot, "get_cog", None)
+            if not callable(getter) or not hasattr(bot, "db"):
+                return
+            if getter("EngagementSuite") is not None:
                 return
             try:
                 from cogs import engagement_suite
@@ -282,7 +322,7 @@ def install(dashboard, community_module=None) -> None:
                 logger.exception("Impossible de démarrer Engagement V3.")
 
         app.on_startup.append(startup_engagement)
-        routes = [
+        app.router.add_routes([
             web.get("/engagement", handle_page),
             web.get("/engagement/profile/{guild_id}", handle_profile_page),
             web.get("/api/guilds/{guild_id}/engagement/options", lambda r: api_options(dashboard, r)),
@@ -296,9 +336,7 @@ def install(dashboard, community_module=None) -> None:
             web.post("/api/guilds/{guild_id}/engagement/ticket-summary", lambda r: api_ticket_summary(dashboard, r)),
             web.get("/api/engagement/changelog", lambda r: api_changelog_get(dashboard, r)),
             web.post("/api/guilds/{guild_id}/engagement/changelog", lambda r: api_changelog_post(dashboard, r)),
-        ]
-        for route in routes:
-            app.router.add_routes([route])
+        ])
         return app
 
     dashboard.build_app = build_app
