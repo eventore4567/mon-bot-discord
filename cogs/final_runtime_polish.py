@@ -22,6 +22,47 @@ def _truthy(name: str) -> bool:
     return os.getenv(name, "").strip().casefold() in {"1", "true", "yes", "on", "oui"}
 
 
+def _install_odboug_account_username(bot: commands.Bot) -> None:
+    """Renomme uniquement le compte Discord de l'instance Bot'Odboug.
+
+    BOT_DISPLAY_NAME continue de gérer le pseudo serveur ``[+] Bot'Odboug |``. Ici on
+    modifie le vrai username du compte bot (la ligne qui pouvait encore afficher
+    ``SentriX Beta#....`` dans le profil Discord). Le bot SentriX principal est exclu via
+    l'identité d'instance, donc son compte n'est jamais renommé par cette couche.
+    """
+    if getattr(bot, "_sentrix_odboug_account_username_installed", False):
+        return
+
+    from utils.instance_identity import is_odboug_instance
+
+    if not is_odboug_instance():
+        return
+
+    desired = (os.getenv("BOT_ACCOUNT_USERNAME") or "Odboug bot").strip()[:32]
+    if not desired:
+        return
+
+    async def apply_odboug_account_username():
+        user = bot.user
+        if user is None or user.name == desired:
+            return
+        try:
+            edited = await user.edit(username=desired)
+            logger.info(
+                "Username global de l'instance Odboug appliqué : %s.",
+                getattr(edited, "name", desired),
+            )
+        except discord.HTTPException:
+            logger.exception(
+                "Discord a refusé le changement du username global vers %r. "
+                "Le pseudo serveur reste néanmoins indépendant.",
+                desired,
+            )
+
+    bot.add_listener(apply_odboug_account_username, "on_ready")
+    bot._sentrix_odboug_account_username_installed = True
+
+
 async def _bootstrap_community_growth(bot: commands.Bot) -> None:
     """Installe une seule fois les fonctions communautaires et leur dashboard.
 
@@ -210,6 +251,7 @@ def _install_command_surface(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
+    _install_odboug_account_username(bot)
     _schedule_community_growth(bot)
     _patch_help(bot)
     _patch_canary_readiness(bot)
