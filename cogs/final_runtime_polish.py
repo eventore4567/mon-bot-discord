@@ -36,10 +36,14 @@ async def _bootstrap_community_growth(bot: commands.Bot) -> None:
         await community_growth.setup(bot)
 
         from web import dashboard
+        from web import community_card_polish
         from web import community_growth as community_dashboard
+        from web import dashboard_instance_runtime
         from web import instance_dashboard_branding
 
         community_dashboard.install(dashboard)
+        community_card_polish.install(dashboard)
+        dashboard_instance_runtime.install(dashboard)
         instance_dashboard_branding.install(dashboard, community_dashboard)
         bot._sentrix_community_growth_ready = True
         logger.info("Community Growth V2 branché au runtime et au dashboard.")
