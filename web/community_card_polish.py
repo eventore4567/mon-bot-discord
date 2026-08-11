@@ -91,3 +91,8 @@ def install(dashboard) -> None:
 
     dashboard.INDEX_HTML = html
     dashboard._sentrix_community_card_polish = True
+
+    # Le mode avancé reçoit les mêmes nouveautés que le mode simple, mais sous une forme
+    # plus compacte : recherche, groupes et raccourcis sans masquer les réglages experts.
+    from . import advanced_mode_guide
+    advanced_mode_guide.install(dashboard)
