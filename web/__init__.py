@@ -33,6 +33,10 @@ from . import operations_center as _operations_center
 from . import dashboard_simple_mode as _dashboard_simple_mode
 from . import dashboard_simple_mode_switch_fix as _dashboard_simple_mode_switch_fix
 from . import dashboard_no_decorative_icons as _dashboard_no_decorative_icons
+from . import community_growth as _community_growth_dashboard
+from . import community_card_polish as _community_card_polish
+from . import dashboard_instance_runtime as _dashboard_instance_runtime
+from . import instance_dashboard_branding as _instance_dashboard_branding
 
 
 # Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
@@ -170,6 +174,14 @@ _main_html = _main_html.replace(
 if 'id="sentrix-core-recovery"' not in _main_html:
     _main_html = _main_html.replace("</body>", _CORE_RECOVERY_JS + "\n</body>", 1)
 _dashboard.INDEX_HTML = _main_html
+
+# Community Growth doit être branché AVANT build_app()/le bind HTTP. Auparavant il était
+# installé depuis une tâche asynchrone de cog ; Railway pouvait donc créer l'application
+# aiohttp avant l'installation du wrapper build_app et /community répondait 404.
+_community_growth_dashboard.install(_dashboard)
+_community_card_polish.install(_dashboard)
+_dashboard_instance_runtime.install(_dashboard)
+_instance_dashboard_branding.install(_dashboard, _community_growth_dashboard)
 
 # Enrichissements finaux sans monkey-patch des fonctions critiques du dashboard.
 _dashboard_safe_plus.install(_dashboard)
