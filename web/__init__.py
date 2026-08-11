@@ -35,6 +35,7 @@ from . import dashboard_simple_mode_switch_fix as _dashboard_simple_mode_switch_
 from . import dashboard_no_decorative_icons as _dashboard_no_decorative_icons
 from . import community_growth as _community_growth_dashboard
 from . import community_card_polish as _community_card_polish
+from . import engagement_hub as _engagement_hub
 from . import dashboard_instance_runtime as _dashboard_instance_runtime
 from . import instance_dashboard_branding as _instance_dashboard_branding
 
@@ -180,6 +181,11 @@ _dashboard.INDEX_HTML = _main_html
 # aiohttp avant l'installation du wrapper build_app et /community répondait 404.
 _community_growth_dashboard.install(_dashboard)
 _community_card_polish.install(_dashboard)
+
+# Engagement V3 s'installe aussi avant le bind HTTP : la route /engagement, les API et le
+# bootstrap du cog sont ainsi disponibles dès le démarrage de l'application aiohttp.
+_engagement_hub.install(_dashboard, _community_growth_dashboard)
+
 _dashboard_instance_runtime.install(_dashboard)
 _instance_dashboard_branding.install(_dashboard, _community_growth_dashboard)
 
@@ -218,4 +224,5 @@ _dashboard_no_decorative_icons.install(
     _embed_center,
     _owner_server_manager,
     _operations_center,
+    _engagement_hub,
 )
