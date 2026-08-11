@@ -254,7 +254,12 @@ def _install_command_surface(bot: commands.Bot) -> None:
 
 def install(bot: commands.Bot) -> None:
     _install_odboug_account_username(bot)
-    bot_experience_v5.install(bot)
+    # Le bot possède déjà un gestionnaire historique de CommandNotFound, plus complet et
+    # utilisé par le style global. On conserve les améliorations Bot Core V5 (IA, réponses
+    # naturelles et DM) sans enregistrer son second listener d'erreur, qui produisait deux
+    # embeds pour une seule faute comme +balnce.
+    bot_experience_v5._install_reply_and_dm_conversations(bot)
+    bot_experience_v5._install_ai_pipeline_upgrade(bot)
     _schedule_community_growth(bot)
     _patch_help(bot)
     _patch_canary_readiness(bot)
