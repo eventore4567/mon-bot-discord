@@ -8,6 +8,7 @@ sont pas touchés.
 from __future__ import annotations
 
 import logging
+import sys
 
 logger = logging.getLogger("bot.dashboard.no-icons")
 _INSTALLED = False
@@ -103,6 +104,21 @@ def _inject(html: str) -> str:
     return html
 
 
+def _unique_modules(*groups) -> tuple:
+    result = []
+    seen = set()
+    for group in groups:
+        for module in group:
+            if module is None:
+                continue
+            marker = id(module)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            result.append(module)
+    return tuple(result)
+
+
 def install(*modules) -> None:
     """Installe les derniers outils sûrs puis nettoie toutes les pages en dernier."""
     global _INSTALLED
@@ -131,7 +147,19 @@ def install(*modules) -> None:
         except Exception:
             logger.exception("Impossible d'installer le centre Enterprise du dashboard.")
 
-    all_modules = tuple(modules) + ((enterprise_module,) if enterprise_module is not None else ())
+    # Plusieurs pages secondaires (Community, Enterprise, Setup, etc.) vivent dans des
+    # modules web distincts. On les découvre ici une fois qu'ils sont chargés pour que les
+    # mêmes micro-interactions s'appliquent aussi aux boutons Enregistrer/Sauvegarder.
+    loaded_web_modules = tuple(
+        module
+        for name, module in tuple(sys.modules.items())
+        if module is not None and (name == "web" or name.startswith("web."))
+    )
+    all_modules = _unique_modules(
+        modules,
+        (enterprise_module,) if enterprise_module is not None else (),
+        loaded_web_modules,
+    )
 
     # Filet de sécurité uniquement sur les pages secondaires. Il est volontairement
     # installé avant le nettoyage visuel final et ne touche jamais au JavaScript de /app.
@@ -140,6 +168,14 @@ def install(*modules) -> None:
         secondary_interaction_reliability.install(*all_modules)
     except Exception:
         logger.exception("Impossible d'installer la fiabilité des interactions secondaires.")
+
+    # Le zoom/son doit être identique sur toutes les pages, y compris les contrôles de
+    # formulaire natifs <input type=submit/button/reset> qui servent souvent à enregistrer.
+    try:
+        from . import dashboard_button_feedback
+        dashboard_button_feedback.install(*all_modules)
+    except Exception:
+        logger.exception("Impossible d'installer les micro-interactions des boutons.")
 
     candidate_names = (
         "INDEX_HTML",
@@ -151,11 +187,10 @@ def install(*modules) -> None:
         "OPERATIONS_HTML",
         "ENTERPRISE_HTML",
         "APPEAL_HTML",
+        "COMMUNITY_HTML",
     )
     changed = 0
     for module in all_modules:
-        if module is None:
-            continue
         for name in candidate_names:
             html = getattr(module, name, None)
             if not isinstance(html, str) or "</body>" not in html:
