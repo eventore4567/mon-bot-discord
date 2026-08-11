@@ -15,6 +15,8 @@ from collections import OrderedDict
 import discord
 from discord.ext import commands
 
+from . import bot_experience_v5
+
 logger = logging.getLogger("bot.final-runtime-polish")
 
 
@@ -252,6 +254,7 @@ def _install_command_surface(bot: commands.Bot) -> None:
 
 def install(bot: commands.Bot) -> None:
     _install_odboug_account_username(bot)
+    bot_experience_v5.install(bot)
     _schedule_community_growth(bot)
     _patch_help(bot)
     _patch_canary_readiness(bot)
