@@ -3,10 +3,12 @@
 Le bot continue à fonctionner sans service externe. Quand Railway fournit DATABASE_URL /
 POSTGRES_URL et/ou REDIS_URL, cette couche active automatiquement :
 - un pool PostgreSQL pour les événements/mesures enterprise ;
-- Redis pour compteurs inter-shards, verrous courts et invalidation de cache.
+- Redis pour compteurs inter-shards, verrous courts et invalidation de cache ;
+- un namespace stable par instance afin que SentriX et Bot'Odboug ne puissent jamais
+  mélanger leurs données même si un service externe est partagé par erreur.
 
 SQLite reste le fallback historique afin qu'un service absent ne puisse jamais empêcher
-SentriX de démarrer. Aucun secret n'est journalisé.
+le bot de démarrer. Aucun secret n'est journalisé.
 """
 from __future__ import annotations
 
@@ -14,6 +16,8 @@ import json
 import logging
 import os
 from typing import Any
+
+from utils.instance_identity import instance_key, storage_key
 
 logger = logging.getLogger("bot.enterprise.infra")
 
@@ -32,6 +36,7 @@ class EnterpriseInfra:
     def __init__(self) -> None:
         self.postgres_url = (os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL") or "").strip()
         self.redis_url = (os.getenv("REDIS_URL") or "").strip()
+        self.instance_key = instance_key()
         self.pg_pool = None
         self.redis = None
         self.postgres_error: str | None = None
@@ -47,31 +52,41 @@ class EnterpriseInfra:
                     command_timeout=20,
                 )
                 async with self.pg_pool.acquire() as conn:
+                    # ADD COLUMN IF NOT EXISTS rend la migration compatible avec les tables
+                    # créées avant l'arrivée du mode multi-instance. Les anciennes lignes
+                    # SentriX reçoivent la valeur historique ``sentrix``.
                     await conn.execute(
                         """
                         CREATE TABLE IF NOT EXISTS sentrix_enterprise_events (
                             id BIGSERIAL PRIMARY KEY,
+                            instance_key TEXT NOT NULL DEFAULT 'sentrix',
                             event_type TEXT NOT NULL,
                             guild_id BIGINT,
                             payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
                             created_at BIGINT NOT NULL
                         );
-                        CREATE INDEX IF NOT EXISTS idx_sentrix_enterprise_events_guild_time
-                        ON sentrix_enterprise_events (guild_id, created_at DESC);
+                        ALTER TABLE sentrix_enterprise_events
+                        ADD COLUMN IF NOT EXISTS instance_key TEXT NOT NULL DEFAULT 'sentrix';
+                        CREATE INDEX IF NOT EXISTS idx_sentrix_enterprise_events_instance_time
+                        ON sentrix_enterprise_events (instance_key, guild_id, created_at DESC);
+
                         CREATE TABLE IF NOT EXISTS sentrix_enterprise_metrics (
                             id BIGSERIAL PRIMARY KEY,
+                            instance_key TEXT NOT NULL DEFAULT 'sentrix',
                             metric_name TEXT NOT NULL,
                             guild_id BIGINT,
                             value DOUBLE PRECISION NOT NULL,
                             labels_json JSONB NOT NULL DEFAULT '{}'::jsonb,
                             created_at BIGINT NOT NULL
                         );
-                        CREATE INDEX IF NOT EXISTS idx_sentrix_enterprise_metrics_name_time
-                        ON sentrix_enterprise_metrics (metric_name, created_at DESC);
+                        ALTER TABLE sentrix_enterprise_metrics
+                        ADD COLUMN IF NOT EXISTS instance_key TEXT NOT NULL DEFAULT 'sentrix';
+                        CREATE INDEX IF NOT EXISTS idx_sentrix_enterprise_metrics_instance_time
+                        ON sentrix_enterprise_metrics (instance_key, metric_name, created_at DESC);
                         """
                     )
                 self.postgres_error = None
-                logger.info("PostgreSQL enterprise connecté.")
+                logger.info("PostgreSQL enterprise connecté pour instance=%s.", self.instance_key)
             except Exception as exc:
                 self.postgres_error = f"{type(exc).__name__}: {exc}"[:500]
                 self.pg_pool = None
@@ -87,10 +102,11 @@ class EnterpriseInfra:
                     decode_responses=True,
                     socket_connect_timeout=5,
                     socket_timeout=5,
+                    health_check_interval=30,
                 )
                 await self.redis.ping()
                 self.redis_error = None
-                logger.info("Redis enterprise connecté.")
+                logger.info("Redis enterprise connecté pour instance=%s.", self.instance_key)
             except Exception as exc:
                 self.redis_error = f"{type(exc).__name__}: {exc}"[:500]
                 self.redis = None
@@ -113,12 +129,7 @@ class EnterpriseInfra:
         self.pg_pool = None
 
     async def reconnect(self) -> None:
-        """Recrée proprement les connexions externes après une panne transitoire.
-
-        Le runtime production limite lui-même la fréquence des tentatives. Cette méthode
-        ne boucle donc jamais et conserve le fallback SQLite si Railway/PostgreSQL/Redis
-        restent indisponibles.
-        """
+        """Recrée proprement les connexions externes après une panne transitoire."""
         await self.close()
         self.postgres_error = None
         self.redis_error = None
@@ -127,7 +138,7 @@ class EnterpriseInfra:
     async def incr(self, key: str, amount: int = 1, *, ttl: int = 120) -> int | None:
         if self.redis is None:
             return None
-        redis_key = f"sentrix:{key}"[:240]
+        redis_key = storage_key(key)
         try:
             async with self.redis.pipeline(transaction=True) as pipe:
                 pipe.incrby(redis_key, int(amount))
@@ -141,7 +152,7 @@ class EnterpriseInfra:
         if self.redis is None:
             return None
         try:
-            value = await self.redis.get(f"sentrix:{key}"[:240])
+            value = await self.redis.get(storage_key(key))
             return int(value) if value is not None else 0
         except Exception:
             return None
@@ -151,14 +162,14 @@ class EnterpriseInfra:
         if self.redis is None:
             return True
         try:
-            return bool(await self.redis.set(f"sentrix:lease:{name}"[:240], value, ex=max(5, ttl), nx=True))
+            return bool(await self.redis.set(storage_key(f"lease:{name}"), value, ex=max(5, ttl), nx=True))
         except Exception:
             return True
 
     async def release_lease(self, name: str, value: str) -> None:
         if self.redis is None:
             return
-        key = f"sentrix:lease:{name}"[:240]
+        key = storage_key(f"lease:{name}")
         # Compare-and-delete atomique afin de ne jamais retirer le lease d'un autre shard.
         script = "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end"
         try:
@@ -170,7 +181,10 @@ class EnterpriseInfra:
         if self.redis is None:
             return
         try:
-            await self.redis.publish(f"sentrix:{channel}"[:180], json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            await self.redis.publish(
+                storage_key(f"channel:{channel}")[:180],
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            )
         except Exception:
             pass
 
@@ -179,8 +193,13 @@ class EnterpriseInfra:
             return
         try:
             await self.pg_pool.execute(
-                "INSERT INTO sentrix_enterprise_events (event_type, guild_id, payload_json, created_at) VALUES ($1,$2,$3::jsonb,$4)",
-                str(event_type)[:120], guild_id, json.dumps(payload, ensure_ascii=False), int(created_at),
+                "INSERT INTO sentrix_enterprise_events "
+                "(instance_key,event_type,guild_id,payload_json,created_at) VALUES ($1,$2,$3,$4::jsonb,$5)",
+                self.instance_key,
+                str(event_type)[:120],
+                guild_id,
+                json.dumps(payload, ensure_ascii=False),
+                int(created_at),
             )
         except Exception:
             pass
@@ -190,8 +209,14 @@ class EnterpriseInfra:
             return
         try:
             await self.pg_pool.execute(
-                "INSERT INTO sentrix_enterprise_metrics (metric_name, guild_id, value, labels_json, created_at) VALUES ($1,$2,$3,$4::jsonb,$5)",
-                str(name)[:120], guild_id, float(value), json.dumps(labels, ensure_ascii=False), int(created_at),
+                "INSERT INTO sentrix_enterprise_metrics "
+                "(instance_key,metric_name,guild_id,value,labels_json,created_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6)",
+                self.instance_key,
+                str(name)[:120],
+                guild_id,
+                float(value),
+                json.dumps(labels, ensure_ascii=False),
+                int(created_at),
             )
         except Exception:
             pass
@@ -210,6 +235,7 @@ class EnterpriseInfra:
             except Exception:
                 redis_ok = False
         return {
+            "instance_key": self.instance_key,
             "postgres_configured": bool(self.postgres_url),
             "postgres_online": pg_ok,
             "postgres_error": self.postgres_error if not pg_ok else None,
