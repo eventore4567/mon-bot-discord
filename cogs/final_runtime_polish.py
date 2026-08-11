@@ -6,6 +6,7 @@ est la dernière décision appliquée au runtime.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -19,6 +20,46 @@ logger = logging.getLogger("bot.final-runtime-polish")
 
 def _truthy(name: str) -> bool:
     return os.getenv(name, "").strip().casefold() in {"1", "true", "yes", "on", "oui"}
+
+
+async def _bootstrap_community_growth(bot: commands.Bot) -> None:
+    """Installe une seule fois les fonctions communautaires et leur dashboard.
+
+    Cette suite n'ajoute aucune nouvelle racine slash : elle vit derrière le dashboard et
+    des listeners Discord. On la branche depuis cette couche finale afin de conserver le
+    catalogue de 100 commandes déjà gelé.
+    """
+    if getattr(bot, "_sentrix_community_growth_ready", False):
+        return
+    try:
+        from . import community_growth
+        await community_growth.setup(bot)
+
+        from web import dashboard
+        from web import community_card_polish
+        from web import community_growth as community_dashboard
+        from web import dashboard_instance_runtime
+        from web import instance_dashboard_branding
+
+        community_dashboard.install(dashboard)
+        community_card_polish.install(dashboard)
+        dashboard_instance_runtime.install(dashboard)
+        instance_dashboard_branding.install(dashboard, community_dashboard)
+        bot._sentrix_community_growth_ready = True
+        logger.info("Community Growth V2 branché au runtime et au dashboard.")
+    except Exception:
+        logger.exception("Impossible d'installer Community Growth V2.")
+
+
+def _schedule_community_growth(bot: commands.Bot) -> None:
+    if getattr(bot, "_sentrix_community_growth_scheduled", False):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    bot._sentrix_community_growth_scheduled = True
+    bot._sentrix_community_growth_task = loop.create_task(_bootstrap_community_growth(bot))
 
 
 def _patch_help(bot: commands.Bot) -> None:
@@ -169,6 +210,7 @@ def _install_command_surface(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
+    _schedule_community_growth(bot)
     _patch_help(bot)
     _patch_canary_readiness(bot)
     _install_command_surface(bot)
