@@ -43,6 +43,9 @@ if "cogs.log_access_fix" not in bot_main.EXTENSIONS:
 # un seul contrôle et protège les interactions lentes contre le timeout Discord.
 if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.slash_reliability_v7")
+# Commande texte uniquement, ajoutée sous +security sans consommer de slot slash.
+if "cogs.automod_enable_all" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.automod_enable_all")
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
 )
