@@ -7,6 +7,7 @@ from discord.ext import commands
 from ..bot_mastery_runtime import install as install_mastery
 from ..bot_resilience_v11 import setup as install_resilience
 from ..command_catalog_cleanup import install as install_catalog
+from ..custom_command_failsafe_v11 import setup as install_custom_command_failsafe
 from ..operations_center import install as install_operations
 from ..production_readiness_runtime import install as install_readiness
 
@@ -26,6 +27,7 @@ async def install(bot: commands.Bot):
     await install_mastery(bot, "cogs.ai")
     await install_readiness(bot, "cogs.ai")
     await install_resilience(bot)
+    await install_custom_command_failsafe(bot)
 
     global _ready_task
     started = bool(getattr(getattr(bot, "http", None), "token", None))
