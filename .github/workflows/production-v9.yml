@@ -1,0 +1,41 @@
+name: SentriX Production V9
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  production-v9:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile Production V9
+        run: >-
+          python -m compileall -q
+          cogs/production_observability_v9.py
+          cogs/ai_context_v9.py
+          cogs/game_seasons_v9.py
+          cogs/moderation_advisor_v9.py
+          tools/production_v9_audit.py
+
+      - name: Production V9 regression gate
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-production-v9.db"
+        run: python tools/production_v9_audit.py
