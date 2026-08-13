@@ -20,9 +20,15 @@ jobs:
       - run: >-
           python -m compileall -q
           cogs/bot_resilience_v11.py
+          cogs/custom_command_failsafe_v11.py
           cogs/remove_code_command/__init__.py
           tools/bot_v11_resilience_gate.py
+          tools/bot_v11_custom_command_gate.py
       - run: python tools/bot_v11_resilience_gate.py
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-bot-v11.db"
+      - run: python tools/bot_v11_custom_command_gate.py
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-bot-v11.db"
