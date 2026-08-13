@@ -1,0 +1,28 @@
+name: SentriX Bot V11 Resilience
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  bot-v11-resilience:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - run: >-
+          python -m compileall -q
+          cogs/bot_resilience_v11.py
+          cogs/remove_code_command/__init__.py
+          tools/bot_v11_resilience_gate.py
+      - run: python tools/bot_v11_resilience_gate.py
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-bot-v11.db"
