@@ -111,5 +111,16 @@ def install(bot: commands.Bot) -> None:
     logger.info("Slash Reliability V7 actif (missing=%s extra=%s).", sorted(missing), sorted(extra))
 
 
+async def _install_production_v9(bot: commands.Bot) -> None:
+    """Charge les améliorations runtime V9 après la stabilisation du catalogue slash."""
+    from . import ai_context_v9, game_seasons_v9, moderation_advisor_v9, production_observability_v9
+
+    await production_observability_v9.setup(bot)
+    await ai_context_v9.setup(bot)
+    await game_seasons_v9.setup(bot)
+    await moderation_advisor_v9.setup(bot)
+
+
 async def setup(bot: commands.Bot) -> None:
     install(bot)
+    await _install_production_v9(bot)
