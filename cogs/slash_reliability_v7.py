@@ -121,6 +121,15 @@ async def _install_production_v9(bot: commands.Bot) -> None:
     await moderation_advisor_v9.setup(bot)
 
 
+async def _install_bot_v10(bot: commands.Bot) -> None:
+    """Charge V10 après V9 afin de réutiliser ses moteurs sans toucher au catalogue slash."""
+    from . import bot_v10
+
+    if bot.get_cog("BotV10") is None:
+        await bot_v10.setup(bot)
+
+
 async def setup(bot: commands.Bot) -> None:
     install(bot)
     await _install_production_v9(bot)
+    await _install_bot_v10(bot)
