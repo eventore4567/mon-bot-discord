@@ -16,26 +16,20 @@ async def build_server_context(bot: commands.Bot, guild_id: int | None, channel_
     if guild is None:
         return ""
 
-    lines = [
-        f"Serveur: {guild.name}",
-        f"Membres: {guild.member_count or 0}",
-    ]
+    lines = [f"Serveur: {guild.name}", f"Membres: {guild.member_count or 0}"]
     try:
         conf = await bot.db.get_guild_config(guild.id)
         if conf:
             lines.append(f"Préfixe: {conf['prefix'] or '+'}")
             lines.append(f"Niveau de sécurité: {conf['security_level'] or 'moyen'}")
-            lines.append(
-                f"Tickets configurés: {'oui' if conf['ticket_category'] or conf['ticket_log_channel'] else 'non'}"
-            )
+            lines.append(f"Tickets configurés: {'oui' if conf['ticket_category'] or conf['ticket_log_channel'] else 'non'}")
     except Exception:
         logger.debug("Contexte config serveur indisponible.", exc_info=True)
 
     if channel_id:
         try:
             ticket = await bot.db.fetchone(
-                "SELECT category,priority,claimed_by,status FROM tickets "
-                "WHERE channel_id=? ORDER BY id DESC LIMIT 1",
+                "SELECT category,priority,claimed_by,status FROM tickets WHERE channel_id=? ORDER BY id DESC LIMIT 1",
                 (int(channel_id),),
             )
             if ticket:
@@ -47,6 +41,8 @@ async def build_server_context(bot: commands.Bot, guild_id: int | None, channel_
         except Exception:
             logger.debug("Contexte ticket indisponible.", exc_info=True)
 
+    # Cette table est optionnelle : si le centre Engagement n'a encore enregistré aucun
+    # regroupement, l'IA continue simplement sans cette ligne de contexte.
     try:
         rows = await bot.db.fetchall(
             "SELECT issue_label,occurrences FROM production_issue_clusters "
@@ -54,13 +50,8 @@ async def build_server_context(bot: commands.Bot, guild_id: int | None, channel_
             (guild.id,),
         )
         if rows:
-            lines.append(
-                "Problèmes support fréquents: "
-                + ", ".join(f"{row['issue_label']} ({row['occurrences']})" for row in rows)
-            )
+            lines.append("Problèmes support fréquents: " + ", ".join(f"{row['issue_label']} ({row['occurrences']})" for row in rows))
     except Exception:
-        # La table est créée par ticket_intelligence_v9 et peut ne pas encore exister
-        # pendant les premières millisecondes du démarrage.
         pass
 
     return "\n".join(lines)[:1200]
@@ -70,20 +61,14 @@ def install(bot: commands.Bot) -> None:
     global _PATCHED
     if _PATCHED:
         return
-
     from utils import ai_service
-
     current = ai_service.generate
     if getattr(current, "_sentrix_ai_context_v9", False):
         _PATCHED = True
         return
 
     async def generate_with_context(*args, **kwargs):
-        context = await build_server_context(
-            bot,
-            kwargs.get("guild_id"),
-            kwargs.get("channel_id"),
-        )
+        context = await build_server_context(bot, kwargs.get("guild_id"), kwargs.get("channel_id"))
         if context:
             instructions = kwargs.get("instructions", ai_service.SYSTEM_PROMPT)
             kwargs["instructions"] = (
@@ -100,5 +85,26 @@ def install(bot: commands.Bot) -> None:
     logger.info("Production V9: contexte serveur sûr activé pour l'IA.")
 
 
+async def _activate_isolated_observability(bot: commands.Bot) -> None:
+    """Remplace le prototype V9 par le runtime qui utilise sa propre table SQL."""
+    from . import command_observability_v9, production_observability_v9
+
+    old = bot.get_cog("ProductionObservabilityV9")
+    if old is not None:
+        root = bot.get_command("security")
+        if isinstance(root, commands.Group) and root.get_command("health") is not None:
+            root.remove_command("health")
+        await bot.remove_cog("ProductionObservabilityV9")
+
+        async def disabled_legacy_write(*args, **kwargs):
+            return None
+
+        production_observability_v9._execute = disabled_legacy_write
+
+    if bot.get_cog(command_observability_v9.COG_NAME) is None:
+        await command_observability_v9.setup(bot)
+
+
 async def setup(bot: commands.Bot) -> None:
+    await _activate_isolated_observability(bot)
     install(bot)
