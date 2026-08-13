@@ -39,6 +39,10 @@ if "cogs.drop" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.drop")
 if "cogs.log_access_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.log_access_fix")
+# Chargé en dernier : il consolide le catalogue /, remplace les gardes slash empilés par
+# un seul contrôle et protège les interactions lentes contre le timeout Discord.
+if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.slash_reliability_v7")
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
 )
