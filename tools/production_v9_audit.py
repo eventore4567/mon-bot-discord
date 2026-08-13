@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from pathlib import Path
 
-from cogs import game_seasons_v9, moderation_advisor_v9, production_observability_v9
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from cogs import game_seasons_v9, moderation_advisor_v9, production_observability_v9
 
 
 def text(path: str) -> str:
@@ -42,6 +45,12 @@ def main() -> None:
     assert "_sentrix_ai_context_v9" in ai_context
     assert "build_server_context" in ai_context
     assert "OPENAI_API_KEY" not in ai_context
+    assert "command_observability_v9.setup" in ai_context
+
+    isolated = text("cogs/command_observability_v9.py")
+    assert "production_command_events_v9" in isolated
+    assert "production_v9_health_snapshot" in isolated
+    assert "CREATE TABLE IF NOT EXISTS production_command_metrics" not in isolated
 
     games = text("cogs/game_seasons_v9.py")
     assert "game_season_scores_v2" in games
