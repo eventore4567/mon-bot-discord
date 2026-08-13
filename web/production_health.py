@@ -44,6 +44,7 @@ def install(dashboard_module) -> None:
                 infra_state = {"postgres_online": False, "redis_online": False, "error": str(exc)[:300]}
 
         runtime_observability = await build_runtime_snapshot(bot)
+        production_v9 = getattr(bot, "production_v9_health_snapshot", None)
         uptime = int(time.time() - dashboard_module.START_TIME)
         # Le dashboard se lie volontairement avant Discord. Durant les 90 premières
         # secondes, HTTP reste 200 pour ne pas transformer un déploiement normal en panne,
@@ -52,7 +53,11 @@ def install(dashboard_module) -> None:
         status = 200 if healthy or uptime < 90 else 503
         if not healthy:
             health_level = "starting" if uptime < 90 else "unavailable"
+        elif isinstance(production_v9, dict) and production_v9.get("status") == "unavailable":
+            health_level = "degraded"
         elif runtime_observability.get("available") and runtime_observability.get("status") in {"degraded", "stale"}:
+            health_level = "degraded"
+        elif isinstance(production_v9, dict) and production_v9.get("status") == "degraded":
             health_level = "degraded"
         else:
             health_level = "healthy"
@@ -67,6 +72,8 @@ def install(dashboard_module) -> None:
             "shards": int(getattr(bot, "shard_count", 1) or 1),
             "runtime_observability": runtime_observability,
         }
+        if isinstance(production_v9, dict):
+            payload["production_v9"] = production_v9
         if durable_state is not None:
             payload["durable_database"] = durable_state
         if infra_state is not None:
