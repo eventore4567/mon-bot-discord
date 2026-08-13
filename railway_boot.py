@@ -46,6 +46,10 @@ if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
 # Commande texte uniquement, ajoutée sous +security sans consommer de slot slash.
 if "cogs.automod_enable_all" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.automod_enable_all")
+# Doit être chargé après V10 : intercepte +setup auto AVANT le parsing de la commande
+# historique /setup, dont les arguments supplémentaires étaient sinon ignorés.
+if "cogs.setup_auto_fix" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.setup_auto_fix")
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
 )
