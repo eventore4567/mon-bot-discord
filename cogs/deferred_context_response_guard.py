@@ -1,17 +1,12 @@
-"""Corrige globalement le pattern ``ctx.defer()`` puis ``ctx.send()`` des commandes hybrides.
+"""Résout globalement les réponses slash différées des commandes hybrides SentriX.
 
-Dans discord.py, Context.send() utilise un follow-up des que InteractionResponse est deja
-terminee. Apres Context.defer(), cela laisse donc potentiellement la reponse originale vide
-sur « thinking » pendant que le vrai resultat part dans un second message.
+Principe : lorsqu'un Context issu d'une interaction appelle ``ctx.defer()``, on marque ce
+contexte comme possédant une réponse originale à remplir. Le premier ``ctx.send()`` suivant
+édite DIRECTEMENT cette réponse originale au lieu de faire un follow-up. Aucun fetch de la
+réponse originale n'est nécessaire : le defer créé par SentriX est la preuve suffisante.
 
-SentriX intercepte uniquement ce cas precis :
-- contexte issu d'une interaction encore valide ;
-- reponse Discord de type deferred_channel_message/deferred_message_update ;
-- reponse originale encore vide.
-
-Le premier Context.send() remplit alors la reponse originale. Si elle contient deja un vrai
-payload, le Context.send() original est appele et produit normalement un follow-up. Les
-commandes prefixees ne changent jamais de comportement.
+Cela couvre toutes les commandes hybrides utilisant le couple ctx.defer() -> ctx.send(),
+sans modifier les commandes préfixées. Les envois suivants restent des follow-ups normaux.
 """
 from __future__ import annotations
 
@@ -29,7 +24,10 @@ _DEFERRED_TYPES = {
     discord.InteractionResponseType.deferred_message_update,
 }
 _EDIT_KEYS = {"embed", "embeds", "view", "allowed_mentions", "poll"}
-_UNSUPPORTED_EDIT_KEYS = {"tts", "stickers", "nonce", "reference", "mention_author", "silent", "suppress_embeds"}
+_UNSUPPORTED_EDIT_KEYS = {
+    "tts", "stickers", "nonce", "reference", "mention_author", "silent", "suppress_embeds"
+}
+_PENDING_ATTR = "_sentrix_deferred_original_pending"
 
 
 def _state(bot: commands.Bot) -> dict:
@@ -38,7 +36,9 @@ def _state(bot: commands.Bot) -> dict:
         state = {
             "installed": False,
             "installed_at": None,
+            "defer_marked_count": 0,
             "resolved_count": 0,
+            "fallback_count": 0,
             "last_resolved_at": None,
             "last_command_name": None,
             "last_result": None,
@@ -53,7 +53,9 @@ def _safe_health(bot: commands.Bot) -> dict:
     return {
         "installed": bool(state.get("installed")),
         "installed_at": state.get("installed_at"),
+        "defer_marked_count": int(state.get("defer_marked_count") or 0),
         "resolved_count": int(state.get("resolved_count") or 0),
+        "fallback_count": int(state.get("fallback_count") or 0),
         "last_resolved_at": state.get("last_resolved_at"),
         "last_command_name": state.get("last_command_name"),
         "last_result": state.get("last_result"),
@@ -89,20 +91,7 @@ def _command_name(ctx: commands.Context) -> str | None:
     return str(name)[:120] if name else None
 
 
-def _has_payload(message: discord.InteractionMessage) -> bool:
-    return bool(
-        (getattr(message, "content", "") or "").strip()
-        or getattr(message, "embeds", None)
-        or getattr(message, "attachments", None)
-        or getattr(message, "components", None)
-        or getattr(message, "stickers", None)
-        or getattr(message, "poll", None)
-    )
-
-
 def _can_edit_from_send_kwargs(kwargs: dict[str, Any]) -> bool:
-    # Les valeurs par defaut False/None ne bloquent pas l'edition. Une option réellement
-    # demandee mais non representable par edit_original_response reste un follow-up normal.
     for key in _UNSUPPORTED_EDIT_KEYS:
         value = kwargs.get(key)
         if value not in (None, False):
@@ -130,71 +119,93 @@ def _edit_kwargs(content: Any, kwargs: dict[str, Any]) -> tuple[dict[str, Any], 
     return edit, float(delete_after) if delete_after is not None else None
 
 
+def _mark_pending(ctx: commands.Context) -> None:
+    setattr(ctx, _PENDING_ATTR, True)
+    runtime_bot = getattr(ctx, "bot", None)
+    if isinstance(runtime_bot, commands.Bot):
+        state = _state(runtime_bot)
+        state["defer_marked_count"] = int(state.get("defer_marked_count") or 0) + 1
+        state["last_command_name"] = _command_name(ctx)
+        state["last_result"] = "defer_marked"
+        state["last_error"] = None
+
+
+def _consume_pending(ctx: commands.Context) -> bool:
+    pending = bool(getattr(ctx, _PENDING_ATTR, False))
+    if pending:
+        setattr(ctx, _PENDING_ATTR, False)
+    return pending
+
+
 def install(bot: commands.Bot) -> None:
-    current = commands.Context.send
-    if getattr(current, "_sentrix_resolves_deferred_original", False):
-        state = _state(bot)
-        state["installed"] = True
-        _install_health_patch()
-        return
+    current_send = commands.Context.send
+    current_defer = commands.Context.defer
 
-    async def send_resolving_deferred_original(self: commands.Context, content=None, **kwargs):
-        interaction = getattr(self, "interaction", None)
-        if (
-            interaction is None
-            or interaction.is_expired()
-            or not interaction.response.is_done()
-            or interaction.response.type not in _DEFERRED_TYPES
-            or not _can_edit_from_send_kwargs(kwargs)
-        ):
-            return await current(self, content, **kwargs)
+    if not getattr(current_defer, "_sentrix_marks_deferred_original", False):
+        async def defer_marking_original(self: commands.Context, *args, **kwargs):
+            interaction = getattr(self, "interaction", None)
+            result = await current_defer(self, *args, **kwargs)
+            if (
+                interaction is not None
+                and not interaction.is_expired()
+                and interaction.response.is_done()
+                and interaction.response.type in _DEFERRED_TYPES
+            ):
+                _mark_pending(self)
+            return result
 
-        runtime_bot = getattr(self, "bot", None)
-        state = _state(runtime_bot) if isinstance(runtime_bot, commands.Bot) else None
-        try:
-            original = await interaction.original_response()
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException) as exc:
-            if state is not None:
-                state["last_result"] = "original_unavailable"
-                state["last_error"] = type(exc).__name__
-            return await current(self, content, **kwargs)
+        defer_marking_original._sentrix_marks_deferred_original = True
+        defer_marking_original._sentrix_original = current_defer
+        commands.Context.defer = defer_marking_original
 
-        if _has_payload(original):
-            if state is not None:
-                state["last_result"] = "original_already_resolved"
-                state["last_error"] = None
-            return await current(self, content, **kwargs)
+    if not getattr(current_send, "_sentrix_resolves_deferred_original", False):
+        async def send_resolving_deferred_original(self: commands.Context, content=None, **kwargs):
+            interaction = getattr(self, "interaction", None)
+            pending = bool(getattr(self, _PENDING_ATTR, False))
+            runtime_bot = getattr(self, "bot", None)
+            state = _state(runtime_bot) if isinstance(runtime_bot, commands.Bot) else None
 
-        edit, delete_after = _edit_kwargs(content, kwargs)
-        try:
-            message = await interaction.edit_original_response(**edit)
-            if delete_after is not None:
-                await message.delete(delay=delete_after)
-            if state is not None:
-                state["resolved_count"] = int(state.get("resolved_count") or 0) + 1
-                state["last_resolved_at"] = int(time.time())
-                state["last_command_name"] = _command_name(self)
-                state["last_result"] = "deferred_original_resolved"
-                state["last_error"] = None
-            return message
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
-            if state is not None:
-                state["last_result"] = "edit_failed_followup_used"
-                state["last_error"] = type(exc).__name__
-            # Ne jamais perdre la vraie reponse : si l'edition originale echoue, le
-            # Context.send natif garde son comportement de follow-up.
-            return await current(self, content, **kwargs)
+            if (
+                not pending
+                or interaction is None
+                or interaction.is_expired()
+                or not interaction.response.is_done()
+                or interaction.response.type not in _DEFERRED_TYPES
+                or not _can_edit_from_send_kwargs(kwargs)
+            ):
+                return await current_send(self, content, **kwargs)
 
-    send_resolving_deferred_original._sentrix_resolves_deferred_original = True
-    send_resolving_deferred_original._sentrix_original = current
-    commands.Context.send = send_resolving_deferred_original
+            edit, delete_after = _edit_kwargs(content, kwargs)
+            try:
+                message = await interaction.edit_original_response(**edit)
+                _consume_pending(self)
+                if delete_after is not None:
+                    await message.delete(delay=delete_after)
+                if state is not None:
+                    state["resolved_count"] = int(state.get("resolved_count") or 0) + 1
+                    state["last_resolved_at"] = int(time.time())
+                    state["last_command_name"] = _command_name(self)
+                    state["last_result"] = "deferred_original_resolved_directly"
+                    state["last_error"] = None
+                return message
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException) as exc:
+                _consume_pending(self)
+                if state is not None:
+                    state["fallback_count"] = int(state.get("fallback_count") or 0) + 1
+                    state["last_result"] = "direct_edit_failed_followup_used"
+                    state["last_error"] = type(exc).__name__
+                return await current_send(self, content, **kwargs)
+
+        send_resolving_deferred_original._sentrix_resolves_deferred_original = True
+        send_resolving_deferred_original._sentrix_original = current_send
+        commands.Context.send = send_resolving_deferred_original
 
     state = _state(bot)
     state["installed"] = True
     state["installed_at"] = int(time.time())
     state["last_error"] = None
     _install_health_patch()
-    logger.info("Context.send protege : un premier envoi apres defer resout maintenant la reponse originale.")
+    logger.info("Garde defer global active : premier ctx.send apres ctx.defer edite directement la reponse originale.")
 
 
 async def setup(bot: commands.Bot) -> None:
