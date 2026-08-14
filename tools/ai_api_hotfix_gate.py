@@ -1,5 +1,10 @@
 """Credential-free regression gate for SentriX AI API compatibility."""
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from utils.ai_api_compat import (
     ADVANCED_MODEL_FALLBACK,
@@ -10,8 +15,6 @@ from utils.ai_api_compat import (
     compatible_model,
     compatible_reasoning,
 )
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def main() -> None:
