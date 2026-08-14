@@ -12,6 +12,7 @@ logger = logging.getLogger("bot.dashboard.admin-only")
 _INSTALLED = False
 
 _PRIVATE_PAGE_PATHS = {"/app", "/setup-center"}
+_PUBLIC_RUNTIME_RELAY_PATH = "/api/runtime/slash-heartbeat"
 
 ACCESS_DENIED_HTML = """<!doctype html>
 <html lang="fr">
@@ -125,13 +126,15 @@ def install(dashboard) -> None:
         path = request.path
 
         # Le formulaire de recours est volontairement public : son token aléatoire est
-        # l'autorisation d'accès. Il ne doit surtout pas être bloqué par le verrou admin
-        # général, sinon un membre banni voit bien la page mais toutes ses requêtes API
-        # retournent 401 et le bouton « Envoyer le recours » semble ne rien faire.
+        # l'autorisation d'accès. Le relais runtime est lui aussi public mais n'accepte
+        # que de la télémétrie bornée et sans donnée utilisateur/secrète ; il doit pouvoir
+        # recevoir les heartbeats des autres services Railway sans session OAuth Discord.
         public_appeal_api = path.startswith("/api/appeal/")
+        public_runtime_relay = path == _PUBLIC_RUNTIME_RELAY_PATH
         if (
             path in {"/health", "/login", "/oauth/callback", "/logout", "/api/public"}
             or public_appeal_api
+            or public_runtime_relay
             or request.method == "OPTIONS"
         ):
             return await handler(request)
