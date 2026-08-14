@@ -58,6 +58,7 @@ from .setup_close_fix import install as install_setup_close_fix
 from .setup_create_logs_sync import install as install_setup_create_logs_sync
 from .setup_mobile_cleanup import install as install_setup_mobile_cleanup
 from .setup_oxyde_style import install as install_setup_oxyde_style
+from .slash_reliability_v7 import install as install_slash_reliability_v7
 from .stability_runtime import install as install_stability_runtime
 from .ticket_claim_security import install as install_ticket_claim_security
 from .ticket_ping_role import install_setup_ui as install_ticket_ping_setup
@@ -199,6 +200,10 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
 
     if _matches(name, "cogs.embed_builder"):
         _install_embed_component_fix(bot)
+        # embed_builder est la dernière extension du bootstrap historique. Installer V7 ici
+        # garantit que toutes les commandes hybrides existent déjà et que la garde de
+        # permissions finale est déjà en place avant de brancher le watchdog slash.
+        await _run_installer("fiabilité slash V7", install_slash_reliability_v7, bot)
 
 
 async def _install_log_stack(bot: commands.Bot) -> None:

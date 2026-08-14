@@ -1,20 +1,53 @@
-"""Fiabilite des commandes slash : garde unique, auto-defer et sync finale."""
+"""Fiabilite des interactions slash SentriX.
+
+Cette couche ne gere ni le catalogue ni les permissions. Elle ajoute seulement :
+- un auto-defer pour les commandes slash lentes ;
+- la fermeture des placeholders de defer restes vides apres une commande terminee ;
+- une telemetrie minimale pour verifier le chemin reel en production.
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from typing import Any
 
 import discord
 from discord.ext import commands
 
-from . import command_catalog_cleanup, command_hybrid_slash_restore_v3, permission_guard, slash_command_budget
+from . import permission_guard
 
 logger = logging.getLogger("bot.slash-reliability-v7")
 _ROOT_ALIASES = {"nick": "nickname"}
 _DEFER_DELAY_SECONDS = 1.8
 _AUTO_DEFER_TTL_SECONDS = 300.0
+
+
+def _runtime_state(bot: commands.Bot) -> dict:
+    state = getattr(bot, "slash_reliability_v7_state", None)
+    if not isinstance(state, dict):
+        state = {
+            "installed_at": None,
+            "watchdog_listener_registered": False,
+            "completion_guard_registered": False,
+            "last_interaction_seen_at": None,
+            "last_completion_at": None,
+            "last_response_type": None,
+            "last_response_done": None,
+            "last_original_had_payload": None,
+            "last_result": None,
+            "last_error": None,
+        }
+        bot.slash_reliability_v7_state = state
+    return state
+
+
+def _mark_state(bot: commands.Bot, **values) -> None:
+    _runtime_state(bot).update(values)
+
+
+def _response_type_name(interaction: discord.Interaction) -> str | None:
+    response_type = getattr(interaction.response, "type", None)
+    return getattr(response_type, "name", None) or (str(response_type) if response_type is not None else None)
 
 
 def _auto_deferred(bot: commands.Bot) -> dict[int, float]:
@@ -53,7 +86,7 @@ def _take_auto_deferred(interaction: discord.Interaction) -> bool:
 
 
 def _original_response_has_payload(message: discord.InteractionMessage) -> bool:
-    """Vrai si une commande a déjà remplacé le placeholder de defer par un vrai résultat."""
+    """Vrai si la reponse originale contient deja un vrai resultat de commande."""
     return bool(
         (getattr(message, "content", "") or "").strip()
         or getattr(message, "embeds", None)
@@ -65,7 +98,7 @@ def _original_response_has_payload(message: discord.InteractionMessage) -> bool:
 
 
 def _interaction_is_deferred(interaction: discord.Interaction) -> bool:
-    """Détecte aussi les defer créés directement par une commande, pas seulement le watchdog."""
+    """Couvre le defer watchdog et les defer faits directement par une commande."""
     response_type = getattr(interaction.response, "type", None)
     return response_type in {
         discord.InteractionResponseType.deferred_channel_message,
@@ -73,30 +106,49 @@ def _interaction_is_deferred(interaction: discord.Interaction) -> bool:
     }
 
 
-async def _settle_auto_deferred(interaction: discord.Interaction, command_name: str) -> bool:
-    """Ferme tout placeholder slash différé resté vide après une commande réussie.
+async def _settle_deferred(interaction: discord.Interaction, command_name: str) -> bool:
+    """Ferme un placeholder slash differe reste vide apres succes.
 
-    Le premier correctif ne suivait que les defer créés par notre watchdog. Certaines commandes
-    hybrides ou natives appellent cependant ``defer()`` elles-mêmes. Elles pouvaient donc finir
-    leur vraie action tout en laissant Discord afficher « SentriX réfléchit… ».
-
-    Cette version couvre les deux cas : defer SentriX et defer interne à la commande. Une vraie
-    réponse existante (texte, embed, fichier, composant, etc.) est toujours conservée intacte.
+    Si la commande a deja remplace le defer par du texte, un embed, un fichier ou un
+    composant, cette reponse est conservee telle quelle.
     """
+    bot = interaction.client
     tracked_by_watchdog = _take_auto_deferred(interaction)
+    response_done = bool(interaction.response.is_done())
+    if isinstance(bot, commands.Bot):
+        _mark_state(
+            bot,
+            last_completion_at=int(time.time()),
+            last_response_type=_response_type_name(interaction),
+            last_response_done=response_done,
+            last_original_had_payload=None,
+            last_result="completion_seen",
+            last_error=None,
+        )
 
-    if not interaction.response.is_done():
+    if not response_done:
+        if isinstance(bot, commands.Bot):
+            _mark_state(bot, last_result="response_not_done")
         return tracked_by_watchdog
+
     if not tracked_by_watchdog and not _interaction_is_deferred(interaction):
+        if isinstance(bot, commands.Bot):
+            _mark_state(bot, last_result="not_deferred")
         return False
 
     try:
         original = await interaction.original_response()
-    except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException):
-        # Réponse originale supprimée/inaccessible : aucun placeholder visible à nettoyer.
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException) as exc:
+        if isinstance(bot, commands.Bot):
+            _mark_state(bot, last_result="original_unavailable", last_error=type(exc).__name__)
         return tracked_by_watchdog
 
-    if _original_response_has_payload(original):
+    has_payload = _original_response_has_payload(original)
+    if isinstance(bot, commands.Bot):
+        _mark_state(bot, last_original_had_payload=has_payload)
+    if has_payload:
+        if isinstance(bot, commands.Bot):
+            _mark_state(bot, last_result="payload_present")
         return tracked_by_watchdog
 
     try:
@@ -106,15 +158,19 @@ async def _settle_auto_deferred(interaction: discord.Interaction, command_name: 
             attachments=[],
             view=None,
         )
+        if isinstance(bot, commands.Bot):
+            _mark_state(bot, last_result="settled", last_error=None)
         logger.info(
-            "Defer slash résolu après completion : /%s (user=%s, guild=%s, watchdog=%s).",
+            "Defer slash resolu apres completion : /%s (user=%s, guild=%s, watchdog=%s).",
             command_name,
             getattr(interaction.user, "id", None),
             interaction.guild_id,
             tracked_by_watchdog,
         )
-    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-        logger.debug("Impossible de clôturer le defer pour /%s.", command_name, exc_info=True)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+        if isinstance(bot, commands.Bot):
+            _mark_state(bot, last_result="edit_failed", last_error=type(exc).__name__)
+        logger.debug("Impossible de cloturer le defer pour /%s.", command_name, exc_info=True)
         return tracked_by_watchdog
     return True
 
@@ -144,28 +200,29 @@ async def _defer_watchdog(interaction: discord.Interaction) -> None:
         logger.debug("Auto-defer slash impossible.", exc_info=True)
 
 
-def _install_single_interaction_guard(bot: commands.Bot) -> None:
-    tree = bot.tree
-    if getattr(tree, "_sentrix_slash_reliability_v7_guard", False):
+def _install_watchdog_listener(bot: commands.Bot) -> None:
+    """Observe les interactions sans remplacer tree.interaction_check.
+
+    Le garde central de permissions/blacklist reste donc exactement celui installe par
+    permission_guard.py ; V7 ne fait que lancer son watchdog en parallele.
+    """
+    if getattr(bot, "_sentrix_slash_watchdog_listener_registered", False):
         return
 
-    async def reliable_interaction_check(interaction: discord.Interaction) -> bool:
+    async def watch_interaction(interaction: discord.Interaction) -> None:
         if interaction.type != discord.InteractionType.application_command:
-            return True
+            return
+        _mark_state(bot, last_interaction_seen_at=int(time.time()))
         asyncio.create_task(_defer_watchdog(interaction))
-        decision = await permission_guard.evaluate_interaction_access(bot, interaction)
-        if decision.allowed:
-            return True
-        await permission_guard._send_interaction_denial(interaction, decision)
-        return False
 
-    tree.interaction_check = reliable_interaction_check
-    tree._sentrix_slash_reliability_v7_guard = True
-    tree._sentrix_interaction_policy_v2 = True
+    bot.add_listener(watch_interaction, "on_interaction")
+    bot._sentrix_slash_watchdog_listener = watch_interaction
+    bot._sentrix_slash_watchdog_listener_registered = True
+    _mark_state(bot, watchdog_listener_registered=True)
 
 
-def _install_auto_defer_completion_guard(bot: commands.Bot) -> None:
-    """Termine les placeholders defer après succès, y compris les defer internes/hybrides."""
+def _install_completion_guard(bot: commands.Bot) -> None:
+    """Termine les placeholders defer apres succes, natifs comme hybrides."""
     if getattr(bot, "_sentrix_slash_auto_defer_completion_guard", False):
         return
 
@@ -174,7 +231,7 @@ def _install_auto_defer_completion_guard(bot: commands.Bot) -> None:
         command: discord.app_commands.Command | discord.app_commands.ContextMenu,
     ) -> None:
         name = str(getattr(command, "qualified_name", getattr(command, "name", "commande")))
-        await _settle_auto_deferred(interaction, name)
+        await _settle_deferred(interaction, name)
 
     async def settle_hybrid_command(ctx: commands.Context) -> None:
         interaction = getattr(ctx, "interaction", None)
@@ -182,68 +239,29 @@ def _install_auto_defer_completion_guard(bot: commands.Bot) -> None:
             return
         command = getattr(ctx, "command", None)
         name = str(getattr(command, "qualified_name", getattr(command, "name", "commande")))
-        await _settle_auto_deferred(interaction, name)
+        await _settle_deferred(interaction, name)
 
     bot.add_listener(settle_app_command, "on_app_command_completion")
     bot.add_listener(settle_hybrid_command, "on_command_completion")
     bot._sentrix_slash_auto_defer_completion_guard = True
-
-
-def _expected_slash_roots() -> set[str]:
-    return set(command_catalog_cleanup.normal_direct_commands())
-
-
-def _actual_slash_roots(bot: commands.Bot) -> set[str]:
-    return {str(command.name).casefold() for command in bot.tree.get_commands()}
-
-
-def _rebuild_slash_catalog(bot: commands.Bot) -> tuple[set[str], set[str]]:
-    command_catalog_cleanup.finalize(bot)
-    command_hybrid_slash_restore_v3.restore(bot)
-    slash_command_budget.finalize(bot)
-    expected = _expected_slash_roots()
-    actual = _actual_slash_roots(bot)
-    missing = expected - actual
-    extra = actual - expected
-    if missing or extra:
-        command_hybrid_slash_restore_v3.restore(bot)
-        slash_command_budget.finalize(bot)
-        actual = _actual_slash_roots(bot)
-        missing = expected - actual
-        extra = actual - expected
-    return missing, extra
-
-
-def _install_reliable_sync(bot: commands.Bot) -> None:
-    tree = bot.tree
-    if getattr(tree, "_sentrix_slash_reliability_v7_sync", False):
-        return
-    original_sync = tree.sync
-
-    async def reliable_sync(*args: Any, **kwargs: Any):
-        missing, extra = _rebuild_slash_catalog(bot)
-        if missing or extra:
-            logger.error("Catalogue slash invalide avant sync: missing=%s extra=%s", sorted(missing), sorted(extra))
-            raise RuntimeError(f"Catalogue slash incomplet: missing={sorted(missing)} extra={sorted(extra)}")
-        result = await original_sync(*args, **kwargs)
-        logger.info("Synchronisation slash reussie: %s commandes globales.", len(_expected_slash_roots()))
-        return result
-
-    tree.sync = reliable_sync
-    tree._sentrix_slash_reliability_v7_sync = True
+    _mark_state(bot, completion_guard_registered=True)
 
 
 def install(bot: commands.Bot) -> None:
+    """Installe uniquement la fiabilite interactionnelle, sans toucher au catalogue."""
+    if getattr(bot, "_sentrix_slash_reliability_v7_installed", False):
+        return
+    _runtime_state(bot)
     _install_canonical_root_mapping()
-    _install_single_interaction_guard(bot)
-    _install_auto_defer_completion_guard(bot)
-    _install_reliable_sync(bot)
-    missing, extra = _rebuild_slash_catalog(bot)
-    logger.info("Slash Reliability V7 actif (missing=%s extra=%s).", sorted(missing), sorted(extra))
+    _install_watchdog_listener(bot)
+    _install_completion_guard(bot)
+    bot._sentrix_slash_reliability_v7_installed = True
+    _mark_state(bot, installed_at=int(time.time()), last_error=None)
+    logger.info("Slash Reliability V7 actif : watchdog + completion, garde permissions intacte.")
 
 
 async def _install_production_v9(bot: commands.Bot) -> None:
-    """Charge les améliorations runtime V9 après la stabilisation du catalogue slash."""
+    """Compatibilite historique si ce module est charge comme extension complete."""
     from . import ai_context_v9, game_seasons_v9, moderation_advisor_v9, production_observability_v9
 
     await production_observability_v9.setup(bot)
@@ -253,7 +271,7 @@ async def _install_production_v9(bot: commands.Bot) -> None:
 
 
 async def _install_bot_v10(bot: commands.Bot) -> None:
-    """Charge V10 après V9 afin de réutiliser ses moteurs sans toucher au catalogue slash."""
+    """Compatibilite historique du bootstrap V10 ; non utilisee par install()."""
     from . import bot_v10
 
     if bot.get_cog("BotV10") is None:
