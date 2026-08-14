@@ -48,6 +48,10 @@ if "cogs.interaction_transport_guard" not in bot_main.EXTENSIONS:
 # une autre application. Aucun doublon n'est supprime automatiquement par ce detecteur.
 if "cogs.stale_discord_app_detector" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.stale_discord_app_detector")
+# Rend visible uniquement le nom/type/classe d'erreur des dernieres commandes V9, sans ID
+# d'utilisateur/serveur ni texte de message, afin de cibler le handler fautif en production.
+if "cogs.command_error_probe" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.command_error_probe")
 # Chargé en dernier : il consolide le catalogue /, remplace les gardes slash empilés par
 # un seul contrôle et protège les interactions lentes contre le timeout Discord.
 if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
