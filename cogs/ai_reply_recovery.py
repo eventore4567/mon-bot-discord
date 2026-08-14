@@ -17,6 +17,7 @@ from discord.ext import commands
 from utils import ai_service
 
 _NATURAL_TRIGGER = re.compile(r"^(?:sentrix|ssentrix|sentri|snetri|snentrix)\b", re.IGNORECASE)
+_UNSET = object()
 
 
 def _path(bot: commands.Bot) -> dict:
@@ -30,10 +31,10 @@ def _path(bot: commands.Bot) -> dict:
     return path
 
 
-def _mark(bot: commands.Bot, key: str, value=None) -> None:
+def _mark(bot: commands.Bot, key: str, value=_UNSET) -> None:
     path = _path(bot)
     if isinstance(path, dict):
-        path[key] = int(time.time()) if value is None else value
+        path[key] = int(time.time()) if value is _UNSET else value
 
 
 def _record_error(bot: commands.Bot, stage: str, exc: Exception) -> None:
