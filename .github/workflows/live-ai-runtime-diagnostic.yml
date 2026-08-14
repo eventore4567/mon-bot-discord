@@ -26,19 +26,28 @@ jobs:
 
           for attempt in range(1, 31):
               try:
-                  request = urllib.request.Request(url, headers={"User-Agent": "sentrix-live-ai-diagnostic/1"})
+                  request = urllib.request.Request(url, headers={"User-Agent": "sentrix-live-ai-diagnostic/2"})
                   with urllib.request.urlopen(request, timeout=12) as response:
                       data = json.load(response)
                   last = data
                   ai = data.get("ai") if isinstance(data, dict) else None
                   probe = ai.get("probe") if isinstance(ai, dict) else None
 
-                  print(f"Attempt {attempt}: discord_ready={data.get('discord_ready')} ai_section={bool(ai)} probe={probe}")
+                  print(
+                      f"Attempt {attempt}: discord_ready={data.get('discord_ready')} "
+                      f"ai_section={isinstance(ai, dict)} runtime_loaded={ai.get('runtime_loaded') if isinstance(ai, dict) else None} "
+                      f"probe={probe}"
+                  )
 
-                  # The new deployment is live only once the new safe AI section appears.
+                  # The new deployment is live only once the final production health handler
+                  # exposes the safe AI section.
                   if not isinstance(ai, dict):
                       time.sleep(10)
                       continue
+
+                  if not ai.get("runtime_loaded"):
+                      print(json.dumps(data, indent=2, sort_keys=True))
+                      raise SystemExit("LIVE_AI_DIAGNOSTIC: AI_RUNTIME_NOT_LOADED")
 
                   if not ai.get("key_configured"):
                       print(json.dumps(data, indent=2, sort_keys=True))
@@ -64,5 +73,5 @@ jobs:
                   time.sleep(10)
 
           print("Last payload:", json.dumps(last, indent=2, sort_keys=True) if last is not None else None)
-          raise SystemExit(f"LIVE_AI_DIAGNOSTIC_TIMEOUT: {last_error or 'no health payload'}")
+          raise SystemExit(f"LIVE_AI_DIAGNOSTIC_TIMEOUT: {last_error or 'probe never became ready'}")
           PY
