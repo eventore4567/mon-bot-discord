@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile slash completion sources
-        run: python -m compileall -q cogs/__init__.py cogs/interaction_transport_guard.py cogs/stale_discord_app_detector.py cogs/command_error_probe.py cogs/legacy_observability_conflict_guard.py cogs/slash_reliability_v7.py cogs/deferred_context_response_guard.py cogs/slash_error_completion_guard.py web/dashboard_instance_runtime.py web/production_health.py tools/interaction_transport_gate.py tools/stale_discord_app_gate.py tools/command_error_probe_gate.py tools/slash_thinking_gate.py tools/slash_error_lifecycle_gate.py tools/defer_send_audit.py
+        run: python -m compileall -q cogs/__init__.py cogs/interaction_transport_guard.py cogs/stale_discord_app_detector.py cogs/command_error_probe.py cogs/legacy_observability_conflict_guard.py cogs/slash_reliability_v7.py cogs/deferred_context_response_guard.py cogs/slash_error_completion_guard.py web/dashboard_instance_runtime.py web/production_health.py tools/interaction_transport_gate.py tools/stale_discord_app_gate.py tools/command_error_probe_gate.py tools/slash_thinking_gate.py tools/slash_error_lifecycle_gate.py tools/defer_send_audit.py tools/deferred_context_guard_gate.py
       - name: Interaction transport regression gate
         run: python tools/interaction_transport_gate.py
       - name: Stale Discord app detector gate
@@ -34,3 +34,5 @@ jobs:
         run: python tools/slash_error_lifecycle_gate.py
       - name: Deferred hybrid response audit
         run: python tools/defer_send_audit.py
+      - name: Global deferred Context response gate
+        run: python tools/deferred_context_guard_gate.py
