@@ -1,0 +1,24 @@
+name: SentriX AI API Hotfix
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ai-api-hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile AI hotfix sources
+        run: python -m compileall -q utils/ai_api_compat.py cogs/ai_api_hotfix.py cogs/remove_code_command/__init__.py tools/ai_api_hotfix_gate.py
+      - name: AI API compatibility gate
+        run: python tools/ai_api_hotfix_gate.py

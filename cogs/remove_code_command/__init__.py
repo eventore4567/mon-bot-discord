@@ -4,6 +4,7 @@ import asyncio
 
 from discord.ext import commands
 
+from ..ai_api_hotfix import setup as install_ai_api_hotfix
 from ..bot_mastery_runtime import install as install_mastery
 from ..bot_resilience_v11 import setup as install_resilience
 from ..bot_v12_machine import setup as install_v12_machine
@@ -33,6 +34,8 @@ async def install(bot: commands.Bot):
     await install_v12_machine(bot)
     # V13 owns the single ticket SLA loop and cancels the legacy V12 watcher.
     await install_v13_production(bot)
+    # Keep this after V12/V13 so it sanitizes the final wrapped AI request path.
+    await install_ai_api_hotfix(bot)
 
     global _ready_task
     started = bool(getattr(getattr(bot, "http", None), "token", None))
