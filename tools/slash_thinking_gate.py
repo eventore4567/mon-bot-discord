@@ -33,15 +33,16 @@ def calls(node: ast.AST, attr: str) -> bool:
 
 
 watchdog = function("_defer_watchdog")
-settler = function("_settle_auto_deferred")
+settler = function("_settle_deferred")
 deferred_detector = function("_interaction_is_deferred")
-installer = function("_install_auto_defer_completion_guard")
-interaction_guard = function("_install_single_interaction_guard")
+watchdog_installer = function("_install_watchdog_listener")
+completion_installer = function("_install_completion_guard")
 payload_check = function("_original_response_has_payload")
+install = function("install")
 
 assert calls(watchdog, "defer"), "slash watchdog must still defer slow interactions"
-assert calls(watchdog, "_mark_auto_deferred"), "watchdog defers should still be tracked after success"
-assert "thinking=True" in ast.get_source_segment(text, watchdog), "watchdog must preserve thinking defer semantics"
+assert calls(watchdog, "_mark_auto_deferred"), "watchdog defers must be tracked after success"
+assert "thinking=True" in (ast.get_source_segment(text, watchdog) or ""), "watchdog must preserve thinking defer semantics"
 
 watchdog_source = ast.get_source_segment(text, watchdog) or ""
 assert watchdog_source.index("await interaction.response.defer(thinking=True)") < watchdog_source.index("_mark_auto_deferred(interaction)"), (
@@ -49,53 +50,64 @@ assert watchdog_source.index("await interaction.response.defer(thinking=True)") 
 )
 
 settler_source = ast.get_source_segment(text, settler) or ""
-assert calls(settler, "_take_auto_deferred"), "watchdog tracker must still be consumed on completion"
-assert calls(settler, "_interaction_is_deferred"), "completion must also detect command-owned defer responses"
+assert calls(settler, "_take_auto_deferred"), "watchdog tracker must be consumed on completion"
+assert calls(settler, "_interaction_is_deferred"), "completion must detect command-owned defer responses"
 assert calls(settler, "original_response"), "completion must inspect the original interaction response"
 assert calls(settler, "_original_response_has_payload"), "existing command results must be preserved"
 assert calls(settler, "edit_original_response"), "empty thinking placeholders must be resolved"
 assert "Commande exécutée avec succès." in settler_source
 assert "if not tracked_by_watchdog and not _interaction_is_deferred(interaction)" in settler_source, (
-    "manual/command-owned defer responses must be eligible even when the watchdog never tracked them"
+    "manual/command-owned defers must be eligible even when the watchdog did not create them"
 )
-assert "last_completion_at" in settler_source, "live completion telemetry must be recorded"
-assert "last_result" in settler_source, "live completion result must be observable"
+for field in ("last_completion_at", "last_response_type", "last_result", "last_error"):
+    assert field in settler_source, f"live completion telemetry missing: {field}"
 
 manual_defer_source = ast.get_source_segment(text, deferred_detector) or ""
-assert "deferred_channel_message" in manual_defer_source, "slash defer response type must be recognized"
-assert "deferred_message_update" in manual_defer_source, "deferred update type must be recognized safely"
+assert "deferred_channel_message" in manual_defer_source
+assert "deferred_message_update" in manual_defer_source
 
 payload_source = ast.get_source_segment(text, payload_check) or ""
 for field in ("content", "embeds", "attachments", "components", "stickers", "poll"):
     assert field in payload_source, f"payload detector must preserve existing {field}"
 
-installer_source = ast.get_source_segment(text, installer) or ""
-assert '"on_app_command_completion"' in installer_source, "native slash completion must be covered"
-assert '"on_command_completion"' in installer_source, "hybrid slash completion must be covered"
-assert "_sentrix_slash_auto_defer_completion_guard" in installer_source, "installer must be idempotent"
+watchdog_install_source = ast.get_source_segment(text, watchdog_installer) or ""
+assert 'bot.add_listener(watch_interaction, "on_interaction")' in watchdog_install_source, (
+    "watchdog must use an event listener instead of replacing tree.interaction_check"
+)
+assert "tree.interaction_check" not in watchdog_install_source, (
+    "Slash V7 must never replace the central permission/blacklist interaction check"
+)
+assert "_sentrix_slash_watchdog_listener_registered" in watchdog_install_source
 
-interaction_source = ast.get_source_segment(text, interaction_guard) or ""
-assert "previous_check = tree.interaction_check" in interaction_source, "V7 must preserve the existing permission/blacklist tree check"
-assert "previous_check(interaction)" in interaction_source, "V7 must delegate to the previous interaction check"
-assert "inspect.isawaitable" in interaction_source, "previous async tree checks must be awaited"
+completion_source = ast.get_source_segment(text, completion_installer) or ""
+assert '"on_app_command_completion"' in completion_source, "native slash completion must be covered"
+assert '"on_command_completion"' in completion_source, "hybrid slash completion must be covered"
+assert "_sentrix_slash_auto_defer_completion_guard" in completion_source
 
-install = function("install")
 install_source = ast.get_source_segment(text, install) or ""
-assert calls(install, "_install_auto_defer_completion_guard"), "completion guard must be installed"
-assert "_sentrix_slash_reliability_v7_installed" in install_source, "runtime must expose an installed marker"
+assert calls(install, "_install_watchdog_listener")
+assert calls(install, "_install_completion_guard")
+assert "_sentrix_slash_reliability_v7_installed" in install_source
+assert "_rebuild_slash_catalog" not in text, "Slash V7 must not call stale catalog rebuild APIs"
+assert "command_catalog_cleanup" not in text, "Slash V7 must not own the command catalog"
+assert "command_hybrid_slash_restore_v3" not in text, "Slash V7 must not restore the slash catalog"
+assert "slash_command_budget" not in text, "Slash V7 must not mutate slash budgeting"
 
-# Critical production wiring: previous patches passed CI but the module was never loaded by the bot.
-assert "from .slash_reliability_v7 import install as install_slash_reliability_v7" in loader_text, (
-    "slash reliability must be imported by the real cogs loader"
-)
-assert 'if _matches(name, "cogs.embed_builder")' in loader_text, "runtime must install after the final historical extension"
-assert 'await _run_installer("fiabilité slash V7", install_slash_reliability_v7, bot)' in loader_text, (
-    "slash reliability must be invoked by the production loader"
-)
+# Production wiring: the runtime must be imported and actually invoked by the real loader.
+assert "from .slash_reliability_v7 import install as install_slash_reliability_v7" in loader_text
+assert 'if _matches(name, "cogs.embed_builder")' in loader_text
+assert 'await _run_installer("fiabilité slash V7", install_slash_reliability_v7, bot)' in loader_text
 
-assert '"slash_reliability": _safe_slash_health(bot)' in health_text, "live /health must expose slash runtime state"
-assert '"runtime_installed": bool(getattr(bot, "_sentrix_slash_reliability_v7_installed", False))' in health_text, (
-    "health must prove the runtime is actually installed"
-)
+# Live proof: /health must show whether V7 is really installed and whether interactions reach it.
+assert '"slash_reliability": _safe_slash_health(bot)' in health_text
+for field in (
+    '"runtime_installed"',
+    '"watchdog_listener_registered"',
+    '"completion_guard_registered"',
+    '"last_interaction_seen_at"',
+    '"last_completion_at"',
+    '"last_result"',
+):
+    assert field in health_text, f"slash health field missing: {field}"
 
-print("SentriX slash thinking cleanup gate: OK (runtime wired + watchdog + command-owned defer + live telemetry)")
+print("SentriX slash thinking cleanup gate: OK (real runtime wiring, permissions untouched, defer lifecycle observable)")
