@@ -8,10 +8,12 @@ SOURCE = ROOT / "cogs" / "slash_reliability_v7.py"
 LOADER = ROOT / "cogs" / "__init__.py"
 HEALTH = ROOT / "web" / "production_health.py"
 RUNTIME_WEB = ROOT / "web" / "dashboard_instance_runtime.py"
+ADMIN_GATE = ROOT / "web" / "admin_only_dashboard.py"
 text = SOURCE.read_text(encoding="utf-8")
 loader_text = LOADER.read_text(encoding="utf-8")
 health_text = HEALTH.read_text(encoding="utf-8")
 runtime_web_text = RUNTIME_WEB.read_text(encoding="utf-8")
+admin_gate_text = ADMIN_GATE.read_text(encoding="utf-8")
 tree = ast.parse(text, filename=str(SOURCE))
 
 
@@ -121,6 +123,11 @@ assert 'app["slash_runtime_relays"] = {}' in runtime_web_text
 for forbidden in ("user_id", "guild_id", "message_content", "token", "prompt"):
     assert f'"{forbidden}"' not in runtime_web_text, f"relay must not expose {forbidden}"
 
+# The global dashboard admin middleware must explicitly allow this machine-to-machine route.
+assert '_PUBLIC_RUNTIME_RELAY_PATH = "/api/runtime/slash-heartbeat"' in admin_gate_text
+assert "public_runtime_relay = path == _PUBLIC_RUNTIME_RELAY_PATH" in admin_gate_text
+assert "or public_runtime_relay" in admin_gate_text, "runtime relay must bypass OAuth/admin session checks"
+
 # Live proof: /health must show local V7 state and all Railway instance relays.
 assert '"slash_reliability": _safe_slash_health(bot)' in health_text
 assert '"slash_instances": _safe_slash_instances(request.app)' in health_text
@@ -137,4 +144,4 @@ for field in (
 ):
     assert field in health_text, f"slash health field missing: {field}"
 
-print("SentriX slash thinking cleanup gate: OK (cross-instance routing visible, permissions untouched, defer lifecycle observable)")
+print("SentriX slash thinking cleanup gate: OK (cross-instance relay public, permissions untouched, defer lifecycle observable)")
