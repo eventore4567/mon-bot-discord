@@ -64,25 +64,40 @@ def _original_response_has_payload(message: discord.InteractionMessage) -> bool:
     )
 
 
-async def _settle_auto_deferred(interaction: discord.Interaction, command_name: str) -> bool:
-    """Ferme uniquement les `thinking=True` créés par notre watchdog et restés vides.
+def _interaction_is_deferred(interaction: discord.Interaction) -> bool:
+    """Détecte aussi les defer créés directement par une commande, pas seulement le watchdog."""
+    response_type = getattr(interaction.response, "type", None)
+    return response_type in {
+        discord.InteractionResponseType.deferred_channel_message,
+        discord.InteractionResponseType.deferred_message_update,
+    }
 
-    Une vraie réponse déjà envoyée/éditée est conservée telle quelle. Si la commande a fait
-    son action via un message de salon indépendant et n'a jamais résolu l'interaction,
-    le placeholder "SentriX réfléchit…" devient un accusé de succès court.
+
+async def _settle_auto_deferred(interaction: discord.Interaction, command_name: str) -> bool:
+    """Ferme tout placeholder slash différé resté vide après une commande réussie.
+
+    Le premier correctif ne suivait que les defer créés par notre watchdog. Certaines commandes
+    hybrides ou natives appellent cependant ``defer()`` elles-mêmes. Elles pouvaient donc finir
+    leur vraie action tout en laissant Discord afficher « SentriX réfléchit… ».
+
+    Cette version couvre les deux cas : defer SentriX et defer interne à la commande. Une vraie
+    réponse existante (texte, embed, fichier, composant, etc.) est toujours conservée intacte.
     """
-    if not _take_auto_deferred(interaction):
+    tracked_by_watchdog = _take_auto_deferred(interaction)
+
+    if not interaction.response.is_done():
+        return tracked_by_watchdog
+    if not tracked_by_watchdog and not _interaction_is_deferred(interaction):
         return False
 
     try:
         original = await interaction.original_response()
     except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException):
-        # Si la réponse originale a été supprimée ou n'existe plus, il n'y a plus de
-        # placeholder visible à nettoyer.
-        return True
+        # Réponse originale supprimée/inaccessible : aucun placeholder visible à nettoyer.
+        return tracked_by_watchdog
 
     if _original_response_has_payload(original):
-        return True
+        return tracked_by_watchdog
 
     try:
         await interaction.edit_original_response(
@@ -92,13 +107,15 @@ async def _settle_auto_deferred(interaction: discord.Interaction, command_name: 
             view=None,
         )
         logger.info(
-            "Auto-defer slash résolu après completion : /%s (user=%s, guild=%s).",
+            "Defer slash résolu après completion : /%s (user=%s, guild=%s, watchdog=%s).",
             command_name,
             getattr(interaction.user, "id", None),
             interaction.guild_id,
+            tracked_by_watchdog,
         )
     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-        logger.debug("Impossible de clôturer l'auto-defer pour /%s.", command_name, exc_info=True)
+        logger.debug("Impossible de clôturer le defer pour /%s.", command_name, exc_info=True)
+        return tracked_by_watchdog
     return True
 
 
@@ -148,7 +165,7 @@ def _install_single_interaction_guard(bot: commands.Bot) -> None:
 
 
 def _install_auto_defer_completion_guard(bot: commands.Bot) -> None:
-    """Termine les placeholders auto-defer après succès, y compris pour les hybrides."""
+    """Termine les placeholders defer après succès, y compris les defer internes/hybrides."""
     if getattr(bot, "_sentrix_slash_auto_defer_completion_guard", False):
         return
 

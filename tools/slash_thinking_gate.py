@@ -30,11 +30,12 @@ def calls(node: ast.AST, attr: str) -> bool:
 
 watchdog = function("_defer_watchdog")
 settler = function("_settle_auto_deferred")
+deferred_detector = function("_interaction_is_deferred")
 installer = function("_install_auto_defer_completion_guard")
 payload_check = function("_original_response_has_payload")
 
 assert calls(watchdog, "defer"), "slash watchdog must still defer slow interactions"
-assert calls(watchdog, "_mark_auto_deferred"), "auto-defer must be tracked only after it succeeds"
+assert calls(watchdog, "_mark_auto_deferred"), "watchdog defers should still be tracked after success"
 assert "thinking=True" in ast.get_source_segment(text, watchdog), "watchdog must preserve thinking defer semantics"
 
 watchdog_source = ast.get_source_segment(text, watchdog) or ""
@@ -42,11 +43,20 @@ assert watchdog_source.index("await interaction.response.defer(thinking=True)") 
     "auto-defer must be marked only after Discord accepts the defer"
 )
 
-assert calls(settler, "_take_auto_deferred"), "completion must affect only SentriX auto-deferred interactions"
+settler_source = ast.get_source_segment(text, settler) or ""
+assert calls(settler, "_take_auto_deferred"), "watchdog tracker must still be consumed on completion"
+assert calls(settler, "_interaction_is_deferred"), "completion must also detect command-owned defer responses"
 assert calls(settler, "original_response"), "completion must inspect the original interaction response"
 assert calls(settler, "_original_response_has_payload"), "existing command results must be preserved"
 assert calls(settler, "edit_original_response"), "empty thinking placeholders must be resolved"
-assert "Commande exécutée avec succès." in (ast.get_source_segment(text, settler) or "")
+assert "Commande exécutée avec succès." in settler_source
+assert "if not tracked_by_watchdog and not _interaction_is_deferred(interaction)" in settler_source, (
+    "manual/command-owned defer responses must be eligible even when the watchdog never tracked them"
+)
+
+manual_defer_source = ast.get_source_segment(text, deferred_detector) or ""
+assert "deferred_channel_message" in manual_defer_source, "slash defer response type must be recognized"
+assert "deferred_message_update" in manual_defer_source, "deferred update type must be recognized safely"
 
 payload_source = ast.get_source_segment(text, payload_check) or ""
 for field in ("content", "embeds", "attachments", "components", "stickers", "poll"):
@@ -60,4 +70,4 @@ assert "_sentrix_slash_auto_defer_completion_guard" in installer_source, "instal
 install = function("install")
 assert calls(install, "_install_auto_defer_completion_guard"), "completion guard must be installed in production"
 
-print("SentriX slash thinking cleanup gate: OK")
+print("SentriX slash thinking cleanup gate: OK (watchdog + command-owned defer)")
