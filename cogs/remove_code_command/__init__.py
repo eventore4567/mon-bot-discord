@@ -7,7 +7,7 @@ from discord.ext import commands
 from ..bot_mastery_runtime import install as install_mastery
 from ..bot_resilience_v11 import setup as install_resilience
 from ..bot_v12_machine import setup as install_v12_machine
-from ..bot_v12_ticket_sla import setup as install_v12_ticket_sla
+from ..bot_v13_production import setup as install_v13_production
 from ..command_catalog_cleanup import install as install_catalog
 from ..custom_command_failsafe_v11 import setup as install_custom_command_failsafe
 from ..operations_center import install as install_operations
@@ -31,7 +31,8 @@ async def install(bot: commands.Bot):
     await install_resilience(bot)
     await install_custom_command_failsafe(bot)
     await install_v12_machine(bot)
-    await install_v12_ticket_sla(bot)
+    # V13 owns the single ticket SLA loop and cancels the legacy V12 watcher.
+    await install_v13_production(bot)
 
     global _ready_task
     started = bool(getattr(getattr(bot, "http", None), "token", None))
