@@ -19,6 +19,8 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile V13 production sources
-        run: python -m compileall -q cogs/bot_v13_production.py cogs/remove_code_command/__init__.py tools/bot_v13_gate.py
+        run: python -m compileall -q cogs/bot_v13_production.py cogs/remove_code_command/__init__.py tools/bot_v13_gate.py tools/bot_v13_backup_probe.py
       - name: Bot V13 production regression gate
         run: python tools/bot_v13_gate.py
+      - name: V13 SQLite backup/recovery round-trip
+        run: python tools/bot_v13_backup_probe.py
