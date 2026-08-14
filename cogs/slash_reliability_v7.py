@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import discord
@@ -13,6 +14,92 @@ from . import command_catalog_cleanup, command_hybrid_slash_restore_v3, permissi
 logger = logging.getLogger("bot.slash-reliability-v7")
 _ROOT_ALIASES = {"nick": "nickname"}
 _DEFER_DELAY_SECONDS = 1.8
+_AUTO_DEFER_TTL_SECONDS = 300.0
+
+
+def _auto_deferred(bot: commands.Bot) -> dict[int, float]:
+    tracker = getattr(bot, "_sentrix_auto_deferred_slash", None)
+    if not isinstance(tracker, dict):
+        tracker = {}
+        bot._sentrix_auto_deferred_slash = tracker
+    return tracker
+
+
+def _prune_auto_deferred(bot: commands.Bot) -> None:
+    tracker = _auto_deferred(bot)
+    if not tracker:
+        return
+    now = time.monotonic()
+    stale = [interaction_id for interaction_id, stamp in tracker.items() if now - stamp > _AUTO_DEFER_TTL_SECONDS]
+    for interaction_id in stale:
+        tracker.pop(interaction_id, None)
+
+
+def _mark_auto_deferred(interaction: discord.Interaction) -> None:
+    bot = interaction.client
+    if not isinstance(bot, commands.Bot):
+        return
+    tracker = _auto_deferred(bot)
+    tracker[int(interaction.id)] = time.monotonic()
+    if len(tracker) > 5000:
+        _prune_auto_deferred(bot)
+
+
+def _take_auto_deferred(interaction: discord.Interaction) -> bool:
+    bot = interaction.client
+    if not isinstance(bot, commands.Bot):
+        return False
+    return _auto_deferred(bot).pop(int(interaction.id), None) is not None
+
+
+def _original_response_has_payload(message: discord.InteractionMessage) -> bool:
+    """Vrai si une commande a déjà remplacé le placeholder de defer par un vrai résultat."""
+    return bool(
+        (getattr(message, "content", "") or "").strip()
+        or getattr(message, "embeds", None)
+        or getattr(message, "attachments", None)
+        or getattr(message, "components", None)
+        or getattr(message, "stickers", None)
+        or getattr(message, "poll", None)
+    )
+
+
+async def _settle_auto_deferred(interaction: discord.Interaction, command_name: str) -> bool:
+    """Ferme uniquement les `thinking=True` créés par notre watchdog et restés vides.
+
+    Une vraie réponse déjà envoyée/éditée est conservée telle quelle. Si la commande a fait
+    son action via un message de salon indépendant et n'a jamais résolu l'interaction,
+    le placeholder "SentriX réfléchit…" devient un accusé de succès court.
+    """
+    if not _take_auto_deferred(interaction):
+        return False
+
+    try:
+        original = await interaction.original_response()
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException):
+        # Si la réponse originale a été supprimée ou n'existe plus, il n'y a plus de
+        # placeholder visible à nettoyer.
+        return True
+
+    if _original_response_has_payload(original):
+        return True
+
+    try:
+        await interaction.edit_original_response(
+            content="Commande exécutée avec succès.",
+            embeds=[],
+            attachments=[],
+            view=None,
+        )
+        logger.info(
+            "Auto-defer slash résolu après completion : /%s (user=%s, guild=%s).",
+            command_name,
+            getattr(interaction.user, "id", None),
+            interaction.guild_id,
+        )
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        logger.debug("Impossible de clôturer l'auto-defer pour /%s.", command_name, exc_info=True)
+    return True
 
 
 def _install_canonical_root_mapping() -> None:
@@ -33,6 +120,7 @@ async def _defer_watchdog(interaction: discord.Interaction) -> None:
     try:
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
+            _mark_auto_deferred(interaction)
     except (discord.InteractionResponded, discord.NotFound):
         return
     except discord.HTTPException:
@@ -57,6 +145,31 @@ def _install_single_interaction_guard(bot: commands.Bot) -> None:
     tree.interaction_check = reliable_interaction_check
     tree._sentrix_slash_reliability_v7_guard = True
     tree._sentrix_interaction_policy_v2 = True
+
+
+def _install_auto_defer_completion_guard(bot: commands.Bot) -> None:
+    """Termine les placeholders auto-defer après succès, y compris pour les hybrides."""
+    if getattr(bot, "_sentrix_slash_auto_defer_completion_guard", False):
+        return
+
+    async def settle_app_command(
+        interaction: discord.Interaction,
+        command: discord.app_commands.Command | discord.app_commands.ContextMenu,
+    ) -> None:
+        name = str(getattr(command, "qualified_name", getattr(command, "name", "commande")))
+        await _settle_auto_deferred(interaction, name)
+
+    async def settle_hybrid_command(ctx: commands.Context) -> None:
+        interaction = getattr(ctx, "interaction", None)
+        if interaction is None or interaction.type != discord.InteractionType.application_command:
+            return
+        command = getattr(ctx, "command", None)
+        name = str(getattr(command, "qualified_name", getattr(command, "name", "commande")))
+        await _settle_auto_deferred(interaction, name)
+
+    bot.add_listener(settle_app_command, "on_app_command_completion")
+    bot.add_listener(settle_hybrid_command, "on_command_completion")
+    bot._sentrix_slash_auto_defer_completion_guard = True
 
 
 def _expected_slash_roots() -> set[str]:
@@ -106,6 +219,7 @@ def _install_reliable_sync(bot: commands.Bot) -> None:
 def install(bot: commands.Bot) -> None:
     _install_canonical_root_mapping()
     _install_single_interaction_guard(bot)
+    _install_auto_defer_completion_guard(bot)
     _install_reliable_sync(bot)
     missing, extra = _rebuild_slash_catalog(bot)
     logger.info("Slash Reliability V7 actif (missing=%s extra=%s).", sorted(missing), sorted(extra))
