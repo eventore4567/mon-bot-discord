@@ -33,6 +33,22 @@ def _safe_discord_path(path) -> dict | None:
     }
 
 
+def _safe_slash_health(bot) -> dict:
+    state = getattr(bot, "slash_reliability_v7_state", None)
+    state = state if isinstance(state, dict) else {}
+    return {
+        "runtime_installed": bool(getattr(bot, "_sentrix_slash_reliability_v7_installed", False)),
+        "completion_guard_registered": bool(state.get("completion_guard_registered")),
+        "installed_at": state.get("installed_at"),
+        "last_completion_at": state.get("last_completion_at"),
+        "last_response_type": state.get("last_response_type"),
+        "last_response_done": state.get("last_response_done"),
+        "last_original_had_payload": state.get("last_original_had_payload"),
+        "last_result": state.get("last_result"),
+        "last_error": state.get("last_error"),
+    }
+
+
 def _safe_ai_health(bot) -> dict:
     """Expose uniquement l'état IA utile au diagnostic, jamais une clé ou un secret."""
     state = getattr(bot, "ai_api_hotfix_state", None)
@@ -197,6 +213,7 @@ def install(dashboard_module) -> None:
             "uptime_seconds": uptime,
             "shards": int(getattr(bot, "shard_count", 1) or 1),
             "runtime_observability": runtime_observability,
+            "slash_reliability": _safe_slash_health(bot),
             "ai": _safe_ai_health(bot),
             "ai_instances": await _shared_ai_runtimes(bot),
         }
