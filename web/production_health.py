@@ -40,15 +40,58 @@ def _safe_slash_health(bot) -> dict:
         "runtime_installed": bool(getattr(bot, "_sentrix_slash_reliability_v7_installed", False)),
         "watchdog_listener_registered": bool(state.get("watchdog_listener_registered")),
         "completion_guard_registered": bool(state.get("completion_guard_registered")),
+        "relay_loop_registered": bool(state.get("relay_loop_registered")),
         "installed_at": state.get("installed_at"),
         "last_interaction_seen_at": state.get("last_interaction_seen_at"),
+        "last_command_name": state.get("last_command_name"),
         "last_completion_at": state.get("last_completion_at"),
         "last_response_type": state.get("last_response_type"),
         "last_response_done": state.get("last_response_done"),
         "last_original_had_payload": state.get("last_original_had_payload"),
         "last_result": state.get("last_result"),
         "last_error": state.get("last_error"),
+        "last_publish_at": state.get("last_publish_at"),
+        "last_publish_error": state.get("last_publish_error"),
     }
+
+
+def _safe_slash_instances(app) -> list[dict]:
+    relays = app.get("slash_runtime_relays")
+    if not isinstance(relays, dict):
+        return []
+
+    now = int(time.time())
+    result: list[dict] = []
+    for item in relays.values():
+        if not isinstance(item, dict):
+            continue
+        received_at = int(item.get("received_at") or 0)
+        if received_at and now - received_at > 900:
+            continue
+        result.append({
+            "service": str(item.get("service") or "unknown")[:120],
+            "service_id": item.get("service_id"),
+            "brand": str(item.get("brand") or "")[:48] or None,
+            "bot_user_id": item.get("bot_user_id"),
+            "bot_user_name": str(item.get("bot_user_name") or "")[:120] or None,
+            "runtime_installed": bool(item.get("runtime_installed")),
+            "watchdog_listener_registered": bool(item.get("watchdog_listener_registered")),
+            "completion_guard_registered": bool(item.get("completion_guard_registered")),
+            "last_interaction_seen_at": item.get("last_interaction_seen_at"),
+            "last_command_name": str(item.get("last_command_name") or "")[:120] or None,
+            "last_completion_at": item.get("last_completion_at"),
+            "last_response_type": str(item.get("last_response_type") or "")[:80] or None,
+            "last_response_done": item.get("last_response_done"),
+            "last_original_had_payload": item.get("last_original_had_payload"),
+            "last_result": str(item.get("last_result") or "")[:80] or None,
+            "last_error": str(item.get("last_error") or "")[:120] or None,
+            "updated_at": item.get("updated_at"),
+            "received_at": received_at or None,
+        })
+    return sorted(
+        result,
+        key=lambda item: (item.get("service") or "", item.get("bot_user_id") or ""),
+    )[:20]
 
 
 def _safe_ai_health(bot) -> dict:
@@ -216,6 +259,7 @@ def install(dashboard_module) -> None:
             "shards": int(getattr(bot, "shard_count", 1) or 1),
             "runtime_observability": runtime_observability,
             "slash_reliability": _safe_slash_health(bot),
+            "slash_instances": _safe_slash_instances(request.app),
             "ai": _safe_ai_health(bot),
             "ai_instances": await _shared_ai_runtimes(bot),
         }
