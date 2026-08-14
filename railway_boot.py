@@ -48,12 +48,16 @@ if "cogs.interaction_transport_guard" not in bot_main.EXTENSIONS:
 # une autre application. Aucun doublon n'est supprime automatiquement par ce detecteur.
 if "cogs.stale_discord_app_detector" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.stale_discord_app_detector")
-# Rend visible uniquement le nom/type/classe d'erreur des dernieres commandes V9, sans ID
-# d'utilisateur/serveur ni texte de message, afin de cibler le handler fautif en production.
+# Lit le vrai schema horaire ProductionPhase afin d'identifier les noms de commandes qui
+# accumulent des erreurs, sans exposer d'identifiant utilisateur/serveur.
 if "cogs.command_error_probe" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.command_error_probe")
-# Chargé en dernier : il consolide le catalogue /, remplace les gardes slash empilés par
-# un seul contrôle et protège les interactions lentes contre le timeout Discord.
+# Doit preceder Slash V7 : l'ancien ProductionObservabilityV9 reutilise le nom de table
+# production_command_metrics avec un schema incompatible. On neutralise uniquement cette
+# couche historique avant que le setup de compatibilite V7 puisse la charger.
+if "cogs.legacy_observability_conflict_guard" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.legacy_observability_conflict_guard")
+# Slash V7 protege les interactions lentes et ferme les placeholders sur succes.
 if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.slash_reliability_v7")
 # Commande texte uniquement, ajoutée sous +security sans consommer de slot slash.
@@ -63,6 +67,11 @@ if "cogs.automod_enable_all" not in bot_main.EXTENSIONS:
 # historique /setup, dont les arguments supplémentaires étaient sinon ignorés.
 if "cogs.setup_auto_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.setup_auto_fix")
+# Toujours en dernier : CommandTree.on_error est deja dans sa forme finale. Cette garde
+# conserve tous les handlers existants puis ferme, dans un finally, tout defer reste vide
+# lorsqu'une commande slash termine par une exception au lieu d'un completion event.
+if "cogs.slash_error_completion_guard" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.slash_error_completion_guard")
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
 )

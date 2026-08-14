@@ -1,19 +1,16 @@
-"""Expose un diagnostic minimal des dernieres erreurs de commandes.
+"""Expose un diagnostic minimal des erreurs agregees de commandes.
 
-Les metriques V9 contiennent deja le nom de commande, son type, sa duree et le detail de
-l'exception. Cette sonde ne publie jamais guild_id/user_id ni le message d'erreur complet :
-elle conserve uniquement la classe d'exception afin de pouvoir retrouver le handler fautif.
+ProductionPhase utilise ``production_command_metrics`` comme table horaire avec une ligne
+par nom de commande. Cette sonde lit ce schema reel et n'expose que nom, nombre d'appels,
+erreurs et latence agregee. Aucun guild_id/user_id ni texte de message n'est present dans
+ce schema.
 """
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 
 from discord.ext import commands
-
-
-_ERROR_TYPE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]{0,119})\s*:")
 
 
 def _state(bot: commands.Bot) -> dict:
@@ -22,32 +19,28 @@ def _state(bot: commands.Bot) -> dict:
         state = {
             "installed": False,
             "updated_at": None,
-            "latest_metric": None,
-            "latest_error": None,
+            "latest_hour": None,
+            "error_commands": [],
             "last_error": None,
         }
         bot.command_error_probe_state = state
     return state
 
 
-def _error_type(detail: object) -> str | None:
-    value = str(detail or "").strip()
-    match = _ERROR_TYPE.match(value)
-    if match:
-        return match.group(1)[:120]
-    return None
-
-
 def _safe_row(row) -> dict | None:
     if not row:
         return None
+    calls = max(0, int(row["calls"] or 0))
+    errors = max(0, int(row["errors"] or 0))
+    total_ms = max(0.0, float(row["total_ms"] or 0.0))
     return {
+        "hour_bucket": int(row["hour_bucket"] or 0),
         "command_name": str(row["command_name"] or "unknown")[:120],
-        "command_kind": str(row["command_kind"] or "unknown")[:20],
-        "duration_ms": max(0, int(row["duration_ms"] or 0)),
-        "status": str(row["status"] or "unknown")[:30],
-        "error_type": _error_type(row["detail"]),
-        "created_at": int(row["created_at"] or 0),
+        "calls": calls,
+        "errors": errors,
+        "error_rate_pct": round(errors * 100.0 / calls, 2) if calls else 0.0,
+        "avg_ms": round(total_ms / calls, 1) if calls else 0.0,
+        "max_ms": round(max(0.0, float(row["max_ms"] or 0.0)), 1),
     }
 
 
@@ -56,8 +49,8 @@ def _safe_health(bot: commands.Bot) -> dict:
     return {
         "installed": bool(state.get("installed")),
         "updated_at": state.get("updated_at"),
-        "latest_metric": state.get("latest_metric"),
-        "latest_error": state.get("latest_error"),
+        "latest_hour": state.get("latest_hour"),
+        "error_commands": list(state.get("error_commands") or [])[:12],
         "last_error": state.get("last_error"),
     }
 
@@ -87,16 +80,21 @@ def _install_health_patch() -> None:
 async def _refresh(bot: commands.Bot) -> None:
     state = _state(bot)
     try:
-        latest = await bot.db.fetchone(
-            "SELECT command_name,command_kind,duration_ms,status,detail,created_at "
-            "FROM production_command_metrics ORDER BY id DESC LIMIT 1"
+        latest_hour_row = await bot.db.fetchone(
+            "SELECT MAX(hour_bucket) AS hour_bucket FROM production_command_metrics"
         )
-        latest_error = await bot.db.fetchone(
-            "SELECT command_name,command_kind,duration_ms,status,detail,created_at "
-            "FROM production_command_metrics WHERE status='error' ORDER BY id DESC LIMIT 1"
-        )
-        state["latest_metric"] = _safe_row(latest)
-        state["latest_error"] = _safe_row(latest_error)
+        latest_hour = int(latest_hour_row["hour_bucket"] or 0) if latest_hour_row else 0
+        rows = []
+        if latest_hour:
+            rows = await bot.db.fetchall(
+                "SELECT hour_bucket,command_name,calls,errors,total_ms,max_ms "
+                "FROM production_command_metrics "
+                "WHERE hour_bucket=? AND errors>0 "
+                "ORDER BY errors DESC,max_ms DESC,command_name ASC LIMIT 12",
+                (latest_hour,),
+            )
+        state["latest_hour"] = latest_hour or None
+        state["error_commands"] = [item for row in rows if (item := _safe_row(row)) is not None]
         state["updated_at"] = int(time.time())
         state["last_error"] = None
     except Exception as exc:
