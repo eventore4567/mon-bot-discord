@@ -22,7 +22,14 @@ def _safe_discord_path(path) -> dict | None:
         "reply_completed_at": path.get("reply_completed_at"),
         "fallback_completed_at": path.get("fallback_completed_at"),
         "natural_command_detected_at": path.get("natural_command_detected_at"),
+        "recovery_trigger_seen_at": path.get("recovery_trigger_seen_at"),
+        "recovery_primary_entered_at": path.get("recovery_primary_entered_at"),
+        "recovery_used_at": path.get("recovery_used_at"),
+        "recovery_completed_at": path.get("recovery_completed_at"),
+        "reply_recovery_registered": bool(path.get("reply_recovery_registered")),
         "last_error": path.get("last_error"),
+        "last_error_stage": path.get("last_error_stage"),
+        "last_error_key": path.get("last_error_key"),
     }
 
 
@@ -73,6 +80,7 @@ def _safe_ai_health(bot) -> dict:
         "bot_user_name": str(bot_user)[:120] if bot_user is not None else None,
         "ai_cog_loaded": bool(state.get("ai_cog_loaded")),
         "natural_fallback_registered": bool(state.get("natural_fallback_registered")),
+        "reply_recovery_installed": bool(getattr(bot, "_sentrix_reply_recovery_installed", False)),
         "discord_path": _safe_discord_path(state.get("discord_path")),
         "fast_model": state.get("fast_model"),
         "balanced_model": state.get("balanced_model"),
