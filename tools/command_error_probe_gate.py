@@ -26,10 +26,13 @@ refresh = source("_refresh")
 health = source("_safe_health")
 
 for field in ("command_name", "command_kind", "duration_ms", "status", "error_type", "created_at"):
-    assert field in safe_row
-for forbidden in ('"guild_id"', '"user_id"', '"detail"'):
-    assert forbidden not in safe_row, f"safe metric leaks {forbidden}"
-    assert forbidden not in health, f"health leaks {forbidden}"
+    assert f'"{field}"' in safe_row
+
+# Raw DB detail may be read only to derive the exception class, but must never be emitted.
+for forbidden_output in ('"guild_id":', '"user_id":', '"detail":'):
+    assert forbidden_output not in safe_row, f"safe metric leaks {forbidden_output}"
+    assert forbidden_output not in health, f"health leaks {forbidden_output}"
+assert '_error_type(row["detail"])' in safe_row, "raw detail may only feed the exception-class sanitizer"
 
 assert "production_command_metrics" in refresh
 assert "WHERE status='error'" in refresh
