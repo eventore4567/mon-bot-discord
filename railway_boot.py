@@ -39,6 +39,11 @@ if "cogs.drop" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.drop")
 if "cogs.log_access_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.log_access_fix")
+# Discord ne peut livrer les interactions qu'en Gateway OU via un endpoint HTTP. SentriX
+# utilise discord.py/Gateway : cette garde supprime donc tout ancien endpoint HTTP reste
+# configure dans l'application, puis republie le catalogue slash sur le bon transport.
+if "cogs.interaction_transport_guard" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.interaction_transport_guard")
 # Chargé en dernier : il consolide le catalogue /, remplace les gardes slash empilés par
 # un seul contrôle et protège les interactions lentes contre le timeout Discord.
 if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
