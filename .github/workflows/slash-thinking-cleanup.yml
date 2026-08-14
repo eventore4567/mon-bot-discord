@@ -21,6 +21,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile slash completion sources
-        run: python -m compileall -q cogs/slash_reliability_v7.py tools/slash_thinking_gate.py
+        run: python -m compileall -q cogs/__init__.py cogs/slash_reliability_v7.py web/production_health.py tools/slash_thinking_gate.py
       - name: Slash thinking regression gate
         run: python tools/slash_thinking_gate.py
