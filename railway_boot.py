@@ -44,6 +44,10 @@ if "cogs.log_access_fix" not in bot_main.EXTENSIONS:
 # configure dans l'application, puis republie le catalogue slash sur le bon transport.
 if "cogs.interaction_transport_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.interaction_transport_guard")
+# Inventorie les integrations Discord ressemblant a la marque courante mais appartenant a
+# une autre application. Aucun doublon n'est supprime automatiquement par ce detecteur.
+if "cogs.stale_discord_app_detector" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.stale_discord_app_detector")
 # Chargé en dernier : il consolide le catalogue /, remplace les gardes slash empilés par
 # un seul contrôle et protège les interactions lentes contre le timeout Discord.
 if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
