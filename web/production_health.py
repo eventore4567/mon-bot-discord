@@ -1,6 +1,7 @@
 """Renforce /health pour une surveillance externe réelle de SentriX."""
 from __future__ import annotations
 
+import json
 import time
 
 from aiohttp import web
@@ -8,6 +9,7 @@ from aiohttp import web
 from .production_observability import build_runtime_snapshot
 
 _INSTALLED = False
+_SHARED_RUNTIME_PREFIX = "sentrix:v177:ai-runtime:"
 
 
 def _safe_ai_health(bot) -> dict:
@@ -23,8 +25,6 @@ def _safe_ai_health(bot) -> dict:
         for item in canary.get("checks", []):
             if not isinstance(item, dict) or item.get("name") != "openai":
                 continue
-            # Keep the connectivity probe fresh with V13, but never replace the separate
-            # full-generation probe because it exercises ai_service.generate().
             probe = {
                 "status": item.get("status") or "error",
                 "has_key": bool(state.get("has_key")),
@@ -49,11 +49,14 @@ def _safe_ai_health(bot) -> dict:
             "model": generation_probe.get("model"),
         }
 
+    bot_user = getattr(bot, "user", None)
     return {
         "runtime_loaded": loaded,
         "key_configured": bool(state.get("has_key")),
         "railway_service": state.get("railway_service"),
         "railway_service_id": state.get("railway_service_id"),
+        "bot_user_id": str(getattr(bot_user, "id", "")) or None,
+        "bot_user_name": str(bot_user)[:120] if bot_user is not None else None,
         "fast_model": state.get("fast_model"),
         "balanced_model": state.get("balanced_model"),
         "advanced_model": state.get("advanced_model"),
@@ -62,6 +65,50 @@ def _safe_ai_health(bot) -> dict:
         "generation_probe": generation_probe,
         "probe_updated_at": state.get("probe_updated_at"),
     }
+
+
+async def _shared_ai_runtimes(bot) -> list[dict]:
+    """Collect secret-free sibling service heartbeats when Railway services share Redis."""
+    infra = getattr(bot, "sentrix_infra", None)
+    redis = getattr(infra, "redis", None)
+    if redis is None:
+        return []
+
+    runtimes: list[dict] = []
+    now = int(time.time())
+    try:
+        async for key in redis.scan_iter(match=f"{_SHARED_RUNTIME_PREFIX}*", count=20):
+            raw = await redis.get(key)
+            if not raw:
+                continue
+            try:
+                item = json.loads(raw)
+            except Exception:
+                continue
+            if not isinstance(item, dict):
+                continue
+            updated_at = int(item.get("updated_at") or 0)
+            if updated_at and now - updated_at > 900:
+                continue
+            probe = item.get("probe") if isinstance(item.get("probe"), dict) else None
+            generation = item.get("generation_probe") if isinstance(item.get("generation_probe"), dict) else None
+            runtimes.append({
+                "service": str(item.get("service") or "unknown")[:120],
+                "service_id": item.get("service_id"),
+                "bot_user_id": item.get("bot_user_id"),
+                "bot_user_name": str(item.get("bot_user_name"))[:120] if item.get("bot_user_name") else None,
+                "key_configured": bool(item.get("key_configured")),
+                "fast_model": item.get("fast_model"),
+                "probe_status": probe.get("status") if probe else None,
+                "probe_error_type": probe.get("error_type") if probe else None,
+                "generation_status": generation.get("status") if generation else None,
+                "generation_error_code": generation.get("error_code") if generation else None,
+                "generation_latency_ms": int(generation.get("latency_ms") or 0) if generation else 0,
+                "updated_at": updated_at,
+            })
+    except Exception:
+        return []
+    return sorted(runtimes, key=lambda item: (item.get("service") or "", item.get("bot_user_id") or ""))[:10]
 
 
 def install(dashboard_module) -> None:
@@ -123,6 +170,7 @@ def install(dashboard_module) -> None:
             "shards": int(getattr(bot, "shard_count", 1) or 1),
             "runtime_observability": runtime_observability,
             "ai": _safe_ai_health(bot),
+            "ai_instances": await _shared_ai_runtimes(bot),
         }
         if isinstance(production_v9, dict):
             payload["production_v9"] = production_v9
