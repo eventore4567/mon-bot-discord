@@ -57,9 +57,14 @@ if "cogs.command_error_probe" not in bot_main.EXTENSIONS:
 # couche historique avant que le setup de compatibilite V7 puisse la charger.
 if "cogs.legacy_observability_conflict_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.legacy_observability_conflict_guard")
-# Slash V7 protege les interactions lentes et ferme les placeholders sur succes.
+# Slash V7 protège les interactions lentes et ferme les placeholders sur succès.
 if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.slash_reliability_v7")
+# Correctif global discord.py : le premier ctx.send() après un ctx.defer() remplit la
+# réponse originale encore vide au lieu de créer un follow-up en laissant « thinking ».
+# Une réponse originale déjà remplie conserve le comportement follow-up natif.
+if "cogs.deferred_context_response_guard" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.deferred_context_response_guard")
 # Commande texte uniquement, ajoutée sous +security sans consommer de slot slash.
 if "cogs.automod_enable_all" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.automod_enable_all")
