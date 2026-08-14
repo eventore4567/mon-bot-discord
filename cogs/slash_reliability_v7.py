@@ -260,5 +260,25 @@ def install(bot: commands.Bot) -> None:
     logger.info("Slash Reliability V7 actif : watchdog + completion, garde permissions intacte.")
 
 
+async def _install_production_v9(bot: commands.Bot) -> None:
+    """Compatibilite historique si ce module est charge comme extension complete."""
+    from . import ai_context_v9, game_seasons_v9, moderation_advisor_v9, production_observability_v9
+
+    await production_observability_v9.setup(bot)
+    await ai_context_v9.setup(bot)
+    await game_seasons_v9.setup(bot)
+    await moderation_advisor_v9.setup(bot)
+
+
+async def _install_bot_v10(bot: commands.Bot) -> None:
+    """Compatibilite historique du bootstrap V10 ; non utilisee par install()."""
+    from . import bot_v10
+
+    if bot.get_cog("BotV10") is None:
+        await bot_v10.setup(bot)
+
+
 async def setup(bot: commands.Bot) -> None:
     install(bot)
+    await _install_production_v9(bot)
+    await _install_bot_v10(bot)
