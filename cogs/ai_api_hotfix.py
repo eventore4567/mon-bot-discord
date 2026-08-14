@@ -7,6 +7,7 @@ expose credentials, prompts from users, or raw provider errors.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -18,6 +19,7 @@ import config
 from utils import ai_api_compat
 
 logger = logging.getLogger("bot.ai-api-hotfix")
+_SHARED_RUNTIME_PREFIX = "sentrix:v177:ai-runtime:"
 
 
 def _safe_probe(result: dict | None) -> dict | None:
@@ -29,6 +31,46 @@ def _safe_probe(result: dict | None) -> dict | None:
         "error_type": None if result.get("ok") else (result.get("error_type") or "unknown"),
         "latency_ms": int(result.get("latency_ms") or 0),
     }
+
+
+async def _publish_runtime_heartbeat(bot: commands.Bot) -> None:
+    """Publish a short-lived, secret-free state so sibling Railway services can be compared."""
+    state = getattr(bot, "ai_api_hotfix_state", None)
+    if not isinstance(state, dict):
+        return
+    infra = getattr(bot, "sentrix_infra", None)
+    redis = getattr(infra, "redis", None)
+    if redis is None:
+        return
+
+    service = str(state.get("railway_service") or "unknown")[:120]
+    bot_user = getattr(bot, "user", None)
+    payload = {
+        "service": service,
+        "service_id": state.get("railway_service_id"),
+        "bot_user_id": str(getattr(bot_user, "id", "")) or None,
+        "bot_user_name": str(bot_user)[:120] if bot_user is not None else None,
+        "key_configured": bool(state.get("has_key")),
+        "fast_model": state.get("fast_model"),
+        "probe": state.get("probe"),
+        "generation_probe": state.get("generation_probe"),
+        "updated_at": int(time.time()),
+    }
+    try:
+        await redis.set(
+            f"{_SHARED_RUNTIME_PREFIX}{service}",
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            ex=900,
+        )
+    except Exception:
+        logger.debug("Unable to publish shared AI runtime heartbeat.", exc_info=True)
+
+
+async def _heartbeat_loop(bot: commands.Bot) -> None:
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        await _publish_runtime_heartbeat(bot)
+        await asyncio.sleep(60)
 
 
 async def _probe_openai_after_ready(bot: commands.Bot) -> None:
@@ -51,8 +93,6 @@ async def _probe_openai_after_ready(bot: commands.Bot) -> None:
             "latency_ms": 0,
         }
 
-    # This intentionally uses ai_service.generate(), SYSTEM_PROMPT, Luna and the same
-    # reasoning path as a simple "sentrix salut" request. It contains no member content.
     generation_started = time.monotonic()
     try:
         generated = await asyncio.wait_for(
@@ -88,6 +128,8 @@ async def _probe_openai_after_ready(bot: commands.Bot) -> None:
         state["generation_probe"] = generation_probe
         state["probe_updated_at"] = int(time.time())
 
+    await _publish_runtime_heartbeat(bot)
+
     if probe and probe.get("status") == "ok" and generation_probe.get("status") == "ok":
         logger.info(
             "SentriX AI live probes: connectivity OK (%sms), full generation OK (%sms).",
@@ -101,7 +143,6 @@ async def _probe_openai_after_ready(bot: commands.Bot) -> None:
 
 
 def _install_safe_health_patch(bot: commands.Bot) -> None:
-    """Extend the early /health handler; final production health also reads the same state."""
     try:
         from web import dashboard
     except Exception:
@@ -206,6 +247,9 @@ async def setup(bot: commands.Bot) -> None:
     task = getattr(bot, "_sentrix_ai_startup_probe_task", None)
     if task is None or task.done():
         bot._sentrix_ai_startup_probe_task = asyncio.create_task(_probe_openai_after_ready(bot))
+    heartbeat = getattr(bot, "_sentrix_ai_heartbeat_task", None)
+    if heartbeat is None or heartbeat.done():
+        bot._sentrix_ai_heartbeat_task = asyncio.create_task(_heartbeat_loop(bot))
 
     if not bot.ai_api_hotfix_state["has_key"]:
         logger.error("SentriX AI: OPENAI_API_KEY is missing; AI commands cannot call OpenAI.")
