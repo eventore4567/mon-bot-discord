@@ -3,23 +3,32 @@
 Cette couche ne gere ni le catalogue ni les permissions. Elle ajoute seulement :
 - un auto-defer pour les commandes slash lentes ;
 - la fermeture des placeholders de defer restes vides apres une commande terminee ;
-- une telemetrie minimale pour verifier le chemin reel en production.
+- une telemetrie minimale pour verifier le chemin reel en production ;
+- un relais inter-instance secret-free pour distinguer SentriX de Bot'Odboug.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 
 import discord
+from aiohttp import ClientSession, ClientTimeout
 from discord.ext import commands
 
 from . import permission_guard
+from utils import instance_identity
 
 logger = logging.getLogger("bot.slash-reliability-v7")
 _ROOT_ALIASES = {"nick": "nickname"}
 _DEFER_DELAY_SECONDS = 1.8
 _AUTO_DEFER_TTL_SECONDS = 300.0
+_RUNTIME_RELAY_INTERVAL_SECONDS = 30.0
+_RUNTIME_RELAY_URL = (
+    os.getenv("SENTRIX_RUNTIME_RELAY_URL")
+    or "https://mon-bot-discord-production-8944.up.railway.app/api/runtime/slash-heartbeat"
+).strip()
 
 
 def _runtime_state(bot: commands.Bot) -> dict:
@@ -29,13 +38,17 @@ def _runtime_state(bot: commands.Bot) -> dict:
             "installed_at": None,
             "watchdog_listener_registered": False,
             "completion_guard_registered": False,
+            "relay_loop_registered": False,
             "last_interaction_seen_at": None,
+            "last_command_name": None,
             "last_completion_at": None,
             "last_response_type": None,
             "last_response_done": None,
             "last_original_had_payload": None,
             "last_result": None,
             "last_error": None,
+            "last_publish_at": None,
+            "last_publish_error": None,
         }
         bot.slash_reliability_v7_state = state
     return state
@@ -48,6 +61,83 @@ def _mark_state(bot: commands.Bot, **values) -> None:
 def _response_type_name(interaction: discord.Interaction) -> str | None:
     response_type = getattr(interaction.response, "type", None)
     return getattr(response_type, "name", None) or (str(response_type) if response_type is not None else None)
+
+
+def _interaction_command_name(interaction: discord.Interaction) -> str | None:
+    command = getattr(interaction, "command", None)
+    name = getattr(command, "qualified_name", None) or getattr(command, "name", None)
+    if name:
+        return str(name)[:120]
+    data = getattr(interaction, "data", None)
+    if isinstance(data, dict) and data.get("name"):
+        return str(data.get("name"))[:120]
+    return None
+
+
+def _relay_payload(bot: commands.Bot) -> dict:
+    state = _runtime_state(bot)
+    bot_user = getattr(bot, "user", None)
+    return {
+        "service": instance_identity.railway_service_name() or "unknown",
+        "service_id": (os.getenv("RAILWAY_SERVICE_ID") or "").strip() or None,
+        "brand": instance_identity.brand_label(),
+        "bot_user_id": str(getattr(bot_user, "id", "")) or None,
+        "bot_user_name": str(bot_user)[:120] if bot_user is not None else None,
+        "runtime_installed": bool(getattr(bot, "_sentrix_slash_reliability_v7_installed", False)),
+        "watchdog_listener_registered": bool(state.get("watchdog_listener_registered")),
+        "completion_guard_registered": bool(state.get("completion_guard_registered")),
+        "last_interaction_seen_at": state.get("last_interaction_seen_at"),
+        "last_command_name": state.get("last_command_name"),
+        "last_completion_at": state.get("last_completion_at"),
+        "last_response_type": state.get("last_response_type"),
+        "last_response_done": state.get("last_response_done"),
+        "last_original_had_payload": state.get("last_original_had_payload"),
+        "last_result": state.get("last_result"),
+        "last_error": state.get("last_error"),
+        "updated_at": int(time.time()),
+    }
+
+
+async def _publish_runtime_relay(bot: commands.Bot) -> None:
+    if not _RUNTIME_RELAY_URL:
+        return
+    try:
+        timeout = ClientTimeout(total=5)
+        async with ClientSession(timeout=timeout) as session:
+            async with session.post(
+                _RUNTIME_RELAY_URL,
+                json=_relay_payload(bot),
+                headers={"User-Agent": "sentrix-slash-runtime-relay/1"},
+            ) as response:
+                if response.status >= 400:
+                    raise RuntimeError(f"HTTP_{response.status}")
+        _mark_state(bot, last_publish_at=int(time.time()), last_publish_error=None)
+    except Exception as exc:
+        _mark_state(bot, last_publish_error=type(exc).__name__)
+        logger.debug("Publication du relais slash inter-instance impossible.", exc_info=True)
+
+
+def _schedule_runtime_relay(bot: commands.Bot) -> None:
+    try:
+        asyncio.create_task(_publish_runtime_relay(bot))
+    except RuntimeError:
+        return
+
+
+def _install_runtime_relay_loop(bot: commands.Bot) -> None:
+    if getattr(bot, "_sentrix_slash_relay_loop_registered", False):
+        return
+
+    async def relay_loop() -> None:
+        await bot.wait_until_ready()
+        await asyncio.sleep(2)
+        while not bot.is_closed():
+            await _publish_runtime_relay(bot)
+            await asyncio.sleep(_RUNTIME_RELAY_INTERVAL_SECONDS)
+
+    bot._sentrix_slash_relay_loop_registered = True
+    bot._sentrix_slash_relay_task = asyncio.create_task(relay_loop())
+    _mark_state(bot, relay_loop_registered=True)
 
 
 def _auto_deferred(bot: commands.Bot) -> dict[int, float]:
@@ -119,6 +209,7 @@ async def _settle_deferred(interaction: discord.Interaction, command_name: str) 
         _mark_state(
             bot,
             last_completion_at=int(time.time()),
+            last_command_name=command_name[:120],
             last_response_type=_response_type_name(interaction),
             last_response_done=response_done,
             last_original_had_payload=None,
@@ -190,13 +281,26 @@ def _install_canonical_root_mapping() -> None:
 
 async def _defer_watchdog(interaction: discord.Interaction) -> None:
     await asyncio.sleep(_DEFER_DELAY_SECONDS)
+    bot = interaction.client
     try:
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
             _mark_auto_deferred(interaction)
+            if isinstance(bot, commands.Bot):
+                _mark_state(
+                    bot,
+                    last_response_type=_response_type_name(interaction),
+                    last_response_done=True,
+                    last_result="watchdog_deferred",
+                    last_error=None,
+                )
+                _schedule_runtime_relay(bot)
     except (discord.InteractionResponded, discord.NotFound):
         return
-    except discord.HTTPException:
+    except discord.HTTPException as exc:
+        if isinstance(bot, commands.Bot):
+            _mark_state(bot, last_result="watchdog_defer_failed", last_error=type(exc).__name__)
+            _schedule_runtime_relay(bot)
         logger.debug("Auto-defer slash impossible.", exc_info=True)
 
 
@@ -212,7 +316,16 @@ def _install_watchdog_listener(bot: commands.Bot) -> None:
     async def watch_interaction(interaction: discord.Interaction) -> None:
         if interaction.type != discord.InteractionType.application_command:
             return
-        _mark_state(bot, last_interaction_seen_at=int(time.time()))
+        _mark_state(
+            bot,
+            last_interaction_seen_at=int(time.time()),
+            last_command_name=_interaction_command_name(interaction),
+            last_response_type=_response_type_name(interaction),
+            last_response_done=bool(interaction.response.is_done()),
+            last_result="interaction_seen",
+            last_error=None,
+        )
+        _schedule_runtime_relay(bot)
         asyncio.create_task(_defer_watchdog(interaction))
 
     bot.add_listener(watch_interaction, "on_interaction")
@@ -232,6 +345,7 @@ def _install_completion_guard(bot: commands.Bot) -> None:
     ) -> None:
         name = str(getattr(command, "qualified_name", getattr(command, "name", "commande")))
         await _settle_deferred(interaction, name)
+        await _publish_runtime_relay(bot)
 
     async def settle_hybrid_command(ctx: commands.Context) -> None:
         interaction = getattr(ctx, "interaction", None)
@@ -240,6 +354,7 @@ def _install_completion_guard(bot: commands.Bot) -> None:
         command = getattr(ctx, "command", None)
         name = str(getattr(command, "qualified_name", getattr(command, "name", "commande")))
         await _settle_deferred(interaction, name)
+        await _publish_runtime_relay(bot)
 
     bot.add_listener(settle_app_command, "on_app_command_completion")
     bot.add_listener(settle_hybrid_command, "on_command_completion")
@@ -257,7 +372,8 @@ def install(bot: commands.Bot) -> None:
     _install_completion_guard(bot)
     bot._sentrix_slash_reliability_v7_installed = True
     _mark_state(bot, installed_at=int(time.time()), last_error=None)
-    logger.info("Slash Reliability V7 actif : watchdog + completion, garde permissions intacte.")
+    _install_runtime_relay_loop(bot)
+    logger.info("Slash Reliability V7 actif : watchdog + completion + relais inter-instance, garde permissions intacte.")
 
 
 async def _install_production_v9(bot: commands.Bot) -> None:

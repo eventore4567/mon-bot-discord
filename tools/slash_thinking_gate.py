@@ -7,9 +7,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "cogs" / "slash_reliability_v7.py"
 LOADER = ROOT / "cogs" / "__init__.py"
 HEALTH = ROOT / "web" / "production_health.py"
+RUNTIME_WEB = ROOT / "web" / "dashboard_instance_runtime.py"
 text = SOURCE.read_text(encoding="utf-8")
 loader_text = LOADER.read_text(encoding="utf-8")
 health_text = HEALTH.read_text(encoding="utf-8")
+runtime_web_text = RUNTIME_WEB.read_text(encoding="utf-8")
 tree = ast.parse(text, filename=str(SOURCE))
 
 
@@ -37,6 +39,8 @@ settler = function("_settle_deferred")
 deferred_detector = function("_interaction_is_deferred")
 watchdog_installer = function("_install_watchdog_listener")
 completion_installer = function("_install_completion_guard")
+relay_installer = function("_install_runtime_relay_loop")
+relay_publisher = function("_publish_runtime_relay")
 payload_check = function("_original_response_has_payload")
 install = function("install")
 
@@ -59,7 +63,7 @@ assert "Commande exécutée avec succès." in settler_source
 assert "if not tracked_by_watchdog and not _interaction_is_deferred(interaction)" in settler_source, (
     "manual/command-owned defers must be eligible even when the watchdog did not create them"
 )
-for field in ("last_completion_at", "last_response_type", "last_result", "last_error"):
+for field in ("last_completion_at", "last_response_type", "last_result", "last_error", "last_command_name"):
     assert field in settler_source, f"live completion telemetry missing: {field}"
 
 manual_defer_source = ast.get_source_segment(text, deferred_detector) or ""
@@ -78,15 +82,27 @@ assert "tree.interaction_check =" not in watchdog_install_source, (
     "Slash V7 must never assign over the central permission/blacklist interaction check"
 )
 assert "_sentrix_slash_watchdog_listener_registered" in watchdog_install_source
+assert "_schedule_runtime_relay(bot)" in watchdog_install_source, "slash arrival must be relayed across Railway instances"
 
 completion_source = ast.get_source_segment(text, completion_installer) or ""
 assert '"on_app_command_completion"' in completion_source, "native slash completion must be covered"
 assert '"on_command_completion"' in completion_source, "hybrid slash completion must be covered"
 assert "_sentrix_slash_auto_defer_completion_guard" in completion_source
+assert "_publish_runtime_relay" in completion_source, "slash completion must be relayed across Railway instances"
+
+relay_source = ast.get_source_segment(text, relay_installer) or ""
+assert calls(relay_installer, "create_task"), "cross-instance relay must start as a background runtime loop"
+assert "wait_until_ready" in relay_source
+assert "_RUNTIME_RELAY_INTERVAL_SECONDS" in relay_source
+publisher_source = ast.get_source_segment(text, relay_publisher) or ""
+assert "session.post" in publisher_source
+assert "_relay_payload" in publisher_source
+assert "last_publish_error" in publisher_source
 
 install_source = ast.get_source_segment(text, install) or ""
 assert calls(install, "_install_watchdog_listener")
 assert calls(install, "_install_completion_guard")
+assert calls(install, "_install_runtime_relay_loop")
 assert "_sentrix_slash_reliability_v7_installed" in install_source
 assert "_rebuild_slash_catalog" not in text, "Slash V7 must not call stale catalog rebuild APIs"
 assert "command_catalog_cleanup" not in text, "Slash V7 must not own the command catalog"
@@ -98,16 +114,27 @@ assert "from .slash_reliability_v7 import install as install_slash_reliability_v
 assert 'if _matches(name, "cogs.embed_builder")' in loader_text
 assert 'await _run_installer("fiabilité slash V7", install_slash_reliability_v7, bot)' in loader_text
 
-# Live proof: /health must show whether V7 is really installed and whether interactions reach it.
+# Cross-instance endpoint is installed before the Railway HTTP bind through web.__init__.
+assert '_RUNTIME_RELAY_PATH = "/api/runtime/slash-heartbeat"' in runtime_web_text
+assert "app.router.add_post(_RUNTIME_RELAY_PATH, _handle_runtime_slash_heartbeat)" in runtime_web_text
+assert 'app["slash_runtime_relays"] = {}' in runtime_web_text
+for forbidden in ("user_id", "guild_id", "message_content", "token", "prompt"):
+    assert f'"{forbidden}"' not in runtime_web_text, f"relay must not expose {forbidden}"
+
+# Live proof: /health must show local V7 state and all Railway instance relays.
 assert '"slash_reliability": _safe_slash_health(bot)' in health_text
+assert '"slash_instances": _safe_slash_instances(request.app)' in health_text
 for field in (
     '"runtime_installed"',
     '"watchdog_listener_registered"',
     '"completion_guard_registered"',
+    '"relay_loop_registered"',
     '"last_interaction_seen_at"',
+    '"last_command_name"',
     '"last_completion_at"',
     '"last_result"',
+    '"last_publish_error"',
 ):
     assert field in health_text, f"slash health field missing: {field}"
 
-print("SentriX slash thinking cleanup gate: OK (real runtime wiring, permissions untouched, defer lifecycle observable)")
+print("SentriX slash thinking cleanup gate: OK (cross-instance routing visible, permissions untouched, defer lifecycle observable)")
