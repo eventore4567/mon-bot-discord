@@ -1,4 +1,4 @@
-"""Bot V12 — suivi opérationnel des tickets SentriX (schéma FR + legacy EN)."""
+"""Bot V12 — suivi SLA des tickets SentriX utilisant le statut français `ouvert`."""
 from __future__ import annotations
 
 import logging
@@ -18,10 +18,6 @@ class BotV12TicketSLA(commands.Cog, name="BotV12TicketSLA"):
         self.bot = bot
 
     async def cog_load(self) -> None:
-        # Le watcher générique V12 ne connaît pas forcément le statut localisé du schéma.
-        machine = self.bot.get_cog("BotV12Machine")
-        if machine is not None and machine.ticket_watch_loop.is_running():
-            machine.ticket_watch_loop.cancel()
         if not self.ticket_watch_loop.is_running():
             self.ticket_watch_loop.start()
 
@@ -33,7 +29,7 @@ class BotV12TicketSLA(commands.Cog, name="BotV12TicketSLA"):
         try:
             rows = await self.bot.db.fetchall(
                 "SELECT id,guild_id,channel_id,claimed_by,status,created_at "
-                "FROM tickets WHERE status IN ('ouvert','open') ORDER BY created_at ASC LIMIT 500"
+                "FROM tickets WHERE status='ouvert' ORDER BY created_at ASC LIMIT 500"
             )
         except Exception:
             logger.debug("V12 ticket SLA: lecture tickets indisponible.", exc_info=True)
@@ -54,9 +50,7 @@ class BotV12TicketSLA(commands.Cog, name="BotV12TicketSLA"):
 
             guild = self.bot.get_guild(guild_id)
             channel = guild.get_channel(channel_id) if guild else None
-            if channel is None:
-                continue
-            if claimed_by or now_ts - created_at < UNCLAIMED_SECONDS:
+            if channel is None or claimed_by or now_ts - created_at < UNCLAIMED_SECONDS:
                 continue
 
             try:
