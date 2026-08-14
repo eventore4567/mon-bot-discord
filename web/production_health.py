@@ -17,11 +17,14 @@ def _safe_ai_health(bot) -> dict:
     state = state if loaded else {}
 
     probe = state.get("probe") if isinstance(state.get("probe"), dict) else None
+    generation_probe = state.get("generation_probe") if isinstance(state.get("generation_probe"), dict) else None
     canary = getattr(bot, "sentrix_canary_status", None)
     if isinstance(canary, dict):
         for item in canary.get("checks", []):
             if not isinstance(item, dict) or item.get("name") != "openai":
                 continue
+            # Keep the connectivity probe fresh with V13, but never replace the separate
+            # full-generation probe because it exercises ai_service.generate().
             probe = {
                 "status": item.get("status") or "error",
                 "has_key": bool(state.get("has_key")),
@@ -37,15 +40,26 @@ def _safe_ai_health(bot) -> dict:
             "error_type": probe.get("error_type"),
             "latency_ms": int(probe.get("latency_ms") or 0),
         }
+    if isinstance(generation_probe, dict):
+        generation_probe = {
+            "status": generation_probe.get("status") or "error",
+            "error_code": generation_probe.get("error_code"),
+            "empty_response": bool(generation_probe.get("empty_response")),
+            "latency_ms": int(generation_probe.get("latency_ms") or 0),
+            "model": generation_probe.get("model"),
+        }
 
     return {
         "runtime_loaded": loaded,
         "key_configured": bool(state.get("has_key")),
+        "railway_service": state.get("railway_service"),
+        "railway_service_id": state.get("railway_service_id"),
         "fast_model": state.get("fast_model"),
         "balanced_model": state.get("balanced_model"),
         "advanced_model": state.get("advanced_model"),
         "image_model": state.get("image_model"),
         "probe": probe,
+        "generation_probe": generation_probe,
         "probe_updated_at": state.get("probe_updated_at"),
     }
 
@@ -86,9 +100,6 @@ def install(dashboard_module) -> None:
         runtime_observability = await build_runtime_snapshot(bot)
         production_v9 = getattr(bot, "production_v9_health_snapshot", None)
         uptime = int(time.time() - dashboard_module.START_TIME)
-        # Le dashboard se lie volontairement avant Discord. Durant les 90 premières
-        # secondes, HTTP reste 200 pour ne pas transformer un déploiement normal en panne,
-        # mais discord_ready=false permet au moniteur externe de patienter/retester.
         healthy = db_ok and discord_ready
         status = 200 if healthy or uptime < 90 else 503
         if not healthy:
