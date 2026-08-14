@@ -12,6 +12,20 @@ _INSTALLED = False
 _SHARED_RUNTIME_PREFIX = "sentrix:v177:ai-runtime:"
 
 
+def _safe_discord_path(path) -> dict | None:
+    if not isinstance(path, dict):
+        return None
+    return {
+        "trigger_seen_at": path.get("trigger_seen_at"),
+        "primary_started_at": path.get("primary_started_at"),
+        "fallback_used_at": path.get("fallback_used_at"),
+        "reply_completed_at": path.get("reply_completed_at"),
+        "fallback_completed_at": path.get("fallback_completed_at"),
+        "natural_command_detected_at": path.get("natural_command_detected_at"),
+        "last_error": path.get("last_error"),
+    }
+
+
 def _safe_ai_health(bot) -> dict:
     """Expose uniquement l'état IA utile au diagnostic, jamais une clé ou un secret."""
     state = getattr(bot, "ai_api_hotfix_state", None)
@@ -57,6 +71,9 @@ def _safe_ai_health(bot) -> dict:
         "railway_service_id": state.get("railway_service_id"),
         "bot_user_id": str(getattr(bot_user, "id", "")) or None,
         "bot_user_name": str(bot_user)[:120] if bot_user is not None else None,
+        "ai_cog_loaded": bool(state.get("ai_cog_loaded")),
+        "natural_fallback_registered": bool(state.get("natural_fallback_registered")),
+        "discord_path": _safe_discord_path(state.get("discord_path")),
         "fast_model": state.get("fast_model"),
         "balanced_model": state.get("balanced_model"),
         "advanced_model": state.get("advanced_model"),
@@ -104,6 +121,9 @@ async def _shared_ai_runtimes(bot) -> list[dict]:
                 "generation_status": generation.get("status") if generation else None,
                 "generation_error_code": generation.get("error_code") if generation else None,
                 "generation_latency_ms": int(generation.get("latency_ms") or 0) if generation else 0,
+                "ai_cog_loaded": bool(item.get("ai_cog_loaded")),
+                "natural_fallback_registered": bool(item.get("natural_fallback_registered")),
+                "discord_path": _safe_discord_path(item.get("discord_path")),
                 "updated_at": updated_at,
             })
     except Exception:
