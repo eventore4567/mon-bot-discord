@@ -1,0 +1,68 @@
+name: SentriX Live AI Runtime Diagnostic
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  live-ai-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Wait for Railway and verify live OpenAI probe
+        env:
+          HEALTH_URL: https://mon-bot-discord-production-8944.up.railway.app/health
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.request
+
+          url = os.environ["HEALTH_URL"]
+          last = None
+          last_error = None
+
+          for attempt in range(1, 31):
+              try:
+                  request = urllib.request.Request(url, headers={"User-Agent": "sentrix-live-ai-diagnostic/1"})
+                  with urllib.request.urlopen(request, timeout=12) as response:
+                      data = json.load(response)
+                  last = data
+                  ai = data.get("ai") if isinstance(data, dict) else None
+                  probe = ai.get("probe") if isinstance(ai, dict) else None
+
+                  print(f"Attempt {attempt}: discord_ready={data.get('discord_ready')} ai_section={bool(ai)} probe={probe}")
+
+                  # The new deployment is live only once the new safe AI section appears.
+                  if not isinstance(ai, dict):
+                      time.sleep(10)
+                      continue
+
+                  if not ai.get("key_configured"):
+                      print(json.dumps(data, indent=2, sort_keys=True))
+                      raise SystemExit("LIVE_AI_DIAGNOSTIC: OPENAI_API_KEY_MISSING")
+
+                  # Startup probe normally appears a few seconds after Discord is ready.
+                  if not isinstance(probe, dict):
+                      time.sleep(10)
+                      continue
+
+                  print(json.dumps(data, indent=2, sort_keys=True))
+                  if probe.get("status") != "ok":
+                      error_type = probe.get("error_type") or "unknown"
+                      raise SystemExit(f"LIVE_AI_DIAGNOSTIC: OPENAI_PROBE_FAILED:{error_type}")
+
+                  print("LIVE_AI_RUNTIME_OK")
+                  raise SystemExit(0)
+              except SystemExit:
+                  raise
+              except Exception as exc:
+                  last_error = f"{type(exc).__name__}: {exc}"
+                  print(f"Attempt {attempt}: {last_error}")
+                  time.sleep(10)
+
+          print("Last payload:", json.dumps(last, indent=2, sort_keys=True) if last is not None else None)
+          raise SystemExit(f"LIVE_AI_DIAGNOSTIC_TIMEOUT: {last_error or 'no health payload'}")
+          PY
