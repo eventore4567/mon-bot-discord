@@ -1,14 +1,14 @@
 """Runtime hotfix and live diagnostics for SentriX OpenAI API compatibility.
 
 The bot keeps its internal Luna/Terra/Sol tiers, but maps them to public OpenAI API model
-IDs and sanitizes reasoning/image parameters before requests are sent. It also exposes a
-strictly non-secret AI health summary through the existing /health endpoint so production
-can be diagnosed without Railway log access.
+IDs and sanitizes reasoning/image parameters before requests are sent. Diagnostics never
+expose credentials, prompts from users, or raw provider errors.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 
 from aiohttp import web
@@ -21,7 +21,6 @@ logger = logging.getLogger("bot.ai-api-hotfix")
 
 
 def _safe_probe(result: dict | None) -> dict | None:
-    """Return only non-secret fields from an OpenAI connectivity probe."""
     if not isinstance(result, dict):
         return None
     return {
@@ -33,7 +32,7 @@ def _safe_probe(result: dict | None) -> dict | None:
 
 
 async def _probe_openai_after_ready(bot: commands.Bot) -> None:
-    """Run one real production probe after Discord is ready, without exposing credentials."""
+    """Probe both raw connectivity and the exact text-generation path used by SentriX."""
     await bot.wait_until_ready()
     await asyncio.sleep(1)
     from utils import ai_service
@@ -52,23 +51,57 @@ async def _probe_openai_after_ready(bot: commands.Bot) -> None:
             "latency_ms": 0,
         }
 
+    # This intentionally uses ai_service.generate(), SYSTEM_PROMPT, Luna and the same
+    # reasoning path as a simple "sentrix salut" request. It contains no member content.
+    generation_started = time.monotonic()
+    try:
+        generated = await asyncio.wait_for(
+            ai_service.generate(
+                "Réponds uniquement par le mot : ok",
+                model_key=ai_service.MODEL_LUNA,
+                reasoning_effort="none",
+                instructions=ai_service.SYSTEM_PROMPT,
+                command="live-full-path-probe",
+                web_search=False,
+            ),
+            timeout=25,
+        )
+        generation_probe = {
+            "status": "ok" if generated.ok and bool((generated.text or "").strip()) else "error",
+            "error_code": None if generated.ok else generated.error,
+            "empty_response": bool(generated.ok and not (generated.text or "").strip()),
+            "latency_ms": int((time.monotonic() - generation_started) * 1000),
+            "model": ai_service.MODEL_IDS.get(ai_service.MODEL_LUNA),
+        }
+    except Exception as exc:
+        generation_probe = {
+            "status": "error",
+            "error_code": type(exc).__name__,
+            "empty_response": False,
+            "latency_ms": int((time.monotonic() - generation_started) * 1000),
+            "model": ai_service.MODEL_IDS.get(ai_service.MODEL_LUNA),
+        }
+
     state = getattr(bot, "ai_api_hotfix_state", None)
     if isinstance(state, dict):
         state["probe"] = probe
+        state["generation_probe"] = generation_probe
         state["probe_updated_at"] = int(time.time())
 
-    if probe and probe.get("status") == "ok":
-        logger.info("SentriX AI live startup probe: OK (%sms).", probe.get("latency_ms"))
+    if probe and probe.get("status") == "ok" and generation_probe.get("status") == "ok":
+        logger.info(
+            "SentriX AI live probes: connectivity OK (%sms), full generation OK (%sms).",
+            probe.get("latency_ms"), generation_probe.get("latency_ms"),
+        )
     else:
         logger.error(
-            "SentriX AI live startup probe: FAILED type=%s key_present=%s",
-            (probe or {}).get("error_type"),
-            (probe or {}).get("has_key"),
+            "SentriX AI live probes failed: connectivity=%s full_generation=%s",
+            probe, generation_probe,
         )
 
 
 def _install_safe_health_patch(bot: commands.Bot) -> None:
-    """Extend the existing /health JSON with safe AI runtime state only."""
+    """Extend the early /health handler; final production health also reads the same state."""
     try:
         from web import dashboard
     except Exception:
@@ -82,28 +115,14 @@ def _install_safe_health_patch(bot: commands.Bot) -> None:
     async def handle_health_with_ai(request: web.Request):
         runtime_bot = request.app["bot"]
         state = getattr(runtime_bot, "ai_api_hotfix_state", {}) or {}
-        probe = state.get("probe") if isinstance(state, dict) else None
-
-        # V13 may already have a fresher OpenAI probe. Reuse it, but only expose safe fields.
-        canary = getattr(runtime_bot, "sentrix_canary_status", {}) or {}
-        checks = canary.get("checks", []) if isinstance(canary, dict) else []
-        for item in checks:
-            if isinstance(item, dict) and item.get("name") == "openai":
-                probe = {
-                    "status": item.get("status") or "error",
-                    "has_key": bool(state.get("has_key")) if isinstance(state, dict) else False,
-                    "error_type": item.get("error"),
-                    "latency_ms": int(item.get("latency_ms") or 0),
-                }
-                break
-
         ai_payload = {
             "key_configured": bool(state.get("has_key")) if isinstance(state, dict) else False,
             "fast_model": state.get("fast_model") if isinstance(state, dict) else None,
             "balanced_model": state.get("balanced_model") if isinstance(state, dict) else None,
             "advanced_model": state.get("advanced_model") if isinstance(state, dict) else None,
             "image_model": state.get("image_model") if isinstance(state, dict) else None,
-            "probe": probe,
+            "probe": state.get("probe") if isinstance(state, dict) else None,
+            "generation_probe": state.get("generation_probe") if isinstance(state, dict) else None,
             "probe_updated_at": state.get("probe_updated_at") if isinstance(state, dict) else None,
         }
         return web.json_response({
@@ -134,7 +153,6 @@ async def setup(bot: commands.Bot) -> None:
         getattr(config, "OPENAI_IMAGE_MODEL", None), ai_api_compat.IMAGE_MODEL_FALLBACK, image=True
     )
 
-    # Update config as well as ai_service because ai_service reads both at runtime.
     config.OPENAI_MODEL_FAST = fast_model
     config.OPENAI_MODEL = balanced_model
     config.OPENAI_MODEL_ADVANCED = advanced_model
@@ -146,9 +164,6 @@ async def setup(bot: commands.Bot) -> None:
     ai_service.MODEL_LABELS[ai_service.MODEL_LUNA] = f"Luna ({fast_model})"
     ai_service.MODEL_LABELS[ai_service.MODEL_TERRA] = f"Terra ({balanced_model})"
     ai_service.MODEL_LABELS[ai_service.MODEL_SOL] = f"Sol ({advanced_model})"
-
-    # The Image API does not accept 3840x2160 as a generation size. SentriX still upscales
-    # the returned landscape image to its Discord 4K delivery size in cogs/ai.py.
     ai_service.IMAGE_SIZE_4K = ai_api_compat.IMAGE_API_SIZE
 
     current_pick = ai_service.pick_reasoning_effort
@@ -160,7 +175,6 @@ async def setup(bot: commands.Bot) -> None:
         safe_pick_reasoning_effort._sentrix_original = current_pick
         ai_service.pick_reasoning_effort = safe_pick_reasoning_effort
 
-    # Defense in depth: sanitize direct callers that bypass pick_reasoning_effort().
     current_generate = ai_service.generate
     if not getattr(current_generate, "_sentrix_api_compat", False):
         async def generate_compatible(*args, **kwargs):
@@ -181,7 +195,10 @@ async def setup(bot: commands.Bot) -> None:
         "advanced_model": advanced_model,
         "image_model": image_model,
         "image_api_size": ai_api_compat.IMAGE_API_SIZE,
+        "railway_service": os.getenv("RAILWAY_SERVICE_NAME") or "unknown",
+        "railway_service_id": os.getenv("RAILWAY_SERVICE_ID") or None,
         "probe": None,
+        "generation_probe": None,
         "probe_updated_at": None,
     }
 
@@ -194,7 +211,8 @@ async def setup(bot: commands.Bot) -> None:
         logger.error("SentriX AI: OPENAI_API_KEY is missing; AI commands cannot call OpenAI.")
     else:
         logger.info(
-            "SentriX AI API compatibility active: fast=%s balanced=%s advanced=%s image=%s",
+            "SentriX AI API compatibility active: service=%s fast=%s balanced=%s advanced=%s image=%s",
+            bot.ai_api_hotfix_state["railway_service"],
             fast_model,
             balanced_model,
             advanced_model,
