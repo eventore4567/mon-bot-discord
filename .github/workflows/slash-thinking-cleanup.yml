@@ -1,0 +1,26 @@
+name: SentriX Slash Completion
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  slash-completion:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile slash completion sources
+        run: python -m compileall -q cogs/slash_reliability_v7.py tools/slash_thinking_gate.py
+      - name: Slash thinking regression gate
+        run: python tools/slash_thinking_gate.py
