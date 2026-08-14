@@ -5,6 +5,7 @@ import asyncio
 from discord.ext import commands
 
 from ..ai_api_hotfix import setup as install_ai_api_hotfix
+from ..ai_reply_recovery import setup as install_ai_reply_recovery
 from ..bot_mastery_runtime import install as install_mastery
 from ..bot_resilience_v11 import setup as install_resilience
 from ..bot_v12_machine import setup as install_v12_machine
@@ -36,6 +37,9 @@ async def install(bot: commands.Bot):
     await install_v13_production(bot)
     # Keep this after V12/V13 so it sanitizes the final wrapped AI request path.
     await install_ai_api_hotfix(bot)
+    # Final Discord-side safety net: if context/reply helpers fail after OpenAI succeeds,
+    # recover through a minimal direct generation + send path instead of ending on typing.
+    await install_ai_reply_recovery(bot)
 
     global _ready_task
     started = bool(getattr(getattr(bot, "http", None), "token", None))
