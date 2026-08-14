@@ -38,8 +38,10 @@ def _safe_slash_health(bot) -> dict:
     state = state if isinstance(state, dict) else {}
     return {
         "runtime_installed": bool(getattr(bot, "_sentrix_slash_reliability_v7_installed", False)),
+        "watchdog_listener_registered": bool(state.get("watchdog_listener_registered")),
         "completion_guard_registered": bool(state.get("completion_guard_registered")),
         "installed_at": state.get("installed_at"),
+        "last_interaction_seen_at": state.get("last_interaction_seen_at"),
         "last_completion_at": state.get("last_completion_at"),
         "last_response_type": state.get("last_response_type"),
         "last_response_done": state.get("last_response_done"),
