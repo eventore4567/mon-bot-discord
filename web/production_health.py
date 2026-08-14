@@ -10,6 +10,46 @@ from .production_observability import build_runtime_snapshot
 _INSTALLED = False
 
 
+def _safe_ai_health(bot) -> dict:
+    """Expose uniquement l'état IA utile au diagnostic, jamais une clé ou un secret."""
+    state = getattr(bot, "ai_api_hotfix_state", None)
+    loaded = isinstance(state, dict)
+    state = state if loaded else {}
+
+    probe = state.get("probe") if isinstance(state.get("probe"), dict) else None
+    canary = getattr(bot, "sentrix_canary_status", None)
+    if isinstance(canary, dict):
+        for item in canary.get("checks", []):
+            if not isinstance(item, dict) or item.get("name") != "openai":
+                continue
+            probe = {
+                "status": item.get("status") or "error",
+                "has_key": bool(state.get("has_key")),
+                "error_type": item.get("error") or item.get("details"),
+                "latency_ms": int(item.get("latency_ms") or 0),
+            }
+            break
+
+    if isinstance(probe, dict):
+        probe = {
+            "status": probe.get("status") or "error",
+            "has_key": bool(probe.get("has_key", state.get("has_key"))),
+            "error_type": probe.get("error_type"),
+            "latency_ms": int(probe.get("latency_ms") or 0),
+        }
+
+    return {
+        "runtime_loaded": loaded,
+        "key_configured": bool(state.get("has_key")),
+        "fast_model": state.get("fast_model"),
+        "balanced_model": state.get("balanced_model"),
+        "advanced_model": state.get("advanced_model"),
+        "image_model": state.get("image_model"),
+        "probe": probe,
+        "probe_updated_at": state.get("probe_updated_at"),
+    }
+
+
 def install(dashboard_module) -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -71,6 +111,7 @@ def install(dashboard_module) -> None:
             "uptime_seconds": uptime,
             "shards": int(getattr(bot, "shard_count", 1) or 1),
             "runtime_observability": runtime_observability,
+            "ai": _safe_ai_health(bot),
         }
         if isinstance(production_v9, dict):
             payload["production_v9"] = production_v9
