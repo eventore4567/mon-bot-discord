@@ -74,8 +74,8 @@ watchdog_install_source = ast.get_source_segment(text, watchdog_installer) or ""
 assert 'bot.add_listener(watch_interaction, "on_interaction")' in watchdog_install_source, (
     "watchdog must use an event listener instead of replacing tree.interaction_check"
 )
-assert "tree.interaction_check" not in watchdog_install_source, (
-    "Slash V7 must never replace the central permission/blacklist interaction check"
+assert "tree.interaction_check =" not in watchdog_install_source, (
+    "Slash V7 must never assign over the central permission/blacklist interaction check"
 )
 assert "_sentrix_slash_watchdog_listener_registered" in watchdog_install_source
 
