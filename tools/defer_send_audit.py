@@ -51,19 +51,24 @@ for path in sorted(COGS.rglob("*.py")):
         if "ctx.defer" in calls and "ctx.send" in calls:
             legacy_patterns.append((str(path.relative_to(ROOT)), node.lineno, node.name))
 
-# Global protection must be present and wired on the real Railway bootstrap. These
-# assertions turn every legacy/future ctx.defer()+ctx.send() handler into a protected case.
+# Global protection must be present and wired on the real Railway bootstrap. Every
+# current/future ctx.defer()+ctx.send() hybrid handler is protected by one shared resolver.
+assert "commands.Context.defer = defer_marking_original" in guard_text
 assert "commands.Context.send = send_resolving_deferred_original" in guard_text
+assert "_sentrix_marks_deferred_original" in guard_text
+assert "_sentrix_resolves_deferred_original" in guard_text
+assert "interaction.response.type in _DEFERRED_TYPES" in guard_text
 assert "interaction.response.type not in _DEFERRED_TYPES" in guard_text
-assert "interaction.original_response()" in guard_text
-assert "_has_payload(original)" in guard_text
 assert "interaction.edit_original_response(**edit)" in guard_text
-assert "return await current(self, content, **kwargs)" in guard_text, "native follow-up fallback must remain"
+assert "interaction.original_response()" not in guard_text, "resolver must not refetch the deferred original before editing it"
+assert "_mark_pending(self)" in guard_text
+assert "_consume_pending(self)" in guard_text
+assert "return await current_send(self, content, **kwargs)" in guard_text, "native/follow-up fallback must remain"
 assert "attachments" in guard_text and "file" in guard_text and "files" in guard_text, "deferred file responses must be supported"
 assert '"cogs.deferred_context_response_guard" not in bot_main.EXTENSIONS' in boot_text
 assert 'bot_main.EXTENSIONS.append("cogs.deferred_context_response_guard")' in boot_text
 
-# Error cleanup stays the final layer; Context.send resolver must be installed before it.
+# Error cleanup stays the final layer; Context.defer/send resolver must be installed first.
 resolver_index = boot_text.index('bot_main.EXTENSIONS.append("cogs.deferred_context_response_guard")')
 error_index = boot_text.index('bot_main.EXTENSIONS.append("cogs.slash_error_completion_guard")')
 assert resolver_index < error_index
