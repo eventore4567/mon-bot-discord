@@ -15,13 +15,15 @@ MAX_REASON_LENGTH = 400
 _AMOUNT_RE = re.compile(r"^([0-9]+(?:[.,][0-9]+)?)\s*([kmb]?)$", re.IGNORECASE)
 _AMOUNT_MULTIPLIERS = {"": 1, "k": 1_000, "m": 1_000_000, "b": 1_000_000_000}
 
+# Les unités longues passent avant leurs préfixes courts : sinon ``10minutes`` serait
+# capturé comme ``10m`` puis rejeté à cause du reste ``inutes``.
 _DURATION_RE = re.compile(
     r"(?P<value>\d+)\s*(?P<unit>"
-    r"s|sec|secs|seconde|secondes|"
-    r"m|min|mins|minute|minutes|"
-    r"h|heure|heures|"
-    r"j|d|jour|jours|"
-    r"w|sem|semaine|semaines"
+    r"secondes|seconde|secs|sec|s|"
+    r"minutes|minute|mins|min|m|"
+    r"heures|heure|h|"
+    r"jours|jour|j|d|"
+    r"semaines|semaine|sem|w"
     r")",
     re.IGNORECASE,
 )
@@ -35,11 +37,7 @@ _DURATION_SECONDS = {
 
 
 def parse_friendly_amount(value: str, available: int | None = None, *, maximum: int = MAX_MONEY_INPUT) -> int | None:
-    """Comprend 1500, 1 500, 1_500, 1.5k, 2m, all/tout/max.
-
-    ``available`` est utilisé uniquement pour all/tout/max. Les valeurs négatives, nulles,
-    non finies ou supérieures au plafond sont refusées.
-    """
+    """Comprend 1500, 1 500, 1_500, 1.5k, 2m, all/tout/max."""
     raw = str(value or "").strip().casefold()
     if raw in {"all", "tout", "max"}:
         if available is None:
@@ -79,8 +77,7 @@ def clean_reason(value: str | None, *, maximum: int = MAX_REASON_LENGTH) -> str:
 def parse_friendly_duration(value: str | None) -> int | None:
     """Comprend notamment 10m, 1h30m, 2 j 3 h, 1 semaine.
 
-    Contrairement à l'ancien parseur, du texte parasite n'est pas silencieusement ignoré :
-    ``abc10m`` est refusé au lieu d'être interprété comme 10 minutes.
+    Du texte parasite n'est pas silencieusement ignoré : ``abc10m`` est refusé.
     """
     text = str(value or "").strip().casefold()
     if not text:
