@@ -58,30 +58,33 @@ def parse_natural_action(value: str | None) -> NaturalAction | None:
     if not text or len(text) > 500:
         return None
 
-    # Actions de consultation : formulation volontairement explicite pour ne pas détourner
-    # une vraie question qui doit continuer vers l'IA.
     safe_patterns: tuple[tuple[str, str, str], ...] = (
         (r"^(?:ouvre|montre|affiche|voir|je veux voir) (?:mon |ma )?(?:profil|profile)$", "profile", "Ouvrir ton profil"),
         (r"^(?:ouvre|montre|affiche|voir|je veux voir) (?:mon |mes )?(?:solde|balance)$", "balance", "Afficher ton solde"),
         (r"^(?:ouvre|montre|affiche|voir|je veux voir) (?:mon |mes )?(?:niveau|level|xp)$", "level", "Afficher ta progression"),
         (r"^(?:ouvre|montre|affiche|voir|je veux voir) (?:mon |mes )?(?:inventaire|inventory|objets)$", "inventory", "Ouvrir ton inventaire"),
         (r"^(?:ouvre|montre|affiche|voir|je veux voir) (?:la |le )?(?:boutique|shop)$", "shop", "Ouvrir la boutique"),
-        (r"^(?:ouvre|cree|crée|faire|fais) (?:un |mon )?ticket$", "ticket", "Ouvrir les tickets"),
-        (r"^(?:prends|prend|recupere|récupère|donne moi) (?:ma |la )?(?:recompense |récompense )?quotidienne$", "daily", "Récupérer la récompense quotidienne"),
-        (r"^(?:prends|prend|recupere|récupère|donne moi) (?:ma |la )?(?:recompense |récompense )?hebdomadaire$", "weekly", "Récupérer la récompense hebdomadaire"),
+        (r"^(?:ouvre|cree|faire|fais) (?:un |mon )?ticket$", "ticket", "Ouvrir les tickets"),
+        (r"^(?:prends|prend|recupere|donne moi) (?:ma |la )?(?:recompense )?quotidienne$", "daily", "Récupérer la récompense quotidienne"),
+        (r"^(?:prends|prend|recupere|donne moi) (?:ma |la )?(?:recompense )?hebdomadaire$", "weekly", "Récupérer la récompense hebdomadaire"),
         (r"^(?:fais moi travailler|je veux travailler|travaille|work)$", "work", "Travailler"),
     )
     for pattern, command, label in safe_patterns:
         if re.fullmatch(pattern, text, flags=re.I):
             return NaturalAction(command=command, label=label)
 
-    # Paiement : on exige un verbe de transfert ET un montant. La couche Discord exigera
-    # en plus une cible explicite (mention ou message auquel l'utilisateur répond).
-    if re.search(r"\b(?:donne|donner|envoie|envoyer|paye|payer|transfere|transférer|transfert)\b", text):
-        amount_match = _AMOUNT_RE.search(text)
+    transfer_verb = re.search(r"\b(?:donne|donner|envoie|envoyer|paye|payer|transfere|transfert)\b", text)
+    recipient_cue = bool(_MENTION_RE.search(raw) or re.search(r"\b(?:lui|a|au|pour)\b", text))
+    if transfer_verb and recipient_cue:
+        amount_source = _MENTION_RE.sub(" ", raw)
+        amount_match = _AMOUNT_RE.search(amount_source)
         if amount_match:
             amount = amount_match.group(1).replace(" ", "")
-            reason = _clean_reason(raw, action_words=("donne", "donner", "envoie", "envoyer", "paye", "payer", "transfere", "transférer", "transfert"), amount=amount)
+            reason = _clean_reason(
+                raw,
+                action_words=("donne", "donner", "envoie", "envoyer", "paye", "payer", "transfere", "transfert"),
+                amount=amount,
+            )
             return NaturalAction(
                 command="pay",
                 label=f"Envoyer {amount}",
@@ -91,13 +94,12 @@ def parse_natural_action(value: str | None) -> NaturalAction | None:
                 reason=reason,
             )
 
-    # Vol économique : risque de perte de monnaie => confirmation obligatoire.
     if re.search(r"\b(?:vole|voler|rob)\b", text):
         return NaturalAction(command="rob", label="Tenter un vol", sensitive=True, target_required=True)
 
     moderation: tuple[tuple[tuple[str, ...], str, str, bool], ...] = (
         (("ban temporaire", "tempban"), "tempban", "Bannir temporairement", True),
-        (("unmute", "demute", "démute", "demuter", "démuter"), "unmute", "Retirer le mute", False),
+        (("unmute", "demute", "demuter"), "unmute", "Retirer le mute", False),
         (("mute", "timeout"), "mute", "Rendre muet", True),
         (("kick", "expulse", "expulser"), "kick", "Expulser", False),
         (("warn", "avertis", "avertir"), "warn", "Avertir", False),
@@ -111,8 +113,6 @@ def parse_natural_action(value: str | None) -> NaturalAction | None:
         if command == "mute" and duration is None:
             duration = "10m"
         if command == "tempban" and duration is None:
-            # Une demande de ban temporaire sans durée n'est pas assez précise pour être
-            # transformée en action : elle continue vers l'IA qui pourra demander la durée.
             return None
         reason = _clean_reason(raw, action_words=words, duration=duration)
         return NaturalAction(
@@ -128,7 +128,6 @@ def parse_natural_action(value: str | None) -> NaturalAction | None:
 
 
 def classify_ticket_priority(text: str | None) -> tuple[str, str]:
-    """Retourne (valeur DB, libellé) via une heuristique déterministe et explicable."""
     value = normalize_text(text)
     urgent = ("compte vole", "compte hack", "hacke", "pirate", "menace", "dox", "arnaque", "scam", "paiement", "urgence", "urgent")
     high = ("harcelement", "harcele", "insulte", "ban injuste", "sanction", "bug bloquant", "perdu")
