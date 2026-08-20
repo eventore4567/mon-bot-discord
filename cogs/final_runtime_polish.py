@@ -66,12 +66,7 @@ def _install_odboug_account_username(bot: commands.Bot) -> None:
 
 
 async def _bootstrap_community_growth(bot: commands.Bot) -> None:
-    """Installe une seule fois les fonctions communautaires et leur dashboard.
-
-    Cette suite n'ajoute aucune nouvelle racine slash : elle vit derrière le dashboard et
-    des listeners Discord. On la branche depuis cette couche finale afin de conserver le
-    catalogue de 100 commandes déjà gelé.
-    """
+    """Installe une seule fois les fonctions communautaires et leur dashboard."""
     if getattr(bot, "_sentrix_community_growth_ready", False):
         return
     try:
@@ -106,32 +101,36 @@ def _schedule_community_growth(bot: commands.Bot) -> None:
 
 
 async def _bootstrap_sentrix_v2(bot: commands.Bot) -> None:
-    """Branche une seule fois l'expérience V2/V2.1 Discord et le dashboard live."""
+    """Branche une seule fois l'expérience V2/V2.1/V2.2 et le dashboard live.
+
+    V2.2 ne crée aucune commande : elle durcit et accélère les commandes déjà chargées.
+    """
     if getattr(bot, "_sentrix_v2_ready", False):
         return
     try:
         from .sentrix_v2 import SentriXV2
         from .sentrix_v21 import SentriXV21
+        from .sentrix_v22 import SentriXV22
 
         if bot.get_cog("SentriXV2") is None:
             await bot.add_cog(SentriXV2(bot))
         if bot.get_cog("SentriXV21") is None:
             await bot.add_cog(SentriXV21(bot))
+        if bot.get_cog("SentriXV22") is None:
+            await bot.add_cog(SentriXV22(bot))
 
-        # Le dashboard est déjà importé par main.py. Les couches V2/V2.1 restent
-        # visuelles : /api/guild garde sa vérification administrateur existante et le
-        # monitoring V2.1 lit uniquement /health, qui n'expose aucun secret.
         from web import dashboard, dashboard_v2_home, dashboard_v21
         dashboard_v2_home.install(dashboard)
         dashboard_v21.install(dashboard)
 
         bot._sentrix_v2_ready = True
         bot._sentrix_v21_ready = True
+        bot._sentrix_v22_ready = True
         logger.info(
-            "SentriX V2.1 branché : design global, progression, marché sécurisé, IA et monitoring live."
+            "SentriX V2.2 branché : performance, UX et fiabilité renforcées sans nouvelle commande."
         )
     except Exception:
-        logger.exception("Impossible d'installer SentriX V2/V2.1.")
+        logger.exception("Impossible d'installer SentriX V2/V2.1/V2.2.")
 
 
 def _schedule_sentrix_v2(bot: commands.Bot) -> None:
@@ -294,10 +293,6 @@ def _install_command_surface(bot: commands.Bot) -> None:
 
 def install(bot: commands.Bot) -> None:
     _install_odboug_account_username(bot)
-    # Le bot possède déjà un gestionnaire historique de CommandNotFound, plus complet et
-    # utilisé par le style global. On conserve les améliorations Bot Core V5 (IA, réponses
-    # naturelles et DM) sans enregistrer son second listener d'erreur, qui produisait deux
-    # embeds pour une seule faute comme +balnce.
     bot_experience_v5._install_reply_and_dm_conversations(bot)
     bot_experience_v5._install_ai_pipeline_upgrade(bot)
     bot_experience_v6.install(bot)
