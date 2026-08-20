@@ -24,6 +24,7 @@ class V22RulesTests(unittest.TestCase):
 
     def test_compound_duration(self):
         self.assertEqual(parse_friendly_duration("10m"), 600)
+        self.assertEqual(parse_friendly_duration("10minutes"), 600)
         self.assertEqual(parse_friendly_duration("1h30m"), 5400)
         self.assertEqual(parse_friendly_duration("2 j 3 h"), 183600)
         self.assertEqual(parse_friendly_duration("1 semaine"), 604800)
