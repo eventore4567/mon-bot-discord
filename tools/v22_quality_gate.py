@@ -33,9 +33,6 @@ def main() -> int:
     runtime = ROOT / "cogs/sentrix_v22.py"
     if runtime.exists():
         text = runtime.read_text(encoding="utf-8")
-        # Vérifie uniquement de VRAIES lignes décoratrices : le commentaire/docstring peut
-        # naturellement expliquer que V2.2 n'ajoute aucun @commands.command sans faire
-        # échouer le gate.
         if re.search(r"(?m)^\s*@commands\.(?:command|hybrid_command|group)\b", text):
             errors.append("V2.2 déclare une nouvelle commande alors que cette phase doit uniquement améliorer l'existant")
         markers = (
@@ -69,12 +66,30 @@ def main() -> int:
     if finalizer.exists() and "SentriXV22" not in finalizer.read_text(encoding="utf-8"):
         errors.append("SentriXV22 n'est pas branché au runtime final")
 
+    # Nettoyage sans rupture : les anciennes copies racine doivent rester de minuscules
+    # shims vers la source canonique, pas redevenir des milliers de lignes divergentes.
+    legacy_shims = {
+        "db.py": "from database.db import *",
+        "minigames.py": "from cogs.minigames import *",
+        "games_setup.py": "from cogs.games_setup import *",
+    }
+    for relative, expected_import in legacy_shims.items():
+        path = ROOT / relative
+        if not path.exists():
+            errors.append(f"shim de compatibilité absent: {relative}")
+            continue
+        text = path.read_text(encoding="utf-8")
+        if expected_import not in text:
+            errors.append(f"{relative}: ne redirige pas vers la source canonique")
+        if len(text.splitlines()) > 20:
+            errors.append(f"{relative}: le doublon historique a recommencé à grossir")
+
     for error in errors:
         print(f"[ERROR] {error}")
     if errors:
         print(f"ECHEC V2.2: {len(errors)} problème(s)")
         return 1
-    print("OK V2.2: polish/performance/fiabilité validés, 0 nouvelle commande")
+    print("OK V2.2: polish/performance/fiabilité + nettoyage legacy validés, 0 nouvelle commande")
     return 0
 
 
