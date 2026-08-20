@@ -1,4 +1,4 @@
-"""Correctifs finaux SentriX pour +help, le Canary et la surface de commandes.
+"""Correctifs finaux SentriX pour +help, le Canary, l'accessibilité et la surface de commandes.
 
 Cette couche est réappliquée après les autres finaliseurs à chaque chargement d'extension.
 Elle garantit donc aussi que +help reste public et que la politique permissions/catalogue
@@ -101,16 +101,17 @@ def _schedule_community_growth(bot: commands.Bot) -> None:
 
 
 async def _bootstrap_sentrix_v2(bot: commands.Bot) -> None:
-    """Branche une seule fois l'expérience V2/V2.1/V2.2 et le dashboard live.
+    """Branche V2/V2.1/V2.2/V2.3 accessibilité et le dashboard live.
 
-    V2.2 ne crée aucune commande : elle durcit et accélère les commandes déjà chargées.
+    V2.2/V2.3 n'ajoutent aucune commande : elles améliorent les commandes déjà chargées.
     """
-    if getattr(bot, "_sentrix_v2_ready", False):
+    if getattr(bot, "_sentrix_v2_ready", False) and getattr(bot, "_sentrix_accessibility_ready", False):
         return
     try:
         from .sentrix_v2 import SentriXV2
         from .sentrix_v21 import SentriXV21
         from .sentrix_v22 import SentriXV22
+        from .sentrix_accessibility import SentriXAccessibility
 
         if bot.get_cog("SentriXV2") is None:
             await bot.add_cog(SentriXV2(bot))
@@ -118,19 +119,23 @@ async def _bootstrap_sentrix_v2(bot: commands.Bot) -> None:
             await bot.add_cog(SentriXV21(bot))
         if bot.get_cog("SentriXV22") is None:
             await bot.add_cog(SentriXV22(bot))
+        if bot.get_cog("SentriXAccessibility") is None:
+            await bot.add_cog(SentriXAccessibility(bot))
 
-        from web import dashboard, dashboard_v2_home, dashboard_v21
+        from web import dashboard, dashboard_v2_home, dashboard_v21, dashboard_accessibility
         dashboard_v2_home.install(dashboard)
         dashboard_v21.install(dashboard)
+        dashboard_accessibility.install(dashboard)
 
         bot._sentrix_v2_ready = True
         bot._sentrix_v21_ready = True
         bot._sentrix_v22_ready = True
+        bot._sentrix_accessibility_ready = True
         logger.info(
-            "SentriX V2.2 branché : performance, UX et fiabilité renforcées sans nouvelle commande."
+            "SentriX V2.3 branché : accessibilité, tolérance aux fautes, mobile et clavier, sans nouvelle commande."
         )
     except Exception:
-        logger.exception("Impossible d'installer SentriX V2/V2.1/V2.2.")
+        logger.exception("Impossible d'installer SentriX V2/V2.1/V2.2/V2.3 accessibilité.")
 
 
 def _schedule_sentrix_v2(bot: commands.Bot) -> None:
