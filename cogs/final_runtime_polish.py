@@ -106,24 +106,32 @@ def _schedule_community_growth(bot: commands.Bot) -> None:
 
 
 async def _bootstrap_sentrix_v2(bot: commands.Bot) -> None:
-    """Branche une seule fois l'expérience V2 Discord + le snapshot V2 du dashboard."""
+    """Branche une seule fois l'expérience V2/V2.1 Discord et le dashboard live."""
     if getattr(bot, "_sentrix_v2_ready", False):
         return
     try:
         from .sentrix_v2 import SentriXV2
+        from .sentrix_v21 import SentriXV21
 
         if bot.get_cog("SentriXV2") is None:
             await bot.add_cog(SentriXV2(bot))
+        if bot.get_cog("SentriXV21") is None:
+            await bot.add_cog(SentriXV21(bot))
 
-        # Le dashboard est déjà importé par main.py. Cette injection reste purement
-        # visuelle et réutilise l'API /api/guild existante, qui revérifie l'admin.
-        from web import dashboard, dashboard_v2_home
+        # Le dashboard est déjà importé par main.py. Les couches V2/V2.1 restent
+        # visuelles : /api/guild garde sa vérification administrateur existante et le
+        # monitoring V2.1 lit uniquement /health, qui n'expose aucun secret.
+        from web import dashboard, dashboard_v2_home, dashboard_v21
         dashboard_v2_home.install(dashboard)
+        dashboard_v21.install(dashboard)
 
         bot._sentrix_v2_ready = True
-        logger.info("SentriX V2 branché : centre Discord, progression, marché et dashboard live.")
+        bot._sentrix_v21_ready = True
+        logger.info(
+            "SentriX V2.1 branché : design global, progression, marché sécurisé, IA et monitoring live."
+        )
     except Exception:
-        logger.exception("Impossible d'installer SentriX V2.")
+        logger.exception("Impossible d'installer SentriX V2/V2.1.")
 
 
 def _schedule_sentrix_v2(bot: commands.Bot) -> None:
