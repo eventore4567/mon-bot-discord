@@ -1,10 +1,13 @@
-"""Ajout d'emojis par nom pour ``+addemoji`` / ``+addemogi``.
+"""Ajout d'emojis simple pour ``+addemoji`` / ``+addemogi``.
 
-Quand aucun emoji ou fichier n'est fourni, la commande cherche d'abord un emoji
-que le bot connait deja sur Discord, puis le catalogue public Emoji.gg. Un emoji
-Discord colle depuis le selecteur (y compris avec Nitro) continue d'etre copie
-directement par ``cogs.utility``. La signature originale de la commande est preservee
-pour ne jamais exposer ``ctx`` comme argument utilisateur.
+Modes pris en charge :
+- emoji Discord/Nitro colle directement dans la commande ;
+- nom simple, avec ou sans ``:`` autour, recherche automatiquement ;
+- image jointe + nom, geree par le pipeline historique de ``cogs.utility``.
+
+La copie d'un emoji Discord/Nitro contourne volontairement Pillow : l'asset existe deja
+au bon format sur le CDN Discord, donc le redecoder ne sert a rien et peut echouer selon
+les codecs installes sur l'hebergeur.
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ import unicodedata
 from typing import Any
 
 import aiohttp
+import discord
 from discord.ext import commands
 
 from utils import embeds
@@ -25,6 +29,8 @@ EMOJI_GG_API_URL = "https://emoji.gg/api"
 CATALOG_TTL_SECONDS = 15 * 60
 LOOKUP_TIMEOUT_SECONDS = 8
 FUZZY_MIN_SCORE = 0.80
+MAX_DIRECT_EMOJI_BYTES = 2 * 1024 * 1024
+CUSTOM_EMOJI_RE = re.compile(r"<(a?):([A-Za-z0-9_]{2,32}):([0-9]+)>")
 
 _catalog_cache: list[dict[str, Any]] = []
 _catalog_expires_at = 0.0
@@ -77,7 +83,7 @@ async def _emoji_gg_catalog() -> list[dict[str, Any]]:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(
                 EMOJI_GG_API_URL,
-                headers={"User-Agent": "SentriX-EmojiNameLookup/1.1", "Accept": "application/json"},
+                headers={"User-Agent": "SentriX-EmojiNameLookup/1.2", "Accept": "application/json"},
             ) as response:
                 if response.status != 200:
                     raise ValueError(f"Le catalogue d'emojis est indisponible (HTTP {response.status}).")
@@ -149,9 +155,6 @@ def _local_emoji(bot: commands.Bot, query: str):
 async def _resolve_by_name(bot: commands.Bot, query: str) -> tuple[str, str]:
     local = _local_emoji(bot, query)
     if local is not None:
-        # Le pipeline de cogs.utility attend une URL HTTPS. Utiliser l'Asset CDN
-        # plutot que str(local), qui donnerait <:nom:id> et serait refuse par le
-        # validateur d'URL.
         return str(local.url), local.name
 
     catalog = await _emoji_gg_catalog()
@@ -173,9 +176,116 @@ def _plain_name_request(ctx: commands.Context, nom: str, source: str | None) -> 
     value = (nom or "").strip()
     if not value or value.startswith("<") or value.startswith("http://") or value.startswith("https://"):
         return False
-    # Les emojis Unicode et les emojis Discord rendus par Nitro sont geres directement
-    # par cogs.utility. Ici on ne prend que du texte comme tete ou :tete:.
+    # Les emojis Unicode restent geres par cogs.utility. Ici on ne prend que du texte
+    # comme tete ou :tete:.
     return all(ord(ch) < 0x2300 for ch in value)
+
+
+async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str):
+    """Copie un emoji Discord/Nitro sans le faire passer par Pillow."""
+    match = CUSTOM_EMOJI_RE.fullmatch((markup or "").strip())
+    if match is None:
+        return None
+
+    if ctx.guild is None:
+        return await ctx.send(embed=await cog_self._embed(
+            None,
+            title="Commande indisponible",
+            description="Cette commande doit etre utilisee sur un serveur.",
+            kind="danger",
+        ))
+
+    if not ctx.guild.me or not ctx.guild.me.guild_permissions.manage_emojis_and_stickers:
+        return await ctx.send(embed=await cog_self._embed(
+            ctx.guild.id,
+            title="Permission manquante",
+            description="Le bot doit avoir la permission **Gerer les emojis et stickers**.",
+            kind="danger",
+        ))
+
+    animated = bool(match.group(1))
+    emoji_name = _discord_name(match.group(2), fallback="emoji")
+    emoji_id = match.group(3)
+
+    existing = discord.utils.find(lambda item: item.name.casefold() == emoji_name.casefold(), ctx.guild.emojis)
+    if existing is not None:
+        return await ctx.send(embed=await cog_self._embed(
+            ctx.guild.id,
+            title="Emoji deja present",
+            description=f"{existing} existe deja sous le nom `:{existing.name}:`.",
+            kind="warning",
+        ))
+
+    extension = "gif" if animated else "png"
+    candidates = [
+        f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}?size=128&quality=lossless",
+        f"https://media.discordapp.net/emojis/{emoji_id}.{extension}?size=128&quality=lossless",
+        f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}",
+    ]
+
+    data = None
+    last_status = None
+    timeout = aiohttp.ClientTimeout(total=12)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for candidate in candidates:
+                async with session.get(
+                    candidate,
+                    headers={
+                        "User-Agent": "SentriX-NitroEmojiCopy/1.0",
+                        "Accept": "image/png,image/gif,image/webp,image/*;q=0.8",
+                    },
+                ) as response:
+                    last_status = response.status
+                    if response.status != 200:
+                        continue
+                    payload = await response.content.read(MAX_DIRECT_EMOJI_BYTES + 1)
+                    if not payload or len(payload) > MAX_DIRECT_EMOJI_BYTES:
+                        continue
+                    data = payload
+                    break
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        data = None
+
+    if data is None:
+        detail = f" (HTTP {last_status})" if last_status else ""
+        return await ctx.send(embed=await cog_self._embed(
+            ctx.guild.id,
+            title="Emoji inaccessible",
+            description=f"SentriX n'a pas pu recuperer cet emoji depuis Discord{detail}.",
+            kind="danger",
+        ))
+
+    try:
+        created = await ctx.guild.create_custom_emoji(
+            name=emoji_name,
+            image=data,
+            reason=f"Emoji Nitro copie par {ctx.author} avec +addemogi",
+        )
+    except discord.Forbidden:
+        return await ctx.send(embed=await cog_self._embed(
+            ctx.guild.id,
+            title="Creation refusee",
+            description="Discord refuse la creation. Verifiez la permission **Gerer les emojis et stickers** et la position du role du bot.",
+            kind="danger",
+        ))
+    except discord.HTTPException as exc:
+        return await ctx.send(embed=await cog_self._embed(
+            ctx.guild.id,
+            title="Creation impossible",
+            description=f"Discord a refuse cet emoji : {exc}",
+            kind="danger",
+        ))
+
+    return await ctx.send(embed=await cog_self._embed(
+        ctx.guild.id,
+        title="Emoji ajoute",
+        description=(
+            f"{created} a ete copie directement sous le nom `:{created.name}:`.\n"
+            f"Type : **{'anime' if created.animated else 'statique'}**."
+        ),
+        kind="success",
+    ))
 
 
 def install(bot: commands.Bot) -> bool:
@@ -184,16 +294,19 @@ def install(bot: commands.Bot) -> bool:
         return False
 
     original = command.callback
-    # IMPORTANT : sauvegarder les vrais parametres avant de remplacer callback. Sans
-    # cela certaines couches runtime de discord.py voient cog_self/ctx comme arguments
-    # utilisateur et +addemogi <emoji> echoue avant meme d'entrer dans la commande.
     original_params = command.params.copy()
 
     @functools.wraps(original)
     async def wrapped(cog_self, ctx: commands.Context, nom: str, url: str = None):
+        # Quand Nitro remplace :nom: par un vrai emoji, Discord envoie <a?:nom:id>.
+        # On le copie directement depuis son CDN : aucun decodage Pillow.
+        if not url:
+            direct_match = CUSTOM_EMOJI_RE.fullmatch((nom or "").strip())
+            if direct_match is not None:
+                return await _copy_custom_emoji_direct(cog_self, ctx, nom)
+
         if not _plain_name_request(ctx, nom, url):
-            # Emoji visuel Discord/Nitro, Unicode, image jointe ou ancienne syntaxe :
-            # on laisse le pipeline natif de SentriX le traiter sans transformation.
+            # Unicode, image jointe ou ancienne syntaxe : pipeline historique.
             return await original(cog_self, ctx, nom, url)
 
         query = (nom or "").strip().strip(":").strip()
@@ -228,13 +341,12 @@ def install(bot: commands.Bot) -> bool:
 
     wrapped._sentrix_name_lookup = True
     command.callback = wrapped
-    # Restaurer explicitement la signature de parsing d'origine. functools.wraps aide
-    # l'introspection, mais command.params est la source de verite pour le parseur.
     command.params = original_params
-    command.description = "Ajouter un emoji en l'envoyant directement ou en donnant son nom."
+    command.usage = ":nom:"
+    command.description = "Ajouter un emoji en l'envoyant directement, par son nom ou avec une image jointe."
     command.help = (
         "Exemples : `+addemogi :tete:` ou `+addemogi` suivi d'un emoji Discord/Nitro. "
-        "Une image jointe reste aussi acceptee avec un nom."
+        "Pour une image : joignez PNG/JPG/WebP/GIF et tapez `+addemogi nom`."
     )
     return True
 
