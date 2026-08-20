@@ -16,10 +16,10 @@ class V22RulesTests(unittest.TestCase):
         self.assertEqual(parse_friendly_amount("1 500"), 1500)
         self.assertEqual(parse_friendly_amount("1_500"), 1500)
         self.assertEqual(parse_friendly_amount("1.5k"), 1500)
+        self.assertEqual(parse_friendly_amount("1.234k"), 1234)
         self.assertEqual(parse_friendly_amount("2m"), 2_000_000)
         self.assertEqual(parse_friendly_amount("tout", 4321), 4321)
         self.assertIsNone(parse_friendly_amount("-10"))
-        self.assertIsNone(parse_friendly_amount("1.234k"))
         self.assertIsNone(parse_friendly_amount("999999999999999999999"))
 
     def test_compound_duration(self):
