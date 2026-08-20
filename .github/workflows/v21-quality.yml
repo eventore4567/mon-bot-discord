@@ -1,0 +1,58 @@
+name: SentriX V2.1 Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  v21:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Compile V2.1 sources
+        run: python -m compileall -q utils/v21_rules.py cogs/sentrix_v21.py web/dashboard_v21.py tools/v21_quality_gate.py tests
+
+      - name: Pure V2.1 unit tests
+        run: python -m unittest discover -s tests -p 'test_v21_rules.py' -v
+
+      - name: V2.1 static quality gate
+        run: python tools/v21_quality_gate.py
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Security runtime audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v21-security.db"
+        run: python tools/security_runtime_audit.py
+
+      - name: Multi-instance isolation audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python tools/instance_isolation_audit.py
+
+      - name: Command registry audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v21-commands.db"
+        run: python tools/command_runtime_audit.py
+
+      - name: Dashboard interaction audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v21-dashboard.db"
+        run: python tools/web_interaction_audit.py
