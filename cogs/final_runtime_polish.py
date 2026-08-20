@@ -105,6 +105,38 @@ def _schedule_community_growth(bot: commands.Bot) -> None:
     bot._sentrix_community_growth_task = loop.create_task(_bootstrap_community_growth(bot))
 
 
+async def _bootstrap_sentrix_v2(bot: commands.Bot) -> None:
+    """Branche une seule fois l'expérience V2 Discord + le snapshot V2 du dashboard."""
+    if getattr(bot, "_sentrix_v2_ready", False):
+        return
+    try:
+        from .sentrix_v2 import SentriXV2
+
+        if bot.get_cog("SentriXV2") is None:
+            await bot.add_cog(SentriXV2(bot))
+
+        # Le dashboard est déjà importé par main.py. Cette injection reste purement
+        # visuelle et réutilise l'API /api/guild existante, qui revérifie l'admin.
+        from web import dashboard, dashboard_v2_home
+        dashboard_v2_home.install(dashboard)
+
+        bot._sentrix_v2_ready = True
+        logger.info("SentriX V2 branché : centre Discord, progression, marché et dashboard live.")
+    except Exception:
+        logger.exception("Impossible d'installer SentriX V2.")
+
+
+def _schedule_sentrix_v2(bot: commands.Bot) -> None:
+    if getattr(bot, "_sentrix_v2_scheduled", False):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    bot._sentrix_v2_scheduled = True
+    bot._sentrix_v2_task = loop.create_task(_bootstrap_sentrix_v2(bot))
+
+
 def _patch_help(bot: commands.Bot) -> None:
     command = bot.get_command("help")
     if command is None:
@@ -262,6 +294,7 @@ def install(bot: commands.Bot) -> None:
     bot_experience_v5._install_ai_pipeline_upgrade(bot)
     bot_experience_v6.install(bot)
     _schedule_community_growth(bot)
+    _schedule_sentrix_v2(bot)
     _patch_help(bot)
     _patch_canary_readiness(bot)
     _install_command_surface(bot)
