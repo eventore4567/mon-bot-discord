@@ -72,6 +72,10 @@ if "cogs.automod_enable_all" not in bot_main.EXTENSIONS:
 # historique /setup, dont les arguments supplémentaires étaient sinon ignorés.
 if "cogs.setup_auto_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.setup_auto_fix")
+# Rend +addemoji/+addemogi utilisable avec un simple nom (ex: +addemogi ban-1).
+# Les anciennes syntaxes avec emoji, pièce jointe ou URL restent compatibles.
+if "cogs.emoji_name_lookup" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.emoji_name_lookup")
 # Toujours en dernier : CommandTree.on_error est deja dans sa forme finale. Cette garde
 # conserve tous les handlers existants puis ferme, dans un finally, tout defer reste vide
 # lorsqu'une commande slash termine par une exception au lieu d'un completion event.
