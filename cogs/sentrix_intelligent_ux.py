@@ -7,6 +7,7 @@ exige une confirmation humaine pour tout transfert, vol ou acte de modération.
 from __future__ import annotations
 
 import logging
+import time
 import types
 
 import discord
@@ -75,6 +76,28 @@ def _action_details(plan: NaturalAction, target: discord.Member | None) -> str:
     return "\n".join(lines)
 
 
+def _claim_natural_message(bot: commands.Bot, message_id: int) -> bool:
+    """Un même message naturel ne peut être pris en charge qu'une fois.
+
+    Plusieurs listeners historiques peuvent observer le même message Discord. Sans cette
+    garde, une couche pouvait afficher la confirmation pendant qu'une autre envoyait quand
+    même la phrase au modèle, ce qui produisait deux réponses contradictoires.
+    """
+    cache = getattr(bot, "_sentrix_v24_claimed_messages", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        bot._sentrix_v24_claimed_messages = cache
+    current = time.monotonic()
+    if len(cache) > 2000:
+        for key, saved_at in list(cache.items()):
+            if current - float(saved_at) > 180:
+                cache.pop(key, None)
+    if int(message_id) in cache:
+        return False
+    cache[int(message_id)] = current
+    return True
+
+
 async def _invoke_existing_command(
     bot: commands.Bot,
     message: discord.Message,
@@ -104,6 +127,8 @@ async def _invoke_existing_command(
 
     kwargs = {}
     if plan.command == "pay":
+        # plan.amount est déjà canonique : 5k => 5000, 1.5k => 1500.
+        # L'ancienne commande +pay n'a donc plus besoin de comprendre les suffixes V2.4.
         kwargs = {"membre": target, "montant": plan.amount or "0"}
     elif plan.command == "rob":
         kwargs = {"membre": target}
@@ -228,13 +253,26 @@ def _install_natural_router(bot: commands.Bot) -> bool:
         plan = parse_natural_action(question)
         if plan is None or reply_to is None or reply_to.author.id != author.id:
             return await current(destination, author, question, reply_to=reply_to)
+
+        # Réserve immédiatement le message AVANT le premier await. Si deux listeners ont
+        # reçu le même événement, le second s'arrête ici et ne part jamais vers l'IA.
+        if not _claim_natural_message(bot, reply_to.id):
+            return None
+
         try:
             return await _handle_plan(bot, reply_to, plan)
         except Exception:
-            # Un routeur de confort ne doit jamais rendre l'IA indisponible : en cas de
-            # problème inattendu on retombe sur le pipeline historique.
-            logger.exception("V2.4 : routeur naturel en échec, fallback IA.")
-            return await current(destination, author, question, reply_to=reply_to)
+            # Le message est bien une action reconnue : même en cas d'erreur interne on ne
+            # le renvoie pas au modèle, sinon l'utilisateur reçoitrait à nouveau une
+            # réponse contradictoire. On affiche une erreur déterministe à la place.
+            logger.exception("V2.4 : routeur naturel en échec.")
+            return await _send_reply(
+                reply_to,
+                embed=embeds.error(
+                    "Je n'ai pas pu préparer cette action. Aucune action n'a été exécutée ; réessaie dans un instant.",
+                    title="Action interrompue",
+                ),
+            )
 
     intelligent_reply._sentrix_intelligent_ux_v24 = True
     ai_cog.send_sentrix_reply = types.MethodType(intelligent_reply, ai_cog)
@@ -308,4 +346,5 @@ def install(bot: commands.Bot) -> None:
         "ticket_intelligence": bool(tickets),
         "sensitive_confirmation": True,
         "permission_reuse": True,
+        "deduplicated_messages": True,
     }
