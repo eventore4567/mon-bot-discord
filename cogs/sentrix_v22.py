@@ -1,13 +1,14 @@
 """SentriX V2.2 — polish, performance et fiabilité SANS nouvelle commande.
 
 Cette couche améliore uniquement les systèmes déjà existants : parsing UX, statistiques,
-économie, modération, tickets, IA et mini-jeux. Elle ne déclare aucun @commands.command.
+économie, modération, tickets, IA et mini-jeux. Elle ne déclare aucune nouvelle commande.
 Les patchs conservent les paramètres des Command existantes afin de ne pas reproduire les
 anciens problèmes de signatures visibles dans +help.
 """
 from __future__ import annotations
 
 import asyncio
+import copy
 import functools
 import logging
 import secrets
@@ -51,12 +52,12 @@ class SentriXV22(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._ticket_open_locks: dict[tuple[int, int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._ticket_create_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._ticket_close_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._warn_locks: dict[tuple[int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
         self._ai_settings_cache: dict[tuple[int, int], tuple[float, dict]] = {}
         self._game_settings_cache: dict[tuple[int, int], tuple[float, dict]] = {}
         self._ticket_button_cache: dict[tuple[int, int], tuple[float, dict]] = {}
-        self._originals = {}
 
     async def cog_load(self):
         await self._install_database_tuning()
@@ -150,7 +151,7 @@ class SentriXV22(commands.Cog):
             if conn is None:
                 return await ctx.send(embed=embeds.error("L'économie est temporairement indisponible."))
 
-            result = None
+            result = ("error", 0)
             async with db._economy_lock:
                 try:
                     await conn.execute(
@@ -175,10 +176,12 @@ class SentriXV22(commands.Cog):
                     now_ts = int(time.time())
                     remaining = ROB_COOLDOWN_SECONDS - (now_ts - last_rob) if last_rob else 0
                     if remaining > 0:
+                        # Les INSERT OR IGNORE ci-dessus peuvent avoir ouvert une transaction
+                        # sur un compte neuf. On la ferme explicitement même sans vol.
+                        await conn.commit()
                         result = ("cooldown", remaining)
                     elif target_cash < 50:
-                        # Une cible trop pauvre ne consomme plus le cooldown : meilleure UX,
-                        # sans aucune possibilité de gain puisque le transfert n'a pas lieu.
+                        await conn.commit()
                         result = ("poor", 0)
                     else:
                         await conn.execute(
@@ -256,8 +259,6 @@ class SentriXV22(commands.Cog):
         if moderation is None:
             return
 
-        # Un MP fermé ou un réseau lent ne doit jamais retarder une sanction pendant de
-        # longues secondes. La sanction continue même si le MP n'est pas livré.
         original_dm = moderation._send_sanction_dm
         if not getattr(original_dm, "_sentrix_v22", False):
             async def bounded_dm(this, ctx, target, action, reason, duration_seconds=None):
@@ -272,7 +273,6 @@ class SentriXV22(commands.Cog):
             bounded_dm._sentrix_v22 = True
             moderation._send_sanction_dm = types.MethodType(bounded_dm, moderation)
 
-        # +unmute était la seule sanction membre qui ne repassait pas par check_targetable.
         unmute = self.bot.get_command("unmute")
         if unmute is not None and not getattr(unmute, "_sentrix_v22_hierarchy", False):
             original = unmute.callback
@@ -282,8 +282,6 @@ class SentriXV22(commands.Cog):
                 return await original(cog, ctx, membre, raison=clean_reason(raison))
             self._replace_command_callback(unmute, guarded_unmute, "_sentrix_v22_hierarchy")
 
-        # Deux warns simultanés sur la même personne sont sérialisés : le compteur/seuil de
-        # ban automatique reste cohérent et les dossiers sont produits dans le bon ordre.
         warn = self.bot.get_command("warn")
         if warn is not None and not getattr(warn, "_sentrix_v22_serial_warn", False):
             original = warn.callback
@@ -293,7 +291,6 @@ class SentriXV22(commands.Cog):
                     return await original(cog, ctx, membre, raison=clean_reason(raison))
             self._replace_command_callback(warn, serial_warn, "_sentrix_v22_serial_warn")
 
-        # Toutes les autres raisons de sanction sont nettoyées de la même façon.
         for name in ("ban", "kick", "unban"):
             command = self.bot.get_command(name)
             if command is None or getattr(command, "_sentrix_v22_reason", False):
@@ -330,11 +327,8 @@ class SentriXV22(commands.Cog):
                 now_value = time.monotonic()
                 cached = self._ticket_button_cache.get(key)
                 if cached and ttl_is_fresh(cached[0], now_value, TICKET_BUTTON_SETTINGS_TTL):
-                    # Les vues de configuration modifient le dict reçu : toujours copier.
-                    import copy
                     return copy.deepcopy(cached[1])
                 value = await original_get_buttons(bot, guild_id)
-                import copy
                 self._ticket_button_cache[key] = (now_value, copy.deepcopy(value))
                 return value
             cached_buttons._sentrix_v22 = True
@@ -361,6 +355,36 @@ class SentriXV22(commands.Cog):
                     return await original_start(interaction, type_id)
             serialized_start._sentrix_v22 = True
             tickets_cog.start_ticket_flow = types.MethodType(serialized_start, tickets_cog)
+
+        # Le formulaire Discord peut survivre plus longtemps que le verrou start_ticket_flow.
+        # On protège donc AUSSI la création réelle du salon. Le verrou par serveur garantit
+        # un numéro de ticket unique avec l'algorithme historique COUNT(*)+1 et on revérifie
+        # la limite du membre juste avant l'appel Discord create_text_channel().
+        original_create = tickets_cog.create_ticket
+        if not getattr(original_create, "_sentrix_v22", False):
+            async def serialized_create(this, interaction: discord.Interaction, ticket_type, answers: list):
+                guild = interaction.guild
+                if guild is None:
+                    return await _safe_interaction_message(interaction, embeds.error("Serveur introuvable."))
+                async with self._ticket_create_locks[guild.id]:
+                    type_id = int(ticket_type["id"])
+                    limit = max(1, int(ticket_type["max_per_member"] or 1))
+                    open_count = await self.bot.db.fetchone(
+                        "SELECT COUNT(*) AS c FROM tickets WHERE guild_id=? AND user_id=? AND type_id=? AND status='ouvert'",
+                        (guild.id, interaction.user.id, type_id),
+                    )
+                    count = int(open_count["c"] if open_count else 0)
+                    if count >= limit:
+                        return await _safe_interaction_message(
+                            interaction,
+                            embeds.warning(
+                                f"Vous avez déjà **{count}** ticket(s) « {ticket_type['name']} » ouvert(s) "
+                                f"(maximum : {limit})."
+                            ),
+                        )
+                    return await original_create(interaction, ticket_type, answers)
+            serialized_create._sentrix_v22 = True
+            tickets_cog.create_ticket = types.MethodType(serialized_create, tickets_cog)
 
         if not getattr(tickets_cog.btn_claim, "_sentrix_v22", False):
             async def atomic_claim(this, interaction: discord.Interaction, ticket):
@@ -401,10 +425,14 @@ class SentriXV22(commands.Cog):
                         embed=embeds.error("Seul le staff qui a claim ce ticket (ou un responsable) peut l'abandonner."),
                         ephemeral=True,
                     )
-                await self.bot.db.execute(
-                    "UPDATE tickets SET claimed_by=NULL WHERE id=? AND guild_id=? AND claimed_by=?",
+                cursor = await self.bot.db.execute(
+                    "UPDATE tickets SET claimed_by=NULL WHERE id=? AND guild_id=? AND status='ouvert' AND claimed_by=?",
                     (ticket["id"], interaction.guild.id, claimed_by),
                 )
+                if getattr(cursor, "rowcount", 0) < 1:
+                    return await interaction.response.send_message(
+                        embed=embeds.warning("La prise en charge vient de changer. Actualisez le ticket."), ephemeral=True
+                    )
                 await interaction.response.send_message(embed=embeds.success("Prise en charge annulée."))
             guarded_unclaim._sentrix_v22 = True
             tickets_cog.btn_unclaim = types.MethodType(guarded_unclaim, tickets_cog)
@@ -440,9 +468,9 @@ class SentriXV22(commands.Cog):
             now_value = time.monotonic()
             cached = self._ai_settings_cache.get(key)
             if cached and ttl_is_fresh(cached[0], now_value, AI_SETTINGS_TTL):
-                return dict(cached[1])
+                return copy.deepcopy(cached[1])
             value = await original_get(bot, guild_id)
-            self._ai_settings_cache[key] = (now_value, dict(value))
+            self._ai_settings_cache[key] = (now_value, copy.deepcopy(value))
             return value
 
         async def update_and_invalidate(bot, guild_id: int, field: str, value):
@@ -466,9 +494,9 @@ class SentriXV22(commands.Cog):
             now_value = time.monotonic()
             cached = self._game_settings_cache.get(key)
             if cached and ttl_is_fresh(cached[0], now_value, GAME_SETTINGS_TTL):
-                return dict(cached[1])
+                return copy.deepcopy(cached[1])
             value = await original_get(bot, guild_id)
-            self._game_settings_cache[key] = (now_value, dict(value))
+            self._game_settings_cache[key] = (now_value, copy.deepcopy(value))
             return value
 
         async def set_and_invalidate(bot, guild_id: int, updates: dict):
