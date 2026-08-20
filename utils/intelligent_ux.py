@@ -7,6 +7,7 @@ sont marquées comme telles afin que la couche Discord exige toujours une confir
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 import re
 import unicodedata
 
@@ -29,6 +30,7 @@ _DURATION_RE = re.compile(
     r"(?<!\w)(\d+\s*(?:secondes?|secs?|sec|s|minutes?|mins?|min|m|heures?|h|jours?|j|d|semaines?|semaine|sem|w)(?:\s*\d+\s*(?:heures?|h|minutes?|mins?|min|m))?)(?!\w)",
     re.I,
 )
+_AMOUNT_MULTIPLIERS = {"": 1, "k": 1_000, "m": 1_000_000, "b": 1_000_000_000}
 
 
 def normalize_text(value: str | None) -> str:
@@ -36,6 +38,27 @@ def normalize_text(value: str | None) -> str:
     text = text.casefold().replace("’", "'")
     text = re.sub(r"[^a-z0-9@<>#'.,+\- ]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def canonical_amount(value: str | None) -> str | None:
+    """Convertit un montant naturel vers la syntaxe entière comprise par +pay.
+
+    5k -> 5000, 1.5k -> 1500, 2m -> 2000000. all/tout/max restent tels quels.
+    """
+    raw = str(value or "").strip().casefold().replace(" ", "")
+    if raw in {"all", "tout", "max"}:
+        return raw
+    match = re.fullmatch(r"(\d+(?:[.,]\d+)?)([kmb]?)", raw, flags=re.I)
+    if not match:
+        return None
+    try:
+        number = Decimal(match.group(1).replace(",", "."))
+    except InvalidOperation:
+        return None
+    amount = number * _AMOUNT_MULTIPLIERS[match.group(2).casefold()]
+    if amount <= 0 or amount != amount.to_integral_value():
+        return None
+    return str(int(amount))
 
 
 def _clean_reason(raw: str, *, action_words: tuple[str, ...], amount: str | None = None, duration: str | None = None) -> str:
@@ -47,7 +70,15 @@ def _clean_reason(raw: str, *, action_words: tuple[str, ...], amount: str | None
         text = re.sub(re.escape(amount), " ", text, count=1, flags=re.I)
     if duration:
         text = re.sub(re.escape(duration), " ", text, count=1, flags=re.I)
-    text = re.sub(r"\b(?:stp|svp|please|pls|lui|le|la|les|moi|pour|avec|car|parce que|raison)\b", " ", text, flags=re.I)
+
+    # Les mots qui relient seulement l'action à la cible ne doivent pas devenir une raison.
+    # Exemple corrigé : « envoie 5k à @membre » ne doit jamais produire « Raison : à ».
+    text = re.sub(
+        r"\b(?:stp|svp|please|pls|lui|le|la|les|moi|pour|avec|car|parce que|raison|a|à|au|aux|de|du|des|vers|chez)\b",
+        " ",
+        text,
+        flags=re.I,
+    )
     text = re.sub(r"\s+", " ", text).strip(" .,:;-_")
     return text[:400] or "Aucune raison fournie"
 
@@ -79,20 +110,22 @@ def parse_natural_action(value: str | None) -> NaturalAction | None:
         amount_source = _MENTION_RE.sub(" ", raw)
         amount_match = _AMOUNT_RE.search(amount_source)
         if amount_match:
-            amount = amount_match.group(1).replace(" ", "")
-            reason = _clean_reason(
-                raw,
-                action_words=("donne", "donner", "envoie", "envoyer", "paye", "payer", "transfere", "transfert"),
-                amount=amount,
-            )
-            return NaturalAction(
-                command="pay",
-                label=f"Envoyer {amount}",
-                sensitive=True,
-                target_required=True,
-                amount=amount,
-                reason=reason,
-            )
+            displayed_amount = amount_match.group(1).replace(" ", "")
+            amount = canonical_amount(displayed_amount)
+            if amount is not None:
+                reason = _clean_reason(
+                    raw,
+                    action_words=("donne", "donner", "envoie", "envoyer", "paye", "payer", "transfere", "transfert"),
+                    amount=displayed_amount,
+                )
+                return NaturalAction(
+                    command="pay",
+                    label=f"Envoyer {displayed_amount}",
+                    sensitive=True,
+                    target_required=True,
+                    amount=amount,
+                    reason=reason,
+                )
 
     if re.search(r"\b(?:vole|voler|rob)\b", text):
         return NaturalAction(command="rob", label="Tenter un vol", sensitive=True, target_required=True)
