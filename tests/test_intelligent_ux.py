@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from utils.intelligent_ux import classify_ticket_priority, parse_natural_action, summarize_ticket
+from utils.intelligent_ux import canonical_amount, classify_ticket_priority, parse_natural_action, summarize_ticket
 
 
 class IntelligentUXTests(unittest.TestCase):
@@ -16,9 +16,24 @@ class IntelligentUXTests(unittest.TestCase):
         plan = parse_natural_action("envoie 1.5k à <@123456789>")
         self.assertIsNotNone(plan)
         self.assertEqual(plan.command, "pay")
-        self.assertEqual(plan.amount, "1.5k")
+        self.assertEqual(plan.amount, "1500")
+        self.assertEqual(plan.reason, "Aucune raison fournie")
         self.assertTrue(plan.sensitive)
         self.assertTrue(plan.target_required)
+
+    def test_k_amount_is_canonical_for_legacy_pay(self):
+        plan = parse_natural_action("envoie 5k à <@123456789>")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.amount, "5000")
+        self.assertEqual(plan.reason, "Aucune raison fournie")
+        self.assertEqual(canonical_amount("2m"), "2000000")
+        self.assertEqual(canonical_amount("1,5k"), "1500")
+
+    def test_payment_reason_remains_meaningful(self):
+        plan = parse_natural_action("envoie 5k à <@123456789> remboursement concours")
+        self.assertEqual(plan.amount, "5000")
+        self.assertIn("remboursement", plan.reason.casefold())
+        self.assertNotEqual(plan.reason.strip().casefold(), "à")
 
     def test_moderation_is_never_automatic(self):
         plan = parse_natural_action("mute <@123456789> 30m spam répété")
