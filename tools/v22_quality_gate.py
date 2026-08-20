@@ -32,7 +32,6 @@ def main() -> int:
     runtime = ROOT / "cogs/sentrix_v22.py"
     if runtime.exists():
         text = runtime.read_text(encoding="utf-8")
-        # Exigence utilisateur : cette phase améliore l'existant, elle n'ajoute aucune commande.
         forbidden = ("@commands.command", "@commands.hybrid_command", "@commands.group")
         for marker in forbidden:
             if marker in text:
@@ -40,7 +39,7 @@ def main() -> int:
         markers = (
             "last_rob", "_economy_lock", "cash>=?", "status='ouvert' AND claimed_by IS NULL",
             "check_targetable", "asyncio.wait_for", "AI_SETTINGS_TTL", "GAME_SETTINGS_TTL",
-            "TICKET_BUTTON_SETTINGS_TTL", "PRAGMA busy_timeout=5000", "new_commands\": 0",
+            "TICKET_BUTTON_SETTINGS_TTL", "PRAGMA busy_timeout=5000", '"new_commands": 0',
         )
         for marker in markers:
             if marker not in text:
