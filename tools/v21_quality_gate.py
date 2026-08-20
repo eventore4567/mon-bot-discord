@@ -61,7 +61,7 @@ def main() -> int:
     dashboard_path = ROOT / "web/dashboard_v21.py"
     if dashboard_path.exists():
         text = dashboard_path.read_text(encoding="utf-8")
-        for marker in ('fetch("/health"', "@media(max-width:680px)", "credentials:\"same-origin\""):
+        for marker in ('fetch("/health"', "@media(max-width:680px)", 'credentials:"same-origin"'):
             if marker not in text:
                 errors.append(f"dashboard_v21.py: invariant absent: {marker}")
         if "DISCORD_TOKEN" in text or "OPENAI_API_KEY" in text:
