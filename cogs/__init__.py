@@ -22,6 +22,7 @@ from .command_no_emoji_runtime import install as install_command_no_emoji
 from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
 from .dashboard_access import install_dashboard_access
+from .emoji_name_lookup import install as install_emoji_name_lookup
 from .final_runtime_polish import install as install_final_runtime_polish
 from .generated_logs_sync import install as install_generated_logs_sync
 from .giveaway_antialt import install as install_giveaway_antialt
@@ -168,6 +169,12 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
         await _run_installer("suppression ancienne commande code", install_remove_code_command, bot)
 
     if _matches(name, "cogs.utility"):
+        await _run_installer("ajout emoji par nom", install_emoji_name_lookup, bot)
+        emoji_command = bot.get_command("addemoji")
+        if emoji_command is not None:
+            emoji_command.usage = ":nom:"
+            emoji_command.description = "Ajouter un emoji en tapant simplement son nom, ex. +addemogi :tete:."
+            emoji_command.help = "Tapez seulement le nom entre deux-points, par exemple `+addemogi :tete:`."
         await _run_installer("interface sondages", install_poll_ui, bot)
         await _run_installer("aide complète", install_complete_help, bot)
         await _run_installer("accès dashboard depuis aide", install_dashboard_access, bot)
