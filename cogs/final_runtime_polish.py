@@ -1,4 +1,4 @@
-"""Correctifs finaux SentriX pour +help, le Canary, l'accessibilité et la surface de commandes.
+"""Correctifs finaux SentriX pour +help, le Canary, l'accessibilité et l'UX intelligente.
 
 Cette couche est réappliquée après les autres finaliseurs à chaque chargement d'extension.
 Elle garantit donc aussi que +help reste public et que la politique permissions/catalogue
@@ -25,13 +25,7 @@ def _truthy(name: str) -> bool:
 
 
 def _install_odboug_account_username(bot: commands.Bot) -> None:
-    """Renomme uniquement le compte Discord de l'instance Bot'Odboug.
-
-    BOT_DISPLAY_NAME continue de gérer le pseudo serveur ``[+] Bot'Odboug |``. Ici on
-    modifie le vrai username du compte bot (la ligne qui pouvait encore afficher
-    ``SentriX Beta#....`` dans le profil Discord). Le bot SentriX principal est exclu via
-    l'identité d'instance, donc son compte n'est jamais renommé par cette couche.
-    """
+    """Renomme uniquement le compte Discord de l'instance Bot'Odboug."""
     if getattr(bot, "_sentrix_odboug_account_username_installed", False):
         return
 
@@ -276,6 +270,22 @@ def _patch_canary_readiness(bot: commands.Bot) -> None:
         infra_command._sentrix_external_canary = True
 
 
+def _install_intelligent_ux(bot: commands.Bot) -> None:
+    """Branche V2.4 après V6, sans modifier le catalogue de commandes."""
+    try:
+        from . import sentrix_intelligent_ux
+        sentrix_intelligent_ux.install(bot)
+
+        from web import dashboard, dashboard_intelligent_ux
+        dashboard_intelligent_ux.install(dashboard)
+        bot._sentrix_intelligent_ux_ready = bool(
+            getattr(bot, "_sentrix_intelligent_router_ready", False)
+            or getattr(bot, "_sentrix_intelligent_tickets_ready", False)
+        )
+    except Exception:
+        logger.exception("Impossible d'installer SentriX V2.4 Intelligent UX.")
+
+
 def _install_command_surface(bot: commands.Bot) -> None:
     """Réapplique toujours en dernier les décisions catalogue et permissions."""
     from . import (
@@ -301,6 +311,7 @@ def install(bot: commands.Bot) -> None:
     bot_experience_v5._install_reply_and_dm_conversations(bot)
     bot_experience_v5._install_ai_pipeline_upgrade(bot)
     bot_experience_v6.install(bot)
+    _install_intelligent_ux(bot)
     _schedule_community_growth(bot)
     _schedule_sentrix_v2(bot)
     _patch_help(bot)
