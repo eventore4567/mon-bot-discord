@@ -1,12 +1,13 @@
-"""SentriX V2.4 Intelligent UX — utiliser l'existant sans apprendre les commandes.
+"""SentriX V2.4 Intelligent UX — actions naturelles sans doubler les réponses IA.
 
-Aucune nouvelle commande n'est déclarée ici. La couche comprend uniquement des demandes
-naturelles explicites, exécute les actions de consultation via les commandes existantes et
-exige une confirmation humaine pour tout transfert, vol ou acte de modération.
+Cette couche n'ajoute aucune commande publique. Elle transforme uniquement des demandes
+naturelles explicites en appels vers les commandes SentriX existantes. Les actions
+sensibles exigent toujours une confirmation et réutilisent les permissions des commandes.
 """
 from __future__ import annotations
 
 import logging
+import re
 import time
 import types
 
@@ -15,12 +16,23 @@ from discord.ext import commands
 
 from database.db import now
 from utils import embeds
-from utils.intelligent_ux import NaturalAction, classify_ticket_priority, parse_natural_action, summarize_ticket
+from utils.instance_identity import wake_words
+from utils.intelligent_ux import (
+    NaturalAction,
+    classify_ticket_priority,
+    parse_natural_action,
+    summarize_ticket,
+)
 
 logger = logging.getLogger("bot.intelligent-ux-v24")
 
 
-async def _send_reply(message: discord.Message, *, embed: discord.Embed, view: discord.ui.View | None = None):
+async def _send_reply(
+    message: discord.Message,
+    *,
+    embed: discord.Embed,
+    view: discord.ui.View | None = None,
+):
     try:
         sent = await message.channel.send(
             embed=embed,
@@ -30,7 +42,11 @@ async def _send_reply(message: discord.Message, *, embed: discord.Embed, view: d
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except discord.HTTPException:
-        sent = await message.channel.send(embed=embed, view=view, allowed_mentions=discord.AllowedMentions.none())
+        sent = await message.channel.send(
+            embed=embed,
+            view=view,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
     if view is not None and hasattr(view, "message"):
         view.message = sent
     return sent
@@ -39,6 +55,7 @@ async def _send_reply(message: discord.Message, *, embed: discord.Embed, view: d
 async def _resolve_target(bot: commands.Bot, message: discord.Message) -> discord.Member | None:
     if message.guild is None:
         return None
+
     for member in getattr(message, "mentions", []):
         if member.id not in {message.author.id, getattr(getattr(bot, "user", None), "id", 0)}:
             return member
@@ -77,25 +94,48 @@ def _action_details(plan: NaturalAction, target: discord.Member | None) -> str:
 
 
 def _claim_natural_message(bot: commands.Bot, message_id: int) -> bool:
-    """Un même message naturel ne peut être pris en charge qu'une fois.
-
-    Plusieurs listeners historiques peuvent observer le même message Discord. Sans cette
-    garde, une couche pouvait afficher la confirmation pendant qu'une autre envoyait quand
-    même la phrase au modèle, ce qui produisait deux réponses contradictoires.
-    """
+    """Réserve un message afin qu'un seul pipeline SentriX puisse le traiter."""
     cache = getattr(bot, "_sentrix_v24_claimed_messages", None)
     if not isinstance(cache, dict):
         cache = {}
         bot._sentrix_v24_claimed_messages = cache
+
     current = time.monotonic()
     if len(cache) > 2000:
         for key, saved_at in list(cache.items()):
             if current - float(saved_at) > 180:
                 cache.pop(key, None)
-    if int(message_id) in cache:
+
+    message_id = int(message_id)
+    if message_id in cache:
         return False
-    cache[int(message_id)] = current
+    cache[message_id] = current
     return True
+
+
+def _extract_explicit_question(bot: commands.Bot, message: discord.Message) -> str | None:
+    """Extrait le texte après une mention ou un mot de réveil explicite du bot."""
+    content = str(getattr(message, "content", "") or "").strip()
+    if not content:
+        return None
+
+    user = bot.user
+    if user is not None:
+        mention_match = re.match(rf"^<@!?{user.id}>\s*", content)
+        if mention_match:
+            return content[mention_match.end():].lstrip(" ,;:!?.-").strip()
+
+    words = set(wake_words())
+    words.update({"SentriX", "SSentriX", "Sentri", "Snetri", "SnentriX"})
+    for word in sorted((str(item) for item in words if str(item).strip()), key=len, reverse=True):
+        match = re.match(
+            rf"^{re.escape(word)}(?=$|[\s,;:!?.-])",
+            content,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return content[match.end():].lstrip(" ,;:!?.-").strip()
+    return None
 
 
 async def _invoke_existing_command(
@@ -108,7 +148,10 @@ async def _invoke_existing_command(
     if command is None or not command.enabled:
         return await _send_reply(
             message,
-            embed=embeds.warning("Cette action existe dans SentriX mais n'est pas disponible sur cette instance.", title="Action indisponible"),
+            embed=embeds.warning(
+                "Cette action existe dans SentriX mais n'est pas disponible sur cette instance.",
+                title="Action indisponible",
+            ),
         )
 
     ctx = await bot.get_context(message)
@@ -123,12 +166,13 @@ async def _invoke_existing_command(
         try:
             return await bot.on_command_error(ctx, exc)
         except Exception:
-            return await _send_reply(message, embed=embeds.error("Tu n'as pas les permissions nécessaires pour cette action."))
+            return await _send_reply(
+                message,
+                embed=embeds.error("Tu n'as pas les permissions nécessaires pour cette action."),
+            )
 
     kwargs = {}
     if plan.command == "pay":
-        # plan.amount est déjà canonique : 5k => 5000, 1.5k => 1500.
-        # L'ancienne commande +pay n'a donc plus besoin de comprendre les suffixes V2.4.
         kwargs = {"membre": target, "montant": plan.amount or "0"}
     elif plan.command == "rob":
         kwargs = {"membre": target}
@@ -152,7 +196,10 @@ async def _invoke_existing_command(
         logger.exception("V2.4 : action naturelle %s interrompue", plan.command)
         return await _send_reply(
             message,
-            embed=embeds.error("L'action n'a pas pu être terminée. Rien d'autre n'a été exécuté.", title="Action interrompue"),
+            embed=embeds.error(
+                "L'action n'a pas pu être terminée. Rien d'autre n'a été exécuté.",
+                title="Action interrompue",
+            ),
         )
 
 
@@ -175,7 +222,10 @@ class NaturalActionConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message("Seule la personne qui a demandé l'action peut confirmer.", ephemeral=True)
+            await interaction.response.send_message(
+                "Seule la personne qui a demandé l'action peut confirmer.",
+                ephemeral=True,
+            )
             return False
         return True
 
@@ -186,11 +236,16 @@ class NaturalActionConfirmView(discord.ui.View):
     @discord.ui.button(label="Confirmer l'action", style=discord.ButtonStyle.danger, emoji="✅")
     async def confirm(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if self.used:
-            return await interaction.response.send_message("Cette action a déjà été traitée.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Cette action a déjà été traitée.", ephemeral=True
+            )
         self.used = True
         self._disable()
         await interaction.response.edit_message(
-            embed=embeds.info(_action_details(self.plan, self.target), title="Action confirmée — exécution"),
+            embed=embeds.info(
+                _action_details(self.plan, self.target),
+                title="Action confirmée — exécution",
+            ),
             view=self,
         )
         self.stop()
@@ -199,24 +254,41 @@ class NaturalActionConfirmView(discord.ui.View):
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="❌")
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if self.used:
-            return await interaction.response.send_message("Cette action a déjà été traitée.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Cette action a déjà été traitée.", ephemeral=True
+            )
         self.used = True
         self._disable()
-        await interaction.response.edit_message(embed=embeds.info("Aucune action n'a été exécutée.", title="Action annulée"), view=self)
+        await interaction.response.edit_message(
+            embed=embeds.info("Aucune action n'a été exécutée.", title="Action annulée"),
+            view=self,
+        )
         self.stop()
 
     async def on_timeout(self):
         self._disable()
         if self.message:
             try:
-                await self.message.edit(embed=embeds.info("La confirmation a expiré. Aucune action n'a été exécutée.", title="Confirmation expirée"), view=self)
+                await self.message.edit(
+                    embed=embeds.info(
+                        "La confirmation a expiré. Aucune action n'a été exécutée.",
+                        title="Confirmation expirée",
+                    ),
+                    view=self,
+                )
             except discord.HTTPException:
                 pass
 
 
 async def _handle_plan(bot: commands.Bot, message: discord.Message, plan: NaturalAction):
     if message.guild is None:
-        return await _send_reply(message, embed=embeds.warning("Cette action doit être utilisée dans un serveur Discord.", title="Serveur requis"))
+        return await _send_reply(
+            message,
+            embed=embeds.warning(
+                "Cette action doit être utilisée dans un serveur Discord.",
+                title="Serveur requis",
+            ),
+        )
 
     target = await _resolve_target(bot, message) if plan.target_required else None
     if plan.target_required and target is None:
@@ -245,26 +317,29 @@ def _install_natural_router(bot: commands.Bot) -> bool:
     ai_cog = bot.get_cog("Ai")
     if ai_cog is None:
         return False
+
     current = ai_cog.send_sentrix_reply
     if getattr(current, "_sentrix_intelligent_ux_v24", False):
         return True
 
-    async def intelligent_reply(self, destination, author, question: str, *, reply_to: discord.Message | None = None):
+    async def intelligent_reply(
+        self,
+        destination,
+        author,
+        question: str,
+        *,
+        reply_to: discord.Message | None = None,
+    ):
         plan = parse_natural_action(question)
         if plan is None or reply_to is None or reply_to.author.id != author.id:
             return await current(destination, author, question, reply_to=reply_to)
 
-        # Réserve immédiatement le message AVANT le premier await. Si deux listeners ont
-        # reçu le même événement, le second s'arrête ici et ne part jamais vers l'IA.
         if not _claim_natural_message(bot, reply_to.id):
             return None
 
         try:
             return await _handle_plan(bot, reply_to, plan)
         except Exception:
-            # Le message est bien une action reconnue : même en cas d'erreur interne on ne
-            # le renvoie pas au modèle, sinon l'utilisateur reçoitrait à nouveau une
-            # réponse contradictoire. On affiche une erreur déterministe à la place.
             logger.exception("V2.4 : routeur naturel en échec.")
             return await _send_reply(
                 reply_to,
@@ -281,25 +356,92 @@ def _install_natural_router(bot: commands.Bot) -> bool:
     return True
 
 
+def _install_primary_ai_listener_guard(bot: commands.Bot) -> bool:
+    """Remplace le listener IA historique par une version qui donne priorité à V2.4.
+
+    Le bug corrigé était : « SentriX ouvre mon profil » affichait correctement le profil,
+    puis un second chemin IA continuait et ajoutait « Je n'ai pas reçu de texte de l'IA ».
+    Ici une action naturelle reconnue est consommée avant que l'ancien listener ne démarre.
+    """
+    ai_cog = bot.get_cog("Ai")
+    if ai_cog is None:
+        return False
+    if getattr(bot, "_sentrix_v24_primary_ai_listener_guard", False):
+        return True
+
+    events = getattr(bot, "extra_events", {})
+    listeners = list(events.get("on_message", [])) if isinstance(events, dict) else []
+    originals = [
+        listener
+        for listener in listeners
+        if getattr(listener, "__self__", None) is ai_cog
+        and getattr(listener, "__name__", "") == "on_message"
+    ]
+    if not originals:
+        return False
+
+    for listener in originals:
+        bot.remove_listener(listener, "on_message")
+
+    async def guarded_ai_on_message(message: discord.Message):
+        if not message.author.bot and message.guild is not None:
+            question = _extract_explicit_question(bot, message)
+            if question is not None:
+                plan = parse_natural_action(question)
+                if plan is not None:
+                    if _claim_natural_message(bot, message.id):
+                        try:
+                            await _handle_plan(bot, message, plan)
+                        except Exception:
+                            logger.exception("V2.4 : action naturelle interceptée en échec.")
+                            await _send_reply(
+                                message,
+                                embed=embeds.error(
+                                    "Je n'ai pas pu terminer cette action. Aucune autre réponse IA n'a été envoyée.",
+                                    title="Action interrompue",
+                                ),
+                            )
+                    return
+
+        for original in originals:
+            await original(message)
+
+    guarded_ai_on_message._sentrix_v24_primary_guard = True
+    bot.add_listener(guarded_ai_on_message, "on_message")
+    bot._sentrix_v24_primary_ai_listener_guard = True
+    logger.info(
+        "SentriX V2.4 : listener IA historique protégé contre les doubles réponses."
+    )
+    return True
+
+
 def _install_ticket_intelligence(bot: commands.Bot) -> bool:
     tickets = bot.get_cog("Tickets")
     if tickets is None:
         return False
+
     current = tickets.create_ticket
     if getattr(current, "_sentrix_intelligent_ticket_v24", False):
         return True
 
-    async def intelligent_create(this, interaction: discord.Interaction, ticket_type, answers: list):
+    async def intelligent_create(
+        this,
+        interaction: discord.Interaction,
+        ticket_type,
+        answers: list,
+    ):
         result = await current(interaction, ticket_type, answers)
         try:
             if interaction.guild is None:
                 return result
+
             row = await bot.db.fetchone(
                 "SELECT id,created_at FROM tickets WHERE guild_id=? AND user_id=? AND type_id=? ORDER BY id DESC LIMIT 1",
                 (interaction.guild.id, interaction.user.id, int(ticket_type["id"])),
             )
             if not row or int(row["created_at"] or 0) < now() - 180:
                 return result
+
             ticket_id = int(row["id"])
             duplicate = await bot.db.fetchone(
                 "SELECT id FROM ticket_notes WHERE ticket_id=? AND note LIKE '[SentriX Auto]%' LIMIT 1",
@@ -323,7 +465,12 @@ def _install_ticket_intelligence(bot: commands.Bot) -> bool:
             )[:1000]
             await bot.db.execute(
                 "INSERT INTO ticket_notes (ticket_id, author_id, note, timestamp) VALUES (?, ?, ?, ?)",
-                (ticket_id, getattr(getattr(bot, "user", None), "id", 0) or 0, note, now()),
+                (
+                    ticket_id,
+                    getattr(getattr(bot, "user", None), "id", 0) or 0,
+                    note,
+                    now(),
+                ),
             )
         except Exception:
             logger.exception("V2.4 : impossible d'ajouter le résumé interne du ticket.")
@@ -339,10 +486,13 @@ def _install_ticket_intelligence(bot: commands.Bot) -> bool:
 def install(bot: commands.Bot) -> None:
     """Installation idempotente, rappelée après chaque extension par le finaliseur."""
     router = _install_natural_router(bot)
+    listener_guard = _install_primary_ai_listener_guard(bot)
     tickets = _install_ticket_intelligence(bot)
+
     bot._sentrix_intelligent_ux_state = {
         "new_commands": 0,
         "natural_router": bool(router),
+        "primary_listener_guard": bool(listener_guard),
         "ticket_intelligence": bool(tickets),
         "sensitive_confirmation": True,
         "permission_reuse": True,
