@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -32,14 +33,16 @@ def main() -> int:
     runtime = ROOT / "cogs/sentrix_v22.py"
     if runtime.exists():
         text = runtime.read_text(encoding="utf-8")
-        forbidden = ("@commands.command", "@commands.hybrid_command", "@commands.group")
-        for marker in forbidden:
-            if marker in text:
-                errors.append(f"V2.2 ajoute une commande alors que c'est interdit: {marker}")
+        # Vérifie uniquement de VRAIES lignes décoratrices : le commentaire/docstring peut
+        # naturellement expliquer que V2.2 n'ajoute aucun @commands.command sans faire
+        # échouer le gate.
+        if re.search(r"(?m)^\s*@commands\.(?:command|hybrid_command|group)\b", text):
+            errors.append("V2.2 déclare une nouvelle commande alors que cette phase doit uniquement améliorer l'existant")
         markers = (
             "last_rob", "_economy_lock", "cash>=?", "status='ouvert' AND claimed_by IS NULL",
             "check_targetable", "asyncio.wait_for", "AI_SETTINGS_TTL", "GAME_SETTINGS_TTL",
             "TICKET_BUTTON_SETTINGS_TTL", "PRAGMA busy_timeout=5000", '"new_commands": 0',
+            "_ticket_create_locks", "await conn.commit()",
         )
         for marker in markers:
             if marker not in text:
