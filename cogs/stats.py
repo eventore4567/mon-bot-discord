@@ -33,6 +33,13 @@ class Stats(commands.Cog, name="Stats"):
             footer=design.get("footer"),
         )
 
+    def _runtime_snapshot(self) -> dict:
+        try:
+            from . import runtime_observability_v26
+            return runtime_observability_v26.snapshot(self.bot)
+        except Exception:
+            return {}
+
     @commands.hybrid_command(name="bot-status", description="Afficher l'état général du bot.")
     async def system_status(self, ctx: commands.Context):
         e = await self._embed(ctx.guild.id if ctx.guild else None, title="État du bot")
@@ -45,6 +52,18 @@ class Stats(commands.Cog, name="Stats"):
         h, rem = divmod(uptime, 3600)
         m, s = divmod(rem, 60)
         e.add_field(name="Uptime", value=f"{h}h {m}m {s}s", inline=True)
+        runtime = self._runtime_snapshot()
+        if runtime:
+            e.add_field(name="Release", value=f"`{runtime.get('release', 'inconnu')}`", inline=True)
+            e.add_field(
+                name="Santé runtime",
+                value=(
+                    f"Erreurs récentes : {runtime.get('error_count', 0)}\n"
+                    f"Commandes lentes : {runtime.get('slow_command_count', 0)}\n"
+                    f"Requêtes DB lentes : {runtime.get('slow_db_count', 0)}"
+                ),
+                inline=True,
+            )
         try:
             level_row = await self.bot.db.fetchone("SELECT COUNT(*) AS n FROM levels")
             e.add_field(
@@ -97,13 +116,19 @@ class Stats(commands.Cog, name="Stats"):
         modules_expected = getattr(self.bot, "expected_extension_count", modules_loaded)
         database_label = "Opérationnelle" if database_ok else "Indisponible"
         permission_label = "Toutes disponibles" if not missing else f"{len(missing)} manquante(s)"
-        kind = "success" if database_ok and not missing else "warning"
+
+        integrity = getattr(self.bot, "_sentrix_integrity_state", None)
+        quality = getattr(self.bot, "_sentrix_quality_v25_state", None)
+        runtime = self._runtime_snapshot()
+        quality_ok = bool(quality.get("ready")) if isinstance(quality, dict) else True
+        kind = "success" if database_ok and not missing and quality_ok else "warning"
+
         e = await self._embed(
             ctx.guild.id,
             title="Diagnostic de SentriX",
             description=(
-                "Ce contrôle vérifie les éléments essentiels dans le salon actuel. "
-                "Il ne modifie aucun réglage du serveur."
+                "Contrôle du salon, des commandes et du runtime actuel. "
+                "Aucun réglage n'est modifié."
             ),
             kind=kind,
         )
@@ -113,7 +138,7 @@ class Stats(commands.Cog, name="Stats"):
         e.add_field(name="Commandes texte", value=str(len(self.bot.commands)), inline=True)
         e.add_field(name="Commandes slash", value=str(count_slash(self.bot.tree.get_commands())), inline=True)
         e.add_field(name="Permissions", value=permission_label, inline=True)
-        integrity = getattr(self.bot, "_sentrix_integrity_state", None)
+
         if isinstance(integrity, dict):
             integrity_ok = bool(integrity.get("ready"))
             e.add_field(
@@ -124,6 +149,39 @@ class Stats(commands.Cog, name="Stats"):
                 ),
                 inline=True,
             )
+
+        if isinstance(quality, dict):
+            contracts = quality.get("contracts", {}) if isinstance(quality.get("contracts"), dict) else {}
+            protections = quality.get("protections", {}) if isinstance(quality.get("protections"), dict) else {}
+            enabled = sum(1 for value in protections.values() if value)
+            total = len(protections)
+            e.add_field(
+                name="Qualité V2.5",
+                value=(
+                    f"{'OK' if quality.get('ready') else 'À vérifier'} — "
+                    f"{contracts.get('commands_checked', 0)} commande(s), "
+                    f"{contracts.get('critical_contracts', 0)} contrat(s), "
+                    f"{enabled}/{total} protection(s)"
+                ),
+                inline=False,
+            )
+
+        if runtime:
+            runtime_lines = [
+                f"Release : `{runtime.get('release', 'inconnu')}`",
+                f"DB : {runtime.get('db_calls', 0)} appel(s), moyenne {runtime.get('db_avg_ms', 0)} ms",
+                f"DB lente : {runtime.get('slow_db_count', 0)}",
+                f"Commandes lentes : {runtime.get('slow_command_count', 0)}",
+                f"Erreurs récentes : {runtime.get('error_count', 0)}",
+            ]
+            last_error = runtime.get("last_error")
+            if isinstance(last_error, dict):
+                runtime_lines.append(
+                    f"Dernière erreur : `{last_error.get('command', 'inconnue')}` / `{last_error.get('type', 'Erreur')}` "
+                    f"(réf. `{last_error.get('reference') or 'n/a'}`)"
+                )
+            e.add_field(name="Runtime", value="\n".join(runtime_lines), inline=False)
+
         if missing:
             e.add_field(
                 name="À corriger dans ce salon",
@@ -141,7 +199,7 @@ class Stats(commands.Cog, name="Stats"):
         else:
             e.add_field(
                 name="Résultat",
-                value="La base de données répond et toutes les permissions indispensables sont disponibles dans ce salon.",
+                value="La base répond et les permissions indispensables sont disponibles dans ce salon.",
                 inline=False,
             )
         await ctx.send(embed=e, ephemeral=True if ctx.interaction else False)
@@ -192,8 +250,8 @@ class Stats(commands.Cog, name="Stats"):
                 "• Réponses harmonisées : titres sobres, erreurs détaillées et permissions expliquées en français.\n"
                 "• Aide corrigée : chaque membre voit ses commandes publiques, sans afficher les outils du staff.\n"
                 "• Tickets renforcés : emojis Unicode et personnalisés animés validés avant l’envoi à Discord.\n"
-                "• Nouvelle commande `/diagnostic` : contrôle de la base, des modules et des permissions.\n"
-                "• Les erreurs des commandes slash donnent maintenant une explication au lieu d’un simple échec."
+                "• `/diagnostic` contrôle maintenant aussi les contrats de commandes et la santé runtime.\n"
+                "• Les erreurs slash et cooldowns donnent une explication claire."
             ),
             inline=False,
         )
@@ -247,6 +305,7 @@ class Stats(commands.Cog, name="Stats"):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Stats(bot))
-    from . import integrity_hardening, user_facing_hygiene
+    from . import integrity_hardening, runtime_observability_v26, user_facing_hygiene
     integrity_hardening.install(bot)
+    runtime_observability_v26.install(bot)
     user_facing_hygiene.install(bot)
