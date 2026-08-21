@@ -3,6 +3,11 @@
 Cette couche n'ajoute aucune commande publique. Elle transforme uniquement des demandes
 naturelles explicites en appels vers les commandes SentriX existantes. Les actions
 sensibles exigent toujours une confirmation et réutilisent les permissions des commandes.
+
+Le routage est exclusif : dès qu'un message appartient à une commande SentriX (commande
+préfixée ou commande demandée en langage naturel), le pipeline IA passif ne peut plus
+répondre derrière. Cette protection couvre tout le catalogue existant via walk_commands(),
+pas seulement une liste de commandes codée en dur.
 """
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ import types
 import discord
 from discord.ext import commands
 
+import config
 from database.db import now
 from utils import embeds
 from utils.instance_identity import wake_words
@@ -93,24 +99,46 @@ def _action_details(plan: NaturalAction, target: discord.Member | None) -> str:
     return "\n".join(lines)
 
 
-def _claim_natural_message(bot: commands.Bot, message_id: int) -> bool:
-    """Réserve un message afin qu'un seul pipeline SentriX puisse le traiter."""
+def _message_claim_cache(bot: commands.Bot) -> dict[int, float]:
     cache = getattr(bot, "_sentrix_v24_claimed_messages", None)
     if not isinstance(cache, dict):
         cache = {}
         bot._sentrix_v24_claimed_messages = cache
+    return cache
 
+
+def _cleanup_claim_cache(cache: dict[int, float]) -> None:
     current = time.monotonic()
-    if len(cache) > 2000:
-        for key, saved_at in list(cache.items()):
-            if current - float(saved_at) > 180:
-                cache.pop(key, None)
+    if len(cache) <= 2000:
+        return
+    for key, saved_at in list(cache.items()):
+        if current - float(saved_at) > 180:
+            cache.pop(key, None)
 
+
+def _message_is_claimed(bot: commands.Bot, message_id: int) -> bool:
+    cache = _message_claim_cache(bot)
+    _cleanup_claim_cache(cache)
+    return int(message_id) in cache
+
+
+def _claim_natural_message(bot: commands.Bot, message_id: int) -> bool:
+    """Réserve atomiquement un message afin qu'un seul pipeline SentriX puisse le traiter."""
+    cache = _message_claim_cache(bot)
+    _cleanup_claim_cache(cache)
     message_id = int(message_id)
     if message_id in cache:
         return False
-    cache[message_id] = current
+    cache[message_id] = time.monotonic()
     return True
+
+
+def _guild_prefix(bot: commands.Bot, guild_id: int) -> str:
+    if hasattr(bot, "prefix_cache"):
+        value = bot.prefix_cache.get(guild_id, config.DEFAULT_PREFIX)
+    else:
+        value = config.DEFAULT_PREFIX
+    return str(value or config.DEFAULT_PREFIX)
 
 
 def _extract_explicit_question(bot: commands.Bot, message: discord.Message) -> str | None:
@@ -330,6 +358,11 @@ def _install_natural_router(bot: commands.Bot) -> bool:
         *,
         reply_to: discord.Message | None = None,
     ):
+        # Une autre couche a déjà décidé que ce message était une commande : elle possède
+        # le message, donc l'IA ne doit surtout pas produire une seconde réponse.
+        if reply_to is not None and _message_is_claimed(bot, reply_to.id):
+            return None
+
         plan = parse_natural_action(question)
         if plan is None or reply_to is None or reply_to.author.id != author.id:
             return await current(destination, author, question, reply_to=reply_to)
@@ -357,17 +390,31 @@ def _install_natural_router(bot: commands.Bot) -> bool:
 
 
 def _install_primary_ai_listener_guard(bot: commands.Bot) -> bool:
-    """Remplace le listener IA historique par une version qui donne priorité à V2.4.
+    """Donne une propriété exclusive du message à une commande avant le pipeline IA.
 
-    Le bug corrigé était : « SentriX ouvre mon profil » affichait correctement le profil,
-    puis un second chemin IA continuait et ajoutait « Je n'ai pas reçu de texte de l'IA ».
-    Ici une action naturelle reconnue est consommée avant que l'ancien listener ne démarre.
+    Cette garde couvre :
+    - toutes les commandes préfixées (`+...`) ;
+    - toutes les actions V2.4 sensibles ou simples ;
+    - toutes les commandes reconnues par le moteur naturel de cogs.ai, lequel parcourt
+      dynamiquement bot.walk_commands() ;
+    - les doublons accidentels de listeners après reload.
+
+    Une vraie question qui n'est pas une commande continue vers un seul listener IA.
     """
     ai_cog = bot.get_cog("Ai")
     if ai_cog is None:
         return False
-    if getattr(bot, "_sentrix_v24_primary_ai_listener_guard", False):
+
+    previous_guard = getattr(bot, "_sentrix_v24_primary_ai_listener_guard_fn", None)
+    guarded_cog = getattr(bot, "_sentrix_v24_guarded_ai_cog", None)
+    if guarded_cog is ai_cog and previous_guard is not None:
         return True
+
+    if previous_guard is not None:
+        try:
+            bot.remove_listener(previous_guard, "on_message")
+        except Exception:
+            pass
 
     events = getattr(bot, "extra_events", {})
     listeners = list(events.get("on_message", [])) if isinstance(events, dict) else []
@@ -380,37 +427,86 @@ def _install_primary_ai_listener_guard(bot: commands.Bot) -> bool:
     if not originals:
         return False
 
+    # Plusieurs références identiques peuvent exister après un reload. On les retire
+    # toutes, mais une seule version canonique sera appelée pour les vraies questions.
     for listener in originals:
         bot.remove_listener(listener, "on_message")
+    primary = originals[0]
 
     async def guarded_ai_on_message(message: discord.Message):
-        if not message.author.bot and message.guild is not None:
-            question = _extract_explicit_question(bot, message)
-            if question is not None:
-                plan = parse_natural_action(question)
-                if plan is not None:
-                    if _claim_natural_message(bot, message.id):
-                        try:
-                            await _handle_plan(bot, message, plan)
-                        except Exception:
-                            logger.exception("V2.4 : action naturelle interceptée en échec.")
-                            await _send_reply(
-                                message,
-                                embed=embeds.error(
-                                    "Je n'ai pas pu terminer cette action. Aucune autre réponse IA n'a été envoyée.",
-                                    title="Action interrompue",
-                                ),
-                            )
-                    return
+        if message.author.bot or message.guild is None:
+            return
 
-        for original in originals:
-            await original(message)
+        # Si un autre routeur a déjà réclamé le message, ce listener IA n'a rien à faire.
+        if _message_is_claimed(bot, message.id):
+            return
+
+        content = str(getattr(message, "content", "") or "").strip()
+        prefix = _guild_prefix(bot, message.guild.id)
+
+        # Les commandes `+...` appartiennent au CommandProcessor Discord.py. Même si elles
+        # échouent ou sont mal écrites, elles ne doivent jamais être envoyées à l'IA passive.
+        if content.startswith(prefix):
+            return
+
+        question = _extract_explicit_question(bot, message)
+        if question is None:
+            return await primary(message)
+
+        # 1) Actions V2.4 structurées (pay, modération, profil, économie, etc.).
+        plan = parse_natural_action(question)
+        if plan is not None:
+            if not _claim_natural_message(bot, message.id):
+                return
+            try:
+                await _handle_plan(bot, message, plan)
+            except Exception:
+                logger.exception("V2.4 : action naturelle interceptée en échec.")
+                await _send_reply(
+                    message,
+                    embed=embeds.error(
+                        "Je n'ai pas pu terminer cette action. Aucune autre réponse IA n'a été envoyée.",
+                        title="Action interrompue",
+                    ),
+                )
+            return
+
+        # 2) Toutes les autres commandes existantes reconnues en langage naturel.
+        # _natural_command_line() s'appuie sur bot.walk_commands(), donc une nouvelle
+        # commande existante est automatiquement couverte sans modifier cette garde.
+        command_line = ai_cog._natural_command_line(
+            question,
+            prefix,
+            has_attachment=bool(getattr(message, "attachments", None)),
+        )
+        if command_line:
+            if not _claim_natural_message(bot, message.id):
+                return
+            try:
+                invoked = await ai_cog._invoke_natural_command(message, question, prefix)
+            except Exception:
+                logger.exception("V2.4 : commande naturelle globale en échec.")
+                invoked = False
+            if not invoked:
+                await _send_reply(
+                    message,
+                    embed=embeds.warning(
+                        "J'ai reconnu une commande SentriX, mais elle n'est pas disponible actuellement.",
+                        title="Commande indisponible",
+                    ),
+                )
+            return
+
+        # 3) Ce n'est pas une commande : une seule vraie réponse IA est autorisée.
+        return await primary(message)
 
     guarded_ai_on_message._sentrix_v24_primary_guard = True
     bot.add_listener(guarded_ai_on_message, "on_message")
+    bot._sentrix_v24_primary_ai_listener_guard_fn = guarded_ai_on_message
+    bot._sentrix_v24_guarded_ai_cog = ai_cog
     bot._sentrix_v24_primary_ai_listener_guard = True
     logger.info(
-        "SentriX V2.4 : listener IA historique protégé contre les doubles réponses."
+        "SentriX V2.4 : garde globale activée pour toutes les commandes et réponses IA."
     )
     return True
 
@@ -493,6 +589,8 @@ def install(bot: commands.Bot) -> None:
         "new_commands": 0,
         "natural_router": bool(router),
         "primary_listener_guard": bool(listener_guard),
+        "global_command_exclusivity": True,
+        "reload_safe_listener_guard": True,
         "ticket_intelligence": bool(tickets),
         "sensitive_confirmation": True,
         "permission_reuse": True,
