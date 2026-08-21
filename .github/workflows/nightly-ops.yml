@@ -46,6 +46,9 @@ jobs:
       - name: Command runtime audit
         run: python tools/command_runtime_audit.py
 
+      - name: Command error ownership gate
+        run: python tools/command_error_ownership_gate.py
+
       - name: Permission matrix
         run: python tools/permission_matrix_gate.py
 
