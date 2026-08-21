@@ -33,9 +33,6 @@ class Stats(commands.Cog, name="Stats"):
             footer=design.get("footer"),
         )
 
-    # NOTE : le nom de méthode ne doit JAMAIS commencer par "bot_" ou "cog_"
-    # (restriction interne de discord.py sur les Cogs). D'où "system_status"
-    # ici, alors que la commande visible reste "/bot-status" et "+bot-status".
     @commands.hybrid_command(name="bot-status", description="Afficher l'état général du bot.")
     async def system_status(self, ctx: commands.Context):
         e = await self._embed(ctx.guild.id if ctx.guild else None, title="État du bot")
@@ -48,13 +45,6 @@ class Stats(commands.Cog, name="Stats"):
         h, rem = divmod(uptime, 3600)
         m, s = divmod(rem, 60)
         e.add_field(name="Uptime", value=f"{h}h {m}m {s}s", inline=True)
-
-        # Compteur de profils enregistrés en base : sert de diagnostic rapide de
-        # persistance. Si ce nombre retombe à un chiffre anormalement bas juste après un
-        # redéploiement Railway (alors qu'il était plus élevé avant), c'est le signe qu'aucun
-        # volume persistant n'est monté sur le chemin de la base de données, et que toutes
-        # les données (niveaux, économie, avertissements...) repartent de zéro à chaque
-        # redéploiement. Un serveur actif ne doit JAMAIS voir ce chiffre baisser tout seul.
         try:
             level_row = await self.bot.db.fetchone("SELECT COUNT(*) AS n FROM levels")
             e.add_field(
@@ -73,7 +63,6 @@ class Stats(commands.Cog, name="Stats"):
     @commands.guild_only()
     @checks.is_owner_or_admin_for("configuration")
     async def diagnostic(self, ctx: commands.Context):
-        """Diagnostic lisible par un administrateur, sans exposer de secret."""
         database_ok = True
         try:
             row = await self.bot.db.fetchone("SELECT 1 AS ok")
@@ -124,6 +113,17 @@ class Stats(commands.Cog, name="Stats"):
         e.add_field(name="Commandes texte", value=str(len(self.bot.commands)), inline=True)
         e.add_field(name="Commandes slash", value=str(count_slash(self.bot.tree.get_commands())), inline=True)
         e.add_field(name="Permissions", value=permission_label, inline=True)
+        integrity = getattr(self.bot, "_sentrix_integrity_state", None)
+        if isinstance(integrity, dict):
+            integrity_ok = bool(integrity.get("ready"))
+            e.add_field(
+                name="Intégrité des commandes",
+                value=(
+                    f"{'OK' if integrity_ok else 'À vérifier'} — "
+                    f"{integrity.get('commands_checked', 0)} commande(s) contrôlée(s)"
+                ),
+                inline=True,
+            )
         if missing:
             e.add_field(
                 name="À corriger dans ce salon",
@@ -247,3 +247,5 @@ class Stats(commands.Cog, name="Stats"):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Stats(bot))
+    from . import integrity_hardening
+    integrity_hardening.install(bot)
