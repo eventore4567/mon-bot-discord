@@ -42,6 +42,9 @@ jobs:
       - name: Economy concurrency smoke test
         run: python tools/load_test_economy.py --users 60 --operations 800 --concurrency 20
 
+      - name: Real command parser smoke test
+        run: python tools/command_parse_smoke.py
+
       - name: Command contracts
         run: python tools/command_runtime_audit.py
 
