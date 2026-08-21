@@ -1,14 +1,16 @@
 """Hygiène d'affichage globale des commandes SentriX.
 
-Aucune logique métier et aucune nouvelle commande ici. Cette couche garantit que les
-paramètres internes de discord.py (ctx/context/interaction/self/cog) ne sont jamais
-présentés aux membres et répare la catégorie d'aide V2 ajoutée dynamiquement.
+Cette couche ne modifie jamais les signatures internes utilisées par discord.py.
+Elle agit uniquement sur les textes visibles : aide, syntaxes, erreurs techniques et
+cooldowns. Cela évite qu'un correctif d'affichage casse les commandes slash/hybrides.
 """
 from __future__ import annotations
 
 import logging
+import math
 import re
 
+import discord
 from discord.ext import commands
 
 from utils import embeds
@@ -30,8 +32,8 @@ def _is_internal(name: str) -> bool:
     return str(name or "").casefold().strip() in _INTERNAL_PARAMS
 
 
-def sanitize_usage_text(value: str) -> str:
-    """Retire les paramètres techniques d'une syntaxe destinée à un membre."""
+def sanitize_usage_text(value: str | None) -> str:
+    """Retire uniquement les paramètres techniques d'un texte destiné au membre."""
     text = str(value or "")
     previous = None
     while previous != text:
@@ -40,40 +42,8 @@ def sanitize_usage_text(value: str) -> str:
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
-def _sanitize_registered_commands(bot: commands.Bot) -> None:
-    """Nettoie la source même des signatures Discord.py.
-
-    Certaines anciennes couches runtime ont pu conserver ``ctx`` dans ``command.params``
-    ou dans ``command.usage``. Dans discord.py ces deux valeurs alimentent ensuite
-    ``command.signature`` : masquer seulement le texte de +help ne suffit donc pas.
-    On retire ici uniquement les paramètres techniques qui ne sont jamais saisis par un
-    utilisateur. Les vrais arguments (montant, membre, raison...) restent inchangés.
-    """
-    cleaned = 0
-    for command in bot.walk_commands():
-        params = getattr(command, "params", None)
-        if params is not None and hasattr(params, "items"):
-            filtered = [(name, value) for name, value in params.items() if not _is_internal(name)]
-            if len(filtered) != len(params):
-                try:
-                    command.params = type(params)(filtered)
-                except Exception:
-                    command.params = dict(filtered)
-                cleaned += 1
-
-        usage = getattr(command, "usage", None)
-        if usage:
-            safe_usage = sanitize_usage_text(str(usage))
-            if safe_usage != str(usage):
-                command.usage = safe_usage
-                cleaned += 1
-
-    if cleaned:
-        logger.warning("%s signature(s) de commande nettoyée(s) : paramètres internes retirés.", cleaned)
-
-
 def visible_usage(command: commands.Command, prefix: str = "+") -> str:
-    """Construit une syntaxe utilisateur sans aucun paramètre interne discord.py."""
+    """Construit une syntaxe utilisateur sans toucher à ``command.params``."""
     parts = [f"{prefix}{command.qualified_name}"]
     for name, parameter in getattr(command, "clean_params", {}).items():
         if _is_internal(name):
@@ -84,7 +54,7 @@ def visible_usage(command: commands.Command, prefix: str = "+") -> str:
 
 
 def _repair_help_categories() -> None:
-    """Synchronise CATEGORIES et CATEGORY_BY_KEY, notamment après l'ajout dynamique de V2."""
+    """Synchronise CATEGORIES et CATEGORY_BY_KEY, notamment pour SentriX V2."""
     try:
         from . import help_complete
     except Exception:
@@ -116,9 +86,7 @@ def _repair_help_categories() -> None:
 
     try:
         from . import language_runtime
-        language_runtime.CATEGORY_I18N.setdefault(
-            "v2", ("SentriX V2", "SentriX V2")
-        )
+        language_runtime.CATEGORY_I18N.setdefault("v2", ("SentriX V2", "SentriX V2"))
     except Exception:
         pass
 
@@ -147,7 +115,7 @@ def _patch_main_usage() -> None:
 
 
 def _patch_help_renderers() -> None:
-    """Nettoie les anciennes couches qui pourraient encore réinjecter <ctx>/[ctx]."""
+    """Nettoie les anciennes couches qui pourraient encore afficher <ctx>/[ctx]."""
     try:
         from . import utility
     except Exception:
@@ -189,9 +157,24 @@ def _patch_help_renderers() -> None:
     except Exception:
         pass
 
+    # La V2.3 avait importé usage_line directement. On nettoie donc son global local
+    # plutôt que de modifier les paramètres réels de la commande.
+    try:
+        from . import sentrix_accessibility
+        current_usage_line = sentrix_accessibility.usage_line
+        if not getattr(current_usage_line, "_sentrix_no_internal_params", False):
+            def accessibility_usage_line(prefix: str, command_name: str, signature=None):
+                return current_usage_line(prefix, command_name, sanitize_usage_text(signature))
+
+            accessibility_usage_line._sentrix_no_internal_params = True
+            accessibility_usage_line._sentrix_original = current_usage_line
+            sentrix_accessibility.usage_line = accessibility_usage_line
+    except Exception:
+        pass
+
 
 def _patch_raw_technical_errors() -> None:
-    """Les traces Python restent dans les logs, jamais dans Discord, même pour le créateur."""
+    """Les traces Python restent dans les logs, jamais dans Discord."""
     current = embeds.error
     if getattr(current, "_sentrix_hide_raw_technical_error", False):
         return
@@ -210,12 +193,77 @@ def _patch_raw_technical_errors() -> None:
     embeds.error = safe_error
 
 
+def _cooldown_text(seconds: float) -> str:
+    total = max(1, int(math.ceil(float(seconds))))
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days} j")
+    if hours:
+        parts.append(f"{hours} h")
+    if minutes:
+        parts.append(f"{minutes} min")
+    if secs or not parts:
+        parts.append(f"{secs} s")
+    return " ".join(parts[:3])
+
+
+def _cooldown_retry_after(error) -> float | None:
+    candidates = [error, getattr(error, "original", None)]
+    for candidate in candidates:
+        if isinstance(candidate, (commands.CommandOnCooldown, discord.app_commands.CommandOnCooldown)):
+            try:
+                return float(candidate.retry_after)
+            except (TypeError, ValueError):
+                return 1.0
+    return None
+
+
+async def _send_slash_cooldown(interaction: discord.Interaction, retry_after: float) -> None:
+    embed = embeds.warning(
+        f"Cette commande est en cooldown. Réessaie dans **{_cooldown_text(retry_after)}**.",
+        title="Cooldown actif",
+    )
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+    except (discord.HTTPException, discord.InteractionResponded):
+        logger.debug("Impossible d'envoyer le cooldown slash.", exc_info=True)
+
+
+def _patch_slash_cooldown_errors(bot: commands.Bot) -> None:
+    """Couvre les cooldowns app_commands ET ceux des commandes hybrides.
+
+    Une commande hybride exécutée avec / peut remonter ``commands.CommandOnCooldown``
+    dans ``error.original``. Le handler historique ne vérifiait que la variante
+    ``app_commands.CommandOnCooldown`` et pouvait donc afficher une erreur technique.
+    """
+    current = bot.tree.on_error
+    if getattr(current, "_sentrix_cooldown_ux", False):
+        return
+
+    async def slash_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+        retry_after = _cooldown_retry_after(error)
+        if retry_after is not None:
+            return await _send_slash_cooldown(interaction, retry_after)
+        return await current(interaction, error)
+
+    slash_error._sentrix_cooldown_ux = True
+    slash_error._sentrix_original = current
+    bot.tree.on_error = slash_error
+
+
 def apply(bot: commands.Bot) -> None:
-    _sanitize_registered_commands(bot)
+    # Important : ne jamais modifier command.params / command.callback ici.
     _repair_help_categories()
     _patch_main_usage()
     _patch_help_renderers()
     _patch_raw_technical_errors()
+    _patch_slash_cooldown_errors(bot)
     bot._sentrix_user_facing_hygiene = True
 
 
@@ -227,10 +275,11 @@ def install(bot: commands.Bot) -> None:
     apply(bot)
 
     async def reapply_on_ready():
-        # Les finaliseurs et SentriX V2 peuvent être chargés après Stats. on_ready est la
-        # dernière barrière : on resynchronise alors les signatures et renderers finaux.
+        # Les dernières couches runtime peuvent être installées après Stats.
         apply(bot)
 
     bot.add_listener(reapply_on_ready, "on_ready")
     bot._sentrix_user_facing_hygiene_listener = True
-    logger.info("Hygiène utilisateur active : ctx supprimé des signatures, erreurs techniques privées, aide V2 sécurisée.")
+    logger.info(
+        "Hygiène utilisateur active : signatures intactes, ctx masqué à l'affichage, cooldowns slash explicites."
+    )
