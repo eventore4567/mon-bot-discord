@@ -33,6 +33,10 @@ CRITICAL_CONTRACTS = {
 }
 
 
+def _annotation_is_int(value) -> bool:
+    return value is int or str(value).strip() in {"int", "<class 'int'>"}
+
+
 def _static_checks(errors: list[str]) -> None:
     hygiene_path = ROOT / "cogs" / "user_facing_hygiene.py"
     integrity_path = ROOT / "cogs" / "integrity_hardening.py"
@@ -105,7 +109,7 @@ def _static_checks(errors: list[str]) -> None:
             errors.append("cache négatif de performance absent")
         if "if result:" not in text or "return True" not in text:
             errors.append("le cache propriétaire doit conserver les résultats positifs hors cache")
-        if "new_commands\": 0" not in text:
+        if '"new_commands": 0' not in text:
             errors.append("runtime_quality_v25 doit déclarer 0 nouvelle commande")
 
 
@@ -127,8 +131,6 @@ async def _runtime_checks(errors: list[str]) -> None:
             except Exception as exc:
                 errors.append(f"chargement {extension}: {type(exc).__name__}: {exc}")
 
-        # Rejouer les finaliseurs de surface comme en production, puis appliquer l'UX V2.5
-        # une dernière fois afin de contrôler le registre final, pas un état intermédiaire.
         try:
             bot._prune_redundant_commands()
             command_catalog_cleanup.apply_surface(bot)
@@ -176,12 +178,11 @@ async def _runtime_checks(errors: list[str]) -> None:
             parameter = gamble.clean_params.get("montant")
             if parameter is None:
                 errors.append("+gamble n'a plus de paramètre montant")
-            elif parameter.annotation is not int:
+            elif not _annotation_is_int(parameter.annotation):
                 errors.append(f"+gamble montant doit rester int, obtenu {parameter.annotation!r}")
             if "ctx" in user_facing_hygiene.visible_usage(gamble, "+").casefold():
                 errors.append("+gamble affiche encore ctx dans sa syntaxe")
 
-        # Les commandes slash essentielles doivent exister sous leur forme finale.
         roots = {str(command.name).casefold() for command in bot.tree.get_commands()}
         if len(roots) > slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET:
             errors.append(f"budget slash dépassé: {len(roots)}/100")
@@ -189,7 +190,6 @@ async def _runtime_checks(errors: list[str]) -> None:
             if name not in roots:
                 errors.append(f"commande slash critique absente: /{name}")
 
-        # Régressions pures : montants, durées et rendu cooldown.
         amount_cases = {
             "10": 10,
             "1 500": 1500,
@@ -206,7 +206,6 @@ async def _runtime_checks(errors: list[str]) -> None:
         if user_facing_hygiene._cooldown_text(65) != "1 min 5 s":
             errors.append("format cooldown 65s incorrect")
 
-        # La couche performance doit être installée et ne cache que les négatifs.
         creator_lookup = getattr(bot.db, "is_bot_creator", None)
         if not getattr(creator_lookup, "_sentrix_v25_negative_cache", False):
             errors.append("cache négatif is_bot_creator V2.5 non installé")
