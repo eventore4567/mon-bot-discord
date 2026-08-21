@@ -1,0 +1,36 @@
+name: SentriX Integrity Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile all Python
+        run: python -m compileall -q .
+
+      - name: Repository audit
+        run: python tools/repo_audit.py
+
+      - name: Command runtime audit
+        run: python tools/command_runtime_audit.py
+
+      - name: Integrity gate
+        run: python tools/integrity_gate.py
