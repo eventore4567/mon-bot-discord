@@ -8,7 +8,9 @@ catalogue ni les signatures Discord :
 - état de santé runtime des protections critiques économie/tickets/jeux/IA ;
 - inventaire compact des contrats de commandes contrôlés au démarrage.
 
-Aucune commande publique n'est déclarée ici.
+La couche V3 d'expérience membre est installée depuis ici afin d'éviter un nouveau point de
+chargement dispersé dans main.py. Elle réutilise les commandes existantes et n'altère pas
+leurs contrats de parsing.
 """
 from __future__ import annotations
 
@@ -63,8 +65,6 @@ def _install_negative_creator_cache(bot: commands.Bot) -> None:
             stats["entries"] = len(negative_until)
             return False
 
-        # L'appel réel reste la source d'autorité. Un résultat positif n'est JAMAIS mis
-        # en cache : une révocation de privilège ne doit pas rester valide à cause du cache.
         result = bool(await current(uid))
         stats["misses"] += 1
         if result:
@@ -155,8 +155,6 @@ def _critical_protection_snapshot(bot: commands.Bot) -> dict[str, bool]:
 
 
 async def _refresh_state_after_ready(bot: commands.Bot) -> None:
-    # Les finaliseurs V2.4 sont planifiés pendant le chargement des cogs. Leur laisser un
-    # court tour de boucle évite un faux négatif au tout premier on_ready.
     await asyncio.sleep(0.25)
     contracts = _command_contract_snapshot(bot)
     protections = _critical_protection_snapshot(bot)
@@ -187,11 +185,20 @@ async def _refresh_state_after_ready(bot: commands.Bot) -> None:
         )
 
 
+def _install_member_experience_v3(bot: commands.Bot) -> None:
+    try:
+        from . import community_v3
+        community_v3.install(bot)
+    except Exception:
+        logger.exception("Impossible d'installer l'expérience membre SentriX V3.")
+
+
 def install(bot: commands.Bot) -> None:
-    """Installation idempotente, sans commande publique et sans mutation de signature."""
+    """Installation idempotente des protections et de l'expérience produit V3."""
     _install_negative_creator_cache(bot)
 
     if getattr(bot, "_sentrix_quality_v25_installed", False):
+        _install_member_experience_v3(bot)
         return
 
     async def refresh_on_ready():
@@ -206,4 +213,5 @@ def install(bot: commands.Bot) -> None:
         "protections": {},
         "creator_cache": getattr(bot, "_sentrix_v25_creator_cache_stats", {}),
     }
-    logger.info("SentriX V2.5 qualité runtime installée : cache DB négatif sûr + contrats; 0 nouvelle commande.")
+    _install_member_experience_v3(bot)
+    logger.info("SentriX V2.5 qualité runtime + expérience membre V3 installées.")
