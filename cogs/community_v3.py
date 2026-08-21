@@ -144,19 +144,14 @@ def season_label(season_id: str | None = None) -> str:
 
 
 def mission_selection(guild_id: int, user_id: int, day: str | None = None):
-    """Retourne 3 missions stables pour le membre pendant toute la journée UTC."""
+    """Retourne 3 missions stables et toujours distinctes pour toute la journée UTC."""
     day = day or current_day()
-    digest = hashlib.sha256(f"{day}:{int(guild_id)}:{int(user_id)}".encode()).digest()
-    start = int.from_bytes(digest[:2], "big") % len(MISSION_POOL)
-    step = 1 + (digest[2] % (len(MISSION_POOL) - 1))
-    selected = []
-    index = start
-    while len(selected) < 3:
-        mission = MISSION_POOL[index % len(MISSION_POOL)]
-        if mission not in selected:
-            selected.append(mission)
-        index += step
-    return tuple(selected)
+    seed = f"{day}:{int(guild_id)}:{int(user_id)}"
+    ranked = sorted(
+        MISSION_POOL,
+        key=lambda mission: hashlib.sha256(f"{seed}:{mission[0]}".encode()).digest(),
+    )
+    return tuple(ranked[:3])
 
 
 def _season_tier(xp: int) -> str:
@@ -238,7 +233,7 @@ async def record_action(bot: commands.Bot, guild_id: int, user_id: int, action: 
     amount = max(1, min(int(amount), 100))
     key = (int(guild_id), int(user_id))
     async with _PROGRESS_LOCKS[key]:
-        row = await _daily_row(bot, guild_id, user_id)
+        await _daily_row(bot, guild_id, user_id)
         await bot.db.execute(
             f"UPDATE member_daily_progress SET {action}=MIN({action}+?, 100000) WHERE guild_id=? AND user_id=? AND day=?",
             (amount, guild_id, user_id, current_day()),
@@ -701,10 +696,13 @@ async def _on_command_completion(bot: commands.Bot, ctx: commands.Context) -> No
 
 
 async def _on_guild_join(bot: commands.Bot, guild: discord.Guild) -> None:
+    bot_member = guild.me
+    if bot_member is None:
+        return
     channel = guild.system_channel
-    if channel is None or not channel.permissions_for(guild.me).send_messages:
+    if channel is None or not channel.permissions_for(bot_member).send_messages:
         channel = next(
-            (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages),
+            (c for c in guild.text_channels if c.permissions_for(bot_member).send_messages),
             None,
         )
     if channel is None:
@@ -749,8 +747,6 @@ def install(bot: commands.Bot) -> None:
 
     async def ready_listener():
         await _ensure_schema(bot)
-        # Certains cogs peuvent être finalisés après l'installation initiale ; ces appels
-        # sont idempotents et permettent de les accrocher au premier ready si nécessaire.
         _install_rich_profile(bot)
         _install_ticket_intelligence(bot)
         _install_ai_context(bot)
