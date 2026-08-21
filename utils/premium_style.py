@@ -1,11 +1,9 @@
-"""Identité visuelle globale premium de SentriX.
+"""Identité visuelle et éditoriale globale de SentriX.
 
-Ce module ne contient aucune logique métier. Il harmonise uniquement les messages,
-embeds et composants Discord afin que tous les cogs partagent exactement la même
-présentation : titres de catégorie, informations essentielles, couleurs d'état,
-champs lisibles et boutons sobres. Le rendu reste volontairement sans décoration emoji.
+Ce module ne contient aucune logique métier. Il harmonise les embeds, messages et
+composants Discord afin que toutes les commandes partagent la même présentation et la
+même microcopy : concise, claire, professionnelle et accessible.
 """
-
 from __future__ import annotations
 
 import re
@@ -13,6 +11,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import discord
+
+from utils import microcopy
 
 
 COLORS: dict[str, int] = {
@@ -69,18 +69,10 @@ LEADING_DECORATION = re.compile(
 SPACE_RE = re.compile(r"[ \t]{2,}")
 SENTRIX_TITLE_RE = re.compile(r"^SENTRIX\s*/\s*", re.IGNORECASE)
 
-
 _GENERIC_TITLES = {
-    "action terminée",
-    "action terminee",
-    "action impossible",
-    "vérification nécessaire",
-    "verification necessaire",
-    "information",
-    "succès",
-    "succes",
-    "erreur",
-    "avertissement",
+    "action terminée", "action terminee", "action impossible",
+    "vérification nécessaire", "verification necessaire", "à vérifier",
+    "information", "succès", "succes", "erreur", "avertissement",
 }
 
 
@@ -97,6 +89,7 @@ def clean_title(value: Any, fallback: str = "Information") -> str:
         return fallback
     cleaned = LEADING_DECORATION.sub("", text).strip(" —–-|•·")
     cleaned = SPACE_RE.sub(" ", cleaned).strip()
+    cleaned = microcopy.polish_text(cleaned)
     return cleaned or fallback
 
 
@@ -183,21 +176,18 @@ def infer_category(*, command: Any = None, embed: discord.Embed | None = None, h
 
 
 def _footer_text(*, guild: discord.Guild | None = None, requester: Any = None) -> str:
+    """Footer volontairement court : marque + serveur, sans répéter le pseudo utilisateur."""
     parts = ["SentriX"]
     if guild is not None:
         parts.append(clip(getattr(guild, "name", "Serveur"), 60))
-    if requester is not None:
-        display = getattr(requester, "display_name", None) or getattr(requester, "name", None)
-        if display:
-            parts.append(clip(display, 40))
-    return " / ".join(parts)
+    return " • ".join(parts)
 
 
 def _canonical_title(category: str, *, log_type: str | None = None) -> str:
     label = CATEGORY_NAMES.get(category, "Information")
     if log_type:
-        return clip(f"SENTRIX / JOURNAL {label}".upper(), 256)
-    return clip(f"SENTRIX / {label}".upper(), 256)
+        return clip(f"SentriX / Journal {label}", 256)
+    return clip(f"SentriX / {label}", 256)
 
 
 def _detail_title(original_title: Any, category: str) -> str | None:
@@ -215,16 +205,16 @@ def _detail_title(original_title: Any, category: str) -> str | None:
 
 
 def _merge_detail(description: Any, detail: str | None) -> str | None:
-    body = clip(description, 4096) if description else ""
+    body = microcopy.polish_text(clip(description, 4096)) if description else ""
     if not detail:
         return body or None
+    detail = microcopy.polish_text(detail)
     marker = f"**{detail}**"
     if body.startswith(marker):
         return body
     if not body:
         return marker
-    merged = f"{marker}\n{body}"
-    return clip(merged, 4096)
+    return clip(f"{marker}\n{body}", 4096)
 
 
 def style_embed(
@@ -248,9 +238,8 @@ def style_embed(
     original_title = getattr(embed, "title", None)
     cleaned_original = clean_title(original_title) if original_title else ""
     if cleaned_original and SENTRIX_TITLE_RE.match(cleaned_original):
-        # Les centres spécialisés (+help, +security, +setup...) ont déjà un titre métier
-        # précis. On le conserve au lieu de le remplacer par une catégorie générique.
-        embed.title = clip(cleaned_original.upper(), 256)
+        # Les centres spécialisés gardent leur titre métier, sans mise en majuscules forcée.
+        embed.title = clip(cleaned_original, 256)
         detail = None
     else:
         detail = _detail_title(original_title, category)
@@ -265,8 +254,6 @@ def style_embed(
     elif not current_colour or current_colour in SYSTEM_COLOURS:
         embed.colour = discord.Colour(category_colour)
 
-    # Le titre suffit pour identifier SentriX et la catégorie. On n'ajoute plus un second
-    # bandeau auteur automatiquement : cela rend les réponses nettement plus légères.
     if embed.timestamp is None:
         embed.timestamp = datetime.now(timezone.utc)
 
@@ -276,11 +263,11 @@ def style_embed(
     base_footer = _footer_text(guild=guild, requester=requester)
     if footer_text and "Page " in str(footer_text):
         page_text = clean_title(footer_text, fallback="")
-        final_footer = f"{page_text} / {base_footer}" if page_text else base_footer
+        final_footer = f"{page_text} • {base_footer}" if page_text else base_footer
     elif not footer_text or str(footer_text).startswith("SentriX"):
         final_footer = base_footer
     else:
-        final_footer = clip(str(footer_text), 2048)
+        final_footer = microcopy.polish_text(clip(str(footer_text), 2048))
     if footer_icon:
         embed.set_footer(text=clip(final_footer, 2048), icon_url=footer_icon)
     else:
@@ -293,8 +280,9 @@ def style_embed(
             embed.add_field(name=field.name, value=field.value, inline=field.inline)
 
     for index, field in enumerate(list(embed.fields)):
-        field_name = clean_title(field.name, "INFORMATION").upper()
-        field_value = clip(field.value, 1024) or "—"
+        # Les champs en Title Case sont plus lisibles que des libellés entièrement en capitales.
+        field_name = clean_title(field.name, "Information")
+        field_value = microcopy.polish_text(clip(field.value, 1024)) or "—"
         embed.set_field_at(
             index,
             name=clip(field_name, 256),
@@ -329,7 +317,7 @@ def content_embed(
     requester: Any = None,
     bot_user: Any = None,
 ) -> discord.Embed:
-    text = clip(content, 4096)
+    text = microcopy.polish_text(clip(content, 4096))
     kind = infer_kind(content=text)
     category = infer_category(command=command)
     embed = discord.Embed(description=text)
@@ -349,7 +337,11 @@ def style_view(view: discord.ui.View | None) -> discord.ui.View | None:
     if view is None:
         return None
     for item in getattr(view, "children", []):
-        if not isinstance(item, discord.ui.Button) or item.style is discord.ButtonStyle.link:
+        if not isinstance(item, discord.ui.Button):
+            continue
+        if item.label:
+            item.label = microcopy.polish_button_label(item.label)
+        if item.style is discord.ButtonStyle.link:
             continue
         label = str(item.label or "").casefold()
         custom_id = str(item.custom_id or "").casefold()
@@ -363,7 +355,6 @@ def style_view(view: discord.ui.View | None) -> discord.ui.View | None:
             "enregistrer", "save", "confirmer", "confirm", "valider", "verify",
             "créer", "create", "envoyer", "send", "activer", "enable",
         )):
-            # Une seule couleur d'action principale, plutôt que des rangées de boutons verts.
             item.style = discord.ButtonStyle.primary
         else:
             item.style = discord.ButtonStyle.secondary
