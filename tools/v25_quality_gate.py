@@ -183,10 +183,13 @@ async def _runtime_checks(errors: list[str]) -> None:
             if "ctx" in user_facing_hygiene.visible_usage(gamble, "+").casefold():
                 errors.append("+gamble affiche encore ctx dans sa syntaxe")
 
+        # Le bot conserve volontairement beaucoup plus de commandes + que de racines slash :
+        # Discord limite les commandes chat-input globales à 100. On vérifie donc uniquement
+        # la surface slash canonique, pas toutes les commandes historiques préfixées.
         roots = {str(command.name).casefold() for command in bot.tree.get_commands()}
         if len(roots) > slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET:
             errors.append(f"budget slash dépassé: {len(roots)}/100")
-        for name in ("help", "balance", "gamble", "rps", "ban", "mute"):
+        for name in ("help", "balance", "rps", "ban", "mute"):
             if name not in roots:
                 errors.append(f"commande slash critique absente: /{name}")
 
