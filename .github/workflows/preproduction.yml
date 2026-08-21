@@ -14,7 +14,7 @@ concurrency:
 jobs:
   preproduction:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,6 +35,12 @@ jobs:
 
       - name: Unit tests
         run: python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Production ops tests
+        run: python -m unittest tests.test_production_ops -v
+
+      - name: Economy concurrency smoke test
+        run: python tools/load_test_economy.py --users 60 --operations 800 --concurrency 20
 
       - name: Command contracts
         run: python tools/command_runtime_audit.py
