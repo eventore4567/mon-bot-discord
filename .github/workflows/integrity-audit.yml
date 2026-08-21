@@ -38,6 +38,9 @@ jobs:
       - name: Command runtime audit
         run: python tools/command_runtime_audit.py
 
+      - name: Command error ownership gate
+        run: python tools/command_error_ownership_gate.py
+
       - name: Integrity gate
         run: python tools/integrity_gate.py
 
