@@ -2,10 +2,9 @@
 
 Cette couche consolide des améliorations transversales qui ne doivent jamais modifier le
 catalogue ni les signatures Discord :
-- cache très court des réponses NEGATIVES à is_bot_creator() pour éviter deux lectures DB
+- cache très court des réponses NEGATIVES à is_bot_creator() pour éviter des lectures DB
   répétées sur pratiquement chaque commande d'un membre normal ;
-- aucun résultat positif n'est mis en cache, afin qu'un retrait de privilège propriétaire
-  soit pris en compte immédiatement ;
+- aucun résultat positif n'est mis en cache : une révocation de privilège reste immédiate ;
 - état de santé runtime des protections critiques économie/tickets/jeux/IA ;
 - inventaire compact des contrats de commandes contrôlés au démarrage.
 
@@ -26,8 +25,6 @@ _NEGATIVE_CREATOR_TTL = 15.0
 _MAX_NEGATIVE_CACHE = 5000
 _INTERNAL_PARAMS = {"ctx", "context", "interaction", "self", "cog", "_ctx"}
 
-# Les commandes ci-dessous ont déjà causé, ou peuvent causer, des régressions très visibles.
-# Le contrôle est volontairement petit et strict : il ne modifie jamais la commande.
 _CRITICAL_CONTRACTS: dict[str, tuple[str, ...]] = {
     "gamble": ("montant",),
     "pay": ("membre", "montant"),
@@ -40,6 +37,10 @@ _CRITICAL_CONTRACTS: dict[str, tuple[str, ...]] = {
     "ban": ("membre", "raison"),
     "kick": ("membre", "raison"),
 }
+
+
+def _annotation_is_int(value: Any) -> bool:
+    return value is int or str(value).strip() in {"int", "<class 'int'>"}
 
 
 def _install_negative_creator_cache(bot: commands.Bot) -> None:
@@ -59,6 +60,7 @@ def _install_negative_creator_cache(bot: commands.Bot) -> None:
         expires = negative_until.get(uid, 0.0)
         if expires > now_value:
             stats["hits"] += 1
+            stats["entries"] = len(negative_until)
             return False
 
         # L'appel réel reste la source d'autorité. Un résultat positif n'est JAMAIS mis
@@ -67,6 +69,7 @@ def _install_negative_creator_cache(bot: commands.Bot) -> None:
         stats["misses"] += 1
         if result:
             negative_until.pop(uid, None)
+            stats["entries"] = len(negative_until)
             return True
 
         negative_until[uid] = now_value + _NEGATIVE_CREATOR_TTL
@@ -74,8 +77,6 @@ def _install_negative_creator_cache(bot: commands.Bot) -> None:
             stale = [key for key, end in negative_until.items() if end <= now_value]
             for key in stale:
                 negative_until.pop(key, None)
-            # Si le cache reste énorme malgré le prune, retirer les plus anciens éléments
-            # suffit : ce cache n'est qu'une optimisation, jamais une source d'autorité.
             if len(negative_until) > _MAX_NEGATIVE_CACHE:
                 overflow = len(negative_until) - _MAX_NEGATIVE_CACHE
                 for key in list(negative_until)[:overflow]:
@@ -97,22 +98,33 @@ def _command_contract_snapshot(bot: commands.Bot) -> dict[str, Any]:
         checked += 1
         try:
             names = tuple(str(name) for name in command.clean_params)
+            signature = str(command.signature or "")
         except Exception as exc:
-            errors.append(f"{command.qualified_name}: paramètres illisibles ({type(exc).__name__})")
+            errors.append(f"{command.qualified_name}: signature illisible ({type(exc).__name__})")
             continue
+
         leaked = sorted({name.casefold() for name in names} & _INTERNAL_PARAMS)
         if leaked:
             errors.append(f"{command.qualified_name}: paramètre interne visible ({', '.join(leaked)})")
+        lowered = signature.casefold()
+        for token in _INTERNAL_PARAMS:
+            if f"<{token}>" in lowered or f"[{token}]" in lowered:
+                errors.append(f"{command.qualified_name}: signature utilisateur polluée ({signature})")
 
     for name, expected in _CRITICAL_CONTRACTS.items():
         command = bot.get_command(name)
         if command is None:
-            # Certaines commandes peuvent être volontairement fusionnées/masquées selon la
-            # surface active. Ce n'est critique que si le nom est encore attendu directement.
+            errors.append(f"{name}: commande critique absente")
             continue
         actual = tuple(str(item) for item in command.clean_params)
         if actual != expected:
             errors.append(f"{name}: contrat {actual!r}, attendu {expected!r}")
+
+    gamble = bot.get_command("gamble")
+    if gamble is not None:
+        parameter = gamble.clean_params.get("montant")
+        if parameter is None or not _annotation_is_int(getattr(parameter, "annotation", None)):
+            errors.append("gamble: le paramètre montant doit utiliser le convertisseur int")
 
     return {
         "ready": not errors,
@@ -123,12 +135,18 @@ def _command_contract_snapshot(bot: commands.Bot) -> dict[str, Any]:
 
 
 def _critical_protection_snapshot(bot: commands.Bot) -> dict[str, bool]:
+    try:
+        from . import command_response_guard
+        response_guard = bool(command_response_guard._INSTALLED)
+    except Exception:
+        response_guard = False
+
     return {
         "economy_atomic": bool(getattr(bot, "_sentrix_integrity_economy", False)),
         "ticket_guards": bool(getattr(bot, "_sentrix_integrity_tickets", False)),
         "game_locks": bool(getattr(bot, "_sentrix_integrity_game_locks", False)),
         "permission_guard": bool(getattr(bot, "_sentrix_permission_guard_installed", False)),
-        "response_guard": bool(getattr(bot, "_sentrix_response_guard_installed", False)),
+        "response_guard": response_guard,
         "intelligent_router": bool(
             getattr(bot, "_sentrix_intelligent_router_ready", False)
             or getattr(bot, "_sentrix_v24_primary_ai_listener_guard_fn", None)
@@ -144,8 +162,12 @@ async def _refresh_state_after_ready(bot: commands.Bot) -> None:
     protections = _critical_protection_snapshot(bot)
     cache_stats = getattr(bot, "_sentrix_v25_creator_cache_stats", {})
 
+    core_protections_ok = all(
+        protections.get(key, False)
+        for key in ("economy_atomic", "ticket_guards", "game_locks", "permission_guard", "response_guard")
+    )
     bot._sentrix_quality_v25_state = {
-        "ready": bool(contracts["ready"]),
+        "ready": bool(contracts["ready"] and core_protections_ok),
         "new_commands": 0,
         "contracts": contracts,
         "protections": protections,
@@ -154,7 +176,10 @@ async def _refresh_state_after_ready(bot: commands.Bot) -> None:
 
     for error in contracts["errors"]:
         logger.error("V2.5 contrat commande: %s", error)
-    if contracts["ready"]:
+    missing = [name for name, enabled in protections.items() if not enabled and name != "intelligent_router"]
+    if missing:
+        logger.error("V2.5 protections runtime manquantes: %s", ", ".join(missing))
+    if contracts["ready"] and core_protections_ok:
         logger.info(
             "V2.5 qualité runtime OK : %s commandes et %s contrats critiques contrôlés.",
             contracts["commands_checked"],
