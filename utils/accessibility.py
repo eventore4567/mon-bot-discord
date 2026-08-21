@@ -43,6 +43,11 @@ PARAMETER_LABELS = {
     "message": "message",
 }
 
+_INTERNAL_ARGUMENT_RE = re.compile(
+    r"(?:^|\s)(?:<|\[|\()(?:ctx|context|interaction|self|cog|_ctx)(?:>|\]|\))(?=\s|$)",
+    re.IGNORECASE,
+)
+
 
 def normalize_text(value: str | None) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
@@ -101,10 +106,18 @@ def human_parameter(name: str | None) -> str:
 
 
 def clean_signature(signature: str | None) -> str:
-    """Rend la signature Discord.py un peu plus lisible sans en changer le sens."""
+    """Rend une signature discord.py lisible et retire tout argument interne.
+
+    ``ctx``/``context``/``interaction`` sont des objets fournis automatiquement par le
+    framework. Un membre ne doit jamais les voir ni devoir les saisir.
+    """
     text = str(signature or "").strip()
+    previous = None
+    while previous != text:
+        previous = text
+        text = _INTERNAL_ARGUMENT_RE.sub(" ", text)
     text = re.sub(r"\s+", " ", text)
-    return text
+    return text.strip()
 
 
 def usage_line(prefix: str, command_name: str, signature: str | None = None) -> str:
