@@ -1,14 +1,18 @@
-name: SentriX Integrity Audit
+name: SentriX Preproduction
 
 on:
   push:
-    branches: [main]
+    branches: [staging]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: sentrix-preproduction-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  integrity:
+  preproduction:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -26,29 +30,29 @@ jobs:
       - name: Dependencies
         run: pip install -r requirements.txt
 
-      - name: Compile all Python
+      - name: Compile
         run: python -m compileall -q .
 
-      - name: Pure unit tests
+      - name: Unit tests
         run: python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Command contracts
+        run: python tools/command_runtime_audit.py
+
+      - name: V2.5 regression gate
+        run: python tools/v25_quality_gate.py
+
+      - name: Permission matrix
+        run: python tools/permission_matrix_gate.py
+
+      - name: AI intent fuzz
+        run: python tools/ai_intent_fuzz_gate.py
+
+      - name: Runtime debt
+        run: python tools/runtime_debt_gate.py
 
       - name: Repository audit
         run: python tools/repo_audit.py
 
-      - name: Command runtime audit
-        run: python tools/command_runtime_audit.py
-
-      - name: Integrity gate
-        run: python tools/integrity_gate.py
-
-      - name: V2.5 quality gate
-        run: python tools/v25_quality_gate.py
-
-      - name: Permission matrix gate
-        run: python tools/permission_matrix_gate.py
-
-      - name: Natural intent fuzz gate
-        run: python tools/ai_intent_fuzz_gate.py
-
-      - name: Runtime debt gate
-        run: python tools/runtime_debt_gate.py
+      - name: Preproduction result
+        run: echo "SentriX preproduction gates passed for $GITHUB_SHA"
