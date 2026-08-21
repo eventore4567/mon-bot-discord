@@ -8,9 +8,9 @@ catalogue ni les signatures Discord :
 - état de santé runtime des protections critiques économie/tickets/jeux/IA ;
 - inventaire compact des contrats de commandes contrôlés au démarrage.
 
-Les couches V3/V3.1 d'expérience membre sont installées depuis ici afin d'éviter un nouveau
-point de chargement dispersé dans main.py. Elles réutilisent les commandes existantes et
-n'altèrent pas leurs contrats de parsing.
+Les couches V3/V3.1/V3.2 d'expérience membre sont installées depuis ici afin d'éviter un
+nouveau point de chargement dispersé dans main.py. Elles réutilisent les commandes existantes
+et n'altèrent pas leurs contrats de parsing.
 """
 from __future__ import annotations
 
@@ -191,12 +191,14 @@ def _install_member_experience_v3(bot: commands.Bot) -> None:
         community_v3.install(bot)
         from . import community_v31
         community_v31.install(bot)
+        from . import community_v32
+        community_v32.install(bot)
     except Exception:
-        logger.exception("Impossible d'installer l'expérience membre SentriX V3/V3.1.")
+        logger.exception("Impossible d'installer l'expérience membre SentriX V3/V3.1/V3.2.")
 
 
 def install(bot: commands.Bot) -> None:
-    """Installation idempotente des protections et de l'expérience produit V3/V3.1."""
+    """Installation idempotente des protections et de l'expérience produit V3/V3.1/V3.2."""
     _install_negative_creator_cache(bot)
 
     if getattr(bot, "_sentrix_quality_v25_installed", False):
@@ -216,4 +218,4 @@ def install(bot: commands.Bot) -> None:
         "creator_cache": getattr(bot, "_sentrix_v25_creator_cache_stats", {}),
     }
     _install_member_experience_v3(bot)
-    logger.info("SentriX V2.5 qualité runtime + expérience membre V3.1 installées.")
+    logger.info("SentriX V2.5 qualité runtime + expérience membre V3.2 installées.")
