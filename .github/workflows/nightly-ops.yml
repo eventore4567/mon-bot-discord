@@ -1,0 +1,56 @@
+name: SentriX Nightly Reliability
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sentrix-nightly-reliability
+  cancel-in-progress: true
+
+jobs:
+  reliability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile
+        run: python -m compileall -q .
+
+      - name: Production ops tests
+        run: python -m unittest tests.test_production_ops -v
+
+      - name: Full unit suite
+        run: python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Concurrent economy load test
+        run: python tools/load_test_economy.py --users 100 --operations 2000 --concurrency 32
+
+      - name: Command runtime audit
+        run: python tools/command_runtime_audit.py
+
+      - name: Permission matrix
+        run: python tools/permission_matrix_gate.py
+
+      - name: AI intent fuzz
+        run: python tools/ai_intent_fuzz_gate.py
+
+      - name: Runtime debt gate
+        run: python tools/runtime_debt_gate.py
+
+      - name: Repository audit
+        run: python tools/repo_audit.py
