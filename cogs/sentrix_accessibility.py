@@ -1,7 +1,7 @@
 """SentriX V2.3 — accessibilité et simplicité, sans nouvelle commande.
 
 Objectifs :
-- une faute de commande n'est plus ignorée : SentriX propose les commandes proches ;
+- une faute de commande reçoit une seule suggestion claire via le garde de réponses ;
 - les erreurs d'arguments expliquent quoi corriger avec la syntaxe réelle ;
 - la navigation naturelle tolère les petites fautes ;
 - les paginations utilisent des libellés textuels, pas uniquement des flèches ;
@@ -112,33 +112,17 @@ class SentriXAccessibility(commands.Cog):
         if getattr(self.bot, "_sentrix_accessible_error_handler", False):
             return
         original = self.bot.on_command_error
-        bot = self.bot
 
         async def accessible_error_handler(_bot, ctx: commands.Context, error: commands.CommandError):
             raw_error = error
             error = getattr(error, "original", error)
 
-            # Une commande inconnue était historiquement ignorée. On suggère maintenant,
-            # mais on n'exécute JAMAIS automatiquement une correction : indispensable pour
-            # éviter qu'une faute sur une commande de modération lance une autre action.
+            # Les commandes inconnues sont volontairement laissées au garde de réponses
+            # global (command_response_guard). Il est l'unique source de suggestion pour
+            # les fautes comme +hyelp -> +help. Les traiter aussi ici produisait deux embeds
+            # pour le même message Discord.
             if isinstance(error, commands.CommandNotFound):
-                typed = _typed_root(ctx)
-                candidates = _visible_candidates(bot, ctx)
-                suggestions = closest_commands(typed, candidates, limit=3)
-                prefix = _prefix(ctx)
-                if suggestions:
-                    rendered = "\n".join(f"• `{prefix}{name}`" for name in suggestions)
-                    description = (
-                        f"Je ne trouve pas `{prefix}{typed}`.\n\n"
-                        f"Tu voulais peut-être utiliser :\n{rendered}\n\n"
-                        f"Sinon, ouvre `{prefix}help`."
-                    )
-                else:
-                    description = (
-                        f"Je ne trouve pas `{prefix}{typed}`.\n"
-                        f"Ouvre `{prefix}help` pour voir les commandes disponibles."
-                    )
-                return await _safe_send(ctx, title="Commande non reconnue", description=description)
+                return await original(ctx, raw_error)
 
             command = getattr(ctx, "command", None)
             command_name = str(getattr(command, "qualified_name", "") or getattr(command, "name", "") or "commande")
