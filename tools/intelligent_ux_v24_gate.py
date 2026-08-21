@@ -43,6 +43,15 @@ def main() -> int:
             "_install_ticket_intelligence",
             "[SentriX Auto]",
             '"new_commands": 0',
+            "_message_is_claimed",
+            "_claim_natural_message",
+            "content.startswith(prefix)",
+            "ai_cog._natural_command_line",
+            "ai_cog._invoke_natural_command",
+            "primary = originals[0]",
+            "_sentrix_v24_primary_ai_listener_guard_fn",
+            '"global_command_exclusivity": True',
+            '"reload_safe_listener_guard": True',
         ):
             if marker not in text:
                 errors.append(f"garantie V2.4 absente: {marker}")
@@ -72,7 +81,10 @@ def main() -> int:
     if errors:
         print(f"ECHEC V2.4: {len(errors)} problème(s)")
         return 1
-    print("OK V2.4: actions naturelles, confirmations, tickets et dashboard validés, 0 nouvelle commande")
+    print(
+        "OK V2.4: commandes exclusives, IA sans double réponse, confirmations, tickets, "
+        "dashboard et reload validés, 0 nouvelle commande"
+    )
     return 0
 
 
