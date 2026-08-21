@@ -257,13 +257,23 @@ def _patch_slash_cooldown_errors(bot: commands.Bot) -> None:
     bot.tree.on_error = slash_error
 
 
+def _install_gamble_parser_repair(bot: commands.Bot) -> None:
+    """Répare uniquement le parseur texte de +gamble après les wrappers d'intégrité."""
+    try:
+        from . import gamble_parser_fix
+        gamble_parser_fix.install(bot)
+    except Exception:
+        logger.exception("Impossible d'installer le correctif ciblé du parseur +gamble.")
+
+
 def apply(bot: commands.Bot) -> None:
-    # Important : ne jamais modifier command.params / command.callback ici.
+    # Important : ne jamais modifier globalement command.params / command.callback ici.
     _repair_help_categories()
     _patch_main_usage()
     _patch_help_renderers()
     _patch_raw_technical_errors()
     _patch_slash_cooldown_errors(bot)
+    _install_gamble_parser_repair(bot)
     bot._sentrix_user_facing_hygiene = True
 
 
