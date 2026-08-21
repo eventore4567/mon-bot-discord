@@ -30,6 +30,48 @@ def _is_internal(name: str) -> bool:
     return str(name or "").casefold().strip() in _INTERNAL_PARAMS
 
 
+def sanitize_usage_text(value: str) -> str:
+    """Retire les paramètres techniques d'une syntaxe destinée à un membre."""
+    text = str(value or "")
+    previous = None
+    while previous != text:
+        previous = text
+        text = _INTERNAL_TOKEN_RE.sub("", text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def _sanitize_registered_commands(bot: commands.Bot) -> None:
+    """Nettoie la source même des signatures Discord.py.
+
+    Certaines anciennes couches runtime ont pu conserver ``ctx`` dans ``command.params``
+    ou dans ``command.usage``. Dans discord.py ces deux valeurs alimentent ensuite
+    ``command.signature`` : masquer seulement le texte de +help ne suffit donc pas.
+    On retire ici uniquement les paramètres techniques qui ne sont jamais saisis par un
+    utilisateur. Les vrais arguments (montant, membre, raison...) restent inchangés.
+    """
+    cleaned = 0
+    for command in bot.walk_commands():
+        params = getattr(command, "params", None)
+        if params is not None and hasattr(params, "items"):
+            filtered = [(name, value) for name, value in params.items() if not _is_internal(name)]
+            if len(filtered) != len(params):
+                try:
+                    command.params = type(params)(filtered)
+                except Exception:
+                    command.params = dict(filtered)
+                cleaned += 1
+
+        usage = getattr(command, "usage", None)
+        if usage:
+            safe_usage = sanitize_usage_text(str(usage))
+            if safe_usage != str(usage):
+                command.usage = safe_usage
+                cleaned += 1
+
+    if cleaned:
+        logger.warning("%s signature(s) de commande nettoyée(s) : paramètres internes retirés.", cleaned)
+
+
 def visible_usage(command: commands.Command, prefix: str = "+") -> str:
     """Construit une syntaxe utilisateur sans aucun paramètre interne discord.py."""
     parts = [f"{prefix}{command.qualified_name}"]
@@ -39,16 +81,6 @@ def visible_usage(command: commands.Command, prefix: str = "+") -> str:
         display = str(name).replace("_", " ")
         parts.append(f"<{display}>" if getattr(parameter, "required", False) else f"[{display}]")
     return " ".join(parts)
-
-
-def sanitize_usage_text(value: str) -> str:
-    """Dernier filet : retire un token interne d'une ancienne couche d'aide."""
-    text = str(value or "")
-    previous = None
-    while previous != text:
-        previous = text
-        text = _INTERNAL_TOKEN_RE.sub("", text)
-    return text
 
 
 def _repair_help_categories() -> None:
@@ -62,8 +94,6 @@ def _repair_help_categories() -> None:
         category.key: category for category in help_complete.CATEGORIES
     }
 
-    # Si une ancienne fonction de catégorisation possède une table capturée avant l'ajout
-    # de V2, un KeyError ne doit jamais pouvoir casser +help. On reconstruit puis réessaie.
     current = help_complete._category_for
     if not getattr(current, "_sentrix_category_map_safe", False):
         def safe_category_for(command):
@@ -181,6 +211,7 @@ def _patch_raw_technical_errors() -> None:
 
 
 def apply(bot: commands.Bot) -> None:
+    _sanitize_registered_commands(bot)
     _repair_help_categories()
     _patch_main_usage()
     _patch_help_renderers()
@@ -197,9 +228,9 @@ def install(bot: commands.Bot) -> None:
 
     async def reapply_on_ready():
         # Les finaliseurs et SentriX V2 peuvent être chargés après Stats. on_ready est la
-        # dernière barrière : on resynchronise alors les catégories et les renderers finaux.
+        # dernière barrière : on resynchronise alors les signatures et renderers finaux.
         apply(bot)
 
     bot.add_listener(reapply_on_ready, "on_ready")
     bot._sentrix_user_facing_hygiene_listener = True
-    logger.info("Hygiène utilisateur active : ctx masqué, erreurs techniques privées, aide V2 sécurisée.")
+    logger.info("Hygiène utilisateur active : ctx supprimé des signatures, erreurs techniques privées, aide V2 sécurisée.")
