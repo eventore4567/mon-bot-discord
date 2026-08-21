@@ -1,8 +1,8 @@
-"""Règles pures de SentriX V2.4 Intelligent UX.
+"""Règles pures de SentriX Intelligent UX.
 
 Ce module ne dépend pas de Discord. Il transforme uniquement des formulations naturelles
-très explicites en plans d'action vers des commandes EXISTANTES. Les actions sensibles
-sont marquées comme telles afin que la couche Discord exige toujours une confirmation.
+TRÈS explicites en plans d'action vers des commandes existantes. Une simple discussion
+qui contient « ban », « mute », « payer », etc. ne doit jamais devenir une action.
 """
 from __future__ import annotations
 
@@ -32,6 +32,11 @@ _DURATION_RE = re.compile(
 )
 _AMOUNT_MULTIPLIERS = {"": 1, "k": 1_000, "m": 1_000_000, "b": 1_000_000_000}
 
+# Les actions sensibles doivent commencer comme une vraie instruction. Cela évite que des
+# questions telles que « c'est quoi un ban ? » ou « comment éviter de se faire voler ? »
+# soient transformées en commande.
+_REQUEST_PREFIX = r"(?:stp\s+|svp\s+|please\s+|pls\s+|peux[ -]?tu\s+|tu\s+peux\s+|je\s+veux\s+|merci\s+de\s+)?"
+
 
 def normalize_text(value: str | None) -> str:
     text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
@@ -41,10 +46,7 @@ def normalize_text(value: str | None) -> str:
 
 
 def canonical_amount(value: str | None) -> str | None:
-    """Convertit un montant naturel vers la syntaxe entière comprise par +pay.
-
-    5k -> 5000, 1.5k -> 1500, 2m -> 2000000. all/tout/max restent tels quels.
-    """
+    """Convertit 5k -> 5000, 1.5k -> 1500, 2m -> 2000000."""
     raw = str(value or "").strip().casefold().replace(" ", "")
     if raw in {"all", "tout", "max"}:
         return raw
@@ -70,17 +72,19 @@ def _clean_reason(raw: str, *, action_words: tuple[str, ...], amount: str | None
         text = re.sub(re.escape(amount), " ", text, count=1, flags=re.I)
     if duration:
         text = re.sub(re.escape(duration), " ", text, count=1, flags=re.I)
-
-    # Les mots qui relient seulement l'action à la cible ne doivent pas devenir une raison.
-    # Exemple corrigé : « envoie 5k à @membre » ne doit jamais produire « Raison : à ».
     text = re.sub(
-        r"\b(?:stp|svp|please|pls|lui|le|la|les|moi|pour|avec|car|parce que|raison|a|à|au|aux|de|du|des|vers|chez)\b",
+        r"\b(?:stp|svp|please|pls|peux|tu|je|veux|merci|lui|le|la|les|moi|pour|avec|car|parce que|raison|a|à|au|aux|de|du|des|vers|chez)\b",
         " ",
         text,
         flags=re.I,
     )
     text = re.sub(r"\s+", " ", text).strip(" .,:;-_")
     return text[:400] or "Aucune raison fournie"
+
+
+def _explicit_action(text: str, alternatives: tuple[str, ...]) -> bool:
+    words = "|".join(re.escape(item) for item in sorted(alternatives, key=len, reverse=True))
+    return bool(re.match(rf"^{_REQUEST_PREFIX}(?:{words})\b", text, flags=re.I))
 
 
 def parse_natural_action(value: str | None) -> NaturalAction | None:
@@ -104,20 +108,16 @@ def parse_natural_action(value: str | None) -> NaturalAction | None:
         if re.fullmatch(pattern, text, flags=re.I):
             return NaturalAction(command=command, label=label)
 
-    transfer_verb = re.search(r"\b(?:donne|donner|envoie|envoyer|paye|payer|transfere|transfert)\b", text)
+    transfer_words = ("transfere", "transfert", "envoyer", "envoie", "donner", "donne", "payer", "paye")
     recipient_cue = bool(_MENTION_RE.search(raw) or re.search(r"\b(?:lui|a|au|pour)\b", text))
-    if transfer_verb and recipient_cue:
+    if _explicit_action(text, transfer_words) and recipient_cue:
         amount_source = _MENTION_RE.sub(" ", raw)
         amount_match = _AMOUNT_RE.search(amount_source)
         if amount_match:
             displayed_amount = amount_match.group(1).replace(" ", "")
             amount = canonical_amount(displayed_amount)
             if amount is not None:
-                reason = _clean_reason(
-                    raw,
-                    action_words=("donne", "donner", "envoie", "envoyer", "paye", "payer", "transfere", "transfert"),
-                    amount=displayed_amount,
-                )
+                reason = _clean_reason(raw, action_words=transfer_words, amount=displayed_amount)
                 return NaturalAction(
                     command="pay",
                     label=f"Envoyer {displayed_amount}",
@@ -127,19 +127,19 @@ def parse_natural_action(value: str | None) -> NaturalAction | None:
                     reason=reason,
                 )
 
-    if re.search(r"\b(?:vole|voler|rob)\b", text):
+    if _explicit_action(text, ("vole", "voler", "rob")):
         return NaturalAction(command="rob", label="Tenter un vol", sensitive=True, target_required=True)
 
     moderation: tuple[tuple[tuple[str, ...], str, str, bool], ...] = (
-        (("ban temporaire", "tempban"), "tempban", "Bannir temporairement", True),
+        (("ban temporaire", "bannis temporairement", "bannir temporairement", "tempban"), "tempban", "Bannir temporairement", True),
         (("unmute", "demute", "demuter"), "unmute", "Retirer le mute", False),
-        (("mute", "timeout"), "mute", "Rendre muet", True),
+        (("rends muet", "mettre en mute", "mute", "timeout"), "mute", "Rendre muet", True),
         (("kick", "expulse", "expulser"), "kick", "Expulser", False),
         (("warn", "avertis", "avertir"), "warn", "Avertir", False),
         (("ban", "bannis", "bannir"), "ban", "Bannir", False),
     )
     for words, command, label, accepts_duration in moderation:
-        if not any(re.search(rf"\b{re.escape(word)}\b", text) for word in words):
+        if not _explicit_action(text, words):
             continue
         duration_match = _DURATION_RE.search(raw) if accepts_duration else None
         duration = duration_match.group(1).strip() if duration_match else None
