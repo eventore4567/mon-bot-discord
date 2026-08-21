@@ -1,14 +1,23 @@
-"""Hygiène d'affichage globale des commandes SentriX.
+"""Hygiène utilisateur et qualité d'exécution globale de SentriX.
 
-Cette couche ne modifie jamais les signatures internes utilisées par discord.py.
-Elle agit uniquement sur les textes visibles : aide, syntaxes, erreurs techniques et
-cooldowns. Cela évite qu'un correctif d'affichage casse les commandes slash/hybrides.
+Cette couche reste volontairement centrée sur l'expérience membre :
+- aucun paramètre interne discord.py (ctx/context/interaction/self/cog) n'est affiché ;
+- les erreurs d'arguments courantes indiquent quoi corriger ;
+- les cooldowns préfixe, slash et hybrides utilisent le même format lisible ;
+- les traces Python restent dans les logs ;
+- le correctif historique de +gamble est consolidé ici au lieu d'un module séparé ;
+- la qualité runtime V2.5 est installée sans ajouter de commande.
+
+Important : aucune mutation globale de ``command.params`` ou ``command.callback`` n'est
+faite ici. La seule exception est le contrat ciblé de +gamble, nécessaire pour réparer une
+ancienne signature déjà corrompue ; /gamble n'est pas modifié.
 """
 from __future__ import annotations
 
 import logging
 import math
 import re
+import types
 
 import discord
 from discord.ext import commands
@@ -26,6 +35,11 @@ _RAW_TECHNICAL_ERROR_RE = re.compile(
     r"^\s*Erreur technique\s*:\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\n.*)?$",
     re.IGNORECASE | re.DOTALL,
 )
+_INT_ERROR_RE = re.compile(r"(?:int|integer|entier|nombre)", re.IGNORECASE)
+_AMOUNT_COMMANDS = {
+    "gamble", "deposit", "withdraw", "pay", "give-money", "reset-economy",
+}
+_ID_COMMANDS = {"buy", "unwarn", "case"}
 
 
 def _is_internal(name: str) -> bool:
@@ -43,7 +57,7 @@ def sanitize_usage_text(value: str | None) -> str:
 
 
 def visible_usage(command: commands.Command, prefix: str = "+") -> str:
-    """Construit une syntaxe utilisateur sans toucher à ``command.params``."""
+    """Construit une syntaxe utilisateur sans modifier les paramètres internes."""
     parts = [f"{prefix}{command.qualified_name}"]
     for name, parameter in getattr(command, "clean_params", {}).items():
         if _is_internal(name):
@@ -51,6 +65,14 @@ def visible_usage(command: commands.Command, prefix: str = "+") -> str:
         display = str(name).replace("_", " ")
         parts.append(f"<{display}>" if getattr(parameter, "required", False) else f"[{display}]")
     return " ".join(parts)
+
+
+def _command_root_name(ctx: commands.Context) -> str:
+    command = getattr(ctx, "command", None)
+    if command is None:
+        return ""
+    root = getattr(command, "root_parent", None) or command
+    return str(getattr(root, "name", "") or "").casefold()
 
 
 def _repair_help_categories() -> None:
@@ -97,7 +119,7 @@ def _repair_help_categories() -> None:
         pass
 
 
-def _patch_main_usage() -> None:
+def _patch_main_usage_and_cooldown() -> None:
     try:
         import main
     except Exception:
@@ -112,6 +134,7 @@ def _patch_main_usage() -> None:
 
     command_usage._sentrix_no_internal_params = True
     main.command_usage = command_usage
+    main.cooldown_text = _cooldown_text
 
 
 def _patch_help_renderers() -> None:
@@ -157,8 +180,8 @@ def _patch_help_renderers() -> None:
     except Exception:
         pass
 
-    # La V2.3 avait importé usage_line directement. On nettoie donc son global local
-    # plutôt que de modifier les paramètres réels de la commande.
+    # V2.3 a importé usage_line directement. On nettoie son global local plutôt que les
+    # paramètres réels de la commande.
     try:
         from . import sentrix_accessibility
         current_usage_line = sentrix_accessibility.usage_line
@@ -184,7 +207,7 @@ def _patch_raw_technical_errors() -> None:
         if _RAW_TECHNICAL_ERROR_RE.match(text):
             description = (
                 "Cette commande a rencontré un problème technique. "
-                "Réessaie dans un instant. Si le problème continue, consulte les logs du bot."
+                "Réessaie dans un instant. Si le problème continue, préviens le staff."
             )
         return current(description, title=title)
 
@@ -194,6 +217,7 @@ def _patch_raw_technical_errors() -> None:
 
 
 def _cooldown_text(seconds: float) -> str:
+    """Durée courte et lisible : 2 j 4 h, 3 h 12 min, 1 min 5 s, 8 s."""
     total = max(1, int(math.ceil(float(seconds))))
     days, rem = divmod(total, 86400)
     hours, rem = divmod(rem, 3600)
@@ -207,7 +231,7 @@ def _cooldown_text(seconds: float) -> str:
         parts.append(f"{minutes} min")
     if secs or not parts:
         parts.append(f"{secs} s")
-    return " ".join(parts[:3])
+    return " ".join(parts[:2] if days else parts[:3])
 
 
 def _cooldown_retry_after(error) -> float | None:
@@ -223,7 +247,7 @@ def _cooldown_retry_after(error) -> float | None:
 
 async def _send_slash_cooldown(interaction: discord.Interaction, retry_after: float) -> None:
     embed = embeds.warning(
-        f"Cette commande est en cooldown. Réessaie dans **{_cooldown_text(retry_after)}**.",
+        f"Tu pourras réutiliser cette commande dans **{_cooldown_text(retry_after)}**.",
         title="Cooldown actif",
     )
     try:
@@ -235,45 +259,151 @@ async def _send_slash_cooldown(interaction: discord.Interaction, retry_after: fl
         logger.debug("Impossible d'envoyer le cooldown slash.", exc_info=True)
 
 
-def _patch_slash_cooldown_errors(bot: commands.Bot) -> None:
-    """Couvre les cooldowns app_commands ET ceux des commandes hybrides.
-
-    Une commande hybride exécutée avec / peut remonter ``commands.CommandOnCooldown``
-    dans ``error.original``. Le handler historique ne vérifiait que la variante
-    ``app_commands.CommandOnCooldown`` et pouvait donc afficher une erreur technique.
-    """
+def _patch_slash_error_ux(bot: commands.Bot) -> None:
+    """Cooldowns slash/hybrides et erreurs de conversion lisibles."""
     current = bot.tree.on_error
-    if getattr(current, "_sentrix_cooldown_ux", False):
+    if getattr(current, "_sentrix_v25_error_ux", False):
         return
 
     async def slash_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
         retry_after = _cooldown_retry_after(error)
         if retry_after is not None:
             return await _send_slash_cooldown(interaction, retry_after)
+
+        original = getattr(error, "original", error)
+        if isinstance(error, (discord.app_commands.TransformerError, discord.app_commands.CommandSignatureMismatch)):
+            embed = embeds.warning(
+                "Une valeur n'est pas valide. Vérifie le nombre, le membre, le rôle ou le salon sélectionné.",
+                title="Valeur invalide",
+            )
+            try:
+                if interaction.response.is_done():
+                    return await interaction.followup.send(embed=embed, ephemeral=True)
+                return await interaction.response.send_message(embed=embed, ephemeral=True)
+            except (discord.HTTPException, discord.InteractionResponded):
+                return None
+
+        if isinstance(original, commands.CommandOnCooldown):
+            return await _send_slash_cooldown(interaction, original.retry_after)
         return await current(interaction, error)
 
-    slash_error._sentrix_cooldown_ux = True
+    slash_error._sentrix_v25_error_ux = True
     slash_error._sentrix_original = current
     bot.tree.on_error = slash_error
 
 
-def _install_gamble_parser_repair(bot: commands.Bot) -> None:
-    """Répare uniquement le parseur texte de +gamble après les wrappers d'intégrité."""
+def _patch_prefix_error_ux(bot: commands.Bot) -> None:
+    """Donne une erreur précise avant le handler générique de V2.3/main.py."""
+    current = bot.on_command_error
+    if getattr(current, "_sentrix_v25_error_ux", False):
+        return
+
+    async def prefix_error(_bot, ctx: commands.Context, error: commands.CommandError):
+        original = getattr(error, "original", error)
+
+        if isinstance(original, commands.CommandOnCooldown):
+            return await ctx.send(
+                embed=embeds.warning(
+                    f"Tu pourras réutiliser cette commande dans **{_cooldown_text(original.retry_after)}**.",
+                    title="Cooldown actif",
+                )
+            )
+
+        if isinstance(original, commands.MaxConcurrencyReached):
+            return await ctx.send(
+                embed=embeds.warning(
+                    "Une partie ou une action identique est déjà en cours. Termine-la avant de recommencer.",
+                    title="Action déjà en cours",
+                )
+            )
+
+        # Les convertisseurs spécialisés savent déjà produire de meilleurs messages dans
+        # les handlers existants : ne pas les réduire à un simple BadArgument générique.
+        specialized = tuple(
+            cls for cls in (
+                getattr(commands, "MemberNotFound", None),
+                getattr(commands, "UserNotFound", None),
+                getattr(commands, "RoleNotFound", None),
+                getattr(commands, "ChannelNotFound", None),
+            ) if isinstance(cls, type)
+        )
+        if specialized and isinstance(original, specialized):
+            return await current(ctx, error)
+
+        if isinstance(original, commands.BadArgument):
+            root_name = _command_root_name(ctx)
+            usage = visible_usage(ctx.command, str(getattr(ctx, "clean_prefix", None) or "+")) if ctx.command else None
+            raw = str(original)
+
+            if root_name in _AMOUNT_COMMANDS or _INT_ERROR_RE.search(raw):
+                if root_name in _ID_COMMANDS:
+                    description = "L'identifiant doit être un nombre entier positif."
+                elif root_name == "gamble":
+                    description = "Le montant doit être un nombre entier positif, par exemple `10` ou `500`."
+                else:
+                    description = "Le montant indiqué n'est pas valide. Utilise un nombre positif."
+                if usage:
+                    description += f"\nUtilise : `{usage}`"
+                return await ctx.send(embed=embeds.warning(description, title="Montant invalide"))
+
+            if root_name in _ID_COMMANDS:
+                description = "L'identifiant doit être un nombre entier valide."
+                if usage:
+                    description += f"\nUtilise : `{usage}`"
+                return await ctx.send(embed=embeds.warning(description, title="Identifiant invalide"))
+
+        return await current(ctx, error)
+
+    prefix_error._sentrix_v25_error_ux = True
+    prefix_error._sentrix_original = current
+    bot.on_command_error = types.MethodType(prefix_error, bot)
+
+
+async def _gamble_signature_probe(ctx: commands.Context, montant: int):
+    return None
+
+
+def _repair_gamble_parser(bot: commands.Bot) -> None:
+    """Contrat ciblé +gamble : un seul argument utilisateur ``montant: int``.
+
+    Cette réparation est gardée ici parce qu'une ancienne couche runtime a déjà corrompu
+    ce contrat en production. Elle ne touche pas à l'Application Command /gamble.
+    """
+    command = bot.get_command("gamble")
+    if command is None:
+        return
+
+    actual = tuple(str(name) for name in getattr(command, "clean_params", {}))
+    annotation = getattr(getattr(command, "clean_params", {}).get("montant"), "annotation", None)
+    if actual == ("montant",) and annotation is int:
+        command.usage = "<montant>"
+        command._sentrix_gamble_parser_fixed = True
+        return
+
+    probe = commands.Command(_gamble_signature_probe, name="_sentrix_gamble_signature_probe")
+    command.params = probe.params.copy()
+    command.usage = "<montant>"
+    command._sentrix_gamble_parser_fixed = True
+    logger.warning("Contrat du parseur +gamble réparé : %r -> ('montant',).", actual)
+
+
+def _install_runtime_quality(bot: commands.Bot) -> None:
     try:
-        from . import gamble_parser_fix
-        gamble_parser_fix.install(bot)
+        from . import runtime_quality_v25
+        runtime_quality_v25.install(bot)
     except Exception:
-        logger.exception("Impossible d'installer le correctif ciblé du parseur +gamble.")
+        logger.exception("Impossible d'installer la qualité runtime V2.5.")
 
 
 def apply(bot: commands.Bot) -> None:
-    # Important : ne jamais modifier globalement command.params / command.callback ici.
     _repair_help_categories()
-    _patch_main_usage()
+    _patch_main_usage_and_cooldown()
     _patch_help_renderers()
     _patch_raw_technical_errors()
-    _patch_slash_cooldown_errors(bot)
-    _install_gamble_parser_repair(bot)
+    _patch_slash_error_ux(bot)
+    _patch_prefix_error_ux(bot)
+    _repair_gamble_parser(bot)
+    _install_runtime_quality(bot)
     bot._sentrix_user_facing_hygiene = True
 
 
@@ -291,5 +421,5 @@ def install(bot: commands.Bot) -> None:
     bot.add_listener(reapply_on_ready, "on_ready")
     bot._sentrix_user_facing_hygiene_listener = True
     logger.info(
-        "Hygiène utilisateur active : signatures intactes, ctx masqué à l'affichage, cooldowns slash explicites."
+        "UX globale active : ctx masqué, erreurs précises, cooldowns cohérents et qualité V2.5; 0 nouvelle commande."
     )
