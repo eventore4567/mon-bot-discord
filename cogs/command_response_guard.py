@@ -4,6 +4,8 @@ Cette couche garde les réponses normales des commandes, mais ajoute des filets 
 transversaux qui s'appliquent automatiquement à TOUT le registre actif :
 - une commande valide qui se termine sans réponse reçoit un accusé de succès ;
 - une faute de frappe sur une commande `+`, y compris une sous-commande, propose les noms proches ;
+- les suggestions respectent la surface réellement accessible au membre et n'exposent pas
+  les commandes staff/owner à quelqu'un qui n'a pas les permissions nécessaires ;
 - les commandes préfixées et slash lentes sont signalées dans les logs ;
 - le catalogue de suggestions est construit depuis walk_commands(), donc une future commande
   bénéficie du système sans ajout manuel.
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import sys
 import time
 
 import discord
@@ -32,8 +35,63 @@ _UNKNOWN_REPLY_LAST: dict[int, float] = {}
 _SLASH_STARTS: dict[int, float] = {}
 
 
-def _command_suggestions(bot: commands.Bot, typed: str) -> list[str]:
-    """Retourne jusqu'à 3 commandes/sous-commandes proches, sans exposer les cachées."""
+def _runtime_main():
+    """Retourne le module main réellement utilisé, y compris quand le bot est lancé en script."""
+    return sys.modules.get("main") or sys.modules.get("__main__")
+
+
+def _command_policy_name(command: commands.Command) -> str:
+    root = getattr(command, "root_parent", None) or command
+    return str(getattr(root, "name", "") or getattr(command, "name", "") or "").casefold()
+
+
+def _can_suggest_command(ctx: commands.Context, command: commands.Command) -> bool:
+    """Applique une version synchrone et fail-closed de la politique de commandes.
+
+    Une suggestion n'exécute rien, mais elle ne doit pas révéler inutilement les outils
+    staff/owner. Les checks métier restent évidemment la vraie autorité à l'exécution.
+    """
+    if getattr(command, "hidden", False) or not getattr(command, "enabled", True):
+        return False
+
+    main = _runtime_main()
+    if main is None:
+        # Pendant un bootstrap inhabituel, mieux vaut ne proposer que +help plutôt que
+        # d'exposer une commande dont la politique n'est pas encore disponible.
+        return _command_policy_name(command) == "help"
+
+    name = _command_policy_name(command)
+    public = set(getattr(main, "PUBLIC_COMMANDS", set()) or set())
+    owner_only = set(getattr(main, "OWNER_ONLY_COMMANDS", set()) or set())
+    permission_commands = dict(getattr(main, "DISCORD_PERMISSION_COMMANDS", {}) or {})
+    categories = dict(getattr(main, "CATEGORY_COMMANDS", {}) or {})
+
+    if name in owner_only:
+        # Les commandes propriétaire restent hors des suggestions publiques. Le propriétaire
+        # peut toujours les utiliser normalement ou les retrouver dans son aide dédiée.
+        return False
+    if name in public or name == "help":
+        return True
+
+    author = getattr(ctx, "author", None)
+    perms = getattr(author, "guild_permissions", None)
+    is_admin = bool(perms and (getattr(perms, "administrator", False) or getattr(perms, "manage_guild", False)))
+
+    required = permission_commands.get(name)
+    if required:
+        return bool(perms and (is_admin or getattr(perms, required, False)))
+
+    for names in categories.values():
+        if name in set(names or ()):
+            return is_admin
+
+    # La politique centrale de main.py est fail-closed : une commande inconnue de la
+    # matrice n'est suggérée qu'à un administrateur.
+    return is_admin
+
+
+def _command_suggestions(bot: commands.Bot, ctx: commands.Context, typed: str) -> list[str]:
+    """Retourne jusqu'à 3 commandes/sous-commandes proches réellement accessibles."""
     typed = (typed or "").casefold().strip()
     if not typed:
         return []
@@ -42,7 +100,7 @@ def _command_suggestions(bot: commands.Bot, typed: str) -> list[str]:
     # la recherche, mais l'utilisateur reçoit toujours le nom canonique complet.
     lookup: dict[str, str] = {}
     for command in bot.walk_commands():
-        if getattr(command, "hidden", False):
+        if not _can_suggest_command(ctx, command):
             continue
         canonical = str(command.qualified_name).strip()
         if not canonical:
@@ -229,7 +287,7 @@ def install(bot: commands.Bot) -> None:
             if not typed:
                 return
             prefix = str(getattr(ctx, "clean_prefix", None) or "+")
-            suggestions = _command_suggestions(bot, typed)
+            suggestions = _command_suggestions(bot, ctx, typed)
 
             if suggestions:
                 formatted = "\n".join(f"• `{prefix}{name}`" for name in suggestions)
@@ -289,5 +347,5 @@ def install(bot: commands.Bot) -> None:
     bot.add_listener(ensure_slash_command_response, "on_app_command_completion")
     _INSTALLED = True
     logger.info(
-        "Expérience TOUTES commandes activée : réponses garanties, suggestions groupes/sous-commandes et diagnostic préfixe/slash."
+        "Expérience TOUTES commandes activée : réponses garanties, suggestions filtrées par permissions et diagnostic préfixe/slash."
     )
