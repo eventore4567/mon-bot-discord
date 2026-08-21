@@ -247,5 +247,6 @@ class Stats(commands.Cog, name="Stats"):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Stats(bot))
-    from . import integrity_hardening
+    from . import integrity_hardening, user_facing_hygiene
     integrity_hardening.install(bot)
+    user_facing_hygiene.install(bot)
