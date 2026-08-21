@@ -48,6 +48,9 @@ jobs:
       - name: Command contracts
         run: python tools/command_runtime_audit.py
 
+      - name: Command error ownership
+        run: python tools/command_error_ownership_gate.py
+
       - name: V2.5 regression gate
         run: python tools/v25_quality_gate.py
 
