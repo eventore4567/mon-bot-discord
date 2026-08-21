@@ -41,6 +41,7 @@ from .poll_ui import install_poll_ui
 from .premium_logs import install as install_premium_logs
 from .premium_logs_v2 import install as install_premium_logs_v2
 from .premium_style_runtime import install as install_premium_style
+from .production_ops import install as install_production_ops
 from .public_language_choice import install as install_public_language_choice
 from .remove_code_command import install as install_remove_code_command
 from .reply_reference_fix import install as install_reply_reference_fix
@@ -232,6 +233,7 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     await _run_installer("style final aide sans emoji", install_help_clean_style, bot)
     await _run_installer("aide racine et canary externe", install_final_runtime_polish, bot)
     await _run_installer("garde de réponse commandes", install_command_response_guard, bot)
+    await _run_installer("opérations production", install_production_ops, bot)
     await _run_installer("politique finale commandes sans emoji", install_command_no_emoji, bot)
     # Toujours en dernier : aucun runtime charge ensuite ne doit pouvoir reclasser help
     # ou contourner la matrice de permissions des commandes slash.
