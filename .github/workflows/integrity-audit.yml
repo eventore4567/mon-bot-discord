@@ -34,3 +34,6 @@ jobs:
 
       - name: Integrity gate
         run: python tools/integrity_gate.py
+
+      - name: V2.5 quality gate
+        run: python tools/v25_quality_gate.py
