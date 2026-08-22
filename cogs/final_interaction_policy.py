@@ -19,7 +19,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from . import community_v34, permission_guard
+from . import community_v32, community_v33, community_v34, permission_guard
 from utils import premium_style
 
 logger = logging.getLogger("bot.final-interaction-policy")
@@ -56,6 +56,21 @@ _GENERIC_TITLES = frozenset({
     "termine",
     "terminé",
 })
+
+
+def _disable_legacy_embed_flattening() -> None:
+    """Neutralise toutes les anciennes couches qui transformaient les cartes en texte.
+
+    Trois générations historiques (V3.2, V3.3 et V3.4) possédaient chacune leur propre
+    convertisseur. N'en désactiver qu'un laissait donc réapparaître le rendu libre lors
+    d'un clic sur Suivant, d'une sélection ou d'une modification de message.
+    """
+    def keep_embed(*_args, **_kwargs):
+        return None
+
+    community_v32.simple_embed_text = keep_embed
+    community_v33._simple_embed_to_text = keep_embed
+    community_v34._embed_to_text = keep_embed
 
 
 def _clean(value: Any) -> str:
@@ -217,6 +232,8 @@ def _install_interaction_response() -> None:
                 bot_user=getattr(getattr(interaction, "client", None), "user", None),
                 allow_content_wrap=True,
             )
+            if kwargs.get("embed") is not None or kwargs.get("embeds"):
+                kwargs.setdefault("content", None)
             args, kwargs = _convert_kwargs(args, kwargs, root=root, editing=True)
             return await base_edit(self, *args, **kwargs)
 
@@ -242,6 +259,8 @@ def _install_original_response_edit() -> None:
             bot_user=getattr(getattr(self, "client", None), "user", None),
             allow_content_wrap=True,
         )
+        if kwargs.get("embed") is not None or kwargs.get("embeds"):
+            kwargs.setdefault("content", None)
         args, kwargs = _convert_kwargs(args, kwargs, root=root, editing=True)
         return await base(self, *args, **kwargs)
 
@@ -341,6 +360,7 @@ def install(bot: commands.Bot) -> None:
     """Re-apply the final interaction policy after every legacy runtime installer."""
     # V3.4 owns the fast AI and slash defer cleanup. Re-applying it here makes the final
     # order deterministic even if runtime_quality_v25 is not loaded by a particular boot.
+    _disable_legacy_embed_flattening()
     community_v34.install(bot)
 
     _install_context_send()

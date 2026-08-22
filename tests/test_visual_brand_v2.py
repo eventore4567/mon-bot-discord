@@ -218,3 +218,11 @@ def test_final_interaction_policy_never_flattens_embeds_to_text():
     assert args == ()
     assert kwargs["embed"] is embed
     assert "content" not in kwargs
+
+
+def test_every_legacy_embed_flattener_is_disabled():
+    final_interaction_policy._disable_legacy_embed_flattening()
+    embed = discord.Embed(title="Toujours encadré")
+    assert final_interaction_policy.community_v32.simple_embed_text(embed) is None
+    assert final_interaction_policy.community_v33._simple_embed_to_text(embed, has_view=False) is None
+    assert final_interaction_policy.community_v34._embed_to_text(embed, root="ping") is None

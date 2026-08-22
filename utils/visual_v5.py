@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 
@@ -207,14 +208,36 @@ async def render_member_card(
     *,
     level_up: int | None = None,
 ) -> io.BytesIO:
-    # Asset.read() passe par le client HTTP officiel de discord.py. L'ancien appel avec
-    # une ClientSession aiohttp indépendante pouvait être refusé par le CDN Discord ou
-    # expirer sur Railway, ce qui rendait +profile-card aléatoirement indisponible.
-    # Une icône locale garantit qu'une carte reste générable même si le CDN est en panne.
+    # On lit d'abord l'asset ORIGINAL : un avatar animé reste donc un GIF et Pillow en
+    # utilise sa vraie première image au lieu de remplacer la PP par l'icône SentriX.
+    # Plusieurs chemins sont tentés avant d'utiliser l'ultime secours local.
+    avatar = member.display_avatar
+    avatar_bytes: bytes | None = None
     try:
-        avatar = member.display_avatar.replace(size=256, static_format="png")
-        avatar_bytes = await avatar.read()
+        avatar_bytes = await asyncio.wait_for(avatar.read(), timeout=4)
     except Exception:
+        pass
+
+    if not avatar_bytes:
+        try:
+            timeout = aiohttp.ClientTimeout(total=5)
+            headers = {"User-Agent": "SentriX Discord Bot/5.0"}
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                async with session.get(str(avatar.url)) as response:
+                    response.raise_for_status()
+                    avatar_bytes = await response.read()
+        except Exception:
+            avatar_bytes = None
+
+    if not avatar_bytes:
+        global_avatar = getattr(member, "avatar", None)
+        if global_avatar is not None and global_avatar != avatar:
+            try:
+                avatar_bytes = await asyncio.wait_for(global_avatar.read(), timeout=3)
+            except Exception:
+                avatar_bytes = None
+
+    if not avatar_bytes:
         avatar_bytes = await asyncio.to_thread((ASSET_DIR / "profile.png").read_bytes)
     try:
         return await asyncio.to_thread(
