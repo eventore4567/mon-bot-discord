@@ -57,6 +57,10 @@ if "cogs.create_sentrix_v3" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.create_sentrix_v3")
 if "cogs.canonical_interactions" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.canonical_interactions")
+# Nouvelles fonctions isolées : starboard, vocaux temporaires, sticky, annonces planifiées
+# et diagnostic serveur. Elles sont chargées avant la politique visuelle finale.
+if "cogs.sentrix_plus" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.sentrix_plus")
 # Une seule politique visuelle finale. L'ancien compact_response_style n'est plus chargé :
 # il doublonnait la transformation et rendait les réponses incohérentes selon la commande.
 if "cogs.plain_text_all_extension" not in bot_main.EXTENSIONS:
@@ -65,13 +69,40 @@ if "cogs.plain_text_all_extension" not in bot_main.EXTENSIONS:
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
 )
+
+_SENTRIX_PLUS_CONFIG_COMMANDS = frozenset({
+    "starboard-setup",
+    "starboard-off",
+    "voicehub-setup",
+    "voicehub-off",
+    "sticky-set",
+    "sticky-every",
+    "sticky-off",
+    "schedule-send",
+    "schedule-list",
+    "schedule-cancel",
+    "server-health",
+})
+_SENTRIX_PLUS_MEMBER_COMMANDS = frozenset({
+    "sentrix-plus",
+    "voice-name",
+    "voice-limit",
+    "voice-lock",
+    "voice-unlock",
+    "voice-transfer",
+})
+
 bot_main.CATEGORY_COMMANDS["configuration"] = (
     bot_main.CATEGORY_COMMANDS.get("configuration", frozenset())
     | frozenset({"create", "create sentrix"})
+    | _SENTRIX_PLUS_CONFIG_COMMANDS
+)
+bot_main.PUBLIC_COMMANDS = (
+    getattr(bot_main, "PUBLIC_COMMANDS", frozenset()) | _SENTRIX_PLUS_MEMBER_COMMANDS
 )
 bot_main.KNOWN_PERMISSION_COMMANDS = bot_main.KNOWN_PERMISSION_COMMANDS | frozenset(
     {"drop", "create", "create sentrix"}
-)
+) | _SENTRIX_PLUS_CONFIG_COMMANDS | _SENTRIX_PLUS_MEMBER_COMMANDS
 
 
 logger = logging.getLogger("bot.railway")
