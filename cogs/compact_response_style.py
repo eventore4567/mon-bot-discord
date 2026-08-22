@@ -113,8 +113,6 @@ def _compact(text: str, label: str) -> str:
         return text
     marker = "!" if any(word in text.casefold() for word in ERROR_HINTS) else "•"
     prefix = f"{marker} | [{label}] | "
-    # Discord refuse les messages > 2000 caractères. Les longues réponses IA ont déjà
-    # leur propre découpage ; on ne risque pas de les casser juste pour ajouter le préfixe.
     if len(prefix) + len(text) > 1990:
         return text
     return prefix + text
@@ -136,7 +134,6 @@ def _install_context_send() -> None:
         text_from_embed = _embed_text(kwargs.get("embed"))
         if text_from_embed:
             kwargs.pop("embed", None)
-            kwargs["embeds"] = [] if "embeds" not in kwargs else kwargs.get("embeds")
             if args:
                 existing = str(args[0] or "").strip()
                 args[0] = f"{existing}\n{text_from_embed}".strip() if existing else text_from_embed
