@@ -40,31 +40,23 @@ if "cogs.drop" not in bot_main.EXTENSIONS:
 if "cogs.log_access_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.log_access_fix")
 # Discord ne peut livrer les interactions qu'en Gateway OU via un endpoint HTTP. SentriX
-# utilise discord.py/Gateway : cette garde supprime donc tout ancien endpoint HTTP reste
-# configure dans l'application, puis republie le catalogue slash sur le bon transport.
+# utilise discord.py/Gateway : cette garde supprime donc tout ancien endpoint HTTP resté
+# configuré dans l'application, puis republie le catalogue slash sur le bon transport.
 if "cogs.interaction_transport_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.interaction_transport_guard")
-# Inventorie les integrations Discord ressemblant a la marque courante mais appartenant a
-# une autre application. Aucun doublon n'est supprime automatiquement par ce detecteur.
+# Inventorie les intégrations Discord ressemblant à la marque courante mais appartenant à
+# une autre application. Aucun doublon n'est supprimé automatiquement par ce détecteur.
 if "cogs.stale_discord_app_detector" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.stale_discord_app_detector")
-# Lit le vrai schema horaire ProductionPhase afin d'identifier les noms de commandes qui
+# Lit le vrai schéma horaire ProductionPhase afin d'identifier les noms de commandes qui
 # accumulent des erreurs, sans exposer d'identifiant utilisateur/serveur.
 if "cogs.command_error_probe" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.command_error_probe")
-# Doit preceder Slash V7 : l'ancien ProductionObservabilityV9 reutilise le nom de table
-# production_command_metrics avec un schema incompatible. On neutralise uniquement cette
-# couche historique avant que le setup de compatibilite V7 puisse la charger.
+# Neutralise uniquement l'ancien observability runtime qui réutilisait un schéma SQL
+# incompatible. La gestion des interactions slash n'est plus installée ici en plusieurs
+# couches : canonical_interactions sera l'unique politique finale.
 if "cogs.legacy_observability_conflict_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.legacy_observability_conflict_guard")
-# Slash V7 protège les interactions lentes et ferme les placeholders sur succès.
-if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
-    bot_main.EXTENSIONS.append("cogs.slash_reliability_v7")
-# Correctif global discord.py : le premier ctx.send() après un ctx.defer() remplit la
-# réponse originale encore vide au lieu de créer un follow-up en laissant « thinking ».
-# Une réponse originale déjà remplie conserve le comportement follow-up natif.
-if "cogs.deferred_context_response_guard" not in bot_main.EXTENSIONS:
-    bot_main.EXTENSIONS.append("cogs.deferred_context_response_guard")
 # Commande texte uniquement, ajoutée sous +security sans consommer de slot slash.
 if "cogs.automod_enable_all" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.automod_enable_all")
@@ -76,11 +68,12 @@ if "cogs.setup_auto_fix" not in bot_main.EXTENSIONS:
 # Les anciennes syntaxes avec emoji, pièce jointe ou URL restent compatibles.
 if "cogs.emoji_name_lookup" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.emoji_name_lookup")
-# Toujours en dernier : CommandTree.on_error est deja dans sa forme finale. Cette garde
-# conserve tous les handlers existants puis ferme, dans un finally, tout defer reste vide
-# lorsqu'une commande slash termine par une exception au lieu d'un completion event.
-if "cogs.slash_error_completion_guard" not in bot_main.EXTENSIONS:
-    bot_main.EXTENSIONS.append("cogs.slash_error_completion_guard")
+# TOUJOURS EN DERNIER : une seule politique de réponse Discord. Elle neutralise les
+# anciens listeners slash encore installés par le bootstrap historique des cogs et prend
+# en charge texte libre, defer, erreurs et confidentialité de façon canonique.
+if "cogs.canonical_interactions" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.canonical_interactions")
+
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
 )
