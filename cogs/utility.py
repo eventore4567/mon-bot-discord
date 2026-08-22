@@ -123,28 +123,50 @@ async def _download_discord_avatar(
         "User-Agent": "SentriX-Avatar/3.0",
         "Accept": "image/avif,image/webp,image/apng,image/gif,image/*,*/*;q=0.8",
     }
-    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-        tried: set[str] = set()
-        for asset_url in asset_urls:
-            for candidate in _discord_avatar_url_variants(asset_url):
-                if candidate in tried:
-                    continue
+    tried: set[str] = set()
+    variants: list[str] = []
+    for asset_url in asset_urls[:6]:
+        for candidate in _discord_avatar_url_variants(asset_url):
+            if candidate not in tried:
                 tried.add(candidate)
-                try:
+                variants.append(candidate)
+
+    if not variants:
+        return None
+
+    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        semaphore = asyncio.Semaphore(8)
+
+        async def fetch(candidate: str) -> tuple[bytes, str] | None:
+            try:
+                async with semaphore:
                     async with session.get(candidate, allow_redirects=True) as response:
                         if response.status != 200:
-                            continue
+                            return None
                         declared_size = int(response.headers.get("Content-Length", "0") or 0)
                         if declared_size > byte_limit:
-                            continue
+                            return None
                         data = await response.content.read(byte_limit + 1)
-                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-                    continue
-                if len(data) > byte_limit:
-                    continue
-                kind = _image_kind(data)
-                if kind is not None:
-                    return data, kind
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                return None
+            if len(data) > byte_limit:
+                return None
+            kind = _image_kind(data)
+            return (data, kind) if kind is not None else None
+
+        tasks = [asyncio.create_task(fetch(candidate)) for candidate in variants]
+        try:
+            for completed in asyncio.as_completed(tasks, timeout=5):
+                result = await completed
+                if result is not None:
+                    return result
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
     return None
 
 
@@ -701,7 +723,24 @@ class Utility(commands.Cog, name="Utility"):
 
         # L'image est jointe directement au message au lieu de dépendre d'un lien public.
         # Discord affiche ainsi l'avatar dans l'embed et conserve un GIF animé.
+        message_member = getattr(getattr(ctx, "message", None), "author", None)
+        if getattr(message_member, "id", None) != membre.id:
+            message_member = None
+        mentioned_member = next(
+            (
+                mention
+                for mention in getattr(getattr(ctx, "message", None), "mentions", ())
+                if getattr(mention, "id", None) == membre.id
+            ),
+            None,
+        )
         candidates = [
+            # MESSAGE_CREATE contient le profil affiché à côté du message et constitue
+            # donc la source la plus fraîche lorsque le membre demande son propre avatar.
+            getattr(message_member, "guild_avatar", None),
+            getattr(message_member, "display_avatar", None),
+            getattr(mentioned_member, "guild_avatar", None),
+            getattr(mentioned_member, "display_avatar", None),
             getattr(fresh_member, "guild_avatar", None),
             getattr(fresh_user, "avatar", None),
             getattr(fresh_member, "avatar", None),

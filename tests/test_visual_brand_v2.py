@@ -287,12 +287,15 @@ def test_avatar_uses_the_target_display_name_and_real_animated_asset():
     assert 'display_name = (' in source
     assert 'await ctx.guild.fetch_member(membre.id)' in source
     assert 'await self.bot.fetch_user(membre.id)' in source
+    assert 'getattr(ctx, "message", None), "author"' in source
+    assert 'getattr(ctx, "message", None), "mentions"' in source
     assert 'asset.is_animated()' in source
     assert 'asset.with_format("gif")' in source
     assert 'data = await asset.read()' in source
     assert 'getattr(membre, "guild_avatar", None)' in source
     assert '"media.discordapp.net"' in source
     assert '_download_discord_avatar(' in source
+    assert 'asyncio.as_completed(tasks, timeout=5)' in source
     assert '"/embed/avatars/" in original_url' in source
     assert 'e.set_image(url=f"attachment://{filename}")' in source
     assert 'discord.File(io.BytesIO(data), filename=filename)' in source
