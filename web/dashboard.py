@@ -1234,8 +1234,8 @@ INDEX_HTML = r"""<!doctype html>
 </html>"""
 
 
-# Keep the dashboard logic in this module while applying the visual layer from a
-# small, independently testable helper.
-from web.dashboard_theme_v2 import apply_dashboard_theme
+# Keep the API and the original dashboard logic in this module while the V3
+# helper installs the real page router and the dedicated module screens.
+from web.dashboard_pages_v3 import apply_dashboard_pages
 
-INDEX_HTML = apply_dashboard_theme(INDEX_HTML)
+INDEX_HTML = apply_dashboard_pages(INDEX_HTML)
