@@ -2,6 +2,7 @@
 
 from .dashboard_oxyde_rebuild import apply_dashboard_pages as _apply_oxyde_dashboard
 from .dashboard_oxyde_hotfix import apply_dashboard_hotfix, patch_dashboard_runtime
+from .dashboard_major_v5 import apply_major_v5
 
 
 # dashboard.py imports this module after its handlers are defined. Patch the guild reader
@@ -86,7 +87,7 @@ _EMBEDS_PAGE_JS = r"""
 
 
 def apply_dashboard_pages(html: str) -> str:
-    """Install the clean dashboard, embeds bridge and final reliability layer."""
+    """Install the page router, reliability hotfix and the V5 dashboard upgrade."""
     html = _apply_oxyde_dashboard(html)
     if "body:not([data-tab=\"overview\"]) #sentrixSafeOverview" not in html:
         html = html.replace("  </style>", _OVERVIEW_SCOPE_FIX + "\n  </style>", 1)
@@ -95,7 +96,8 @@ def apply_dashboard_pages(html: str) -> str:
     marker = "    Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));"
     if marker in html and "sxRenderWithEmbeds" not in html:
         html = html.replace(marker, _EMBEDS_PAGE_JS + "\n" + marker, 1)
-    return apply_dashboard_hotfix(html)
+    html = apply_dashboard_hotfix(html)
+    return apply_major_v5(html)
 
 
 __all__ = ["apply_dashboard_pages"]
