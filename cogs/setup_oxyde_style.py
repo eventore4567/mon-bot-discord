@@ -101,9 +101,9 @@ def _safe_http_url(value: str | None) -> str | None:
 def _set_author(embed: discord.Embed, bot: commands.Bot) -> None:
     avatar = _avatar_url(bot)
     if avatar:
-        embed.set_author(name="SENTRIX • CONTROL CENTER", icon_url=avatar)
+        embed.set_author(name="SentriX", icon_url=avatar)
     else:
-        embed.set_author(name="SENTRIX • CONTROL CENTER")
+        embed.set_author(name="SentriX")
 
 
 def _status_icon(status: str) -> str:
@@ -163,84 +163,18 @@ def install(bot: commands.Bot) -> None:
         partial = sum(1 for _step, status in paired if status == "Partiel")
         missing = sum(1 for _step, status in paired if status == "Non configuré")
 
-        if missing == 0 and partial == 0:
-            state = "✅ Prêt à utiliser"
-            state_sentence = "Les modules principaux sont configurés."
-        elif missing == 0:
-            state = "⚠️ Presque prêt"
-            state_sentence = "Il reste quelques réglages facultatifs ou incomplets."
-        else:
-            state = "🟣 Configuration à terminer"
-            state_sentence = "Quelques éléments importants doivent encore être réglés."
-
         e = discord.Embed(
-            title="⚡ SentriX • Centre de contrôle",
+            title="SentriX • Configuration",
             description=(
-                "**Tout ce qui compte est regroupé ici.** Choisis simplement ce que tu veux "
-                "configurer dans le menu : SentriX t'explique ensuite quoi faire, sans jargon.\n\n"
-                f"Préfixe actuel : **`{prefix}`**  •  État : **{state}**"
+                f"**{configured}/{len(paired)} modules prêts** • {partial} partiel(s) • {missing} à régler\n"
+                f"Préfixe : `{prefix}`\n\nChoisis une catégorie dans le menu."
             ),
             color=PURPLE_MAIN,
         )
         _set_author(e, self.bot)
-        avatar = _avatar_url(self.bot)
-        if avatar:
-            e.set_thumbnail(url=avatar)
-
-        e.add_field(
-            name="📊 État de la configuration",
-            value=(
-                f"**{configured}/{len(paired)} modules prêts**\n"
-                f"{partial} à compléter • {missing} non configuré(s)\n"
-                f"{state_sentence}"
-            ),
-            inline=False,
-        )
-
-        todo = []
-        for step, status in paired:
-            if status == "Configuré":
-                continue
-            meta = STEP_META[step["key"]]
-            todo.append(f"{_status_icon(status)} **{meta['title']}** — {meta['summary']}")
-            if len(todo) >= 3:
-                break
-        if todo:
-            e.add_field(
-                name="🎯 À faire maintenant",
-                value="\n".join(todo),
-                inline=False,
-            )
-        else:
-            e.add_field(
-                name="🎯 À faire maintenant",
-                value="✅ Rien d'obligatoire. Tu peux ouvrir un module pour ajuster un détail.",
-                inline=False,
-            )
-
-        module_lines = []
-        for step, status in paired:
-            module_lines.append(
-                f"{_status_icon(status)} **{STEP_META[step['key']]['title']}**"
-            )
-        e.add_field(
-            name="🧩 Modules",
-            value="\n".join(module_lines),
-            inline=True,
-        )
-        e.add_field(
-            name="🪄 Comment l'utiliser",
-            value=(
-                "**1.** Choisis un module dans le menu.\n"
-                "**2.** Modifie uniquement ce dont tu as besoin.\n"
-                "**3.** Clique sur **Enregistrer** quand il apparaît.\n"
-                "**4.** Termine par **Résumé** pour tout vérifier."
-            ),
-            inline=True,
-        )
 
         server_name = guild.name if guild else "Serveur"
-        e.set_footer(text=f"SentriX • {server_name} • Les réglages sont conservés après redémarrage")
+        e.set_footer(text=f"SentriX • {server_name}")
         return e
 
     async def build_embed(self) -> discord.Embed:
@@ -256,38 +190,53 @@ def install(bot: commands.Bot) -> None:
             "tip": "Enregistre tes changements avant de quitter.",
         })
         guild = self._guild()
-        avatar = _avatar_url(self.bot)
-
         e.colour = discord.Colour(PURPLE_MAIN)
-        e.title = f"{step['icon']} {meta['title']}"
+        e.title = f"SentriX • {meta['title']}"
         _set_author(e, self.bot)
-        if avatar:
-            e.set_thumbnail(url=avatar)
+        e.set_thumbnail(url=None)
 
-        # Retire le vieux champ séparateur/statut vide quand il existe.
-        for index in range(len(e.fields) - 1, -1, -1):
-            name = str(e.fields[index].name or "").replace("\u200b", "").strip()
-            if not name:
-                e.remove_field(index)
-
-        old_description = str(e.description or "").strip()
-        if old_description and old_description != meta["summary"]:
-            e.description = f"**{meta['summary']}**\n\n{old_description}"
-        else:
-            e.description = f"**{meta['summary']}**"
-
-        if step["key"] != "summary":
-            e.insert_field_at(
-                0,
-                name="🎯 Ce que tu règles ici",
-                value=meta["details"],
-                inline=False,
+        # L'ancien panneau répétait un titre, une explication, « Ce que tu règles »,
+        # toutes les valeurs puis un conseil. Le menu fait déjà ce travail : la carte ne
+        # garde qu'une phrase et, si nécessaire, un seul petit état utile.
+        original_fields = list(e.fields)
+        e.clear_fields()
+        picker_noun = "rôle" if step["key"] == "roles" else "salon"
+        if step["key"] in {"roles", "channels"}:
+            e.description = (
+                f"{meta['summary']}\n\n"
+                f"Choisis un réglage, puis le {picker_noun} correspondant."
             )
-            e.add_field(name="💡 Conseil", value=meta["tip"], inline=False)
+            if getattr(self, "picker_selected", None):
+                conf = await self.bot.db.get_guild_config(self.guild_id)
+                fields = configuration.PICKER_FIELDS[step["key"]]
+                label = next(
+                    (label for field, _kind, label in fields if field == self.picker_selected),
+                    self.picker_selected,
+                )
+                e.add_field(
+                    name="Réglage sélectionné",
+                    value=f"**{label}** • {self._mention_current(self.picker_selected, conf)}",
+                    inline=False,
+                )
+        else:
+            e.description = meta["summary"]
+            # Les pages de résumé/paliers/gestionnaires gardent au maximum un aperçu de
+            # quatre lignes. Les contrôles situés dessous donnent accès au reste.
+            for field in original_fields:
+                name = str(field.name or "").replace("\u200b", "").strip()
+                value = str(field.value or "").strip()
+                if not name or not value:
+                    continue
+                lines = value.splitlines()
+                preview = "\n".join(lines[:4])
+                if len(lines) > 4:
+                    preview += f"\n+{len(lines) - 4} autres"
+                e.add_field(name=name, value=preview[:700], inline=False)
+                break
 
         save_state = "Modifications en attente" if getattr(self, "dirty", False) else "Tout est enregistré"
         e.set_footer(
-            text=f"SentriX • {guild.name if guild else 'Serveur'} • {save_state}"
+            text=f"SentriX • {save_state}"
         )
         return e
 
@@ -322,21 +271,8 @@ def install(bot: commands.Bot) -> None:
             label="📋 Résumé", style=discord.ButtonStyle.primary, row=1,
         ))
         self.add_item(configuration.SetupNavButton(
-            "history", self.message_id,
-            label="📜 Historique", style=discord.ButtonStyle.secondary, row=1,
-        ))
-        self.add_item(configuration.SetupNavButton(
             "cancel", self.message_id,
             label="Fermer", style=discord.ButtonStyle.danger, row=1,
-        ))
-
-        dashboard_url = (_safe_http_url(os.getenv("DASHBOARD_PUBLIC_URL")) or DASHBOARD_FALLBACK).rstrip("/")
-        self.add_item(discord.ui.Button(
-            label="Ouvrir le dashboard web",
-            emoji="🌐",
-            style=discord.ButtonStyle.link,
-            url=f"{dashboard_url}/app?guild={self.guild_id}&tab=overview",
-            row=2,
         ))
 
     def render_page(self) -> None:
@@ -346,12 +282,31 @@ def install(bot: commands.Bot) -> None:
 
         original_render_page(self)
 
+        # Accueil/Enregistrer/Résumé/Fermer suffisent. Précédent, Suivant, Aperçu et
+        # Historique alourdissaient le panneau alors que l'accueil permet déjà de choisir
+        # directement n'importe quelle catégorie.
+        for item in list(self.children):
+            if isinstance(item, configuration.SetupNavButton) and item.action in {
+                "prev", "next", "preview", "history",
+            }:
+                self.remove_item(item)
+
         # Nettoyage transversal des composants des pages internes : labels simples,
         # placeholders explicites et aucun symbole décoratif ambigu.
         for item in self.children:
             try:
                 if isinstance(item, discord.ui.Button):
-                    item.label = _clean_button_label(item.label)
+                    action_labels = {
+                        "home": "Accueil",
+                        "save": "Enregistrer",
+                        "summary": "Résumé",
+                        "cancel": "Fermer",
+                    }
+                    item.label = action_labels.get(
+                        getattr(item, "action", ""),
+                        _clean_button_label(item.label),
+                    )
+                    item.emoji = None
                 elif isinstance(item, discord.ui.Select):
                     placeholder = str(item.placeholder or "").strip()
                     placeholder = placeholder.replace("Choisissez", "Choisis").replace("Choisir", "Sélectionner")

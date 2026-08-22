@@ -9,6 +9,8 @@ from cogs import plain_response_policy
 from cogs import final_interaction_policy
 from cogs import help_clean_style
 from cogs import command_response_guard
+from cogs import setup_oxyde_style
+from cogs import utility as utility_cog
 
 
 def _command(cog: str, name: str):
@@ -32,6 +34,7 @@ def test_priority_categories_select_dedicated_icons():
     assert premium_style.infer_category(command=_command("Levels", "profile")) == "profile"
     assert premium_style.infer_category(command=_command("Levels", "leaderboard-levels")) == "leaderboard"
     assert premium_style.infer_category(command=_command("SentriXUltimate", "sentrixpro")) == "premium"
+    assert premium_style.infer_category(command=_command("Utility", "avatar")) == "profile"
 
 
 def test_progress_bars_are_emoji_free_and_include_percentage():
@@ -276,3 +279,22 @@ def test_command_guard_never_adds_an_automatic_success_message():
     source = inspect.getsource(command_response_guard.install)
     assert 'add_listener(ensure_prefix_command_response' not in source
     assert 'add_listener(ensure_slash_command_response' not in source
+
+
+def test_avatar_uses_the_target_display_name_and_real_animated_asset():
+    import inspect
+    source = inspect.getsource(utility_cog)
+    assert 'display_name = getattr(membre, "display_name"' in source
+    assert 'asset.is_animated()' in source
+    assert 'asset.with_format("gif")' in source
+    assert 'e.set_image(url=avatar_url)' in source
+    assert 'label="Ouvrir l\'avatar"' in source
+
+
+def test_setup_is_compact_and_does_not_repeat_the_control_center():
+    import inspect
+    source = inspect.getsource(setup_oxyde_style)
+    assert 'SENTRIX • CONTROL CENTER' not in source
+    assert 'Ouvrir le dashboard web' not in source
+    assert 'e.clear_fields()' in source
+    assert '"prev", "next", "preview", "history"' in source

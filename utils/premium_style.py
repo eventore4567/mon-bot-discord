@@ -245,7 +245,7 @@ def infer_category(*, command: Any = None, embed: discord.Embed | None = None, h
     priority_rules = (
         ("premium", ("sentrixpro", "sentrixplus", "sentrixultimate", "sentrix_ultimate", "premium", "ultimate")),
         ("leaderboard", ("leaderboard", "classement", "top serveur", "top 10")),
-        ("profile", ("profile", "profil", "set-bio", "badge", "missions")),
+        ("profile", ("profile", "profil", "avatar", "userinfo", "user-info", "set-bio", "badge", "missions")),
         ("shop", ("shop", "boutique", "inventory", "inventaire", "buy", "sell", "acheter")),
     )
     for resolved, words in priority_rules:
@@ -265,7 +265,9 @@ def infer_category(*, command: Any = None, embed: discord.Embed | None = None, h
         ("music", ("music", "musique", "playlist", "queue", "lecture")),
         ("events", ("event", "giveaway", "tournoi", "tournament", "événement")),
         ("invites", ("invite", "invitation")),
-        ("ai", (" ai", "intelligence", "sentrix", "openai", "image")),
+        # « SentriX » apparaît dans presque tous les titres : l'utiliser comme indice IA
+        # classait à tort +avatar, +status et d'autres commandes dans cette catégorie.
+        ("ai", (" ai", "intelligence", "openai", "génération d'image", "generation d'image")),
         ("configuration", ("configuration", "setup", "config", "rôle", "salon", "serveur", "create-server", "wipe-server")),
         ("logs", ("log", "journal", "audit")),
     )

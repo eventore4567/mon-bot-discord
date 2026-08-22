@@ -600,9 +600,25 @@ class Utility(commands.Cog, name="Utility"):
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def avatar(self, ctx: commands.Context, membre: discord.Member = None):
         membre = membre or ctx.author
-        e = await self._embed(ctx.guild.id if ctx.guild else None, title=f"Avatar de {membre}")
-        e.set_image(url=membre.display_avatar.url)
-        await ctx.send(embed=e)
+        asset = membre.display_avatar
+        try:
+            if asset.is_animated():
+                asset = asset.with_format("gif")
+            asset = asset.with_size(1024)
+        except (AttributeError, ValueError):
+            pass
+        avatar_url = str(asset.url)
+        display_name = getattr(membre, "display_name", None) or getattr(membre, "name", None) or str(membre)
+        e = await self._embed(
+            ctx.guild.id if ctx.guild else None,
+            title=f"Avatar de {display_name}",
+            description=f"{membre.mention}\n[Afficher l'image en taille réelle]({avatar_url})",
+        )
+        e.url = avatar_url
+        e.set_image(url=avatar_url)
+        view = discord.ui.View(timeout=120)
+        view.add_item(discord.ui.Button(label="Ouvrir l'avatar", url=avatar_url))
+        await ctx.send(embed=e, view=view)
 
     @commands.hybrid_group(
         name="info",
