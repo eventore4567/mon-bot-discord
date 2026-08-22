@@ -68,6 +68,10 @@ if "cogs.setup_auto_fix" not in bot_main.EXTENSIONS:
 # Les anciennes syntaxes avec emoji, pièce jointe ou URL restent compatibles.
 if "cogs.emoji_name_lookup" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.emoji_name_lookup")
+# Créateur complet de serveur SentriX. Prefix-only : +create sentrix. Il réutilise le
+# ServerBuilder déjà chargé et pose son verrou permanent uniquement après succès complet.
+if "cogs.create_sentrix" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.create_sentrix")
 # TOUJOURS EN DERNIER : une seule politique de réponse Discord. Elle neutralise les
 # anciens listeners slash encore installés par le bootstrap historique des cogs et prend
 # en charge texte libre, defer, erreurs et confidentialité de façon canonique.
@@ -77,7 +81,13 @@ if "cogs.canonical_interactions" not in bot_main.EXTENSIONS:
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
 )
-bot_main.KNOWN_PERMISSION_COMMANDS = bot_main.KNOWN_PERMISSION_COMMANDS | frozenset({"drop"})
+bot_main.CATEGORY_COMMANDS["configuration"] = (
+    bot_main.CATEGORY_COMMANDS.get("configuration", frozenset())
+    | frozenset({"create", "create sentrix"})
+)
+bot_main.KNOWN_PERMISSION_COMMANDS = bot_main.KNOWN_PERMISSION_COMMANDS | frozenset(
+    {"drop", "create", "create sentrix"}
+)
 
 
 logger = logging.getLogger("bot.railway")
