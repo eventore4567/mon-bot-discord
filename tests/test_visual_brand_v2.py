@@ -297,8 +297,9 @@ def test_avatar_uses_the_target_display_name_and_real_animated_asset():
     assert '_download_discord_avatar(' in source
     assert 'asyncio.as_completed(tasks, timeout=5)' in source
     assert '"/embed/avatars/" in original_url' in source
-    assert 'e.set_image(url=f"attachment://{filename}")' in source
-    assert 'discord.File(io.BytesIO(data), filename=filename)' in source
+    assert 'e.set_image(url=str(asset.url))' in source
+    assert 'e.set_image(url=verified_url)' in source
+    assert 'file=discord.File(io.BytesIO(data), filename=filename)' not in source
     assert 'getattr(membre, "default_avatar", None)' not in source
     assert 'label="Ouvrir l\'avatar"' not in source
 

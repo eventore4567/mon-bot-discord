@@ -116,7 +116,7 @@ async def _download_discord_avatar(
     asset_urls: list[str],
     *,
     byte_limit: int,
-) -> tuple[bytes, str] | None:
+) -> tuple[bytes, str, str] | None:
     """Télécharge la vraie image via les deux CDN Discord et valide ses octets."""
     timeout = aiohttp.ClientTimeout(total=12, connect=5)
     headers = {
@@ -137,7 +137,7 @@ async def _download_discord_avatar(
     async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
         semaphore = asyncio.Semaphore(8)
 
-        async def fetch(candidate: str) -> tuple[bytes, str] | None:
+        async def fetch(candidate: str) -> tuple[bytes, str, str] | None:
             try:
                 async with semaphore:
                     async with session.get(candidate, allow_redirects=True) as response:
@@ -152,7 +152,7 @@ async def _download_discord_avatar(
             if len(data) > byte_limit:
                 return None
             kind = _image_kind(data)
-            return (data, kind) if kind is not None else None
+            return (data, kind, candidate) if kind is not None else None
 
         tasks = [asyncio.create_task(fetch(candidate)) for candidate in variants]
         try:
@@ -721,8 +721,9 @@ class Utility(commands.Cog, name="Utility"):
             description=membre.mention,
         )
 
-        # L'image est jointe directement au message au lieu de dépendre d'un lien public.
-        # Discord affiche ainsi l'avatar dans l'embed et conserve un GIF animé.
+        # Chaque URL est d'abord lue et validée. L'URL validée est ensuite placée dans
+        # l'embed : contrairement à attachment://, elle ne peut pas être désolidarisée
+        # de l'image par une couche de style intermédiaire.
         message_member = getattr(getattr(ctx, "message", None), "author", None)
         if getattr(message_member, "id", None) != membre.id:
             message_member = None
@@ -774,14 +775,10 @@ class Utility(commands.Cog, name="Utility"):
                     data = await asset.read()
                     if not data or len(data) > upload_limit:
                         continue
-                    kind = _image_kind(data) or ("gif" if asset.is_animated() else "png")
-                    extension = "jpg" if kind == "jpeg" else kind
-                    filename = f"avatar-{membre.id}.{extension}"
-                    e.set_image(url=f"attachment://{filename}")
-                    return await ctx.send(
-                        embed=e,
-                        file=discord.File(io.BytesIO(data), filename=filename),
-                    )
+                    if _image_kind(data) is None:
+                        continue
+                    e.set_image(url=str(asset.url))
+                    return await ctx.send(embed=e)
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
                     continue
 
@@ -792,14 +789,9 @@ class Utility(commands.Cog, name="Utility"):
             byte_limit=upload_limit,
         )
         if downloaded is not None:
-            data, kind = downloaded
-            extension = "jpg" if kind == "jpeg" else kind
-            filename = f"avatar-{membre.id}.{extension}"
-            e.set_image(url=f"attachment://{filename}")
-            return await ctx.send(
-                embed=e,
-                file=discord.File(io.BytesIO(data), filename=filename),
-            )
+            _data, _kind, verified_url = downloaded
+            e.set_image(url=verified_url)
+            return await ctx.send(embed=e)
 
         # Ne jamais remplacer silencieusement la vraie photo par l'avatar orange.
         e.description = (
