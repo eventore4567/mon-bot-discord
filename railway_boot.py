@@ -68,15 +68,16 @@ if "cogs.setup_auto_fix" not in bot_main.EXTENSIONS:
 # Les anciennes syntaxes avec emoji, pièce jointe ou URL restent compatibles.
 if "cogs.emoji_name_lookup" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.emoji_name_lookup")
-# Créateur complet de serveur SentriX. Prefix-only : +create sentrix. Il réutilise le
-# ServerBuilder déjà chargé et pose son verrou permanent uniquement après succès complet.
+# Créateur du serveur officiel SentriX. Prefix-only : +create sentrix.
 if "cogs.create_sentrix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.create_sentrix")
-# TOUJOURS EN DERNIER : une seule politique de réponse Discord. Elle neutralise les
-# anciens listeners slash encore installés par le bootstrap historique des cogs et prend
-# en charge texte libre, defer, erreurs et confidentialité de façon canonique.
+# Moteur canonique unique des interactions : defer, erreurs slash et confidentialité.
 if "cogs.canonical_interactions" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.canonical_interactions")
+# TOUJOURS EN DERNIER : uniquement le rendu visuel des réponses de commandes. Cette couche
+# ne gère pas les interactions ; elle transforme les réponses ordinaires en texte compact.
+if "cogs.compact_response_style" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.compact_response_style")
 
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
