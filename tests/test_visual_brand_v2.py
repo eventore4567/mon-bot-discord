@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import discord
 
 from utils import brand_assets, design_system, premium_style, visual_v5
+from cogs.visual_experience_v5 import VisualExperienceV5
 
 
 def _command(cog: str, name: str):
@@ -192,3 +193,9 @@ def test_v5_empty_music_state_guides_the_member():
         command=_command("Music", "queue"),
     )
     assert "+play <titre>" in embed.description
+
+
+def test_v5_commands_do_not_redeclare_the_existing_status_alias():
+    names = {command.name for command in VisualExperienceV5.__cog_commands__}
+    assert "status" not in names
+    assert {"about", "design-theme", "profile-card", "iconsetup"} <= names

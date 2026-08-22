@@ -260,7 +260,35 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
         self.bot = bot
 
     async def cog_load(self):
+        self._patch_status()
         self._patch_changelog()
+
+    def _patch_status(self):
+        """Habille la commande historique +bot-status (et son alias +status).
+
+        La couche ``common_command_names`` crée déjà l'alias ``status`` pour
+        ``bot-status`` avant le chargement de cette extension. Déclarer une deuxième
+        commande nommée ``status`` faisait donc échouer ``add_cog`` : Discord.py
+        rejetait le doublon et *toutes* les commandes V5 (+iconsetup,
+        +design-theme, +profile-card, +about) disparaissaient avec lui.
+
+        On conserve une seule commande canonique et on remplace uniquement son rendu.
+        L'ancien nom +bot-status et le nom court +status continuent ainsi de fonctionner.
+        """
+        command = self.bot.get_command("bot-status")
+        if command is None or getattr(command, "_sentrix_v5_status", False):
+            return
+
+        original_params = command.params.copy()
+
+        async def callback(_cog, ctx: commands.Context):
+            view = StatusHubView(self.bot, ctx.guild, ctx.author.id, "status")
+            message = await ctx.send(embed=await build_status_embed(self.bot, ctx.guild), view=view)
+            view.message = message
+
+        command.callback = functools.wraps(command.callback)(callback)
+        command.params = original_params
+        command._sentrix_v5_status = True
 
     def _patch_changelog(self):
         command = self.bot.get_command("changelog")
@@ -277,13 +305,6 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
         command.callback = functools.wraps(command.callback)(callback)
         command.params = original_params
         command._sentrix_v5_changelog = True
-
-    @commands.command(name="status")
-    async def status_command(self, ctx: commands.Context):
-        """Centre compact de disponibilité des services."""
-        view = StatusHubView(self.bot, ctx.guild, ctx.author.id, "status")
-        message = await ctx.send(embed=await build_status_embed(self.bot, ctx.guild), view=view)
-        view.message = message
 
     @commands.command(name="about")
     async def about_command(self, ctx: commands.Context):
@@ -375,3 +396,12 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(VisualExperienceV5(bot))
+
+    # Diagnostic explicite : le démarrage général du bot tolère l'échec d'une extension.
+    # Cette vérification rend immédiatement visible dans les logs toute régression du
+    # catalogue au lieu de laisser Railway afficher un déploiement sain avec des commandes
+    # silencieusement absentes.
+    required = ("status", "about", "design-theme", "profile-card", "iconsetup")
+    missing = [name for name in required if bot.get_command(name) is None]
+    if missing:
+        raise RuntimeError("Commandes V5 non enregistrées : " + ", ".join(missing))
