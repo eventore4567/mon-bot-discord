@@ -284,11 +284,15 @@ def test_command_guard_never_adds_an_automatic_success_message():
 def test_avatar_uses_the_target_display_name_and_real_animated_asset():
     import inspect
     source = inspect.getsource(utility_cog)
-    assert 'display_name = getattr(membre, "display_name"' in source
+    assert 'display_name = (' in source
+    assert 'await ctx.guild.fetch_member(membre.id)' in source
+    assert 'await self.bot.fetch_user(membre.id)' in source
     assert 'asset.is_animated()' in source
     assert 'asset.with_format("gif")' in source
-    assert 'e.set_image(url=avatar_url)' in source
-    assert 'label="Ouvrir l\'avatar"' in source
+    assert 'data = await asset.read()' in source
+    assert 'e.set_image(url=f"attachment://{filename}")' in source
+    assert 'discord.File(io.BytesIO(data), filename=filename)' in source
+    assert 'label="Ouvrir l\'avatar"' not in source
 
 
 def test_setup_is_compact_and_does_not_repeat_the_control_center():

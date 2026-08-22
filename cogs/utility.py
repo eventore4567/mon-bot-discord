@@ -600,25 +600,75 @@ class Utility(commands.Cog, name="Utility"):
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def avatar(self, ctx: commands.Context, membre: discord.Member = None):
         membre = membre or ctx.author
-        asset = membre.display_avatar
+        # Rafraîchit les données : un Member gardé en cache peut encore contenir l'ancien
+        # hash d'un avatar animé et produire une URL CDN « Invalid resource ».
+        fresh_member = membre
         try:
-            if asset.is_animated():
-                asset = asset.with_format("gif")
-            asset = asset.with_size(1024)
-        except (AttributeError, ValueError):
+            if ctx.guild is not None:
+                fresh_member = await ctx.guild.fetch_member(membre.id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             pass
-        avatar_url = str(asset.url)
-        display_name = getattr(membre, "display_name", None) or getattr(membre, "name", None) or str(membre)
+        fresh_user = None
+        try:
+            fresh_user = await self.bot.fetch_user(membre.id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
+
+        display_name = (
+            getattr(fresh_member, "display_name", None)
+            or getattr(membre, "display_name", None)
+            or getattr(membre, "name", None)
+            or str(membre)
+        )
         e = await self._embed(
             ctx.guild.id if ctx.guild else None,
             title=f"Avatar de {display_name}",
-            description=f"{membre.mention}\n[Afficher l'image en taille réelle]({avatar_url})",
+            description=membre.mention,
         )
-        e.url = avatar_url
-        e.set_image(url=avatar_url)
-        view = discord.ui.View(timeout=120)
-        view.add_item(discord.ui.Button(label="Ouvrir l'avatar", url=avatar_url))
-        await ctx.send(embed=e, view=view)
+
+        # L'image est jointe directement au message au lieu de dépendre d'un lien public.
+        # Discord affiche ainsi l'avatar dans l'embed et conserve un GIF animé.
+        candidates = [
+            getattr(fresh_member, "guild_avatar", None),
+            getattr(fresh_user, "avatar", None),
+            getattr(fresh_member, "avatar", None),
+            getattr(fresh_member, "display_avatar", None),
+            getattr(membre, "default_avatar", None),
+        ]
+        seen: set[str] = set()
+        upload_limit = int(getattr(ctx.guild, "filesize_limit", 10 * 1024 * 1024) or 10 * 1024 * 1024)
+        for original_asset in candidates:
+            if original_asset is None:
+                continue
+            original_url = str(getattr(original_asset, "url", "") or "")
+            if not original_url or original_url in seen:
+                continue
+            seen.add(original_url)
+            for size in (1024, 512, 256):
+                try:
+                    asset = original_asset
+                    if asset.is_animated():
+                        asset = asset.with_format("gif")
+                    asset = asset.with_size(size)
+                    data = await asset.read()
+                    if not data or len(data) > upload_limit:
+                        continue
+                    kind = _image_kind(data) or ("gif" if asset.is_animated() else "png")
+                    extension = "jpg" if kind == "jpeg" else kind
+                    filename = f"avatar-{membre.id}.{extension}"
+                    e.set_image(url=f"attachment://{filename}")
+                    return await ctx.send(
+                        embed=e,
+                        file=discord.File(io.BytesIO(data), filename=filename),
+                    )
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
+                    continue
+
+        # Le seul cas de repli possible est l'avatar Discord par défaut.
+        fallback = getattr(membre, "default_avatar", None)
+        if fallback is not None:
+            e.set_image(url=str(fallback.url))
+        await ctx.send(embed=e)
 
     @commands.hybrid_group(
         name="info",
