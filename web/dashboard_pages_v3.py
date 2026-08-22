@@ -1,6 +1,12 @@
 """Compatibility entry point for the SentriX dashboard presentation layer."""
 
 from .dashboard_oxyde_rebuild import apply_dashboard_pages as _apply_oxyde_dashboard
+from .dashboard_oxyde_hotfix import apply_dashboard_hotfix, patch_dashboard_runtime
+
+
+# dashboard.py imports this module after its handlers are defined. Patch the guild reader
+# immediately so a secondary/optional table can never leave the whole dashboard blank.
+patch_dashboard_runtime()
 
 
 _EMBEDS_PAGE_FIX = r"""
@@ -46,14 +52,14 @@ _EMBEDS_PAGE_JS = r"""
 
 
 def apply_dashboard_pages(html: str) -> str:
-    """Install the clean dashboard and the small embeds compatibility page."""
+    """Install the clean dashboard, embeds bridge and final reliability layer."""
     html = _apply_oxyde_dashboard(html)
     if "body[data-tab=\"embeds\"] #sxV4Save" not in html:
         html = html.replace("  </style>", _EMBEDS_PAGE_FIX + "\n  </style>", 1)
     marker = "    Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));"
     if marker in html and "sxRenderWithEmbeds" not in html:
         html = html.replace(marker, _EMBEDS_PAGE_JS + "\n" + marker, 1)
-    return html
+    return apply_dashboard_hotfix(html)
 
 
 __all__ = ["apply_dashboard_pages"]
