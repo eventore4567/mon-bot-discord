@@ -16,6 +16,12 @@ import discord
 
 ASSET_DIR = Path(__file__).resolve().parents[1] / "assets" / "sentrix"
 
+# Les fichiers restent disponibles pour de futurs panneaux statiques, mais ne sont plus
+# joints automatiquement aux réponses. Sur Discord, une miniature locale peut se détacher
+# lors d'une édition et devenir une image géante. La V3 utilise donc la petite photo du bot
+# et la couleur de bordure pour identifier les catégories.
+AUTO_ATTACH_CATEGORY_ASSETS = False
+
 CATEGORY_ASSETS: dict[str, str] = {
     "brand": "brand.png",
     "utility": "brand.png",
@@ -75,6 +81,8 @@ def decorate_send_kwargs(
     l'ancienne miniature en grande pièce jointe au-dessus du panneau. Ils utilisent à la
     place l'avatar public du bot, qui reste petit et stable pendant toutes les éditions.
     """
+    if not AUTO_ATTACH_CATEGORY_ASSETS:
+        return kwargs
     if kwargs.get("view") is not None:
         return kwargs
     if (

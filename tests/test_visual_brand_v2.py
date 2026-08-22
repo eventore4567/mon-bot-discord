@@ -71,7 +71,7 @@ def test_interactive_panels_never_attach_category_artwork():
     assert not embed.thumbnail.url
 
 
-def test_bot_avatar_is_used_as_a_small_remote_thumbnail():
+def test_bot_avatar_is_used_only_as_the_small_author_icon():
     bot_user = SimpleNamespace(
         display_avatar=SimpleNamespace(url="https://cdn.discordapp.com/avatar.png")
     )
@@ -79,5 +79,26 @@ def test_bot_avatar_is_used_as_a_small_remote_thumbnail():
         discord.Embed(title="Configuration"),
         bot_user=bot_user,
     )
-    assert embed.thumbnail.url == "https://cdn.discordapp.com/avatar.png"
-    assert not embed.thumbnail.url.startswith("attachment://")
+    assert embed.author.icon_url == "https://cdn.discordapp.com/avatar.png"
+    assert not embed.thumbnail.url
+
+
+def test_v3_titles_are_calm_and_ordinary_cards_have_no_extra_timestamp():
+    embed = premium_style.style_embed(discord.Embed(title="SENTRIX / CONFIGURATION"))
+    assert embed.title == "SentriX • Configuration"
+    assert embed.timestamp is None
+
+
+def test_category_artwork_is_never_auto_attached_in_v3():
+    embed = discord.Embed(title="Configuration")
+    kwargs = brand_assets.decorate_send_kwargs({}, embed=embed, category="configuration")
+    assert kwargs == {}
+    assert not embed.thumbnail.url
+
+
+def test_setup_summary_does_not_repeat_the_module_list():
+    embed = discord.Embed(title="SENTRIX / CONFIGURATION")
+    embed.add_field(name="Serveur", value="Prêt")
+    embed.add_field(name="Modules", value="Tickets\nLogs\nNiveaux")
+    styled = premium_style.style_embed(embed, category="configuration")
+    assert [field.name for field in styled.fields] == ["Serveur"]

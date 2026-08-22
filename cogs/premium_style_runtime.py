@@ -75,7 +75,7 @@ def _configure_instance_branding() -> None:
 
     original_style_embed = premium_style.style_embed
     premium_style.SENTRIX_TITLE_RE = re.compile(
-        rf"^(?:SENTRIX|{re.escape(brand)})\s*/\s*",
+        rf"^(?:SENTRIX|{re.escape(brand)})\s*(?:/|•)\s*",
         re.IGNORECASE,
     )
     premium_style.CATEGORY_NAMES["brand"] = brand
@@ -83,8 +83,8 @@ def _configure_instance_branding() -> None:
     def canonical_title(category: str, *, log_type: str | None = None) -> str:
         label = premium_style.CATEGORY_NAMES.get(category, "Information")
         if log_type:
-            return premium_style.clip(f"{brand} / JOURNAL {label}".upper(), 256)
-        return premium_style.clip(f"{brand} / {label}".upper(), 256)
+            return premium_style.clip(f"{brand} • Journal {label}", 256)
+        return premium_style.clip(f"{brand} • {label}", 256)
 
     def footer_text(*, guild: discord.Guild | None = None, requester: Any = None) -> str:
         parts = [brand]
@@ -94,14 +94,14 @@ def _configure_instance_branding() -> None:
             display = getattr(requester, "display_name", None) or getattr(requester, "name", None)
             if display:
                 parts.append(premium_style.clip(display, 40))
-        return " / ".join(parts)
+        return " • ".join(parts)
 
     def branded_style_embed(embed: discord.Embed, *args, **kwargs):
         if isinstance(embed, discord.Embed):
             title = str(getattr(embed, "title", "") or "").strip()
-            match = re.match(r"^SENTRIX\s*/\s*(.+)$", title, flags=re.IGNORECASE)
+            match = re.match(r"^SENTRIX\s*(?:/|•)\s*(.+)$", title, flags=re.IGNORECASE)
             if match:
-                embed.title = premium_style.clip(f"{brand} / {match.group(1)}".upper(), 256)
+                embed.title = premium_style.clip(f"{brand} • {match.group(1)}", 256)
             elif title.casefold() == "sentrix":
                 embed.title = brand
         return original_style_embed(embed, *args, **kwargs)

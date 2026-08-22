@@ -81,7 +81,7 @@ LEADING_DECORATION = re.compile(
     flags=re.UNICODE,
 )
 SPACE_RE = re.compile(r"[ \t]{2,}")
-SENTRIX_TITLE_RE = re.compile(r"^SENTRIX\s*/\s*", re.IGNORECASE)
+SENTRIX_TITLE_RE = re.compile(r"^SENTRIX\s*(?:/|•)\s*", re.IGNORECASE)
 
 _GENERIC_TITLES = {
     "action terminée", "action terminee", "action impossible",
@@ -117,6 +117,23 @@ def clean_title(value: Any, fallback: str = "Information") -> str:
     cleaned = SPACE_RE.sub(" ", cleaned).strip()
     cleaned = microcopy.polish_text(cleaned)
     return cleaned or fallback
+
+
+def display_label(value: Any, fallback: str = "Information") -> str:
+    """Transforme un ancien titre tout en capitales en libellé premium plus calme."""
+    text = clean_title(value, fallback)
+    if text.isupper():
+        text = text[:1].upper() + text[1:].lower()
+    replacements = {
+        " ia": " IA",
+        " ai": " AI",
+        " xp": " XP",
+        " automod": " AutoMod",
+    }
+    padded = f" {text}"
+    for source, target in replacements.items():
+        padded = re.sub(rf"{re.escape(source)}\b", target, padded, flags=re.IGNORECASE)
+    return padded.strip()
 
 
 def infer_kind(embed: discord.Embed | None = None, content: str = "") -> str:
@@ -222,8 +239,8 @@ def _footer_text(*, guild: discord.Guild | None = None, requester: Any = None) -
 def _canonical_title(category: str, *, log_type: str | None = None) -> str:
     label = CATEGORY_NAMES.get(category, "Information")
     if log_type:
-        return clip(f"SentriX / Journal {label}", 256)
-    return clip(f"SentriX / {label}", 256)
+        return clip(f"SentriX • Journal {label}", 256)
+    return clip(f"SentriX • {label}", 256)
 
 
 def _detail_title(original_title: Any, category: str) -> str | None:
@@ -274,8 +291,10 @@ def style_embed(
     original_title = getattr(embed, "title", None)
     cleaned_original = clean_title(original_title) if original_title else ""
     if cleaned_original and SENTRIX_TITLE_RE.match(cleaned_original):
-        # Les centres spécialisés gardent leur titre métier, sans mise en majuscules forcée.
-        embed.title = clip(cleaned_original, 256)
+        # Les centres spécialisés gardent leur nom, avec une typographie moins agressive.
+        panel_name = SENTRIX_TITLE_RE.sub("", cleaned_original).strip()
+        brand_name = CATEGORY_NAMES.get("brand", "SentriX")
+        embed.title = clip(f"{brand_name} • {display_label(panel_name)}", 256)
         detail = None
     else:
         detail = _detail_title(original_title, category)
@@ -290,19 +309,16 @@ def style_embed(
     elif not current_colour or current_colour in SYSTEM_COLOURS:
         embed.colour = discord.Colour(category_colour)
 
-    if embed.timestamp is None:
+    # Le message Discord possède déjà son heure. On réserve le timestamp interne aux
+    # journaux afin d'alléger toutes les cartes de commandes ordinaires.
+    if log_type and embed.timestamp is None:
         embed.timestamp = datetime.now(timezone.utc)
 
     # La photo de profil configurée sur le compte bot reste l'identité principale.
-    # Elle est chargée depuis l'URL Discord et ne peut donc jamais devenir une grande
-    # pièce jointe détachée lors d'une mise à jour de bouton ou de menu.
+    # Elle reste dans la petite icône d'auteur ; aucune photo de catégorie n'est jointe.
     avatar = None
     if bot_user is not None:
         avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
-        current_thumbnail = getattr(getattr(embed, "thumbnail", None), "url", None)
-        current_image = getattr(getattr(embed, "image", None), "url", None)
-        if avatar and not current_thumbnail and not current_image:
-            embed.set_thumbnail(url=str(avatar))
 
     current_author = getattr(embed, "author", None)
     if bot_user is not None and not getattr(current_author, "name", None):
@@ -337,6 +353,13 @@ def style_embed(
         embed.clear_fields()
         for field in fields:
             embed.add_field(name=field.name, value=field.value, inline=field.inline)
+
+    # Le résumé de +setup n'a pas besoin de répéter tous les modules : le menu situé
+    # juste dessous les contient déjà. Retirer ce bloc rend le panneau proche de +ticket.
+    if category == "configuration" and "configuration" in str(embed.title or "").casefold():
+        for index in range(len(embed.fields) - 1, -1, -1):
+            if clean_title(embed.fields[index].name).casefold() in {"modules", "module"}:
+                embed.remove_field(index)
 
     for index, field in enumerate(list(embed.fields)):
         # Les champs en Title Case sont plus lisibles que des libellés entièrement en capitales.
@@ -423,6 +446,9 @@ def style_view(view: discord.ui.View | None) -> discord.ui.View | None:
             "enregistrer", "save", "confirmer", "confirm", "valider", "verify",
             "créer", "create", "envoyer", "send", "activer", "enable",
         )):
+            item.style = discord.ButtonStyle.primary
+        elif item.style is discord.ButtonStyle.primary:
+            # Une vue peut désigner explicitement son action principale : on la conserve.
             item.style = discord.ButtonStyle.primary
         else:
             item.style = discord.ButtonStyle.secondary
