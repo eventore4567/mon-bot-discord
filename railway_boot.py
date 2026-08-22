@@ -58,11 +58,13 @@ if "cogs.create_sentrix_v3" not in bot_main.EXTENSIONS:
 if "cogs.canonical_interactions" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.canonical_interactions")
 # Nouvelles fonctions isolées : starboard, vocaux temporaires, sticky, annonces planifiées
-# et diagnostic serveur. Elles sont chargées avant la politique visuelle finale.
+# et diagnostic serveur.
 if "cogs.sentrix_plus" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.sentrix_plus")
-# Une seule politique visuelle finale. L'ancien compact_response_style n'est plus chargé :
-# il doublonnait la transformation et rendait les réponses incohérentes selon la commande.
+# Suite professionnelle : 20 systèmes regroupés derrière +sentrixpro.
+if "cogs.sentrix_ultimate" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.sentrix_ultimate")
+# Une seule politique visuelle finale.
 if "cogs.plain_text_all_extension" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.plain_text_all_extension")
 
@@ -71,38 +73,45 @@ bot_main.CATEGORY_COMMANDS["economie"] = (
 )
 
 _SENTRIX_PLUS_CONFIG_COMMANDS = frozenset({
-    "starboard-setup",
-    "starboard-off",
-    "voicehub-setup",
-    "voicehub-off",
-    "sticky-set",
-    "sticky-every",
-    "sticky-off",
-    "schedule-send",
-    "schedule-list",
-    "schedule-cancel",
-    "server-health",
+    "starboard-setup", "starboard-off", "voicehub-setup", "voicehub-off",
+    "sticky-set", "sticky-every", "sticky-off", "schedule-send", "schedule-list",
+    "schedule-cancel", "server-health",
 })
 _SENTRIX_PLUS_MEMBER_COMMANDS = frozenset({
-    "sentrix-plus",
-    "voice-name",
-    "voice-limit",
-    "voice-lock",
-    "voice-unlock",
-    "voice-transfer",
+    "sentrix-plus", "voice-name", "voice-limit", "voice-lock", "voice-unlock", "voice-transfer",
+})
+
+_SENTRIX_PRO_PUBLIC_COMMANDS = frozenset({
+    "sentrixpro", "sentrixpro help", "sentrixpro trust", "sentrixpro profile",
+    "sentrixpro badges", "sentrixpro season", "sentrixpro status",
+})
+_SENTRIX_PRO_ADMIN_COMMANDS = frozenset({
+    "sentrixpro security", "sentrixpro lockdown", "sentrixpro quarantine-setup",
+    "sentrixpro history", "sentrixpro live", "sentrixpro notifications",
+    "sentrixpro welcome", "sentrixpro autorole", "sentrixpro goal",
+    "sentrixpro aimod", "sentrixpro ticket-summary", "sentrixpro digest",
+    "sentrixpro modules", "sentrixpro module",
 })
 
 bot_main.CATEGORY_COMMANDS["configuration"] = (
     bot_main.CATEGORY_COMMANDS.get("configuration", frozenset())
     | frozenset({"create", "create sentrix"})
     | _SENTRIX_PLUS_CONFIG_COMMANDS
+    | _SENTRIX_PRO_ADMIN_COMMANDS
 )
 bot_main.PUBLIC_COMMANDS = (
-    getattr(bot_main, "PUBLIC_COMMANDS", frozenset()) | _SENTRIX_PLUS_MEMBER_COMMANDS
+    getattr(bot_main, "PUBLIC_COMMANDS", frozenset())
+    | _SENTRIX_PLUS_MEMBER_COMMANDS
+    | _SENTRIX_PRO_PUBLIC_COMMANDS
 )
-bot_main.KNOWN_PERMISSION_COMMANDS = bot_main.KNOWN_PERMISSION_COMMANDS | frozenset(
-    {"drop", "create", "create sentrix"}
-) | _SENTRIX_PLUS_CONFIG_COMMANDS | _SENTRIX_PLUS_MEMBER_COMMANDS
+bot_main.KNOWN_PERMISSION_COMMANDS = (
+    bot_main.KNOWN_PERMISSION_COMMANDS
+    | frozenset({"drop", "create", "create sentrix"})
+    | _SENTRIX_PLUS_CONFIG_COMMANDS
+    | _SENTRIX_PLUS_MEMBER_COMMANDS
+    | _SENTRIX_PRO_PUBLIC_COMMANDS
+    | _SENTRIX_PRO_ADMIN_COMMANDS
+)
 
 
 logger = logging.getLogger("bot.railway")
