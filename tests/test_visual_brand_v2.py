@@ -241,3 +241,16 @@ def test_final_response_policy_installs_absolute_button_wrappers():
     source = inspect.getsource(plain_response_policy.install)
     assert "_sentrix_absolute_rich" in source
     assert 'raw_response_edit(self, *args, **kwargs)' in source
+
+
+def test_final_response_policy_covers_every_command_transport():
+    import inspect
+    source = inspect.getsource(plain_response_policy.install)
+    assert 'raw_context_send(self, *args, **kwargs)' in source
+    assert 'self._sentrix_response_sent = True' in source
+    assert 'raw_messageable_send(self, *args, **kwargs)' in source
+    assert 'raw_message_edit(self, *args, **kwargs)' in source
+    assert 'raw_response_send(self, *args, **kwargs)' in source
+    assert 'raw_response_edit(self, *args, **kwargs)' in source
+    assert 'raw_original_edit(self, *args, **kwargs)' in source
+    assert 'raw_webhook_send(self, *args, **kwargs)' in source
