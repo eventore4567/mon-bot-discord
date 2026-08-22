@@ -304,7 +304,35 @@ def _detail_title(original_title: Any, category: str) -> str | None:
     return cleaned
 
 
+def _branded_category(value: Any) -> str | None:
+    """Retrouve la catégorie d'un titre déjà transformé par une ancienne couche."""
+    cleaned = clean_title(value, fallback="")
+    if not cleaned or not SENTRIX_TITLE_RE.match(cleaned):
+        return None
+    panel_name = SENTRIX_TITLE_RE.sub("", cleaned).strip().casefold()
+    for key, label in CATEGORY_NAMES.items():
+        if panel_name == str(label).casefold():
+            return key
+    return None
+
+
+def _strip_repeated_titles(description: Any) -> str:
+    """Supprime les titres SentriX accidentellement recopiés au début du contenu."""
+    body = str(description or "").strip()
+    if not body:
+        return ""
+    lines = body.splitlines()
+    while lines:
+        candidate = lines[0].strip().strip("*_` ")
+        if candidate and SENTRIX_TITLE_RE.match(clean_title(candidate, fallback="")):
+            lines.pop(0)
+            continue
+        break
+    return "\n".join(lines).strip()
+
+
 def _merge_detail(description: Any, detail: str | None) -> str | None:
+    description = _strip_repeated_titles(description)
     body = microcopy.polish_text(clip(description, 4096)) if description else ""
     if not detail:
         return body or None
@@ -337,11 +365,18 @@ def style_embed(
 
     original_title = getattr(embed, "title", None)
     cleaned_original = clean_title(original_title) if original_title else ""
+    existing_category = _branded_category(cleaned_original)
     if cleaned_original and SENTRIX_TITLE_RE.match(cleaned_original):
         # Les centres spécialisés gardent leur nom, avec une typographie moins agressive.
         panel_name = SENTRIX_TITLE_RE.sub("", cleaned_original).strip()
         brand_name = CATEGORY_NAMES.get("brand", "SentriX")
-        embed.title = clip(f"{brand_name} • {display_label(panel_name)}", VISUAL_LIMITS["title"])
+        # Si une première couche a choisi « Utilitaires » sans connaître la commande,
+        # la couche qui possède enfin le contexte remplace ce mauvais titre au lieu de
+        # l'empiler dans la description.
+        if command is not None and existing_category and existing_category != category:
+            embed.title = _canonical_title(category, log_type=log_type)
+        else:
+            embed.title = clip(f"{brand_name} • {display_label(panel_name)}", VISUAL_LIMITS["title"])
         detail = None
     else:
         detail = _detail_title(original_title, category)

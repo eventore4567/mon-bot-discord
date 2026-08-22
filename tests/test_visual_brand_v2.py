@@ -134,3 +134,27 @@ def test_v4_labels_are_short_enough_for_mobile():
     view.add_item(discord.ui.Button(label="Une action principale beaucoup trop longue", row=0))
     premium_style.style_view(view)
     assert len(view.children[0].label) <= premium_style.VISUAL_LIMITS["button_label"]
+
+
+def test_v4_replaces_a_wrong_pre_styled_category_without_duplicating_it():
+    command = _command("Music", "queue")
+    embed = discord.Embed(
+        title="SentriX • Utilitaires",
+        description="SentriX • Utilitaires\n**File d'attente vide**",
+    )
+    styled = premium_style.style_embed(embed, command=command)
+    assert styled.title == "SentriX • Musique"
+    assert styled.description == "**File d'attente vide**"
+    assert "Utilitaires" not in styled.description
+
+
+def test_v4_styling_is_idempotent_across_context_and_messageable_layers():
+    command = _command("Music", "queue")
+    embed = premium_style.style_embed(
+        discord.Embed(title="File d'attente vide"),
+        command=command,
+    )
+    first = embed.to_dict()
+    premium_style.style_embed(embed, command=command)
+    premium_style.style_embed(embed)
+    assert embed.to_dict() == first

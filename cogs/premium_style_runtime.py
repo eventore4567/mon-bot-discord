@@ -397,7 +397,12 @@ def _patch_webhook_followups(bot: commands.Bot) -> None:
 
 
 def _patch_design_system() -> None:
-    """Fait converger l'ancien design_system vers le moteur unique."""
+    """Construit l'embed brut ; le transport l'habille ensuite une seule fois.
+
+    L'ancien comportement appliquait le style ici sans connaître la commande, puis une
+    seconde fois dans Context.send. Cela produisait par exemple « SentriX • Musique »
+    suivi de « SentriX • Utilitaires » dans le contenu.
+    """
     try:
         from utils import design_system
     except Exception:
@@ -412,7 +417,7 @@ def _patch_design_system() -> None:
             embed.set_thumbnail(url=thumbnail)
         if footer:
             embed.set_footer(text=footer)
-        return premium_style.style_embed(embed, requester=user)
+        return embed
 
     design_system.create_embed = create_embed
 
