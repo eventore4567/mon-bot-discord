@@ -323,6 +323,14 @@ def install(bot: commands.Bot | None = None) -> None:
         async def absolute_response_edit(self: discord.InteractionResponse, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
             args, kwargs = _style_interaction_args(interaction, args, kwargs)
+            # Même méthode que +help : on accuse le clic, puis on édite directement le
+            # message Discord brut. InteractionResponse.edit_message repassait encore par
+            # des couches historiques sur Précédent, Statut, À propos et plusieurs panels.
+            if interaction is not None and getattr(interaction, "message", None) is not None:
+                if not self.is_done():
+                    await self.defer()
+                raw_message_edit = originals.get("message_edit") or _unwrap(discord.Message.edit)
+                return await raw_message_edit(interaction.message, *args, **kwargs)
             return await raw_response_edit(self, *args, **kwargs)
 
         absolute_response_edit._sentrix_absolute_rich = True

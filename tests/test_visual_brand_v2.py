@@ -251,6 +251,8 @@ def test_final_response_policy_installs_absolute_button_wrappers():
     source = inspect.getsource(plain_response_policy.install)
     assert "_sentrix_absolute_rich" in source
     assert 'raw_response_edit(self, *args, **kwargs)' in source
+    assert 'await self.defer()' in source
+    assert 'raw_message_edit(interaction.message, *args, **kwargs)' in source
 
 
 def test_final_response_policy_covers_every_command_transport():
