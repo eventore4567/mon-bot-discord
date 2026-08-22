@@ -24,58 +24,39 @@ class SentriXAutoShardedBot(commands.AutoShardedBot):
         super().__init__(*args, **kwargs)
 
 
-# IMPORTANT : main.BotAllInOne est défini en héritant de commands.Bot. Sur le bootstrap
-# Railway uniquement, on remplace cette classe de base AVANT d'importer main. Avec
-# SHARD_COUNT=0, discord.py demande automatiquement à Discord le nombre recommandé.
 if not getattr(commands, "_sentrix_auto_sharded_bootstrap", False):
     commands.Bot = SentriXAutoShardedBot
     commands._sentrix_auto_sharded_bootstrap = True
 
 import main as bot_main
 
-# Extensions complémentaires chargées sur les instances Railway. +drop reste une commande
-# texte uniquement afin de ne consommer aucun emplacement slash supplémentaire.
 if "cogs.drop" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.drop")
 if "cogs.log_access_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.log_access_fix")
-# Discord ne peut livrer les interactions qu'en Gateway OU via un endpoint HTTP. SentriX
-# utilise discord.py/Gateway : cette garde supprime donc tout ancien endpoint HTTP resté
-# configuré dans l'application, puis republie le catalogue slash sur le bon transport.
 if "cogs.interaction_transport_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.interaction_transport_guard")
-# Inventorie les intégrations Discord ressemblant à la marque courante mais appartenant à
-# une autre application. Aucun doublon n'est supprimé automatiquement par ce détecteur.
 if "cogs.stale_discord_app_detector" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.stale_discord_app_detector")
-# Lit le vrai schéma horaire ProductionPhase afin d'identifier les noms de commandes qui
-# accumulent des erreurs, sans exposer d'identifiant utilisateur/serveur.
 if "cogs.command_error_probe" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.command_error_probe")
-# Neutralise uniquement l'ancien observability runtime qui réutilisait un schéma SQL
-# incompatible. La gestion des interactions slash n'est plus installée ici en plusieurs
-# couches : canonical_interactions sera l'unique politique finale.
 if "cogs.legacy_observability_conflict_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.legacy_observability_conflict_guard")
-# Commande texte uniquement, ajoutée sous +security sans consommer de slot slash.
 if "cogs.automod_enable_all" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.automod_enable_all")
-# Doit être chargé après V10 : intercepte +setup auto AVANT le parsing de la commande
-# historique /setup, dont les arguments supplémentaires étaient sinon ignorés.
 if "cogs.setup_auto_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.setup_auto_fix")
-# Rend +addemoji/+addemogi utilisable avec un simple nom (ex: +addemogi ban-1).
-# Les anciennes syntaxes avec emoji, pièce jointe ou URL restent compatibles.
 if "cogs.emoji_name_lookup" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.emoji_name_lookup")
-# Créateur du serveur officiel SentriX. Prefix-only : +create sentrix.
+# Ancienne V2 chargée d'abord pour la compatibilité avec les données déjà présentes.
 if "cogs.create_sentrix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.create_sentrix")
-# Moteur canonique unique des interactions : defer, erreurs slash et confidentialité.
+# V3 retire proprement le Cog V2 puis réenregistre +create sentrix avec la structure
+# professionnelle, les salons emoji et les logs automatiques séparés.
+if "cogs.create_sentrix_v3" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.create_sentrix_v3")
 if "cogs.canonical_interactions" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.canonical_interactions")
-# TOUJOURS EN DERNIER : uniquement le rendu visuel des réponses de commandes. Cette couche
-# ne gère pas les interactions ; elle transforme les réponses ordinaires en texte compact.
 if "cogs.compact_response_style" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.compact_response_style")
 
@@ -95,7 +76,6 @@ logger = logging.getLogger("bot.railway")
 
 
 async def _dashboard_already_started(_bot):
-    """Remplace le second démarrage du dashboard dans BotAllInOne.setup_hook."""
     return None
 
 
@@ -151,8 +131,6 @@ async def run() -> None:
         logger.critical("Le processus Discord s'est arrêté :\n%s", traceback.format_exc())
         raise
     finally:
-        # Dernier snapshot cohérent avant fermeture de la connexion SQLite. Si PostgreSQL
-        # est absent, snapshot() retourne immédiatement sans gêner l'arrêt.
         try:
             if durable.configured:
                 await asyncio.wait_for(
