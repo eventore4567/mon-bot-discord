@@ -1,11 +1,9 @@
 """Politique finale des réponses SentriX.
 
-But: une commande normale doit répondre comme un grand bot Discord moderne : texte natif,
-sans carte/embed. Les embeds restent uniquement pour les vrais panneaux de configuration
-et les interfaces qui ont besoin de champs/boutons riches.
-
-Cette couche est installée EN DERNIER par cogs/__init__.py, après les anciens runtimes de
-style, afin qu'aucune couche historique ne puisse remettre le texte dans une box violette.
+Les commandes passent désormais par le moteur visuel premium afin d'afficher la photo de
+profil actuelle du bot et l'icône correspondant à leur catégorie. Le module conserve son
+nom historique et son marqueur d'installation pour rester compatible avec les runtimes
+déjà en production.
 """
 from __future__ import annotations
 
@@ -174,34 +172,9 @@ def install(bot: commands.Bot | None = None) -> None:
         return
 
     async def plain_send(self: commands.Context, *args, **kwargs):
-        root = _root(self)
-        if root in RICH_ROOTS:
-            return await current(self, *args, **kwargs)
-
-        args, kwargs = _convert(args, kwargs, _label(self))
-
-        # Pour une commande préfixée, on évite entièrement Context.send après conversion :
-        # les anciens wrappers de style qui transformaient le texte en embed ne peuvent
-        # donc plus réintervenir. Messageable.send garde le message natif Discord.
-        if self.interaction is None:
-            kwargs.pop("ephemeral", None)
-            if self.message is not None and "reference" not in kwargs:
-                kwargs["reference"] = discord.MessageReference(
-                    message_id=self.message.id,
-                    channel_id=self.channel.id,
-                    guild_id=self.guild.id if self.guild else None,
-                    fail_if_not_exists=False,
-                )
-                kwargs.setdefault("mention_author", False)
-            try:
-                return await self.channel.send(*args, **kwargs)
-            except discord.HTTPException:
-                kwargs.pop("reference", None)
-                kwargs.pop("mention_author", None)
-                return await self.channel.send(*args, **kwargs)
-
-        # Les slash restent gérés par le moteur canonique (defer/ephemeral/followup), mais
-        # reçoivent déjà ici le contenu texte au lieu de l'embed source.
+        # Le wrapper premium placé juste en dessous transforme le texte simple en embed,
+        # applique la catégorie, ajoute la photo du bot puis joint l'icône correspondante.
+        # Les mentions, références, fichiers métier et réponses éphémères sont conservés.
         return await current(self, *args, **kwargs)
 
     plain_send._sentrix_plain_response_policy = True

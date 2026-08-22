@@ -258,6 +258,7 @@ def _patch_context_send() -> None:
             requester=self.author,
             bot_user=_bot_user_from_context(self),
             allow_content_wrap=True,
+            include_brand_asset=True,
         )
         return await original(self, *args, **kwargs)
 
@@ -277,6 +278,7 @@ def _patch_context_reply() -> None:
             requester=self.author,
             bot_user=_bot_user_from_context(self),
             allow_content_wrap=True,
+            include_brand_asset=True,
         )
         return await original(self, *args, **kwargs)
 
@@ -295,6 +297,7 @@ def _patch_messageable_send(bot: commands.Bot) -> None:
             guild=guild,
             bot_user=bot.user,
             allow_content_wrap=False,
+            include_brand_asset=True,
         )
         return await original(self, *args, **kwargs)
 
@@ -334,6 +337,7 @@ def _patch_interaction_response(bot: commands.Bot) -> None:
             requester=getattr(interaction, "user", None),
             bot_user=bot.user,
             allow_content_wrap=True,
+            include_brand_asset=True,
         )
         return await original_send(self, *args, **kwargs)
 
@@ -384,6 +388,7 @@ def _patch_webhook_followups(bot: commands.Bot) -> None:
                 kwargs,
                 bot_user=bot.user,
                 allow_content_wrap=True,
+                include_brand_asset=True,
             )
         return await original(self, *args, **kwargs)
 

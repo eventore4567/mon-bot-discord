@@ -12,7 +12,7 @@ from typing import Any
 
 import discord
 
-from utils import microcopy
+from utils import brand_assets, microcopy
 
 
 COLORS: dict[str, int] = {
@@ -257,6 +257,17 @@ def style_embed(
     if embed.timestamp is None:
         embed.timestamp = datetime.now(timezone.utc)
 
+    # La photo de profil configurée sur le compte bot reste l'identité principale.
+    # Les nouvelles icônes de catégories sont utilisées séparément en miniature.
+    current_author = getattr(embed, "author", None)
+    if bot_user is not None and not getattr(current_author, "name", None):
+        avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
+        author_name = CATEGORY_NAMES.get("brand", "SentriX")
+        if avatar:
+            embed.set_author(name=author_name, icon_url=str(avatar))
+        else:
+            embed.set_author(name=author_name)
+
     current_footer = getattr(embed, "footer", None)
     footer_text = getattr(current_footer, "text", None) if current_footer else None
     footer_icon = getattr(current_footer, "icon_url", None) if current_footer else None
@@ -370,6 +381,7 @@ def style_kwargs(
     requester: Any = None,
     bot_user: Any = None,
     allow_content_wrap: bool = False,
+    include_brand_asset: bool = False,
     category: str | None = None,
     log_type: str | None = None,
 ) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -425,4 +437,21 @@ def style_kwargs(
 
     if "view" in new_kwargs:
         new_kwargs["view"] = style_view(new_kwargs.get("view"))
+
+    if include_brand_asset:
+        target_embed = new_kwargs.get("embed")
+        if not isinstance(target_embed, discord.Embed):
+            candidates = new_kwargs.get("embeds") or []
+            target_embed = candidates[0] if candidates and isinstance(candidates[0], discord.Embed) else None
+        if isinstance(target_embed, discord.Embed):
+            resolved_category = infer_category(
+                command=command,
+                embed=target_embed,
+                hint=category,
+            )
+            new_kwargs = brand_assets.decorate_send_kwargs(
+                new_kwargs,
+                embed=target_embed,
+                category=resolved_category,
+            )
     return tuple(new_args), new_kwargs
