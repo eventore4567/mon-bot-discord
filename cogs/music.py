@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, design_system
+from utils import embeds, design_system, premium_style
 
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamretries 5 -reconnect_delay_max 5",
@@ -65,7 +65,13 @@ class Music(commands.Cog, name="Music"):
             info = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
         if "entries" in info:
             info = info["entries"][0]
-        return {"title": info.get("title", "Titre inconnu"), "url": info["url"], "webpage_url": info.get("webpage_url", "")}
+        return {
+            "title": info.get("title", "Titre inconnu"),
+            "url": info["url"],
+            "webpage_url": info.get("webpage_url", ""),
+            "thumbnail": info.get("thumbnail", ""),
+            "duration": info.get("duration", 0),
+        }
 
     def play_next(self, guild: discord.Guild):
         state = self.get_state(guild.id)
@@ -173,17 +179,33 @@ class Music(commands.Cog, name="Music"):
             return await ctx.send(embed=await self._embed(ctx.guild.id, title="File d'attente vide"))
         lines = []
         if state.current:
-            lines.append(f"▶️ **En cours :** {state.current['title']}")
-        for i, t in enumerate(state.queue[:10], 1):
-            lines.append(f"{i}. {t['title']}")
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="File d'attente", description="\n".join(lines)))
+            lines.append(f"**En cours :** {state.current['title']}")
+        for i, track in enumerate(state.queue[:8], 1):
+            lines.append(f"{i}. {track['title']}")
+        hidden = max(0, len(state.queue) - 8)
+        if hidden:
+            lines.append(f"+{hidden} titre{'s' if hidden > 1 else ''} dans la file")
+        await ctx.send(embed=await self._embed(
+            ctx.guild.id,
+            title="File d'attente",
+            description="\n".join(lines),
+        ))
 
     @commands.hybrid_command(name="nowplaying", description="Afficher la musique en cours.")
     async def nowplaying(self, ctx: commands.Context):
         state = self.get_state(ctx.guild.id)
         if not state.current:
             return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucune lecture en cours"))
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="En cours de lecture", description=state.current["title"]))
+        track = state.current
+        title = track["title"]
+        url = track.get("webpage_url")
+        description = f"[{title}]({url})" if url else title
+        if track.get("duration"):
+            description += f"\nDurée • {premium_style.format_duration(track['duration'])}"
+        embed = await self._embed(ctx.guild.id, title="En cours", description=description)
+        if track.get("thumbnail"):
+            embed.set_thumbnail(url=track["thumbnail"])
+        await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="volume", description="Régler le volume (0 à 100).")
     @app_commands.describe(niveau="Le niveau de volume entre 0 et 100")

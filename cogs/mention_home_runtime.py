@@ -1,4 +1,4 @@
-"""Accueil compact affiché lorsqu'un membre mentionne seulement le bot.
+"""Accueil V4 compact affiché lorsqu'un membre mentionne seulement le bot.
 
 Le panneau tient dans un unique embed et une unique rangée de boutons. Il utilise
 l'avatar Discord du compte bot comme miniature distante : aucune pièce jointe ne peut
@@ -52,7 +52,7 @@ def _tip_embed(bot: commands.Bot, prefix: str, kind: str) -> discord.Embed:
         text = f"{brand} est en ligne. Latence Discord : **{latency} ms**."
 
     embed = discord.Embed(
-        title=f"SENTRIX / {title.upper()}",
+        title=f"SentriX • {title}",
         description=text,
         color=_ACCENT,
     )
@@ -109,23 +109,20 @@ def _home_embed(bot: commands.Bot, author: discord.abc.User, prefix: str) -> dis
     brand = brand_label()
     display_name = getattr(author, "display_name", None) or getattr(author, "name", "membre")
     embed = discord.Embed(
-        title="SENTRIX / ACCUEIL",
+        title="SentriX • Accueil",
         description=(
             f"**Salut {display_name}, je suis {brand}.**\n"
-            "Je protège, configure et anime ton serveur depuis une seule interface.\n\n"
-            f"**Préfixe :** `{prefix}`\n"
-            f"**Pour commencer :** `{prefix}help` ou `{prefix}setup`\n"
-            "Tu peux aussi me mentionner avec une question pour discuter directement."
+            "Protection, configuration et outils communautaires.\n"
+            f"Préfixe `{prefix}` • Commence avec `{prefix}help` ou `{prefix}setup`."
         ),
         color=_ACCENT,
     )
     avatar = _avatar_url(bot)
     if avatar:
         embed.set_author(name=brand, icon_url=avatar)
-        embed.set_thumbnail(url=avatar)
     else:
         embed.set_author(name=brand)
-    embed.set_footer(text=f"{brand} • Panneau rapide")
+    embed.set_footer(text=f"{brand} • Accès rapide")
     return embed
 
 

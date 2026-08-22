@@ -110,6 +110,12 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
                     text = text.replace(token, "")
                 cleaned.append(f"{index}. {text.strip().lstrip('1234567890. ')}")
             embed.add_field(name="Top 5", value="\n".join(cleaned), inline=False)
+        badges = _badges(member, stats, progression)
+        embed.add_field(
+            name="Badges",
+            value=" • ".join(badges) if badges else "Aucun badge débloqué",
+            inline=False,
+        )
         return embed
 
     if page == "rankings":
@@ -148,20 +154,6 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
             f"{stats_service.format_duration(stats['voice_time'])} vocal • "
             f"streak {progression['daily_streak']} j"
         ),
-        inline=False,
-    )
-    embed.add_field(
-        name="Saison",
-        value=(
-            f"{progression['tier']} • niveau {progression['season_level']} • "
-            f"rang {_rank(data['season_rank'])}"
-        ),
-        inline=False,
-    )
-    badges = _badges(member, stats, progression)
-    embed.add_field(
-        name="Badges",
-        value=" • ".join(badges) if badges else "Aucun badge débloqué pour le moment",
         inline=False,
     )
     return embed

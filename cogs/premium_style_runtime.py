@@ -82,18 +82,16 @@ def _configure_instance_branding() -> None:
 
     def canonical_title(category: str, *, log_type: str | None = None) -> str:
         label = premium_style.CATEGORY_NAMES.get(category, "Information")
+        limit = premium_style.VISUAL_LIMITS["title"]
         if log_type:
-            return premium_style.clip(f"{brand} • Journal {label}", 256)
-        return premium_style.clip(f"{brand} • {label}", 256)
+            return premium_style.clip(f"{brand} • Journal {label}", limit)
+        return premium_style.clip(f"{brand} • {label}", limit)
 
     def footer_text(*, guild: discord.Guild | None = None, requester: Any = None) -> str:
+        del requester
         parts = [brand]
         if guild is not None:
             parts.append(premium_style.clip(getattr(guild, "name", "Serveur"), 60))
-        if requester is not None:
-            display = getattr(requester, "display_name", None) or getattr(requester, "name", None)
-            if display:
-                parts.append(premium_style.clip(display, 40))
         return " • ".join(parts)
 
     def branded_style_embed(embed: discord.Embed, *args, **kwargs):
@@ -101,7 +99,10 @@ def _configure_instance_branding() -> None:
             title = str(getattr(embed, "title", "") or "").strip()
             match = re.match(r"^SENTRIX\s*(?:/|•)\s*(.+)$", title, flags=re.IGNORECASE)
             if match:
-                embed.title = premium_style.clip(f"{brand} • {match.group(1)}", 256)
+                embed.title = premium_style.clip(
+                    f"{brand} • {match.group(1)}",
+                    premium_style.VISUAL_LIMITS["title"],
+                )
             elif title.casefold() == "sentrix":
                 embed.title = brand
         return original_style_embed(embed, *args, **kwargs)

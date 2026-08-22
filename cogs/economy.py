@@ -115,6 +115,57 @@ class ShopRoleView(discord.ui.View):
             self.add_item(ShopRoleSelect(slot, options))
 
 
+
+class ShopCatalogueView(discord.ui.View):
+    """Catalogue paginé : six articles maximum par écran, optimisé pour mobile."""
+
+    def __init__(self, pages: list[discord.Embed], owner_id: int):
+        super().__init__(timeout=180)
+        self.pages = pages
+        self.owner_id = int(owner_id)
+        self.index = 0
+        self.message: discord.Message | None = None
+        self._refresh()
+
+    def _refresh(self):
+        self.previous.disabled = self.index <= 0
+        self.next.disabled = self.index >= len(self.pages) - 1
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message(
+            "Ouvre ton propre catalogue avec +shop.",
+            ephemeral=True,
+        )
+        return False
+
+    @discord.ui.button(label="Précédent", style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.index = max(0, self.index - 1)
+        self._refresh()
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+    @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary)
+    async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.index = min(len(self.pages) - 1, self.index + 1)
+        self._refresh()
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger)
+    async def close(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=None)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+
 class Economy(commands.Cog, name="Economy"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -257,13 +308,14 @@ class Economy(commands.Cog, name="Economy"):
             rank += 1
             if rank > 10:
                 break
-            medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"**{rank}.**")
-            lines.append(f"{medal} {name} — {stats_service.format_number(r['cash'] + r['bank'])} 🪙")
+            lines.append(
+                f"**{rank}.** {name} — {stats_service.format_number(r['cash'] + r['bank'])} pièces"
+            )
         if not lines:
             return await ctx.send(embed=embeds.info("Aucune donnée économique pour l'instant."))
         style = design_system.CATEGORY_STYLES["economy"]
         embed = design_system.create_embed(
-            title=f"{style['emoji']} 🏆 Classement des plus riches",
+            title="Classement économique",
             description="\n".join(lines),
             colour=design.get("primary_color", style["colour"]),
             footer=design.get("footer"),
@@ -324,10 +376,8 @@ class Economy(commands.Cog, name="Economy"):
         return design_system.create_embed(
             title="Boutique de rôles",
             description=(
-                "Choisissez le rôle que vous voulez acheter dans le menu ci-dessous.\n"
-                "Le prix est retiré automatiquement de votre portefeuille.\n\n"
                 f"**{total} rôle(s) disponible(s)**\n"
-                "Le résultat de l'achat sera visible uniquement par vous."
+                "Choisis un rôle ci-dessous. Le prix est débité automatiquement et le résultat reste privé."
             ),
             colour=design.get("primary_color", style["colour"]),
             footer=design.get("footer"),
@@ -521,24 +571,32 @@ class Economy(commands.Cog, name="Economy"):
         )
         if not items:
             return await ctx.send(embed=embeds.info("La boutique est vide pour l'instant."))
-        lines = []
-        for item in items:
-            role = ctx.guild.get_role(item["role_id"]) if item["role_id"] else None
-            name = role.mention if role else item["name"]
-            suffix = f" — {item['description']}" if item["description"] else ""
-            if item["role_id"] and role is None:
-                suffix += " — rôle supprimé (achat bloqué)"
-            lines.append(
-                f"**#{item['id']}** {name} — **{stats_service.format_number(item['price'])} 🪙**{suffix}"
-            )
+
+        chunks = [items[index:index + 6] for index in range(0, len(items), 6)]
+        pages: list[discord.Embed] = []
         style = design_system.CATEGORY_STYLES["economy"]
-        embed = design_system.create_embed(
-            title="🛒 Boutique de rôles",
-            description="\n".join(lines) + "\n\nAcheter : `+buy <id>` ou `+buyrole @rôle`",
-            colour=design.get("primary_color", style["colour"]),
-            footer=design.get("footer"),
-        )
-        await ctx.send(embed=embed)
+        for page_number, chunk in enumerate(chunks, start=1):
+            lines = []
+            for item in chunk:
+                role = ctx.guild.get_role(item["role_id"]) if item["role_id"] else None
+                name = role.mention if role else item["name"]
+                suffix = f" — {item['description']}" if item["description"] else ""
+                if item["role_id"] and role is None:
+                    suffix += " — indisponible"
+                lines.append(
+                    f"**#{item['id']}** {name} • **{stats_service.format_number(item['price'])} pièces**{suffix}"
+                )
+            embed = design_system.create_embed(
+                title="Boutique",
+                description="\n".join(lines) + "\n\nAcheter : +buy <id> ou +buyrole @rôle",
+                colour=design.get("primary_color", style["colour"]),
+                footer=f"Page {page_number}/{len(chunks)}",
+            )
+            pages.append(embed)
+
+        view = ShopCatalogueView(pages, ctx.author.id)
+        message = await ctx.send(embed=pages[0], view=view)
+        view.message = message
 
     @commands.hybrid_command(name="buy", description="Acheter un article de la boutique.")
     @app_commands.describe(id="L'identifiant de l'article (voir /shop)")

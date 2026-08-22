@@ -254,6 +254,13 @@ class CleanHelpHomeView(discord.ui.View):
             await interaction.response.send_modal(CleanHelpSearchModal(bot, prefix, is_staff, language, author_id))
         search.callback = search_callback
         self.add_item(search)
+        close = discord.ui.Button(label="Close" if language == "en" else "Fermer", style=discord.ButtonStyle.danger, row=1)
+        async def close_callback(interaction: discord.Interaction):
+            if interaction.user.id != author_id:
+                return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)
+            await interaction.response.edit_message(view=None)
+        close.callback = close_callback
+        self.add_item(close)
 
 
 class CleanHelpPagesView(discord.ui.View):
@@ -265,7 +272,8 @@ class CleanHelpPagesView(discord.ui.View):
         previous = discord.ui.Button(label="Previous" if language == "en" else "Precedent", style=discord.ButtonStyle.secondary, row=1, disabled=len(pages) <= 1)
         home = discord.ui.Button(label="Home" if language == "en" else "Accueil", style=discord.ButtonStyle.primary, row=1)
         next_button = discord.ui.Button(label="Next" if language == "en" else "Suivant", style=discord.ButtonStyle.secondary, row=1, disabled=len(pages) <= 1)
-        search = discord.ui.Button(label="Search" if language == "en" else "Rechercher", style=discord.ButtonStyle.secondary, row=2)
+        search = discord.ui.Button(label="Search" if language == "en" else "Rechercher", style=discord.ButtonStyle.secondary, row=1)
+        close = discord.ui.Button(label="Close" if language == "en" else "Fermer", style=discord.ButtonStyle.danger, row=1)
         def refresh():
             previous.disabled = self.index <= 0
             next_button.disabled = self.index >= len(self.pages) - 1
@@ -285,8 +293,12 @@ class CleanHelpPagesView(discord.ui.View):
             if interaction.user.id != author_id:
                 return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)
             await interaction.response.send_modal(CleanHelpSearchModal(bot, prefix, is_staff, language, author_id))
-        previous.callback, home.callback, next_button.callback, search.callback = previous_callback, home_callback, next_callback, search_callback
-        self.add_item(previous); self.add_item(home); self.add_item(next_button); self.add_item(search); refresh()
+        async def close_callback(interaction: discord.Interaction):
+            if interaction.user.id != author_id:
+                return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)
+            await interaction.response.edit_message(view=None)
+        previous.callback, home.callback, next_button.callback, search.callback, close.callback = previous_callback, home_callback, next_callback, search_callback, close_callback
+        self.add_item(previous); self.add_item(home); self.add_item(next_button); self.add_item(search); self.add_item(close); refresh()
 
 
 async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = None):
@@ -305,7 +317,7 @@ async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = No
         category = help_complete._category_for(command)
         category_name, _ = _category_text(category, language)
         command_title = language_runtime._title(command, language).upper()
-        embed = _brand(f"SENTRIX / {command_title}", _summary(command, language))
+        embed = _brand(f"SentriX • {command_title}", _summary(command, language))
         _apply_category_colour(embed, category.key)
         parameters: list[str] = []
         for name, parameter in getattr(command, "clean_params", {}).items():
@@ -314,16 +326,19 @@ async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = No
             display = language_runtime._param_name(name, language)
             status = ("required" if getattr(parameter, "required", False) else "optional") if language == "en" else ("obligatoire" if getattr(parameter, "required", False) else "facultatif")
             parameters.append(f"- **{display}** - {status}")
-        if language == "en":
-            embed.add_field(name="SYNTAX", value=f"`{_usage(command, prefix, language)}`", inline=False)
-            embed.add_field(name="PARAMETERS", value="\n".join(parameters) if parameters else "No parameters.", inline=False)
-            embed.add_field(name="ACCESS", value=f"{category_name} | {'Staff only' if utility.is_staff_command(command) else 'Members'}", inline=False)
-            embed.set_footer(text="SentriX | Command sheet")
-        else:
-            embed.add_field(name="SYNTAXE", value=f"`{_usage(command, prefix, language)}`", inline=False)
-            embed.add_field(name="PARAMETRES", value="\n".join(parameters) if parameters else "Aucun parametre.", inline=False)
-            embed.add_field(name="ACCES", value=f"{category_name} | {'Staff uniquement' if utility.is_staff_command(command) else 'Membres'}", inline=False)
-            embed.set_footer(text="SentriX | Fiche commande")
+        details = "\n".join(parameters) if parameters else ("No parameters." if language == "en" else "Aucun paramètre.")
+        access = (
+            f"{category_name} • {'Staff only' if utility.is_staff_command(command) else 'Members'}"
+            if language == "en"
+            else f"{category_name} • {'Staff uniquement' if utility.is_staff_command(command) else 'Membres'}"
+        )
+        embed.description = (
+            f"{embed.description or ''}\n\n"
+            f"**{'Syntax' if language == 'en' else 'Syntaxe'} :** `{_usage(command, prefix, language)}`\n"
+            f"{details}\n"
+            f"**{'Access' if language == 'en' else 'Accès'} :** {access}"
+        ).strip()
+        embed.set_footer(text="SentriX • Command")
         return await ctx.send(embed=embed)
     home = _help_home(bot, ctx.guild, prefix, is_staff, language)
     return await ctx.send(embed=home, view=CleanHelpHomeView(bot, prefix, is_staff, language, ctx.author.id))

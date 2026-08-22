@@ -83,22 +83,54 @@ def test_bot_avatar_is_used_only_as_the_small_author_icon():
     assert not embed.thumbnail.url
 
 
-def test_v3_titles_are_calm_and_ordinary_cards_have_no_extra_timestamp():
+def test_v4_titles_are_calm_and_ordinary_cards_have_no_extra_timestamp():
     embed = premium_style.style_embed(discord.Embed(title="SENTRIX / CONFIGURATION"))
     assert embed.title == "SentriX • Configuration"
     assert embed.timestamp is None
 
 
-def test_category_artwork_is_never_auto_attached_in_v3():
+def test_category_artwork_is_never_auto_attached_in_v4():
     embed = discord.Embed(title="Configuration")
     kwargs = brand_assets.decorate_send_kwargs({}, embed=embed, category="configuration")
     assert kwargs == {}
     assert not embed.thumbnail.url
 
 
-def test_setup_summary_does_not_repeat_the_module_list():
+def test_setup_summary_is_reduced_to_one_mobile_friendly_line():
     embed = discord.Embed(title="SENTRIX / CONFIGURATION")
-    embed.add_field(name="Serveur", value="Prêt")
+    embed.add_field(name="Serveur", value="Communauté")
+    embed.add_field(name="Progression", value="8 / 9")
+    embed.add_field(name="Langue", value="Français")
     embed.add_field(name="Modules", value="Tickets\nLogs\nNiveaux")
     styled = premium_style.style_embed(embed, category="configuration")
-    assert [field.name for field in styled.fields] == ["Serveur"]
+    assert not styled.fields
+    assert "**Serveur :** Communauté" in styled.description
+    assert "**Progression :** 8 / 9" in styled.description
+    assert "**Langue :** Français" in styled.description
+    assert "Modules" not in styled.description
+
+
+def test_v4_number_duration_and_list_formats_are_consistent():
+    assert premium_style.format_number(1250000) == "1 250 000"
+    assert premium_style.format_duration(15120) == "4 h 12 min"
+    lines = premium_style.compact_lines([f"Commande {index}" for index in range(10)], limit=8)
+    assert len(lines) == 9
+    assert lines[-1] == "+2 autres"
+
+
+def test_v4_button_hierarchy_keeps_one_primary_action_per_row():
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="Valider", style=discord.ButtonStyle.primary, row=0))
+    view.add_item(discord.ui.Button(label="Enregistrer", style=discord.ButtonStyle.primary, row=0))
+    view.add_item(discord.ui.Button(label="Fermer", style=discord.ButtonStyle.secondary, row=0))
+    premium_style.style_view(view)
+    styles = [item.style for item in view.children]
+    assert styles.count(discord.ButtonStyle.primary) == 1
+    assert styles[-1] is discord.ButtonStyle.danger
+
+
+def test_v4_labels_are_short_enough_for_mobile():
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="Une action principale beaucoup trop longue", row=0))
+    premium_style.style_view(view)
+    assert len(view.children[0].label) <= premium_style.VISUAL_LIMITS["button_label"]

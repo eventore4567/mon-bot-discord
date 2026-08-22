@@ -41,6 +41,19 @@ COLORS: dict[str, int] = {
     "premium": 0xF2C94C,
 }
 
+# Contrat visuel V4. Ces limites sont volontairement plus strictes que les limites
+# techniques de Discord : un panneau doit rester lisible sur mobile sans devenir une
+# page de documentation.
+VISUAL_LIMITS: dict[str, int] = {
+    "title": 72,
+    "button_label": 24,
+    "select_label": 60,
+    "select_description": 72,
+    "compact_items": 8,
+    "shop_items": 6,
+    "leaderboard_items": 10,
+}
+
 CATEGORY_NAMES: dict[str, str] = {
     "moderation": "Modération",
     "security": "Sécurité",
@@ -95,6 +108,40 @@ def clip(value: Any, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def format_number(value: Any) -> str:
+    """Nombre lisible en français, stable pour l'économie, l'XP et les statistiques."""
+    try:
+        return f"{int(value or 0):,}".replace(",", " ")
+    except (TypeError, ValueError):
+        return "0"
+
+
+def format_duration(seconds: Any) -> str:
+    """Durée compacte sans unité inutile : 4 h 12 min, 8 min ou 35 s."""
+    try:
+        total = max(0, int(seconds or 0))
+    except (TypeError, ValueError):
+        total = 0
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours} h {minutes} min" if minutes else f"{hours} h"
+    if minutes:
+        return f"{minutes} min" if not secs else f"{minutes} min {secs} s"
+    return f"{secs} s"
+
+
+def compact_lines(lines: Any, *, limit: int | None = None) -> list[str]:
+    """Nettoie une liste de lignes et ajoute un résumé lorsque la liste déborde."""
+    maximum = max(1, int(limit or VISUAL_LIMITS["compact_items"]))
+    cleaned = [SPACE_RE.sub(" ", str(line)).strip() for line in list(lines or [])]
+    cleaned = [line for line in cleaned if line]
+    if len(cleaned) <= maximum:
+        return cleaned
+    hidden = len(cleaned) - maximum
+    return [*cleaned[:maximum], f"+{hidden} autre{'s' if hidden > 1 else ''}"]
 
 
 def progress_bar(value: float, maximum: float, *, length: int = 12) -> str:
@@ -239,8 +286,8 @@ def _footer_text(*, guild: discord.Guild | None = None, requester: Any = None) -
 def _canonical_title(category: str, *, log_type: str | None = None) -> str:
     label = CATEGORY_NAMES.get(category, "Information")
     if log_type:
-        return clip(f"SentriX • Journal {label}", 256)
-    return clip(f"SentriX • {label}", 256)
+        return clip(f"SentriX • Journal {label}", VISUAL_LIMITS["title"])
+    return clip(f"SentriX • {label}", VISUAL_LIMITS["title"])
 
 
 def _detail_title(original_title: Any, category: str) -> str | None:
@@ -294,7 +341,7 @@ def style_embed(
         # Les centres spécialisés gardent leur nom, avec une typographie moins agressive.
         panel_name = SENTRIX_TITLE_RE.sub("", cleaned_original).strip()
         brand_name = CATEGORY_NAMES.get("brand", "SentriX")
-        embed.title = clip(f"{brand_name} • {display_label(panel_name)}", 256)
+        embed.title = clip(f"{brand_name} • {display_label(panel_name)}", VISUAL_LIMITS["title"])
         detail = None
     else:
         detail = _detail_title(original_title, category)
@@ -355,11 +402,27 @@ def style_embed(
             embed.add_field(name=field.name, value=field.value, inline=field.inline)
 
     # Le résumé de +setup n'a pas besoin de répéter tous les modules : le menu situé
-    # juste dessous les contient déjà. Retirer ce bloc rend le panneau proche de +ticket.
+    # juste dessous les contient déjà. Les trois métriques restantes sont regroupées
+    # sur une ligne afin que le panneau garde la hauteur d'un petit centre de tickets.
     if category == "configuration" and "configuration" in str(embed.title or "").casefold():
+        summary_parts: list[str] = []
         for index in range(len(embed.fields) - 1, -1, -1):
-            if clean_title(embed.fields[index].name).casefold() in {"modules", "module"}:
+            field = embed.fields[index]
+            field_name = clean_title(field.name).casefold()
+            if field_name in {"modules", "module"}:
                 embed.remove_field(index)
+            elif field_name in {"serveur", "server", "progression", "langue", "language"}:
+                label = {
+                    "server": "Serveur",
+                    "language": "Langue",
+                }.get(field_name, display_label(field.name))
+                summary_parts.append(f"**{label} :** {microcopy.polish_text(str(field.value))}")
+                embed.remove_field(index)
+        if summary_parts:
+            summary_parts.reverse()
+            metrics = " • ".join(summary_parts)
+            body = str(embed.description or "").strip()
+            embed.description = clip(f"{body}\n\n{metrics}" if body else metrics, 4096)
 
     for index, field in enumerate(list(embed.fields)):
         # Les champs en Title Case sont plus lisibles que des libellés entièrement en capitales.
@@ -418,20 +481,30 @@ def style_view(view: discord.ui.View | None) -> discord.ui.View | None:
     """Uniformise boutons et menus sans toucher aux callbacks persistants."""
     if view is None:
         return None
+    primary_rows: set[int] = set()
     for item in getattr(view, "children", []):
         if isinstance(item, discord.ui.Select):
             if item.placeholder:
                 placeholder = microcopy.polish_text(str(item.placeholder))
                 item.placeholder = clip(placeholder or "Choisir une option…", 150)
             for option in list(getattr(item, "options", []) or []):
-                option.label = clip(microcopy.polish_text(str(option.label)), 100)
+                option.label = clip(
+                    microcopy.polish_text(str(option.label)),
+                    VISUAL_LIMITS["select_label"],
+                )
                 if option.description:
-                    option.description = clip(microcopy.polish_text(str(option.description)), 100)
+                    option.description = clip(
+                        microcopy.polish_text(str(option.description)),
+                        VISUAL_LIMITS["select_description"],
+                    )
             continue
         if not isinstance(item, discord.ui.Button):
             continue
         if item.label:
-            item.label = microcopy.polish_button_label(item.label)
+            item.label = clip(
+                microcopy.polish_button_label(item.label),
+                VISUAL_LIMITS["button_label"],
+            )
         if item.style is discord.ButtonStyle.link:
             continue
         label = str(item.label or "").casefold()
@@ -452,6 +525,15 @@ def style_view(view: discord.ui.View | None) -> discord.ui.View | None:
             item.style = discord.ButtonStyle.primary
         else:
             item.style = discord.ButtonStyle.secondary
+
+        # Un seul appel à l'action principal par rangée. Les autres restent visibles,
+        # mais ne concurrencent pas le bouton important sur mobile.
+        row = int(getattr(item, "row", None) or 0)
+        if item.style is discord.ButtonStyle.primary:
+            if row in primary_rows:
+                item.style = discord.ButtonStyle.secondary
+            else:
+                primary_rows.add(row)
     return view
 
 
