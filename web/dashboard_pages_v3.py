@@ -9,6 +9,40 @@ from .dashboard_oxyde_hotfix import apply_dashboard_hotfix, patch_dashboard_runt
 patch_dashboard_runtime()
 
 
+_OVERVIEW_SCOPE_FIX = r"""
+    /* The detailed server diagnostic belongs to Vue d'ensemble only. */
+    body:not([data-tab="overview"]) #sentrixSafeOverview{display:none!important}
+    body[data-tab="overview"] #sentrixSafeOverview{display:block!important}
+
+    /* The overview renderer is itself a child of .fields: make it span the full grid.
+       Without this, the hero is squeezed into half a column and all cards become tall. */
+    body[data-tab="overview"] #fields>.sx-overview{
+      grid-column:1/-1!important;
+      width:100%!important;
+      min-width:0!important;
+      max-width:none!important;
+    }
+    body[data-tab="overview"] .sx-summary{
+      width:100%!important;
+      min-width:0!important;
+      align-items:stretch!important;
+    }
+    body[data-tab="overview"] .sx-summary-main,
+    body[data-tab="overview"] .sx-summary-stat{
+      min-width:0!important;
+      height:auto!important;
+    }
+    @media(max-width:1180px){
+      body[data-tab="overview"] .sx-summary{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+      body[data-tab="overview"] .sx-summary-main{grid-column:1/-1!important}
+    }
+    @media(max-width:700px){
+      body[data-tab="overview"] .sx-summary{grid-template-columns:1fr!important}
+      body[data-tab="overview"] .sx-summary-main{grid-column:auto!important}
+    }
+"""
+
+
 _EMBEDS_PAGE_FIX = r"""
     /* Embeds has its own secure builder route; keep it as a real dashboard page. */
     body[data-tab="embeds"] #sxV4Save,
@@ -54,6 +88,8 @@ _EMBEDS_PAGE_JS = r"""
 def apply_dashboard_pages(html: str) -> str:
     """Install the clean dashboard, embeds bridge and final reliability layer."""
     html = _apply_oxyde_dashboard(html)
+    if "body:not([data-tab=\"overview\"]) #sentrixSafeOverview" not in html:
+        html = html.replace("  </style>", _OVERVIEW_SCOPE_FIX + "\n  </style>", 1)
     if "body[data-tab=\"embeds\"] #sxV4Save" not in html:
         html = html.replace("  </style>", _EMBEDS_PAGE_FIX + "\n  </style>", 1)
     marker = "    Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));"
