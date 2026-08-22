@@ -1,8 +1,8 @@
 """Final interaction policy for SentriX.
 
-This module is intentionally installed LAST by cogs/__init__.py. It owns the final user-
-visible response policy after every historical runtime wrapper has finished installing:
-- ordinary command replies are native Discord text instead of embeds when practical;
+This module is intentionally installed near the end by cogs/__init__.py. It owns the final
+slash reliability policy after every historical runtime wrapper has finished installing:
+- command embeds are preserved so the interface never alternates between card and text;
 - real control panels keep their card UI;
 - slash errors and permission denials are text, private and deterministic;
 - direct interaction replies, edits after defer and application-webhook followups all use
@@ -20,10 +20,11 @@ import discord
 from discord.ext import commands
 
 from . import community_v34, permission_guard
+from utils import premium_style
 
 logger = logging.getLogger("bot.final-interaction-policy")
 
-# Only genuine dashboards/panels stay as cards. Everything else is eligible for plain text.
+# Conservé pour compatibilité avec les modules qui importent encore cette constante.
 RICH_ROOTS = frozenset({
     "help",
     "profile",
@@ -96,36 +97,14 @@ def _has_media(embed: discord.Embed) -> bool:
 
 
 def _embed_to_plain(embed: discord.Embed | None, *, root: str = "") -> str | None:
-    if not isinstance(embed, discord.Embed):
-        return None
-    if root in RICH_ROOTS or _has_media(embed):
-        return None
+    """Ne convertit plus jamais un embed en texte simple.
 
-    title = _clean(embed.title)
-    description = _clean(embed.description)
-    lines: list[str] = []
-
-    if title and not title.casefold().startswith("sentrix /") and title.casefold() not in _GENERIC_TITLES:
-        lines.append(f"**{title}**")
-    if description:
-        lines.append(description)
-
-    for field in list(embed.fields):
-        name = _clean(field.name)
-        value = _clean(field.value)
-        if not value:
-            continue
-        if name and name.casefold() not in {"information", "detail", "détail"}:
-            lines.append(f"**{name} :** {value}")
-        else:
-            lines.append(value)
-
-    text = "\n".join(part for part in lines if part).strip()
-    # Never silently truncate a rich result. Long cards remain cards because Discord text
-    # messages have a 2,000 character limit.
-    if not text or len(text) > 1900:
-        return None
-    return text
+    L'ancienne politique expliquait exactement l'alternance signalée : les panneaux et
+    médias restaient dans un cadre, tandis que les réponses courtes en sortaient. Garder
+    ce point d'entrée en no-op préserve la compatibilité sans modifier les données.
+    """
+    del embed, root
+    return None
 
 
 def _merge_content(args: tuple, kwargs: dict, text: str) -> tuple[tuple, dict]:
@@ -203,6 +182,16 @@ def _install_interaction_response() -> None:
         async def response_send(self, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
             root = _root_from_interaction(interaction)
+            args, kwargs = premium_style.style_kwargs(
+                args,
+                kwargs,
+                command=getattr(interaction, "command", None),
+                guild=getattr(interaction, "guild", None),
+                requester=getattr(interaction, "user", None),
+                bot_user=getattr(getattr(interaction, "client", None), "user", None),
+                allow_content_wrap=True,
+                include_brand_asset=True,
+            )
             args, kwargs = _convert_kwargs(args, kwargs, root=root)
             if root and root not in community_v34.SHARED_SLASH_ROOTS:
                 kwargs.setdefault("ephemeral", True)
@@ -219,6 +208,15 @@ def _install_interaction_response() -> None:
         async def response_edit(self, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
             root = _root_from_interaction(interaction)
+            args, kwargs = premium_style.style_kwargs(
+                args,
+                kwargs,
+                command=getattr(interaction, "command", None),
+                guild=getattr(interaction, "guild", None),
+                requester=getattr(interaction, "user", None),
+                bot_user=getattr(getattr(interaction, "client", None), "user", None),
+                allow_content_wrap=True,
+            )
             args, kwargs = _convert_kwargs(args, kwargs, root=root, editing=True)
             return await base_edit(self, *args, **kwargs)
 
@@ -235,6 +233,15 @@ def _install_original_response_edit() -> None:
 
     async def edit_original(self: discord.Interaction, *args, **kwargs):
         root = _root_from_interaction(self)
+        args, kwargs = premium_style.style_kwargs(
+            args,
+            kwargs,
+            command=getattr(self, "command", None),
+            guild=getattr(self, "guild", None),
+            requester=getattr(self, "user", None),
+            bot_user=getattr(getattr(self, "client", None), "user", None),
+            allow_content_wrap=True,
+        )
         args, kwargs = _convert_kwargs(args, kwargs, root=root, editing=True)
         return await base(self, *args, **kwargs)
 
@@ -252,6 +259,12 @@ def _install_followup_send() -> None:
     async def webhook_send(self: discord.Webhook, *args, **kwargs):
         # Only interaction followups. Normal server webhooks/log webhooks are untouched.
         if getattr(self, "type", None) == discord.WebhookType.application:
+            args, kwargs = premium_style.style_kwargs(
+                args,
+                kwargs,
+                allow_content_wrap=True,
+                include_brand_asset=True,
+            )
             args, kwargs = _convert_kwargs(args, kwargs, root="")
         return await base(self, *args, **kwargs)
 
@@ -338,4 +351,4 @@ def install(bot: commands.Bot) -> None:
     _install_tree_error(bot)
 
     bot._sentrix_final_interaction_policy = True
-    logger.info("Politique finale SentriX active : slash texte natif, réponses privées et aucun vieux runtime après elle.")
+    logger.info("Politique finale SentriX active : embeds cohérents, réponses slash privées et aucun vieux runtime après elle.")

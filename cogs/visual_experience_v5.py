@@ -333,6 +333,16 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
     @commands.guild_only()
     async def profile_card(self, ctx: commands.Context, member: discord.Member | None = None):
         member = member or ctx.author
+        permissions = ctx.channel.permissions_for(ctx.guild.me)
+        if not permissions.attach_files:
+            return await ctx.send(
+                embed=_base(
+                    self.bot,
+                    "Permission requise",
+                    "Ajoute la permission **Joindre des fichiers** au rôle du bot pour générer les cartes.",
+                    0xED4245,
+                )
+            )
         loading = _base(self.bot, "Carte de profil", "Préparation de la carte.")
         message = await ctx.send(embed=loading)
         task = asyncio.create_task(self._render_profile(ctx.guild, member))
@@ -346,14 +356,10 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
             except discord.HTTPException:
                 pass
         try:
-            buffer = await task
-            file = discord.File(buffer, filename="sentrix-profile.png")
-            embed = _base(self.bot, "Carte de profil", f"Profil de **{member.display_name}**")
-            embed.set_image(url="attachment://sentrix-profile.png")
-            await message.edit(content=None, embed=embed, attachments=[file])
+            buffer = await asyncio.wait_for(task, timeout=15)
         except Exception:
             logger.exception(
-                "Génération de +profile-card impossible (serveur=%s, membre=%s).",
+                "Rendu de +profile-card impossible (serveur=%s, membre=%s).",
                 getattr(ctx.guild, "id", "?"),
                 getattr(member, "id", "?"),
             )
@@ -362,7 +368,37 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
                 embed=_base(
                     self.bot,
                     "Carte indisponible",
-                    "La carte n’a pas pu être générée. L’erreur a été enregistrée ; réessaie dans quelques instants.",
+                    "Le moteur d’image n’a pas terminé. Réessaie dans quelques instants. `[R1]`",
+                    0xED4245,
+                ),
+                attachments=[],
+            )
+            return
+
+        file = discord.File(buffer, filename="sentrix-profile.png")
+        embed = _base(self.bot, "Carte de profil", f"Profil de **{member.display_name}**")
+        embed.set_image(url="attachment://sentrix-profile.png")
+        try:
+            # L'envoi d'un nouveau message avec ``file=`` est la voie Discord la plus
+            # fiable. Ajouter un nouveau fichier via Message.edit/attachments provoquait
+            # encore des HTTP 400 sur certaines instances Railway.
+            await ctx.send(content=None, embed=embed, file=file)
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                await message.edit(content=None, embed=_base(self.bot, "Carte prête", "La carte est affichée ci-dessous."))
+        except (discord.Forbidden, discord.HTTPException):
+            logger.exception(
+                "Envoi de +profile-card refusé par Discord (serveur=%s, membre=%s).",
+                getattr(ctx.guild, "id", "?"),
+                getattr(member, "id", "?"),
+            )
+            await message.edit(
+                content=None,
+                embed=_base(
+                    self.bot,
+                    "Envoi impossible",
+                    "Discord a refusé l’image. Vérifie **Joindre des fichiers** et **Intégrer des liens** pour le rôle du bot. `[S1]`",
                     0xED4245,
                 ),
                 attachments=[],

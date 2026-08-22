@@ -32,21 +32,17 @@ def _rich_send_args(ctx: commands.Context, args: tuple[Any, ...], kwargs: dict[s
     """Transforme uniquement le texte compatible ; fichiers et mentions restent intacts."""
     args = list(args)
     kwargs = dict(kwargs)
-    content = _content(tuple(args), kwargs)
-
-    if premium_style.can_wrap_content(content, kwargs):
-        kwargs["embed"] = premium_style.content_embed(
-            content,
-            command=getattr(ctx, "command", None),
-            guild=getattr(ctx, "guild", None),
-            requester=getattr(ctx, "author", None),
-            bot_user=getattr(getattr(ctx, "bot", None), "user", None),
-        )
-        if args:
-            args[0] = None
-            kwargs.pop("content", None)
-        else:
-            kwargs["content"] = None
+    args, kwargs = premium_style.style_kwargs(
+        tuple(args),
+        kwargs,
+        command=getattr(ctx, "command", None),
+        guild=getattr(ctx, "guild", None),
+        requester=getattr(ctx, "author", None),
+        bot_user=getattr(getattr(ctx, "bot", None), "user", None),
+        allow_content_wrap=True,
+        include_brand_asset=True,
+    )
+    args = list(args)
 
     # Si un embed est explicitement fourni, il devient l'unique présentation visuelle.
     # Cela empêche un ancien texte de rester au-dessus après une modification.

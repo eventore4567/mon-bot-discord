@@ -141,8 +141,19 @@ def _render_card_sync(
     settings: dict[str, Any],
     level_up: int | None,
 ) -> io.BytesIO:
-    background = Image.open(CARD_BACKGROUND).convert("RGBA")
-    canvas = ImageOps.fit(background, (1200, 400), method=Image.Resampling.LANCZOS)
+    try:
+        background = Image.open(CARD_BACKGROUND).convert("RGBA")
+        canvas = ImageOps.fit(background, (1200, 400), method=Image.Resampling.LANCZOS)
+    except (OSError, ValueError):
+        # Dernier filet de sécurité si l'asset est absent ou corrompu sur l'hébergeur.
+        canvas = Image.new("RGBA", (1200, 400), (10, 13, 42, 255))
+        backdrop = ImageDraw.Draw(canvas, "RGBA")
+        for x in range(0, 1200, 12):
+            ratio = x / 1200
+            backdrop.rectangle(
+                (x, 0, x + 12, 400),
+                fill=(35 + round(50 * ratio), 28, 105 + round(65 * ratio), 255),
+            )
     overlay = Image.new("RGBA", canvas.size, (4, 8, 28, 30))
     canvas = Image.alpha_composite(canvas, overlay)
     draw = ImageDraw.Draw(canvas, "RGBA")
@@ -205,12 +216,35 @@ async def render_member_card(
         avatar_bytes = await avatar.read()
     except Exception:
         avatar_bytes = await asyncio.to_thread((ASSET_DIR / "profile.png").read_bytes)
-    return await asyncio.to_thread(
-        _render_card_sync,
-        avatar_bytes,
-        member.display_name,
-        guild.name,
-        stats,
-        settings,
-        level_up,
-    )
+    try:
+        return await asyncio.to_thread(
+            _render_card_sync,
+            avatar_bytes,
+            member.display_name,
+            guild.name,
+            stats or {},
+            settings or theme_settings("sentrix"),
+            level_up,
+        )
+    except Exception:
+        # Une donnée de profil exotique ou un avatar illisible ne doit jamais condamner
+        # toute la commande : on fabrique une carte SentriX neutre au second essai.
+        fallback_avatar = await asyncio.to_thread((ASSET_DIR / "profile.png").read_bytes)
+        fallback_stats = {
+            "current_level": 0,
+            "current_level_xp": 0,
+            "required_xp": 100,
+            "rank": None,
+            "is_ranked": False,
+            "message_count": 0,
+            "total_money": 0,
+        }
+        return await asyncio.to_thread(
+            _render_card_sync,
+            fallback_avatar,
+            str(getattr(member, "display_name", "Membre"))[:40],
+            str(getattr(guild, "name", "Serveur"))[:60],
+            fallback_stats,
+            theme_settings("sentrix"),
+            level_up,
+        )

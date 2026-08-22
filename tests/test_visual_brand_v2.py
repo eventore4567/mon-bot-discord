@@ -6,6 +6,7 @@ import discord
 from utils import brand_assets, design_system, premium_style, visual_v5
 from cogs.visual_experience_v5 import VisualExperienceV5
 from cogs import plain_response_policy
+from cogs import final_interaction_policy
 
 
 def _command(cog: str, name: str):
@@ -208,3 +209,12 @@ def test_command_text_is_consistently_wrapped_in_an_embed():
     assert args == (None,)
     assert kwargs["content"] is None
     assert isinstance(kwargs["embed"], discord.Embed)
+
+
+def test_final_interaction_policy_never_flattens_embeds_to_text():
+    embed = discord.Embed(title="SentriX • Carte", description="Réponse encadrée")
+    assert final_interaction_policy._embed_to_plain(embed, root="profile-card") is None
+    args, kwargs = final_interaction_policy._convert_kwargs((), {"embed": embed}, root="ping")
+    assert args == ()
+    assert kwargs["embed"] is embed
+    assert "content" not in kwargs
