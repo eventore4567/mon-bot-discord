@@ -1,11 +1,11 @@
-"""Style final compact des réponses de commandes SentriX.
+"""Rendu compact des réponses ordinaires de SentriX.
 
-Cette couche est volontairement petite : elle ne gère ni les deffers ni les erreurs slash,
-qui restent sous la responsabilité de canonical_interactions. Elle intervient uniquement
-sur Context.send afin de transformer les réponses ordinaires en texte Discord natif au
-format compact inspiré des grands bots de protection.
+But : les commandes normales répondent comme un bot de protection professionnel :
+    ✅ | [PING] | Pong ! • Latence : 42 ms
 
-Les vrais centres de configuration et panels restent en embed.
+Les vrais panneaux interactifs/configuration et les réponses contenant une image restent
+en embed. Cette couche ne remplace pas canonical_interactions : elle ne fait que préparer
+le rendu avant l'envoi.
 """
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ import discord
 from discord.ext import commands
 
 
-CONFIG_ROOTS = frozenset({
+PANEL_ROOTS = frozenset({
+    "help",
     "setup",
     "ticketsetup",
     "ticketpanel",
@@ -31,12 +32,13 @@ CONFIG_ROOTS = frozenset({
     "designsetup",
     "embed",
     "embed-builder",
+    "shoppanel",
     "rolepanel",
     "verify-panel",
     "create",
 })
 
-ERROR_HINTS = (
+ERROR_WORDS = (
     "erreur",
     "impossible",
     "introuvable",
@@ -44,6 +46,7 @@ ERROR_HINTS = (
     "échoué",
     "echoue",
     "indisponible",
+    "permission manquante",
     "pas les permissions",
     "n'a pas les permissions",
     "tu n'as pas accès",
@@ -51,120 +54,276 @@ ERROR_HINTS = (
     "problème technique",
     "probleme technique",
 )
+WARNING_WORDS = (
+    "avertissement",
+    "attention",
+    "recharge",
+    "cooldown",
+    "patiente",
+    "déjà",
+    "deja",
+)
 
 
-def _clean(value: Any) -> str:
-    text = str(value or "").strip()
-    try:
-        from .community_v32 import strip_decorative_emoji
-        text = strip_decorative_emoji(text).strip()
-    except Exception:
-        pass
-    return text
-
-
-def _root(ctx: commands.Context) -> str:
-    command = getattr(ctx, "command", None)
+def _root_from_command(command: Any) -> str:
     if command is None:
         return ""
     root = getattr(command, "root_parent", None) or command
     return str(getattr(root, "name", "") or "").casefold()
 
 
-def _label(ctx: commands.Context) -> str:
-    command = getattr(ctx, "command", None)
+def _root_from_ctx(ctx: commands.Context) -> str:
+    return _root_from_command(getattr(ctx, "command", None))
+
+
+def _root_from_interaction(interaction: discord.Interaction | None) -> str:
+    if interaction is None:
+        return ""
+    command = getattr(interaction, "command", None)
+    if command is not None:
+        return _root_from_command(command)
+    data = getattr(interaction, "data", None)
+    return str(data.get("name") or "").casefold() if isinstance(data, dict) else ""
+
+
+def _label_from_command(command: Any) -> str:
     qualified = str(getattr(command, "qualified_name", "") or "COMMAND")
-    label = qualified.replace(" ", "-").replace("_", "-").upper()
-    return label[:28]
+    return qualified.replace(" ", "-").replace("_", "-").upper()[:30]
 
 
-def _embed_text(embed: Any) -> str | None:
+def _label_from_ctx(ctx: commands.Context) -> str:
+    return _label_from_command(getattr(ctx, "command", None))
+
+
+def _label_from_interaction(interaction: discord.Interaction | None) -> str:
+    if interaction is None:
+        return "COMMAND"
+    command = getattr(interaction, "command", None)
+    if command is not None:
+        return _label_from_command(command)
+    data = getattr(interaction, "data", None)
+    if isinstance(data, dict):
+        return str(data.get("name") or "COMMAND").replace("_", "-").upper()[:30]
+    return "COMMAND"
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _has_media(embed: discord.Embed) -> bool:
+    return bool(
+        getattr(embed.image, "url", None)
+        or getattr(embed.thumbnail, "url", None)
+        or getattr(embed.video, "url", None)
+    )
+
+
+def _status_from_text(text: str, title: str = "") -> str:
+    haystack = f"{title}\n{text}".casefold()
+    if any(word in haystack for word in ERROR_WORDS):
+        return "❌"
+    if any(word in haystack for word in WARNING_WORDS):
+        return "⚠️"
+    return "✅"
+
+
+def _embed_to_text(embed: Any) -> tuple[str | None, str]:
     if not isinstance(embed, discord.Embed):
-        return None
-    lines: list[str] = []
-    title = _clean(embed.title)
-    description = _clean(embed.description)
-    generic = {
-        "information", "succès", "succes", "erreur", "avertissement",
-        "action terminée", "action terminee", "sentrix / utilitaires",
+        return None, "✅"
+    if _has_media(embed):
+        return None, "✅"
+
+    title = _text(embed.title)
+    description = _text(embed.description)
+    generic_titles = {
+        "information",
+        "succès",
+        "succes",
+        "erreur",
+        "erreur ia",
+        "avertissement",
+        "action terminée",
+        "action terminee",
+        "action impossible",
     }
-    if title and title.casefold() not in generic and not title.casefold().startswith("sentrix /"):
+
+    lines: list[str] = []
+    if (
+        title
+        and title.casefold() not in generic_titles
+        and not title.casefold().startswith("sentrix /")
+    ):
         lines.append(title)
     if description:
         lines.append(description)
+
     for field in list(embed.fields):
-        name = _clean(field.name)
-        value = _clean(field.value)
+        name = _text(field.name)
+        value = _text(field.value)
         if not value:
             continue
         if name and name.casefold() not in {"information", "détail", "detail"}:
             lines.append(f"{name} : {value}")
         else:
             lines.append(value)
+
     text = "\n".join(lines).strip()
-    return text or None
+    if not text:
+        return None, _status_from_text("", title)
+    return text, _status_from_text(text, title)
 
 
-def _compact(text: str, label: str) -> str:
-    text = _clean(text)
+def _decorate(text: str, label: str, status: str | None = None) -> str:
+    text = _text(text)
     if not text:
         return text
-    if text.startswith(("• | [", "! | [")):
+    if text.startswith(("✅ | [", "❌ | [", "⚠️ | [")):
         return text
-    marker = "!" if any(word in text.casefold() for word in ERROR_HINTS) else "•"
-    prefix = f"{marker} | [{label}] | "
+
+    status = status or _status_from_text(text)
+    prefix = f"{status} | [{label}] | "
     if len(prefix) + len(text) > 1990:
         return text
     return prefix + text
 
 
+def _prepare(
+    *,
+    root: str,
+    label: str,
+    args: tuple,
+    kwargs: dict,
+) -> tuple[tuple, dict]:
+    if not root or root in PANEL_ROOTS:
+        return args, kwargs
+
+    args_list = list(args)
+    kwargs = dict(kwargs)
+    chosen_status: str | None = None
+
+    embed = kwargs.get("embed")
+    if isinstance(embed, discord.Embed):
+        converted, status = _embed_to_text(embed)
+        if converted is not None:
+            chosen_status = status
+            kwargs.pop("embed", None)
+            if args_list:
+                current = _text(args_list[0])
+                args_list[0] = f"{current}\n{converted}".strip() if current else converted
+            else:
+                current = _text(kwargs.get("content"))
+                kwargs["content"] = f"{current}\n{converted}".strip() if current else converted
+
+    embeds = kwargs.get("embeds")
+    if isinstance(embeds, (list, tuple)) and len(embeds) == 1:
+        converted, status = _embed_to_text(embeds[0])
+        if converted is not None:
+            chosen_status = chosen_status or status
+            kwargs.pop("embeds", None)
+            if args_list:
+                current = _text(args_list[0])
+                args_list[0] = f"{current}\n{converted}".strip() if current else converted
+            else:
+                current = _text(kwargs.get("content"))
+                kwargs["content"] = f"{current}\n{converted}".strip() if current else converted
+
+    if args_list and isinstance(args_list[0], str):
+        args_list[0] = _decorate(args_list[0], label, chosen_status)
+    elif isinstance(kwargs.get("content"), str):
+        kwargs["content"] = _decorate(kwargs["content"], label, chosen_status)
+
+    return tuple(args_list), kwargs
+
+
 def _install_context_send() -> None:
     current = commands.Context.send
-    if getattr(current, "_sentrix_compact_style", False):
+    if getattr(current, "_sentrix_compact_v2", False):
         return
 
-    async def compact_send(self: commands.Context, *args, **kwargs):
-        root = _root(self)
-        if root in CONFIG_ROOTS:
-            return await current(self, *args, **kwargs)
+    async def compact_context_send(self: commands.Context, *args, **kwargs):
+        args, kwargs = _prepare(
+            root=_root_from_ctx(self),
+            label=_label_from_ctx(self),
+            args=args,
+            kwargs=kwargs,
+        )
+        return await current(self, *args, **kwargs)
 
-        args = list(args)
-        kwargs = dict(kwargs)
+    compact_context_send._sentrix_compact_v2 = True
+    compact_context_send._sentrix_original = current
+    commands.Context.send = compact_context_send
 
-        text_from_embed = _embed_text(kwargs.get("embed"))
-        if text_from_embed:
-            kwargs.pop("embed", None)
-            if args:
-                existing = str(args[0] or "").strip()
-                args[0] = f"{existing}\n{text_from_embed}".strip() if existing else text_from_embed
-            else:
-                existing = str(kwargs.get("content") or "").strip()
-                kwargs["content"] = f"{existing}\n{text_from_embed}".strip() if existing else text_from_embed
 
-        embeds = kwargs.get("embeds")
-        if isinstance(embeds, (list, tuple)) and len(embeds) == 1:
-            text_from_embeds = _embed_text(embeds[0])
-            if text_from_embeds:
-                kwargs.pop("embeds", None)
-                if args:
-                    existing = str(args[0] or "").strip()
-                    args[0] = f"{existing}\n{text_from_embeds}".strip() if existing else text_from_embeds
-                else:
-                    existing = str(kwargs.get("content") or "").strip()
-                    kwargs["content"] = f"{existing}\n{text_from_embeds}".strip() if existing else text_from_embeds
+def _install_sentrix_context_send() -> None:
+    try:
+        from main import SentriXContext
+    except Exception:
+        return
 
-        label = _label(self)
-        if args and isinstance(args[0], str):
-            args[0] = _compact(args[0], label)
-        elif isinstance(kwargs.get("content"), str):
-            kwargs["content"] = _compact(kwargs["content"], label)
+    current = SentriXContext.send
+    if getattr(current, "_sentrix_compact_v2", False):
+        return
 
-        return await current(self, *tuple(args), **kwargs)
+    async def compact_sentrix_send(self, *args, **kwargs):
+        args, kwargs = _prepare(
+            root=_root_from_ctx(self),
+            label=_label_from_ctx(self),
+            args=args,
+            kwargs=kwargs,
+        )
+        return await current(self, *args, **kwargs)
 
-    compact_send._sentrix_compact_style = True
-    compact_send._sentrix_original = current
-    commands.Context.send = compact_send
+    compact_sentrix_send._sentrix_compact_v2 = True
+    compact_sentrix_send._sentrix_original = current
+    SentriXContext.send = compact_sentrix_send
+
+
+def _install_interaction_send() -> None:
+    current = discord.InteractionResponse.send_message
+    if getattr(current, "_sentrix_compact_v2", False):
+        return
+
+    async def compact_interaction_send(self, *args, **kwargs):
+        interaction = getattr(self, "_parent", None)
+        root = _root_from_interaction(interaction)
+        if root:
+            args, kwargs = _prepare(
+                root=root,
+                label=_label_from_interaction(interaction),
+                args=args,
+                kwargs=kwargs,
+            )
+        return await current(self, *args, **kwargs)
+
+    compact_interaction_send._sentrix_compact_v2 = True
+    compact_interaction_send._sentrix_original = current
+    discord.InteractionResponse.send_message = compact_interaction_send
+
+
+def _install_interaction_edit_original() -> None:
+    current = discord.Interaction.edit_original_response
+    if getattr(current, "_sentrix_compact_v2", False):
+        return
+
+    async def compact_edit_original(self: discord.Interaction, *args, **kwargs):
+        root = _root_from_interaction(self)
+        if root:
+            args, kwargs = _prepare(
+                root=root,
+                label=_label_from_interaction(self),
+                args=args,
+                kwargs=kwargs,
+            )
+        return await current(self, *args, **kwargs)
+
+    compact_edit_original._sentrix_compact_v2 = True
+    compact_edit_original._sentrix_original = current
+    discord.Interaction.edit_original_response = compact_edit_original
 
 
 async def setup(bot: commands.Bot) -> None:
     _install_context_send()
+    _install_sentrix_context_send()
+    _install_interaction_send()
+    _install_interaction_edit_original()
