@@ -2,8 +2,8 @@
 
 Le dashboard doit rester sobre et professionnel : aucun emoji décoratif, gros check vert,
 pictogramme ou symbole graphique injecté dans les boutons, onglets, titres et badges.
-Les avatars/photos de profil, images configurées par l'utilisateur et aperçus d'embed ne
-sont pas touchés.
+Cette couche finale impose aussi les vrais noms produits, un état actif noir et l'identité
+Discord réelle (nom + avatar animé quand Discord en fournit un).
 """
 from __future__ import annotations
 
@@ -24,6 +24,37 @@ CLEAN_CSS = r"""
   [data-decorative-icon="true"]{display:none!important}
   .sx-system-tile>div:first-child{min-width:0}
   button,.btn,.tab,label,h1,h2,h3,h4,h5,h6{font-family:inherit}
+
+  /* Les sélecteurs/entrées de centres restent sobres : plus de gros violet plein. */
+  .sx-dashboard-dark-option,
+  .sx-dashboard-dark-option:hover,
+  .sx-dashboard-dark-option:focus,
+  .sx-dashboard-dark-option.active,
+  .sx-dashboard-dark-option[aria-current="page"]{
+    background:#050608!important;
+    background-image:none!important;
+    border-color:#2b3140!important;
+    color:#f7f8fb!important;
+    box-shadow:none!important;
+  }
+  .sx-dashboard-dark-option *{color:inherit!important}
+
+  /* Vraie photo Discord, y compris GIF animé. */
+  #userAvatar{
+    overflow:hidden!important;
+    border-radius:50%!important;
+    background:#07080c!important;
+    background-image:none!important;
+    box-shadow:0 0 0 1px #34394a!important;
+  }
+  #userAvatar img.sx-real-discord-avatar{
+    display:block!important;
+    width:100%!important;
+    height:100%!important;
+    object-fit:cover!important;
+    border-radius:50%!important;
+    transform:none!important;
+  }
 </style>
 """
 
@@ -43,13 +74,42 @@ CLEAN_JS = r"""
     ".sx-safe-status", ".sx-safe-metric", ".panel-head", ".head"
   ].join(",");
 
+  const visibleNames = [
+    [/Engagement\s+V3/gi, "Engagement communautaire"],
+    [/Platform\s+V4/gi, "Centre de contrôle"],
+    [/SentriX\s+V2\s+Control\s+Center/gi, "Aperçu du serveur"],
+    [/V2\s+LIVE/gi, "EN DIRECT"],
+    [/Bot\s+V10\s*[—-]\s*/gi, ""],
+    [/Conservation automatique\s+V10/gi, "Conservation automatique"],
+    [/V10\s+indisponible/gi, "Diagnostic indisponible"],
+    [/Giveaways\s+V2/gi, "Giveaways avancés"],
+    [/Économie\s+V2/gi, "Économie"],
+    [/Dashboard\s+Community\s+Growth\s+V2/gi, "Communauté"],
+  ];
+
   function cleanTextNode(node){
     if (!node || node.nodeType !== Node.TEXT_NODE) return;
     const parent = node.parentElement;
     if (!parent) return;
     if (parent.closest("textarea,input,pre,code,[contenteditable='true'],.embed-preview,.preview,[data-user-content='true']")) return;
-    const cleaned = node.nodeValue.replace(emojiRE, "").replace(/\s{2,}/g, " ");
+    let cleaned = node.nodeValue.replace(emojiRE, "");
+    for (const [pattern, replacement] of visibleNames) cleaned = cleaned.replace(pattern, replacement);
+    cleaned = cleaned.replace(/\s{2,}/g, " ");
     if (cleaned !== node.nodeValue) node.nodeValue = cleaned;
+  }
+
+  function markDarkProductOptions(root=document){
+    const candidates = root.querySelectorAll ? root.querySelectorAll("button,a,[role='button'],.btn,.card") : [];
+    for (const element of candidates) {
+      const text = (element.textContent || "").replace(/\s+/g, " ").trim().toLocaleLowerCase("fr");
+      if (
+        text.includes("engagement communautaire") ||
+        text.includes("centre de contrôle") ||
+        text.includes("profils, quêtes, saisons") ||
+        text.includes("opérations, économie, sauvegardes") ||
+        text.includes("opérations, économie, backups")
+      ) element.classList.add("sx-dashboard-dark-option");
+    }
   }
 
   function cleanElement(element){
@@ -70,21 +130,65 @@ CLEAN_JS = r"""
     const scope = root.querySelectorAll ? root : document;
     scope.querySelectorAll(uiSelector).forEach(cleanElement);
     scope.querySelectorAll(".sx-system-icon,.decorative-icon,.status-icon,.check-icon,.emoji-icon,[data-decorative-icon='true']").forEach(cleanElement);
+    markDarkProductOptions(scope);
+  }
+
+  let identityBusy = false;
+  async function syncDiscordIdentity(){
+    if (identityBusy) return;
+    const userName = document.getElementById("userName");
+    const userAvatar = document.getElementById("userAvatar");
+    if (!userName && !userAvatar) return;
+    identityBusy = true;
+    try {
+      const response = await fetch("/api/me", {credentials:"same-origin", cache:"no-store"});
+      if (!response.ok) return;
+      const data = await response.json();
+      const user = data && data.user ? data.user : null;
+      if (!user) return;
+      if (userName && user.username) userName.textContent = user.username;
+      if (userAvatar && user.avatar_url) {
+        const current = userAvatar.querySelector("img.sx-real-discord-avatar");
+        if (!current || current.getAttribute("src") !== user.avatar_url) {
+          const image = document.createElement("img");
+          image.className = "avatar sx-real-discord-avatar";
+          image.src = user.avatar_url;
+          image.alt = user.username ? `Photo de profil de ${user.username}` : "Photo de profil Discord";
+          image.decoding = "async";
+          userAvatar.replaceChildren(image);
+        }
+      }
+    } catch (_) {
+      /* La page principale gère déjà l'état de session. */
+    } finally {
+      identityBusy = false;
+    }
   }
 
   const observer = new MutationObserver(mutations => {
+    let identityMayHaveChanged = false;
     for (const mutation of mutations) {
       if (mutation.type === "characterData") cleanTextNode(mutation.target);
       for (const node of mutation.addedNodes) {
         if (node.nodeType === Node.TEXT_NODE) cleanTextNode(node);
-        else if (node.nodeType === Node.ELEMENT_NODE) cleanAll(node);
+        else if (node.nodeType === Node.ELEMENT_NODE) {
+          cleanAll(node);
+          if (node.id === "userAvatar" || node.id === "userName" || node.querySelector?.("#userAvatar,#userName")) identityMayHaveChanged = true;
+        }
       }
+      if (mutation.target?.id === "userAvatar" || mutation.target?.id === "userName") identityMayHaveChanged = true;
     }
+    if (identityMayHaveChanged) setTimeout(syncDiscordIdentity, 0);
   });
 
   function start(){
     cleanAll(document);
+    syncDiscordIdentity();
     observer.observe(document.documentElement, {subtree:true, childList:true, characterData:true});
+    /* Les anciennes couches d'avatar peuvent finir leur initialisation après DOMContentLoaded. */
+    setTimeout(syncDiscordIdentity, 150);
+    setTimeout(syncDiscordIdentity, 900);
+    setTimeout(syncDiscordIdentity, 2200);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, {once:true});
@@ -127,9 +231,8 @@ def install(*modules) -> None:
     _INSTALLED = True
 
     enterprise_module = None
+    platform_module = None
     if modules:
-        # /health est renforcé ici, avant que build_app() ne lie les routes. Ce correctif
-        # ne modifie aucune page ni interaction du dashboard.
         try:
             from . import production_health
             production_health.install(modules[0])
@@ -146,10 +249,12 @@ def install(*modules) -> None:
             enterprise_module = enterprise_suite
         except Exception:
             logger.exception("Impossible d'installer le centre Enterprise du dashboard.")
+        try:
+            from . import platform_v4
+            platform_module = platform_v4
+        except Exception:
+            logger.exception("Impossible de charger le centre de contrôle du dashboard.")
 
-    # Plusieurs pages secondaires (Community, Enterprise, Setup, etc.) vivent dans des
-    # modules web distincts. On les découvre ici une fois qu'ils sont chargés pour que les
-    # mêmes micro-interactions s'appliquent aussi aux boutons Enregistrer/Sauvegarder.
     loaded_web_modules = tuple(
         module
         for name, module in tuple(sys.modules.items())
@@ -158,19 +263,16 @@ def install(*modules) -> None:
     all_modules = _unique_modules(
         modules,
         (enterprise_module,) if enterprise_module is not None else (),
+        (platform_module,) if platform_module is not None else (),
         loaded_web_modules,
     )
 
-    # Filet de sécurité uniquement sur les pages secondaires. Il est volontairement
-    # installé avant le nettoyage visuel final et ne touche jamais au JavaScript de /app.
     try:
         from . import secondary_interaction_reliability
         secondary_interaction_reliability.install(*all_modules)
     except Exception:
         logger.exception("Impossible d'installer la fiabilité des interactions secondaires.")
 
-    # Le zoom/son doit être identique sur toutes les pages, y compris les contrôles de
-    # formulaire natifs <input type=submit/button/reset> qui servent souvent à enregistrer.
     try:
         from . import dashboard_button_feedback
         dashboard_button_feedback.install(*all_modules)
@@ -188,6 +290,10 @@ def install(*modules) -> None:
         "ENTERPRISE_HTML",
         "APPEAL_HTML",
         "COMMUNITY_HTML",
+        "ENGAGEMENT_HTML",
+        "PROFILE_HTML",
+        "PLATFORM_HTML",
+        "PRIVACY_HTML",
     )
     changed = 0
     for module in all_modules:
@@ -200,4 +306,4 @@ def install(*modules) -> None:
                 setattr(module, name, new_html)
                 changed += 1
 
-    logger.info("Dashboard SentriX sans icônes décoratives : %s page(s) nettoyée(s).", changed)
+    logger.info("Dashboard SentriX finalisé : noms produit, thème noir et identité Discord sur %s page(s).", changed)
