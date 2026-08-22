@@ -49,3 +49,15 @@ def test_category_attachment_does_not_replace_existing_thumbnail():
     kwargs = brand_assets.decorate_send_kwargs({}, embed=embed, category="profile")
     assert kwargs == {}
     assert embed.thumbnail.url == "https://example.test/member.png"
+
+
+def test_interactive_panels_never_attach_category_artwork():
+    embed = discord.Embed(title="Configuration")
+    view = discord.ui.View()
+    kwargs = brand_assets.decorate_send_kwargs(
+        {"view": view},
+        embed=embed,
+        category="configuration",
+    )
+    assert kwargs == {"view": view}
+    assert not embed.thumbnail.url

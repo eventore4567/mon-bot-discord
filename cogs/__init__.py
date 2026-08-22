@@ -34,6 +34,7 @@ from .language_runtime import install as install_language_runtime
 from .language_setup_finalizer import install as install_language_setup_finalizer
 from .logs_no_ping import install as install_logs_no_ping
 from .moderation_logs_fix import install as install_moderation_logs_fix
+from .mention_home_runtime import install as install_mention_home
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
 from .no_auto_tracker import install as install_no_auto_tracker
 from .owner_sanction_immunity import install as install_owner_sanction_immunity
@@ -235,6 +236,7 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     await _run_installer("finaliseur langue setup", install_language_setup_finalizer, bot)
     await _run_installer("style final aide sans emoji", install_help_clean_style, bot)
     await _run_installer("aide racine et canary externe", install_final_runtime_polish, bot)
+    await _run_installer("accueil compact sur mention", install_mention_home, bot)
     await _run_installer("garde de réponse commandes", install_command_response_guard, bot)
     await _run_installer("opérations production", install_production_ops, bot)
     await _run_installer("politique finale commandes sans emoji", install_command_no_emoji, bot)

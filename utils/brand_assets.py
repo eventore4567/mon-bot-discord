@@ -63,7 +63,14 @@ def decorate_send_kwargs(
     Les profils de membres, produits de boutique ou autres miniatures déjà définies
     restent prioritaires. L'icône SentriX est ajoutée uniquement lorsqu'il reste une
     place parmi les dix pièces jointes acceptées par Discord.
+
+    Les panneaux interactifs sont volontairement exclus. Leurs boutons et menus remplacent
+    régulièrement l'embed sans renvoyer son fichier local ; Discord transforme alors
+    l'ancienne miniature en grande pièce jointe au-dessus du panneau. Ils utilisent à la
+    place l'avatar public du bot, qui reste petit et stable pendant toutes les éditions.
     """
+    if kwargs.get("view") is not None:
+        return kwargs
     if not isinstance(embed, discord.Embed) or _has_thumbnail(embed):
         return kwargs
 
