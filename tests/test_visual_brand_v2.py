@@ -5,6 +5,7 @@ import discord
 
 from utils import brand_assets, design_system, premium_style, visual_v5
 from cogs.visual_experience_v5 import VisualExperienceV5
+from cogs import plain_response_policy
 
 
 def _command(cog: str, name: str):
@@ -199,3 +200,11 @@ def test_v5_commands_do_not_redeclare_the_existing_status_alias():
     names = {command.name for command in VisualExperienceV5.__cog_commands__}
     assert "status" not in names
     assert {"about", "design-theme", "profile-card", "iconsetup"} <= names
+
+
+def test_command_text_is_consistently_wrapped_in_an_embed():
+    ctx = SimpleNamespace(command=_command("Utility", "ping"), guild=None, author=None, bot=None)
+    args, kwargs = plain_response_policy._rich_send_args(ctx, ("Réponse de test",), {})
+    assert args == (None,)
+    assert kwargs["content"] is None
+    assert isinstance(kwargs["embed"], discord.Embed)

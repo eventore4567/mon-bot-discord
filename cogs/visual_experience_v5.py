@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from utils import checks, premium_style, stats_service, visual_v5
 
 
 VERSION = "5.0"
+logger = logging.getLogger("bot.visual-v5")
 ICON_CATEGORIES = (
     "security", "moderation", "tickets", "economy", "levels", "music",
     "games", "events", "invites", "ai", "configuration", "leaderboard",
@@ -340,7 +342,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
                 break
             loading.description = step
             try:
-                await message.edit(embed=loading)
+                await message.edit(content=None, embed=loading)
             except discord.HTTPException:
                 pass
         try:
@@ -348,13 +350,43 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
             file = discord.File(buffer, filename="sentrix-profile.png")
             embed = _base(self.bot, "Carte de profil", f"Profil de **{member.display_name}**")
             embed.set_image(url="attachment://sentrix-profile.png")
-            await message.edit(embed=embed, attachments=[file])
+            await message.edit(content=None, embed=embed, attachments=[file])
         except Exception:
-            await message.edit(embed=_base(self.bot, "Carte indisponible", "Impossible de générer la carte maintenant. Réessaie dans quelques instants.", 0xED4245))
+            logger.exception(
+                "Génération de +profile-card impossible (serveur=%s, membre=%s).",
+                getattr(ctx.guild, "id", "?"),
+                getattr(member, "id", "?"),
+            )
+            await message.edit(
+                content=None,
+                embed=_base(
+                    self.bot,
+                    "Carte indisponible",
+                    "La carte n’a pas pu être générée. L’erreur a été enregistrée ; réessaie dans quelques instants.",
+                    0xED4245,
+                ),
+                attachments=[],
+            )
 
     async def _render_profile(self, guild: discord.Guild, member: discord.Member):
-        stats = await stats_service.get_member_statistics(self.bot, guild, member)
-        settings = await self.bot.db.get_design_settings(guild.id)
+        try:
+            stats = await stats_service.get_member_statistics(self.bot, guild, member)
+        except Exception:
+            logger.exception("Statistiques indisponibles pour la carte de profil ; valeurs neutres utilisées.")
+            stats = {
+                "current_level": 0,
+                "current_level_xp": 0,
+                "required_xp": 100,
+                "rank": None,
+                "is_ranked": False,
+                "message_count": 0,
+                "total_money": 0,
+            }
+        try:
+            settings = await self.bot.db.get_design_settings(guild.id)
+        except Exception:
+            logger.exception("Thème indisponible pour la carte de profil ; thème SentriX utilisé.")
+            settings = visual_v5.theme_settings("sentrix")
         return await visual_v5.render_member_card(member, guild, stats, settings)
 
     @commands.command(name="iconsetup", aliases=["icons-setup"])

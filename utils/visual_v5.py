@@ -12,7 +12,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import aiohttp
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 
@@ -197,12 +196,15 @@ async def render_member_card(
     *,
     level_up: int | None = None,
 ) -> io.BytesIO:
-    avatar_url = str(member.display_avatar.replace(size=256, static_format="png").url)
-    timeout = aiohttp.ClientTimeout(total=8)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(avatar_url) as response:
-            response.raise_for_status()
-            avatar_bytes = await response.read()
+    # Asset.read() passe par le client HTTP officiel de discord.py. L'ancien appel avec
+    # une ClientSession aiohttp indépendante pouvait être refusé par le CDN Discord ou
+    # expirer sur Railway, ce qui rendait +profile-card aléatoirement indisponible.
+    # Une icône locale garantit qu'une carte reste générable même si le CDN est en panne.
+    try:
+        avatar = member.display_avatar.replace(size=256, static_format="png")
+        avatar_bytes = await avatar.read()
+    except Exception:
+        avatar_bytes = await asyncio.to_thread((ASSET_DIR / "profile.png").read_bytes)
     return await asyncio.to_thread(
         _render_card_sync,
         avatar_bytes,
