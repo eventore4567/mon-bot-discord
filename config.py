@@ -16,14 +16,13 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")          # /ask, /ai, /sentrix, etc.
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")         # /weather (sinon fallback wttr.in gratuit)
 
-# Modèles API OpenAI publics. Les noms internes Luna/Terra/Sol restent gérés dans
-# utils/ai_service.py, mais leurs valeurs par défaut doivent être de vrais IDs API.
-# Railway peut toujours les remplacer par variables d'environnement.
-OPENAI_MODEL_FAST = os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.1")
-OPENAI_MODEL_ADVANCED = os.getenv("OPENAI_MODEL_ADVANCED", "gpt-5-pro")
+# Modèles API OpenAI actuels. Les noms internes Luna/Terra/Sol restent gérés dans
+# utils/ai_service.py. Railway peut toujours fournir un override explicite si nécessaire.
+OPENAI_MODEL_FAST = os.getenv("OPENAI_MODEL_FAST", "gpt-5.6-luna")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
+OPENAI_MODEL_ADVANCED = os.getenv("OPENAI_MODEL_ADVANCED", "gpt-5.6-sol")
 # Modèle séparé pour la génération d'images.
-OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
 
 # --- Général ---
 DEFAULT_PREFIX = os.getenv("BOT_PREFIX", "+")
