@@ -8,7 +8,6 @@ import discord
 from discord.ext import commands
 
 import config
-from database.db import PRIMARY_CREATOR_ID
 
 logger = logging.getLogger("bot.guild-arrival")
 
@@ -51,45 +50,30 @@ def _invite_url(bot: commands.Bot) -> str | None:
 def _arrival_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embed:
     owner = guild.owner.mention if guild.owner else f"<@{guild.owner_id}>"
     embed = discord.Embed(
-        title="Bienvenue avec SentriX",
+        title="Merci d'avoir ajouté SentriX !",
         description=(
-            f"Bonjour {owner}, merci de m'avoir ajouté sur **{guild.name}**.\n\n"
-            "**Démarrage rapide**\n"
-            "1. Lance `+setup` ou utilise le bouton ci-dessous.\n"
-            "2. Choisis les rôles, salons, tickets, logs et protections.\n"
-            "3. Consulte le résumé puis enregistre la configuration.\n\n"
-            "**Position du rôle importante**\n"
-            "Place le rôle **SentriX** au-dessus des rôles que le bot doit attribuer ou "
-            "modérer. Sans cela, Discord bloquera certaines actions même si les "
-            "permissions sont activées.\n\n"
-            "Une fois le panneau terminé, SentriX sera prêt à protéger, organiser et "
-            "animer votre serveur."
+            f"Bonjour {owner}, SentriX est maintenant installé sur **{guild.name}**.\n\n"
+            "**Pour commencer**\n"
+            "Utilise `+setup` pour choisir les rôles, les salons et les protections.\n\n"
+            "**À vérifier**\n"
+            "Place le rôle **SentriX** au-dessus des rôles qu'il doit gérer.\n\n"
+            "Besoin d'aide ? Utilise simplement `+help`."
         ),
         colour=discord.Colour(WELCOME_COLOUR),
     )
     bot_user = getattr(bot, "user", None)
     avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
     if avatar:
-        embed.set_author(name="SentriX • Nouveau serveur", icon_url=str(avatar))
+        embed.set_author(name="SentriX", icon_url=str(avatar))
         embed.set_thumbnail(url=str(avatar))
     else:
-        embed.set_author(name="SentriX • Nouveau serveur")
+        embed.set_author(name="SentriX")
     embed.add_field(
-        name="Configuration",
-        value="`+setup` • Centre guidé complet",
-        inline=True,
+        name="Liens rapides",
+        value="`+setup`  Configuration\n`+help`  Commandes",
+        inline=False,
     )
-    embed.add_field(
-        name="Aide",
-        value="`+help` • Toutes les commandes",
-        inline=True,
-    )
-    embed.add_field(
-        name="Créateur",
-        value=f"<@{PRIMARY_CREATOR_ID}>",
-        inline=True,
-    )
-    embed.set_footer(text=f"SentriX • {guild.name} • Prêt à être configuré")
+    embed.set_footer(text=f"SentriX • {guild.name}")
     return embed
 
 
@@ -127,7 +111,7 @@ class GuildArrivalView(discord.ui.View):
         label="Configurer SentriX",
         style=discord.ButtonStyle.primary,
         custom_id="sentrix:guild-arrival:setup:v1",
-        row=1,
+        row=0,
     )
     async def configure(self, interaction: discord.Interaction, _button: discord.ui.Button):
         member = interaction.user
@@ -220,4 +204,3 @@ class GuildArrival(commands.Cog):
 async def setup(bot: commands.Bot):
     await bot.add_cog(GuildArrival(bot))
     bot.add_view(GuildArrivalView(bot))
-
