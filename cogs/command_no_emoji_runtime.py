@@ -182,21 +182,32 @@ def clean_modal(modal):
 
 
 def _clean_send_args(args: tuple, kwargs: dict) -> tuple[tuple, dict]:
+    """Nettoie les paramètres d'envoi sans toucher aux sentinelles internes discord.py."""
     args = list(args)
     kwargs = dict(kwargs)
+    missing = getattr(discord.utils, "MISSING", object())
 
-    # `content` peut être le premier argument positionnel ou un mot-clé selon l'API.
-    if args and args[0] is not None:
+    # discord.py utilise MISSING pour distinguer « argument absent » de None.
+    # Il ne faut surtout pas convertir cette sentinelle en texte ou tenter de l'itérer.
+    if args and args[0] is not None and args[0] is not missing:
         args[0] = clean_text(args[0], fallback="SentriX")
-    if "content" in kwargs and kwargs["content"] is not None:
-        kwargs["content"] = clean_text(kwargs["content"], fallback="SentriX")
 
-    if kwargs.get("embed") is not None:
-        kwargs["embed"] = clean_embed(kwargs["embed"])
-    if kwargs.get("embeds") is not None:
-        kwargs["embeds"] = [clean_embed(embed) for embed in kwargs["embeds"]]
-    if kwargs.get("view") is not None:
-        kwargs["view"] = clean_view(kwargs["view"])
+    content = kwargs.get("content", missing)
+    if content is not missing and content is not None:
+        kwargs["content"] = clean_text(content, fallback="SentriX")
+
+    embed = kwargs.get("embed", missing)
+    if embed is not missing and embed is not None:
+        kwargs["embed"] = clean_embed(embed)
+
+    embeds = kwargs.get("embeds", missing)
+    if embeds is not missing and embeds is not None:
+        kwargs["embeds"] = [clean_embed(item) for item in embeds]
+
+    view = kwargs.get("view", missing)
+    if view is not missing and view is not None:
+        kwargs["view"] = clean_view(view)
+
     return tuple(args), kwargs
 
 
