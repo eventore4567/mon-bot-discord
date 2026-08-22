@@ -211,7 +211,9 @@ class CleanHelpSearchModal(discord.ui.Modal):
             embed.set_footer(text=f"Page {page_number}/{len(chunks)} | {len(results)}")
             pages.append(embed)
         home = _help_home(self.bot, interaction.guild, self.prefix, self.is_staff, self.language)
-        await interaction.response.edit_message(embed=pages[0], view=CleanHelpPagesView(self.bot, self.prefix, self.is_staff, self.language, self.author_id, pages, home))
+        view = CleanHelpPagesView(self.bot, self.prefix, self.is_staff, self.language, self.author_id, pages, home)
+        view.message = interaction.message
+        await interaction.response.edit_message(embed=pages[0], view=view)
 
 
 class CleanHelpSelect(discord.ui.Select):
@@ -239,13 +241,16 @@ class CleanHelpSelect(discord.ui.Select):
                 return await interaction.response.defer()
             pages = _category_pages(self.bot, self.prefix, self.language, *matching)
         home = _help_home(self.bot, interaction.guild, self.prefix, self.is_staff, self.language)
-        await interaction.response.edit_message(embed=pages[0], view=CleanHelpPagesView(self.bot, self.prefix, self.is_staff, self.language, self.author_id, pages, home))
+        view = CleanHelpPagesView(self.bot, self.prefix, self.is_staff, self.language, self.author_id, pages, home)
+        view.message = interaction.message
+        await interaction.response.edit_message(embed=pages[0], view=view)
 
 
 class CleanHelpHomeView(discord.ui.View):
     def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool, language: str, author_id: int):
         super().__init__(timeout=180)
         self.bot, self.prefix, self.is_staff, self.language, self.author_id = bot, prefix, is_staff, language, author_id
+        self.message: discord.Message | None = None
         self.add_item(CleanHelpSelect(bot, prefix, is_staff, language, author_id))
         search = discord.ui.Button(label="Search" if language == "en" else "Rechercher", style=discord.ButtonStyle.secondary, row=1)
         async def search_callback(interaction: discord.Interaction):
@@ -258,15 +263,29 @@ class CleanHelpHomeView(discord.ui.View):
         async def close_callback(interaction: discord.Interaction):
             if interaction.user.id != author_id:
                 return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)
-            await interaction.response.edit_message(view=None)
+            await interaction.response.defer()
+            try:
+                await interaction.message.delete()
+            except discord.HTTPException:
+                pass
         close.callback = close_callback
         self.add_item(close)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
 
 
 class CleanHelpPagesView(discord.ui.View):
     def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool, language: str, author_id: int, pages: list[discord.Embed], home_embed: discord.Embed):
         super().__init__(timeout=180)
         self.bot, self.prefix, self.is_staff, self.language, self.author_id = bot, prefix, is_staff, language, author_id
+        self.message: discord.Message | None = None
         self.pages, self.home_embed, self.index = pages, home_embed, 0
         self.add_item(CleanHelpSelect(bot, prefix, is_staff, language, author_id))
         previous = discord.ui.Button(label="Previous" if language == "en" else "Precedent", style=discord.ButtonStyle.secondary, row=1, disabled=len(pages) <= 1)
@@ -284,7 +303,9 @@ class CleanHelpPagesView(discord.ui.View):
         async def home_callback(interaction: discord.Interaction):
             if interaction.user.id != author_id:
                 return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)
-            await interaction.response.edit_message(embed=self.home_embed, view=CleanHelpHomeView(bot, prefix, is_staff, language, author_id))
+            view = CleanHelpHomeView(bot, prefix, is_staff, language, author_id)
+            view.message = interaction.message
+            await interaction.response.edit_message(embed=self.home_embed, view=view)
         async def next_callback(interaction: discord.Interaction):
             if interaction.user.id != author_id:
                 return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)
@@ -296,9 +317,22 @@ class CleanHelpPagesView(discord.ui.View):
         async def close_callback(interaction: discord.Interaction):
             if interaction.user.id != author_id:
                 return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)
-            await interaction.response.edit_message(view=None)
+            await interaction.response.defer()
+            try:
+                await interaction.message.delete()
+            except discord.HTTPException:
+                pass
         previous.callback, home.callback, next_button.callback, search.callback, close.callback = previous_callback, home_callback, next_callback, search_callback, close_callback
         self.add_item(previous); self.add_item(home); self.add_item(next_button); self.add_item(search); self.add_item(close); refresh()
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
 
 
 async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = None):
@@ -341,7 +375,10 @@ async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = No
         embed.set_footer(text="SentriX • Command")
         return await ctx.send(embed=embed)
     home = _help_home(bot, ctx.guild, prefix, is_staff, language)
-    return await ctx.send(embed=home, view=CleanHelpHomeView(bot, prefix, is_staff, language, ctx.author.id))
+    view = CleanHelpHomeView(bot, prefix, is_staff, language, ctx.author.id)
+    message = await ctx.send(embed=home, view=view)
+    view.message = message
+    return message
 
 
 _clean_help_callback._sentrix_help_clean_v8 = True

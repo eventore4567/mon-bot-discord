@@ -69,6 +69,8 @@ DEFAULT_DESIGN_SETTINGS = {
     "progress_empty": "▱",
     "compact_mode": False,
     "charts_enabled": True,
+    "theme_preset": "sentrix",
+    "seasonal_theme": True,
 }
 
 # Modèle visuel par catégorie de commandes (emoji + couleur). Une commande migrée choisit

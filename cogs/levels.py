@@ -17,7 +17,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks, stats_service, design_system
+from utils import embeds, checks, stats_service, design_system, visual_v5
 from database.db import now, DEFAULT_STATS_SETTINGS
 
 XP_COOLDOWN_FALLBACK = 60
@@ -757,21 +757,48 @@ class Levels(commands.Cog, name="Levels"):
                 if settings.get("level_announce_enabled", True):
                     channel = message.guild.get_channel(conf["level_channel"]) if conf and conf["level_channel"] else message.channel
                     if channel:
+                        allowed_mentions = discord.AllowedMentions(
+                            users=[message.author],
+                            roles=False,
+                            everyone=False,
+                            replied_user=False,
+                        )
                         try:
+                            card_stats = await stats_service.get_member_statistics(
+                                self.bot, message.guild, message.author
+                            )
+                            design_settings = await self.bot.db.get_design_settings(message.guild.id)
+                            buffer = await visual_v5.render_member_card(
+                                message.author,
+                                message.guild,
+                                card_stats,
+                                design_settings,
+                                level_up=level,
+                            )
+                            file = discord.File(buffer, filename="sentrix-level-up.png")
+                            level_embed = discord.Embed(
+                                title="Niveau atteint",
+                                description=f"**{message.author.display_name}** passe au niveau **{level}**.",
+                                colour=discord.Colour(design_settings.get("primary_color", 0x6C5CE7)),
+                            )
+                            level_embed.set_image(url="attachment://sentrix-level-up.png")
                             await channel.send(
                                 content=message.author.mention,
-                                embed=embeds.success(
-                                    f"**{message.author.display_name}** passe au niveau **{level}** !"
-                                ),
-                                allowed_mentions=discord.AllowedMentions(
-                                    users=[message.author],
-                                    roles=False,
-                                    everyone=False,
-                                    replied_user=False,
-                                ),
+                                embed=level_embed,
+                                file=file,
+                                allowed_mentions=allowed_mentions,
                             )
-                        except discord.HTTPException:
-                            pass
+                        except Exception:
+                            try:
+                                await channel.send(
+                                    content=message.author.mention,
+                                    embed=embeds.success(
+                                        f"**{message.author.display_name}** passe au niveau **{level}** !"
+                                    ),
+                                    allowed_mentions=allowed_mentions,
+                                )
+                            except discord.HTTPException:
+                                pass
                 await self._assign_level_role(message.guild, message.author, level, settings)
         except Exception:
             import logging

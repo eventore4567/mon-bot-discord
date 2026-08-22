@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import discord
 
-from utils import brand_assets, design_system, premium_style
+from utils import brand_assets, design_system, premium_style, visual_v5
 
 
 def _command(cog: str, name: str):
@@ -158,3 +158,37 @@ def test_v4_styling_is_idempotent_across_context_and_messageable_layers():
     premium_style.style_embed(embed, command=command)
     premium_style.style_embed(embed)
     assert embed.to_dict() == first
+
+
+def test_v5_theme_presets_and_aliases_are_complete():
+    assert set(visual_v5.THEME_PRESETS) == {"sentrix", "cyber", "noir"}
+    assert visual_v5.resolve_theme("bleu") == "cyber"
+    assert visual_v5.resolve_theme("premium") == "noir"
+    assert visual_v5.theme_settings("violet")["theme_preset"] == "sentrix"
+
+
+def test_v5_profile_card_background_is_bundled():
+    assert visual_v5.CARD_BACKGROUND.is_file()
+
+
+def test_v5_error_references_are_unique_and_well_formed():
+    first = visual_v5.error_reference()
+    second = visual_v5.error_reference()
+    assert first.startswith("SX-") and len(first) == 9
+    assert first != second
+
+
+def test_v5_danger_reference_is_added_once():
+    embed = premium_style.style_embed(discord.Embed(title="Erreur", description="Action impossible"))
+    first = embed.description
+    premium_style.style_embed(embed)
+    assert embed.description == first
+    assert "Référence : `SX-" in embed.description
+
+
+def test_v5_empty_music_state_guides_the_member():
+    embed = premium_style.style_embed(
+        discord.Embed(title="File d'attente vide"),
+        command=_command("Music", "queue"),
+    )
+    assert "+play <titre>" in embed.description

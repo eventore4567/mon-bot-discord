@@ -16,7 +16,7 @@ est déjà très serré (96/100), et ce panneau n'a pas besoin d'être une comma
 import discord
 from discord.ext import commands
 
-from utils import checks, design_system
+from utils import checks, design_system, visual_v5
 from database.db import DEFAULT_DESIGN_SETTINGS
 
 
@@ -78,6 +78,32 @@ class DesignAppearanceModal(discord.ui.Modal, title="Apparence générale"):
 # Contrôles
 # =============================================================================
 
+
+class ThemePresetSelect(discord.ui.Select):
+    """Trois identités complètes, appliquées sans saisir cinq codes couleur."""
+
+    def __init__(self, view: "DesignSetupView"):
+        self.view_ref = view
+        current = visual_v5.resolve_theme(view.pending.get("theme_preset")) or "sentrix"
+        options = [
+            discord.SelectOption(
+                label=data["label"],
+                value=key,
+                description=data["description"],
+                default=key == current,
+            )
+            for key, data in visual_v5.THEME_PRESETS.items()
+        ]
+        super().__init__(placeholder="Choisir un thème visuel…", options=options, row=2)
+
+    async def callback(self, interaction: discord.Interaction):
+        selected = self.values[0]
+        compact = bool(self.view_ref.pending.get("compact_mode", False))
+        self.view_ref.pending.update(visual_v5.theme_settings(selected, compact_mode=compact))
+        self.view_ref.rebuild_items()
+        await self.view_ref.refresh(interaction)
+
+
 class DesignBoolToggleButton(discord.ui.Button):
     def __init__(self, view: "DesignSetupView", key: str, label: str, row: int):
         self.view_ref = view
@@ -127,6 +153,8 @@ class DesignSetupView(design_system.SentriXView):
         self.add_item(DesignBoolToggleButton(self, "show_avatars", "Avatars affichés", row=1))
         self.add_item(DesignBoolToggleButton(self, "compact_mode", "Mode compact", row=1))
         self.add_item(DesignBoolToggleButton(self, "charts_enabled", "Graphiques activés", row=1))
+        self.add_item(DesignBoolToggleButton(self, "seasonal_theme", "Thème saisonnier", row=1))
+        self.add_item(ThemePresetSelect(self))
 
         preview_btn = discord.ui.Button(label="👁️ Prévisualiser", style=discord.ButtonStyle.secondary, row=3)
         preview_btn.callback = self._preview
@@ -147,13 +175,15 @@ class DesignSetupView(design_system.SentriXView):
 
     def build_summary_embed(self) -> discord.Embed:
         p = self.pending
-        e = discord.Embed(title="⚙️ Configuration du système de design (Phase 1)", colour=discord.Colour(p["primary_color"]))
+        theme_key = visual_v5.resolve_theme(p.get("theme_preset")) or "sentrix"
+        theme = visual_v5.THEME_PRESETS[theme_key]
+        e = discord.Embed(title="SentriX • Apparence", colour=discord.Colour(p["primary_color"]))
         e.description = (
-            "Ces réglages sont enregistrés dès maintenant, mais **aucune commande ne les "
-            "utilise encore** — les commandes actuelles (`/stats`, `/level`, tickets, "
-            "économie...) gardent leur apparence habituelle. La migration progressive vers "
-            "ce nouveau design se fera lors des phases suivantes, annoncées à l'avance."
+            "Choisis une identité complète ou règle chaque couleur. "
+            "Les nouveaux panneaux utilisent ces préférences automatiquement."
         )
+        e.add_field(name="Thème", value=theme["label"], inline=True)
+        e.add_field(name="Saisons", value="Actif" if p.get("seasonal_theme", True) else "Inactif", inline=True)
         e.add_field(
             name="🎨 Couleurs",
             value=(
@@ -169,7 +199,7 @@ class DesignSetupView(design_system.SentriXView):
         e.add_field(name="🖼️ Avatars affichés", value="Oui" if p.get("show_avatars", True) else "Non", inline=True)
         e.add_field(name="📐 Mode compact", value="Oui" if p.get("compact_mode", False) else "Non", inline=True)
         e.add_field(name="📈 Graphiques activés", value="Oui" if p.get("charts_enabled", True) else "Non", inline=True)
-        e.set_footer(text="Rien n'est enregistré tant que vous n'avez pas cliqué sur 💾 Enregistrer.")
+        e.set_footer(text="SentriX • Enregistre pour appliquer les changements")
         return e
 
     async def refresh(self, interaction: discord.Interaction):
@@ -185,8 +215,8 @@ class DesignSetupView(design_system.SentriXView):
     async def _preview(self, interaction: discord.Interaction):
         p = self.pending
         embed = design_system.create_embed(
-            title="👁️ Aperçu (exemple, non enregistré)",
-            description="Exemple d'affichage de progression avec ces réglages :\n7/10 — 70%",
+            title="Aperçu du thème",
+            description="Aperçu de progression\n" + design_system.progress_bar(7, 10),
             colour=p["primary_color"],
             user=interaction.user if p.get("show_avatars", True) else None,
             footer=p["footer"],

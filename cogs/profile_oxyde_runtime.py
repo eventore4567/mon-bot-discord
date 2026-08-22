@@ -6,7 +6,7 @@ import functools
 import discord
 from discord.ext import commands
 
-from utils import premium_style, stats_service
+from utils import premium_style, stats_service, visual_v5
 from . import community_v3, community_v31
 
 CARD_COLOUR = premium_style.COLORS["profile"]
@@ -167,6 +167,7 @@ class CleanProfileView(discord.ui.View):
         self.member = member
         self.author_id = int(author_id)
         self.message: discord.Message | None = None
+        self.page = "overview"
         self._set_active("overview")
 
     def _set_active(self, page: str):
@@ -182,6 +183,7 @@ class CleanProfileView(discord.ui.View):
 
     async def _show(self, interaction: discord.Interaction, page: str):
         embed = await build_page(self.bot, self.guild, self.member, self.author_id, page)
+        self.page = page
         self._set_active(page)
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -200,6 +202,40 @@ class CleanProfileView(discord.ui.View):
     @discord.ui.button(label="Classement", style=discord.ButtonStyle.secondary, custom_id="sentrix-clean-profile:rankings")
     async def rankings(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._show(interaction, "rankings")
+
+    @discord.ui.button(label="Carte", style=discord.ButtonStyle.primary, custom_id="sentrix-clean-profile:card", row=1)
+    async def card(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            data = await _snapshot(self.bot, self.guild, self.member)
+            settings = await self.bot.db.get_design_settings(self.guild.id)
+            buffer = await visual_v5.render_member_card(
+                self.member,
+                self.guild,
+                data["stats"],
+                settings,
+            )
+            file = discord.File(buffer, filename="sentrix-profile.png")
+            embed = _base(self.bot, self.member, "Carte de profil", self.member.display_name)
+            embed.set_image(url="attachment://sentrix-profile.png")
+            await interaction.followup.send(embed=embed, file=file, ephemeral=True)
+        except Exception:
+            await interaction.followup.send(
+                "La carte est temporairement indisponible. Réessaie dans quelques instants.",
+                ephemeral=True,
+            )
+
+    @discord.ui.button(label="Actualiser", style=discord.ButtonStyle.secondary, custom_id="sentrix-clean-profile:refresh", row=1)
+    async def refresh(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self._show(interaction, self.page)
+
+    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger, custom_id="sentrix-clean-profile:close", row=1)
+    async def close(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.defer()
+        try:
+            await interaction.message.delete()
+        except discord.HTTPException:
+            pass
 
     async def on_timeout(self):
         for child in self.children:

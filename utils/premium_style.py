@@ -12,7 +12,7 @@ from typing import Any
 
 import discord
 
-from utils import brand_assets, microcopy
+from utils import brand_assets, microcopy, visual_v5
 
 
 COLORS: dict[str, int] = {
@@ -345,6 +345,25 @@ def _merge_detail(description: Any, detail: str | None) -> str | None:
     return clip(f"{marker}\n{body}", 4096)
 
 
+def _with_empty_state_hint(description: Any, category: str) -> str | None:
+    body = str(description or "").strip()
+    lowered = body.casefold()
+    if not any(word in lowered for word in ("vide", "aucun résultat", "aucune donnée", "aucune commande", "rien à")):
+        return body or None
+    hints = {
+        "music": "Lance une lecture avec `+play <titre>`.",
+        "shop": "Le staff peut ajouter un article depuis le panneau de configuration.",
+        "tickets": "Crée un ticket depuis le panneau du serveur.",
+        "leaderboard": "Le classement apparaîtra dès que des membres auront progressé.",
+        "economy": "Commence avec `+daily` ou `+work`.",
+        "events": "Aucun événement actif pour le moment.",
+    }
+    hint = hints.get(category)
+    if not hint or hint.casefold() in lowered:
+        return body or None
+    return clip(f"{body}\n\n{hint}", 4096)
+
+
 def style_embed(
     embed: discord.Embed,
     *,
@@ -382,14 +401,23 @@ def style_embed(
         detail = _detail_title(original_title, category)
         embed.title = _canonical_title(category, log_type=log_type)
     embed.description = _merge_detail(getattr(embed, "description", None), detail)
+    embed.description = _with_empty_state_hint(embed.description, category)
 
     current_colour = getattr(getattr(embed, "colour", None), "value", 0) or 0
     state_colour = COLORS.get(kind)
     category_colour = COLORS.get(category, COLORS["brand"])
+    if kind == "info" and category in {"brand", "utility", "configuration"}:
+        category_colour = visual_v5.seasonal_accent(category_colour)
     if kind in {"success", "warning", "danger"} and state_colour:
         embed.colour = discord.Colour(state_colour)
     elif not current_colour or current_colour in SYSTEM_COLOURS:
         embed.colour = discord.Colour(category_colour)
+
+    if kind == "danger" and embed.description and "Référence : `SX-" not in embed.description:
+        embed.description = clip(
+            f"{embed.description}\n\nRéférence : `{visual_v5.error_reference()}`",
+            4096,
+        )
 
     # Le message Discord possède déjà son heure. On réserve le timestamp interne aux
     # journaux afin d'alléger toutes les cartes de commandes ordinaires.

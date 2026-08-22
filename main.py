@@ -54,6 +54,7 @@ EXTENSIONS = [
     "cogs.invites",
     "cogs.design",
     "cogs.embed_builder",
+    "cogs.visual_experience_v5",
 ]
 
 # Les réglages ci-dessous existent déjà dans les panneaux interactifs. Ils restent
@@ -87,7 +88,7 @@ PRUNED_COMMANDS = COMMANDS_REPLACED_BY_SETUP | EXACT_DUPLICATE_COMMANDS
 # qu'un oubli de décorateur rende accidentellement une commande administrative publique.
 PUBLIC_COMMANDS = frozenset({
     # Aide et utilitaires sans modification du serveur
-    "help", "ping", "avatar", "info", "userinfo",
+    "help", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
     "report-bug", "afk", "roll", "choose",
@@ -144,7 +145,7 @@ CATEGORY_COMMANDS = {
         "remove-level-role", "set-xp", "add-xp", "reset-levels", "levelcheck",
         "levelrepair", "repconfig", "repadd", "repremove", "represet",
         "rephistory", "statsconfig", "levelroles", "addbonusinvites",
-        "removebonusinvites", "invitebonushistory", "designsetup",
+        "removebonusinvites", "invitebonushistory", "designsetup", "design-theme", "iconsetup",
         "embedconfig", "giveaway-create", "giveaway-end", "giveaway-reroll",
         "giveaway-cancel", "giveaway-blacklist", "giveaway-unblacklist",
         "event-create", "event-cancel", "tournament-create",

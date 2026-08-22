@@ -291,35 +291,39 @@ class Economy(commands.Cog, name="Economy"):
     async def economyleaderboard(self, ctx: commands.Context):
         design = await self.bot.db.get_design_settings(ctx.guild.id)
         rows = await self.bot.db.fetchall(
-            "SELECT * FROM economy WHERE guild_id = ? ORDER BY (cash + bank) DESC LIMIT 15", (ctx.guild.id,)
+            "SELECT * FROM economy WHERE guild_id = ? ORDER BY (cash + bank) DESC LIMIT 15",
+            (ctx.guild.id,),
         )
-        if not rows:
-            return await ctx.send(embed=embeds.info("Aucune donnée économique pour l'instant."))
-        lines = []
-        rank = 0
-        for r in rows:
-            # Un membre non mis en cache (get_member()=None) n'a pas forcément quitté le
-            # serveur — on l'affiche avec un identifiant de secours au lieu de le faire
-            # disparaître du classement. Seuls les BOTS confirmés sont exclus.
-            member = ctx.guild.get_member(r["user_id"])
+        entries = []
+        for row in rows:
+            member = ctx.guild.get_member(row["user_id"])
             if member is not None and member.bot:
                 continue
-            name = member.display_name if member else f"Utilisateur {r['user_id']}"
-            rank += 1
-            if rank > 10:
+            name = member.display_name if member else f"Utilisateur {row['user_id']}"
+            entries.append((name, int(row["cash"] + row["bank"])))
+            if len(entries) >= 10:
                 break
-            lines.append(
-                f"**{rank}.** {name} — {stats_service.format_number(r['cash'] + r['bank'])} pièces"
-            )
-        if not lines:
+        if not entries:
             return await ctx.send(embed=embeds.info("Aucune donnée économique pour l'instant."))
+
         style = design_system.CATEGORY_STYLES["economy"]
+        remaining = [
+            f"**{index}.** {name} • {stats_service.format_number(total)} pièces"
+            for index, (name, total) in enumerate(entries[3:], start=4)
+        ]
         embed = design_system.create_embed(
             title="Classement économique",
-            description="\n".join(lines),
+            description="\n".join(remaining) if remaining else "Top du serveur",
             colour=design.get("primary_color", style["colour"]),
             footer=design.get("footer"),
         )
+        podium_labels = ("1er", "2e", "3e")
+        for index, (name, total) in enumerate(entries[:3]):
+            embed.add_field(
+                name=podium_labels[index],
+                value=f"**{name}**\n{stats_service.format_number(total)} pièces",
+                inline=True,
+            )
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="leaderboard-money", description="Afficher le classement des plus riches.", with_app_command=False)

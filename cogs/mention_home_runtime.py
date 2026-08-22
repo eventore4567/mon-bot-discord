@@ -13,6 +13,7 @@ import discord
 from discord.ext import commands
 
 import config
+from utils import visual_v5
 from utils.instance_identity import brand_label
 
 from . import bot_experience_v5
@@ -111,7 +112,7 @@ def _home_embed(bot: commands.Bot, author: discord.abc.User, prefix: str) -> dis
     embed = discord.Embed(
         title="SentriX • Accueil",
         description=(
-            f"**Salut {display_name}, je suis {brand}.**\n"
+            f"**{visual_v5.greeting()} {display_name}, je suis {brand}.**\n"
             "Protection, configuration et outils communautaires.\n"
             f"Préfixe `{prefix}` • Commence avec `{prefix}help` ou `{prefix}setup`."
         ),
