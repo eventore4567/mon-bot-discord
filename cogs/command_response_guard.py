@@ -342,10 +342,12 @@ def install(bot: commands.Bot) -> None:
 
     bot.add_listener(mark_prefix_command_start, "on_command")
     bot.add_listener(mark_slash_command_start, "on_interaction")
-    bot.add_listener(ensure_prefix_command_response, "on_command_completion")
+    # Aucun accusé de succès automatique : certaines commandes répondent via un message
+    # direct, un menu ou une édition que ce garde ne peut pas toujours détecter. L'ancien
+    # filet de sécurité ajoutait alors à tort « Commande exécutée » et pouvait donner
+    # l'impression que la vraie interface avait disparu.
     bot.add_listener(improve_prefix_command_error, "on_command_error")
-    bot.add_listener(ensure_slash_command_response, "on_app_command_completion")
     _INSTALLED = True
     logger.info(
-        "Expérience TOUTES commandes activée : réponses garanties, suggestions filtrées par permissions et diagnostic préfixe/slash."
+        "Expérience commandes activée : aucun succès automatique, suggestions filtrées et diagnostic préfixe/slash."
     )

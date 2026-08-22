@@ -6,12 +6,19 @@ d'éviter qu'une même commande apparaisse parfois avec un cadre et parfois sans
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any
 
 import discord
 from discord.ext import commands
 
 from utils import premium_style
+
+
+_COMMAND_CONTEXT: ContextVar[commands.Context | None] = ContextVar(
+    "sentrix_rich_command_context",
+    default=None,
+)
 
 
 RICH_ROOTS = frozenset({
@@ -28,28 +35,80 @@ def _content(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
     return args[0] if args else None
 
 
-def _rich_send_args(ctx: commands.Context, args: tuple[Any, ...], kwargs: dict[str, Any]):
-    """Transforme uniquement le texte compatible ; fichiers et mentions restent intacts."""
-    args = list(args)
-    kwargs = dict(kwargs)
+def _force_rich_args(
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    command: Any = None,
+    guild: discord.Guild | None = None,
+    requester: Any = None,
+    bot_user: Any = None,
+    include_brand_asset: bool = False,
+):
+    """Force toute réponse textuelle de commande dans la même carte que +help.
+
+    premium_style évitait volontairement les textes avec mention, URL ou fichier. C'était
+    précisément la raison pour laquelle certaines commandes restaient en texte libre. Le
+    transport final sait qu'il traite une commande : il peut donc toujours construire la
+    carte, tout en laissant les pièces jointes, vues et paramètres Discord intacts.
+    """
     args, kwargs = premium_style.style_kwargs(
-        tuple(args),
+        args,
+        kwargs,
+        command=command,
+        guild=guild,
+        requester=requester,
+        bot_user=bot_user,
+        allow_content_wrap=True,
+    )
+    mutable = list(args)
+    missing = getattr(discord.utils, "MISSING", object())
+    has_embed = kwargs.get("embed") is not None or bool(kwargs.get("embeds"))
+    content = kwargs.get("content", missing)
+    if content is missing and mutable:
+        content = mutable[0]
+
+    if not has_embed and content is not missing and content is not None and str(content).strip():
+        kwargs["embed"] = premium_style.content_embed(
+            content,
+            command=command,
+            guild=guild,
+            requester=requester,
+            bot_user=bot_user,
+        )
+        if mutable:
+            mutable[0] = None
+            kwargs.pop("content", None)
+        else:
+            kwargs["content"] = None
+
+    args, kwargs = premium_style.style_kwargs(
+        tuple(mutable),
+        kwargs,
+        command=command,
+        guild=guild,
+        requester=requester,
+        bot_user=bot_user,
+        allow_content_wrap=False,
+        include_brand_asset=include_brand_asset,
+    )
+    if kwargs.get("embed") is not None or kwargs.get("embeds"):
+        if not args or args[0] is None:
+            kwargs.setdefault("content", None)
+    return args, kwargs
+
+
+def _rich_send_args(ctx: commands.Context, args: tuple[Any, ...], kwargs: dict[str, Any]):
+    """Applique à toutes les commandes la même carte compacte que +help."""
+    return _force_rich_args(
+        args,
         kwargs,
         command=getattr(ctx, "command", None),
         guild=getattr(ctx, "guild", None),
         requester=getattr(ctx, "author", None),
         bot_user=getattr(getattr(ctx, "bot", None), "user", None),
-        allow_content_wrap=True,
         include_brand_asset=True,
     )
-    args = list(args)
-
-    # Si un embed est explicitement fourni, il devient l'unique présentation visuelle.
-    # Cela empêche un ancien texte de rester au-dessus après une modification.
-    if kwargs.get("embed") is not None or kwargs.get("embeds"):
-        if not args or args[0] is None:
-            kwargs.setdefault("content", None)
-    return tuple(args), kwargs
 
 
 def _root_from_command(command: Any) -> str:
@@ -103,19 +162,15 @@ def _style_interaction_args(
     *,
     include_brand_asset: bool = False,
 ):
-    args, kwargs = premium_style.style_kwargs(
+    args, kwargs = _force_rich_args(
         args,
         kwargs,
         command=getattr(interaction, "command", None),
         guild=getattr(interaction, "guild", None),
         requester=getattr(interaction, "user", None),
         bot_user=getattr(getattr(interaction, "client", None), "user", None),
-        allow_content_wrap=True,
         include_brand_asset=include_brand_asset,
     )
-    if kwargs.get("embed") is not None or kwargs.get("embeds"):
-        if not args or args[0] is None:
-            kwargs.setdefault("content", None)
     return _clean_send_args(args, kwargs)
 
 
@@ -126,6 +181,35 @@ def install(bot: commands.Bot | None = None) -> None:
         originals = premium_style_runtime._ORIGINALS
     except Exception:
         originals = {}
+
+    # Ce contexte est posé tout à la fin du chargement, après les anciens runtimes. Il
+    # identifie aussi les commandes qui répondent avec ctx.channel.send(...) plutôt que
+    # ctx.send(...), afin qu'elles reçoivent exactement le même embed.
+    current_command_invoke = commands.Command.invoke
+    if not getattr(current_command_invoke, "_sentrix_rich_command_scope", False):
+        async def absolute_command_invoke(self, ctx: commands.Context):
+            token = _COMMAND_CONTEXT.set(ctx)
+            try:
+                return await current_command_invoke(self, ctx)
+            finally:
+                _COMMAND_CONTEXT.reset(token)
+
+        absolute_command_invoke._sentrix_rich_command_scope = True
+        absolute_command_invoke._sentrix_original = current_command_invoke
+        commands.Command.invoke = absolute_command_invoke
+
+    current_group_invoke = commands.Group.invoke
+    if not getattr(current_group_invoke, "_sentrix_rich_command_scope", False):
+        async def absolute_group_invoke(self, ctx: commands.Context):
+            token = _COMMAND_CONTEXT.set(ctx)
+            try:
+                return await current_group_invoke(self, ctx)
+            finally:
+                _COMMAND_CONTEXT.reset(token)
+
+        absolute_group_invoke._sentrix_rich_command_scope = True
+        absolute_group_invoke._sentrix_original = current_group_invoke
+        commands.Group.invoke = absolute_group_invoke
 
     # Les méthodes sauvegardées par premium_style_runtime sont les vrais transports
     # discord.py, capturés avant community_v32/v33/v34 et les autres politiques. Tous les
@@ -162,12 +246,14 @@ def install(bot: commands.Bot | None = None) -> None:
     raw_message_edit = originals.get("message_edit") or _unwrap(current_edit)
     if not getattr(current_edit, "_sentrix_absolute_rich", False):
         async def absolute_message_edit(self: discord.Message, *args, **kwargs):
-            args, kwargs = premium_style.style_kwargs(
+            ctx = _COMMAND_CONTEXT.get()
+            args, kwargs = _force_rich_args(
                 args,
                 kwargs,
+                command=getattr(ctx, "command", None),
                 guild=getattr(self, "guild", None),
+                requester=getattr(ctx, "author", None),
                 bot_user=getattr(bot, "user", None),
-                allow_content_wrap=True,
             )
             kwargs = _clean_edit_kwargs(kwargs)
             if kwargs.get("embed") is not None or kwargs.get("embeds"):
@@ -186,20 +272,18 @@ def install(bot: commands.Bot | None = None) -> None:
     raw_messageable_send = originals.get("messageable_send") or _unwrap(current_messageable_send)
     if not getattr(current_messageable_send, "_sentrix_absolute_rich", False):
         async def absolute_messageable_send(self, *args, **kwargs):
-            try:
-                from . import command_no_emoji_runtime
-                in_command = command_no_emoji_runtime._COMMAND_DEPTH.get() > 0
-            except Exception:
-                in_command = False
+            ctx = _COMMAND_CONTEXT.get()
+            in_command = ctx is not None
             has_embed = kwargs.get("embed") is not None or bool(kwargs.get("embeds"))
             if not in_command and not has_embed:
                 return await current_messageable_send(self, *args, **kwargs)
-            args, kwargs = premium_style.style_kwargs(
+            args, kwargs = _force_rich_args(
                 args,
                 kwargs,
+                command=getattr(ctx, "command", None),
                 guild=getattr(self, "guild", None),
+                requester=getattr(ctx, "author", None),
                 bot_user=getattr(bot, "user", None),
-                allow_content_wrap=in_command,
                 include_brand_asset=True,
             )
             if in_command:
@@ -263,11 +347,10 @@ def install(bot: commands.Bot | None = None) -> None:
         async def absolute_webhook_send(self: discord.Webhook, *args, **kwargs):
             if getattr(self, "type", None) != discord.WebhookType.application:
                 return await current_webhook_send(self, *args, **kwargs)
-            args, kwargs = premium_style.style_kwargs(
+            args, kwargs = _force_rich_args(
                 args,
                 kwargs,
                 bot_user=getattr(bot, "user", None),
-                allow_content_wrap=True,
                 include_brand_asset=True,
             )
             args, kwargs = _clean_send_args(args, kwargs)

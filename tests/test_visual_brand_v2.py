@@ -8,6 +8,7 @@ from cogs.visual_experience_v5 import VisualExperienceV5
 from cogs import plain_response_policy
 from cogs import final_interaction_policy
 from cogs import help_clean_style
+from cogs import command_response_guard
 
 
 def _command(cog: str, name: str):
@@ -212,6 +213,15 @@ def test_command_text_is_consistently_wrapped_in_an_embed():
     assert isinstance(kwargs["embed"], discord.Embed)
 
 
+def test_mentions_and_links_are_also_forced_into_command_embeds():
+    ctx = SimpleNamespace(command=_command("Utility", "info"), guild=None, author=None, bot=None)
+    for content in ("<@123456789012345678> profil", "https://example.test/result"):
+        args, kwargs = plain_response_policy._rich_send_args(ctx, (content,), {})
+        assert args == (None,)
+        assert kwargs["content"] is None
+        assert isinstance(kwargs["embed"], discord.Embed)
+
+
 def test_final_interaction_policy_never_flattens_embeds_to_text():
     embed = discord.Embed(title="SentriX • Carte", description="Réponse encadrée")
     assert final_interaction_policy._embed_to_plain(embed, root="profile-card") is None
@@ -254,3 +264,10 @@ def test_final_response_policy_covers_every_command_transport():
     assert 'raw_response_edit(self, *args, **kwargs)' in source
     assert 'raw_original_edit(self, *args, **kwargs)' in source
     assert 'raw_webhook_send(self, *args, **kwargs)' in source
+
+
+def test_command_guard_never_adds_an_automatic_success_message():
+    import inspect
+    source = inspect.getsource(command_response_guard.install)
+    assert 'add_listener(ensure_prefix_command_response' not in source
+    assert 'add_listener(ensure_slash_command_response' not in source
