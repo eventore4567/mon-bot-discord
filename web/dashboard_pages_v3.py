@@ -1,145 +1,59 @@
-"""Page-by-page SentriX dashboard navigation and screens."""
+"""Compatibility entry point for the SentriX dashboard presentation layer."""
 
-from __future__ import annotations
-
-from web.dashboard_theme_v2 import apply_dashboard_theme
+from .dashboard_oxyde_rebuild import apply_dashboard_pages as _apply_oxyde_dashboard
 
 
-PAGES_V3_CSS = r"""
-    /* V3: real page navigation */
-    .shell{grid-template-columns:288px minmax(0,1fr);background:#05080e}
-    .side{padding:0;background:#090f16;border-right:1px solid #1a2533;z-index:30}
-    .side .brand{height:94px;margin:0;padding:18px 22px;border-bottom:1px solid #182331;gap:13px}
-    .side .brand-logo{width:46px;height:46px;border-radius:13px;background:#0e223d;border:2px solid #398bff;box-shadow:0 0 24px #2f7dff36}
-    .side .brand-copy{min-width:0}.side .brand-copy b{display:block;font-size:15px}.side .brand-copy span{display:block;color:#559aff;font-size:11px;font-weight:800;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .side .user{display:none}.nav{display:grid;padding:13px 14px 120px;overflow:visible}
-    .nav-section{color:#52627a;font-size:10px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;padding:17px 13px 8px}
-    .nav button{min-width:0;width:100%;font-size:13px;font-weight:650;padding:11px 13px;border-radius:10px}
-    .nav button.active{background:#16325a;color:#74b2ff;border-color:#265990;box-shadow:inset 3px 0 #3d91ff}
-    .nav-ico{background:transparent;width:22px;height:22px;border-radius:0;color:#8293aa;font-size:13px}
-    .nav button.active .nav-ico{background:transparent;color:#56a1ff;box-shadow:none}
-    .side-bottom{position:absolute;left:14px;right:14px;bottom:15px;margin:0;padding-top:13px;background:#090f16}
-    .side-bottom .btn{padding:9px 11px;font-size:12px}
-
-    .workspace{padding:0;max-width:none;min-height:100vh;background-color:#05080e;background-image:linear-gradient(#14203366 1px,transparent 1px),linear-gradient(90deg,#14203366 1px,transparent 1px);background-size:42px 42px}
-    .app-topbar{height:68px;display:flex;align-items:center;justify-content:space-between;padding:0 32px;border-bottom:1px solid #1a2533;background:#090f16e8;backdrop-filter:blur(13px);position:sticky;top:0;z-index:25}
-    .breadcrumb{display:flex;align-items:center;gap:9px;color:#596a82;font-size:13px}.breadcrumb strong{color:#e9f1ff}.breadcrumb i{font-style:normal;color:#33445b}
-    .top-actions{display:flex;align-items:center;gap:10px}.icon-button{width:40px;height:40px;border:1px solid #223147;border-radius:10px;background:#0b121b;color:#8fa3bc;display:grid;place-items:center;cursor:pointer;font-size:17px}.icon-button:hover{border-color:#3776c4;color:#fff}.top-save{min-height:40px;padding:0 17px;border:0;border-radius:10px;background:linear-gradient(135deg,#398bff,#1760d8);color:white;font-weight:850;cursor:pointer;box-shadow:0 10px 28px #1760d83d}.top-save.hidden{display:none}
-    .workspace-head{padding:38px 32px 25px;margin:0;align-items:flex-start;border-bottom:1px solid #111c2b}.workspace-head>div:first-child{max-width:800px}.workspace-head h1{font-size:32px}.workspace-head p{font-size:14px}.page-eyebrow{color:#5da4ff}.server-picker{width:300px}.server-picker label{color:#6f829f}
-    #serverContent{padding-bottom:70px}.overview{display:none!important}.panel-head{display:none}.panel{padding:0 32px 52px}.fields{display:block;padding:0}.savebar{display:none!important}
-    .page-body{display:grid;gap:20px}.page-section{padding-top:26px}.page-section-title{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:18px}.page-section-title h2{margin:0;font-size:17px}.page-section-title h2:before{content:"";display:inline-block;width:3px;height:18px;margin-right:10px;vertical-align:-3px;border-radius:4px;background:#3c91ff;box-shadow:0 0 15px #3c91ff}.page-count{padding:6px 10px;border-radius:999px;background:#152135;border:1px solid #25334a;color:#7d8da4;font-size:10px;font-weight:850}
-    .dashboard-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding-top:26px}.dash-metric{min-height:122px;border:1px solid #1b2838;border-radius:18px;background:#0a1017;display:flex;align-items:center;gap:16px;padding:22px}.dash-metric-icon{width:51px;height:51px;border-radius:13px;display:grid;place-items:center;background:#102d4a;color:#4ba5ff;font-size:20px;font-weight:900}.dash-metric-icon.green{background:#0e3025;color:#2bd27e}.dash-metric-icon.violet{background:#172446;color:#69a6ff}.dash-metric small{display:block;color:#65748a;font-size:10px;font-weight:900;letter-spacing:.1em;text-transform:uppercase}.dash-metric strong{display:block;font-size:26px;margin-top:3px}.dash-metric span{display:block;color:#526077;font-size:11px;margin-top:3px}
-    .home-modules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:17px}.home-module{min-height:215px;border:1px solid #1b293a;border-radius:18px;background:#0a1017;padding:21px;display:flex;flex-direction:column;cursor:pointer;transition:.18s}.home-module:hover{transform:translateY(-2px);border-color:#3577c7;box-shadow:0 18px 38px #0005}.home-module.active{border-top-color:#3c91ff}.home-module-head{display:flex;align-items:flex-start;justify-content:space-between}.home-module-icon{width:43px;height:43px;border-radius:12px;border:1px solid #26374c;background:#101924;display:grid;place-items:center;color:#62a9ff;font-weight:900}.home-module h3{margin:16px 0 8px;font-size:16px}.home-module p{margin:0;color:#607089;font-size:13px;line-height:1.55}.home-module footer{display:flex;justify-content:flex-end;margin-top:auto;padding-top:17px;border-top:1px solid #172230}.configure-link{color:#97a8be;border:1px solid #283548;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:800}.home-module:hover .configure-link{color:#fff;border-color:#4388de}
-
-    .settings-card,.wide-card,.empty-page-card,.type-card,.summary-side{border:1px solid #1b2837;border-radius:19px;background:#0a1017}.settings-card{max-width:1120px;margin:26px auto 0;padding:26px}.settings-card-title{display:flex;align-items:center;gap:13px;margin-bottom:9px}.settings-card-title i{font-style:normal;color:#59a3ff;font-size:22px}.settings-card-title h3{margin:0;font-size:17px}.settings-card>p{margin:0 0 22px;color:#728199}.inline-save{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px}.inline-save .top-save{padding-inline:22px}
-    .two-card-choice{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding-top:26px}.type-card{min-height:270px;padding:28px;display:flex;flex-direction:column}.type-card.available{border-color:#3887e9;box-shadow:inset 0 0 0 1px #3887e955,0 14px 40px #0b5ad124}.type-icon{width:58px;height:58px;border-radius:14px;background:#102a4a;color:#64abff;display:grid;place-items:center;font-size:24px;font-weight:900}.type-card h3{margin:18px 0 10px;font-size:20px}.type-card p{margin:0;color:#64738a;line-height:1.65}.type-card footer{margin-top:auto}.availability{display:inline-flex;padding:7px 11px;border:1px solid #17583c;border-radius:999px;background:#0d3024;color:#31d17d;font-size:11px;font-weight:850}.availability.locked{border-color:#26334a;background:#151f2f;color:#5d6d84}
-    .back-button{border:0;background:transparent;color:#8496ae;padding:0;font-weight:800;cursor:pointer;margin:26px 0 17px}.back-button:hover{color:#fff}.captcha-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,.55fr);gap:18px}.captcha-main{display:grid;gap:18px}.wide-card{padding:24px}.wide-card h3{margin:0 0 8px;font-size:17px}.wide-card p{margin:0 0 18px;color:#68778e}.summary-side{padding:24px;height:max-content;position:sticky;top:90px}.summary-side h3{margin:0 0 20px;padding-bottom:17px;border-bottom:1px solid #1c2939}.summary-row{display:flex;justify-content:space-between;gap:18px;padding:10px 0;color:#617188}.summary-row b{color:#e7effb}.summary-row .warning{color:#f2b447}
-
-    .embed-types{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;padding-top:26px}.embed-type{min-height:280px;border:1px solid #1c2939;border-radius:19px;background:#0a1017;padding:27px;display:flex;flex-direction:column;cursor:pointer}.embed-type.primary{border-color:#3b88e9;box-shadow:inset 0 0 0 1px #3b88e933}.embed-type h3{margin:18px 0 10px}.embed-type p{margin:0;color:#637188;line-height:1.6}.round-arrow{width:37px;height:37px;border-radius:50%;display:grid;place-items:center;background:#173d70;color:#70b2ff;margin:18px 0 0 auto}.import-card{margin-top:22px;border:1px solid #1b293a;border-radius:19px;background:#0a1017;padding:24px}.import-card h3{margin:0 0 10px}.import-card p{color:#637188}.import-line{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:13px}
-    .message-index{padding-top:26px}.message-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.dash-button{border:1px dashed #33445d;border-radius:999px;background:#0a1119;color:#9aacbf;padding:10px 15px;font-weight:800;cursor:pointer}.dash-button:hover{border-color:#4089e6;color:#fff}.empty-page-card{min-height:250px;display:grid;place-items:center;text-align:center;color:#596980;padding:30px;border-style:dashed}.empty-page-card i{display:block;font-style:normal;font-size:36px;color:#45536a;margin-bottom:10px}.configured-message{display:flex;align-items:center;justify-content:space-between;gap:20px;border:1px solid #203149;border-radius:16px;background:#0c141e;padding:18px}.configured-message b,.configured-message span{display:block}.configured-message span{color:#68778e;font-size:12px;margin-top:4px}
-    .message-editor{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,.65fr);gap:18px;padding-top:26px}.message-editor .editor-card{border-color:#1c2939}.message-controls{padding:22px;display:grid;gap:18px}.message-preview{position:sticky;top:90px;height:max-content}
-    .whitelist-stack{display:grid;gap:18px;padding-top:26px}.whitelist-card{border:1px solid #1b2939;border-radius:19px;background:#0a1017;padding:24px}.whitelist-card.global{border-color:#2e609c}.whitelist-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.whitelist-title{display:flex;gap:14px}.whitelist-icon{width:45px;height:45px;border-radius:12px;background:#102946;color:#61a8ff;display:grid;place-items:center;font-weight:900}.whitelist-title h3{margin:1px 0 6px}.whitelist-title p{margin:0;color:#64748a;font-size:12px}.add-small{border:1px solid #285d9a;border-radius:9px;background:#10213a;color:#63a9ff;padding:8px 13px;font-weight:850;cursor:pointer}.whitelist-boxes{display:grid;gap:12px;margin-top:20px}.whitelist-boxes.cols-2{grid-template-columns:1fr 1fr}.whitelist-boxes.cols-4{grid-template-columns:repeat(4,1fr)}.whitelist-box{min-height:115px;border:1px solid #1e2d40;border-radius:14px;background:#0d151f;padding:16px}.whitelist-box header{display:flex;justify-content:space-between;color:#8fa0b6;font-size:11px;font-weight:850}.whitelist-box p{text-align:center;color:#596980;font-size:12px;margin:30px 0 0}
-    .ticket-index{padding-top:26px}.ticket-list-card{border:1px solid #1b2939;border-radius:21px;background:#0a1017;overflow:hidden;min-height:470px}.ticket-list-head{display:flex;align-items:center;justify-content:space-between;padding:21px 25px;border-bottom:1px solid #182535}.ticket-list-head h3{margin:0}.ticket-empty{min-height:390px;display:grid;place-items:center;text-align:center;color:#66758a}.ticket-empty i{display:block;font-style:normal;width:66px;height:66px;border-radius:18px;background:#152136;border:1px solid #2a3a50;margin:0 auto 15px;display:grid;place-items:center;font-size:26px}.ticket-empty b{display:block;color:#aab8ca;margin-bottom:7px}
-
-    body[data-tab="security"] .module-grid,body[data-tab="logs"] .log-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.module-card,.log-card{background:#0a1017;border-color:#1b2939}.module-card.on{border-top-color:#3c91ff}.section-line h3:before{background:#3c91ff;box-shadow:0 0 13px #3c91ff}.status-pill.active{background:#0d3024;border-color:#17583d;color:#31d17d}
-    @media(max-width:1200px){.home-modules,.embed-types,body[data-tab="security"] .module-grid,body[data-tab="logs"] .log-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.message-editor{grid-template-columns:1fr}.message-preview{position:relative;top:0}.whitelist-boxes.cols-4{grid-template-columns:1fr 1fr}}
-    @media(max-width:980px){.shell{grid-template-columns:1fr}.side{position:relative;height:auto}.side .brand{height:auto}.side-bottom{display:none}.nav{display:flex;padding:10px 14px;overflow:auto}.nav-section{display:none}.nav button{min-width:max-content}.app-topbar{top:0}.server-picker{width:100%}.workspace-head{flex-direction:column}.captcha-layout{grid-template-columns:1fr}.summary-side{position:relative;top:0}}
-    @media(max-width:720px){.app-topbar{padding:0 16px}.workspace-head,.panel{padding-left:16px;padding-right:16px}.dashboard-metrics,.home-modules,.embed-types,.two-card-choice,body[data-tab="security"] .module-grid,body[data-tab="logs"] .log-grid,.whitelist-boxes.cols-2,.whitelist-boxes.cols-4{grid-template-columns:1fr}.inline-save,.import-line{grid-template-columns:1fr}.top-save{padding-inline:12px}.breadcrumb span{display:none}}
+_EMBEDS_PAGE_FIX = r"""
+    /* Embeds has its own secure builder route; keep it as a real dashboard page. */
+    body[data-tab="embeds"] #sxV4Save,
+    body[data-tab="embeds"] .savebar{display:none!important}
 """
 
-
-PAGES_V3_JS = r"""
-    tabs.overview={title:"Vue d'ensemble",description:"Statut en temps réel de votre serveur et accès rapide aux modules.",fields:[],noSave:true};
-    tabs.settings={title:"Paramètres du serveur",description:"Gérez les réglages généraux de SentriX sur ce serveur.",fields:tabs.general.fields};
-    tabs.captcha={title:"Captcha",description:"Vérification des nouveaux membres depuis Discord.",fields:[
-      {key:"verification_role",label:"Rôle après vérification",type:"role"},{key:"verification_channel",label:"Salon de vérification",type:"channel"},{key:"log_automod",label:"Salon des logs",type:"channel"}
-    ]};
-    tabs.embeds={title:"Créateur d'Embed",description:"Choisissez le format de votre message ou importez-en un existant.",fields:[],noSave:true};
-    tabs.welcome={...tabs.welcome,title:"Messages de bienvenue",description:"Configurez les messages envoyés aux nouveaux membres."};
-    tabs.goodbye={title:"Messages d'au revoir",description:"Configurez le message envoyé lorsqu'un membre quitte le serveur.",fields:[{key:"goodbye_channel",label:"Salon de départ",type:"channel"},{key:"goodbye_message",label:"Message de départ",type:"textarea"}]};
-    tabs.whitelist={title:"Whitelist",description:"Gérez les exceptions de vos modules de protection.",fields:[],noSave:true};
-
-    const pageOrder=["overview","settings","captcha","embeds","welcome","goodbye","security","whitelist","tickets","logs","sanctions","levels","ai","notifications","roles"];
-    const routePage=(location.hash||"").slice(1);
-    state.tab=pageOrder.includes(routePage)?routePage:"overview";
-    if(!routePage)history.replaceState(null,"","#overview");
-    state.captchaStep="select";state.welcomeEditing=false;state.goodbyeEditing=false;state.ticketEditing=false;
-    studioMeta.overview=["DASHBOARD","Vue d'ensemble"];studioMeta.settings=["CONFIGURATION","Paramètres du serveur"];studioMeta.captcha=["MODULES","Captcha"];studioMeta.embeds=["MESSAGES","Type de création"];studioMeta.welcome=["MODULES","Messages de bienvenue"];studioMeta.goodbye=["MODULES","Messages d'au revoir"];studioMeta.whitelist=["PROTECTION","Whitelist"];
-
-    function installPageShell(){
-      const side=document.querySelector(".side"),workspace=document.querySelector(".workspace");
-      side.querySelector(".brand").innerHTML=`<div class="brand-logo" id="appLogo">S</div><div class="brand-copy"><b>SentriX</b><span id="sideGuildName">Serveur sélectionné</span></div>`;
-      $("navigation").innerHTML=`<div class="nav-section">Général</div><button data-tab="overview"><span class="nav-ico">⌂</span>Vue d'ensemble</button><button data-tab="settings"><span class="nav-ico">⚙</span>Paramètres</button><div class="nav-section">Modules</div><button data-tab="captcha"><span class="nav-ico">◉</span>Captcha</button><button data-tab="embeds"><span class="nav-ico">&lt;/&gt;</span>Embeds</button><button data-tab="welcome"><span class="nav-ico">↗</span>Bienvenue</button><button data-tab="goodbye"><span class="nav-ico">↘</span>Départ</button><button data-tab="security"><span class="nav-ico">◇</span>AntiRaid</button><button data-tab="whitelist"><span class="nav-ico">≡</span>Whitelist</button><button data-tab="tickets"><span class="nav-ico">▱</span>Tickets</button><div class="nav-section">Autres</div><button data-tab="logs"><span class="nav-ico">▰</span>Logs</button><button data-tab="sanctions"><span class="nav-ico">!</span>Sanctions</button><button data-tab="levels"><span class="nav-ico">↑</span>Niveaux</button><button data-tab="ai"><span class="nav-ico">✦</span>IA</button><button data-tab="roles"><span class="nav-ico">R</span>Rôles & salons</button>`;
-      workspace.insertAdjacentHTML("afterbegin",`<header class="app-topbar"><div class="breadcrumb"><span>SentriX</span><i>/</i><strong id="breadcrumbPage">Vue d'ensemble</strong></div><div class="top-actions"><button class="icon-button" id="topRefresh" type="button" title="Actualiser">↻</button><button class="top-save hidden" id="topSave" type="button">Enregistrer</button></div></header>`);
-      $("topRefresh").addEventListener("click",()=>state.guildId&&selectGuild(state.guildId));$("topSave").addEventListener("click",()=>$("settingsForm").requestSubmit());
-      $("navigation").querySelectorAll("button").forEach(b=>b.classList.toggle("active",b.dataset.tab===state.tab));
-      $("navigation").addEventListener("click",e=>{const b=e.target.closest("button[data-tab]");if(!b)return;location.hash=b.dataset.tab;});
-      window.addEventListener("hashchange",()=>{const page=location.hash.slice(1);if(!pageOrder.includes(page)||!state.guildData)return;state.tab=page;$("navigation").querySelectorAll("button").forEach(b=>b.classList.toggle("active",b.dataset.tab===page));renderTab();});
-    }
-    installPageShell();
-
-    function openPage(page){state.tab=page;location.hash=page;$("navigation").querySelectorAll("button").forEach(b=>b.classList.toggle("active",b.dataset.tab===page));renderTab();}
-    function pageStatus(active){return `<span class="status-pill ${active?"active":"inactive"}">${active?"Actif":"Inactif"}</span>`;}
-    function renderOverviewPage(){
-      const d=state.guildData,s=d.settings||{},a=d.automod||{};const modules=[
-        ["captcha","C","Captcha","Vérifie les nouveaux membres avant de leur donner accès.",Boolean(s.verification_role||s.verification_channel)],
-        ["welcome","B","Bienvenue","Envoie un message personnalisé à chaque nouveau membre.",Boolean(s.welcome_channel)],
-        ["goodbye","D","Départ","Prévient le serveur lorsqu'un membre quitte la communauté.",Boolean(s.goodbye_channel)],
-        ["security","S","AntiRaid","Protège le serveur contre le spam, les liens et les raids.",Object.values(a).some(Number)],
-        ["tickets","T","Tickets","Centralise les demandes privées adressées à votre équipe.",Boolean(s.ticket_category||s.ticket_log_channel)],
-        ["logs","L","Logs","Conserve un historique clair des événements importants.",Boolean(s.log_channel||s.log_messages||s.log_members)]
-      ];
-      const latency=state.publicData?.latency_ms==null?"—":`${state.publicData.latency_ms} ms`;
-      $("fields").innerHTML=`<div class="page-body"><div class="dashboard-metrics"><article class="dash-metric"><span class="dash-metric-icon green">▥</span><div><small>Latence bot</small><strong>${latency}</strong><span>Connexion Discord</span></div></article><article class="dash-metric"><span class="dash-metric-icon">S</span><div><small>Serveur actif</small><strong>${esc(d.guild.name)}</strong><span>${number(d.guild.channels_count)} salons</span></div></article><article class="dash-metric"><span class="dash-metric-icon violet">U</span><div><small>Utilisateurs</small><strong>${number(d.guild.members)}</strong><span>Membres du serveur</span></div></article></div><section class="page-section"><div class="page-section-title"><h2>Modules</h2><span class="page-count">${modules.length} modules</span></div><div class="home-modules">${modules.map(m=>`<article class="home-module ${m[4]?"active":""}" data-open-page="${m[0]}"><div class="home-module-head"><span class="home-module-icon">${m[1]}</span>${pageStatus(m[4])}</div><h3>${m[2]}</h3><p>${m[3]}</p><footer><span class="configure-link">Configurer →</span></footer></article>`).join("")}</div></section></div>`;
-      $("fields").querySelectorAll("[data-open-page]").forEach(card=>card.addEventListener("click",()=>openPage(card.dataset.openPage)));
-    }
-    function renderSettingsPage(){
-      const s=state.guildData.settings||{};
-      $("fields").innerHTML=`<section class="settings-card"><div class="settings-card-title"><i>›_</i><h3>Préfixe du bot</h3></div><p>Définissez le préfixe utilisé pour les commandes textuelles de SentriX.</p><div class="inline-save"><input data-key="prefix" maxlength="5" value="${esc(s.prefix||"+")}"><button class="top-save" type="button" data-submit-now>Enregistrer</button></div></section><section class="settings-card"><div class="settings-card-title"><i>◇</i><h3>Sécurité générale</h3></div><p>Ajustez le niveau global et la limite d'avertissements.</p><div class="ticket-basic"><div class="field"><label>Niveau de sécurité</label><select class="select" data-key="security_level"><option value="faible" ${s.security_level==="faible"?"selected":""}>Faible</option><option value="moyen" ${s.security_level==="moyen"?"selected":""}>Moyen</option><option value="eleve" ${s.security_level==="eleve"?"selected":""}>Élevé</option></select></div><div class="field"><label>Bannissement après avertissements</label><input data-key="warn_ban_threshold" type="number" min="1" max="20" value="${esc(s.warn_ban_threshold??3)}"></div></div></section>`;
-      $("fields").querySelector("[data-submit-now]").addEventListener("click",()=>$("settingsForm").requestSubmit());
-    }
-    function renderCaptchaPage(){
-      const s=state.guildData.settings||{};
-      if(state.captchaStep!=="config"){$("fields").innerHTML=`<div class="two-card-choice"><article class="type-card available" data-captcha-type="site"><span class="type-icon">◎</span><h3>Captcha via Discord</h3><p>Le membre reçoit une vérification directement dans le serveur. Après validation, SentriX lui attribue automatiquement le rôle choisi.</p><footer><span class="availability">Disponible</span></footer></article><article class="type-card" style="opacity:.45"><span class="type-icon">▧</span><h3>Captcha illustré</h3><p>Une image générée doit être résolue parmi plusieurs propositions.</p><footer><span class="availability locked">Prochainement</span></footer></article></div>`;$("fields").querySelector("[data-captcha-type]").addEventListener("click",()=>{state.captchaStep="config";renderTab();});return;}
-      const roleName=state.guildData.roles.find(r=>String(r.id)===String(s.verification_role))?.name||"—",channelName=state.guildData.channels.find(c=>String(c.id)===String(s.verification_channel))?.name||"—",logName=state.guildData.channels.find(c=>String(c.id)===String(s.log_automod))?.name||"—";
-      $("fields").innerHTML=`<button class="back-button" type="button" data-captcha-back>← Changer de type</button><div class="captcha-layout"><div class="captcha-main"><div class="wide-card" style="border-color:#347ddd"><h3>Captcha via Discord</h3><p>Configuration active pour les nouveaux membres.</p></div><div class="studio-tabs"><button class="studio-tab active" type="button">Général</button><button class="studio-tab" type="button">Salons</button></div><section class="wide-card"><h3>Rôle après vérification</h3><p>Rôle attribué automatiquement après une vérification réussie.</p><select class="select" data-key="verification_role">${optionList("role",s.verification_role)}</select></section><section class="wide-card"><h3>Salons du module</h3><p>Choisissez le salon de vérification et celui qui recevra les journaux.</p><div class="ticket-basic"><div class="field"><label>Salon de vérification</label><select class="select" data-key="verification_channel">${optionList("channel",s.verification_channel)}</select></div><div class="field"><label>Salon des logs</label><select class="select" data-key="log_automod">${optionList("channel",s.log_automod)}</select></div></div></section></div><aside class="summary-side"><h3>Résumé</h3><div class="summary-row"><span>Type</span><b>Discord</b></div><div class="summary-row"><span>Rôle</span><b>${esc(roleName)}</b></div><div class="summary-row"><span>Salon</span><b>${esc(channelName)}</b></div><div class="summary-row"><span>Logs</span><b>${esc(logName)}</b></div><div class="summary-row"><span>Statut</span><b class="${s.verification_role&&s.verification_channel?"":"warning"}">${s.verification_role&&s.verification_channel?"Configuré":"Non enregistré"}</b></div></aside></div>`;
-      $("fields").querySelector("[data-captcha-back]").addEventListener("click",()=>{state.captchaStep="select";renderTab();});
-    }
-    function renderEmbedsPage(){
-      $("fields").innerHTML=`<div class="embed-types"><article class="embed-type primary"><span class="type-icon">▰</span><h3>Components V2</h3><p>Créez des messages modernes avec boutons, menus déroulants et mises en page avancées.</p><span class="round-arrow">→</span></article><article class="embed-type"><span class="type-icon">&lt;/&gt;</span><h3>Embed classique</h3><p>Un éditeur simple pour les messages compatibles avec tous les salons.</p><span class="round-arrow">→</span></article><article class="embed-type"><span class="type-icon">▣</span><h3>Embed enregistré</h3><p>Retrouvez vos créations sauvegardées pour les modifier ou les réutiliser.</p><span class="round-arrow">→</span></article></div><section class="import-card"><h3>Importer depuis Discord</h3><p>Collez le lien d'un message Discord pour préparer sa modification.</p><div class="import-line"><input type="url" placeholder="https://discord.com/channels/..."><button class="top-save" type="button" data-soft-action="L'importateur sera connecté au prochain module d'édition.">Importer</button></div></section>`;
-    }
-    function renderMessagePage(kind){
-      const s=state.guildData.settings||{},isWelcome=kind==="welcome",editing=isWelcome?state.welcomeEditing:state.goodbyeEditing,channelKey=isWelcome?"welcome_channel":"goodbye_channel",messageKey=isWelcome?"welcome_message":"goodbye_message",channel=s[channelKey],configured=Boolean(channel);
-      if(!editing){$("fields").innerHTML=`<div class="message-index"><div class="message-toolbar"><button class="dash-button" type="button" data-add-message>＋ Ajouter un salon</button><span class="page-count">${configured?1:0}/2 salons</span></div>${configured?`<div class="configured-message"><div><b>${isWelcome?"Message de bienvenue":"Message d'au revoir"}</b><span>${esc(state.guildData.channels.find(c=>String(c.id)===String(channel))?.name||"Salon configuré")}</span></div><button class="configure-link" type="button" data-add-message>Modifier →</button></div>`:`<div class="empty-page-card"><div><i>▱</i><b>Aucun message configuré</b><span>Ajoutez un salon pour commencer.</span></div></div>`}</div>`;$("fields").querySelectorAll("[data-add-message]").forEach(b=>b.addEventListener("click",()=>{if(isWelcome)state.welcomeEditing=true;else state.goodbyeEditing=true;renderTab();}));return;}
-      const defaultText=isWelcome?"Bienvenue {member} ! Tu viens de rejoindre {server}. Tu es notre membre n°{member_count}.":"À bientôt {username}. Merci d'avoir fait partie de {server}.";const message=s[messageKey]||defaultText;
-      $("fields").innerHTML=`<button class="back-button" type="button" data-message-back>← Revenir aux messages</button><div class="message-editor"><section class="editor-card"><div class="studio-tabs"><button class="studio-tab active" type="button">Contenu</button><button class="studio-tab" type="button">${isWelcome?"Bannière":"Options"}</button><button class="studio-tab" type="button">Salon</button></div><div class="message-controls"><div class="field"><label>${isWelcome?"Message de bienvenue":"Message d'au revoir"}</label>${studioTokens()}<textarea data-key="${messageKey}" rows="10">${esc(message)}</textarea></div>${isWelcome?`<div class="field"><label>Image ou GIF</label><input data-key="welcome_image_url" type="url" value="${esc(s.welcome_image_url||"")}" placeholder="https://exemple.com/banniere.png"></div><div class="field"><label>Rôle automatique</label><select class="select" data-key="autorole">${optionList("role",s.autorole)}</select></div>`:""}<div class="field"><label>${isWelcome?"Salon d'arrivée":"Salon de départ"}</label><select class="select" data-key="${channelKey}">${optionList("channel",channel)}</select></div></div></section><aside class="preview-card message-preview"><div class="preview-title"><b>◉ Aperçu en direct</b><span class="live-pill">LIVE</span></div><div class="discord-preview"><div class="discord-user"><span class="discord-avatar">S</span><div><b>SentriX</b><small style="color:#8b93a5"> BOT · maintenant</small></div></div><div class="discord-message"><b>${isWelcome?"Bienvenue":"Au revoir"}</b><span id="messageLiveCopy"></span><img id="messageLiveImage" class="hidden" alt="Aperçu"></div></div></aside></div>`;
-      const refresh=()=>{let text=$("fields").querySelector(`[data-key="${messageKey}"]`).value;text=text.replaceAll("{member}","@NouveauMembre").replaceAll("{username}","NouveauMembre").replaceAll("{server}",state.guildData.guild.name).replaceAll("{member_count}",number((state.guildData.guild.members||0)+1));$("messageLiveCopy").textContent=text;if(isWelcome){const img=$("messageLiveImage"),url=$("fields").querySelector('[data-key="welcome_image_url"]')?.value.trim();if(url){img.src=url;img.classList.remove("hidden");}else img.classList.add("hidden");}};$("fields").querySelectorAll("textarea,input").forEach(el=>el.addEventListener("input",refresh));$("fields").querySelectorAll("[data-token]").forEach(button=>button.addEventListener("click",()=>{const area=$("fields").querySelector(`[data-key="${messageKey}"]`),start=area.selectionStart??area.value.length,end=area.selectionEnd??start;area.setRangeText(button.dataset.token,start,end,"end");area.dispatchEvent(new Event("input",{bubbles:true}));area.focus();}));$("fields").querySelector("[data-message-back]").addEventListener("click",()=>{if(isWelcome)state.welcomeEditing=false;else state.goodbyeEditing=false;renderTab();});refresh();
-    }
-    function renderWhitelistPage(){
-      const modules=[["global","G","Whitelist globale","Ces utilisateurs contournent tous les modules de protection.",1],["antibot","B","AntiBot","Utilisateurs autorisés à ajouter des bots.",1],["antichannel","#","AntiChannel","Utilisateurs autorisés à gérer les salons.",1],["antirole","R","AntiRole","Utilisateurs autorisés à gérer les rôles.",1],["antiperm","K","AntiPerm & AntiPerm Up","Exceptions aux modifications sensibles.",2],["antilink","L","AntiLien","Rôles, catégories, salons et utilisateurs autorisés.",4],["antispam","S","AntiSpam","Salons et utilisateurs ignorés par le filtre.",2]];
-      $("fields").innerHTML=`<div class="whitelist-stack">${modules.map((m,i)=>`<section class="whitelist-card ${i===0?"global":""}"><div class="whitelist-head"><div class="whitelist-title"><span class="whitelist-icon">${m[1]}</span><div><h3>${m[2]}</h3><p>${m[3]}</p></div></div><button class="add-small" type="button" data-soft-action="La gestion des exceptions de ${m[2]} sera reliée à la base dans la prochaine mise à jour.">＋ Ajouter</button></div><div class="whitelist-boxes cols-${m[4]}">${Array.from({length:m[4]},(_,n)=>`<div class="whitelist-box"><header><span>${m[4]===4?["RÔLES","CATÉGORIES","SALONS","UTILISATEURS"][n]:m[4]===2?["ANTIPERM","ANTIPERM UP"][n]:"UTILISATEURS"}</span><button class="add-small" type="button">＋ Ajouter</button></header><p>Aucune entrée pour le moment.</p></div>`).join("")}</div></section>`).join("")}</div>`;
-    }
-    function renderTicketsIndex(){
-      const s=state.guildData.settings||{},configured=Boolean(s.ticket_category||s.ticket_log_channel);if(state.ticketEditing){renderTicketStudio();return;}
-      $("fields").innerHTML=`<div class="ticket-index"><section class="ticket-list-card"><header class="ticket-list-head"><h3>▰ &nbsp;Panneaux déployés <span class="page-count">${configured?1:0}</span></h3><button class="top-save" type="button" data-create-ticket>＋ Créer un panneau</button></header>${configured?`<div style="padding:22px"><div class="configured-message"><div><b>Centre d'assistance SentriX</b><span>Catégorie et salon de suivi configurés</span></div><button class="configure-link" type="button" data-create-ticket>Modifier →</button></div></div>`:`<div class="ticket-empty"><div><i>▱</i><b>Aucun panneau créé</b><span>Créez votre premier panneau de tickets pour démarrer.</span><br><button class="top-save" type="button" data-create-ticket>＋ Créer un panneau</button></div></div>`}</section></div>`;$("fields").querySelectorAll("[data-create-ticket]").forEach(b=>b.addEventListener("click",()=>{state.ticketEditing=true;renderTab();}));
-    }
-    function pageCanSave(tab){return !tab.noSave&&!tab.sanctions&&!tab.notifications&&!(["overview","embeds","whitelist"].includes(state.tab))&&!(state.tab==="captcha"&&state.captchaStep!=="config")&&!(state.tab==="welcome"&&!state.welcomeEditing)&&!(state.tab==="goodbye"&&!state.goodbyeEditing)&&!(state.tab==="tickets"&&!state.ticketEditing);}
-    function renderTab(){
-      if(!state.guildData)return;const tab=tabs[state.tab]||tabs.overview;$("fields").className="fields";setPageIdentity(tab);$("breadcrumbPage").textContent=tab.title;$("sideGuildName").textContent=state.guildData.guild.name;$("tabTitle").textContent=tab.title;$("tabDescription").textContent=tab.description;
-      if(state.tab==="overview")renderOverviewPage();else if(state.tab==="settings")renderSettingsPage();else if(state.tab==="captcha")renderCaptchaPage();else if(state.tab==="embeds")renderEmbedsPage();else if(state.tab==="welcome")renderMessagePage("welcome");else if(state.tab==="goodbye")renderMessagePage("goodbye");else if(state.tab==="whitelist")renderWhitelistPage();else if(state.tab==="tickets")renderTicketsIndex();else if(state.tab==="security")renderModuleGrid(tab);else if(state.tab==="logs")renderLogStudio(tab);else if(tab.sanctions)renderSanctions();else if(tab.notifications)renderNotifications();else renderDefaultStudio(tab);
-      const canSave=pageCanSave(tab);$("topSave").classList.toggle("hidden",!canSave);$("saveBar").classList.add("hidden");$("saveButton").textContent="Enregistrer";$("saveStatus").textContent="Toutes les données sont à jour";state.dirty=false;bindDashboardInputs();$("fields").querySelectorAll("[data-soft-action]").forEach(b=>b.addEventListener("click",()=>toast(b.dataset.softAction)));
-    }
+_EMBEDS_PAGE_JS = r"""
+    (() => {
+      "use strict";
+      tabs.embeds={
+        title:"Embeds",
+        description:"Créez et publiez vos messages enrichis depuis l'éditeur SentriX.",
+        fields:[]
+      };
+      const sxRenderWithEmbeds=renderTab;
+      renderTab=function(){
+        if(state.tab!=="embeds")return sxRenderWithEmbeds();
+        if(!state.guildData)return;
+        document.body.dataset.tab="embeds";
+        const title=document.getElementById("tabTitle");
+        const description=document.getElementById("tabDescription");
+        const crumb=document.getElementById("sxV4Crumb");
+        const eyebrow=document.getElementById("sxV4Eyebrow");
+        if(title)title.textContent="Embeds";
+        if(description)description.textContent="Préparez vos annonces et messages Discord avec l'éditeur dédié de SentriX.";
+        if(crumb)crumb.textContent="Embeds";
+        if(eyebrow)eyebrow.textContent="OUTILS";
+        document.getElementById("navigation")?.querySelectorAll("button[data-tab]").forEach(btn=>btn.classList.toggle("active",btn.dataset.tab==="embeds"));
+        const fields=document.getElementById("fields");
+        if(fields){
+          const guild=encodeURIComponent(String(state.guildId||""));
+          fields.innerHTML='<div class="sx-section-head"><small>OUTILS</small><h2>Créateur d embeds</h2><p>Utilisez l éditeur sécurisé déjà relié à votre serveur.</p></div><article class="sx-hub-card" style="grid-column:1/-1;min-height:240px"><div><div class="sx-kicker">MESSAGES DISCORD</div><h3>Créer un message enrichi</h3><p>Composez le contenu, choisissez le salon, prévisualisez le rendu et publiez depuis le créateur SentriX.</p></div><div class="sx-hub-actions"><button type="button" class="sx-hub-button primary" id="sxOpenEmbedBuilder">Ouvrir le créateur</button></div></article>';
+          fields.querySelector("#sxOpenEmbedBuilder")?.addEventListener("click",()=>{location.href="/embed-builder"+(guild?"?guild="+guild:"");});
+        }
+        document.getElementById("saveBar")?.classList.add("hidden");
+        document.getElementById("sxV4Save")?.classList.add("hidden");
+        state.dirty=false;
+      };
+    })();
 """
 
 
 def apply_dashboard_pages(html: str) -> str:
-    """Apply the base theme, then install the page router and dedicated screens."""
-
-    html = apply_dashboard_theme(html)
-    html = html.replace("  </style>", PAGES_V3_CSS + "\n  </style>", 1)
-    html = html.replace(
-        "    Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));",
-        PAGES_V3_JS + "\n    Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));",
-        1,
-    )
+    """Install the clean dashboard and the small embeds compatibility page."""
+    html = _apply_oxyde_dashboard(html)
+    if "body[data-tab=\"embeds\"] #sxV4Save" not in html:
+        html = html.replace("  </style>", _EMBEDS_PAGE_FIX + "\n  </style>", 1)
+    marker = "    Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));"
+    if marker in html and "sxRenderWithEmbeds" not in html:
+        html = html.replace(marker, _EMBEDS_PAGE_JS + "\n" + marker, 1)
     return html
+
+
+__all__ = ["apply_dashboard_pages"]
