@@ -23,6 +23,7 @@ from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
 from .dashboard_access import install_dashboard_access
 from .emoji_name_lookup import install as install_emoji_name_lookup
+from .final_interaction_policy import install as install_final_interaction_policy
 from .final_runtime_polish import install as install_final_runtime_polish
 from .generated_logs_sync import install as install_generated_logs_sync
 from .giveaway_antialt import install as install_giveaway_antialt
@@ -235,9 +236,11 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     await _run_installer("garde de réponse commandes", install_command_response_guard, bot)
     await _run_installer("opérations production", install_production_ops, bot)
     await _run_installer("politique finale commandes sans emoji", install_command_no_emoji, bot)
-    # Toujours en dernier : aucun runtime charge ensuite ne doit pouvoir reclasser help
-    # ou contourner la matrice de permissions des commandes slash.
     await _run_installer("permissions commandes", install_permission_guard, bot)
+    # ABSOLUMENT EN DERNIER : cette couche possède le rendu final des interactions. Aucun
+    # ancien runtime ne doit pouvoir remettre un embed conversationnel ou un handler slash
+    # après elle.
+    await _run_installer("politique finale interactions", install_final_interaction_policy, bot)
 
 
 async def _load_extension_with_sentrix_patches(
