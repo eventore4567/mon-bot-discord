@@ -35,6 +35,10 @@ COLORS: dict[str, int] = {
     "configuration": 0x6C5CE7,
     "logs": 0x667085,
     "utility": 0x5865F2,
+    "profile": 0x00B8D9,
+    "shop": 0xE6B84A,
+    "leaderboard": 0x4C7DFF,
+    "premium": 0xF2C94C,
 }
 
 CATEGORY_NAMES: dict[str, str] = {
@@ -51,7 +55,17 @@ CATEGORY_NAMES: dict[str, str] = {
     "configuration": "Configuration",
     "logs": "Journal",
     "utility": "Utilitaires",
+    "profile": "Profil",
+    "shop": "Boutique",
+    "leaderboard": "Classement",
+    "premium": "Premium",
     "brand": "SentriX",
+}
+
+STATE_LABELS: dict[str, str] = {
+    "success": "Terminé",
+    "warning": "Attention",
+    "danger": "Erreur",
 }
 
 SYSTEM_COLOURS = {
@@ -81,6 +95,18 @@ def clip(value: Any, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def progress_bar(value: float, maximum: float, *, length: int = 12) -> str:
+    """Barre compacte sans emoji, stable dans toutes les polices Discord."""
+    try:
+        ratio = float(value) / float(maximum) if float(maximum) > 0 else 0.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        ratio = 0.0
+    ratio = max(0.0, min(ratio, 1.0))
+    length = max(4, min(int(length), 20))
+    filled = round(ratio * length)
+    return f"{'▰' * filled}{'▱' * (length - filled)}  {round(ratio * 100)} %"
 
 
 def clean_title(value: Any, fallback: str = "Information") -> str:
@@ -151,16 +177,26 @@ def infer_category(*, command: Any = None, embed: discord.Embed | None = None, h
         "server_builder": "configuration",
         "logs": "logs",
     }
+    haystack = f"{cog_name} {command_name} {title}"
+    priority_rules = (
+        ("premium", ("sentrixpro", "sentrixplus", "sentrixultimate", "sentrix_ultimate", "premium", "ultimate")),
+        ("leaderboard", ("leaderboard", "classement", "top serveur", "top 10")),
+        ("profile", ("profile", "profil", "set-bio", "badge", "missions")),
+        ("shop", ("shop", "boutique", "inventory", "inventaire", "buy", "sell", "acheter")),
+    )
+    for resolved, words in priority_rules:
+        if any(word in haystack for word in words):
+            return resolved
+
     if cog_name in direct_categories:
         return direct_categories[cog_name]
 
-    haystack = f"{cog_name} {command_name} {title}"
     rules = (
         ("moderation", ("moderation", "sanction", "warn", "mute", "kick", "ban", "quarantaine")),
         ("security", ("automod", "security", "sécurité", "antinuke", "anti-", "blacklist", "whitelist")),
         ("tickets", ("ticket", "support")),
-        ("economy", ("economy", "économie", "balance", "banque", "shop", "argent", "daily", "work")),
-        ("levels", ("level", "niveau", "xp", "réputation", "reputation", "leaderboard")),
+        ("economy", ("economy", "économie", "balance", "banque", "argent", "daily", "work")),
+        ("levels", ("level", "niveau", "xp", "réputation", "reputation")),
         ("games", ("game", "jeu", "trivia", "slots", "blackjack", "quiz", "guess")),
         ("music", ("music", "musique", "playlist", "queue", "lecture")),
         ("events", ("event", "giveaway", "tournoi", "tournament", "événement")),
@@ -262,7 +298,11 @@ def style_embed(
     current_author = getattr(embed, "author", None)
     if bot_user is not None and not getattr(current_author, "name", None):
         avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
-        author_name = CATEGORY_NAMES.get("brand", "SentriX")
+        brand_name = CATEGORY_NAMES.get("brand", "SentriX")
+        state_label = STATE_LABELS.get(kind)
+        author_name = f"{brand_name} • {state_label}" if state_label else brand_name
+        if category == "premium" and not state_label:
+            author_name = f"{brand_name} • Premium"
         if avatar:
             embed.set_author(name=author_name, icon_url=str(avatar))
         else:
@@ -344,10 +384,19 @@ def content_embed(
 
 
 def style_view(view: discord.ui.View | None) -> discord.ui.View | None:
-    """Uniformise les boutons sans toucher aux custom_id ni aux callbacks persistants."""
+    """Uniformise boutons et menus sans toucher aux callbacks persistants."""
     if view is None:
         return None
     for item in getattr(view, "children", []):
+        if isinstance(item, discord.ui.Select):
+            if item.placeholder:
+                placeholder = microcopy.polish_text(str(item.placeholder))
+                item.placeholder = clip(placeholder or "Choisir une option…", 150)
+            for option in list(getattr(item, "options", []) or []):
+                option.label = clip(microcopy.polish_text(str(option.label)), 100)
+                if option.description:
+                    option.description = clip(microcopy.polish_text(str(option.description)), 100)
+            continue
         if not isinstance(item, discord.ui.Button):
             continue
         if item.label:

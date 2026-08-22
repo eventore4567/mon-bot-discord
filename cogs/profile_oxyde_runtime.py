@@ -6,10 +6,10 @@ import functools
 import discord
 from discord.ext import commands
 
-from utils import stats_service
+from utils import premium_style, stats_service
 from . import community_v3, community_v31
 
-CARD_COLOUR = 0x635BFF
+CARD_COLOUR = premium_style.COLORS["profile"]
 
 
 def _fmt(value) -> str:
@@ -24,15 +24,34 @@ async def _snapshot(bot: commands.Bot, guild: discord.Guild, member: discord.Mem
     return await community_v31._profile_snapshot(bot, guild, member)
 
 
-def _base(member: discord.Member, title: str, subtitle: str | None = None) -> discord.Embed:
+def _base(bot: commands.Bot, member: discord.Member, title: str, subtitle: str | None = None) -> discord.Embed:
     embed = discord.Embed(
         title=title,
         description=subtitle or None,
         colour=discord.Colour(CARD_COLOUR),
     )
+    if bot.user is not None:
+        embed.set_author(name="SentriX • Profil", icon_url=bot.user.display_avatar.url)
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text="SentriX • Profil")
     return embed
+
+
+def _badges(member: discord.Member, stats: dict, progression: dict) -> list[str]:
+    """Badges calculés uniquement à partir des vraies données du membre."""
+    badges: list[str] = []
+    if int(stats.get("message_count", 0)) >= 1000:
+        badges.append("Actif")
+    if int(stats.get("wallet", 0)) + int(stats.get("bank", 0)) >= 10_000:
+        badges.append("Économiste")
+    if int(progression.get("season_xp", 0)) > 0:
+        badges.append("Saisonnier")
+    if member.guild_permissions.manage_messages or member.guild_permissions.moderate_members:
+        badges.append("Staff")
+    account_days = max(0, (discord.utils.utcnow() - member.created_at).days)
+    if account_days >= 365:
+        badges.append("Vétéran")
+    return badges[:5]
 
 
 async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Member, author_id: int, page: str):
@@ -41,7 +60,7 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
     progression = data["progression"]
 
     if page == "missions":
-        embed = _base(member, "Missions du jour", member.display_name)
+        embed = _base(bot, member, "Missions du jour", member.display_name)
         if member.id != author_id:
             embed.description = "Les missions personnelles ne sont visibles que par leur propriétaire."
             return embed
@@ -56,13 +75,16 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
             state = "Terminée" if mission.get("done") else f"{current}/{target}"
             embed.add_field(
                 name=str(mission.get("label") or "Mission"),
-                value=f"{state} • +{reward} XP saison",
+                value=(
+                    f"{premium_style.progress_bar(current, target, length=10)}\n"
+                    f"{state} • +{reward} XP saison"
+                ),
                 inline=False,
             )
         return embed
 
     if page == "season":
-        embed = _base(member, "Saison", community_v3.season_label(progression["season_id"]))
+        embed = _base(bot, member, "Saison", community_v3.season_label(progression["season_id"]))
         embed.add_field(
             name="Rang",
             value=f"{progression['tier']} • {_rank(data['season_rank'])}",
@@ -71,6 +93,7 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         embed.add_field(
             name="Progression",
             value=(
+                f"{premium_style.progress_bar(progression['season_level_xp'], progression['season_level_target'])}\n"
                 f"Niveau {progression['season_level']} • "
                 f"{progression['season_level_xp']}/{progression['season_level_target']} XP\n"
                 f"Total saison : {_fmt(progression['season_xp'])} XP"
@@ -91,7 +114,8 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
 
     if page == "rankings":
         ranks = data["ranks"]
-        embed = _base(member, "Classements", member.display_name)
+        embed = _base(bot, member, "Classements", member.display_name)
+        embed.colour = discord.Colour(premium_style.COLORS["leaderboard"])
         lines = [
             f"Niveau : {_rank(ranks.get('xp_rank'))}",
             f"Messages : {_rank(ranks.get('message_rank'))}",
@@ -102,11 +126,14 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         return embed
 
     # Vue principale : volontairement courte. Les détails sont dans les boutons.
-    embed = _base(member, f"Profil de {member.display_name}")
+    embed = _base(bot, member, f"Profil de {member.display_name}", data.get("bio") or "Carte membre SentriX")
     level_rank = _rank(stats.get("rank")) if stats.get("is_ranked") else "Non classé"
     embed.add_field(
         name="Progression",
-        value=f"Niveau {stats['current_level']} • Rang {level_rank}",
+        value=(
+            f"{premium_style.progress_bar(progression['season_level_xp'], progression['season_level_target'])}\n"
+            f"Niveau {stats['current_level']} • Rang {level_rank}"
+        ),
         inline=False,
     )
     embed.add_field(
@@ -129,6 +156,12 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
             f"{progression['tier']} • niveau {progression['season_level']} • "
             f"rang {_rank(data['season_rank'])}"
         ),
+        inline=False,
+    )
+    badges = _badges(member, stats, progression)
+    embed.add_field(
+        name="Badges",
+        value=" • ".join(badges) if badges else "Aucun badge débloqué pour le moment",
         inline=False,
     )
     return embed

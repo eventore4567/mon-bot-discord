@@ -65,8 +65,8 @@ DEFAULT_DESIGN_SETTINGS = {
     "footer": "SentriX",
     "show_avatars": True,
     "progress_length": 10,
-    "progress_filled": "🟪",
-    "progress_empty": "⬛",
+    "progress_filled": "▰",
+    "progress_empty": "▱",
     "compact_mode": False,
     "charts_enabled": True,
 }
@@ -87,6 +87,10 @@ CATEGORY_STYLES = {
     "games": {"emoji": "🎮", "colour": COLORS.games},
     "ai": {"emoji": "🧠", "colour": COLORS.ai},
     "verification": {"emoji": "●", "colour": COLORS.verification},
+    "profile": {"emoji": "", "colour": 0x00B8D9},
+    "shop": {"emoji": "", "colour": 0xE6B84A},
+    "leaderboard": {"emoji": "", "colour": 0x4C7DFF},
+    "premium": {"emoji": "", "colour": 0xF2C94C},
 }
 
 # Titres sobres et lisibles : la couleur de l'embed indique déjà l'état. Les anciens
@@ -120,12 +124,23 @@ def format_number(value) -> str:
     return f"{value:,}".replace(",", " ")
 
 
-def progress_bar(current: float, maximum: float, length: int = 10, filled: str = "🟪", empty: str = "⬛") -> str:
+def progress_bar(current: float, maximum: float, length: int = 10, filled: str = "▰", empty: str = "▱") -> str:
+    """Barre moderne lisible même lorsque la politique sans emoji est active."""
+    def decorative(value: str) -> bool:
+        return any(
+            0x1F000 <= ord(char) <= 0x1FAFF
+            or 0x2600 <= ord(char) <= 0x27BF
+            or 0x2B00 <= ord(char) <= 0x2BFF
+            for char in value
+        )
+
+    filled = filled if filled and not decorative(filled) else "▰"
+    empty = empty if empty and not decorative(empty) else "▱"
     if maximum <= 0:
-        return empty * length
+        return f"{empty * length}  0 %"
     ratio = max(0.0, min(current / maximum, 1.0))
     filled_count = round(ratio * length)
-    return filled * filled_count + empty * (length - filled_count)
+    return f"{filled * filled_count}{empty * (length - filled_count)}  {round(ratio * 100)} %"
 
 
 def percentage(current: float, maximum: float) -> int:

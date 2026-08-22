@@ -16,13 +16,41 @@ from utils import embeds
 
 logger = logging.getLogger("bot.help-clean-style")
 
-ACCENT = 0x6D5DFB
+ACCENT = 0x6C5CE7
 _ALL_VALUE = "__sentrix_clean_all__"
 
 
 def _brand(title: str, description: str = "") -> discord.Embed:
     embed = embeds.brand(title, description)
     embed.colour = discord.Colour(ACCENT)
+    return embed
+
+
+def _visual_category(key: str) -> str:
+    return {
+        "ai": "ai",
+        "economy": "economy",
+        "levels": "levels",
+        "games": "games",
+        "music": "music",
+        "events": "events",
+        "social": "invites",
+        "tickets": "tickets",
+        "sanctions": "moderation",
+        "moderation": "moderation",
+        "security": "security",
+        "configuration": "configuration",
+        "server": "configuration",
+        "roles": "configuration",
+        "embeds": "configuration",
+        "stats": "logs",
+        "owner": "premium",
+    }.get(str(key or "").casefold(), "brand")
+
+
+def _apply_category_colour(embed: discord.Embed, key: str) -> discord.Embed:
+    from utils import premium_style
+    embed.colour = discord.Colour(premium_style.COLORS[_visual_category(key)])
     return embed
 
 
@@ -69,15 +97,13 @@ def _help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_s
     total = sum(len(commands_list) for _, commands_list in entries)
     server_name = guild.name if guild else ("this server" if language == "en" else "ce serveur")
     if language == "en":
-        embed = _brand("SENTRIX / COMMAND CENTER", f"Commands available on **{server_name}**. Select a category below or use search.\n\n**{total} active commands**  |  prefix `{prefix}`")
-        section_names = {"essential": "ESSENTIALS", "community": "COMMUNITY", "staff": "ADMINISTRATION"}
+        embed = _brand("SENTRIX / COMMAND CENTER", f"A clean dashboard for every command available on **{server_name}**.\nSelect a category or search by name.\n\n**{total} active commands**  |  prefix `{prefix}`")
+        section_names = {"essential": "01 • ESSENTIALS", "community": "02 • COMMUNITY", "staff": "03 • ADMINISTRATION"}
         navigation = f"`{prefix}help ban`  -  open a command sheet\nSearch  -  find a command by name or keyword\nLanguage  -  English"
     else:
-        embed = _brand("SENTRIX / COMMANDES", f"Commandes disponibles sur **{server_name}**. Choisis une categorie ou utilise la recherche.\n\n**{total} commandes actives**  |  prefixe `{prefix}`")
-        section_names = {"essential": "ESSENTIELS", "community": "COMMUNAUTE", "staff": "ADMINISTRATION"}
+        embed = _brand("SENTRIX / CENTRE DE COMMANDES", f"Un tableau propre pour toutes les commandes disponibles sur **{server_name}**.\nChoisis une catégorie ou recherche directement son nom.\n\n**{total} commandes actives**  |  préfixe `{prefix}`")
+        section_names = {"essential": "01 • ESSENTIELS", "community": "02 • COMMUNAUTÉ", "staff": "03 • ADMINISTRATION"}
         navigation = f"`{prefix}aide bannir`  -  ouvrir la fiche d'une commande\nRechercher  -  trouver une commande par nom ou mot-cle\nLangue  -  Francais"
-    if bot.user:
-        embed.set_thumbnail(url=bot.user.display_avatar.url)
     for section in ("essential", "community", "staff"):
         rows: list[str] = []
         for category, commands_list in entries:
@@ -89,7 +115,12 @@ def _help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_s
         if rows:
             embed.add_field(name=section_names[section], value="\n".join(rows), inline=section != "staff")
     embed.add_field(name="NAVIGATION", value=navigation, inline=False)
-    embed.set_footer(text="SentriX | Select a category to continue" if language == "en" else "SentriX | Selectionne une categorie pour continuer")
+    category_count = len(entries)
+    embed.set_footer(text=(
+        f"SentriX | {category_count} categories | Select one to continue"
+        if language == "en"
+        else f"SentriX | {category_count} catégories | Sélectionne-en une"
+    ))
     return embed
 
 
@@ -101,7 +132,7 @@ def _category_pages(bot: commands.Bot, prefix: str, language: str, category, com
     for page_number, chunk in enumerate(chunks, start=1):
         lines = [_command_line(None, command, prefix, language) for command in chunk]
         body = summary + (("\n\n" + "\n\n".join(lines)) if lines else "")
-        embed = _brand(f"SENTRIX / {name.upper()}", body)
+        embed = _apply_category_colour(_brand(f"SENTRIX / {name.upper()}", body), category.key)
         if language == "en":
             embed.set_footer(text=f"Page {page_number}/{len(chunks)} | {len(commands_list)} commands | <required> [optional]")
         else:
@@ -269,8 +300,7 @@ async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = No
         category_name, _ = _category_text(category, language)
         command_title = language_runtime._title(command, language).upper()
         embed = _brand(f"SENTRIX / {command_title}", _summary(command, language))
-        if bot.user:
-            embed.set_thumbnail(url=bot.user.display_avatar.url)
+        _apply_category_colour(embed, category.key)
         parameters: list[str] = []
         for name, parameter in getattr(command, "clean_params", {}).items():
             if name in {"ctx", "context", "interaction", "self"}:
@@ -372,4 +402,4 @@ def install(bot: commands.Bot) -> None:
     first_install = not getattr(bot, "_sentrix_help_clean_v8", False)
     bot._sentrix_help_clean_v8 = True
     if first_install:
-        logger.info("+help V8 actif : interface complete sans emoji, style premium et navigation propre.")
+        logger.info("+help V9 actif : centre visuel, catégories colorées et navigation premium.")

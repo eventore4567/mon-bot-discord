@@ -43,6 +43,7 @@ from .poll_ui import install_poll_ui
 from .premium_logs import install as install_premium_logs
 from .premium_logs_v2 import install as install_premium_logs_v2
 from .premium_style_runtime import install as install_premium_style
+from .profile_oxyde_runtime import install as install_profile_oxyde
 from .production_ops import install as install_production_ops
 from .public_language_choice import install as install_public_language_choice
 from .remove_code_command import install as install_remove_code_command
@@ -165,6 +166,9 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
 
     if _matches(name, "cogs.moderation"):
         await _run_installer("immunité propriétaire sanctions", install_owner_sanction_immunity, bot)
+
+    if _matches(name, "cogs.levels"):
+        await _run_installer("profil visuel premium", install_profile_oxyde, bot)
 
     if _matches(name, "cogs.ai"):
         await _run_installer("fiabilité IA", install_ai_reliability)
