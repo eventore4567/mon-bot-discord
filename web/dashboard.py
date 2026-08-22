@@ -1232,3 +1232,10 @@ INDEX_HTML = r"""<!doctype html>
   </script>
 </body>
 </html>"""
+
+
+# Keep the dashboard logic in this module while applying the visual layer from a
+# small, independently testable helper.
+from web.dashboard_theme_v2 import apply_dashboard_theme
+
+INDEX_HTML = apply_dashboard_theme(INDEX_HTML)
