@@ -290,8 +290,13 @@ def test_avatar_uses_the_target_display_name_and_real_animated_asset():
     assert 'asset.is_animated()' in source
     assert 'asset.with_format("gif")' in source
     assert 'data = await asset.read()' in source
+    assert 'getattr(membre, "guild_avatar", None)' in source
+    assert '"media.discordapp.net"' in source
+    assert '_download_discord_avatar(' in source
+    assert '"/embed/avatars/" in original_url' in source
     assert 'e.set_image(url=f"attachment://{filename}")' in source
     assert 'discord.File(io.BytesIO(data), filename=filename)' in source
+    assert 'getattr(membre, "default_avatar", None)' not in source
     assert 'label="Ouvrir l\'avatar"' not in source
 
 

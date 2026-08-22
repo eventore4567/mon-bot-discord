@@ -75,6 +75,79 @@ def _custom_emoji_urls(emoji_id: str, animated: bool) -> list[str]:
     ]
 
 
+def _discord_avatar_url_variants(asset_url: str) -> list[str]:
+    """Construit les variantes officielles d'un avatar Discord sans avatar par défaut."""
+    parsed = urlparse(asset_url)
+    if parsed.scheme != "https" or parsed.hostname not in {
+        "cdn.discordapp.com",
+        "media.discordapp.net",
+    }:
+        return [asset_url]
+
+    path_without_extension = re.sub(
+        r"\.(?:gif|png|webp|jpe?g)$",
+        "",
+        parsed.path,
+        flags=re.IGNORECASE,
+    )
+    filename = path_without_extension.rsplit("/", 1)[-1]
+    original_match = re.search(r"\.([A-Za-z0-9]+)$", parsed.path)
+    original_format = original_match.group(1).lower() if original_match else "webp"
+    formats = [original_format]
+    if filename.startswith("a_"):
+        formats.extend(("gif", "webp", "png"))
+    else:
+        formats.extend(("webp", "png", "jpg"))
+
+    variants: list[str] = []
+    for hostname in (parsed.hostname, "cdn.discordapp.com", "media.discordapp.net"):
+        for image_format in dict.fromkeys(formats):
+            for size in (1024, 512, 256):
+                candidate = (
+                    f"https://{hostname}{path_without_extension}.{image_format}"
+                    f"?size={size}&quality=lossless"
+                )
+                if candidate not in variants:
+                    variants.append(candidate)
+    return variants
+
+
+async def _download_discord_avatar(
+    asset_urls: list[str],
+    *,
+    byte_limit: int,
+) -> tuple[bytes, str] | None:
+    """Télécharge la vraie image via les deux CDN Discord et valide ses octets."""
+    timeout = aiohttp.ClientTimeout(total=12, connect=5)
+    headers = {
+        "User-Agent": "SentriX-Avatar/3.0",
+        "Accept": "image/avif,image/webp,image/apng,image/gif,image/*,*/*;q=0.8",
+    }
+    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        tried: set[str] = set()
+        for asset_url in asset_urls:
+            for candidate in _discord_avatar_url_variants(asset_url):
+                if candidate in tried:
+                    continue
+                tried.add(candidate)
+                try:
+                    async with session.get(candidate, allow_redirects=True) as response:
+                        if response.status != 200:
+                            continue
+                        declared_size = int(response.headers.get("Content-Length", "0") or 0)
+                        if declared_size > byte_limit:
+                            continue
+                        data = await response.content.read(byte_limit + 1)
+                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                    continue
+                if len(data) > byte_limit:
+                    continue
+                kind = _image_kind(data)
+                if kind is not None:
+                    return data, kind
+    return None
+
+
 def _emoji_canvas(frame: Image.Image, size: int) -> Image.Image:
     rgba = frame.convert("RGBA")
     rgba.thumbnail((size, size), Image.Resampling.LANCZOS)
@@ -633,9 +706,13 @@ class Utility(commands.Cog, name="Utility"):
             getattr(fresh_user, "avatar", None),
             getattr(fresh_member, "avatar", None),
             getattr(fresh_member, "display_avatar", None),
-            getattr(membre, "default_avatar", None),
+            # La mention reçue dans le message peut être plus récente que le cache REST.
+            getattr(membre, "guild_avatar", None),
+            getattr(membre, "avatar", None),
+            getattr(membre, "display_avatar", None),
         ]
         seen: set[str] = set()
+        real_asset_urls: list[str] = []
         upload_limit = int(getattr(ctx.guild, "filesize_limit", 10 * 1024 * 1024) or 10 * 1024 * 1024)
         for original_asset in candidates:
             if original_asset is None:
@@ -644,6 +721,11 @@ class Utility(commands.Cog, name="Utility"):
             if not original_url or original_url in seen:
                 continue
             seen.add(original_url)
+            # display_avatar peut être l'avatar Discord par défaut. On ne l'utilise
+            # que si son URL correspond réellement à un avatar personnalisé.
+            if "/embed/avatars/" in original_url:
+                continue
+            real_asset_urls.append(original_url)
             for size in (1024, 512, 256):
                 try:
                     asset = original_asset
@@ -664,10 +746,27 @@ class Utility(commands.Cog, name="Utility"):
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
                     continue
 
-        # Le seul cas de repli possible est l'avatar Discord par défaut.
-        fallback = getattr(membre, "default_avatar", None)
-        if fallback is not None:
-            e.set_image(url=str(fallback.url))
+        # Certains liens GIF expirés sont refusés par cdn.discordapp.com alors que
+        # la même ressource fonctionne en WebP/PNG ou via media.discordapp.net.
+        downloaded = await _download_discord_avatar(
+            real_asset_urls,
+            byte_limit=upload_limit,
+        )
+        if downloaded is not None:
+            data, kind = downloaded
+            extension = "jpg" if kind == "jpeg" else kind
+            filename = f"avatar-{membre.id}.{extension}"
+            e.set_image(url=f"attachment://{filename}")
+            return await ctx.send(
+                embed=e,
+                file=discord.File(io.BytesIO(data), filename=filename),
+            )
+
+        # Ne jamais remplacer silencieusement la vraie photo par l'avatar orange.
+        e.description = (
+            f"{membre.mention}\n"
+            "Discord n'a pas transmis son avatar personnalisé. Réessaie dans quelques secondes."
+        )
         await ctx.send(embed=e)
 
     @commands.hybrid_group(
