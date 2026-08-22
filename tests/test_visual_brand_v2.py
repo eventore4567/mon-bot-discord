@@ -11,6 +11,7 @@ from cogs import help_clean_style
 from cogs import command_response_guard
 from cogs import setup_oxyde_style
 from cogs import utility as utility_cog
+from cogs import guild_arrival
 
 
 def _command(cog: str, name: str):
@@ -302,6 +303,18 @@ def test_avatar_uses_the_target_display_name_and_real_animated_asset():
     assert 'file=discord.File(io.BytesIO(data), filename=filename)' not in source
     assert 'getattr(membre, "default_avatar", None)' not in source
     assert 'label="Ouvrir l\'avatar"' not in source
+
+
+def test_guild_arrival_opens_the_real_setup_and_has_safe_fallbacks():
+    import inspect
+    source = inspect.getsource(guild_arrival)
+    assert 'async def on_guild_join' in source
+    assert 'guild.system_channel' in source
+    assert 'permissions.send_messages and permissions.embed_links' in source
+    assert 'custom_id="sentrix:guild-arrival:setup:v1"' in source
+    assert 'configuration._open_setup_panel(interaction.channel, author=member)' in source
+    assert 'await guild.owner.send(' in source
+    assert 'Place le rôle **SentriX** au-dessus' in source
 
 
 def test_setup_is_compact_and_does_not_repeat_the_control_center():

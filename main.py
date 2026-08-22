@@ -40,6 +40,7 @@ EXTENSIONS = [
     "cogs.server_builder",
     "cogs.logs",
     "cogs.utility",
+    "cogs.guild_arrival",
     "cogs.notifications",
     "cogs.ai",
     "cogs.economy",
