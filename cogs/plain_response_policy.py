@@ -6,6 +6,7 @@ d'éviter qu'une même commande apparaisse parfois avec un cadre et parfois sans
 """
 from __future__ import annotations
 
+import asyncio
 from contextvars import ContextVar
 from typing import Any
 
@@ -19,6 +20,7 @@ _COMMAND_CONTEXT: ContextVar[commands.Context | None] = ContextVar(
     "sentrix_rich_command_context",
     default=None,
 )
+_ACTIVE_WRAPPERS: dict[str, Any] = {}
 
 
 RICH_ROOTS = frozenset({
@@ -186,7 +188,7 @@ def install(bot: commands.Bot | None = None) -> None:
     # identifie aussi les commandes qui répondent avec ctx.channel.send(...) plutôt que
     # ctx.send(...), afin qu'elles reçoivent exactement le même embed.
     current_command_invoke = commands.Command.invoke
-    if not getattr(current_command_invoke, "_sentrix_rich_command_scope", False):
+    if _ACTIVE_WRAPPERS.get("command_invoke") is not current_command_invoke:
         async def absolute_command_invoke(self, ctx: commands.Context):
             token = _COMMAND_CONTEXT.set(ctx)
             try:
@@ -197,9 +199,10 @@ def install(bot: commands.Bot | None = None) -> None:
         absolute_command_invoke._sentrix_rich_command_scope = True
         absolute_command_invoke._sentrix_original = current_command_invoke
         commands.Command.invoke = absolute_command_invoke
+        _ACTIVE_WRAPPERS["command_invoke"] = absolute_command_invoke
 
     current_group_invoke = commands.Group.invoke
-    if not getattr(current_group_invoke, "_sentrix_rich_command_scope", False):
+    if _ACTIVE_WRAPPERS.get("group_invoke") is not current_group_invoke:
         async def absolute_group_invoke(self, ctx: commands.Context):
             token = _COMMAND_CONTEXT.set(ctx)
             try:
@@ -210,13 +213,14 @@ def install(bot: commands.Bot | None = None) -> None:
         absolute_group_invoke._sentrix_rich_command_scope = True
         absolute_group_invoke._sentrix_original = current_group_invoke
         commands.Group.invoke = absolute_group_invoke
+        _ACTIVE_WRAPPERS["group_invoke"] = absolute_group_invoke
 
     # Les méthodes sauvegardées par premium_style_runtime sont les vrais transports
     # discord.py, capturés avant community_v32/v33/v34 et les autres politiques. Tous les
     # chemins de commande finissent désormais sur ces mêmes méthodes brutes.
     current_send = commands.Context.send
     raw_context_send = originals.get("context_send") or _unwrap(current_send)
-    if not getattr(current_send, "_sentrix_absolute_rich", False):
+    if _ACTIVE_WRAPPERS.get("context_send") is not current_send:
         async def absolute_context_send(self: commands.Context, *args, **kwargs):
             args, kwargs = _rich_send_args(self, args, kwargs)
             args, kwargs = _clean_send_args(args, kwargs)
@@ -241,10 +245,11 @@ def install(bot: commands.Bot | None = None) -> None:
         absolute_context_send._sentrix_response_marker = True
         absolute_context_send._sentrix_original = raw_context_send
         commands.Context.send = absolute_context_send
+        _ACTIVE_WRAPPERS["context_send"] = absolute_context_send
 
     current_edit = discord.Message.edit
     raw_message_edit = originals.get("message_edit") or _unwrap(current_edit)
-    if not getattr(current_edit, "_sentrix_absolute_rich", False):
+    if _ACTIVE_WRAPPERS.get("message_edit") is not current_edit:
         async def absolute_message_edit(self: discord.Message, *args, **kwargs):
             ctx = _COMMAND_CONTEXT.get()
             args, kwargs = _force_rich_args(
@@ -264,13 +269,14 @@ def install(bot: commands.Bot | None = None) -> None:
         absolute_message_edit._sentrix_rich_response_policy = True
         absolute_message_edit._sentrix_original = raw_message_edit
         discord.Message.edit = absolute_message_edit
+        _ACTIVE_WRAPPERS["message_edit"] = absolute_message_edit
 
     # Couvre aussi les commandes historiques qui utilisent ctx.channel.send(...) au lieu
     # de ctx.send(...). Hors commande, les messages automatiques configurés par les membres
     # gardent leur comportement actuel.
     current_messageable_send = discord.abc.Messageable.send
     raw_messageable_send = originals.get("messageable_send") or _unwrap(current_messageable_send)
-    if not getattr(current_messageable_send, "_sentrix_absolute_rich", False):
+    if _ACTIVE_WRAPPERS.get("messageable_send") is not current_messageable_send:
         async def absolute_messageable_send(self, *args, **kwargs):
             ctx = _COMMAND_CONTEXT.get()
             in_command = ctx is not None
@@ -293,12 +299,13 @@ def install(bot: commands.Bot | None = None) -> None:
         absolute_messageable_send._sentrix_absolute_rich = True
         absolute_messageable_send._sentrix_original = raw_messageable_send
         discord.abc.Messageable.send = absolute_messageable_send
+        _ACTIVE_WRAPPERS["messageable_send"] = absolute_messageable_send
 
     raw_response_send = originals.get("interaction_send")
     raw_response_edit = originals.get("interaction_edit")
 
     current_response_send = discord.InteractionResponse.send_message
-    if raw_response_send is not None and not getattr(current_response_send, "_sentrix_absolute_rich", False):
+    if raw_response_send is not None and _ACTIVE_WRAPPERS.get("response_send") is not current_response_send:
         async def absolute_response_send(self: discord.InteractionResponse, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
             args, kwargs = _style_interaction_args(
@@ -317,9 +324,10 @@ def install(bot: commands.Bot | None = None) -> None:
         absolute_response_send._sentrix_absolute_rich = True
         absolute_response_send._sentrix_original = raw_response_send
         discord.InteractionResponse.send_message = absolute_response_send
+        _ACTIVE_WRAPPERS["response_send"] = absolute_response_send
 
     current_response_edit = discord.InteractionResponse.edit_message
-    if raw_response_edit is not None and not getattr(current_response_edit, "_sentrix_absolute_rich", False):
+    if raw_response_edit is not None and _ACTIVE_WRAPPERS.get("response_edit") is not current_response_edit:
         async def absolute_response_edit(self: discord.InteractionResponse, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
             args, kwargs = _style_interaction_args(interaction, args, kwargs)
@@ -336,11 +344,12 @@ def install(bot: commands.Bot | None = None) -> None:
         absolute_response_edit._sentrix_absolute_rich = True
         absolute_response_edit._sentrix_original = raw_response_edit
         discord.InteractionResponse.edit_message = absolute_response_edit
+        _ACTIVE_WRAPPERS["response_edit"] = absolute_response_edit
 
     # Réponses après defer() et follow-ups slash : mêmes règles, même embed, même transport.
     current_original_edit = discord.Interaction.edit_original_response
     raw_original_edit = originals.get("interaction_edit_original") or _unwrap(current_original_edit)
-    if not getattr(current_original_edit, "_sentrix_absolute_rich", False):
+    if _ACTIVE_WRAPPERS.get("original_edit") is not current_original_edit:
         async def absolute_original_edit(self: discord.Interaction, *args, **kwargs):
             args, kwargs = _style_interaction_args(self, args, kwargs)
             return await raw_original_edit(self, *args, **kwargs)
@@ -348,10 +357,11 @@ def install(bot: commands.Bot | None = None) -> None:
         absolute_original_edit._sentrix_absolute_rich = True
         absolute_original_edit._sentrix_original = raw_original_edit
         discord.Interaction.edit_original_response = absolute_original_edit
+        _ACTIVE_WRAPPERS["original_edit"] = absolute_original_edit
 
     current_webhook_send = discord.Webhook.send
     raw_webhook_send = originals.get("webhook_send") or _unwrap(current_webhook_send)
-    if not getattr(current_webhook_send, "_sentrix_absolute_rich", False):
+    if _ACTIVE_WRAPPERS.get("webhook_send") is not current_webhook_send:
         async def absolute_webhook_send(self: discord.Webhook, *args, **kwargs):
             if getattr(self, "type", None) != discord.WebhookType.application:
                 return await current_webhook_send(self, *args, **kwargs)
@@ -367,3 +377,23 @@ def install(bot: commands.Bot | None = None) -> None:
         absolute_webhook_send._sentrix_absolute_rich = True
         absolute_webhook_send._sentrix_original = raw_webhook_send
         discord.Webhook.send = absolute_webhook_send
+        _ACTIVE_WRAPPERS["webhook_send"] = absolute_webhook_send
+
+    # V3.2, V3.3 et V3.4 possèdent encore des listeners on_ready qui réinstallent leurs
+    # anciens transports APRÈS le chargement de toutes les extensions. C'est pour cela que
+    # le déploiement était vert mais que +status et +setup redevenaient du texte au moment
+    # où le bot passait en ligne. On réaffirme la politique riche après ces listeners.
+    if bot is not None and not getattr(bot, "_sentrix_rich_ready_reassert", False):
+        async def reassert_rich_transports_after_ready():
+            # Les listeners Discord sont planifiés comme des tâches séparées. Une courte
+            # cession laisse les anciennes installations se terminer avant la nôtre.
+            await asyncio.sleep(0.25)
+            try:
+                from . import final_interaction_policy
+                final_interaction_policy._disable_legacy_embed_flattening()
+            except Exception:
+                pass
+            install(bot)
+
+        bot.add_listener(reassert_rich_transports_after_ready, "on_ready")
+        bot._sentrix_rich_ready_reassert = True

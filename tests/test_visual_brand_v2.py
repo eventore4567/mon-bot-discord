@@ -266,6 +266,9 @@ def test_final_response_policy_covers_every_command_transport():
     assert 'raw_response_edit(self, *args, **kwargs)' in source
     assert 'raw_original_edit(self, *args, **kwargs)' in source
     assert 'raw_webhook_send(self, *args, **kwargs)' in source
+    assert '_ACTIVE_WRAPPERS.get("response_edit") is not current_response_edit' in source
+    assert 'reassert_rich_transports_after_ready' in source
+    assert 'final_interaction_policy._disable_legacy_embed_flattening()' in source
 
 
 def test_command_guard_never_adds_an_automatic_success_message():
