@@ -4,6 +4,7 @@ from .dashboard_oxyde_rebuild import apply_dashboard_pages as _apply_oxyde_dashb
 from .dashboard_oxyde_hotfix import apply_dashboard_hotfix, patch_dashboard_runtime
 from .dashboard_major_v5 import apply_major_v5
 from .dashboard_v5_reliability import apply_v5_reliability
+from .dashboard_clarity_v51 import apply_clarity_v51
 
 
 # dashboard.py imports this module after its handlers are defined. Patch the guild reader
@@ -88,7 +89,7 @@ _EMBEDS_PAGE_JS = r"""
 
 
 def apply_dashboard_pages(html: str) -> str:
-    """Install the page router, V5 design and the final navigation/data-loss guards."""
+    """Install the page router, V5 design, reliability guards and clarity pass."""
     html = _apply_oxyde_dashboard(html)
     if "body:not([data-tab=\"overview\"]) #sentrixSafeOverview" not in html:
         html = html.replace("  </style>", _OVERVIEW_SCOPE_FIX + "\n  </style>", 1)
@@ -99,7 +100,8 @@ def apply_dashboard_pages(html: str) -> str:
         html = html.replace(marker, _EMBEDS_PAGE_JS + "\n" + marker, 1)
     html = apply_dashboard_hotfix(html)
     html = apply_major_v5(html)
-    return apply_v5_reliability(html)
+    html = apply_v5_reliability(html)
+    return apply_clarity_v51(html)
 
 
 __all__ = ["apply_dashboard_pages"]
