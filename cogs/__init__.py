@@ -38,6 +38,7 @@ from .natural_music_intent_guard import install as install_natural_music_intent_
 from .no_auto_tracker import install as install_no_auto_tracker
 from .owner_sanction_immunity import install as install_owner_sanction_immunity
 from .permission_guard import install as install_permission_guard
+from .plain_response_policy import install as install_plain_response_policy
 from .poll_ui import install_poll_ui
 from .premium_logs import install as install_premium_logs
 from .premium_logs_v2 import install as install_premium_logs_v2
@@ -209,9 +210,6 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
 
     if _matches(name, "cogs.embed_builder"):
         _install_embed_component_fix(bot)
-        # embed_builder est la dernière extension du bootstrap historique. Installer V7 ici
-        # garantit que toutes les commandes hybrides existent déjà et que la garde de
-        # permissions finale est déjà en place avant de brancher le watchdog slash.
         await _run_installer("fiabilité slash V7", install_slash_reliability_v7, bot)
 
 
@@ -237,10 +235,10 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     await _run_installer("opérations production", install_production_ops, bot)
     await _run_installer("politique finale commandes sans emoji", install_command_no_emoji, bot)
     await _run_installer("permissions commandes", install_permission_guard, bot)
-    # ABSOLUMENT EN DERNIER : cette couche possède le rendu final des interactions. Aucun
-    # ancien runtime ne doit pouvoir remettre un embed conversationnel ou un handler slash
-    # après elle.
     await _run_installer("politique finale interactions", install_final_interaction_policy, bot)
+    # VRAIMENT EN DERNIER : aucune réponse ordinaire ne doit être remise dans un embed
+    # par premium_style_runtime ou une autre couche historique après cette étape.
+    await _run_installer("réponses finales sans box", install_plain_response_policy, bot)
 
 
 async def _load_extension_with_sentrix_patches(
