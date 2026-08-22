@@ -95,43 +95,46 @@ def _command_line(utility, command: commands.Command, prefix: str, language: str
 def _help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_staff: bool, language: str) -> discord.Embed:
     entries = _help_entries(bot, is_staff)
     total = sum(len(commands_list) for _, commands_list in entries)
-    server_name = guild.name if guild else ("this server" if language == "en" else "ce serveur")
-    if language == "en":
-        embed = _brand("SENTRIX / COMMAND CENTER", f"A clean dashboard for every command available on **{server_name}**.\nSelect a category or search by name.\n\n**{total} active commands**  |  prefix `{prefix}`")
-        section_names = {"essential": "01 • ESSENTIALS", "community": "02 • COMMUNITY", "staff": "03 • ADMINISTRATION"}
-        navigation = f"`{prefix}help ban`  -  open a command sheet\nSearch  -  find a command by name or keyword\nLanguage  -  English"
-    else:
-        embed = _brand("SENTRIX / CENTRE DE COMMANDES", f"Un tableau propre pour toutes les commandes disponibles sur **{server_name}**.\nChoisis une catégorie ou recherche directement son nom.\n\n**{total} commandes actives**  |  préfixe `{prefix}`")
-        section_names = {"essential": "01 • ESSENTIELS", "community": "02 • COMMUNAUTÉ", "staff": "03 • ADMINISTRATION"}
-        navigation = f"`{prefix}aide bannir`  -  ouvrir la fiche d'une commande\nRechercher  -  trouver une commande par nom ou mot-cle\nLangue  -  Francais"
-    for section in ("essential", "community", "staff"):
-        rows: list[str] = []
-        for category, commands_list in entries:
-            if getattr(category, "section", "") != section:
-                continue
-            name, _ = _category_text(category, language)
-            unit = "commands" if language == "en" else "commandes"
-            rows.append(f"**{name}**  -  `{len(commands_list)} {unit}`")
-        if rows:
-            embed.add_field(name=section_names[section], value="\n".join(rows), inline=section != "staff")
-    embed.add_field(name="NAVIGATION", value=navigation, inline=False)
     category_count = len(entries)
-    embed.set_footer(text=(
-        f"SentriX | {category_count} categories | Select one to continue"
-        if language == "en"
-        else f"SentriX | {category_count} catégories | Sélectionne-en une"
-    ))
+    if language == "en":
+        shortcuts = [f"`{prefix}profile`", f"`{prefix}ticket`", f"`{prefix}daily`"]
+        if is_staff:
+            shortcuts.append(f"`{prefix}setup`")
+        embed = _brand(
+            "SENTRIX / HELP",
+            (
+                f"**{total} commands** • prefix `{prefix}`\n"
+                "Select a category below or use search.\n\n"
+                f"Quick access: {'  '.join(shortcuts)}"
+            ),
+        )
+        embed.set_footer(text=f"SentriX • {category_count} categories")
+    else:
+        shortcuts = [f"`{prefix}profile`", f"`{prefix}ticket`", f"`{prefix}daily`"]
+        if is_staff:
+            shortcuts.append(f"`{prefix}setup`")
+        embed = _brand(
+            "SENTRIX / AIDE",
+            (
+                f"**{total} commandes** • préfixe `{prefix}`\n"
+                "Choisis une catégorie ci-dessous ou utilise la recherche.\n\n"
+                f"Accès rapides : {'  '.join(shortcuts)}"
+            ),
+        )
+        embed.set_footer(text=f"SentriX • {category_count} catégories")
     return embed
 
 
 def _category_pages(bot: commands.Bot, prefix: str, language: str, category, commands_list: list[commands.Command]) -> list[discord.Embed]:
     del bot
     name, summary = _category_text(category, language)
-    chunks = [commands_list[index:index + 10] for index in range(0, len(commands_list), 10)] or [[]]
+    chunks = [commands_list[index:index + 8] for index in range(0, len(commands_list), 8)] or [[]]
     pages: list[discord.Embed] = []
     for page_number, chunk in enumerate(chunks, start=1):
-        lines = [_command_line(None, command, prefix, language) for command in chunk]
-        body = summary + (("\n\n" + "\n\n".join(lines)) if lines else "")
+        # La fiche détaillée reste accessible avec +help <commande>. La page de
+        # catégorie ne montre donc que les syntaxes afin de rester aussi courte qu'un ticket.
+        lines = [f"`{_usage(command, prefix, language)}`" for command in chunk]
+        body = summary + (("\n\n" + "\n".join(lines)) if lines else "")
         embed = _apply_category_colour(_brand(f"SENTRIX / {name.upper()}", body), category.key)
         if language == "en":
             embed.set_footer(text=f"Page {page_number}/{len(chunks)} | {len(commands_list)} commands | <required> [optional]")
@@ -145,16 +148,16 @@ def _all_pages(bot: commands.Bot, prefix: str, language: str, is_staff: bool) ->
     commands_with_category: list[tuple[object, commands.Command]] = []
     for category, command_list in _help_entries(bot, is_staff):
         commands_with_category.extend((category, command) for command in command_list)
-    chunks = [commands_with_category[index:index + 10] for index in range(0, len(commands_with_category), 10)] or [[]]
+    chunks = [commands_with_category[index:index + 12] for index in range(0, len(commands_with_category), 12)] or [[]]
     pages: list[discord.Embed] = []
     for page_number, chunk in enumerate(chunks, start=1):
         lines: list[str] = []
-        base_index = (page_number - 1) * 10
+        base_index = (page_number - 1) * 12
         for offset, (category, command) in enumerate(chunk, start=1):
             category_name, _ = _category_text(category, language)
-            lines.append(_command_line(None, command, prefix, language, base_index + offset) + f"\n`{category_name}`")
+            lines.append(f"`{base_index + offset:02d}` `{_usage(command, prefix, language)}` • {category_name}")
         title = "SENTRIX / ALL COMMANDS" if language == "en" else "SENTRIX / TOUTES LES COMMANDES"
-        description = "\n\n".join(lines) if lines else ("No command." if language == "en" else "Aucune commande.")
+        description = "\n".join(lines) if lines else ("No command." if language == "en" else "Aucune commande.")
         embed = _brand(title, description)
         embed.set_footer(text=f"Page {page_number}/{len(chunks)} | {len(commands_with_category)} " + ("commands" if language == "en" else "commandes"))
         pages.append(embed)
@@ -198,10 +201,13 @@ class CleanHelpSearchModal(discord.ui.Modal):
         if not results:
             text = "No command found for this search." if self.language == "en" else "Aucune commande trouvee pour cette recherche."
             return await interaction.response.edit_message(embed=_brand("SENTRIX / SEARCH" if self.language == "en" else "SENTRIX / RECHERCHE", text), view=CleanHelpHomeView(self.bot, self.prefix, self.is_staff, self.language, self.author_id))
-        chunks = [results[index:index + 10] for index in range(0, len(results), 10)]
+        chunks = [results[index:index + 8] for index in range(0, len(results), 8)]
         pages: list[discord.Embed] = []
         for page_number, chunk in enumerate(chunks, start=1):
-            embed = _brand("SENTRIX / SEARCH" if self.language == "en" else "SENTRIX / RECHERCHE", "\n\n".join(_command_line(None, command, self.prefix, self.language) for command in chunk))
+            embed = _brand(
+                "SENTRIX / SEARCH" if self.language == "en" else "SENTRIX / RECHERCHE",
+                "\n".join(f"`{_usage(command, self.prefix, self.language)}`" for command in chunk),
+            )
             embed.set_footer(text=f"Page {page_number}/{len(chunks)} | {len(results)}")
             pages.append(embed)
         home = _help_home(self.bot, interaction.guild, self.prefix, self.is_staff, self.language)
@@ -338,14 +344,14 @@ def _fallback_pages(utility, bot: commands.Bot, prefix: str, entries: Iterable, 
         flattened: list[tuple[object, commands.Command]] = []
         for category, command_list in entries:
             flattened.extend((category, command) for command in command_list)
-        chunks = [flattened[index:index + 10] for index in range(0, len(flattened), 10)] or [[]]
+        chunks = [flattened[index:index + 12] for index in range(0, len(flattened), 12)] or [[]]
         pages: list[discord.Embed] = []
         for page_number, chunk in enumerate(chunks, start=1):
             lines = []
             for offset, (category, command) in enumerate(chunk, start=1):
                 name, _ = _category_text(category, language)
-                lines.append(_command_line(None, command, prefix, language, (page_number - 1) * 10 + offset) + f"\n`{name}`")
-            embed = _brand("SENTRIX / TOUTES LES COMMANDES", "\n\n".join(lines)); embed.set_footer(text=f"Page {page_number}/{len(chunks)}"); pages.append(embed)
+                lines.append(f"`{(page_number - 1) * 12 + offset:02d}` `{_usage(command, prefix, language)}` • {name}")
+            embed = _brand("SENTRIX / TOUTES LES COMMANDES", "\n".join(lines)); embed.set_footer(text=f"Page {page_number}/{len(chunks)}"); pages.append(embed)
         return pages
     pages: list[discord.Embed] = []
     for category, command_list in entries:

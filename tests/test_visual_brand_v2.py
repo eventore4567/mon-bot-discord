@@ -51,6 +51,14 @@ def test_category_attachment_does_not_replace_existing_thumbnail():
     assert embed.thumbnail.url == "https://example.test/member.png"
 
 
+def test_category_attachment_does_not_duplicate_remote_author_icon():
+    embed = discord.Embed(title="Configuration")
+    embed.set_author(name="SentriX", icon_url="https://cdn.discordapp.com/avatar.png")
+    kwargs = brand_assets.decorate_send_kwargs({}, embed=embed, category="configuration")
+    assert kwargs == {}
+    assert not embed.thumbnail.url
+
+
 def test_interactive_panels_never_attach_category_artwork():
     embed = discord.Embed(title="Configuration")
     view = discord.ui.View()
@@ -61,3 +69,15 @@ def test_interactive_panels_never_attach_category_artwork():
     )
     assert kwargs == {"view": view}
     assert not embed.thumbnail.url
+
+
+def test_bot_avatar_is_used_as_a_small_remote_thumbnail():
+    bot_user = SimpleNamespace(
+        display_avatar=SimpleNamespace(url="https://cdn.discordapp.com/avatar.png")
+    )
+    embed = premium_style.style_embed(
+        discord.Embed(title="Configuration"),
+        bot_user=bot_user,
+    )
+    assert embed.thumbnail.url == "https://cdn.discordapp.com/avatar.png"
+    assert not embed.thumbnail.url.startswith("attachment://")

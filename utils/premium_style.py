@@ -294,10 +294,18 @@ def style_embed(
         embed.timestamp = datetime.now(timezone.utc)
 
     # La photo de profil configurée sur le compte bot reste l'identité principale.
-    # Les nouvelles icônes de catégories sont utilisées séparément en miniature.
+    # Elle est chargée depuis l'URL Discord et ne peut donc jamais devenir une grande
+    # pièce jointe détachée lors d'une mise à jour de bouton ou de menu.
+    avatar = None
+    if bot_user is not None:
+        avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
+        current_thumbnail = getattr(getattr(embed, "thumbnail", None), "url", None)
+        current_image = getattr(getattr(embed, "image", None), "url", None)
+        if avatar and not current_thumbnail and not current_image:
+            embed.set_thumbnail(url=str(avatar))
+
     current_author = getattr(embed, "author", None)
     if bot_user is not None and not getattr(current_author, "name", None):
-        avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
         brand_name = CATEGORY_NAMES.get("brand", "SentriX")
         state_label = STATE_LABELS.get(kind)
         author_name = f"{brand_name} • {state_label}" if state_label else brand_name

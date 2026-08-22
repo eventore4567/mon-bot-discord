@@ -48,6 +48,12 @@ def _has_thumbnail(embed: discord.Embed) -> bool:
     return bool(getattr(thumbnail, "url", None))
 
 
+def _has_remote_identity(embed: discord.Embed) -> bool:
+    """Vrai lorsque l'embed affiche déjà une petite icône distante dans son auteur."""
+    icon_url = getattr(getattr(embed, "author", None), "icon_url", None)
+    return str(icon_url or "").startswith(("https://", "http://"))
+
+
 def _file_name(file: Any) -> str:
     return str(getattr(file, "filename", "") or "")
 
@@ -71,7 +77,11 @@ def decorate_send_kwargs(
     """
     if kwargs.get("view") is not None:
         return kwargs
-    if not isinstance(embed, discord.Embed) or _has_thumbnail(embed):
+    if (
+        not isinstance(embed, discord.Embed)
+        or _has_thumbnail(embed)
+        or _has_remote_identity(embed)
+    ):
         return kwargs
 
     asset_name = _asset_name(category)
