@@ -57,10 +57,8 @@ if "cogs.create_sentrix_v3" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.create_sentrix_v3")
 if "cogs.canonical_interactions" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.canonical_interactions")
-if "cogs.compact_response_style" not in bot_main.EXTENSIONS:
-    bot_main.EXTENSIONS.append("cogs.compact_response_style")
-# ABSOLUMENT DERNIÈRE extension : au on_ready elle contourne le runtime premium et force
-# les réponses de commandes ordinaires en texte Discord natif, sans carte/embed.
+# Une seule politique visuelle finale. L'ancien compact_response_style n'est plus chargé :
+# il doublonnait la transformation et rendait les réponses incohérentes selon la commande.
 if "cogs.plain_text_all_extension" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.plain_text_all_extension")
 
