@@ -208,13 +208,18 @@ async def render_member_card(
     *,
     level_up: int | None = None,
 ) -> io.BytesIO:
-    # On lit d'abord l'asset ORIGINAL : un avatar animé reste donc un GIF et Pillow en
-    # utilise sa vraie première image au lieu de remplacer la PP par l'icône SentriX.
-    # Plusieurs chemins sont tentés avant d'utiliser l'ultime secours local.
-    avatar = member.display_avatar
+    # On demande au CDN Discord une vraie version PNG de la PP. ``format='png'`` est
+    # important : pour une PP animée, ``static_format='png'`` conservait encore le GIF,
+    # puis certains GIF optimisés faisaient échouer Pillow et déclenchaient l'icône de
+    # secours. Le PNG correspond à la vraie première image de la PP animée.
+    avatar = getattr(member, "avatar", None) or member.display_avatar
+    try:
+        static_avatar = avatar.replace(format="png", size=256)
+    except (TypeError, ValueError):
+        static_avatar = avatar
     avatar_bytes: bytes | None = None
     try:
-        avatar_bytes = await asyncio.wait_for(avatar.read(), timeout=4)
+        avatar_bytes = await asyncio.wait_for(static_avatar.read(), timeout=4)
     except Exception:
         pass
 
@@ -223,17 +228,18 @@ async def render_member_card(
             timeout = aiohttp.ClientTimeout(total=5)
             headers = {"User-Agent": "SentriX Discord Bot/5.0"}
             async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-                async with session.get(str(avatar.url)) as response:
+                async with session.get(str(static_avatar.url)) as response:
                     response.raise_for_status()
                     avatar_bytes = await response.read()
         except Exception:
             avatar_bytes = None
 
     if not avatar_bytes:
-        global_avatar = getattr(member, "avatar", None)
-        if global_avatar is not None and global_avatar != avatar:
+        display_avatar = member.display_avatar
+        if display_avatar is not None and display_avatar != avatar:
             try:
-                avatar_bytes = await asyncio.wait_for(global_avatar.read(), timeout=3)
+                display_static = display_avatar.replace(format="png", size=256)
+                avatar_bytes = await asyncio.wait_for(display_static.read(), timeout=3)
             except Exception:
                 avatar_bytes = None
 

@@ -7,6 +7,7 @@ from utils import brand_assets, design_system, premium_style, visual_v5
 from cogs.visual_experience_v5 import VisualExperienceV5
 from cogs import plain_response_policy
 from cogs import final_interaction_policy
+from cogs import help_clean_style
 
 
 def _command(cog: str, name: str):
@@ -226,3 +227,10 @@ def test_every_legacy_embed_flattener_is_disabled():
     assert final_interaction_policy.community_v32.simple_embed_text(embed) is None
     assert final_interaction_policy.community_v33._simple_embed_to_text(embed, has_view=False) is None
     assert final_interaction_policy.community_v34._embed_to_text(embed, root="ping") is None
+
+
+def test_help_navigation_uses_direct_message_edits():
+    import inspect
+    source = inspect.getsource(help_clean_style.CleanHelpPagesView.__init__)
+    assert "_edit_help_message" in source
+    assert "interaction.response.edit_message" not in source

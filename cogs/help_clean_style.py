@@ -183,6 +183,24 @@ def _embed_has_emoji(embed: discord.Embed) -> bool:
     return any(_text_has_emoji(value) for value in values)
 
 
+async def _edit_help_message(
+    interaction: discord.Interaction,
+    *,
+    embed: discord.Embed,
+    view: discord.ui.View,
+) -> None:
+    """Édite +help sans passer par les anciens wrappers InteractionResponse.
+
+    Plusieurs runtimes historiques transforment encore ``edit_message(embed=...)`` en
+    texte Markdown. Déférer l'interaction puis éditer le Message Discord directement
+    garantit que l'accueil, les catégories et Suivant restent tous dans le même embed.
+    """
+    if not interaction.response.is_done():
+        await interaction.response.defer()
+    if interaction.message is not None:
+        await interaction.message.edit(content=None, embed=embed, view=view)
+
+
 class CleanHelpSearchModal(discord.ui.Modal):
     def __init__(self, bot: commands.Bot, prefix: str, is_staff: bool, language: str, author_id: int):
         super().__init__(title="Search a command" if language == "en" else "Rechercher une commande")
@@ -200,7 +218,7 @@ class CleanHelpSearchModal(discord.ui.Modal):
                 results.append(command)
         if not results:
             text = "No command found for this search." if self.language == "en" else "Aucune commande trouvee pour cette recherche."
-            return await interaction.response.edit_message(embed=_brand("SENTRIX / SEARCH" if self.language == "en" else "SENTRIX / RECHERCHE", text), view=CleanHelpHomeView(self.bot, self.prefix, self.is_staff, self.language, self.author_id))
+            return await _edit_help_message(interaction, embed=_brand("SENTRIX / SEARCH" if self.language == "en" else "SENTRIX / RECHERCHE", text), view=CleanHelpHomeView(self.bot, self.prefix, self.is_staff, self.language, self.author_id))
         chunks = [results[index:index + 8] for index in range(0, len(results), 8)]
         pages: list[discord.Embed] = []
         for page_number, chunk in enumerate(chunks, start=1):
@@ -213,7 +231,7 @@ class CleanHelpSearchModal(discord.ui.Modal):
         home = _help_home(self.bot, interaction.guild, self.prefix, self.is_staff, self.language)
         view = CleanHelpPagesView(self.bot, self.prefix, self.is_staff, self.language, self.author_id, pages, home)
         view.message = interaction.message
-        await interaction.response.edit_message(embed=pages[0], view=view)
+        await _edit_help_message(interaction, embed=pages[0], view=view)
 
 
 class CleanHelpSelect(discord.ui.Select):
@@ -243,7 +261,7 @@ class CleanHelpSelect(discord.ui.Select):
         home = _help_home(self.bot, interaction.guild, self.prefix, self.is_staff, self.language)
         view = CleanHelpPagesView(self.bot, self.prefix, self.is_staff, self.language, self.author_id, pages, home)
         view.message = interaction.message
-        await interaction.response.edit_message(embed=pages[0], view=view)
+        await _edit_help_message(interaction, embed=pages[0], view=view)
 
 
 class CleanHelpHomeView(discord.ui.View):
@@ -299,17 +317,17 @@ class CleanHelpPagesView(discord.ui.View):
         async def previous_callback(interaction: discord.Interaction):
             if interaction.user.id != author_id:
                 return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)
-            self.index = max(0, self.index - 1); refresh(); await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+            self.index = max(0, self.index - 1); refresh(); await _edit_help_message(interaction, embed=self.pages[self.index], view=self)
         async def home_callback(interaction: discord.Interaction):
             if interaction.user.id != author_id:
                 return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)
             view = CleanHelpHomeView(bot, prefix, is_staff, language, author_id)
             view.message = interaction.message
-            await interaction.response.edit_message(embed=self.home_embed, view=view)
+            await _edit_help_message(interaction, embed=self.home_embed, view=view)
         async def next_callback(interaction: discord.Interaction):
             if interaction.user.id != author_id:
                 return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)
-            self.index = min(len(self.pages) - 1, self.index + 1); refresh(); await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+            self.index = min(len(self.pages) - 1, self.index + 1); refresh(); await _edit_help_message(interaction, embed=self.pages[self.index], view=self)
         async def search_callback(interaction: discord.Interaction):
             if interaction.user.id != author_id:
                 return await interaction.response.send_message("This menu belongs to another user." if language == "en" else "Ce menu appartient a une autre personne.", ephemeral=True)

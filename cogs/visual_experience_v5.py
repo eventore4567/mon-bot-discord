@@ -382,7 +382,10 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
             # L'envoi d'un nouveau message avec ``file=`` est la voie Discord la plus
             # fiable. Ajouter un nouveau fichier via Message.edit/attachments provoquait
             # encore des HTTP 400 sur certaines instances Railway.
-            await ctx.send(content=None, embed=embed, file=file)
+            # Messageable.send ne passe pas par les anciennes conversions de Context.send :
+            # la carte reste donc réellement dans son embed au lieu de devenir du texte
+            # libre suivi d'une pièce jointe.
+            await ctx.channel.send(content=None, embed=embed, file=file)
             try:
                 await message.delete()
             except discord.HTTPException:
