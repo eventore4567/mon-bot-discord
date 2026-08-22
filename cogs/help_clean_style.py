@@ -198,7 +198,15 @@ async def _edit_help_message(
     if not interaction.response.is_done():
         await interaction.response.defer()
     if interaction.message is not None:
-        await interaction.message.edit(content=None, embed=embed, view=view)
+        try:
+            from . import premium_style_runtime
+            raw_edit = premium_style_runtime._ORIGINALS.get("message_edit")
+        except Exception:
+            raw_edit = None
+        if raw_edit is not None:
+            await raw_edit(interaction.message, content=None, embed=embed, view=view)
+        else:
+            await interaction.message.edit(content=None, embed=embed, view=view)
 
 
 class CleanHelpSearchModal(discord.ui.Modal):

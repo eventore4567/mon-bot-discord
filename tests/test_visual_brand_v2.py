@@ -234,3 +234,10 @@ def test_help_navigation_uses_direct_message_edits():
     source = inspect.getsource(help_clean_style.CleanHelpPagesView.__init__)
     assert "_edit_help_message" in source
     assert "interaction.response.edit_message" not in source
+
+
+def test_final_response_policy_installs_absolute_button_wrappers():
+    import inspect
+    source = inspect.getsource(plain_response_policy.install)
+    assert "_sentrix_absolute_rich" in source
+    assert 'raw_response_edit(self, *args, **kwargs)' in source

@@ -76,3 +76,56 @@ def install(bot: commands.Bot | None = None) -> None:
         rich_edit._sentrix_rich_response_policy = True
         rich_edit._sentrix_original = current_edit
         discord.Message.edit = rich_edit
+
+    # Couche réellement finale pour TOUS les boutons et menus. On appelle les méthodes
+    # Discord brutes sauvegardées avant les runtimes historiques, puis on applique une
+    # seule fois le style actuel. Ainsi Suivant/Précédent/sélections ne peuvent plus
+    # repasser par community_v32/v33/v34 et perdre leur embed.
+    try:
+        from . import premium_style_runtime
+        raw_response_send = premium_style_runtime._ORIGINALS.get("interaction_send")
+        raw_response_edit = premium_style_runtime._ORIGINALS.get("interaction_edit")
+    except Exception:
+        raw_response_send = None
+        raw_response_edit = None
+
+    current_response_send = discord.InteractionResponse.send_message
+    if raw_response_send is not None and not getattr(current_response_send, "_sentrix_absolute_rich", False):
+        async def absolute_response_send(self: discord.InteractionResponse, *args, **kwargs):
+            interaction = getattr(self, "_parent", None)
+            args, kwargs = premium_style.style_kwargs(
+                args,
+                kwargs,
+                command=getattr(interaction, "command", None),
+                guild=getattr(interaction, "guild", None),
+                requester=getattr(interaction, "user", None),
+                bot_user=getattr(getattr(interaction, "client", None), "user", None),
+                allow_content_wrap=True,
+                include_brand_asset=True,
+            )
+            return await raw_response_send(self, *args, **kwargs)
+
+        absolute_response_send._sentrix_absolute_rich = True
+        absolute_response_send._sentrix_original = raw_response_send
+        discord.InteractionResponse.send_message = absolute_response_send
+
+    current_response_edit = discord.InteractionResponse.edit_message
+    if raw_response_edit is not None and not getattr(current_response_edit, "_sentrix_absolute_rich", False):
+        async def absolute_response_edit(self: discord.InteractionResponse, *args, **kwargs):
+            interaction = getattr(self, "_parent", None)
+            args, kwargs = premium_style.style_kwargs(
+                args,
+                kwargs,
+                command=getattr(interaction, "command", None),
+                guild=getattr(interaction, "guild", None),
+                requester=getattr(interaction, "user", None),
+                bot_user=getattr(getattr(interaction, "client", None), "user", None),
+                allow_content_wrap=True,
+            )
+            if kwargs.get("embed") is not None or kwargs.get("embeds"):
+                kwargs.setdefault("content", None)
+            return await raw_response_edit(self, *args, **kwargs)
+
+        absolute_response_edit._sentrix_absolute_rich = True
+        absolute_response_edit._sentrix_original = raw_response_edit
+        discord.InteractionResponse.edit_message = absolute_response_edit
