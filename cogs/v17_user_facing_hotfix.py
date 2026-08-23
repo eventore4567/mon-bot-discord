@@ -12,6 +12,7 @@ Garanties :
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Any
 
 import discord
@@ -71,14 +72,19 @@ def _apply_private_context_transport() -> None:
         try:
             dm_args, dm_kwargs = plain_response_policy._rich_send_args(self, args, dict(kwargs))
             dm_args, dm_kwargs = plain_response_policy._clean_send_args(dm_args, dm_kwargs)
+            # Certains anciens wrappers produisent à la fois un premier argument None et
+            # content=None. Discord.py refuserait ces deux valeurs pour le même paramètre.
+            if dm_args and dm_args[0] is None and "content" in dm_kwargs:
+                dm_args = dm_args[1:]
             for key in ("ephemeral", "reference", "mention_author", "silent"):
                 dm_kwargs.pop(key, None)
             dm_kwargs["allowed_mentions"] = discord.AllowedMentions.none()
             result = await self.author.send(*dm_args, **dm_kwargs)
             self._sentrix_response_sent = True
             return result
-        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-            # DM fermés : ne jamais divulguer le détail de l'erreur publiquement.
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException, TypeError, ValueError):
+            # DM fermés ou transport impossible : ne jamais divulguer le détail de l'erreur
+            # publiquement. La réaction indique seulement à l'auteur que sa commande a échoué.
             try:
                 message = getattr(self, "message", None)
                 if message is not None:
@@ -96,8 +102,9 @@ def _apply_private_context_transport() -> None:
 def _patch_plain_response_install() -> None:
     """Réapplique le transport privé après CHAQUE réinstallation du transport final.
 
-    plain_response_policy se réaffirme aussi après on_ready. En enveloppant son install(),
-    la confidentialité ne peut pas être perdue par un ancien runtime chargé plus tard.
+    Le package ``cogs`` avait importé ``plain_response_policy.install`` par valeur lors de
+    son propre import. On remplace donc aussi cet alias : le finaliseur de chaque extension
+    appelle bien notre wrapper, puis on se réaffirme encore après ``on_ready``.
     """
     global _PLAIN_INSTALL_PATCHED
     if _PLAIN_INSTALL_PATCHED:
@@ -117,6 +124,12 @@ def _patch_plain_response_install() -> None:
     install_with_private_errors._sentrix_private_error_install = True
     install_with_private_errors._sentrix_original = current_install
     plain_response_policy.install = install_with_private_errors
+
+    # cogs/__init__.py utilise ce nom global dans _install_finalizers().
+    package = sys.modules.get(__package__)
+    if package is not None and hasattr(package, "install_plain_response_policy"):
+        package.install_plain_response_policy = install_with_private_errors
+
     _PLAIN_INSTALL_PATCHED = True
 
 
