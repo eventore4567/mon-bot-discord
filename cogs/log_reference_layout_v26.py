@@ -6,7 +6,7 @@ mais la structure est volontairement plus ample que le mini-layout V25 :
 header/titre/description avec avatar à droite, section de détail, footer, boutons.
 
 V27 reste la couche de normalisation/Audit Log. V28 conserve les IDs, la déduplication
-exacte et les mentions silencieuses. V29 est désormais le renderer visuel final.
+exacte et les mentions silencieuses. V30 est désormais le renderer visuel final.
 """
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ def _detail_text(embed: discord.Embed) -> str:
 
 
 class ReferenceLogLayout(discord.ui.LayoutView):
-    """Carte V26 de secours ; V29 prend le contrôle final en production."""
+    """Carte V26 de secours ; V30 prend le contrôle final en production."""
 
     _sentrix_log_layout = True
     _sentrix_rectangle_v25 = True
@@ -199,10 +199,12 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .log_premium_v28 import install as install_v28
     install_v28(bot, extension_name)
 
-    # V29 passe TOUJOURS en dernier : uniquement le style change, toutes les protections
-    # des versions précédentes restent en place.
     from .log_ultra_style_v29 import install as install_v29
     install_v29(bot, extension_name)
+
+    # V30 passe toujours en dernier : c'est le style préféré validé par l'utilisateur.
+    from .log_preferred_style_v30 import install as install_v30
+    install_v30(bot, extension_name)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
