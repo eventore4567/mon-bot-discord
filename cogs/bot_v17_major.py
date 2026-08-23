@@ -103,6 +103,7 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .v17_health import install as install_health
     from .v17_user_facing_hotfix import install as install_user_facing_hotfix
     from .production_alert_noise_fix import install as install_production_alert_noise_fix
+    from .command_runtime_hardening_v18 import install as install_command_runtime_hardening_v18
     from .command_integrity_v18 import install as install_command_integrity_v18
 
     await _install_one(
@@ -148,6 +149,12 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
         extension_name,
     )
     _fix_group_invocation(bot)
+    await _install_one(
+        "durcissement moteur de commandes V18",
+        install_command_runtime_hardening_v18,
+        bot,
+        extension_name,
+    )
     await _install_one(
         "intégrité finale de toutes les commandes V18",
         install_command_integrity_v18,
