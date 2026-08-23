@@ -43,6 +43,8 @@ from .plain_response_policy import install as install_plain_response_policy
 from .poll_ui import install_poll_ui
 from .premium_logs import install as install_premium_logs
 from .premium_logs_v2 import install as install_premium_logs_v2
+from .log_rectangle_v25 import install as install_log_rectangle_v25
+from .log_reference_layout_v26 import install as install_log_reference_layout_v26
 from .premium_style_runtime import install as install_premium_style
 from .profile_oxyde_runtime import install as install_profile_oxyde
 from .production_ops import install as install_production_ops
@@ -219,12 +221,15 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
 
 
 async def _install_log_stack(bot: commands.Bot) -> None:
-    """Ordre important : routage -> style -> Components V2 -> mentions silencieuses."""
+    """Ordre important : routage -> style -> Components V2 -> anti-doublon -> format final."""
     if _discord_session_started(bot):
         await _run_installer("routage logs modération", install_moderation_logs_fix, bot)
     await _run_installer("style premium logs", install_premium_logs, bot)
     await _run_installer("Components V2 logs", install_premium_logs_v2, bot)
     await _run_installer("mentions silencieuses logs", install_logs_no_ping)
+    # V25 garde la sortie unique/anti-doublon ; V26 choisit uniquement le rendu final.
+    await _run_installer("anti-doublon final logs V25", install_log_rectangle_v25, bot)
+    await _run_installer("taille référence logs V26", install_log_reference_layout_v26, bot)
 
 
 async def _install_finalizers(bot: commands.Bot, name: str) -> None:
@@ -245,6 +250,8 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     # VRAIMENT EN DERNIER : aucune réponse ordinaire ne doit être remise dans un embed
     # par premium_style_runtime ou une autre couche historique après cette étape.
     await _run_installer("réponses finales sans box", install_plain_response_policy, bot)
+    # Et le renderer de logs doit lui aussi rester le tout dernier choix visuel.
+    await _run_installer("taille référence logs V26 finale", install_log_reference_layout_v26, bot)
 
 
 async def _load_extension_with_sentrix_patches(
