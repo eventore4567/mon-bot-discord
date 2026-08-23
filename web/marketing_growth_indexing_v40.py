@@ -59,14 +59,15 @@ async def public_growth_indexing(request: web.Request, handler):
     if path in _PUBLIC_PAGES or path.startswith("/sentrix-media/"):
         response.headers["X-Robots-Tag"] = "index, follow"
 
-    if isinstance(response, web.Response) and response.text:
-        if path == "/robots.txt":
-            response.text = _patch_robots(response.text)
-        elif path == "/sitemap.xml":
-            dashboard = request.app.get("dashboard_module")
-            if dashboard is not None:
-                base = str(dashboard._public_url(request)).rstrip("/")
-                response.text = _patch_sitemap(response.text, base)
+    # Ne lire response.text que pour les deux réponses textuelles que nous devons modifier.
+    # Cela évite de tenter de décoder la PP ou un autre fichier binaire en UTF-8.
+    if isinstance(response, web.Response) and path == "/robots.txt":
+        response.text = _patch_robots(response.text or "")
+    elif isinstance(response, web.Response) and path == "/sitemap.xml":
+        dashboard = request.app.get("dashboard_module")
+        if dashboard is not None:
+            base = str(dashboard._public_url(request)).rstrip("/")
+            response.text = _patch_sitemap(response.text or "", base)
     return response
 
 
