@@ -107,6 +107,7 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .command_integrity_v18 import install as install_command_integrity_v18
     from .send_argument_safety_v20 import install as install_send_argument_safety_v20
     from .interaction_defer_safety_v21 import install as install_interaction_defer_safety_v21
+    from .direct_sentrix_slash_v22 import install as install_direct_sentrix_slash_v22
 
     await _install_one(
         "modération/sécurité",
@@ -172,6 +173,12 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     await _install_one(
         "defer/typing slash idempotents V21",
         install_interaction_defer_safety_v21,
+        bot,
+        extension_name,
+    )
+    await _install_one(
+        "callback slash /sentrix direct V22",
+        install_direct_sentrix_slash_v22,
         bot,
         extension_name,
     )
