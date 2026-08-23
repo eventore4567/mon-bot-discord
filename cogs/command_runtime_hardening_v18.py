@@ -1,10 +1,18 @@
 """Durcissement V18 du moteur de commandes SentriX.
 
 Complète command_integrity_v18 avec trois corrections globales :
-1. restaure la signature d'origine des callbacks enveloppés par les runtimes SentriX ;
+1. restaure la signature ET les paramètres discord.py d'origine des callbacks enveloppés
+   par les runtimes SentriX ;
 2. classe la racine +create dans la politique de configuration ;
 3. retente UNE fois le chargement d'une extension uniquement si discord.py signale une
    collision de commande, après nettoyage des alias synthétiques V16.
+
+Le point 1 est important : remplacer uniquement ``callback.__signature__`` ne suffit pas.
+discord.py met en cache les paramètres convertibles dans ``Command.params`` quand le
+callback est affecté. Un wrapper générique (*args, __original=..., **kwargs) peut donc
+faire apparaître des arguments internes comme ``original``, ``name`` ou ``kwargs`` et
+rendre une commande pourtant valide inutilisable. V18 reconstruit désormais ce cache à
+partir du callback métier original, puis remet le wrapper de sécurité en place.
 
 Le retry ne s'applique jamais aux SyntaxError/ImportError/bugs métier : ceux-ci restent
 visibles et ne sont pas masqués.
@@ -39,7 +47,7 @@ def _original_callable(callback):
     seen: set[int] = set()
     current = callback
     best = None
-    for _ in range(12):
+    for _ in range(16):
         if current is None or id(current) in seen:
             break
         seen.add(id(current))
@@ -62,43 +70,98 @@ def _signature_is_generic(signature: inspect.Signature) -> bool:
     )
 
 
+def _bad_cached_params(command: commands.Command) -> bool:
+    """Détecte les paramètres internes typiques créés par un wrapper runtime."""
+    reserved = {
+        "self", "ctx", "context", "interaction", "bot", "_bot",
+        "original", "__original", "name", "__name", "kwargs", "args",
+    }
+    try:
+        names = {str(name).casefold().lstrip("_") for name in command.clean_params}
+    except Exception:
+        return True
+    return bool(names & {item.lstrip("_") for item in reserved})
+
+
+def _rebuild_command_params_from_original(command: commands.Command, original, wrapper) -> bool:
+    """Force discord.py à recalculer Command.params depuis le callback métier original.
+
+    L'affectation à ``Command.callback`` est justement le chemin utilisé par discord.py
+    pour recalculer ses métadonnées internes. On l'utilise brièvement avec l'original,
+    on sauvegarde les bons paramètres, puis on remet le wrapper et on restaure ce cache.
+    Le callback exécuté reste donc le wrapper de sécurité ; seul le parsing utilisateur
+    provient de la vraie commande.
+    """
+    try:
+        command.callback = original
+        good_params = dict(getattr(command, "params", {}) or {})
+        command.callback = wrapper
+        if not good_params:
+            return False
+        command.params = good_params
+        return True
+    except Exception:
+        # Toujours remettre le wrapper même si une version de discord.py refuse une étape.
+        try:
+            if command.callback is not wrapper:
+                command.callback = wrapper
+        except Exception:
+            pass
+        logger.exception(
+            "V18 : impossible de reconstruire les paramètres de +%s.",
+            getattr(command, "qualified_name", getattr(command, "name", "?")),
+        )
+        return False
+
+
 def repair_wrapped_signatures(bot: commands.Bot) -> int:
-    """Restaure seulement les métadonnées de signature, jamais le callback lui-même."""
+    """Restaure signature + cache Command.params, sans retirer les wrappers de sécurité."""
     repaired = 0
     state = _state(bot)
     repaired_keys: set[str] = state["signature_repairs"]
 
     for command in list(bot.walk_commands()):
-        callback = getattr(command, "callback", None)
-        if callback is None or not callable(callback):
+        wrapper = getattr(command, "callback", None)
+        if wrapper is None or not callable(wrapper):
             continue
-        original = _original_callable(callback)
+        original = _original_callable(wrapper)
         if original is None:
             continue
+
         try:
-            current_signature = inspect.signature(callback)
+            current_signature = inspect.signature(wrapper)
             original_signature = inspect.signature(original)
         except (TypeError, ValueError):
             continue
 
-        # functools.wraps peut déjà exposer correctement la signature originale. Dans ce
-        # cas on ne touche rien. On cible seulement les wrappers génériques *args/**kwargs
-        # ou ceux dont la signature diffère clairement de leur source.
-        if current_signature == original_signature:
-            continue
-        if not _signature_is_generic(current_signature):
+        generic = current_signature != original_signature and _signature_is_generic(current_signature)
+        cached_bad = _bad_cached_params(command)
+        if not generic and not cached_bad:
             continue
 
+        params_rebuilt = _rebuild_command_params_from_original(command, original, wrapper)
+
+        # Aide/introspection Python : exposer aussi la vraie signature sur le wrapper.
         try:
-            callback.__signature__ = original_signature
+            wrapper.__signature__ = original_signature
         except (AttributeError, TypeError):
+            pass
+
+        # Vérification après réparation. Si les paramètres restent contaminés, ne pas
+        # annoncer un succès silencieux : le rapport V18 le verra comme anomalie.
+        if _bad_cached_params(command):
+            logger.error(
+                "V18 : paramètres internes encore exposés après réparation pour +%s.",
+                getattr(command, "qualified_name", getattr(command, "name", "?")),
+            )
             continue
 
-        key = str(getattr(command, "qualified_name", "") or getattr(command, "name", "commande"))
-        if key not in repaired_keys:
-            repaired_keys.add(key)
-            logger.info("V18 : signature du wrapper restaurée pour +%s.", key)
-        repaired += 1
+        if params_rebuilt or generic:
+            key = str(getattr(command, "qualified_name", "") or getattr(command, "name", "commande"))
+            if key not in repaired_keys:
+                repaired_keys.add(key)
+                logger.info("V18 : signature + paramètres discord.py restaurés pour +%s.", key)
+            repaired += 1
 
     return repaired
 
@@ -145,8 +208,6 @@ def install_extension_retry(bot: commands.Bot) -> None:
             if not _is_registration_collision(error):
                 raise
 
-            # L'extension Discord.py est nettoyée par load_extension lors d'un échec. On
-            # retire ensuite les alias synthétiques responsables et on retente UNE fois.
             try:
                 from .command_integrity_v18 import _disable_v16_runtime_aliases, _repair_alias_collisions
                 removed = _disable_v16_runtime_aliases(_bot)
