@@ -39,6 +39,7 @@ from . import engagement_hub as _engagement_hub
 from . import dashboard_instance_runtime as _dashboard_instance_runtime
 from . import instance_dashboard_branding as _instance_dashboard_branding
 from . import log_settings_dashboard_v32 as _log_settings_dashboard_v32
+from . import ticket_center_v35 as _ticket_center_v35
 
 
 # Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
@@ -177,9 +178,10 @@ if 'id="sentrix-core-recovery"' not in _main_html:
     _main_html = _main_html.replace("</body>", _CORE_RECOVERY_JS + "\n</body>", 1)
 _dashboard.INDEX_HTML = _main_html
 
-# V32 est installé APRÈS la restauration de la page principale : son bloc Logs ne peut donc
-# pas être effacé par les anciennes couches visuelles et ses routes sont disponibles au bind.
+# V32/V35 sont installés APRÈS la restauration de la page principale : leurs interfaces
+# ne peuvent donc pas être effacées par les anciennes couches visuelles.
 _log_settings_dashboard_v32.install(_dashboard)
+_ticket_center_v35.install(_dashboard)
 
 # Community Growth doit être branché AVANT build_app()/le bind HTTP. Auparavant il était
 # installé depuis une tâche asynchrone de cog ; Railway pouvait donc créer l'application
