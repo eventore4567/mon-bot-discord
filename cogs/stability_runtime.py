@@ -267,6 +267,11 @@ async def install(bot, extension_name: str) -> None:
     from .ai_disable_guard import install as install_ai_disable_guard
     install_ai_disable_guard(bot)
 
+    # V17 majeure : chaque sous-module est isolé et idempotent. Elle complète les couches
+    # précédentes sans dupliquer leurs protections déjà actives.
+    from .bot_v17_major import install as install_bot_v17_major
+    await install_bot_v17_major(bot, name)
+
     # Dernière couche bot-only : supervision SLO, boot/crash, agrégation de latence et
     # reconnexion de l'infrastructure externe. Elle se réapplique après chaque extension
     # pour rester au-dessus des wrappers installés plus tard (notamment arrêt gracieux).
