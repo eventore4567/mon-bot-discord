@@ -40,6 +40,7 @@ from . import dashboard_instance_runtime as _dashboard_instance_runtime
 from . import instance_dashboard_branding as _instance_dashboard_branding
 from . import log_settings_dashboard_v32 as _log_settings_dashboard_v32
 from . import ticket_center_v35 as _ticket_center_v35
+from . import feature_control_v36 as _feature_control_v36
 
 
 # Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
@@ -146,7 +147,7 @@ _CORE_RECOVERY_JS = r"""
         !guildReloading &&
         (!state.guildId || !state.guildData)
       ) {
-        guildReloading = true;
+        guildReloading = true
         try { await loadGuilds(); } catch (_) {}
         finally { guildReloading = false; }
       }
@@ -220,6 +221,10 @@ _dashboard_simple_mode.install(_dashboard)
 # Correctif final de bascule : les deux modes restent toujours accessibles, même si le
 # conteneur de navigation est masqué ou si le stockage local du navigateur est indisponible.
 _dashboard_simple_mode_switch_fix.install(_dashboard)
+
+# V36 est installé après le mode simple : son centre de fonctionnalités est visible à la fois
+# sur l'accueil simple et dans Configuration générale en mode avancé.
+_feature_control_v36.install(_dashboard)
 
 # Toujours en dernier : retire les emojis/icônes décoratifs ajoutés par n'importe quelle
 # couche précédente, sans toucher aux photos de profil ni au contenu configuré par l'utilisateur.
