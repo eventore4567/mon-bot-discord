@@ -7,6 +7,7 @@ header/titre/description avec avatar à droite, section de détail, footer, bout
 
 V27 reste la couche de normalisation/Audit Log. V28 conserve les IDs, la déduplication
 exacte et les mentions silencieuses. V30 est désormais le renderer visuel final.
+V31 force les anciens logs directs (notamment tickets dédiés) à utiliser ce renderer.
 """
 from __future__ import annotations
 
@@ -32,7 +33,6 @@ _INSTALLED = False
 
 
 def _avatar_url(bot: commands.Bot, guild: discord.Guild, embed: discord.Embed) -> str | None:
-    """Avatar fiable : auteur/cible si présent, sinon icône serveur, sinon bot."""
     for token in ("auteur", "membre", "utilisateur", "cible"):
         raw = _field_value(embed, token)
         match = re.search(r"(?<!\d)(\d{15,22})(?!\d)", raw or "")
@@ -55,17 +55,13 @@ def _avatar_url(bot: commands.Bot, guild: discord.Guild, embed: discord.Embed) -
 
 def _clean_description(embed: discord.Embed) -> str:
     description = (embed.description or "").strip()
-    if description:
-        return description[:900]
-    return ""
+    return description[:900] if description else ""
 
 
 def _detail_text(embed: discord.Embed) -> str:
-    """Un bloc de détail large, jamais une colonne de nombreuses petites cases."""
     if _is_role_batch(embed):
         description = (embed.description or "").strip()
         return description[:3200] if description else "*Aucun détail disponible.*"
-
     author = _field_value(embed, "auteur", "membre", "utilisateur", "cible")
     salon = _field_value(embed, "salon")
     content = _field_value(embed, "contenu")
@@ -74,7 +70,6 @@ def _detail_text(embed: discord.Embed) -> str:
     actor = _field_value(embed, "effectue par", "moderateur", "acteur")
     reason = _field_value(embed, "raison")
     duration = _field_value(embed, "duree", "fin du timeout", "nouvel etat")
-
     parts: list[str] = []
     if salon:
         parts.append(f"### 💬 Salon\n{salon[:500]}")
@@ -87,7 +82,6 @@ def _detail_text(embed: discord.Embed) -> str:
             parts.append(f"### ◀️ Avant\n{before[:650]}")
         if after:
             parts.append(f"### ▶️ Après\n{after[:650]}")
-
     extras: list[str] = []
     if actor:
         extras.append(f"**🛡️ Effectué par**\n{actor[:450]}")
@@ -97,63 +91,38 @@ def _detail_text(embed: discord.Embed) -> str:
         extras.append(f"**⏱️ Durée / fin**\n{duration[:450]}")
     if extras:
         parts.append("\n\n".join(extras))
-
     return "\n\n".join(parts[:3])[:2600]
 
 
 class ReferenceLogLayout(discord.ui.LayoutView):
-    """Carte V26 de secours ; V30 prend le contrôle final en production."""
-
     _sentrix_log_layout = True
     _sentrix_rectangle_v25 = True
     _sentrix_reference_v26 = True
 
-    def __init__(
-        self,
-        bot: commands.Bot,
-        guild: discord.Guild,
-        log_type: str,
-        embed: discord.Embed,
-        buttons: list[tuple[str, int]],
-    ):
+    def __init__(self, bot: commands.Bot, guild: discord.Guild, log_type: str, embed: discord.Embed, buttons: list[tuple[str, int]]):
         super().__init__(timeout=6 * 60 * 60)
         clean = _sanitized_embed(bot, guild, embed)
         accent = int(clean.colour.value) if clean.colour else 0x7C5CFC
         category = CATEGORY_LABELS.get(log_type, log_type.upper())
         title = _event_title(clean)
-
         container = discord.ui.Container(accent_colour=accent)
-        header_lines = [
-            f"-# 🛡️ SENTRIX • {category} • {guild.name}",
-            f"# {title}",
-        ]
+        header_lines = [f"-# 🛡️ SENTRIX • {category} • {guild.name}", f"# {title}"]
         description = _clean_description(clean)
         if description and not _is_role_batch(clean):
             header_lines.append(description)
-
         header = discord.ui.TextDisplay("\n\n".join(header_lines)[:3900])
         avatar = _avatar_url(bot, guild, clean)
         if avatar:
             try:
-                container.add_item(
-                    discord.ui.Section(
-                        header,
-                        accessory=discord.ui.Thumbnail(
-                            avatar,
-                            description="Avatar lié à l'événement",
-                        ),
-                    )
-                )
+                container.add_item(discord.ui.Section(header, accessory=discord.ui.Thumbnail(avatar, description="Avatar lié à l'événement")))
             except Exception:
                 container.add_item(header)
         else:
             container.add_item(header)
-
         details = _detail_text(clean)
         if details:
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(details))
-
         container.add_item(discord.ui.Separator())
         ts = _event_timestamp(clean)
         target = _target_id(clean)
@@ -161,7 +130,6 @@ class ReferenceLogLayout(discord.ui.LayoutView):
         if target:
             footer += f" • ID `{target}`"
         container.add_item(discord.ui.TextDisplay(footer))
-
         final_buttons = _button_items(clean, str(clean.title or "")) or buttons
         if final_buttons:
             row = discord.ui.ActionRow()
@@ -174,7 +142,6 @@ class ReferenceLogLayout(discord.ui.LayoutView):
                 row.add_item(premium_logs_v2.CopyIdButton(str(label), int(value), index))
             if row.children:
                 container.add_item(row)
-
         self._sentrix_log_fingerprint = _fingerprint_embed(guild.id, clean)
         self._sentrix_is_log_layout = True
         self.add_item(container)
@@ -182,29 +149,25 @@ class ReferenceLogLayout(discord.ui.LayoutView):
 
 def install(bot: commands.Bot, extension_name: str = "") -> None:
     global _INSTALLED
-
     required = ("LayoutView", "Container", "Section", "TextDisplay", "Thumbnail", "Separator")
     if not all(hasattr(discord.ui, name) for name in required):
         return
-
     premium_logs_v2.PremiumLogLayout = ReferenceLogLayout
     _INSTALLED = True
 
     from .log_premium_v28 import install_source_guard as install_v28_source
     install_v28_source(bot)
-
     from .log_single_pipeline_v27 import install as install_v27
     install_v27(bot, extension_name)
-
     from .log_premium_v28 import install as install_v28
     install_v28(bot, extension_name)
-
     from .log_ultra_style_v29 import install as install_v29
     install_v29(bot, extension_name)
-
-    # V30 passe toujours en dernier : c'est le style préféré validé par l'utilisateur.
     from .log_preferred_style_v30 import install as install_v30
     install_v30(bot, extension_name)
+    # V31 s'installe après le renderer final et intercepte les vieux chemins directs.
+    from .log_category_unifier_v31 import install as install_v31
+    install_v31(bot, extension_name)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
