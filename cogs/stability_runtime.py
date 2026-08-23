@@ -255,6 +255,13 @@ async def install(bot, extension_name: str) -> None:
     from .bot_excellence_runtime import install as install_bot_excellence_runtime
     await install_bot_excellence_runtime(bot, name)
 
+    # Le réglage IA activée/désactivée doit être autoritaire sur TOUTES les routes IA,
+    # y compris les anciennes commandes et la conversation naturelle « SentriX ... ».
+    # stability_runtime passe après chaque extension : dès que le Cog Ai existe, ce garde
+    # est donc réellement installé (et reste idempotent aux passages suivants).
+    from .ai_disable_guard import install as install_ai_disable_guard
+    install_ai_disable_guard(bot)
+
     # Dernière couche bot-only : supervision SLO, boot/crash, agrégation de latence et
     # reconnexion de l'infrastructure externe. Elle se réapplique après chaque extension
     # pour rester au-dessus des wrappers installés plus tard (notamment arrêt gracieux).
