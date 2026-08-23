@@ -102,6 +102,7 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .v17_ai_economy_games import install as install_ai_economy_games
     from .v17_health import install as install_health
     from .v17_user_facing_hotfix import install as install_user_facing_hotfix
+    from .production_alert_noise_fix import install as install_production_alert_noise_fix
 
     await _install_one(
         "modération/sécurité",
@@ -136,6 +137,12 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     await _install_one(
         "accueil/erreurs privées/create sentrix",
         install_user_facing_hotfix,
+        bot,
+        extension_name,
+    )
+    await _install_one(
+        "alertes production anti-spam",
+        install_production_alert_noise_fix,
         bot,
         extension_name,
     )
