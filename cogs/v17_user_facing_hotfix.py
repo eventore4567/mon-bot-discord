@@ -302,6 +302,11 @@ def _enhance_create_builder(bot: commands.Bot) -> None:
     if command is None or getattr(command, "_sentrix_pro_callback_v4", False):
         return
 
+    # discord.py calcule les arguments utilisateur depuis le callback. Le callback d'origine
+    # ne possède aucun argument utilisateur : on conserve donc explicitement ses paramètres
+    # avant de remplacer la fonction, sinon `ctx` peut être interprété comme `<ctx>` à taper.
+    original_params = command.params.copy()
+
     async def create_sentrix_professional(cog_self, ctx: commands.Context):
         guild = ctx.guild
         if guild is None:
@@ -393,6 +398,7 @@ def _enhance_create_builder(bot: commands.Bot) -> None:
                     pass
 
     command.callback = create_sentrix_professional
+    command.params = original_params
     command._sentrix_pro_callback_v4 = True
 
 
