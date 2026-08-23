@@ -5,8 +5,8 @@ bot réellement connecté :
 - les commandes slash locales sont comparées aux commandes réellement enregistrées chez Discord ;
 - chaque commande texte racine et chacun de ses alias sont résolus par le vrai parser du bot,
   avec le préfixe réellement configuré dans un vrai serveur ;
-- les checks locaux sont exécutés dans un contexte de vrai serveur/membre afin de détecter
-  les exceptions techniques sans déclencher le callback métier ;
+- les checks locaux et le verrou global de permissions sont exécutés dans un contexte de
+  vrai serveur/membre afin de détecter les exceptions techniques sans lancer le callback métier ;
 - le résultat est conservé sur le bot pour les healthchecks et le bootstrap Railway.
 
 Les commandes destructives (ban, kick, wipe, suppression de salons, paiements, etc.) ne sont
@@ -48,6 +48,7 @@ def _state(bot: commands.Bot) -> dict[str, Any]:
         "local_slash": 0,
         "remote_slash": 0,
         "checks_tested": 0,
+        "global_permissions_tested": 0,
     }
     bot._sentrix_live_command_gate_v19 = value
     return value
@@ -57,7 +58,6 @@ def _first_probe_guild(bot: commands.Bot) -> discord.Guild | None:
     guilds = list(getattr(bot, "guilds", ()) or ())
     if not guilds:
         return None
-    # Préférer un serveur où l'utilisateur owner est déjà présent dans le cache.
     for guild in guilds:
         if guild.get_member(guild.owner_id) is not None:
             return guild
@@ -89,9 +89,6 @@ def _probe_channel(guild: discord.Guild) -> discord.abc.Messageable | None:
 
 
 def _fake_message(*, guild: discord.Guild, member: discord.Member, channel, content: str):
-    # Bot.get_context() n'a besoin que d'un sous-ensemble des attributs Message pour le
-    # parsing. Les checks qui lisent guild/author/channel récupèrent ici de vrais objets
-    # Discord provenant du cache live.
     return SimpleNamespace(
         id=0,
         content=content,
@@ -147,8 +144,6 @@ async def _check_local_predicates(ctx: commands.Context, command: commands.Comma
             result = predicate(ctx)
             if inspect.isawaitable(result):
                 result = await result
-            # False ou CheckFailure peut dépendre de la config du serveur et n'indique pas
-            # un crash. Une autre exception, elle, est toujours suspecte.
             if result is False:
                 continue
         except commands.CheckFailure:
@@ -158,6 +153,36 @@ async def _check_local_predicates(ctx: commands.Context, command: commands.Comma
                 f"check +{command.qualified_name}: {type(exc).__name__}: {str(exc)[:240]}"
             )
     return errors
+
+
+async def _check_global_permission(bot: commands.Bot, ctx: commands.Context, command: commands.Command) -> list[str]:
+    checker = getattr(bot, "global_permission_check", None)
+    if not callable(checker):
+        return ["global_permission_check absent du bot live"]
+    try:
+        allowed = await checker(ctx)
+        if allowed is False:
+            return [f"permission globale +{command.qualified_name}: retour False"]
+        return []
+    except commands.CheckFailure as exc:
+        root = command.root_parent or command
+        owner_only = set()
+        try:
+            import main
+            owner_only = set(getattr(main, "OWNER_ONLY_COMMANDS", ()) or ())
+        except Exception:
+            pass
+        if str(root.name).casefold() in {str(name).casefold() for name in owner_only}:
+            return []
+        # Le membre de probe est le propriétaire du serveur : une commande non owner-only
+        # ne doit pas être bloquée par le verrou global de SentriX.
+        return [
+            f"permission globale +{command.qualified_name}: {type(exc).__name__}: {str(exc)[:240]}"
+        ]
+    except Exception as exc:
+        return [
+            f"permission globale +{command.qualified_name}: {type(exc).__name__}: {str(exc)[:240]}"
+        ]
 
 
 async def _remote_slash_names(bot: commands.Bot) -> tuple[set[str], str | None]:
@@ -195,9 +220,9 @@ async def run_live_gate(bot: commands.Bot) -> dict[str, Any]:
         "local_slash": 0,
         "remote_slash": 0,
         "checks_tested": 0,
+        "global_permissions_tested": 0,
     })
     errors: list[str] = state["errors"]
-    warnings: list[str] = state["warnings"]
 
     try:
         if not bot.is_ready():
@@ -223,7 +248,7 @@ async def run_live_gate(bot: commands.Bot) -> dict[str, Any]:
         prefix = await _real_prefix(bot, seed)
         state["prefix"] = prefix
 
-        # 1) Test du vrai parser préfixe pour toutes les racines et tous leurs alias.
+        # 1) Vrai parser préfixe pour toutes les commandes racine et tous leurs alias.
         for command in list(bot.commands):
             if not getattr(command, "enabled", True):
                 continue
@@ -252,24 +277,18 @@ async def run_live_gate(bot: commands.Bot) -> dict[str, Any]:
                 else:
                     state["prefix_aliases"] += 1
 
-        # 2) Groupes/sous-commandes : Discord.py les résout au moment de l'invocation.
-        # Ici on valide directement le mapping réellement chargé de chaque groupe.
+        # 2) Groupes et sous-commandes réellement chargés.
         for group in [item for item in bot.walk_commands() if isinstance(item, commands.Group)]:
             for child in list(group.commands):
-                resolved = group.get_command(child.name)
-                if resolved is not child:
+                if group.get_command(child.name) is not child:
                     errors.append(
                         f"groupe +{group.qualified_name}: {child.name} ne se résout pas vers sa vraie sous-commande"
                     )
                 for alias in list(getattr(child, "aliases", ()) or ()):
                     if group.get_command(alias) is not child:
-                        errors.append(
-                            f"alias +{group.qualified_name} {alias}: résolution incorrecte"
-                        )
+                        errors.append(f"alias +{group.qualified_name} {alias}: résolution incorrecte")
 
-        # 3) Checks locaux dans un vrai serveur. On n'exécute jamais les callbacks métier.
-        # Le propriétaire du serveur sert de membre de probe, ce qui permet de traverser
-        # les checks de permissions administrateur sans modifier le serveur.
+        # 3) Checks locaux + verrou global sur un vrai serveur/propriétaire.
         for command in list(bot.walk_commands()):
             message = _fake_message(
                 guild=guild,
@@ -277,11 +296,19 @@ async def run_live_gate(bot: commands.Bot) -> dict[str, Any]:
                 channel=channel,
                 content=f"{prefix}{command.qualified_name}",
             )
-            ctx = _context(bot, message, command, prefix)
+            try:
+                ctx = _context(bot, message, command, prefix)
+            except Exception as exc:
+                errors.append(
+                    f"contexte +{command.qualified_name}: {type(exc).__name__}: {str(exc)[:240]}"
+                )
+                continue
             state["checks_tested"] += len(list(getattr(command, "checks", ()) or ()))
             errors.extend(await _check_local_predicates(ctx, command))
+            state["global_permissions_tested"] += 1
+            errors.extend(await _check_global_permission(bot, ctx, command))
 
-        # 4) Slash réellement enregistrés chez Discord, pas seulement tree.get_commands().
+        # 4) Slash réellement enregistrés chez Discord, via l'API distante.
         local_slash = {str(item.name).casefold() for item in bot.tree.get_commands()}
         remote_slash, remote_error = await _remote_slash_names(bot)
         state["local_slash"] = len(local_slash)
@@ -296,12 +323,14 @@ async def run_live_gate(bot: commands.Bot) -> dict[str, Any]:
             if stale_remote:
                 errors.append("/ obsolètes encore chez Discord: " + ", ".join(stale_remote[:30]))
 
-        # Diagnostic complémentaire : le bot doit avoir une identité et être réellement
-        # membre du serveur utilisé par le probe.
         if bot.user is None or guild.me is None:
             errors.append("identité/membre du bot indisponible dans le serveur live")
 
         state["ok"] = not errors
+        return state
+    except Exception as exc:
+        errors.append(f"gate live interne: {type(exc).__name__}: {str(exc)[:500]}")
+        logger.exception("V19 : exception interne pendant le gate live.")
         return state
     finally:
         state["running"] = False
@@ -309,12 +338,14 @@ async def run_live_gate(bot: commands.Bot) -> dict[str, Any]:
         state["ok"] = not bool(state["errors"])
         if state["ok"]:
             logger.info(
-                "V19 LIVE OK : guild=%s prefix=%r, %s commandes +, %s alias +, %s checks, %s/%s slash Discord.",
+                "V19 LIVE OK : guild=%s prefix=%r, %s commandes +, %s alias +, %s checks locaux, "
+                "%s permissions globales, %s/%s slash Discord.",
                 state["guild_id"],
                 state["prefix"],
                 state["prefix_commands"],
                 state["prefix_aliases"],
                 state["checks_tested"],
+                state["global_permissions_tested"],
                 state["remote_slash"],
                 state["local_slash"],
             )
@@ -333,17 +364,22 @@ def install(bot: commands.Bot) -> None:
 
     @bot.listen("on_ready")
     async def sentrix_live_command_gate_v19() -> None:
-        # on_ready peut être reçu plusieurs fois après une reconnexion. Un build n'a besoin
-        # que d'un gate complet ; les reconnexions normales ne relancent pas toute la matrice.
         runtime = _state(bot)
         if runtime.get("completed") or runtime.get("running"):
             return
-        await run_live_gate(bot)
+        try:
+            await run_live_gate(bot)
+        except Exception as exc:
+            runtime["errors"] = list(runtime.get("errors", [])) + [
+                f"listener live: {type(exc).__name__}: {str(exc)[:500]}"
+            ]
+            runtime["completed"] = True
+            runtime["ok"] = False
+            logger.exception("V19 : le listener live a lui-même échoué.")
+
         if not runtime.get("ok"):
             bot._sentrix_live_gate_failed = True
             bot._sentrix_live_gate_detail = " | ".join(runtime.get("errors", [])[:20])
-            # Le bootstrap Railway vérifie ce drapeau. Fermer proprement le client permet
-            # au process principal de retourner puis de lever une vraie erreur de démarrage.
             await bot.close()
         else:
             bot._sentrix_live_gate_failed = False
