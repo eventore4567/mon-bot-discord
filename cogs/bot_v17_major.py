@@ -50,7 +50,10 @@ async def _install_one(label: str, installer, bot: commands.Bot, extension_name:
         if inspect.isawaitable(result):
             await result
     except Exception:
-        logger.exception("V17 : le module %s n'a pas pu être appliqué ; poursuite du démarrage.", label)
+        logger.exception(
+            "V17 : le module %s n'a pas pu être appliqué ; poursuite du démarrage.",
+            label,
+        )
 
 
 async def _install_extras_deterministic(bot: commands.Bot, extension_name: str) -> None:
@@ -68,8 +71,15 @@ async def _install_extras_deterministic(bot: commands.Bot, extension_name: str) 
 def _fix_group_invocation(bot: commands.Bot) -> None:
     """Un sous-ordre ne doit pas exécuter aussi la page d'accueil de son groupe."""
     for name in (
-        "protectmember", "staffnote", "sanctionpolicy", "serversnapshot", "nukewhitelist",
-        "logevent", "airolequota", "aicontext", "season",
+        "protectmember",
+        "staffnote",
+        "sanctionpolicy",
+        "serversnapshot",
+        "nukewhitelist",
+        "logevent",
+        "airolequota",
+        "aicontext",
+        "season",
     ):
         command = bot.get_command(name)
         if isinstance(command, commands.Group):
@@ -83,37 +93,60 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
         install_permission_cache(bot)
         _install_rate_limit_compatibility()
     except Exception:
-        logger.exception("V17 : socle partagé partiellement indisponible ; poursuite du démarrage.")
+        logger.exception(
+            "V17 : socle partagé partiellement indisponible ; poursuite du démarrage."
+        )
 
     from .v17_moderation_security import install as install_moderation_security
     from .v17_tickets_logs import install as install_tickets_logs
     from .v17_ai_economy_games import install as install_ai_economy_games
     from .v17_health import install as install_health
-    from .create_sentrix_reliability import install as install_create_sentrix_reliability
     from .v17_user_facing_hotfix import install as install_user_facing_hotfix
 
-    await _install_one("modération/sécurité", install_moderation_security, bot, extension_name)
-    await _install_one("tickets/logs", install_tickets_logs, bot, extension_name)
-    await _install_one("IA/économie/jeux", install_ai_economy_games, bot, extension_name)
-    await _install_one("diagnostic/santé", install_health, bot, extension_name)
-    await _install_one("finitions boutique/image/autocomplete", _install_extras_deterministic, bot, extension_name)
-    # Répare d'abord l'ancienne table d'installation : +create sentrix la lit avant de
-    # commencer à créer les rôles/salons, donc cette migration doit être en place avant
-    # que le hotfix n'enregistre la commande.
     await _install_one(
-        "migration base create sentrix",
-        install_create_sentrix_reliability,
+        "modération/sécurité",
+        install_moderation_security,
         bot,
         extension_name,
     )
-    await _install_one("accueil/erreurs privées/create sentrix", install_user_facing_hotfix, bot, extension_name)
+    await _install_one(
+        "tickets/logs",
+        install_tickets_logs,
+        bot,
+        extension_name,
+    )
+    await _install_one(
+        "IA/économie/jeux",
+        install_ai_economy_games,
+        bot,
+        extension_name,
+    )
+    await _install_one(
+        "diagnostic/santé",
+        install_health,
+        bot,
+        extension_name,
+    )
+    await _install_one(
+        "finitions boutique/image/autocomplete",
+        _install_extras_deterministic,
+        bot,
+        extension_name,
+    )
+    await _install_one(
+        "accueil/erreurs privées/create sentrix",
+        install_user_facing_hotfix,
+        bot,
+        extension_name,
+    )
     _fix_group_invocation(bot)
 
     runtime = state(bot)
     if not runtime.get("v17_announced"):
         runtime["v17_announced"] = True
         logger.info(
-            "SentriX V17 majeure active : résilience, modération, sécurité, tickets, logs, IA, économie, missions, saisons et santé."
+            "SentriX V17 majeure active : résilience, modération, sécurité, tickets, "
+            "logs, IA, économie, missions, saisons et santé."
         )
 
 
