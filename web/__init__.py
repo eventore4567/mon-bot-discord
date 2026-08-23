@@ -41,6 +41,7 @@ from . import instance_dashboard_branding as _instance_dashboard_branding
 from . import log_settings_dashboard_v32 as _log_settings_dashboard_v32
 from . import ticket_center_v35 as _ticket_center_v35
 from . import feature_control_v36 as _feature_control_v36
+from . import feature_suite_dashboard_v37 as _feature_suite_dashboard_v37
 
 
 # Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
@@ -147,7 +148,7 @@ _CORE_RECOVERY_JS = r"""
         !guildReloading &&
         (!state.guildId || !state.guildData)
       ) {
-        guildReloading = true
+        guildReloading = true;
         try { await loadGuilds(); } catch (_) {}
         finally { guildReloading = false; }
       }
@@ -238,3 +239,7 @@ _dashboard_no_decorative_icons.install(
     _operations_center,
     _engagement_hub,
 )
+
+# Feature Suite V37 est volontairement installée après les nettoyages visuels : sa page
+# autonome, ses API et son raccourci dans /app restent stables et ne sont pas réécrits.
+_feature_suite_dashboard_v37.install(_dashboard)
