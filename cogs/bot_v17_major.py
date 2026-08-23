@@ -105,6 +105,7 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .production_alert_noise_fix import install as install_production_alert_noise_fix
     from .command_runtime_hardening_v18 import install as install_command_runtime_hardening_v18
     from .command_integrity_v18 import install as install_command_integrity_v18
+    from .send_argument_safety_v20 import install as install_send_argument_safety_v20
 
     await _install_one(
         "modération/sécurité",
@@ -158,6 +159,12 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     await _install_one(
         "intégrité finale de toutes les commandes V18",
         install_command_integrity_v18,
+        bot,
+        extension_name,
+    )
+    await _install_one(
+        "sécurité arguments send V20",
+        install_send_argument_safety_v20,
         bot,
         extension_name,
     )
