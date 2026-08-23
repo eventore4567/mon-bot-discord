@@ -1,12 +1,14 @@
 """SentriX V29 — rendu Ultra Premium compact des journaux.
 
 V29 ne remplace aucune logique de sécurité : V27/V28 gardent la déduplication, les IDs,
-l'Audit Log et les mentions silencieuses. Cette couche ne fait que reprendre le renderer
-final avec une hiérarchie visuelle plus forte et des couleurs adaptées à l'événement.
+l'Audit Log et les mentions silencieuses. Cette couche reprend seulement le renderer final
+avec une hiérarchie visuelle forte et des couleurs adaptées à l'événement.
 
-V29.1 : le bloc Traçabilité textuel a été supprimé. Les identifiants utiles restent
-accessibles via les boutons de copie, avec l'ID serveur toujours disponible. Le rendu est
-également légèrement moins haut sans perdre les informations métier importantes.
+V29.2 :
+- bloc Traçabilité textuel supprimé ;
+- IDs accessibles via boutons compacts ;
+- bouton lien ``Voir le message`` pour les messages modifiés ;
+- rendu légèrement plus premium sans augmenter la hauteur.
 """
 from __future__ import annotations
 
@@ -109,13 +111,13 @@ def _context(guild: discord.Guild, embed: discord.Embed) -> str:
         rows.append(f"🛡️ **Action par**  {_user_mention(actor)}{bot_tag}")
     if not rows:
         rows.append(f"🖥️ **Serveur**  **{discord.utils.escape_markdown(guild.name)}**")
-    return "### CONTEXTE\n" + "\n".join(f"> {row}" for row in rows[:3])
+    return "### ✦ CONTEXTE\n" + "\n".join(f"> {row}" for row in rows[:3])
 
 
 def _payload(embed: discord.Embed) -> str | None:
     if _is_role_batch(embed):
         text = (embed.description or "").strip()
-        return f"### RÔLES REGROUPÉS\n{text[:2800]}" if text else None
+        return f"### ✦ RÔLES REGROUPÉS\n{text[:2800]}" if text else None
 
     content = _field_value(embed, "contenu")
     before = _field_value(embed, "avant")
@@ -140,7 +142,7 @@ def _payload(embed: discord.Embed) -> str | None:
         rows.append(f"**📎 Pièces jointes**\n{str(attachments)[:650]}")
     if not rows:
         return None
-    return "### DÉTAILS\n" + "\n\n".join(rows[:4])
+    return "### ✦ DÉTAILS\n" + "\n\n".join(rows[:4])
 
 
 def _header(bot: commands.Bot, guild: discord.Guild, log_type: str, embed: discord.Embed) -> tuple[discord.ui.TextDisplay, str | None]:
@@ -148,24 +150,18 @@ def _header(bot: commands.Bot, guild: discord.Guild, log_type: str, embed: disco
     status, dot = _status(log_type, embed)
     ts = _event_timestamp(embed)
     text = (
-        f"-# ✦ SENTRIX  /  {category_emoji} {category}  /  SECURE AUDIT\n"
+        f"-# ✦ SENTRIX  •  {category_emoji} {category}  •  {guild.name}\n"
         f"# {v28._title(log_type, embed)}\n"
-        f"{dot} **{status}**  ·  <t:{ts}:R>  ·  `LIVE LOG`\n"
+        f"{dot} **{status}**  ·  <t:{ts}:R>  ·  `SECURE LOG`\n"
         f"{v28._summary(log_type, embed)}"
     )[:3900]
     return discord.ui.TextDisplay(text), v28._avatar(bot, guild, embed)
 
 
 def _button_set(guild: discord.Guild, log_type: str, embed: discord.Embed, inherited: list[tuple[str, int]]) -> list[tuple[str, int]]:
-    """Boutons compacts : message, salon, auteur puis serveur en priorité.
-
-    L'ID serveur n'est plus affiché dans une section Traçabilité : il reste accessible
-    comme bouton, exactement dans le même style que les autres IDs.
-    """
+    """Boutons compacts : message, salon, auteur puis serveur en priorité."""
     base = v28._buttons(guild, log_type, embed, inherited)
     server_pair = ("Copier ID serveur", int(guild.id))
-
-    # Classer les IDs métier avant les éventuels IDs modérateur/acteur.
     priorities = ("message", "salon", "auteur", "serveur", "moderateur", "modérateur", "acteur")
     candidates = list(base)
     if all(int(value) != guild.id for _, value in candidates):
@@ -189,6 +185,17 @@ def _button_set(guild: discord.Guild, log_type: str, embed: discord.Embed, inher
         used_values.add(ivalue)
 
     return ordered[:4]
+
+
+def _message_jump_url(guild: discord.Guild, log_type: str, embed: discord.Embed) -> str | None:
+    """Lien direct uniquement quand le message existe encore, donc pour une modification."""
+    if _event(log_type, embed) != "message_edit":
+        return None
+    message_id = v28._message_id(log_type, embed)
+    channel = v28._resolved_channel(guild, embed)
+    if not message_id or channel is None:
+        return None
+    return f"https://discord.com/channels/{guild.id}/{channel.id}/{message_id}"
 
 
 class UltraPremiumLogV29(discord.ui.LayoutView):
@@ -228,14 +235,21 @@ class UltraPremiumLogV29(discord.ui.LayoutView):
 
         extras = v28._extra_blocks(clean)
         if extras:
-            # On garde un seul complément, sans ajouter le gros bloc Traçabilité.
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay(extras[0][:2600]))
+            container.add_item(discord.ui.TextDisplay(extras[0][:2400]))
 
+        jump_url = _message_jump_url(guild, log_type, clean)
         final_buttons = _button_set(guild, log_type, clean, buttons)
-        if final_buttons:
+        if jump_url or final_buttons:
             row = discord.ui.ActionRow()
-            for index, (label, value) in enumerate(final_buttons):
+            if jump_url:
+                row.add_item(discord.ui.Button(
+                    label="Voir le message",
+                    emoji="🔗",
+                    style=discord.ButtonStyle.link,
+                    url=jump_url,
+                ))
+            for index, (label, value) in enumerate(final_buttons[: 4 if not jump_url else 4]):
                 row.add_item(premium_logs_v2.CopyIdButton(label, int(value), index))
             if row.children:
                 container.add_item(row)
