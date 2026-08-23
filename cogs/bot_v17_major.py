@@ -108,6 +108,7 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .send_argument_safety_v20 import install as install_send_argument_safety_v20
     from .interaction_defer_safety_v21 import install as install_interaction_defer_safety_v21
     from .direct_sentrix_slash_v22 import install as install_direct_sentrix_slash_v22
+    from .ai_compatibility_v23 import install as install_ai_compatibility_v23
 
     await _install_one(
         "modération/sécurité",
@@ -179,6 +180,12 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     await _install_one(
         "callback slash /sentrix direct V22",
         install_direct_sentrix_slash_v22,
+        bot,
+        extension_name,
+    )
+    await _install_one(
+        "compatibilité réglages/commandes IA V23",
+        install_ai_compatibility_v23,
         bot,
         extension_name,
     )
