@@ -1,21 +1,31 @@
 """SEO public V38 pour rendre SentriX découvrable depuis les moteurs de recherche.
 
 Le dashboard privé reste noindex. Seules les pages publiques de présentation, robots.txt
-et sitemap.xml sont exposées à l'indexation.
+et sitemap.xml sont exposées à l'indexation. IndexNow notifie automatiquement Bing et les
+autres moteurs compatibles lorsque le dashboard public démarre.
 """
 from __future__ import annotations
 
 import html
+import logging
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
-from aiohttp import web
+from aiohttp import ClientSession, ClientTimeout, web
 
 _INSTALLED = False
+logger = logging.getLogger("bot.dashboard.seo-v38")
 
 _DESCRIPTION = (
     "SentriX est un bot Discord complet avec dashboard : modération, sécurité, AutoMod, "
     "tickets, IA, logs, niveaux, économie, notifications, automatisations et outils staff."
 )
+
+# Clé publique IndexNow. Elle n'est pas un secret : le protocole impose justement qu'elle
+# soit accessible dans un fichier texte à la racine du domaine pour prouver la propriété.
+_INDEXNOW_KEY = "sentrix-4f39c71a9e7d4bba91c765c1e3b8a2d6"
+_INDEXNOW_PATH = f"/{_INDEXNOW_KEY}.txt"
+_INDEXNOW_ENDPOINT = "https://api.indexnow.org/indexnow"
 
 _ROOT_SEO = r'''
 <meta name="description" content="SentriX est un bot Discord complet avec dashboard : modération, sécurité, AutoMod, tickets, IA, logs, niveaux, économie, notifications et outils staff.">
@@ -135,6 +145,7 @@ async def robots(request: web.Request) -> web.Response:
 Allow: /
 Allow: /sentrix
 Allow: /dashboard-sentrix
+Allow: {_INDEXNOW_PATH}
 Disallow: /app
 Disallow: /api/
 Disallow: /login
@@ -166,12 +177,46 @@ async def sitemap(request: web.Request) -> web.Response:
     return web.Response(text=xml, content_type='application/xml', headers={'Cache-Control': 'public, max-age=3600'})
 
 
+async def indexnow_key(request: web.Request) -> web.Response:
+    del request
+    return web.Response(
+        text=_INDEXNOW_KEY,
+        content_type='text/plain',
+        headers={'Cache-Control': 'public, max-age=86400', 'X-Robots-Tag': 'noindex'},
+    )
+
+
+async def _submit_indexnow(base: str) -> None:
+    """Notifie le point d'entrée global IndexNow des pages publiques SentriX."""
+    base = str(base or '').strip().rstrip('/')
+    parsed = urlparse(base)
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        return
+    urls = [base + '/', base + '/sentrix', base + '/dashboard-sentrix', base + '/sitemap.xml']
+    payload = {
+        'host': parsed.netloc,
+        'key': _INDEXNOW_KEY,
+        'keyLocation': base + _INDEXNOW_PATH,
+        'urlList': urls,
+    }
+    try:
+        timeout = ClientTimeout(total=12)
+        async with ClientSession(timeout=timeout) as client:
+            async with client.post(_INDEXNOW_ENDPOINT, json=payload) as response:
+                if response.status in {200, 202}:
+                    logger.info('IndexNow a accepté %s URL(s) SentriX (%s).', len(urls), response.status)
+                else:
+                    logger.warning('IndexNow a refusé la soumission SentriX (%s).', response.status)
+    except Exception:
+        logger.exception('Soumission IndexNow SentriX impossible.')
+
+
 @web.middleware
 async def indexing_headers(request: web.Request, handler):
     response = await handler(request)
-    public_paths = {'/', '/sentrix', '/dashboard-sentrix', '/robots.txt', '/sitemap.xml'}
+    public_paths = {'/', '/sentrix', '/dashboard-sentrix', '/robots.txt', '/sitemap.xml', _INDEXNOW_PATH}
     if request.path in public_paths:
-        if request.path not in {'/robots.txt', '/sitemap.xml'}:
+        if request.path not in {'/robots.txt', '/sitemap.xml', _INDEXNOW_PATH}:
             response.headers.setdefault('X-Robots-Tag', 'index, follow')
     else:
         response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
@@ -194,6 +239,14 @@ def install(dashboard) -> None:
         app.router.add_get('/dashboard-sentrix', dashboard_page)
         app.router.add_get('/robots.txt', robots)
         app.router.add_get('/sitemap.xml', sitemap)
+        app.router.add_get(_INDEXNOW_PATH, indexnow_key)
+
+        async def submit_on_startup(_app):
+            configured = str(getattr(getattr(dashboard, 'config', None), 'DASHBOARD_PUBLIC_URL', '') or '').strip().rstrip('/')
+            if configured:
+                await _submit_indexnow(configured)
+
+        app.on_startup.append(submit_on_startup)
         return app
 
     dashboard.build_app = build_app
