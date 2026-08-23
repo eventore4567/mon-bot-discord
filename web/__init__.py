@@ -43,6 +43,7 @@ from . import ticket_center_v35 as _ticket_center_v35
 from . import feature_control_v36 as _feature_control_v36
 from . import feature_suite_dashboard_v37 as _feature_suite_dashboard_v37
 from . import seo_v38 as _seo_v38
+from . import brand_avatar_v39 as _brand_avatar_v39
 
 
 # Copie propre AVANT toute injection. C'est cette version qui est finalement servie sur /app.
@@ -248,3 +249,7 @@ _feature_suite_dashboard_v37.install(_dashboard)
 # SEO V38 est strictement final : Google voit les pages publiques SentriX, tandis que toutes
 # les pages d'administration restent noindex.
 _seo_v38.install(_dashboard)
+
+# Identité V39 : les pages publiques, aperçus sociaux et favicon utilisent directement la
+# PP Discord actuelle de SentriX afin qu'une seule image officielle soit utilisée partout.
+_brand_avatar_v39.install(_dashboard)
