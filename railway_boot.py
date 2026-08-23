@@ -3,12 +3,18 @@
 Le serveur HTTP est ouvert avant le chargement complet des cogs Discord. Quand PostgreSQL
 est configuré, le bootstrap tente aussi de restaurer la base SQLite principale depuis son
 dernier snapshot durable si le fichier local a disparu ou est invalide.
+
+Le healthcheck Railway ne passe désormais à HTTP 200 qu'une fois la session Discord
+réellement prête. Avec /health configuré côté Railway, l'ancien déploiement peut donc
+continuer à servir pendant que le nouveau finit son démarrage au lieu de couper SentriX
+trop tôt.
 """
 
 import asyncio
 import logging
 import traceback
 
+from aiohttp import web as aiohttp_web
 from discord.ext import commands
 
 import config
@@ -29,6 +35,7 @@ if not getattr(commands, "_sentrix_auto_sharded_bootstrap", False):
     commands._sentrix_auto_sharded_bootstrap = True
 
 import main as bot_main
+from web import dashboard as dashboard_web
 
 if "cogs.drop" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.drop")
@@ -121,6 +128,35 @@ async def _dashboard_already_started(_bot):
     return None
 
 
+def _install_discord_readiness_healthcheck() -> None:
+    """Ne déclare le nouveau déploiement prêt qu'après on_ready Discord.
+
+    Le dashboard HTTP démarre volontairement avant Discord. Avant ce correctif, /health
+    répondait donc 200 immédiatement : Railway pouvait arrêter l'ancien conteneur alors
+    que le nouveau bot était encore en train de charger ses cogs / ouvrir le Gateway.
+    """
+    current = dashboard_web.handle_health
+    if getattr(current, "_sentrix_discord_readiness", False):
+        return
+
+    async def ready_health(request):
+        bot = request.app["bot"]
+        ready = bool(bot.is_ready() and not bot.is_closed())
+        return aiohttp_web.json_response(
+            {
+                "ok": ready,
+                "discord_ready": ready,
+                "latency_ms": round(bot.latency * 1000) if ready else None,
+            },
+            status=200 if ready else 503,
+        )
+
+    ready_health._sentrix_discord_readiness = True
+    ready_health._sentrix_original = current
+    dashboard_web.handle_health = ready_health
+    logger.info("Healthcheck Railway lié à l'état réel de la connexion Discord.")
+
+
 async def _prepare_durable_store(bot) -> DurableDatabaseReplica:
     durable = DurableDatabaseReplica(config.DATABASE_PATH)
     bot.sentrix_durable_store = durable
@@ -153,6 +189,9 @@ async def run() -> None:
     from cogs.live_command_gate_v19 import install as install_live_command_gate_v19
     install_live_command_gate_v19(bot)
 
+    # Le handler doit être remplacé AVANT build_app() / start_dashboard().
+    _install_discord_readiness_healthcheck()
+
     durable = await _prepare_durable_store(bot)
 
     await bot.db.connect()
@@ -172,7 +211,7 @@ async def run() -> None:
     bot_main.start_dashboard = _dashboard_already_started
 
     await real_start_dashboard(bot)
-    logger.info("Dashboard Railway démarré avant la connexion Discord.")
+    logger.info("Dashboard Railway démarré avant la connexion Discord ; /health reste 503 jusqu'à on_ready.")
 
     try:
         async with bot:
