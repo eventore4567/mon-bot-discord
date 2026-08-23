@@ -5,8 +5,9 @@ Objectif visuel : reprendre la présence de la grande carte de référence, en e
 mais la structure est volontairement plus ample que le mini-layout V25 :
 header/titre/description avec avatar à droite, section de détail, footer, boutons.
 
-V27 est désormais appelé immédiatement après ce renderer : il devient donc la source de
-vérité finale pour la déduplication, l'Audit Log et le grand rendu horizontal.
+V27 reste la couche de normalisation/Audit Log. V28 est désormais la couche finale de
+rendu premium et ajoute notamment l'ID du message visible ainsi qu'une garde exacte par
+message_id.
 """
 from __future__ import annotations
 
@@ -102,7 +103,7 @@ def _detail_text(embed: discord.Embed) -> str:
 
 
 class ReferenceLogLayout(discord.ui.LayoutView):
-    """Carte moyenne/grande : proche de l'image de référence, légèrement réduite."""
+    """Carte V26 de secours ; V28 prend le contrôle final en production."""
 
     _sentrix_log_layout = True
     _sentrix_rectangle_v25 = True
@@ -190,10 +191,17 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     premium_logs_v2.PremiumLogLayout = ReferenceLogLayout
     _INSTALLED = True
 
-    # V27 est volontairement appelé ici, et non dans une phase séparée, pour être certain
-    # qu'il repasse APRES chaque rappel historique de V25/V26 pendant le chargement des cogs.
+    # La garde V28 est posée AVANT V27 : V27 garde sa normalisation/audit comme couche
+    # externe et V28 reçoit ensuite le vrai message_id pour une déduplication exacte.
+    from .log_premium_v28 import install_source_guard as install_v28_source
+    install_v28_source(bot)
+
     from .log_single_pipeline_v27 import install as install_v27
     install_v27(bot, extension_name)
+
+    # V28 passe toujours tout à la fin afin qu'aucun ancien renderer ne reprenne la main.
+    from .log_premium_v28 import install as install_v28
+    install_v28(bot, extension_name)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
