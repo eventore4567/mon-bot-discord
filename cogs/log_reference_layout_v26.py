@@ -150,7 +150,7 @@ class ReferenceLogLayout(discord.ui.LayoutView):
         self.add_item(container)
 
 
-def install(bot: commands.Bot, extension_name: str = "") -> None:
+async def install(bot: commands.Bot, extension_name: str = "") -> None:
     global _INSTALLED
     required = ("LayoutView", "Container", "Section", "TextDisplay", "Thumbnail", "Separator")
     if not all(hasattr(discord.ui, name) for name in required):
@@ -176,11 +176,7 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     install_v32(bot, extension_name)
     # V33 ajoute la commande de test global après que toutes les catégories V32 existent.
     from .log_test_all_v33 import install as install_v33
-    result = install_v33(bot, extension_name)
-    # install() V26 est synchrone : planifier le Cog async sans bloquer le runtime.
-    if hasattr(result, "__await__"):
-        import asyncio
-        asyncio.create_task(result)
+    await install_v33(bot, extension_name)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
