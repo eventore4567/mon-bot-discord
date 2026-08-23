@@ -7,7 +7,8 @@ Audit Log ; V28 conserve ces garanties et ajoute :
 - déduplication secondaire exacte par message_id ;
 - vraie zone Contexte / Action / Données / Traçabilité ;
 - salon cliquable conservé ;
-- auteur/acteur dé-pingés ;
+- vraies mentions Discord membres/bots/rôles conservées, avec AllowedMentions.none() au
+  dernier envoi pour qu'elles soient cliquables sans envoyer de notification ;
 - champs inconnus conservés pour que tickets, vocal, économie, jeux, sécurité, etc. ne
   perdent aucune information ;
 - boutons de copie d'ID cohérents.
@@ -29,7 +30,6 @@ from .log_rectangle_v25 import (
     _event_timestamp,
     _field_value,
     _is_role_batch,
-    _sanitized_embed,
     _target_id,
 )
 from . import log_single_pipeline_v27 as v27
@@ -104,12 +104,53 @@ def _first_id(value: str | None) -> int | None:
     return v27._first_id(value)
 
 
+def _silent_mention_embed(source: discord.Embed) -> discord.Embed:
+    """Conserve les vraies mentions Discord sans autoriser leur notification.
+
+    Le garde de sortie V25 impose ``AllowedMentions.none()`` pour toutes les cartes de
+    logs. On peut donc garder ``<@id>``, ``<@&id>`` et ``<#id>`` pour que Discord affiche
+    de vraies mentions cliquables, sans ping. ``@everyone``/``@here`` sont neutralisés
+    explicitement car ils n'apportent rien à un journal d'audit.
+    """
+    embed = source.copy()
+
+    def safe(value: str | None, limit: int) -> str:
+        text = str(value or "")
+        text = text.replace("@everyone", "＠everyone").replace("@here", "＠here")
+        return text[:limit]
+
+    if embed.title:
+        embed.title = safe(embed.title, 256)
+    if embed.description:
+        embed.description = safe(embed.description, 4096)
+    for index, field in enumerate(list(embed.fields)):
+        embed.set_field_at(
+            index,
+            name=safe(str(field.name), 256),
+            value=safe(str(field.value), 1024),
+            inline=False,
+        )
+    return embed
+
+
 def _one_line(value: str | None, limit: int = 300) -> str:
     text = re.sub(r"\s*\n\s*", " · ", str(value or "").strip())
     text = re.sub(r"\s{2,}", " ", text)
     if not text:
         return "Non disponible"
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _real_user_mention(value: str | None, *, with_id: bool = False) -> str:
+    """Retourne une vraie mention <@id> si un snowflake utilisateur est disponible."""
+    raw = str(value or "").strip()
+    user_id = _first_id(raw)
+    if not user_id:
+        return _one_line(raw, 260)
+    mention = f"<@{user_id}>"
+    if with_id:
+        return f"{mention} · `{user_id}`"
+    return mention
 
 
 def _event(log_type: str, embed: discord.Embed) -> str:
@@ -209,7 +250,6 @@ def _summary(log_type: str, embed: discord.Embed) -> str:
         return SUMMARY_BY_EVENT[event]
     description = (embed.description or "").strip()
     if description and not _is_role_batch(embed):
-        # Une simple mention n'est pas une description utile pour le bandeau principal.
         if not re.fullmatch(r"<?@!?\d{15,22}>?|@[^\n]{1,80}", description):
             return description[:700]
     return "SentriX a enregistré cet événement et regroupé les informations disponibles dans une fiche d'audit unique."
@@ -250,7 +290,7 @@ def _context_block(guild: discord.Guild, embed: discord.Embed) -> str:
     if salon_raw or channel is not None:
         items.append(f"💬 **Salon**  {salon}")
     if author:
-        items.append(f"👤 **Auteur / cible**  {_one_line(author, 260)}")
+        items.append(f"👤 **Auteur / cible**  {_real_user_mention(author, with_id=True)}")
     if not items:
         items.append(f"🖥️ **Serveur**  {discord.utils.escape_markdown(guild.name)}")
     return "### Contexte\n" + "   •   ".join(items)
@@ -262,7 +302,11 @@ def _action_block(embed: discord.Embed) -> str | None:
     duration = _field_value(embed, "duree", "fin du timeout", "nouvel etat")
     parts: list[str] = []
     if actor:
-        parts.append(f"🛡️ **Effectué par**  {_one_line(actor, 260)}")
+        actor_id = _first_id(actor)
+        actor_display = f"<@{actor_id}> · `{actor_id}`" if actor_id else _one_line(actor, 260)
+        if "bot" in _plain(actor):
+            actor_display += " · 🤖 Bot"
+        parts.append(f"🛡️ **Effectué par**  {actor_display}")
     if reason:
         parts.append(f"📝 **Raison**  {_one_line(reason, 300)}")
     if duration:
@@ -416,7 +460,7 @@ class PremiumAuditLogV28(discord.ui.LayoutView):
         buttons: list[tuple[str, int]],
     ):
         super().__init__(timeout=6 * 60 * 60)
-        clean = _sanitized_embed(bot, guild, embed)
+        clean = _silent_mention_embed(embed)
         v27._restore_channel_mentions(guild, clean)
         clean = _ensure_message_id_field(log_type, clean)
 
