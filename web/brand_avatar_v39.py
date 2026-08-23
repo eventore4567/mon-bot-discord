@@ -1,8 +1,8 @@
-"""Identité visuelle publique SentriX V39.
+"""Identité publique SentriX et séparation site/dashboard.
 
-Utilise l'avatar Discord courant du bot comme image officielle du site, des previews
-Open Graph/Twitter et du favicon. Ainsi l'identité publique reste synchronisée avec la
-PP Discord sans dupliquer un fichier image dans plusieurs endroits.
+La racine / sert maintenant une vraie page vitrine publique, tandis que /app conserve
+le dashboard d'administration. La PP Discord actuelle reste l'image officielle du site,
+des previews sociales et du favicon.
 """
 from __future__ import annotations
 
@@ -79,6 +79,37 @@ async def favicon(request: web.Request) -> web.StreamResponse:
     raise web.HTTPFound(_AVATAR_PATH)
 
 
+def _public_home_html(request: web.Request, dashboard) -> str:
+    bot = request.app.get("bot")
+    base = str(dashboard._public_url(request)).rstrip("/")
+    invite = dashboard._invite_url(bot) or "/login"
+    invite = html.escape(str(invite), quote=True)
+    canonical = html.escape(base + "/", quote=True)
+    return f'''<!doctype html>
+<html lang="fr"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SentriX — Bot Discord tout-en-un & Dashboard officiel</title>
+<meta name="description" content="SentriX est un bot Discord tout-en-un avec dashboard : modération, sécurité, tickets, IA, logs, niveaux, économie et automatisations.">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<link rel="canonical" href="{canonical}">
+<meta property="og:type" content="website"><meta property="og:site_name" content="SentriX">
+<meta property="og:title" content="SentriX — Bot Discord tout-en-un">
+<meta property="og:description" content="Gérez votre serveur Discord avec SentriX : sécurité, tickets, IA, logs, automatisations et dashboard web.">
+<meta property="og:url" content="{canonical}">
+<meta name="twitter:card" content="summary">
+<style>
+:root{{--bg:#080a11;--panel:#111522;--line:#283047;--text:#f4f6ff;--muted:#a6afc4;--brand:#6d5dfc;--brand2:#a99cff}}
+*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 20% -10%,#392b7a66,transparent 36%),var(--bg);color:var(--text);font:15px Inter,system-ui,-apple-system,"Segoe UI",sans-serif}}a{{color:inherit}}header{{max-width:1160px;margin:auto;padding:20px 22px;display:flex;align-items:center;justify-content:space-between;gap:16px}}.brand{{display:flex;align-items:center;gap:11px;text-decoration:none;font-size:20px;font-weight:900}}.brand img{{width:38px;height:38px;border-radius:11px}}nav{{display:flex;gap:8px;flex-wrap:wrap}}nav a,.btn{{border:1px solid var(--line);background:#151a29;border-radius:10px;padding:10px 13px;text-decoration:none;font-weight:760}}main{{max-width:1160px;margin:auto;padding:72px 22px 84px}}.hero{{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(260px,.8fr);gap:40px;align-items:center}}.eyebrow{{color:var(--brand2);font-size:11px;font-weight:900;letter-spacing:.1em;text-transform:uppercase}}h1{{font-size:clamp(42px,7vw,78px);line-height:.98;letter-spacing:-.05em;margin:12px 0 19px;max-width:820px}}.lead{{font-size:19px;line-height:1.65;color:var(--muted);max-width:760px}}.actions{{display:flex;gap:10px;flex-wrap:wrap;margin-top:27px}}.btn.primary{{background:linear-gradient(135deg,var(--brand),#5142d7);border-color:transparent}}.logo-panel{{display:flex;justify-content:center}}.logo-panel img{{width:min(300px,72vw);aspect-ratio:1;object-fit:cover;border-radius:30px;border:1px solid var(--line);box-shadow:0 35px 90px #0008}}.grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:70px}}.card{{border:1px solid var(--line);background:linear-gradient(180deg,#151a29,#101420);border-radius:15px;padding:20px}}.card h2{{font-size:17px;margin:0 0 8px}}.card p{{margin:0;color:var(--muted);line-height:1.6}}.strip{{margin-top:22px;border:1px solid var(--line);background:#101420;border-radius:15px;padding:18px 20px;display:flex;justify-content:space-between;gap:18px;align-items:center;flex-wrap:wrap}}footer{{max-width:1160px;margin:auto;padding:0 22px 36px;color:var(--muted);font-size:12px}}footer a{{margin-right:14px}}@media(max-width:850px){{.hero{{grid-template-columns:1fr}}.logo-panel{{order:-1;justify-content:flex-start}}.logo-panel img{{width:150px;border-radius:22px}}.grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}@media(max-width:560px){{header{{align-items:flex-start;flex-direction:column}}main{{padding-top:45px}}.grid{{grid-template-columns:1fr}}}}
+</style></head><body>
+<header><a class="brand" href="/"><img src="/sentrix-avatar.png" alt="Logo SentriX"><span>SentriX</span></a><nav><a href="/sentrix">Fonctions</a><a href="/stats">Stats</a><a href="/support">Support</a><a href="/app">Dashboard</a></nav></header>
+<main>
+<section class="hero"><div><div class="eyebrow">Bot Discord officiel</div><h1>Tout votre serveur Discord. Un seul bot.</h1><p class="lead">SentriX centralise la modération, la sécurité, les tickets, l’IA, les logs, les niveaux, l’économie, les automatisations et les outils staff dans un dashboard web complet.</p><div class="actions"><a class="btn primary" href="{invite}" target="_blank" rel="noopener">Ajouter SentriX</a><a class="btn" href="/app">Ouvrir le dashboard</a><a class="btn" href="/start">Voir le démarrage</a></div></div><div class="logo-panel"><img src="/sentrix-avatar.png" alt="PP officielle SentriX"></div></section>
+<section class="grid"><article class="card"><h2>Sécurité</h2><p>AutoMod, anti-spam, anti-raid, anti-nuke et protections configurables.</p></article><article class="card"><h2>Tickets</h2><p>Panels, formulaires, claims, transcripts et suivi depuis le dashboard.</p></article><article class="card"><h2>IA & automatisations</h2><p>Assistant IA, FAQ, notifications et règles automatiques sans code.</p></article><article class="card"><h2>Communauté</h2><p>Niveaux, économie, jeux, événements, recrutements, rôles et vocaux temporaires.</p></article></section>
+<section class="strip"><div><strong>Vous administrez déjà un serveur avec SentriX ?</strong><div style="color:var(--muted);margin-top:5px">Le dashboard privé reste séparé du site officiel.</div></div><a class="btn primary" href="/app">Accéder au dashboard</a></section>
+</main><footer><a href="/privacy">Confidentialité</a><a href="/terms">Conditions</a><a href="/media-kit">Media kit</a><a href="/support">Support</a></footer>
+</body></html>'''
+
+
 def _inject_brand_meta(source: str, image_url: str) -> str:
     if "sentrix-official-avatar-v39" in source:
         return source
@@ -127,6 +158,21 @@ def install(dashboard) -> None:
         return
     _INSTALLED = True
 
+    # / et /app utilisaient historiquement le même handler. On garde exactement le handler
+    # stable du dashboard pour /app, mais on sert une vraie vitrine distincte sur la racine.
+    original_handle_index = dashboard.handle_index
+
+    async def public_or_dashboard(request: web.Request):
+        if request.path == "/":
+            return web.Response(
+                text=_public_home_html(request, dashboard),
+                content_type="text/html",
+                headers={"Cache-Control": "public, max-age=180", "X-Robots-Tag": "index, follow"},
+            )
+        return await original_handle_index(request)
+
+    dashboard.handle_index = public_or_dashboard
+
     original_build_app = dashboard.build_app
 
     def build_app(bot):
@@ -138,8 +184,7 @@ def install(dashboard) -> None:
 
     dashboard.build_app = build_app
 
-    # V40 est branchée ici afin de rester strictement après le SEO et l'identité officielle,
-    # sans ajouter une nouvelle couche au gros initialiseur web/__init__.py.
+    # Pages publiques de croissance et leur indexation.
     from . import marketing_growth_indexing_v40, marketing_growth_v40
 
     marketing_growth_v40.install(dashboard)
