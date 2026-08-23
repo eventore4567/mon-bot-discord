@@ -10,6 +10,7 @@ aux administrateurs afin qu'ils puissent réactiver ou diagnostiquer le service.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import types
 
@@ -70,12 +71,35 @@ def _guild_id_from_destination(destination, reply_to: discord.Message | None) ->
     return int(guild.id) if guild is not None else None
 
 
+async def _wait_for_ai(bot: commands.Bot) -> None:
+    """Attend le chargement du Cog Ai quand ce garde est installé plus tôt au boot."""
+    try:
+        for _ in range(300):
+            if bot.get_cog("Ai") is not None:
+                install(bot)
+                return
+            await asyncio.sleep(0.1)
+    finally:
+        setattr(bot, "_sentrix_ai_disable_waiter", None)
+
+
 def install(bot: commands.Bot) -> None:
-    """Installe le garde après le chargement du Cog Ai. Idempotent."""
+    """Installe le garde dès que le Cog Ai est disponible. Idempotent."""
     _install_error_code()
 
     cog = bot.get_cog("Ai")
-    if cog is None or getattr(cog, "_sentrix_ai_disable_guard", False):
+    if cog is None:
+        waiter = getattr(bot, "_sentrix_ai_disable_waiter", None)
+        if waiter is None or waiter.done():
+            try:
+                waiter = asyncio.get_running_loop().create_task(
+                    _wait_for_ai(bot), name="sentrix-ai-disable-guard-waiter"
+                )
+                bot._sentrix_ai_disable_waiter = waiter
+            except RuntimeError:
+                pass
+        return
+    if getattr(cog, "_sentrix_ai_disable_guard", False):
         return
 
     original_ask = cog.ask_ai
@@ -136,12 +160,11 @@ def install(bot: commands.Bot) -> None:
     ):
         guild_id = _guild_id_from_destination(destination, reply_to)
         if guild_id and not await _ai_enabled(self.bot, guild_id):
-            # Message naturel/mention : silence total lorsque l'IA est coupée. Cela évite
-            # que le bot semble encore "discuter" alors que l'admin vient de la désactiver.
+            # Conversation naturelle : silence total lorsque l'IA est coupée. Le bot ne
+            # doit plus donner l'impression de continuer à discuter malgré le réglage.
             if reply_to is not None:
                 return None
-            # Commande explicite /sentrix ou +sentrix : informer l'utilisateur au lieu de
-            # laisser la commande sans réponse.
+            # Commande explicite /sentrix ou +sentrix : réponse claire plutôt qu'un silence.
             return await destination.send(embed=embeds.info(AI_DISABLED_MESSAGE))
         return await original_send(destination, author, question, reply_to=reply_to)
 
