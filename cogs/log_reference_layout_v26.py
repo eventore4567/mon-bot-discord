@@ -13,6 +13,8 @@ pour les messages réellement longs, sans modifier le rendu des petits messages.
 V33 ajoute +testlogs / /testlogs pour tester tous les anciens et nouveaux journaux.
 V34 ajoute +createalllogs / /createalllogs et fait aussi de +create-logs une installation
 complète des 13 salons de logs réellement utilisés.
+V34 Ticket Transcript s'installe en tout dernier pour les fermetures : carte dédiée,
+participants, raison, transcript HTML joint et bouton Transcript.
 """
 from __future__ import annotations
 
@@ -170,19 +172,17 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     install_v29(bot, extension_name)
     from .log_preferred_style_v30 import install as install_v30
     install_v30(bot, extension_name)
-    # V31 s'installe après le renderer final et intercepte les vieux chemins directs.
     from .log_category_unifier_v31 import install as install_v31
     install_v31(bot, extension_name)
-    # V32 passe réellement en dernier : catalogue avancé + routage + adaptation longs messages.
     from .log_catalog_v32 import install as install_v32
     install_v32(bot, extension_name)
-    # V33 ajoute la commande de test global après que toutes les catégories V32 existent.
     from .log_test_all_v33 import install as install_v33
     await install_v33(bot, extension_name)
-    # V34 crée/configure tous les vrais salons de logs en une seule commande et remplace
-    # aussi le moteur de l'ancienne commande +create-logs.
     from .create_all_logs_v34 import install as install_v34
     await install_v34(bot, extension_name)
+    # Toujours le dernier wrapper TextChannel.send pour les fermetures de tickets + transcript.
+    from .ticket_transcript_logs_v34 import install as install_ticket_transcript_v34
+    install_ticket_transcript_v34(bot, extension_name)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
