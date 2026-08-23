@@ -18,6 +18,7 @@ from .afk_nickname import install as install_afk_nickname
 from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
 from .bot_tracker import install as install_bot_tracker
+from .command_error_release_v41 import install as install_command_error_release_v41
 from .command_hardening_v41 import install as install_command_hardening_v41
 from .command_no_emoji_runtime import install as install_command_no_emoji
 from .command_response_guard import install as install_command_response_guard
@@ -249,6 +250,7 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     await _run_installer("politique finale commandes sans emoji", install_command_no_emoji, bot)
     await _run_installer("permissions commandes", install_permission_guard, bot)
     await _run_installer("politique finale interactions", install_final_interaction_policy, bot)
+    await _run_installer("libération concurrence slash V41", install_command_error_release_v41, bot)
     # VRAIMENT EN DERNIER : aucune réponse ordinaire ne doit être remise dans un embed
     # par premium_style_runtime ou une autre couche historique après cette étape.
     await _run_installer("réponses finales sans box", install_plain_response_policy, bot)
