@@ -1,8 +1,7 @@
 """Correctifs utilisateur finaux de SentriX.
 
-Cette couche garde uniquement les correctifs généraux d'interface/compatibilité.
-Le constructeur ``+create sentrix`` n'est plus modifié après son chargement : sa logique
-vit entièrement dans ``cogs.create_sentrix``.
+Cette couche garde les correctifs généraux d'interface/compatibilité et garantit qu'une
+seule famille de commandes ``+create`` reste enregistrée.
 """
 from __future__ import annotations
 
@@ -159,34 +158,15 @@ def _disable_separate_language_join_prompt() -> None:
 
 
 async def _ensure_create_sentrix(bot: commands.Bot) -> None:
-    """Enregistre une seule fois la nouvelle commande native ``+create sentrix``."""
-    current = bot.get_command("create")
-    if current is not None:
-        if getattr(current, "cog_name", None) == "CreateSentrix":
-            return
-        logger.error(
-            "Impossible d'enregistrer +create sentrix : +create appartient déjà à %s.",
-            getattr(current, "cog_name", "un autre module"),
-        )
-        return
+    """Installe/répare le routeur canonique ``+create``.
 
-    if bot.get_cog("CreateSentrix") is not None:
-        logger.error("CreateSentrix est chargé mais la commande +create est absente.")
-        return
+    L'ancienne V3 pouvait rester enregistrée sous le même nom de Cog et reprendre
+    ``+create sentrix``. Le routeur sait retirer proprement cette ancienne racine avant de
+    remettre ``sentrix`` et ``server`` sous un seul groupe.
+    """
+    from .create_command_router import install as install_create_router
 
-    from .create_sentrix import CreateSentrix
-
-    try:
-        await bot.add_cog(CreateSentrix(bot))
-    except commands.CommandRegistrationError:
-        logger.exception("Impossible d'enregistrer la nouvelle commande +create sentrix.")
-        return
-
-    registered = bot.get_command("create")
-    if registered is None or getattr(registered, "cog_name", None) != "CreateSentrix":
-        logger.error("CreateSentrix a été ajouté mais +create reste introuvable.")
-    else:
-        logger.info("Nouvelle commande native +create sentrix enregistrée.")
+    await install_create_router(bot)
 
 
 async def install(bot: commands.Bot, extension_name: str = "") -> None:
