@@ -1,19 +1,18 @@
 """SentriX V16 — amélioration transversale de toutes les commandes Discord.
 
-Cette couche n'ajoute aucune fonctionnalité métier et ne touche pas au dashboard. Elle
-améliore automatiquement le registre de commandes existant :
+Bot-only, sans dashboard. Cette couche améliore automatiquement tout le registre :
 - syntaxe uniforme et lisible dans les erreurs ;
-- alias compacts sans tiret quand ils ne créent aucun conflit ;
-- résolution des membres par ID/mention avec fetch Discord en repli ;
-- messages d'erreur précis pour rôles manquants, concurrence, mauvais arguments, DM, etc. ;
-- suggestions de fautes de frappe propres et compatibles avec le +help racine ;
-- erreurs HTTP Discord traduites en explications utiles plutôt qu'en erreur technique vague.
+- alias compacts sans tiret quand aucun conflit n'existe ;
+- résolution d'un membre par ID/mention avec fetch Discord en repli ;
+- erreurs précises pour rôles, concurrence, mauvais arguments, DM et erreurs Discord ;
+- suggestions propres pour les fautes de frappe, compatibles avec le +help racine.
 
-Toutes les permissions/checks historiques restent la source de vérité. Aucun fuzzy-match
-n'exécute automatiquement une commande : une faute ne fait que proposer des suggestions.
+Les permissions/checks existants restent la source de vérité. Une faute de frappe n'exécute
+jamais automatiquement une commande : V16 ne fait que proposer des noms proches.
 """
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 import sys
@@ -32,14 +31,13 @@ def _state(bot: commands.Bot) -> dict[str, Any]:
     state = getattr(bot, "_sentrix_v16_state", None)
     if not isinstance(state, dict):
         state = {
-            "metadata_passes": 0,
             "compact_aliases": set(),
             "member_converter_patched": False,
-            "prefix_error_target": None,
-            "slash_error_target": None,
+            "prefix_error_installed": False,
+            "slash_error_installed": False,
             "unknown_listener_installed": False,
-            "old_unknown_listener_removed": False,
             "usage_patched": False,
+            "announced": False,
         }
         bot._sentrix_v16_state = state
     return state
@@ -73,11 +71,9 @@ def _friendly_usage(ctx: commands.Context) -> str | None:
     parts: list[str] = []
     for name, param in getattr(command, "clean_params", {}).items():
         required = bool(getattr(param, "required", False))
-        greedy = bool(getattr(param, "kind", None) in {
-            getattr(__import__("inspect"), "Parameter").VAR_POSITIONAL,
-            getattr(__import__("inspect"), "Parameter").VAR_KEYWORD,
-        })
-        shown = f"{name}..." if greedy else name
+        kind = getattr(param, "kind", None)
+        repeated = kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+        shown = f"{name}..." if repeated else name
         parts.append(f"<{shown}>" if required else f"[{shown}]")
     return " ".join([f"{prefix}{display}", *parts]).strip()
 
@@ -87,9 +83,7 @@ def _install_usage_formatter(bot: commands.Bot) -> None:
     if state["usage_patched"]:
         return
     main = _runtime_main()
-    if main is None:
-        return
-    current = getattr(main, "command_usage", None)
+    current = getattr(main, "command_usage", None) if main is not None else None
     if current is None:
         return
 
@@ -103,7 +97,7 @@ def _install_usage_formatter(bot: commands.Bot) -> None:
 
 
 def _register_compact_aliases(bot: commands.Bot) -> int:
-    """Ajoute +ticketreopen pour +ticket-reopen, uniquement quand le nom est libre."""
+    """Exemple : +ticket-reopen reste valide et +ticketreopen devient aussi accepté."""
     state = _state(bot)
     added = 0
     for command in list(bot.commands):
@@ -125,7 +119,6 @@ def _register_compact_aliases(bot: commands.Bot) -> int:
         if compact not in state["compact_aliases"]:
             state["compact_aliases"].add(compact)
             added += 1
-    state["metadata_passes"] += 1
     return added
 
 
@@ -167,8 +160,7 @@ def _install_member_converter(bot: commands.Bot) -> None:
 def _role_text(role) -> str:
     if isinstance(role, int):
         return f"le rôle avec l'ID `{role}`"
-    value = str(role or "rôle requis").strip()
-    return f"le rôle **{value}**"
+    return f"le rôle **{str(role or 'requis').strip()}**"
 
 
 def _roles_text(roles) -> str:
@@ -178,12 +170,11 @@ def _roles_text(roles) -> str:
     return ", ".join(_role_text(role) for role in values[:6])
 
 
-async def _send_prefix_error(ctx: commands.Context, title: str, description: str, *, warning: bool = False):
+async def _send_prefix_error(ctx: commands.Context, title: str, description: str):
     if getattr(ctx, "_sentrix_v16_error_sent", False):
         return None
     ctx._sentrix_v16_error_sent = True
-    builder = embeds.warning if warning else embeds.error
-    return await ctx.send(embed=builder(description, title=title))
+    return await ctx.send(embed=embeds.error(description, title=title))
 
 
 def _prefix_special_error(error: commands.CommandError):
@@ -227,36 +218,38 @@ def _prefix_special_error(error: commands.CommandError):
         if status == 429:
             return "Discord est occupé", "Discord limite temporairement les requêtes. Attends quelques secondes puis réessaie."
         if status >= 500:
-            return "Discord indisponible", "Discord rencontre une erreur temporaire. Aucune nouvelle action n'est nécessaire pour le moment ; réessaie dans quelques instants."
+            return "Discord indisponible", "Discord rencontre une erreur temporaire. Réessaie dans quelques instants."
         if code in {10003, 10007, 10008, 10011, 10013}:
             return "Élément introuvable", "La cible de la commande a été supprimée ou n'est plus accessible."
         if code == 50035:
-            return "Valeur refusée par Discord", "Une valeur n'est plus valide pour cette action. Vérifie le membre, le rôle, le salon ou le texte fourni."
+            return "Valeur refusée par Discord", "Une valeur n'est plus valide. Vérifie le membre, le rôle, le salon ou le texte fourni."
     return None
 
 
 def _install_prefix_error_handler(bot: commands.Bot) -> None:
     state = _state(bot)
+    if state["prefix_error_installed"]:
+        return
     current = bot.on_command_error
     function = getattr(current, "__func__", current)
     if getattr(function, "_sentrix_v16_command_errors", False):
-        state["prefix_error_target"] = id(function)
-        return
-    if state.get("prefix_error_target") == id(function):
+        state["prefix_error_installed"] = True
         return
 
     async def on_command_error_v16(_bot, ctx: commands.Context, error: commands.CommandError):
         special = _prefix_special_error(error)
         if special is not None:
             title, description = special
+            raw = getattr(error, "original", error)
             usage = _friendly_usage(ctx)
-            if usage and not isinstance(getattr(error, "original", error), (
+            no_usage = (
                 commands.NoPrivateMessage,
                 commands.PrivateMessageOnly,
                 commands.DisabledCommand,
                 commands.NotOwner,
                 commands.MaxConcurrencyReached,
-            )):
+            )
+            if usage and not isinstance(raw, no_usage):
                 description += f"\n\nSyntaxe : `{usage}`"
             return await _send_prefix_error(ctx, title, description)
         return await current(ctx, error)
@@ -264,18 +257,18 @@ def _install_prefix_error_handler(bot: commands.Bot) -> None:
     on_command_error_v16._sentrix_v16_command_errors = True
     on_command_error_v16._sentrix_original = function
     bot.on_command_error = MethodType(on_command_error_v16, bot)
-    state["prefix_error_target"] = id(getattr(bot.on_command_error, "__func__", bot.on_command_error))
+    state["prefix_error_installed"] = True
 
 
-def _remove_old_unknown_listener(bot: commands.Bot) -> None:
-    state = _state(bot)
-    if state["old_unknown_listener_removed"]:
-        return
+def _remove_legacy_unknown_listener(bot: commands.Bot) -> int:
+    """Le vieux listener donnait encore `+help <commande>` alors que +help est root-only."""
+    removed = 0
     listeners = list(getattr(bot, "extra_events", {}).get("on_command_error", []))
     for listener in listeners:
         if getattr(listener, "__name__", "") == "improve_prefix_command_error":
             bot.remove_listener(listener, "on_command_error")
-    state["old_unknown_listener_removed"] = True
+            removed += 1
+    return removed
 
 
 def _install_unknown_command_listener(bot: commands.Bot) -> None:
@@ -311,10 +304,7 @@ def _install_unknown_command_listener(bot: commands.Bot) -> None:
                 f"Ouvre `{prefix}help` puis utilise **Rechercher** pour voir la syntaxe exacte."
             )
         else:
-            text = (
-                f"La commande `{prefix}{typed}` n'existe pas.\n"
-                f"Ouvre `{prefix}help` pour voir les commandes disponibles."
-            )
+            text = f"La commande `{prefix}{typed}` n'existe pas.\nOuvre `{prefix}help` pour voir les commandes disponibles."
         try:
             await ctx.send(embed=embeds.warning(text, title="Commande introuvable"))
         except (discord.Forbidden, discord.HTTPException):
@@ -326,12 +316,12 @@ def _install_unknown_command_listener(bot: commands.Bot) -> None:
 
 def _install_slash_error_handler(bot: commands.Bot) -> None:
     state = _state(bot)
+    if state["slash_error_installed"]:
+        return
     current = bot.tree.on_error
     function = getattr(current, "__func__", current)
     if getattr(function, "_sentrix_v16_slash_errors", False):
-        state["slash_error_target"] = id(function)
-        return
-    if state.get("slash_error_target") == id(function):
+        state["slash_error_installed"] = True
         return
 
     async def slash_error_v16(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
@@ -365,24 +355,26 @@ def _install_slash_error_handler(bot: commands.Bot) -> None:
     slash_error_v16._sentrix_v16_slash_errors = True
     slash_error_v16._sentrix_original = function
     bot.tree.on_error = slash_error_v16
-    state["slash_error_target"] = id(slash_error_v16)
+    state["slash_error_installed"] = True
 
 
 def install(bot: commands.Bot) -> None:
-    """Réapplique la couche après chaque extension ; toutes les opérations sont sûres/idempotentes."""
+    """Appelable après chaque extension ; aucune couche ne s'empile plusieurs fois."""
     state = _state(bot)
     _install_usage_formatter(bot)
     added = _register_compact_aliases(bot)
     _install_member_converter(bot)
-    _remove_old_unknown_listener(bot)
+    _remove_legacy_unknown_listener(bot)
     _install_unknown_command_listener(bot)
     _install_prefix_error_handler(bot)
     _install_slash_error_handler(bot)
     bot._sentrix_v16_commands_active = True
+
     if added:
-        logger.info("V16 : %s alias compact(s) de commandes ajouté(s) sans conflit.", added)
-    if state["metadata_passes"] == 1:
-        logger.info("SentriX V16 Commandes actif : syntaxe, erreurs, membres et alias améliorés globalement.")
+        logger.info("V16 : %s nouvel(aux) alias compact(s) ajouté(s) sans conflit.", added)
+    if not state["announced"]:
+        state["announced"] = True
+        logger.info("SentriX V16 Commandes actif : syntaxe, erreurs, membres, alias et suggestions améliorés globalement.")
 
 
 __all__ = ["install"]
