@@ -18,6 +18,7 @@ from .afk_nickname import install as install_afk_nickname
 from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
 from .bot_tracker import install as install_bot_tracker
+from .command_hardening_v41 import install as install_command_hardening_v41
 from .command_no_emoji_runtime import install as install_command_no_emoji
 from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
@@ -243,6 +244,7 @@ async def _install_finalizers(bot: commands.Bot, name: str) -> None:
     await _run_installer("aide racine et canary externe", install_final_runtime_polish, bot)
     await _run_installer("accueil compact sur mention", install_mention_home, bot)
     await _run_installer("garde de réponse commandes", install_command_response_guard, bot)
+    await _run_installer("renforcement global commandes V41", install_command_hardening_v41, bot)
     await _run_installer("opérations production", install_production_ops, bot)
     await _run_installer("politique finale commandes sans emoji", install_command_no_emoji, bot)
     await _run_installer("permissions commandes", install_permission_guard, bot)
