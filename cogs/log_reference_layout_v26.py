@@ -10,6 +10,7 @@ exacte et les mentions silencieuses. V30 est désormais le renderer visuel final
 V31 force les anciens logs directs (notamment tickets dédiés) à utiliser ce renderer.
 V32 ajoute les journaux salons/dossiers/anti-spam/anti-raid/staff et le mode adaptatif
 pour les messages réellement longs, sans modifier le rendu des petits messages.
+V33 ajoute +testlogs / /testlogs pour tester tous les anciens et nouveaux journaux.
 """
 from __future__ import annotations
 
@@ -173,6 +174,13 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     # V32 passe réellement en dernier : catalogue avancé + routage + adaptation longs messages.
     from .log_catalog_v32 import install as install_v32
     install_v32(bot, extension_name)
+    # V33 ajoute la commande de test global après que toutes les catégories V32 existent.
+    from .log_test_all_v33 import install as install_v33
+    result = install_v33(bot, extension_name)
+    # install() V26 est synchrone : planifier le Cog async sans bloquer le runtime.
+    if hasattr(result, "__await__"):
+        import asyncio
+        asyncio.create_task(result)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
