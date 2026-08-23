@@ -1,8 +1,12 @@
-"""SentriX V29 — rendu Ultra Premium des journaux.
+"""SentriX V29 — rendu Ultra Premium compact des journaux.
 
 V29 ne remplace aucune logique de sécurité : V27/V28 gardent la déduplication, les IDs,
 l'Audit Log et les mentions silencieuses. Cette couche ne fait que reprendre le renderer
 final avec une hiérarchie visuelle plus forte et des couleurs adaptées à l'événement.
+
+V29.1 : le bloc Traçabilité textuel a été supprimé. Les identifiants utiles restent
+accessibles via les boutons de copie, avec l'ID serveur toujours disponible. Le rendu est
+également légèrement moins haut sans perdre les informations métier importantes.
 """
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ from discord.ext import commands
 
 from . import premium_logs_v2
 from . import log_premium_v28 as v28
-from .log_rectangle_v25 import _event_timestamp, _field_value, _is_role_batch, _target_id
+from .log_rectangle_v25 import _event_timestamp, _field_value, _is_role_batch
 
 
 EVENT_ACCENTS = {
@@ -70,7 +74,6 @@ def _accent(log_type: str, embed: discord.Embed) -> int:
         return EVENT_ACCENTS[event]
     if embed.colour:
         return int(embed.colour.value)
-    category = str(log_type)
     return {
         "moderation": 0xEB459E,
         "automod": 0xED4245,
@@ -81,7 +84,7 @@ def _accent(log_type: str, embed: discord.Embed) -> int:
         "levels": 0x57F287,
         "ai": 0x5865F2,
         "games": 0x00A8FC,
-    }.get(category, 0x7C5CFC)
+    }.get(str(log_type), 0x7C5CFC)
 
 
 def _status(log_type: str, embed: discord.Embed) -> tuple[str, str]:
@@ -96,27 +99,23 @@ def _context(guild: discord.Guild, embed: discord.Embed) -> str:
 
     rows: list[str] = []
     if channel is not None:
-        rows.append(f"💬 **Salon**  {channel.mention}  `#{channel.id}`")
+        rows.append(f"💬 **Salon**  {channel.mention}")
     elif channel_raw:
         rows.append(f"💬 **Salon**  {_safe_one_line(channel_raw, 260)}")
     if target:
-        uid = v28._first_id(target)
-        suffix = f"  `{uid}`" if uid else ""
-        rows.append(f"👤 **Cible**  {_user_mention(target)}{suffix}")
+        rows.append(f"👤 **Cible**  {_user_mention(target)}")
     if actor:
-        uid = v28._first_id(actor)
-        suffix = f"  `{uid}`" if uid else ""
         bot_tag = "  `BOT`" if "bot" in v28._plain(actor) else ""
-        rows.append(f"🛡️ **Action par**  {_user_mention(actor)}{suffix}{bot_tag}")
+        rows.append(f"🛡️ **Action par**  {_user_mention(actor)}{bot_tag}")
     if not rows:
-        rows.append(f"🖥️ **Serveur**  **{discord.utils.escape_markdown(guild.name)}**  `{guild.id}`")
-    return "### ╭・CONTEXTE\n" + "\n".join(f"> {row}" for row in rows[:3]) + "\n-# ╰────────────────────────────────"
+        rows.append(f"🖥️ **Serveur**  **{discord.utils.escape_markdown(guild.name)}**")
+    return "### CONTEXTE\n" + "\n".join(f"> {row}" for row in rows[:3])
 
 
 def _payload(embed: discord.Embed) -> str | None:
     if _is_role_batch(embed):
         text = (embed.description or "").strip()
-        return f"### ╭・RÔLES REGROUPÉS\n{text[:3000]}\n-# ╰────────────────────────────────" if text else None
+        return f"### RÔLES REGROUPÉS\n{text[:2800]}" if text else None
 
     content = _field_value(embed, "contenu")
     before = _field_value(embed, "avant")
@@ -127,46 +126,21 @@ def _payload(embed: discord.Embed) -> str | None:
 
     rows: list[str] = []
     if content:
-        quoted = str(content)[:1200].replace("\n", "\n> ")
+        quoted = str(content)[:1100].replace("\n", "\n> ")
         rows.append(f"**📝 Contenu**\n> {quoted}")
     if before:
-        rows.append(f"**◀ Avant**\n> {str(before)[:750].replace(chr(10), chr(10) + '> ')}")
+        rows.append(f"**◀ Avant**\n> {str(before)[:700].replace(chr(10), chr(10) + '> ')}")
     if after:
-        rows.append(f"**▶ Après**\n> {str(after)[:750].replace(chr(10), chr(10) + '> ')}")
+        rows.append(f"**▶ Après**\n> {str(after)[:700].replace(chr(10), chr(10) + '> ')}")
     if reason:
-        rows.append(f"**📌 Raison**  {_safe_one_line(reason, 420)}")
+        rows.append(f"**📌 Raison**  {_safe_one_line(reason, 400)}")
     if duration:
-        rows.append(f"**⏱️ Durée / état**  {_safe_one_line(duration, 320)}")
+        rows.append(f"**⏱️ Durée / état**  {_safe_one_line(duration, 300)}")
     if attachments:
-        rows.append(f"**📎 Pièces jointes**\n{str(attachments)[:700]}")
+        rows.append(f"**📎 Pièces jointes**\n{str(attachments)[:650]}")
     if not rows:
         return None
-    return "### ╭・DÉTAILS\n" + "\n\n".join(rows[:4]) + "\n-# ╰────────────────────────────────"
-
-
-def _trace(guild: discord.Guild, log_type: str, embed: discord.Embed) -> str:
-    event = _event(log_type, embed)
-    message_id = v28._message_id(log_type, embed)
-    target_id = _target_id(embed)
-    channel = v28._resolved_channel(guild, embed)
-    ts = _event_timestamp(embed)
-
-    chips: list[str] = []
-    if message_id:
-        chips.append(f"`MSG {message_id}`")
-    elif target_id:
-        label = "ROLE" if event.startswith("role_") else "CH" if event.startswith("channel_") else "ID"
-        chips.append(f"`{label} {target_id}`")
-    if channel is not None:
-        chips.append(f"`SALON {channel.id}`")
-    chips.append(f"`SERVEUR {guild.id}`")
-
-    return (
-        "### ╭・TRAÇABILITÉ\n"
-        + "  ".join(chips[:3])
-        + f"\n-# <t:{ts}:F>  •  <t:{ts}:R>  •  SentriX Secure Audit\n"
-        + "-# ╰────────────────────────────────"
-    )
+    return "### DÉTAILS\n" + "\n\n".join(rows[:4])
 
 
 def _header(bot: commands.Bot, guild: discord.Guild, log_type: str, embed: discord.Embed) -> tuple[discord.ui.TextDisplay, str | None]:
@@ -174,12 +148,47 @@ def _header(bot: commands.Bot, guild: discord.Guild, log_type: str, embed: disco
     status, dot = _status(log_type, embed)
     ts = _event_timestamp(embed)
     text = (
-        f"-# ✦ SENTRIX  /  {category_emoji} {category}  /  SECURE AUDIT\n\n"
+        f"-# ✦ SENTRIX  /  {category_emoji} {category}  /  SECURE AUDIT\n"
         f"# {v28._title(log_type, embed)}\n"
-        f"{dot} **{status}**  ·  <t:{ts}:R>  ·  `LIVE LOG`\n\n"
+        f"{dot} **{status}**  ·  <t:{ts}:R>  ·  `LIVE LOG`\n"
         f"{v28._summary(log_type, embed)}"
     )[:3900]
     return discord.ui.TextDisplay(text), v28._avatar(bot, guild, embed)
+
+
+def _button_set(guild: discord.Guild, log_type: str, embed: discord.Embed, inherited: list[tuple[str, int]]) -> list[tuple[str, int]]:
+    """Boutons compacts : message, salon, auteur puis serveur en priorité.
+
+    L'ID serveur n'est plus affiché dans une section Traçabilité : il reste accessible
+    comme bouton, exactement dans le même style que les autres IDs.
+    """
+    base = v28._buttons(guild, log_type, embed, inherited)
+    server_pair = ("Copier ID serveur", int(guild.id))
+
+    # Classer les IDs métier avant les éventuels IDs modérateur/acteur.
+    priorities = ("message", "salon", "auteur", "serveur", "moderateur", "modérateur", "acteur")
+    candidates = list(base)
+    if all(int(value) != guild.id for _, value in candidates):
+        candidates.append(server_pair)
+
+    ordered: list[tuple[str, int]] = []
+    used_values: set[int] = set()
+    for token in priorities:
+        for label, value in candidates:
+            ivalue = int(value)
+            if ivalue in used_values or token not in v28._plain(str(label)):
+                continue
+            ordered.append((str(label), ivalue))
+            used_values.add(ivalue)
+            break
+    for label, value in candidates:
+        ivalue = int(value)
+        if ivalue in used_values:
+            continue
+        ordered.append((str(label), ivalue))
+        used_values.add(ivalue)
+
+    return ordered[:4]
 
 
 class UltraPremiumLogV29(discord.ui.LayoutView):
@@ -219,17 +228,14 @@ class UltraPremiumLogV29(discord.ui.LayoutView):
 
         extras = v28._extra_blocks(clean)
         if extras:
-            # Un seul bloc additionnel maximum : on garde un rendu premium sans faire une tour verticale.
+            # On garde un seul complément, sans ajouter le gros bloc Traçabilité.
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay(extras[0][:3000]))
+            container.add_item(discord.ui.TextDisplay(extras[0][:2600]))
 
-        container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(_trace(guild, log_type, clean)[:3900]))
-
-        final_buttons = v28._buttons(guild, log_type, clean, buttons)
+        final_buttons = _button_set(guild, log_type, clean, buttons)
         if final_buttons:
             row = discord.ui.ActionRow()
-            for index, (label, value) in enumerate(final_buttons[:4]):
+            for index, (label, value) in enumerate(final_buttons):
                 row.add_item(premium_logs_v2.CopyIdButton(label, int(value), index))
             if row.children:
                 container.add_item(row)
