@@ -39,7 +39,6 @@ def _install_discord_api_guard() -> None:
     if _HARD_GUARD_INSTALLED:
         return
 
-    # Guild.ban ---------------------------------------------------------------
     original_guild_ban = discord.Guild.ban
     if not getattr(original_guild_ban, "_sentrix_owner_hard_guard", False):
         async def guild_ban_protected(self, user, *args, **kwargs):
@@ -55,7 +54,6 @@ def _install_discord_api_guard() -> None:
         guild_ban_protected._sentrix_original = original_guild_ban
         discord.Guild.ban = guild_ban_protected
 
-    # Guild.kick --------------------------------------------------------------
     original_guild_kick = discord.Guild.kick
     if not getattr(original_guild_kick, "_sentrix_owner_hard_guard", False):
         async def guild_kick_protected(self, user, *args, **kwargs):
@@ -71,8 +69,6 @@ def _install_discord_api_guard() -> None:
         guild_kick_protected._sentrix_original = original_guild_kick
         discord.Guild.kick = guild_kick_protected
 
-    # Member.ban / Member.kick : selon la version de discord.py ces helpers
-    # délèguent à Guild.* ou appellent directement une route. On protège les deux.
     if hasattr(discord.Member, "ban"):
         original_member_ban = discord.Member.ban
         if not getattr(original_member_ban, "_sentrix_owner_hard_guard", False):
@@ -105,7 +101,6 @@ def _install_discord_api_guard() -> None:
             member_kick_protected._sentrix_original = original_member_kick
             discord.Member.kick = member_kick_protected
 
-    # Member.timeout ----------------------------------------------------------
     if hasattr(discord.Member, "timeout"):
         original_timeout = discord.Member.timeout
         if not getattr(original_timeout, "_sentrix_owner_hard_guard", False):
@@ -122,9 +117,6 @@ def _install_discord_api_guard() -> None:
             timeout_protected._sentrix_original = original_timeout
             discord.Member.timeout = timeout_protected
 
-    # Certains modules appliquent un timeout directement via Member.edit.
-    # On retire uniquement le champ de sanction ; les autres modifications éventuelles
-    # (pseudo, rôles, etc.) continuent normalement.
     original_member_edit = discord.Member.edit
     if not getattr(original_member_edit, "_sentrix_owner_hard_guard", False):
         async def member_edit_protected(self, *args, **kwargs):
@@ -150,13 +142,11 @@ def _install_discord_api_guard() -> None:
 def install(bot: commands.Bot) -> None:
     global _INSTALLED
 
-    # Toujours appeler ce garde, même si les patches métier ont déjà été installés.
     _install_discord_api_guard()
 
     if _INSTALLED:
         return
 
-    # Modération manuelle : ban/tempban/kick/mute/warn passent tous par check_targetable.
     try:
         from . import moderation
         original_targetable = moderation.Moderation.check_targetable
@@ -173,8 +163,6 @@ def install(bot: commands.Bot) -> None:
     except Exception:
         logger.exception("Protection propriétaire impossible sur le module de modération.")
 
-    # AutoMod : le propriétaire ne doit subir ni suppression punitive, ni timeout,
-    # ni escalade mute/kick/ban, même pour un mot blacklisté ou le dataset multilingue.
     try:
         from . import automod
         original_exempt = automod.AutoMod.is_automod_exempt
@@ -233,6 +221,11 @@ def install(bot: commands.Bot) -> None:
 
     _INSTALLED = True
     logger.info("Immunité complète de sanction du propriétaire SentriX activée.")
+
+
+# cogs.__init__ importe ce module avant le chargement des extensions : le garde public
+# discord.py est donc actif immédiatement, même avant le Cog de modération.
+_install_discord_api_guard()
 
 
 __all__ = ["install"]
