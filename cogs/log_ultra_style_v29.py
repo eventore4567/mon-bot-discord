@@ -2,13 +2,13 @@
 
 V29 ne remplace aucune logique de sécurité : V27/V28 gardent la déduplication, les IDs,
 l'Audit Log et les mentions silencieuses. Cette couche reprend seulement le renderer final
-avec une hiérarchie visuelle forte et des couleurs adaptées à l'événement.
+avec une identité visuelle SentriX cohérente.
 
-V29.2 :
-- bloc Traçabilité textuel supprimé ;
-- IDs accessibles via boutons compacts ;
-- bouton lien ``Voir le message`` pour les messages modifiés ;
-- rendu légèrement plus premium sans augmenter la hauteur.
+V29.3 :
+- palette de 10 icônes SentriX cohérentes ;
+- anciens emojis disparates remplacés ;
+- bouton lien ``Voir le message`` conservé pour les messages modifiés ;
+- rendu compact et uniforme.
 """
 from __future__ import annotations
 
@@ -21,6 +21,53 @@ from . import premium_logs_v2
 from . import log_premium_v28 as v28
 from .log_rectangle_v25 import _event_timestamp, _field_value, _is_role_batch
 
+
+# Palette officielle SentriX utilisée dans toute la fiche.
+SENTRIX_ICONS = {
+    "brand": "🛡️",
+    "audit": "🛰️",
+    "secure": "🔐",
+    "signal": "📡",
+    "event": "💠",
+    "watch": "🧿",
+    "action": "⚡",
+    "change": "🧬",
+    "archive": "🗂️",
+    "jump": "🔗",
+}
+
+CATEGORY_ICON = {
+    "messages": SENTRIX_ICONS["event"],
+    "members": SENTRIX_ICONS["watch"],
+    "roles": SENTRIX_ICONS["action"],
+    "server": SENTRIX_ICONS["audit"],
+    "voice": SENTRIX_ICONS["signal"],
+    "moderation": SENTRIX_ICONS["brand"],
+    "automod": SENTRIX_ICONS["secure"],
+    "security": SENTRIX_ICONS["secure"],
+    "tickets": SENTRIX_ICONS["archive"],
+    "economy": SENTRIX_ICONS["event"],
+    "levels": SENTRIX_ICONS["signal"],
+    "ai": SENTRIX_ICONS["change"],
+    "games": SENTRIX_ICONS["event"],
+    "system": SENTRIX_ICONS["audit"],
+}
+
+EVENT_ICON = {
+    "message_delete": SENTRIX_ICONS["archive"],
+    "message_edit": SENTRIX_ICONS["change"],
+    "member_ban": SENTRIX_ICONS["secure"],
+    "member_unban": SENTRIX_ICONS["signal"],
+    "member_timeout": SENTRIX_ICONS["watch"],
+    "member_role_update": SENTRIX_ICONS["action"],
+    "channel_create": SENTRIX_ICONS["signal"],
+    "channel_delete": SENTRIX_ICONS["archive"],
+    "channel_update": SENTRIX_ICONS["audit"],
+    "role_create": SENTRIX_ICONS["event"],
+    "role_delete": SENTRIX_ICONS["archive"],
+    "role_update": SENTRIX_ICONS["action"],
+    "guild_update": SENTRIX_ICONS["audit"],
+}
 
 EVENT_ACCENTS = {
     "message_delete": 0xED4245,
@@ -39,19 +86,19 @@ EVENT_ACCENTS = {
 }
 
 EVENT_STATUS = {
-    "message_delete": ("SUPPRESSION", "🔴"),
-    "message_edit": ("MODIFICATION", "🟠"),
-    "member_ban": ("SANCTION", "🔴"),
-    "member_unban": ("RÉTABLISSEMENT", "🟢"),
-    "member_timeout": ("RESTRICTION", "🟣"),
-    "member_role_update": ("PERMISSIONS", "🟣"),
-    "channel_create": ("CRÉATION", "🟢"),
-    "channel_delete": ("SUPPRESSION", "🔴"),
-    "channel_update": ("CONFIGURATION", "🔵"),
-    "role_create": ("CRÉATION", "🟢"),
-    "role_delete": ("SUPPRESSION", "🔴"),
-    "role_update": ("CONFIGURATION", "🟣"),
-    "guild_update": ("CONFIGURATION", "🔵"),
+    "message_delete": "SUPPRESSION",
+    "message_edit": "MODIFICATION",
+    "member_ban": "SANCTION",
+    "member_unban": "RÉTABLISSEMENT",
+    "member_timeout": "RESTRICTION",
+    "member_role_update": "PERMISSIONS",
+    "channel_create": "CRÉATION",
+    "channel_delete": "SUPPRESSION",
+    "channel_update": "CONFIGURATION",
+    "role_create": "CRÉATION",
+    "role_delete": "SUPPRESSION",
+    "role_update": "CONFIGURATION",
+    "guild_update": "CONFIGURATION",
 }
 
 
@@ -89,8 +136,16 @@ def _accent(log_type: str, embed: discord.Embed) -> int:
     }.get(str(log_type), 0x7C5CFC)
 
 
-def _status(log_type: str, embed: discord.Embed) -> tuple[str, str]:
-    return EVENT_STATUS.get(_event(log_type, embed), ("ÉVÉNEMENT", "⚪"))
+def _status(log_type: str, embed: discord.Embed) -> str:
+    return EVENT_STATUS.get(_event(log_type, embed), "ÉVÉNEMENT")
+
+
+def _clean_event_title(log_type: str, embed: discord.Embed) -> str:
+    raw = re.sub(r"\s+", " ", str(embed.title or "Journal SentriX")).strip()
+    # Retire l'ancien emoji éventuel afin d'éviter deux styles en même temps.
+    raw = re.sub(r"^[^\wÀ-ÿ]+\s*", "", raw).strip() or "Journal SentriX"
+    icon = EVENT_ICON.get(_event(log_type, embed), SENTRIX_ICONS["event"])
+    return f"{icon} {raw}"
 
 
 def _context(guild: discord.Guild, embed: discord.Embed) -> str:
@@ -101,23 +156,23 @@ def _context(guild: discord.Guild, embed: discord.Embed) -> str:
 
     rows: list[str] = []
     if channel is not None:
-        rows.append(f"💬 **Salon**  {channel.mention}")
+        rows.append(f"{SENTRIX_ICONS['signal']} **Salon**  {channel.mention}")
     elif channel_raw:
-        rows.append(f"💬 **Salon**  {_safe_one_line(channel_raw, 260)}")
+        rows.append(f"{SENTRIX_ICONS['signal']} **Salon**  {_safe_one_line(channel_raw, 260)}")
     if target:
-        rows.append(f"👤 **Cible**  {_user_mention(target)}")
+        rows.append(f"{SENTRIX_ICONS['watch']} **Cible**  {_user_mention(target)}")
     if actor:
         bot_tag = "  `BOT`" if "bot" in v28._plain(actor) else ""
-        rows.append(f"🛡️ **Action par**  {_user_mention(actor)}{bot_tag}")
+        rows.append(f"{SENTRIX_ICONS['action']} **Action par**  {_user_mention(actor)}{bot_tag}")
     if not rows:
-        rows.append(f"🖥️ **Serveur**  **{discord.utils.escape_markdown(guild.name)}**")
-    return "### ✦ CONTEXTE\n" + "\n".join(f"> {row}" for row in rows[:3])
+        rows.append(f"{SENTRIX_ICONS['audit']} **Serveur**  **{discord.utils.escape_markdown(guild.name)}**")
+    return f"### {SENTRIX_ICONS['watch']} CONTEXTE\n" + "\n".join(f"> {row}" for row in rows[:3])
 
 
 def _payload(embed: discord.Embed) -> str | None:
     if _is_role_batch(embed):
         text = (embed.description or "").strip()
-        return f"### ✦ RÔLES REGROUPÉS\n{text[:2800]}" if text else None
+        return f"### {SENTRIX_ICONS['action']} RÔLES REGROUPÉS\n{text[:2800]}" if text else None
 
     content = _field_value(embed, "contenu")
     before = _field_value(embed, "avant")
@@ -129,39 +184,39 @@ def _payload(embed: discord.Embed) -> str | None:
     rows: list[str] = []
     if content:
         quoted = str(content)[:1100].replace("\n", "\n> ")
-        rows.append(f"**📝 Contenu**\n> {quoted}")
+        rows.append(f"**{SENTRIX_ICONS['archive']} Contenu**\n> {quoted}")
     if before:
-        rows.append(f"**◀ Avant**\n> {str(before)[:700].replace(chr(10), chr(10) + '> ')}")
+        rows.append(f"**{SENTRIX_ICONS['watch']} Avant**\n> {str(before)[:700].replace(chr(10), chr(10) + '> ')}")
     if after:
-        rows.append(f"**▶ Après**\n> {str(after)[:700].replace(chr(10), chr(10) + '> ')}")
+        rows.append(f"**{SENTRIX_ICONS['change']} Après**\n> {str(after)[:700].replace(chr(10), chr(10) + '> ')}")
     if reason:
-        rows.append(f"**📌 Raison**  {_safe_one_line(reason, 400)}")
+        rows.append(f"**{SENTRIX_ICONS['secure']} Raison**  {_safe_one_line(reason, 400)}")
     if duration:
-        rows.append(f"**⏱️ Durée / état**  {_safe_one_line(duration, 300)}")
+        rows.append(f"**{SENTRIX_ICONS['audit']} Durée / état**  {_safe_one_line(duration, 300)}")
     if attachments:
-        rows.append(f"**📎 Pièces jointes**\n{str(attachments)[:650]}")
+        rows.append(f"**{SENTRIX_ICONS['archive']} Pièces jointes**\n{str(attachments)[:650]}")
     if not rows:
         return None
-    return "### ✦ DÉTAILS\n" + "\n\n".join(rows[:4])
+    return f"### {SENTRIX_ICONS['archive']} DÉTAILS\n" + "\n\n".join(rows[:4])
 
 
 def _header(bot: commands.Bot, guild: discord.Guild, log_type: str, embed: discord.Embed) -> tuple[discord.ui.TextDisplay, str | None]:
-    category, category_emoji = v28._category(log_type)
-    status, dot = _status(log_type, embed)
+    category, _ = v28._category(log_type)
+    category_icon = CATEGORY_ICON.get(str(log_type), SENTRIX_ICONS["event"])
+    status = _status(log_type, embed)
     ts = _event_timestamp(embed)
     text = (
-        f"-# ✦ SENTRIX  •  {category_emoji} {category}  •  {guild.name}\n"
-        f"# {v28._title(log_type, embed)}\n"
-        f"{dot} **{status}**  ·  <t:{ts}:R>  ·  `SECURE LOG`\n"
+        f"-# {SENTRIX_ICONS['brand']} SENTRIX  •  {category_icon} {category}  •  {guild.name}\n"
+        f"# {_clean_event_title(log_type, embed)}\n"
+        f"{SENTRIX_ICONS['signal']} **{status}**  ·  <t:{ts}:R>  ·  `SENTRIX LIVE`\n"
         f"{v28._summary(log_type, embed)}"
     )[:3900]
     return discord.ui.TextDisplay(text), v28._avatar(bot, guild, embed)
 
 
 def _button_set(guild: discord.Guild, log_type: str, embed: discord.Embed, inherited: list[tuple[str, int]]) -> list[tuple[str, int]]:
-    """Boutons compacts : message, salon, auteur puis serveur en priorité."""
     base = v28._buttons(guild, log_type, embed, inherited)
-    server_pair = ("Copier ID serveur", int(guild.id))
+    server_pair = ("ID serveur", int(guild.id))
     priorities = ("message", "salon", "auteur", "serveur", "moderateur", "modérateur", "acteur")
     candidates = list(base)
     if all(int(value) != guild.id for _, value in candidates):
@@ -174,21 +229,20 @@ def _button_set(guild: discord.Guild, log_type: str, embed: discord.Embed, inher
             ivalue = int(value)
             if ivalue in used_values or token not in v28._plain(str(label)):
                 continue
-            ordered.append((str(label), ivalue))
+            clean_label = str(label).replace("Copier ", "")
+            ordered.append((clean_label, ivalue))
             used_values.add(ivalue)
             break
     for label, value in candidates:
         ivalue = int(value)
         if ivalue in used_values:
             continue
-        ordered.append((str(label), ivalue))
+        ordered.append((str(label).replace("Copier ", ""), ivalue))
         used_values.add(ivalue)
-
     return ordered[:4]
 
 
 def _message_jump_url(guild: discord.Guild, log_type: str, embed: discord.Embed) -> str | None:
-    """Lien direct uniquement quand le message existe encore, donc pour une modification."""
     if _event(log_type, embed) != "message_edit":
         return None
     message_id = v28._message_id(log_type, embed)
@@ -218,7 +272,7 @@ class UltraPremiumLogV29(discord.ui.LayoutView):
             try:
                 container.add_item(discord.ui.Section(
                     header,
-                    accessory=discord.ui.Thumbnail(avatar, description="Identité liée à l'événement"),
+                    accessory=discord.ui.Thumbnail(avatar, description="SentriX audit identity"),
                 ))
             except Exception:
                 container.add_item(header)
@@ -245,11 +299,11 @@ class UltraPremiumLogV29(discord.ui.LayoutView):
             if jump_url:
                 row.add_item(discord.ui.Button(
                     label="Voir le message",
-                    emoji="🔗",
+                    emoji=SENTRIX_ICONS["jump"],
                     style=discord.ButtonStyle.link,
                     url=jump_url,
                 ))
-            for index, (label, value) in enumerate(final_buttons[: 4 if not jump_url else 4]):
+            for index, (label, value) in enumerate(final_buttons[:4]):
                 row.add_item(premium_logs_v2.CopyIdButton(label, int(value), index))
             if row.children:
                 container.add_item(row)
@@ -267,4 +321,4 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     premium_logs_v2.PremiumLogLayout = UltraPremiumLogV29
 
 
-__all__ = ["install", "UltraPremiumLogV29"]
+__all__ = ["install", "UltraPremiumLogV29", "SENTRIX_ICONS"]
