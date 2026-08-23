@@ -14,7 +14,17 @@ from aiohttp import ClientSession, ClientTimeout, web
 _INSTALLED = False
 logger = logging.getLogger("bot.dashboard.brand-avatar-v39")
 _AVATAR_PATH = "/sentrix-avatar.png"
-_PUBLIC_HTML_PATHS = {"/", "/sentrix", "/dashboard-sentrix"}
+_PUBLIC_HTML_PATHS = {
+    "/",
+    "/sentrix",
+    "/dashboard-sentrix",
+    "/start",
+    "/stats",
+    "/support",
+    "/privacy",
+    "/terms",
+    "/media-kit",
+}
 
 
 def _discord_avatar_url(bot) -> str | None:
@@ -127,3 +137,10 @@ def install(dashboard) -> None:
         return app
 
     dashboard.build_app = build_app
+
+    # V40 est branchée ici afin de rester strictement après le SEO et l'identité officielle,
+    # sans ajouter une nouvelle couche au gros initialiseur web/__init__.py.
+    from . import marketing_growth_indexing_v40, marketing_growth_v40
+
+    marketing_growth_v40.install(dashboard)
+    marketing_growth_indexing_v40.install(dashboard)
