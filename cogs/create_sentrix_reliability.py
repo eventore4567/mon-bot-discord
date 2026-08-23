@@ -35,7 +35,6 @@ async def _migrate_installation_table(db) -> None:
         if getattr(db, "_sentrix_create_install_schema_v4", False):
             return
 
-        # Toujours créer la table sur une base neuve.
         await db.execute(
             "CREATE TABLE IF NOT EXISTS sentrix_server_installations ("
             "guild_id INTEGER PRIMARY KEY,"
@@ -47,10 +46,6 @@ async def _migrate_installation_table(db) -> None:
 
         rows = await db.fetchall("PRAGMA table_info(sentrix_server_installations)")
         columns = {_column_name(row) for row in rows}
-
-        # CREATE TABLE IF NOT EXISTS ne migre jamais une ancienne table : réparer les
-        # colonnes historiques une par une. Les DEFAULT rendent ALTER TABLE sûr sur une
-        # table qui contient déjà des installations.
         additions = {
             "installed_at": "INTEGER NOT NULL DEFAULT 0",
             "installed_by": "INTEGER NOT NULL DEFAULT 0",
@@ -64,8 +59,6 @@ async def _migrate_installation_table(db) -> None:
                 f"ALTER TABLE sentrix_server_installations ADD COLUMN {name} {definition}"
             )
 
-        # Relecture obligatoire : ne pas déclarer la migration réussie si SQLite n'a pas
-        # réellement appliqué la modification.
         rows = await db.fetchall("PRAGMA table_info(sentrix_server_installations)")
         columns = {_column_name(row) for row in rows}
         required = {"guild_id", "installed_at", "installed_by", "template_key"}
@@ -81,7 +74,7 @@ async def _migrate_installation_table(db) -> None:
 
 
 def install(bot: commands.Bot, extension_name: str = "") -> None:
-    """Patche la classe, pas le callback Discord : aucune modification de signature."""
+    """Patche uniquement les accès DB internes, jamais le callback de la commande."""
     del bot, extension_name
     global _PATCHED
     if _PATCHED:
@@ -90,18 +83,45 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .create_sentrix import CreateSentrix
 
     original_ensure = CreateSentrix._ensure_table
+    original_installation = CreateSentrix._installation
     if getattr(original_ensure, "_sentrix_schema_reliability_v4", False):
         _PATCHED = True
         return
 
     async def ensure_table_reliable(self) -> None:
-        # Garde la création native puis réalise la migration que SQLite ne fait pas seul.
         await original_ensure(self)
         await _migrate_installation_table(self.bot.db)
 
+    async def installation_reliable(self, guild_id: int):
+        """Une ancienne métadonnée cassée ne doit jamais empêcher la reconstruction."""
+        try:
+            return await original_installation(self, guild_id)
+        except Exception:
+            logger.exception(
+                "Lecture de l'ancienne installation SentriX impossible guild=%s ; "
+                "la commande repart en mode réparation.",
+                guild_id,
+            )
+            try:
+                await _migrate_installation_table(self.bot.db)
+                return await self.bot.db.fetchone(
+                    "SELECT guild_id,installed_at,installed_by,template_key "
+                    "FROM sentrix_server_installations WHERE guild_id=?",
+                    (guild_id,),
+                )
+            except Exception:
+                logger.exception(
+                    "Métadonnées SentriX toujours illisibles guild=%s ; état ignoré pour permettre la réparation.",
+                    guild_id,
+                )
+                return None
+
     ensure_table_reliable._sentrix_schema_reliability_v4 = True
     ensure_table_reliable._sentrix_original = original_ensure
+    installation_reliable._sentrix_installation_reliability_v4 = True
+    installation_reliable._sentrix_original = original_installation
     CreateSentrix._ensure_table = ensure_table_reliable
+    CreateSentrix._installation = installation_reliable
     _PATCHED = True
 
 
