@@ -32,6 +32,10 @@ SentriX : bot Discord tout-en-un avec dashboard, modération, sécurité, ticket
 
 Gérez tout votre serveur avec SentriX : sécurité, tickets, IA, logs, automatisations, communauté et dashboard web complet.
 
+## Accroche annuaire
+
+**Un seul bot pour modérer, sécuriser, gérer les tickets et piloter votre serveur depuis un dashboard web.**
+
 ## Description longue
 
 # SentriX — Tout votre serveur, au même endroit
@@ -56,6 +60,8 @@ SentriX est un bot Discord tout-en-un conçu pour centraliser la gestion d'un se
 
 ### IA et automatisations
 - assistant IA SentriX
+- résumé, explication, correction, traduction et réécriture
+- génération d'images lorsque la fonction est activée
 - FAQ du serveur
 - règles automatiques avec déclencheurs et actions
 - notifications sociales
@@ -91,17 +97,38 @@ SentriX est pensé pour les communautés qui veulent un seul outil configurable 
 - Games
 - Multipurpose
 
-## Mots-clés SEO
+## Mots-clés prioritaires
 
-SentriX bot Discord, Sentrix Discord, Dashboard SentriX, bot Discord français, bot Discord modération, bot Discord sécurité, bot Discord tickets, bot Discord IA, bot Discord AutoMod, bot Discord tout-en-un.
+Utiliser naturellement, sans répétition artificielle :
+
+- `discord bot`
+- `discord ticket bot`
+- `discord moderation bot`
+- `discord ai bot`
+- `discord bot dashboard`
+- `discord security bot`
+- `bot Discord français`
+- `bot Discord tout-en-un`
+- `SentriX bot Discord`
+
+Les recherches vidIQ du 24 août 2026 donnent notamment environ **16 477 recherches/mois** pour `discord ticket bot`, **15 206** pour `discord moderation bot` et **7 374** pour `discord ai bot` au niveau global. Le positionnement des fiches doit donc montrer concrètement Tickets + Modération + Dashboard avant d'énumérer toutes les autres fonctions.
 
 ## Liens publics officiels
 
-Ajouter `DASHBOARD_PUBLIC_URL` devant chaque chemin :
+Le **seul lien principal à partager** reste la racine du site SentriX :
 
-- Site officiel : `/`
+- Site / Hub officiel : `/`
+
+Les autres chemins servent aux boutons, au référencement et aux fiches qui demandent des URLs séparées :
+
 - Présentation du bot : `/sentrix`
 - Commencer / installation : `/start`
+- Bot Discord tout-en-un : `/bot-discord`
+- Modération : `/bot-discord-moderation`
+- Tickets : `/bot-discord-tickets`
+- IA : `/bot-discord-ia`
+- Sécurité : `/bot-discord-securite`
+- Dashboard : `/bot-discord-dashboard`
 - Présentation du dashboard : `/dashboard-sentrix`
 - Statistiques publiques : `/stats`
 - Support : `/support`
@@ -111,16 +138,18 @@ Ajouter `DASHBOARD_PUBLIC_URL` devant chaque chemin :
 - PP officielle : `/sentrix-avatar.png`
 - Sitemap : `/sitemap.xml`
 
+Ajouter `DASHBOARD_PUBLIC_URL` devant chaque chemin.
+
 ## Visuels disponibles
 
 Le media kit public contient la PP officielle et des visuels de fonctions. Les ressources du projet existent également dans `assets/sentrix/`.
 
-Pour une fiche d'annuaire, privilégier :
+Pour une fiche d'annuaire, privilégier cet ordre :
 
 1. PP officielle SentriX ;
 2. dashboard / configuration ;
-3. sécurité / modération ;
-4. tickets ;
+3. tickets ;
+4. sécurité / modération ;
 5. IA.
 
 ## Discord App Discovery — checklist
