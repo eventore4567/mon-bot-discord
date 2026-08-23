@@ -1,7 +1,8 @@
 """Correctifs utilisateur finaux de SentriX.
 
-Cette couche s'installe après les runtimes historiques et reste volontairement
-limitée aux correctifs d'interface et de compatibilité.
+Cette couche garde uniquement les correctifs généraux d'interface/compatibilité.
+Le constructeur ``+create sentrix`` n'est plus modifié après son chargement : sa logique
+vit entièrement dans ``cogs.create_sentrix``.
 """
 from __future__ import annotations
 
@@ -17,7 +18,6 @@ _DISPATCH_PATCHED = False
 _MENTION_PATCHED = False
 _PLAIN_INSTALL_PATCHED = False
 _LANGUAGE_JOIN_PATCHED = False
-PRO_TEMPLATE_KEY = "sentrix-official-pro-v4"
 PREFIX_ERROR_LIFETIME = 12.0
 
 
@@ -67,6 +67,7 @@ def _apply_error_context_transport() -> None:
         if message is not None:
             kwargs.setdefault("reference", message)
             kwargs.setdefault("mention_author", False)
+
         try:
             result = await current_send(self, *args, **kwargs)
             self._sentrix_response_sent = True
@@ -158,22 +159,19 @@ def _disable_separate_language_join_prompt() -> None:
 
 
 async def _ensure_create_sentrix(bot: commands.Bot) -> None:
-    """Charge le groupe +create sentrix une fois ses dépendances disponibles."""
-    if bot.get_command("create sentrix") is not None:
-        return
-    if bot.get_cog("Tickets") is None or bot.get_cog("Ai") is None:
-        return
-
-    existing_group = bot.get_command("create")
-    existing_cog = bot.get_cog("CreateSentrix")
-    if existing_cog is not None:
-        logger.error("CreateSentrix est chargé mais +create sentrix est absent du registre.")
-        return
-    if existing_group is not None:
+    """Enregistre une seule fois la nouvelle commande native ``+create sentrix``."""
+    current = bot.get_command("create")
+    if current is not None:
+        if getattr(current, "cog_name", None) == "CreateSentrix":
+            return
         logger.error(
             "Impossible d'enregistrer +create sentrix : +create appartient déjà à %s.",
-            getattr(existing_group, "cog_name", "un autre module"),
+            getattr(current, "cog_name", "un autre module"),
         )
+        return
+
+    if bot.get_cog("CreateSentrix") is not None:
+        logger.error("CreateSentrix est chargé mais la commande +create est absente.")
         return
 
     from .create_sentrix import CreateSentrix
@@ -181,139 +179,14 @@ async def _ensure_create_sentrix(bot: commands.Bot) -> None:
     try:
         await bot.add_cog(CreateSentrix(bot))
     except commands.CommandRegistrationError:
-        logger.exception("Impossible d'enregistrer +create sentrix : collision de commande.")
+        logger.exception("Impossible d'enregistrer la nouvelle commande +create sentrix.")
         return
 
-    if bot.get_command("create sentrix") is None:
-        logger.error("Le Cog CreateSentrix a été ajouté mais +create sentrix reste introuvable.")
+    registered = bot.get_command("create")
+    if registered is None or getattr(registered, "cog_name", None) != "CreateSentrix":
+        logger.error("CreateSentrix a été ajouté mais +create reste introuvable.")
     else:
-        logger.info("Commande +create sentrix enregistrée et disponible.")
-
-
-async def _grant_support_lead_access(guild: discord.Guild, role: discord.Role) -> None:
-    """Donne au Support Lead l'accès aux espaces privés adaptés."""
-    for category in guild.categories:
-        folded = category.name.casefold()
-        if "sentrix" not in folded:
-            continue
-        if "staff" in folded or "tickets" in folded:
-            overwrite = discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                manage_messages=True,
-                manage_threads=True,
-            )
-        elif "logs" in folded:
-            overwrite = discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=False,
-                read_message_history=True,
-            )
-        else:
-            continue
-
-        try:
-            await category.set_permissions(
-                role,
-                overwrite=overwrite,
-                reason="Structure professionnelle SentriX",
-            )
-        except discord.HTTPException:
-            continue
-
-        for channel in category.channels:
-            try:
-                await channel.set_permissions(
-                    role,
-                    overwrite=overwrite,
-                    reason="Structure professionnelle SentriX",
-                )
-            except discord.HTTPException:
-                pass
-
-
-def _enhance_create_builder(bot: commands.Bot) -> None:
-    """Améliore le builder sans remplacer le callback de commande discord.py.
-
-    Important : la commande native garde sa signature (self, ctx). Remplacer
-    command.callback dynamiquement a déjà provoqué des erreurs d'invocation et
-    l'apparition de <ctx> comme argument utilisateur.
-    """
-    cog = bot.get_cog("CreateSentrix")
-    if cog is None or getattr(cog, "_sentrix_pro_builder_v5", False):
-        return
-
-    # La commande native et _mark_installed lisent cette constante au runtime.
-    # On aligne donc proprement la version sans toucher à command.callback.
-    from . import create_sentrix as create_sentrix_module
-
-    create_sentrix_module.TEMPLATE_KEY = PRO_TEMPLATE_KEY
-
-    original_build = cog._build
-
-    async def professional_build(guild: discord.Guild):
-        result = await original_build(guild)
-
-        bot_role, bot_role_new = await cog._role(
-            guild,
-            "SentriX Bot",
-            discord.Color.from_rgb(88, 72, 235),
-            discord.Permissions(
-                view_audit_log=True,
-                manage_roles=True,
-                manage_channels=True,
-                manage_messages=True,
-                manage_threads=True,
-                moderate_members=True,
-                kick_members=True,
-                ban_members=True,
-                send_messages=True,
-                embed_links=True,
-                attach_files=True,
-                read_message_history=True,
-                add_reactions=True,
-            ),
-            hoist=True,
-        )
-        support_lead, support_lead_new = await cog._role(
-            guild,
-            "Support Lead",
-            discord.Color.from_rgb(42, 166, 160),
-            discord.Permissions(
-                view_audit_log=True,
-                moderate_members=True,
-                kick_members=True,
-                manage_messages=True,
-                manage_threads=True,
-                manage_nicknames=True,
-                move_members=True,
-                mute_members=True,
-            ),
-            hoist=True,
-        )
-
-        me = guild.me
-        if me is not None and bot_role not in me.roles:
-            try:
-                await me.add_roles(bot_role, reason="Rôle officiel SentriX")
-            except discord.HTTPException:
-                logger.warning("Rôle SentriX Bot non attribué automatiquement sur %s", guild.id)
-
-        await _grant_support_lead_access(guild, support_lead)
-
-        result = dict(result or {})
-        result["roles_created"] = (
-            int(result.get("roles_created", 0))
-            + int(bot_role_new)
-            + int(support_lead_new)
-        )
-        result["roles_total"] = 10
-        return result
-
-    cog._build = professional_build
-    cog._sentrix_pro_builder_v5 = True
-    logger.info("Builder professionnel +create sentrix v5 installé avec callback natif.")
+        logger.info("Nouvelle commande native +create sentrix enregistrée.")
 
 
 async def install(bot: commands.Bot, extension_name: str = "") -> None:
@@ -324,7 +197,6 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     _patch_duplicate_mention()
     _disable_separate_language_join_prompt()
     await _ensure_create_sentrix(bot)
-    _enhance_create_builder(bot)
 
 
 __all__ = ["install"]
