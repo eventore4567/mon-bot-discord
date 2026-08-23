@@ -12,7 +12,13 @@ import re
 
 from discord.ext import commands
 
-from .v17_shared import ensure_schema, install_config_invalidation, install_permission_cache, state
+from .v17_shared import (
+    ensure_schema,
+    install_config_invalidation,
+    install_permission_cache,
+    register_command_policy,
+    state,
+)
 
 logger = logging.getLogger("bot.v17-major")
 
@@ -47,6 +53,29 @@ async def _install_one(label: str, installer, bot: commands.Bot, extension_name:
         logger.exception("V17 : le module %s n'a pas pu être appliqué ; poursuite du démarrage.", label)
 
 
+async def _install_extras_deterministic(bot: commands.Bot, extension_name: str) -> None:
+    """Ajoute le Cog final en l'attendant vraiment, puis réapplique ses patches ciblés."""
+    del extension_name
+    from . import v17_extras
+
+    register_command_policy(economy={"shopwindow", "shopwindowclear"})
+    if bot.get_cog("V17Extras") is None:
+        await bot.add_cog(v17_extras.V17Extras(bot))
+    v17_extras.install_image_role_quota(bot)
+    v17_extras.install_autocomplete(bot)
+
+
+def _fix_group_invocation(bot: commands.Bot) -> None:
+    """Un sous-ordre ne doit pas exécuter aussi la page d'accueil de son groupe."""
+    for name in (
+        "protectmember", "staffnote", "sanctionpolicy", "serversnapshot", "nukewhitelist",
+        "logevent", "airolequota", "aicontext", "season",
+    ):
+        command = bot.get_command(name)
+        if isinstance(command, commands.Group):
+            command.invoke_without_command = True
+
+
 async def install(bot: commands.Bot, extension_name: str = "") -> None:
     try:
         await ensure_schema(bot)
@@ -60,13 +89,13 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .v17_tickets_logs import install as install_tickets_logs
     from .v17_ai_economy_games import install as install_ai_economy_games
     from .v17_health import install as install_health
-    from .v17_extras import install as install_extras
 
     await _install_one("modération/sécurité", install_moderation_security, bot, extension_name)
     await _install_one("tickets/logs", install_tickets_logs, bot, extension_name)
     await _install_one("IA/économie/jeux", install_ai_economy_games, bot, extension_name)
     await _install_one("diagnostic/santé", install_health, bot, extension_name)
-    await _install_one("finitions boutique/image/autocomplete", install_extras, bot, extension_name)
+    await _install_one("finitions boutique/image/autocomplete", _install_extras_deterministic, bot, extension_name)
+    _fix_group_invocation(bot)
 
     runtime = state(bot)
     if not runtime.get("v17_announced"):
