@@ -89,12 +89,14 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .v17_tickets_logs import install as install_tickets_logs
     from .v17_ai_economy_games import install as install_ai_economy_games
     from .v17_health import install as install_health
+    from .v17_user_facing_hotfix import install as install_user_facing_hotfix
 
     await _install_one("modération/sécurité", install_moderation_security, bot, extension_name)
     await _install_one("tickets/logs", install_tickets_logs, bot, extension_name)
     await _install_one("IA/économie/jeux", install_ai_economy_games, bot, extension_name)
     await _install_one("diagnostic/santé", install_health, bot, extension_name)
     await _install_one("finitions boutique/image/autocomplete", _install_extras_deterministic, bot, extension_name)
+    await _install_one("accueil/erreurs privées/create sentrix", install_user_facing_hotfix, bot, extension_name)
     _fix_group_invocation(bot)
 
     runtime = state(bot)
