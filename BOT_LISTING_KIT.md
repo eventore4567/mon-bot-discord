@@ -1,14 +1,16 @@
 # SentriX — Kit officiel pour annuaires de bots Discord
 
-Ce fichier contient les textes de référencement officiels de SentriX pour Top.gg, Discord Bot List, Discord Bots, DiscordList et autres annuaires gratuits.
+Ce fichier contient les informations officielles à réutiliser sur **Discord App Discovery**, Top.gg, Discord Bot List, Discord Bots, DiscordList et les autres annuaires gratuits.
 
-## Nom
+## Nom officiel
 
 **SentriX**
 
-Nom conseillé lorsqu'un annuaire contient déjà un autre bot appelé Sentrix :
+Toujours garder cette écriture comme nom principal. Si un annuaire impose une désambiguïsation dans un titre de fiche, utiliser : **SentriX — Discord Manager**.
 
-**SentriX — Discord Manager**
+## Signature
+
+**Tout votre serveur Discord, au même endroit.**
 
 ## Préfixe
 
@@ -93,21 +95,62 @@ SentriX est pensé pour les communautés qui veulent un seul outil configurable 
 
 SentriX bot Discord, Sentrix Discord, Dashboard SentriX, bot Discord français, bot Discord modération, bot Discord sécurité, bot Discord tickets, bot Discord IA, bot Discord AutoMod, bot Discord tout-en-un.
 
-## Liens publics du site
+## Liens publics officiels
+
+Ajouter `DASHBOARD_PUBLIC_URL` devant chaque chemin :
 
 - Site officiel : `/`
 - Présentation du bot : `/sentrix`
+- Commencer / installation : `/start`
 - Présentation du dashboard : `/dashboard-sentrix`
+- Statistiques publiques : `/stats`
+- Support : `/support`
+- Politique de confidentialité : `/privacy`
+- Conditions d'utilisation : `/terms`
+- Media kit : `/media-kit`
+- PP officielle : `/sentrix-avatar.png`
 - Sitemap : `/sitemap.xml`
 
-Utiliser le domaine public configuré dans `DASHBOARD_PUBLIC_URL` devant ces chemins.
+## Visuels disponibles
+
+Le media kit public contient la PP officielle et des visuels de fonctions. Les ressources du projet existent également dans `assets/sentrix/`.
+
+Pour une fiche d'annuaire, privilégier :
+
+1. PP officielle SentriX ;
+2. dashboard / configuration ;
+3. sécurité / modération ;
+4. tickets ;
+5. IA.
+
+## Discord App Discovery — checklist
+
+À remplir dans le Discord Developer Portal avec le compte propriétaire :
+
+- application vérifiée et éligible à App Discovery ;
+- description de l'application ;
+- URL d'installation ;
+- serveur de support ;
+- catégories et tags ;
+- langues prises en charge ;
+- politique de confidentialité : `/privacy` ;
+- conditions : `/terms` lorsqu'un lien est demandé ;
+- liens externes vers le site/dashboard ;
+- au moins deux visuels clairs montrant SentriX en fonctionnement ;
+- informations de découverte relues avant publication.
+
+La validation finale ne peut être faite que depuis le compte propriétaire de l'application Discord.
 
 ## Annuaires à viser
 
-1. Top.gg
-2. Discord Bot List — discordbotlist.com
-3. Discord Bots — discord.bots.gg
-4. DiscordList — discordlist.gg
-5. Discord App Directory / App Discovery
+Priorité :
 
-Pour les plateformes exigeant OAuth Discord, la validation doit être faite avec le compte propriétaire de l'application Discord.
+1. Discord App Discovery
+2. Top.gg
+3. Discord Bot List — discordbotlist.com
+4. Discord Bots — discord.bots.gg
+5. DiscordList — discordlist.gg
+
+Puis, lorsqu'ils acceptent encore les nouvelles soumissions gratuitement : Infinity Bot List, Disforge, Discords.com et autres annuaires Discord pertinents.
+
+Pour les plateformes exigeant une connexion OAuth Discord ou une preuve de propriété du bot, la soumission doit être validée avec le compte propriétaire.
