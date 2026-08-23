@@ -6,7 +6,7 @@ Le réglage ai_settings.enabled est vérifié à deux niveaux :
   aucun runtime ou appel direct ne puisse contourner le réglage.
 
 +aisetup et +aidiag restent disponibles aux administrateurs pour réactiver ou diagnostiquer.
-Cette couche sert aussi de point de rattachement sûr aux runtimes bot-only V14/V15, car
+Cette couche sert aussi de point de rattachement sûr aux runtimes bot-only V14/V15/V16, car
 stability_runtime l'appelle après chaque extension chargée.
 """
 from __future__ import annotations
@@ -109,7 +109,7 @@ def _install_service_guard(bot: commands.Bot) -> None:
 
 
 def _install_core_runtimes(bot: commands.Bot) -> None:
-    """V14/V15 ne dépendent plus du chargement réussi d'une commande précise."""
+    """V14/V15/V16 ne dépendent plus du chargement réussi d'une commande précise."""
     try:
         from .bot_v14_core import install as install_v14
         install_v14(bot)
@@ -120,6 +120,11 @@ def _install_core_runtimes(bot: commands.Bot) -> None:
         install_v15(bot)
     except Exception:
         logger.exception("V15 Runtime n'a pas pu être réappliqué ; le bot continue.")
+    try:
+        from .bot_v16_commands import install as install_v16
+        install_v16(bot)
+    except Exception:
+        logger.exception("V16 Commandes n'a pas pu être réappliqué ; le bot continue.")
 
 
 async def _wait_for_ai(bot: commands.Bot) -> None:
@@ -180,7 +185,7 @@ def install(bot: commands.Bot) -> None:
     cog._sentrix_ai_disable_guard = True
 
     logger.info(
-        "IA : switch enabled autoritaire au niveau conversation ET moteur OpenAI ; V14/V15 actifs."
+        "IA : switch enabled autoritaire au niveau conversation ET moteur OpenAI ; V14/V15/V16 actifs."
     )
 
 
