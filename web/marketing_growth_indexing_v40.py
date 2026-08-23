@@ -119,3 +119,8 @@ def install(dashboard) -> None:
         return app
 
     dashboard.build_app = build_app
+
+    # V42 est branchée après les pages V40 et leur indexation afin de conserver le même
+    # domaine public et le même dashboard sans modifier les routes privées.
+    from . import marketing_growth_v42
+    marketing_growth_v42.install(dashboard)
