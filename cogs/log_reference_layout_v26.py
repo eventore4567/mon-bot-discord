@@ -11,6 +11,8 @@ V31 force les anciens logs directs (notamment tickets dédiés) à utiliser ce r
 V32 ajoute les journaux salons/dossiers/anti-spam/anti-raid/staff et le mode adaptatif
 pour les messages réellement longs, sans modifier le rendu des petits messages.
 V33 ajoute +testlogs / /testlogs pour tester tous les anciens et nouveaux journaux.
+V34 ajoute +createalllogs / /createalllogs et fait aussi de +create-logs une installation
+complète des 13 salons de logs réellement utilisés.
 """
 from __future__ import annotations
 
@@ -177,6 +179,10 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     # V33 ajoute la commande de test global après que toutes les catégories V32 existent.
     from .log_test_all_v33 import install as install_v33
     await install_v33(bot, extension_name)
+    # V34 crée/configure tous les vrais salons de logs en une seule commande et remplace
+    # aussi le moteur de l'ancienne commande +create-logs.
+    from .create_all_logs_v34 import install as install_v34
+    await install_v34(bot, extension_name)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
