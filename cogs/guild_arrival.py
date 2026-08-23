@@ -1,4 +1,4 @@
-"""Message d'accueil envoyé automatiquement lorsque SentriX rejoint un serveur."""
+"""Accueil compact envoyé automatiquement lorsque SentriX rejoint un serveur."""
 from __future__ import annotations
 
 import logging
@@ -11,7 +11,7 @@ import config
 
 logger = logging.getLogger("bot.guild-arrival")
 
-WELCOME_COLOUR = 0x7C3AED
+WELCOME_COLOUR = 0x6D5DF5
 SUPPORT_URL = (os.getenv("SUPPORT_SERVER_URL") or "").strip()
 
 
@@ -50,14 +50,11 @@ def _invite_url(bot: commands.Bot) -> str | None:
 def _arrival_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embed:
     owner = guild.owner.mention if guild.owner else f"<@{guild.owner_id}>"
     embed = discord.Embed(
-        title="Merci d'avoir ajouté SentriX !",
+        title="SentriX est prêt",
         description=(
-            f"Bonjour {owner}, SentriX est maintenant installé sur **{guild.name}**.\n\n"
-            "**Pour commencer**\n"
-            "Utilise `+setup` pour choisir les rôles, les salons et les protections.\n\n"
-            "**À vérifier**\n"
-            "Place le rôle **SentriX** au-dessus des rôles qu'il doit gérer.\n\n"
-            "Besoin d'aide ? Utilise simplement `+help`."
+            f"{owner}, SentriX est maintenant actif sur **{guild.name}** — utilise **`+setup`** "
+            "pour le configurer et **`+help`** pour découvrir les commandes. Place simplement "
+            "mon rôle au-dessus des rôles que je dois gérer."
         ),
         colour=discord.Colour(WELCOME_COLOUR),
     )
@@ -65,15 +62,9 @@ def _arrival_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embed:
     avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
     if avatar:
         embed.set_author(name="SentriX", icon_url=str(avatar))
-        embed.set_thumbnail(url=str(avatar))
     else:
         embed.set_author(name="SentriX")
-    embed.add_field(
-        name="Liens rapides",
-        value="`+setup`  Configuration\n`+help`  Commandes",
-        inline=False,
-    )
-    embed.set_footer(text=f"SentriX • {guild.name}")
+    embed.set_footer(text="SentriX • Configuration rapide")
     return embed
 
 
@@ -93,7 +84,7 @@ class GuildArrivalView(discord.ui.View):
         support = _safe_url(SUPPORT_URL)
         if support:
             self.add_item(discord.ui.Button(
-                label="Serveur support",
+                label="Support",
                 style=discord.ButtonStyle.link,
                 url=support,
                 row=0,
@@ -108,18 +99,15 @@ class GuildArrivalView(discord.ui.View):
             ))
 
     @discord.ui.button(
-        label="Configurer SentriX",
+        label="Configurer",
         style=discord.ButtonStyle.primary,
-        custom_id="sentrix:guild-arrival:setup:v1",
+        custom_id="sentrix:guild-arrival:setup:v2",
         row=0,
     )
     async def configure(self, interaction: discord.Interaction, _button: discord.ui.Button):
         member = interaction.user
         permissions = getattr(member, "guild_permissions", None)
-        allowed = bool(
-            permissions
-            and (permissions.administrator or permissions.manage_guild)
-        )
+        allowed = bool(permissions and (permissions.administrator or permissions.manage_guild))
         if not allowed:
             return await interaction.response.send_message(
                 "Seuls les administrateurs peuvent configurer SentriX.",
@@ -162,6 +150,8 @@ class GuildArrival(commands.Cog):
     @staticmethod
     def _target_channel(guild: discord.Guild) -> discord.TextChannel | None:
         bot_member = guild.me
+        if bot_member is None:
+            return None
         ordered = [
             guild.system_channel,
             guild.public_updates_channel,
@@ -192,11 +182,11 @@ class GuildArrival(commands.Cog):
         try:
             if channel is not None:
                 await channel.send(embed=embed, view=view, allowed_mentions=allowed_mentions)
-                logger.info("Accueil SentriX envoyé dans %s (%s).", guild.name, guild.id)
+                logger.info("Accueil compact SentriX envoyé dans %s (%s).", guild.name, guild.id)
                 return
             if guild.owner is not None:
                 await guild.owner.send(embed=embed, view=view, allowed_mentions=allowed_mentions)
-                logger.info("Accueil SentriX envoyé en MP au propriétaire de %s.", guild.id)
+                logger.info("Accueil compact SentriX envoyé en MP au propriétaire de %s.", guild.id)
         except (discord.Forbidden, discord.HTTPException):
             logger.exception("Impossible d'envoyer l'accueil sur %s (%s).", guild.name, guild.id)
 
