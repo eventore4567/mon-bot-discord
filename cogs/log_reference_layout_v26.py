@@ -1,6 +1,6 @@
 """SentriX V26 — layout de logs proche de la carte de référence utilisateur.
 
-Objectif visuel : reprendre la présence de la grande carte de référence, en environ
+Objectif visuel : reprendre la présence de la grande carte de référence utilisateur, en environ
 15–20 % plus petit. Discord garde le contrôle de la largeur exacte selon le client,
 mais la structure est volontairement plus ample que le mini-layout V25 :
 header/titre/description avec avatar à droite, section de détail, footer, boutons.
@@ -8,6 +8,8 @@ header/titre/description avec avatar à droite, section de détail, footer, bout
 V27 reste la couche de normalisation/Audit Log. V28 conserve les IDs, la déduplication
 exacte et les mentions silencieuses. V30 est désormais le renderer visuel final.
 V31 force les anciens logs directs (notamment tickets dédiés) à utiliser ce renderer.
+V32 ajoute les journaux salons/dossiers/anti-spam/anti-raid/staff et le mode adaptatif
+pour les messages réellement longs, sans modifier le rendu des petits messages.
 """
 from __future__ import annotations
 
@@ -168,6 +170,9 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     # V31 s'installe après le renderer final et intercepte les vieux chemins directs.
     from .log_category_unifier_v31 import install as install_v31
     install_v31(bot, extension_name)
+    # V32 passe réellement en dernier : catalogue avancé + routage + adaptation longs messages.
+    from .log_catalog_v32 import install as install_v32
+    install_v32(bot, extension_name)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
