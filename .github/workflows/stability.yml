@@ -37,6 +37,12 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-command-audit.db"
         run: python tools/command_runtime_audit.py
 
+      - name: V18 all-command regression gate
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-command-v18.db"
+        run: python tools/command_integrity_v18_gate.py
+
       - name: Permission matrix audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
