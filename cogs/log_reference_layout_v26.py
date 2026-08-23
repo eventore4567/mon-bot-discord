@@ -5,7 +5,8 @@ Objectif visuel : reprendre la présence de la grande carte de référence, en e
 mais la structure est volontairement plus ample que le mini-layout V25 :
 header/titre/description avec avatar à droite, section de détail, footer, boutons.
 
-Cette couche ne touche pas au routage ni à la déduplication : V25 reste le garde final.
+V27 est désormais appelé immédiatement après ce renderer : il devient donc la source de
+vérité finale pour la déduplication, l'Audit Log et le grand rendu horizontal.
 """
 from __future__ import annotations
 
@@ -54,8 +55,6 @@ def _avatar_url(bot: commands.Bot, guild: discord.Guild, embed: discord.Embed) -
 
 def _clean_description(embed: discord.Embed) -> str:
     description = (embed.description or "").strip()
-    # Les logs de message ont souvent toutes les infos dans les champs ; si une vraie
-    # description existe (message non disponible, contexte, etc.), on la garde.
     if description:
         return description[:900]
     return ""
@@ -77,14 +76,10 @@ def _detail_text(embed: discord.Embed) -> str:
     duration = _field_value(embed, "duree", "fin du timeout", "nouvel etat")
 
     parts: list[str] = []
-
-    # Style proche de la référence : le salon a sa vraie petite section dédiée.
     if salon:
         parts.append(f"### 💬 Salon\n{salon[:500]}")
-
     if author:
         parts.append(f"### 👤 Auteur\n{author[:500]}")
-
     if content:
         parts.append(f"### 📝 Contenu\n{content[:900]}")
     elif before or after:
@@ -103,7 +98,6 @@ def _detail_text(embed: discord.Embed) -> str:
     if extras:
         parts.append("\n\n".join(extras))
 
-    # Pas plus de 3 blocs visuels principaux pour garder une hauteur intermédiaire.
     return "\n\n".join(parts[:3])[:2600]
 
 
@@ -111,7 +105,6 @@ class ReferenceLogLayout(discord.ui.LayoutView):
     """Carte moyenne/grande : proche de l'image de référence, légèrement réduite."""
 
     _sentrix_log_layout = True
-    # Le garde V25 considère cette classe comme le renderer final autorisé.
     _sentrix_rectangle_v25 = True
     _sentrix_reference_v26 = True
 
@@ -130,7 +123,6 @@ class ReferenceLogLayout(discord.ui.LayoutView):
         title = _event_title(clean)
 
         container = discord.ui.Container(accent_colour=accent)
-
         header_lines = [
             f"-# 🛡️ SENTRIX • {category} • {guild.name}",
             f"# {title}",
@@ -189,17 +181,19 @@ class ReferenceLogLayout(discord.ui.LayoutView):
 
 
 def install(bot: commands.Bot, extension_name: str = "") -> None:
-    del bot, extension_name
     global _INSTALLED
 
     required = ("LayoutView", "Container", "Section", "TextDisplay", "Thumbnail", "Separator")
     if not all(hasattr(discord.ui, name) for name in required):
         return
 
-    # Toujours remettre ce renderer en dernier, même après un nouvel appel des couches
-    # historiques : premium_logs_v2 le résout au moment où un log est envoyé.
     premium_logs_v2.PremiumLogLayout = ReferenceLogLayout
     _INSTALLED = True
+
+    # V27 est volontairement appelé ici, et non dans une phase séparée, pour être certain
+    # qu'il repasse APRES chaque rappel historique de V25/V26 pendant le chargement des cogs.
+    from .log_single_pipeline_v27 import install as install_v27
+    install_v27(bot, extension_name)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
