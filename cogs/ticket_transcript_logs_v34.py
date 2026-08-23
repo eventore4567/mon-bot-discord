@@ -1,9 +1,8 @@
-"""SentriX V34 — logs tickets premium avec transcript exploitable.
+"""SentriX V34 — fermeture de ticket compacte avec transcript HTML.
 
-Intercepte uniquement l'ancien envoi de fermeture de ticket (embed + fichier transcript)
-et le remplace par une carte Components V2 dédiée : membre, modérateur, création, raison,
-participants, boutons d'IDs et transcript HTML joint. Après l'envoi, le bouton Transcript
-est relié à l'URL réelle de la pièce jointe Discord.
+Le transcript reste complet en pièce jointe, tandis que le journal Discord utilise le
+même principe que les autres logs : une carte basse et horizontale, sans avatar ni
+séparateurs empilés.
 """
 from __future__ import annotations
 
@@ -29,6 +28,14 @@ def _plain(value: str | None) -> str:
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     text = re.sub(r"[^a-zA-Z0-9]+", " ", text).casefold()
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _one_line(value: object, limit: int = 220) -> str:
+    text = re.sub(r"\s*\n\s*", " · ", str(value or "").strip())
+    text = re.sub(r"\s{2,}", " ", text)
+    if not text:
+        return "Non disponible"
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _field(embed: discord.Embed, *tokens: str) -> str:
@@ -69,11 +76,7 @@ def _read_file_text(file: discord.File) -> str | None:
         if hasattr(fp, "seek"):
             fp.seek(0)
         data = fp.read()
-        if isinstance(data, str):
-            text = data
-        else:
-            text = bytes(data).decode("utf-8", "replace")
-        return text
+        return data if isinstance(data, str) else bytes(data).decode("utf-8", "replace")
     except Exception:
         return None
     finally:
@@ -97,7 +100,9 @@ def _transcript_meta(text: str) -> tuple[int | None, list[tuple[str, int]]]:
     for match in _LINE_RE.finditer(text or ""):
         if created_ts is None:
             try:
-                stamp = datetime.strptime(match.group("date"), "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+                stamp = datetime.strptime(
+                    match.group("date"), "%Y-%m-%d %H:%M"
+                ).replace(tzinfo=timezone.utc)
                 created_ts = int(stamp.timestamp())
             except ValueError:
                 pass
@@ -109,7 +114,12 @@ def _transcript_meta(text: str) -> tuple[int | None, list[tuple[str, int]]]:
     return created_ts, participants
 
 
-def _html_transcript(guild: discord.Guild, title: str, text: str, participants: list[tuple[str, int]]) -> bytes:
+def _html_transcript(
+    guild: discord.Guild,
+    title: str,
+    text: str,
+    participants: list[tuple[str, int]],
+) -> bytes:
     participants_html = "".join(
         f"<span class='pill'>{html.escape(name)} <small>{uid}</small></span>"
         for name, uid in participants[:30]
@@ -138,10 +148,12 @@ pre{{margin:0;padding:26px 30px;white-space:pre-wrap;word-break:break-word;font:
 
 
 def _mention(user_id: int | None, fallback: str = "Non disponible") -> str:
-    return f"<@{user_id}>" if user_id else fallback
+    return f"<@{user_id}>" if user_id else _one_line(fallback, 130)
 
 
 class TicketClosureLogView(discord.ui.LayoutView):
+    """Carte de fermeture compacte ; le détail complet reste dans le transcript."""
+
     _sentrix_log_layout = True
     _sentrix_rectangle_v25 = True
     _sentrix_reference_v26 = True
@@ -158,75 +170,53 @@ class TicketClosureLogView(discord.ui.LayoutView):
         transcript_url: str | None = None,
     ):
         super().__init__(timeout=24 * 60 * 60)
+        del bot
         member_value = _field(embed, "cible", "membre", "utilisateur", "auteur")
         actor_value = _field(embed, "effectue par", "acteur", "moderateur", "modérateur")
         reason = _field(embed, "raison") or "Non précisée"
         salon = _field(embed, "salon")
         member_id = _first_id(member_value)
         actor_id = _first_id(actor_value)
+        stamp = embed.timestamp or discord.utils.utcnow()
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        ts = int(stamp.timestamp())
 
-        container = discord.ui.Container(accent_colour=0x8B5CF6)
-        title = "Fermeture du ticket"
-        header = discord.ui.TextDisplay(
-            f"-# SENTRIX • TICKETS • JOURNAL\n\n# 🔒 {title}\n"
-            "Le ticket a été archivé et sa transcription a été conservée."
-        )
-        avatar = None
-        if bot.user is not None:
-            try:
-                avatar = str(bot.user.display_avatar.url)
-            except Exception:
-                avatar = None
-        if avatar:
-            try:
-                container.add_item(discord.ui.Section(header, accessory=discord.ui.Thumbnail(avatar, description="SentriX")))
-            except Exception:
-                container.add_item(header)
-        else:
-            container.add_item(header)
-
-        container.add_item(discord.ui.Separator())
         context = [
-            "### CONTEXTE",
-            f"> **Modérateur** {_mention(actor_id, actor_value or 'Inconnu')}",
-            f"> **Membre** {_mention(member_id, member_value or 'Inconnu')}",
+            f"🛡️ **Modo** {_mention(actor_id, actor_value or 'Inconnu')}",
+            f"👤 **Membre** {_mention(member_id, member_value or 'Inconnu')}",
         ]
         if salon:
-            context.append(f"> **Salon** {salon[:500]}")
+            context.append(f"💬 **Salon** {_one_line(salon, 130)}")
+        detail = f"📝 **Raison** {_one_line(reason, 260)}  •  👥 **Participants** {len(participants)}"
         if created_ts:
-            context.append(f"> **Création du ticket** <t:{created_ts}:R>")
-        container.add_item(discord.ui.TextDisplay("\n".join(context)[:3900]))
+            detail += f"  •  🕘 **Créé** <t:{created_ts}:R>"
 
-        container.add_item(discord.ui.Separator())
-        participant_lines = []
-        for _name, uid in participants[:12]:
-            participant_lines.append(f"<@{uid}>")
-        participant_text = " • ".join(participant_lines) if participant_lines else "Aucun participant détecté"
-        details = (
-            "### DÉTAILS\n"
-            f"**Raison**\n> {reason[:900]}\n\n"
-            f"**Participants ({len(participants)})**\n> {participant_text[:1800]}"
-        )
-        container.add_item(discord.ui.TextDisplay(details[:3900]))
+        ids = [f"serveur `{guild.id}`"]
+        if member_id:
+            ids.insert(0, f"membre `{member_id}`")
+        if actor_id:
+            ids.insert(1 if member_id else 0, f"modo `{actor_id}`")
+        text = "\n".join([
+            f"-# 🎫 SENTRIX • TICKETS • {guild.name} • <t:{ts}:R>",
+            "## 🔒 Fermeture du ticket",
+            "  •  ".join(context[:3]),
+            detail,
+            "-# " + " • ".join(ids[:3]),
+        ])[:1700]
 
+        container = discord.ui.Container(accent_colour=0x8B5CF6)
+        container.add_item(discord.ui.TextDisplay(text))
         row = discord.ui.ActionRow()
         if transcript_url:
             row.add_item(discord.ui.Button(label="Transcript", style=discord.ButtonStyle.link, url=transcript_url))
         button_index = 0
-        for label, value in (
-            ("ID membre", member_id),
-            ("ID modérateur", actor_id),
-            ("ID serveur", guild.id),
-        ):
+        for label, value in (("ID membre", member_id), ("ID modérateur", actor_id)):
             if value:
                 row.add_item(premium_logs_v2.CopyIdButton(label, int(value), button_index))
                 button_index += 1
         if row.children:
             container.add_item(row)
-
-        stamp = embed.timestamp or discord.utils.utcnow()
-        ts = int(stamp.replace(tzinfo=stamp.tzinfo or timezone.utc).timestamp())
-        container.add_item(discord.ui.TextDisplay(f"-# SentriX • Ticket archivé • <t:{ts}:F>"))
 
         self._sentrix_log_fingerprint = v25._fingerprint_embed(guild.id, embed)
         self._sentrix_is_log_layout = True
@@ -245,7 +235,6 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     global _INSTALLED
     if _INSTALLED:
         return
-
     previous_send = discord.TextChannel.send
     if getattr(previous_send, "_sentrix_ticket_transcript_v34", False):
         _INSTALLED = True
@@ -256,7 +245,6 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
         file = kwargs.get("file")
         if not isinstance(embed, discord.Embed) or not isinstance(file, discord.File) or not _looks_like_ticket_close(embed, file):
             return await previous_send(self, *args, **kwargs)
-
         text = _read_file_text(file)
         if not text:
             return await previous_send(self, *args, **kwargs)
@@ -264,27 +252,18 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
         created_ts, participants = _transcript_meta(text)
         html_file = _html_file(file, self.guild, "Fermeture du ticket", text, participants)
         initial = TicketClosureLogView(bot, self.guild, embed, created_ts=created_ts, participants=participants)
-
         send_kwargs = dict(kwargs)
         send_kwargs.pop("embed", None)
         send_kwargs["file"] = html_file
         send_kwargs["view"] = initial
         send_kwargs["allowed_mentions"] = discord.AllowedMentions.none()
-
         message = await previous_send(self, *args, **send_kwargs)
         if message is None or not getattr(message, "attachments", None):
             return message
 
         try:
             url = str(message.attachments[0].url)
-            final_view = TicketClosureLogView(
-                bot,
-                self.guild,
-                embed,
-                created_ts=created_ts,
-                participants=participants,
-                transcript_url=url,
-            )
+            final_view = TicketClosureLogView(bot, self.guild, embed, created_ts=created_ts, participants=participants, transcript_url=url)
             await message.edit(view=final_view)
         except (discord.Forbidden, discord.HTTPException):
             pass
@@ -296,7 +275,7 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     send_ticket_log._sentrix_original = previous_send
     discord.TextChannel.send = send_ticket_log
     _INSTALLED = True
-    logger.info("V34 tickets : fermeture premium + transcript HTML + bouton Transcript actifs.")
+    logger.info("V34 tickets : fermeture rectangle compacte + transcript HTML actifs.")
 
 
 __all__ = ["install", "TicketClosureLogView"]
