@@ -1,4 +1,4 @@
-"""Sécurise les boutons staff et la confidentialité des tickets pris en charge."""
+"""Sécurise les boutons staff, les claims et les ouvertures de tickets."""
 from __future__ import annotations
 
 import logging
@@ -8,6 +8,7 @@ from discord.ext import commands
 
 logger = logging.getLogger("bot.tickets.claim-security")
 _INSTALLED = False
+_CREATING: set[tuple[int, int, int]] = set()
 
 _STAFF_ONLY_KEYS = {"claim", "unclaim", "add", "remove", "rename", "transfer", "note", "bump"}
 
@@ -88,6 +89,16 @@ async def _remove_claimant_override(channel: discord.TextChannel, member: discor
         pass
 
 
+async def _private_reply(interaction: discord.Interaction, embed: discord.Embed) -> None:
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+    except discord.HTTPException:
+        pass
+
+
 def install(bot: commands.Bot) -> None:
     del bot
     global _INSTALLED
@@ -97,6 +108,7 @@ def install(bot: commands.Bot) -> None:
     from . import tickets
 
     original_handle = tickets.Tickets.handle_control_button
+    original_create_ticket = tickets.Tickets.create_ticket
 
     async def secure_handle_control_button(self, interaction: discord.Interaction, key: str):
         ticket = await self.get_ticket_by_channel(interaction.channel.id)
@@ -106,9 +118,7 @@ def install(bot: commands.Bot) -> None:
         if key in _STAFF_ONLY_KEYS:
             if not await _authorized_staff(self, interaction, ticket, key):
                 return await interaction.response.send_message(
-                    embed=tickets.embeds.error(
-                        "Ce bouton est réservé au staff autorisé de ce ticket."
-                    ),
+                    embed=tickets.embeds.error("Ce bouton est réservé au staff autorisé de ce ticket."),
                     ephemeral=True,
                 )
         elif key == "close":
@@ -121,6 +131,47 @@ def install(bot: commands.Bot) -> None:
                 )
 
         return await original_handle(self, interaction, key)
+
+    async def secure_create_ticket(self, interaction: discord.Interaction, ticket_type, answers: list):
+        """Empêche un double clic/deux interactions simultanées de créer deux salons.
+
+        Le contrôle historique de limite est conservé, mais cette garde est placée au tout
+        dernier point avant la création réelle du salon ; elle couvre donc aussi les tickets
+        qui passent par un formulaire modal.
+        """
+        guild = interaction.guild
+        user = interaction.user
+        if guild is None or user is None:
+            return await original_create_ticket(self, interaction, ticket_type, answers)
+
+        type_id = int(ticket_type["id"])
+        key = (guild.id, user.id, type_id)
+        if key in _CREATING:
+            return await _private_reply(
+                interaction,
+                tickets.embeds.warning("Une ouverture de ticket est déjà en cours. Inutile de cliquer plusieurs fois."),
+            )
+
+        _CREATING.add(key)
+        try:
+            # Recontrôle atomique juste avant la création réelle. Cela ferme la fenêtre de
+            # course entre le premier contrôle de start_ticket_flow et guild.create_text_channel.
+            limit = int(ticket_type["max_per_member"] or 1)
+            row = await self.bot.db.fetchone(
+                "SELECT COUNT(*) c FROM tickets WHERE guild_id = ? AND user_id = ? AND type_id = ? AND status = 'ouvert'",
+                (guild.id, user.id, type_id),
+            )
+            current = int(row["c"] if row else 0)
+            if current >= limit:
+                return await _private_reply(
+                    interaction,
+                    tickets.embeds.warning(
+                        f"Vous avez déjà **{current}** ticket(s) « {ticket_type['name']} » ouvert(s) (maximum : {limit})."
+                    ),
+                )
+            return await original_create_ticket(self, interaction, ticket_type, answers)
+        finally:
+            _CREATING.discard(key)
 
     async def secure_claim(self, interaction: discord.Interaction, ticket):
         channel = interaction.channel
@@ -203,7 +254,8 @@ def install(bot: commands.Bot) -> None:
         await interaction.followup.send(embed=tickets.embeds.success("Prise en charge annulée. L'accès du rôle staff a été rétabli."))
 
     tickets.Tickets.handle_control_button = secure_handle_control_button
+    tickets.Tickets.create_ticket = secure_create_ticket
     tickets.Tickets.btn_claim = secure_claim
     tickets.Tickets.btn_unclaim = secure_unclaim
     _INSTALLED = True
-    logger.info("Sécurité des prises en charge de tickets activée.")
+    logger.info("Sécurité tickets activée : staff, claims exclusifs et anti-double ouverture.")
