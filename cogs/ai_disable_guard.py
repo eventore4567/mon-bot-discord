@@ -1,12 +1,13 @@
 """Autorité unique du bouton IA activée/désactivée.
 
-Le pipeline moderne +ai vérifiait déjà ai_settings.enabled, mais plusieurs routes legacy
-(/sentrix, /ask, summarize, explain, rewrite, fact-check et la conversation naturelle
-"SentriX ...") appelaient directement Ai.ask_ai() et contournaient donc le réglage.
+Le réglage ai_settings.enabled est vérifié à deux niveaux :
+- avant la conversation naturelle, pour rester totalement silencieux quand l'IA est OFF ;
+- dans utils.ai_service.generate()/generate_image(), afin qu'aucune ancienne commande,
+  aucun runtime ou appel direct ne puisse contourner le réglage.
 
-Cette couche ne change aucune commande publique. Elle rend le switch serveur réellement
-autoritaire pour toute génération IA, tout en laissant +aisetup et +aidiag accessibles
-aux administrateurs afin qu'ils puissent réactiver ou diagnostiquer le service.
++aisetup et +aidiag restent disponibles aux administrateurs pour réactiver ou diagnostiquer.
+Cette couche sert aussi de point de rattachement sûr aux runtimes bot-only V14/V15, car
+stability_runtime l'appelle après chaque extension chargée.
 """
 from __future__ import annotations
 
@@ -22,7 +23,10 @@ from utils import ai_service, embeds
 logger = logging.getLogger("bot.ai-disable-guard")
 
 AI_DISABLED_CODE = "__AI_DISABLED__"
-AI_DISABLED_MESSAGE = "L'intelligence artificielle est désactivée sur ce serveur. Un administrateur peut la réactiver avec `+aisetup`."
+AI_DISABLED_MESSAGE = (
+    "L'intelligence artificielle est désactivée sur ce serveur. "
+    "Un administrateur peut la réactiver avec `+aisetup`."
+)
 
 
 def _install_error_code() -> None:
@@ -71,6 +75,53 @@ def _guild_id_from_destination(destination, reply_to: discord.Message | None) ->
     return int(guild.id) if guild is not None else None
 
 
+def _install_service_guard(bot: commands.Bot) -> None:
+    """Verrou final directement autour des appels OpenAI texte et image."""
+    current_generate = ai_service.generate
+    if not getattr(current_generate, "_sentrix_ai_enabled_engine_guard", False):
+        async def guarded_generate(*args, **kwargs):
+            guild_id = kwargs.get("guild_id")
+            if guild_id and not await _ai_enabled(bot, int(guild_id)):
+                return ai_service.AiResult(
+                    error=AI_DISABLED_CODE,
+                    model_key=kwargs.get("model_key"),
+                )
+            return await current_generate(*args, **kwargs)
+
+        guarded_generate._sentrix_ai_enabled_engine_guard = True
+        guarded_generate._sentrix_original = current_generate
+        ai_service.generate = guarded_generate
+
+    current_image = ai_service.generate_image
+    if not getattr(current_image, "_sentrix_ai_enabled_engine_guard", False):
+        async def guarded_generate_image(*args, **kwargs):
+            guild_id = kwargs.get("guild_id")
+            if guild_id and not await _ai_enabled(bot, int(guild_id)):
+                return ai_service.ImageResult(
+                    error=AI_DISABLED_CODE,
+                    model=getattr(__import__("config"), "OPENAI_IMAGE_MODEL", None),
+                )
+            return await current_image(*args, **kwargs)
+
+        guarded_generate_image._sentrix_ai_enabled_engine_guard = True
+        guarded_generate_image._sentrix_original = current_image
+        ai_service.generate_image = guarded_generate_image
+
+
+def _install_core_runtimes(bot: commands.Bot) -> None:
+    """V14/V15 ne dépendent plus du chargement réussi d'une commande précise."""
+    try:
+        from .bot_v14_core import install as install_v14
+        install_v14(bot)
+    except Exception:
+        logger.exception("V14 Core n'a pas pu être réappliqué ; le bot continue.")
+    try:
+        from .bot_v15_runtime import install as install_v15
+        install_v15(bot)
+    except Exception:
+        logger.exception("V15 Runtime n'a pas pu être réappliqué ; le bot continue.")
+
+
 async def _wait_for_ai(bot: commands.Bot) -> None:
     """Attend le chargement du Cog Ai quand ce garde est installé plus tôt au boot."""
     try:
@@ -84,8 +135,10 @@ async def _wait_for_ai(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    """Installe le garde dès que le Cog Ai est disponible. Idempotent."""
+    """Installe tous les verrous de façon idempotente."""
     _install_error_code()
+    _install_service_guard(bot)
+    _install_core_runtimes(bot)
 
     cog = bot.get_cog("Ai")
     if cog is None:
@@ -102,53 +155,7 @@ def install(bot: commands.Bot) -> None:
     if getattr(cog, "_sentrix_ai_disable_guard", False):
         return
 
-    original_ask = cog.ask_ai
-    original_confidence = cog.ask_ai_with_confidence
     original_send = cog.send_sentrix_reply
-
-    async def guarded_ask_ai(
-        self,
-        prompt,
-        history: list | None = None,
-        author_name: str | None = None,
-        *,
-        guild_id: int | None = None,
-        channel_id: int | None = None,
-        user_id: int | None = None,
-        command: str | None = None,
-    ) -> str:
-        if guild_id and not await _ai_enabled(self.bot, guild_id):
-            return AI_DISABLED_CODE
-        return await original_ask(
-            prompt,
-            history,
-            author_name,
-            guild_id=guild_id,
-            channel_id=channel_id,
-            user_id=user_id,
-            command=command,
-        )
-
-    async def guarded_confidence(
-        self,
-        prompt: str,
-        history: list | None = None,
-        *,
-        guild_id: int | None = None,
-        channel_id: int | None = None,
-        user_id: int | None = None,
-        command: str | None = None,
-    ) -> tuple[str, int]:
-        if guild_id and not await _ai_enabled(self.bot, guild_id):
-            return AI_DISABLED_CODE, 0
-        return await original_confidence(
-            prompt,
-            history,
-            guild_id=guild_id,
-            channel_id=channel_id,
-            user_id=user_id,
-            command=command,
-        )
 
     async def guarded_send_sentrix_reply(
         self,
@@ -160,24 +167,21 @@ def install(bot: commands.Bot) -> None:
     ):
         guild_id = _guild_id_from_destination(destination, reply_to)
         if guild_id and not await _ai_enabled(self.bot, guild_id):
-            # Conversation naturelle : silence total lorsque l'IA est coupée. Le bot ne
-            # doit plus donner l'impression de continuer à discuter malgré le réglage.
+            # Conversation naturelle/mention + texte : silence complet lorsque l'IA est OFF.
             if reply_to is not None:
                 return None
-            # Commande explicite /sentrix ou +sentrix : réponse claire plutôt qu'un silence.
+            # Commande explicite +sentrix ou /sentrix : réponse explicative unique.
             return await destination.send(embed=embeds.info(AI_DISABLED_MESSAGE))
         return await original_send(destination, author, question, reply_to=reply_to)
 
-    guarded_ask_ai._sentrix_ai_disable_guard = True
-    guarded_confidence._sentrix_ai_disable_guard = True
     guarded_send_sentrix_reply._sentrix_ai_disable_guard = True
-
-    cog.ask_ai = types.MethodType(guarded_ask_ai, cog)
-    cog.ask_ai_with_confidence = types.MethodType(guarded_confidence, cog)
+    guarded_send_sentrix_reply._sentrix_original = original_send
     cog.send_sentrix_reply = types.MethodType(guarded_send_sentrix_reply, cog)
     cog._sentrix_ai_disable_guard = True
 
-    logger.info("IA : le réglage enabled bloque désormais toutes les générations legacy et naturelles.")
+    logger.info(
+        "IA : switch enabled autoritaire au niveau conversation ET moteur OpenAI ; V14/V15 actifs."
+    )
 
 
 __all__ = ["install", "AI_DISABLED_CODE"]
