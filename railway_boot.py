@@ -145,6 +145,14 @@ async def _prepare_durable_store(bot) -> DurableDatabaseReplica:
 
 async def run() -> None:
     bot = bot_main.BotAllInOne()
+
+    # V19 : le gate est attaché AVANT bot.start(). Il s'exécute après on_ready, donc avec
+    # une vraie connexion Discord, de vrais serveurs/membres et le registre slash distant.
+    # En cas d'incohérence critique il ferme le client ; le bootstrap transforme ensuite
+    # cette fermeture en échec Railway au lieu de laisser tourner un build cassé.
+    from cogs.live_command_gate_v19 import install as install_live_command_gate_v19
+    install_live_command_gate_v19(bot)
+
     durable = await _prepare_durable_store(bot)
 
     await bot.db.connect()
@@ -169,6 +177,9 @@ async def run() -> None:
     try:
         async with bot:
             await bot.start(config.DISCORD_TOKEN)
+        if getattr(bot, "_sentrix_live_gate_failed", False):
+            detail = str(getattr(bot, "_sentrix_live_gate_detail", "échec live inconnu"))[:2000]
+            raise RuntimeError(f"Gate live commandes V19 en échec : {detail}")
     except Exception:
         logger.critical("Le processus Discord s'est arrêté :\n%s", traceback.format_exc())
         raise
