@@ -1,27 +1,23 @@
-"""Réduit le bruit des alertes de production SentriX.
+"""Réduit le bruit et les doubles mutations de production SentriX.
 
-Les métriques de lenteur restent visibles dans les logs/diagnostics, mais ne doivent pas
-notifier le propriétaire à répétition : les gros constructeurs de serveur sont
-volontairement longs et une ancienne entrée `slow_commands` pouvait rester en mémoire et
-être renvoyée toutes les 15 minutes.
-
-Les notifications Discord sont réservées aux incidents réellement actionnables :
-- plusieurs erreurs techniques récentes ;
-- échec du backup SQLite.
-
-Sur Railway, un seul service est autorisé à envoyer ces alertes afin d'éviter les doublons
-quand deux services exécutent le même dépôt.
+Deux services Railway exécutent le même dépôt. Les actions qui modifient réellement
+Discord ne doivent donc jamais être jouées deux fois :
+- un seul service envoie les alertes d'exploitation ;
+- un seul service exécute la sanction/rollback anti-nuke et recrée les salons ;
+- le service secondaire peut rester connecté pour la disponibilité, sans dupliquer les
+  restaurations.
 """
 from __future__ import annotations
 
 import logging
 import os
 import time
+from types import MethodType
 
 from discord.ext import commands
 
 logger = logging.getLogger("bot.production-alert-noise-fix")
-_PATCHED = False
+_ALERTS_PATCHED = False
 
 DEFAULT_ALERT_COOLDOWN_SECONDS = 60 * 60
 DEFAULT_BACKUP_ALERT_COOLDOWN_SECONDS = 6 * 60 * 60
@@ -36,33 +32,104 @@ def _positive_int_env(name: str, default: int, *, minimum: int, maximum: int) ->
     return max(minimum, min(maximum, value))
 
 
-def _is_primary_alert_service() -> bool:
-    """Un seul service Railway envoie les notifications Discord d'exploitation."""
-    service = (os.getenv("RAILWAY_SERVICE_NAME") or "").strip().casefold()
-    if not service:
-        # Local / autre hébergeur : ne pas désactiver les alertes par erreur.
-        return True
-    primary = (
-        os.getenv("SENTRIX_ALERT_PRIMARY_SERVICE")
+def _primary_service_name() -> str:
+    return (
+        os.getenv("SENTRIX_MUTATION_PRIMARY_SERVICE")
+        or os.getenv("SENTRIX_LOG_PRIMARY_SERVICE")
+        or os.getenv("SENTRIX_ALERT_PRIMARY_SERVICE")
         or DEFAULT_PRIMARY_SERVICE
     ).strip().casefold()
+
+
+def _is_primary_service() -> bool:
+    """Vrai uniquement pour l'instance autorisée à faire les mutations uniques."""
+    service = (os.getenv("RAILWAY_SERVICE_NAME") or "").strip().casefold()
+    if not service:
+        # En local / autre hébergeur, ne pas neutraliser les fonctions de sécurité.
+        return True
+    primary = _primary_service_name()
     if not primary:
         return True
     return service == primary or primary in service
 
 
+def _patch_primary_mutations(bot: commands.Bot) -> None:
+    """Empêche la deuxième instance Railway de restaurer/sanctionner en doublon.
+
+    Cet installateur est rappelé après chaque extension. Si le rollback anti-nuke enveloppe
+    ``punish_nuker`` plus tard pendant le boot, ce garde repasse donc au-dessus.
+    """
+    automod = bot.get_cog("Automod")
+    if automod is not None:
+        current_punish = getattr(automod, "punish_nuker", None)
+        current_func = getattr(current_punish, "__func__", current_punish)
+        if current_punish is not None and not getattr(
+            current_func, "_sentrix_primary_mutation_guard", False
+        ):
+            async def primary_punish(_self, guild, actor_id, reason):
+                if not _is_primary_service():
+                    logger.warning(
+                        "Anti-nuke observé mais mutation ignorée sur le service secondaire %s "
+                        "(guild=%s, actor=%s).",
+                        os.getenv("RAILWAY_SERVICE_NAME") or "inconnu",
+                        getattr(guild, "id", "?"),
+                        actor_id,
+                    )
+                    return None
+                return await current_punish(guild, actor_id, reason)
+
+            primary_punish._sentrix_primary_mutation_guard = True
+            primary_punish._sentrix_original = current_punish
+            automod.punish_nuker = MethodType(primary_punish, automod)
+
+    rollback = bot.get_cog("AntiNukeRollback")
+    if rollback is not None:
+        current_context = getattr(rollback, "_antinuke_context", None)
+        context_func = getattr(current_context, "__func__", current_context)
+        if current_context is not None and not getattr(
+            context_func, "_sentrix_primary_mutation_guard", False
+        ):
+            async def primary_context(_self, guild, action, target_id):
+                if not _is_primary_service():
+                    # Le secondaire ne remplit même pas son journal rollback : il ne peut
+                    # donc jamais recréer un salon à partir de la même suppression.
+                    return None, None
+                return await current_context(guild, action, target_id)
+
+            primary_context._sentrix_primary_mutation_guard = True
+            primary_context._sentrix_original = current_context
+            rollback._antinuke_context = MethodType(primary_context, rollback)
+
+        current_rollback = getattr(rollback, "rollback_actor", None)
+        rollback_func = getattr(current_rollback, "__func__", current_rollback)
+        if current_rollback is not None and not getattr(
+            rollback_func, "_sentrix_primary_mutation_guard", False
+        ):
+            async def primary_rollback(_self, guild, actor_id, reason):
+                if not _is_primary_service():
+                    return {"unbanned": 0, "restored": 0, "deleted": 0, "reverted": 0}
+                return await current_rollback(guild, actor_id, reason)
+
+            primary_rollback._sentrix_primary_mutation_guard = True
+            primary_rollback._sentrix_original = current_rollback
+            rollback.rollback_actor = MethodType(primary_rollback, rollback)
+
+
 def install(bot: commands.Bot, extension_name: str = "") -> None:
-    """Patch idempotent appliqué après le chargement de production_ops."""
-    del bot, extension_name
-    global _PATCHED
-    if _PATCHED:
+    """Patch idempotent rappelé pendant le chargement de toutes les extensions."""
+    del extension_name
+    global _ALERTS_PATCHED
+
+    # IMPORTANT : ceci doit repasser même après l'installation des alertes, car Automod et
+    # AntiNukeRollback peuvent être chargés plus tard dans la séquence de démarrage.
+    _patch_primary_mutations(bot)
+
+    if _ALERTS_PATCHED:
         return
 
     try:
         from . import production_ops
     except Exception:
-        # production_ops n'est peut-être pas encore chargé ; stability_runtime rappellera
-        # cet installateur après l'extension suivante.
         return
 
     current_health = getattr(production_ops, "_health_alert", None)
@@ -70,7 +137,7 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     if current_health is None or current_send is None:
         return
     if getattr(current_health, "_sentrix_noise_fixed", False):
-        _PATCHED = True
+        _ALERTS_PATCHED = True
         return
 
     def actionable_health_alert(runtime_bot: commands.Bot):
@@ -86,8 +153,6 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
                 kinds[name] = kinds.get(name, 0) + 1
             top = sorted(kinds.items(), key=lambda pair: (-pair[1], pair[0]))[:4]
             detail = ", ".join(f"{name} ×{count}" for name, count in top)
-            # La clé ne contient volontairement PAS les compteurs : 5 puis 6 TypeError
-            # restent le même incident et respectent donc le cooldown.
             fingerprint = ",".join(sorted(name for name, _count in top))
             return (
                 f"errors:{fingerprint}",
@@ -99,12 +164,10 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
             reason = str(ops.get("last_backup_error") or "erreur inconnue")[:100]
             return "backup-failed", f"Le dernier backup SQLite a échoué ({reason})."
 
-        # IMPORTANT : les commandes lentes et requêtes DB lentes restent dans les logs et
-        # +healthcheck, mais ne déclenchent plus de message Discord au propriétaire.
         return None, None
 
     async def send_actionable_alert(runtime_bot: commands.Bot, key: str, detail: str) -> None:
-        if not _is_primary_alert_service():
+        if not _is_primary_service():
             logger.debug(
                 "Alerte production ignorée sur le service secondaire %s : %s",
                 os.getenv("RAILWAY_SERVICE_NAME") or "inconnu",
@@ -143,10 +206,11 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     send_actionable_alert._sentrix_original = current_send
     production_ops._health_alert = actionable_health_alert
     production_ops._send_ops_alert = send_actionable_alert
-    _PATCHED = True
+    _ALERTS_PATCHED = True
 
     logger.info(
-        "Alertes production anti-spam actives : lenteurs en logs uniquement, incidents réels avec cooldown et service primaire unique."
+        "Production SentriX : alertes et mutations anti-nuke limitées au service primaire %s.",
+        _primary_service_name() or DEFAULT_PRIMARY_SERVICE,
     )
 
 
