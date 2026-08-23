@@ -10,10 +10,10 @@ logger = logging.getLogger("bot.afk-signature")
 
 
 def _install_v14(bot: commands.Bot) -> None:
-    """Charge la couche bot-only V14 depuis un installateur déjà garanti au démarrage.
+    """Charge les couches bot-only V14 depuis un installateur garanti au démarrage.
 
-    Ce fichier est appelé après le chargement du cog Utility. V14 reste idempotent et
-    n'ajoute aucune commande publique : il accélère uniquement les chemins runtime.
+    Elles n'ajoutent aucune commande publique et ne touchent pas au dashboard : V14
+    accélère les chemins runtime puis précharge les petites configurations très lues.
     """
     try:
         from .bot_v14_core import install as install_v14
@@ -21,6 +21,12 @@ def _install_v14(bot: commands.Bot) -> None:
     except Exception:
         # Une optimisation ne doit jamais empêcher +afk ni le reste des cogs de démarrer.
         logger.exception("Impossible d'activer SentriX V14 Core ; le bot continue en mode normal.")
+
+    try:
+        from .bot_v14_prewarm import install as install_v14_prewarm
+        install_v14_prewarm(bot)
+    except Exception:
+        logger.exception("Impossible d'activer le préchargement V14 ; les caches resteront paresseux.")
 
 
 def install(bot: commands.Bot) -> None:
