@@ -1,14 +1,8 @@
-"""SentriX V30 — style préféré : large, lisible et équilibré.
+"""SentriX V30 — style unique pour tous les journaux.
 
-Cette couche ne change pas la logique des logs. V27/V28 gardent :
-- anti-doublon ;
-- Audit Log et actions des autres bots ;
-- IDs ;
-- vraies mentions cliquables avec AllowedMentions.none().
-
-V30 remet uniquement le rendu visuel préféré : gros titre, CONTEXTE, DÉTAILS,
-avatar à droite et rangée de boutons en bas. Les messages modifiés gardent le bouton
-Voir le message et un bloc Avant / Après.
+V27/V28 gardent la déduplication, l'Audit Log, les IDs et les mentions silencieuses.
+V30 applique le même rendu visuel à messages, tickets, modération, vocal et serveur :
+un gros titre, CONTEXTE, DÉTAILS, avatar à droite et boutons d'IDs en bas.
 """
 from __future__ import annotations
 
@@ -21,6 +15,18 @@ from . import premium_logs_v2
 from . import log_premium_v28 as v28
 from .log_rectangle_v25 import _event_timestamp, _field_value, _is_role_batch
 
+
+CATEGORY_ICON = {
+    "messages": "💬",
+    "tickets": "🎫",
+    "moderation": "🛡️",
+    "voice": "🔊",
+    "server": "⚙️",
+    "members": "👤",
+    "roles": "⚙️",
+    "security": "🛡️",
+    "automod": "🛡️",
+}
 
 EVENT_ACCENTS = {
     "message_delete": 0xED4245,
@@ -44,12 +50,12 @@ EVENT_ICON = {
     "member_ban": "🔨",
     "member_unban": "🔓",
     "member_timeout": "⏱️",
-    "member_role_update": "🏷️",
-    "channel_create": "➕",
-    "channel_delete": "➖",
+    "member_role_update": "⚙️",
+    "channel_create": "⚙️",
+    "channel_delete": "⚙️",
     "channel_update": "⚙️",
-    "role_create": "➕",
-    "role_delete": "➖",
+    "role_create": "⚙️",
+    "role_delete": "⚙️",
     "role_update": "⚙️",
     "guild_update": "⚙️",
 }
@@ -70,20 +76,13 @@ EVENT_STATUS = {
     "guild_update": "CONFIGURATION",
 }
 
-STATUS_DOT = {
-    "message_delete": "🔴",
-    "message_edit": "🟣",
-    "member_ban": "🔴",
-    "member_unban": "🟢",
-    "member_timeout": "🟣",
-    "member_role_update": "🟣",
-    "channel_create": "🟢",
-    "channel_delete": "🔴",
-    "channel_update": "🔵",
-    "role_create": "🟢",
-    "role_delete": "🔴",
-    "role_update": "🟣",
-    "guild_update": "🔵",
+CONTEXT_NAMES = {
+    "salon", "channel", "auteur", "membre", "utilisateur", "cible",
+    "effectue par", "effectué par", "moderateur", "modérateur", "acteur", "executant", "exécutant",
+}
+ID_NAMES = {
+    "id", "id message", "id du message", "identifiant du message", "id salon", "id serveur",
+    "id auteur", "id membre", "id cible", "identifiant",
 }
 
 
@@ -91,16 +90,21 @@ def _event(log_type: str, embed: discord.Embed) -> str:
     return v28._event(log_type, embed)
 
 
-def _plain(value: str | None, limit: int = 320) -> str:
-    text = re.sub(r"\s*\n\s*", " · ", str(value or "").strip())
-    text = re.sub(r"\s{2,}", " ", text)
-    text = text or "Non disponible"
+def _norm(value: str | None) -> str:
+    text = str(value or "").casefold()
+    for old, new in (("é", "e"), ("è", "e"), ("ê", "e"), ("à", "a"), ("ù", "u"), ("ô", "o"), ("î", "i"), ("ç", "c")):
+        text = text.replace(old, new)
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def _plain(value: str | None, limit: int = 500) -> str:
+    text = str(value or "").strip() or "Non disponible"
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _mention(value: str | None) -> str:
     uid = v28._first_id(value)
-    return f"<@{uid}>" if uid else _plain(value, 220)
+    return f"<@{uid}>" if uid else _plain(value, 240)
 
 
 def _accent(log_type: str, embed: discord.Embed) -> int:
@@ -109,89 +113,118 @@ def _accent(log_type: str, embed: discord.Embed) -> int:
         return EVENT_ACCENTS[event]
     if embed.colour:
         return int(embed.colour.value)
-    return 0x7C5CFC
+    return {
+        "tickets": 0x5865F2,
+        "moderation": 0xED4245,
+        "voice": 0x3498DB,
+        "server": 0x7C5CFC,
+    }.get(str(log_type), 0x7C5CFC)
+
+
+def _generic_status(embed: discord.Embed) -> str:
+    text = _norm(f"{embed.title or ''} {embed.description or ''}")
+    if any(word in text for word in ("supprime", "ferme", "deconnexion", "quitte", "retire", "ban", "kick")):
+        return "SUPPRESSION" if "supprime" in text else "ACTION"
+    if any(word in text for word in ("ouvert", "cree", "connexion", "rejoint", "ajoute")):
+        return "CRÉATION" if "cree" in text else "ACTION"
+    if any(word in text for word in ("modifie", "change", "deplace", "claim")):
+        return "MODIFICATION"
+    return "ÉVÉNEMENT"
 
 
 def _title(log_type: str, embed: discord.Embed) -> str:
     raw = re.sub(r"\s+", " ", str(embed.title or "Journal SentriX")).strip()
     raw = re.sub(r"^[^\wÀ-ÿ]+\s*", "", raw).strip() or "Journal SentriX"
-    return f"{EVENT_ICON.get(_event(log_type, embed), '📋')} {raw}"
+    icon = EVENT_ICON.get(_event(log_type, embed)) or CATEGORY_ICON.get(str(log_type), "")
+    return f"{icon} {raw}".strip()
 
 
 def _header(bot: commands.Bot, guild: discord.Guild, log_type: str, embed: discord.Embed):
     category, _ = v28._category(log_type)
     event = _event(log_type, embed)
-    status = EVENT_STATUS.get(event, "ÉVÉNEMENT")
-    dot = STATUS_DOT.get(event, "⚪")
+    status = EVENT_STATUS.get(event, _generic_status(embed))
     ts = _event_timestamp(embed)
-    summary = v28._summary(log_type, embed)
+    category_icon = CATEGORY_ICON.get(str(log_type), "")
+    summary = (embed.description or "").strip() or v28._summary(log_type, embed)
     text = (
-        f"-# ✦ SENTRIX  /  💬 {category}  /  SECURE AUDIT\n\n"
+        f"-# ✦ SENTRIX  /  {category_icon} {category}  /  SECURE AUDIT\n\n"
         f"# {_title(log_type, embed)}\n"
-        f"{dot} **{status}**  ·  <t:{ts}:R>  ·  `LIVE LOG`\n"
-        f"{summary}"
+        f"**{status}**  ·  <t:{ts}:R>  ·  `LIVE LOG`\n"
+        f"{summary[:800]}"
     )[:3900]
     return discord.ui.TextDisplay(text), v28._avatar(bot, guild, embed)
 
 
-def _context(guild: discord.Guild, embed: discord.Embed) -> str:
+def _context(guild: discord.Guild, embed: discord.Embed) -> tuple[str, set[int]]:
     channel = v28._resolved_channel(guild, embed)
     channel_raw = _field_value(embed, "salon", "channel")
     target = _field_value(embed, "auteur", "membre", "utilisateur", "cible")
-    actor = _field_value(embed, "effectue par", "moderateur", "acteur", "executant")
-
+    actor = _field_value(embed, "effectue par", "effectué par", "moderateur", "modérateur", "acteur", "executant", "exécutant")
     rows: list[str] = []
+    consumed: set[int] = set()
+
+    for index, field in enumerate(embed.fields):
+        name = _norm(str(field.name))
+        if any(token == name or token in name for token in CONTEXT_NAMES):
+            consumed.add(index)
+
     if channel is not None:
-        rows.append(f"💬 **Salon**  {channel.mention}")
+        rows.append(f"**Salon**  {channel.mention}")
     elif channel_raw:
-        rows.append(f"💬 **Salon**  {_plain(channel_raw, 240)}")
+        rows.append(f"**Salon**  {_plain(channel_raw, 300)}")
     if target:
-        rows.append(f"👤 **Cible**  {_mention(target)}")
+        rows.append(f"**Cible**  {_mention(target)}")
     if actor:
-        bot_tag = "  `BOT`" if "bot" in v28._plain(actor) else ""
-        rows.append(f"🛡️ **Action par**  {_mention(actor)}{bot_tag}")
+        bot_tag = "  `BOT`" if "bot" in _norm(actor) else ""
+        rows.append(f"**Action par**  {_mention(actor)}{bot_tag}")
     if not rows:
-        rows.append(f"🖥️ **Serveur**  **{discord.utils.escape_markdown(guild.name)}**")
-    return "### CONTEXTE\n" + "\n".join(f"> {row}" for row in rows[:3])
+        rows.append(f"**Serveur**  {discord.utils.escape_markdown(guild.name)}")
+    return "### CONTEXTE\n" + "\n".join(f"> {row}" for row in rows[:4]), consumed
 
 
-def _details(embed: discord.Embed) -> str | None:
+def _is_id_field(name: str) -> bool:
+    normalized = _norm(name)
+    return normalized in {_norm(item) for item in ID_NAMES} or normalized.startswith("id ") or normalized.startswith("identifiant ")
+
+
+def _generic_details(embed: discord.Embed, consumed: set[int]) -> str | None:
     if _is_role_batch(embed):
         text = (embed.description or "").strip()
-        return f"### DÉTAILS\n{text[:3000]}" if text else None
-
-    content = _field_value(embed, "contenu")
-    reason = _field_value(embed, "raison", "raison audit log")
-    duration = _field_value(embed, "duree", "fin du timeout", "nouvel etat")
-    attachments = _field_value(embed, "pieces jointes", "pièces jointes")
+        return f"### DÉTAILS\n{text[:3200]}" if text else None
 
     rows: list[str] = []
-    if content:
-        quoted = str(content)[:1300].replace("\n", "\n> ")
-        rows.append(f"**📝 Contenu**\n> {quoted}")
-    if reason:
-        rows.append(f"**📌 Raison**  {_plain(reason, 500)}")
-    if duration:
-        rows.append(f"**⏱️ Durée / état**  {_plain(duration, 360)}")
-    if attachments:
-        rows.append(f"**📎 Pièces jointes**\n{str(attachments)[:750]}")
-    if not rows:
-        return None
-    return "### DÉTAILS\n" + "\n\n".join(rows[:4])
-
-
-def _edit_details(embed: discord.Embed) -> str | None:
     before = _field_value(embed, "avant")
     after = _field_value(embed, "apres")
-    if not before and not after:
-        return _details(embed)
-    before_text = str(before or "Non disponible")[:1100].replace("\n", "\n> ")
-    after_text = str(after or "Non disponible")[:1100].replace("\n", "\n> ")
-    return (
-        "### DÉTAILS\n"
-        f"**◀ Avant**\n> {before_text}\n\n"
-        f"**▶ Après**\n> {after_text}"
-    )[:3900]
+    if before or after:
+        if before:
+            rows.append(f"**Avant**\n> {str(before)[:900].replace(chr(10), chr(10) + '> ')}")
+        if after:
+            rows.append(f"**Après**\n> {str(after)[:900].replace(chr(10), chr(10) + '> ')}")
+
+    for index, field in enumerate(embed.fields):
+        if index in consumed:
+            continue
+        name = str(field.name).strip() or "Information"
+        normalized = _norm(name)
+        if _is_id_field(name) or normalized in {"avant", "apres"}:
+            continue
+        value = str(field.value).strip()
+        if not value:
+            continue
+        clean_name = re.sub(r"^[^\wÀ-ÿ]+\s*", "", name).strip() or "Information"
+        if len(value) > 850:
+            value = value[:849] + "…"
+        if "\n" in value or len(value) > 120:
+            quoted = value.replace("\n", "\n> ")
+            rows.append(f"**{clean_name}**\n> {quoted}")
+        else:
+            rows.append(f"**{clean_name}**  {value}")
+        if len(rows) >= 6:
+            break
+
+    if not rows:
+        return None
+    return "### DÉTAILS\n" + "\n\n".join(rows)[:3500]
 
 
 def _message_jump_url(guild: discord.Guild, log_type: str, embed: discord.Embed) -> str | None:
@@ -208,15 +241,14 @@ def _id_buttons(guild: discord.Guild, log_type: str, embed: discord.Embed) -> li
     message_id = v28._message_id(log_type, embed)
     channel = v28._resolved_channel(guild, embed)
     author_id = v28._first_id(_field_value(embed, "auteur", "membre", "utilisateur", "cible"))
-
     result: list[tuple[str, int]] = []
     if message_id:
-        result.append(("💬 ID message", message_id))
+        result.append(("ID message", message_id))
     if channel is not None:
-        result.append(("#️⃣ ID salon", channel.id))
+        result.append(("ID salon", channel.id))
     if author_id:
-        result.append(("👤 ID auteur", author_id))
-    result.append(("🖥️ ID serveur", guild.id))
+        result.append(("ID auteur", author_id))
+    result.append(("ID serveur", guild.id))
     return result[:4]
 
 
@@ -234,25 +266,21 @@ class PreferredLogV30(discord.ui.LayoutView):
         clean = v28._silent_mention_embed(embed)
         v28.v27._restore_channel_mentions(guild, clean)
         clean = v28._ensure_message_id_field(log_type, clean)
-
         container = discord.ui.Container(accent_colour=_accent(log_type, clean))
         header, avatar = _header(bot, guild, log_type, clean)
         if avatar:
             try:
-                container.add_item(discord.ui.Section(
-                    header,
-                    accessory=discord.ui.Thumbnail(avatar, description="SentriX audit"),
-                ))
+                container.add_item(discord.ui.Section(header, accessory=discord.ui.Thumbnail(avatar, description="SentriX audit")))
             except Exception:
                 container.add_item(header)
         else:
             container.add_item(header)
 
         container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(_context(guild, clean)[:3900]))
+        context, consumed = _context(guild, clean)
+        container.add_item(discord.ui.TextDisplay(context[:3900]))
 
-        event = _event(log_type, clean)
-        body = _edit_details(clean) if event == "message_edit" else _details(clean)
+        body = _generic_details(clean, consumed)
         if body:
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(body[:3900]))
@@ -262,12 +290,7 @@ class PreferredLogV30(discord.ui.LayoutView):
         if jump_url or ids:
             row = discord.ui.ActionRow()
             if jump_url:
-                row.add_item(discord.ui.Button(
-                    label="Voir le message",
-                    emoji="🔗",
-                    style=discord.ButtonStyle.link,
-                    url=jump_url,
-                ))
+                row.add_item(discord.ui.Button(label="Voir le message", emoji="🔗", style=discord.ButtonStyle.link, url=jump_url))
             for index, (label, value) in enumerate(ids):
                 row.add_item(premium_logs_v2.CopyIdButton(label, int(value), index))
             if row.children:
