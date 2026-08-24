@@ -1,14 +1,8 @@
-"""Correctif de signature pour l'alias texte +sentrix-server.
+"""Correctifs runtime pour +sentrix-server.
 
-Le constructeur officiel réutilise la commande hybride ``create-server`` afin de ne pas
-ajouter une nouvelle commande slash. L'ancien wrapper remplaçait directement
-``Command.callback`` avec une fonction ``(cog, ctx, *args, **kwargs)``. discord.py et les
-helpers UX pouvaient alors recalculer les paramètres de la commande et exposer ``ctx``
-comme un argument utilisateur obligatoire.
-
-Cette couche conserve l'alias mais remplace le callback par un wrapper dont la signature
-publique est celle du callback original grâce à ``functools.wraps``. Pour Discord, la
-commande reste donc exactement une commande sans argument utilisateur.
+Cette couche conserve l'alias texte sur la commande hybride ``create-server`` sans ajouter
+de nouvelle commande slash. Elle applique aussi la réparation d'identification du serveur
+officiel avant d'exécuter l'alias.
 """
 from __future__ import annotations
 
@@ -42,6 +36,14 @@ def install(bot: commands.Bot) -> None:
     if command is None or runtime is None:
         return
 
+    # Répare d'abord la détection du serveur officiel. L'invitation officielle devient
+    # prioritaire sur les anciens IDs persistants éventuellement obsolètes.
+    try:
+        from .official_server_binding_fix import install as install_binding_fix
+        install_binding_fix(bot)
+    except Exception:
+        logger.exception("Impossible d'installer le correctif d'identification du serveur officiel.")
+
     # Les aliases restent rattachés au même objet Command. Cela n'ajoute donc aucune
     # commande slash/racine supplémentaire.
     for alias in OFFICIAL_ALIASES:
@@ -69,7 +71,7 @@ def install(bot: commands.Bot) -> None:
     signature_safe._sentrix_signature_safe = True
     command.callback = signature_safe
 
-    logger.info("Alias +sentrix-server corrigé : aucune saisie de ctx/args requise.")
+    logger.info("Alias +sentrix-server corrigé : signature sûre + serveur officiel auto-réparé.")
 
 
 __all__ = ["install"]
