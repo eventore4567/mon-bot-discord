@@ -96,4 +96,49 @@ Les ressources sont disponibles via `/media-kit` et `assets/sentrix/`.
 
 Page officielle : `https://top.gg/bot/new`
 
-Top.gg demande une connexion à un compte Top.gg avant la soumission. La fiche doit donc être validée depuis le compte du propriétaire de SentriX. Une fois connecté, utiliser exactement les informations ci-dessus et conserver le nom **SentriX**.
+Top.gg demande une connexion au compte du propriétaire avant la soumission. Utiliser exactement l'Application ID `1532010415951839252` et conserver le nom **SentriX**.
+
+## État du problème Find Bot — 24 août 2026
+
+Les vérifications côté Discord sont bonnes :
+
+- l'Application ID affiche bien SentriX dans le flux d'installation Discord ;
+- `Public Bot` est activé ;
+- `Requires OAuth2 Code Grant` est désactivé ;
+- le bot peut être ajouté à un serveur.
+
+Malgré cela, Top.gg affiche actuellement `Your application was not found` sur `Find Bot`. Ne pas changer l'Application ID ni les permissions Discord pour tenter de contourner ce message.
+
+### Message support prêt à envoyer
+
+```text
+Hello,
+
+My Discord bot SentriX is public and can be installed normally through Discord.
+Application ID: 1532010415951839252
+
+However, the Top.gg submission page returns “Your application was not found” when I use Find Bot.
+Public Bot is enabled and Requires OAuth2 Code Grant is disabled.
+The Discord installation flow correctly displays SentriX and allows it to be added to a server.
+
+Could you please check why the application is not being detected by the submission form?
+Thank you.
+```
+
+## API Top.gg après approbation
+
+Top.gg recommande désormais l'API v1 pour les nouvelles intégrations.
+
+Une fois la fiche créée :
+
+1. ouvrir les réglages **Integrations & API** du projet Top.gg ;
+2. créer/copier le token API v1 ;
+3. ajouter ce token uniquement dans Railway sous `TOPGG_TOKEN` ;
+4. ne jamais mettre le token dans GitHub.
+
+SentriX est déjà préparé pour publier automatiquement toutes les 30 minutes :
+
+- `server_count` ;
+- `shard_count`.
+
+Endpoint préparé : `PATCH https://top.gg/api/v1/projects/@me/metrics` avec authentification Bearer.
