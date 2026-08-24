@@ -17,6 +17,8 @@ V34 Ticket Transcript s'installe en tout dernier pour les fermetures : carte dé
 participants, raison, transcript HTML joint et bouton Transcript.
 V50 est installé après toutes ces couches et impose la structure visuelle uniforme des
 cartes standards : mêmes blocs, padding invisible et taille maximale des contenus.
+V51 marque explicitement V50 comme compatible avec la garde V25 : les cartes uniformes
+ne sont plus prises pour d'anciens layouts et donc ne sont plus bloquées à l'envoi.
 """
 from __future__ import annotations
 
@@ -186,11 +188,20 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .ticket_transcript_logs_v34 import install as install_ticket_transcript_v34
     install_ticket_transcript_v34(bot, extension_name)
 
-    # V50 doit être la dernière couche VISUELLE : elle ne touche ni au routage ni aux
-    # listeners. Les logs courts sont remplis avec des lignes invisibles et les gros sont
-    # tronqués, ce qui donne une hauteur quasi identique sur Discord desktop.
-    from .log_fixed_height_v50 import install as install_fixed_height_v50
+    # V50 doit être la dernière couche VISUELLE. La garde de sortie V25 considère
+    # `_sentrix_rectangle_v25` comme le marqueur de compatibilité ; sans ce marqueur elle
+    # prenait V50 pour un ancien layout et supprimait silencieusement tous les logs.
+    from .log_fixed_height_v50 import FixedHeightLogV50, install as install_fixed_height_v50
+    FixedHeightLogV50._sentrix_rectangle_v25 = True
+    FixedHeightLogV50._sentrix_reference_v26 = True
+    FixedHeightLogV50._sentrix_unified_v27 = True
+    FixedHeightLogV50._sentrix_premium_v28 = True
     install_fixed_height_v50(bot, extension_name)
+
+    # Panneau de vérification V51 : aucune nouvelle commande, uniquement le runtime de
+    # +setup > Sécurité et les boutons persistants du portail.
+    from .verification_polish_v51 import install as install_verification_polish_v51
+    install_verification_polish_v51(bot)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
