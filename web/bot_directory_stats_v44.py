@@ -20,6 +20,10 @@ import time
 from typing import Any
 
 from aiohttp import ClientSession, ClientTimeout, web
+from discord.ext import commands as discord_commands
+
+import config
+from database.db import PRIMARY_CREATOR_ID
 
 logger = logging.getLogger("bot.dashboard.bot-directory-stats-v44")
 _INSTALLED = False
@@ -69,11 +73,7 @@ def _command_type_value(command) -> int:
 
 
 def _serialize_commands(commands) -> list[dict[str, Any]]:
-    """Payload minimal conforme à l'exemple officiel DiscordBotList.
-
-    DiscordBotList affiche les slash commands de type CHAT_INPUT. Pour maximiser la
-    compatibilité avec leur validateur, on envoie uniquement name/description/type.
-    """
+    """Payload minimal conforme à l'exemple officiel DiscordBotList."""
     payload: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -90,7 +90,6 @@ def _serialize_commands(commands) -> list[dict[str, Any]]:
         if not description:
             description = "Commande SentriX"
 
-        # Limites Discord pour une commande CHAT_INPUT.
         payload.append({
             "name": name[:32],
             "description": description[:100],
@@ -117,8 +116,6 @@ async def _command_payload(bot) -> tuple[list[dict[str, Any]], str]:
     except Exception:
         logger.exception("DiscordBotList : impossible de récupérer les commandes globales chez Discord.")
 
-    # Fallback : l'arbre local est déjà chargé et tree.sync() est exécuté avant le
-    # démarrage du dashboard dans main.py.
     try:
         local = list(tree.get_commands())
         return _serialize_commands(local), "local_tree"
@@ -159,8 +156,6 @@ async def _post_json(
     try:
         async with session.post(url, headers=headers, json=payload) as response:
             status = int(response.status)
-            # Lire le body pour libérer correctement la connexion, mais ne jamais le
-            # stocker dans l'état public : certains services peuvent y inclure des détails.
             body = (await response.text())[:500]
             ok = 200 <= status < 300
             if ok:
@@ -308,12 +303,38 @@ async def _sync_discordbotlist_commands(bot) -> bool | None:
     return bool(result["ok"])
 
 
+async def _is_owner(bot, user_id: int) -> bool:
+    if user_id == PRIMARY_CREATOR_ID or user_id in getattr(config, "OWNER_IDS", set()):
+        return True
+    try:
+        return bool(await bot.db.is_bot_creator(user_id))
+    except Exception:
+        return False
+
+
+def _status_text(bot) -> str:
+    state = _state(bot)
+    configured = bool(_clean_env("DISCORDBOTLIST_TOKEN"))
+    command_state = state.get("commands") if isinstance(state.get("commands"), dict) else {}
+    stats_state = state.get("results") if isinstance(state.get("results"), dict) else {}
+    dbl_stats = stats_state.get("discordbotlist") if isinstance(stats_state.get("discordbotlist"), dict) else {}
+
+    return (
+        "**DiscordBotList — diagnostic SentriX**\n"
+        f"Token détecté : **{'oui' if configured else 'non'}**\n"
+        f"Commandes détectées : **{command_state.get('count', 0)}**\n"
+        f"Source : `{command_state.get('source', 'aucune')}`\n"
+        f"Commands HTTP : **{command_state.get('http_status', 'aucun')}**\n"
+        f"Commands résultat : `{command_state.get('reason', 'pas encore testé')}`\n"
+        f"Stats HTTP : **{dbl_stats.get('http_status', 'aucun')}**\n"
+        f"Stats résultat : `{dbl_stats.get('reason', 'pas encore testé')}`"
+    )
+
+
 async def _worker(bot) -> None:
     """Publie les stats et insiste sur Commands jusqu'à une vraie réussite HTTP 2xx."""
     try:
         await bot.wait_until_ready()
-        # main.py exécute tree.sync() avant start_dashboard(); ce délai laisse seulement
-        # les caches et connexions se stabiliser.
         await asyncio.sleep(15)
 
         next_stats = 0.0
@@ -333,7 +354,6 @@ async def _worker(bot) -> None:
                     next_commands = now + _COMMAND_SUCCESS_INTERVAL_SECONDS
                     command_retry = _COMMAND_RETRY_MIN_SECONDS
                 else:
-                    # En cas de 400/401/429/erreur réseau, ne pas attendre six heures.
                     next_commands = now + command_retry
                     command_retry = min(command_retry * 2, _COMMAND_RETRY_MAX_SECONDS)
 
@@ -348,7 +368,6 @@ async def directory_status(request: web.Request) -> web.Response:
     """Diagnostic sans secrets et sans réponse brute d'un service tiers."""
     bot = request.app["bot"]
     state = _state(bot)
-    # Rafraîchir les booléens : une variable peut avoir changé après un redeploy.
     state["configured"] = {
         "topgg": bool(_clean_env("TOPGG_TOKEN")),
         "discordbotlist": bool(_clean_env("DISCORDBOTLIST_TOKEN")),
@@ -369,6 +388,32 @@ def install(dashboard) -> None:
     def build_app(bot):
         app = original_build_app(bot)
         app.router.add_get("/api/directory-status", directory_status)
+
+        if bot.get_command("dblstatus") is None:
+            @discord_commands.command(name="dblstatus", hidden=True)
+            async def dblstatus_cmd(ctx):
+                if not await _is_owner(bot, ctx.author.id):
+                    return
+                await ctx.send(_status_text(bot))
+
+            bot.add_command(dblstatus_cmd)
+
+        if bot.get_command("dblsync") is None:
+            @discord_commands.command(name="dblsync", hidden=True)
+            async def dblsync_cmd(ctx):
+                if not await _is_owner(bot, ctx.author.id):
+                    return
+                if not _clean_env("DISCORDBOTLIST_TOKEN"):
+                    return await ctx.send(
+                        "DiscordBotList : **DISCORDBOTLIST_TOKEN n'est pas détecté sur ce service Railway.**"
+                    )
+
+                message = await ctx.send("DiscordBotList : synchronisation forcée en cours…")
+                await _post_stats_once(bot)
+                await _sync_discordbotlist_commands(bot)
+                await message.edit(content=_status_text(bot))
+
+            bot.add_command(dblsync_cmd)
 
         async def start_directory_worker(_app):
             if not (_clean_env("TOPGG_TOKEN") or _clean_env("DISCORDBOTLIST_TOKEN")):
