@@ -122,5 +122,9 @@ def install(dashboard) -> None:
 
     # V42 est branchée après les pages V40 et leur indexation afin de conserver le même
     # domaine public et le même dashboard sans modifier les routes privées.
-    from . import marketing_growth_v42
+    from . import bot_directory_stats_v44, marketing_growth_v42
+
     marketing_growth_v42.install(dashboard)
+    # V44 prépare l'envoi de stats Top.gg/DiscordBotList. Sans token, il reste en veille
+    # et n'effectue aucune requête réseau.
+    bot_directory_stats_v44.install(dashboard)
