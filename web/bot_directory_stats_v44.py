@@ -1,8 +1,12 @@
 """Synchronisation SentriX avec les annuaires de bots.
 
 Variables optionnelles :
-- TOPGG_TOKEN : token API Top.gg
+- TOPGG_TOKEN : token API v1 Top.gg (Bearer)
 - DISCORDBOTLIST_TOKEN : token API généré sur la fiche DiscordBotList
+
+Top.gg v1 :
+- metrics : PATCH /api/v1/projects/@me/metrics
+- commands : PUT /api/v1/projects/@me/commands
 
 DiscordBotList :
 - stats : POST /api/v1/bots/:id/stats avec le token brut
@@ -47,20 +51,25 @@ def _snapshot(bot) -> dict[str, int]:
     }
 
 
-def _command_auth(token: str) -> str:
-    """La doc Commands exige exactement `Authorization: Bot <token>`."""
+def _discordbotlist_command_auth(token: str) -> str:
     token = str(token or "").strip()
     if token.casefold().startswith("bot "):
         return token
     return f"Bot {token}"
 
 
-def _raw_auth(token: str) -> str:
-    """Stats/Vote API utilisent le token d'annuaire brut."""
+def _discordbotlist_raw_auth(token: str) -> str:
     token = str(token or "").strip()
     if token.casefold().startswith("bot "):
         return token[4:].strip()
     return token
+
+
+def _topgg_auth(token: str) -> str:
+    token = str(token or "").strip()
+    if token.casefold().startswith("bearer "):
+        return token
+    return f"Bearer {token}"
 
 
 def _command_type_value(command) -> int:
@@ -73,7 +82,7 @@ def _command_type_value(command) -> int:
 
 
 def _serialize_commands(commands) -> list[dict[str, Any]]:
-    """Payload minimal conforme à l'exemple officiel DiscordBotList."""
+    """Payload minimal compatible avec DiscordBotList et Top.gg v1."""
     payload: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -110,17 +119,17 @@ async def _command_payload(bot) -> tuple[list[dict[str, Any]], str]:
         payload = _serialize_commands(registered)
         if payload:
             return payload, "discord_registered"
-        logger.warning("DiscordBotList : Discord ne renvoie aucune slash command globale exploitable.")
+        logger.warning("Annuaires : Discord ne renvoie aucune slash command globale exploitable.")
     except asyncio.CancelledError:
         raise
     except Exception:
-        logger.exception("DiscordBotList : impossible de récupérer les commandes globales chez Discord.")
+        logger.exception("Annuaires : impossible de récupérer les commandes globales chez Discord.")
 
     try:
         local = list(tree.get_commands())
         return _serialize_commands(local), "local_tree"
     except Exception:
-        logger.exception("DiscordBotList : impossible de lire l'arbre local des commandes.")
+        logger.exception("Annuaires : impossible de lire l'arbre local des commandes.")
         return [], "local_error"
 
 
@@ -130,23 +139,26 @@ def _safe_http_reason(status: int | None) -> str:
     if 200 <= status < 300:
         return "ok"
     if status == 400:
-        return "invalid_payload"
+        return "invalid_payload_or_token"
     if status == 401:
         return "invalid_or_expired_token"
     if status == 403:
         return "forbidden"
     if status == 404:
-        return "bot_or_endpoint_not_found"
+        return "project_or_endpoint_not_found"
+    if status == 422:
+        return "validation_error"
     if status == 429:
         return "rate_limited"
     if 500 <= status < 600:
-        return "discordbotlist_server_error"
+        return "service_error"
     return f"http_{status}"
 
 
-async def _post_json(
+async def _request_json(
     session: ClientSession,
     *,
+    method: str,
     url: str,
     headers: dict[str, str],
     payload: Any,
@@ -154,7 +166,7 @@ async def _post_json(
 ) -> dict[str, Any]:
     status: int | None = None
     try:
-        async with session.post(url, headers=headers, json=payload) as response:
+        async with session.request(method, url, headers=headers, json=payload) as response:
             status = int(response.status)
             body = (await response.text())[:500]
             ok = 200 <= status < 300
@@ -180,6 +192,7 @@ def _base_state(bot) -> dict[str, Any]:
         "stats": _snapshot(bot),
         "results": {},
         "commands": {},
+        "topgg_commands": {},
         "configured": {
             "topgg": bool(_clean_env("TOPGG_TOKEN")),
             "discordbotlist": bool(_clean_env("DISCORDBOTLIST_TOKEN")),
@@ -191,6 +204,8 @@ def _state(bot) -> dict[str, Any]:
     state = getattr(bot, "_sentrix_directory_stats", None)
     if not isinstance(state, dict):
         state = _base_state(bot)
+    state.setdefault("commands", {})
+    state.setdefault("topgg_commands", {})
     return state
 
 
@@ -209,11 +224,12 @@ async def _post_stats_once(bot) -> dict[str, Any]:
 
     async with ClientSession(timeout=timeout) as session:
         if topgg_token:
-            results["topgg"] = await _post_json(
+            results["topgg"] = await _request_json(
                 session,
+                method="PATCH",
                 url="https://top.gg/api/v1/projects/@me/metrics",
                 headers={
-                    "Authorization": f"Bearer {topgg_token}",
+                    "Authorization": _topgg_auth(topgg_token),
                     "Content-Type": "application/json",
                     "User-Agent": "SentriX/1.0 directory-stats",
                 },
@@ -221,15 +237,16 @@ async def _post_stats_once(bot) -> dict[str, Any]:
                     "server_count": stats["guilds"],
                     "shard_count": stats["shards"],
                 },
-                label="Top.gg stats",
+                label="Top.gg metrics",
             )
 
         if dbl_token:
-            results["discordbotlist"] = await _post_json(
+            results["discordbotlist"] = await _request_json(
                 session,
+                method="POST",
                 url=f"https://discordbotlist.com/api/v1/bots/{bot.user.id}/stats",
                 headers={
-                    "Authorization": _raw_auth(dbl_token),
+                    "Authorization": _discordbotlist_raw_auth(dbl_token),
                     "Content-Type": "application/json",
                     "User-Agent": "SentriX/1.0 directory-stats",
                 },
@@ -274,16 +291,16 @@ async def _sync_discordbotlist_commands(bot) -> bool | None:
             "reason": "no_commands_found",
         }
         bot._sentrix_directory_stats = state
-        logger.warning("DiscordBotList commands : aucune slash command trouvée.")
         return False
 
     timeout = ClientTimeout(total=20, connect=6)
     async with ClientSession(timeout=timeout) as session:
-        result = await _post_json(
+        result = await _request_json(
             session,
+            method="POST",
             url=f"https://discordbotlist.com/api/v1/bots/{bot.user.id}/commands",
             headers={
-                "Authorization": _command_auth(token),
+                "Authorization": _discordbotlist_command_auth(token),
                 "Content-Type": "application/json",
                 "User-Agent": "SentriX/1.0 directory-commands",
             },
@@ -292,6 +309,54 @@ async def _sync_discordbotlist_commands(bot) -> bool | None:
         )
 
     state["commands"] = {
+        "updated_at": now,
+        "count": len(commands),
+        "ok": bool(result["ok"]),
+        "source": source,
+        "http_status": result["http_status"],
+        "reason": result["reason"],
+    }
+    bot._sentrix_directory_stats = state
+    return bool(result["ok"])
+
+
+async def _sync_topgg_commands(bot) -> bool | None:
+    token = _clean_env("TOPGG_TOKEN")
+    if not token or not getattr(bot, "user", None) or not bot.is_ready():
+        return None
+
+    commands, source = await _command_payload(bot)
+    now = int(time.time())
+    state = _state(bot)
+
+    if not commands:
+        state["topgg_commands"] = {
+            "updated_at": now,
+            "count": 0,
+            "ok": False,
+            "source": source,
+            "http_status": None,
+            "reason": "no_commands_found",
+        }
+        bot._sentrix_directory_stats = state
+        return False
+
+    timeout = ClientTimeout(total=20, connect=6)
+    async with ClientSession(timeout=timeout) as session:
+        result = await _request_json(
+            session,
+            method="PUT",
+            url="https://top.gg/api/v1/projects/@me/commands",
+            headers={
+                "Authorization": _topgg_auth(token),
+                "Content-Type": "application/json",
+                "User-Agent": "SentriX/1.0 topgg-commands",
+            },
+            payload=commands,
+            label=f"Top.gg commands ({len(commands)})",
+        )
+
+    state["topgg_commands"] = {
         "updated_at": now,
         "count": len(commands),
         "ok": bool(result["ok"]),
@@ -312,7 +377,7 @@ async def _is_owner(bot, user_id: int) -> bool:
         return False
 
 
-def _status_text(bot) -> str:
+def _dbl_status_text(bot) -> str:
     state = _state(bot)
     configured = bool(_clean_env("DISCORDBOTLIST_TOKEN"))
     command_state = state.get("commands") if isinstance(state.get("commands"), dict) else {}
@@ -331,15 +396,35 @@ def _status_text(bot) -> str:
     )
 
 
+def _topgg_status_text(bot) -> str:
+    state = _state(bot)
+    configured = bool(_clean_env("TOPGG_TOKEN"))
+    command_state = state.get("topgg_commands") if isinstance(state.get("topgg_commands"), dict) else {}
+    stats_state = state.get("results") if isinstance(state.get("results"), dict) else {}
+    topgg_stats = stats_state.get("topgg") if isinstance(stats_state.get("topgg"), dict) else {}
+
+    return (
+        "**Top.gg — diagnostic SentriX**\n"
+        f"Token détecté : **{'oui' if configured else 'non'}**\n"
+        f"Commandes détectées : **{command_state.get('count', 0)}**\n"
+        f"Source : `{command_state.get('source', 'aucune')}`\n"
+        f"Commands HTTP : **{command_state.get('http_status', 'aucun')}**\n"
+        f"Commands résultat : `{command_state.get('reason', 'pas encore testé')}`\n"
+        f"Metrics HTTP : **{topgg_stats.get('http_status', 'aucun')}**\n"
+        f"Metrics résultat : `{topgg_stats.get('reason', 'pas encore testé')}`"
+    )
+
+
 async def _worker(bot) -> None:
-    """Publie les stats et insiste sur Commands jusqu'à une vraie réussite HTTP 2xx."""
     try:
         await bot.wait_until_ready()
         await asyncio.sleep(15)
 
         next_stats = 0.0
-        next_commands = 0.0
-        command_retry = _COMMAND_RETRY_MIN_SECONDS
+        next_dbl_commands = 0.0
+        next_topgg_commands = 0.0
+        dbl_retry = _COMMAND_RETRY_MIN_SECONDS
+        topgg_retry = _COMMAND_RETRY_MIN_SECONDS
 
         while not bot.is_closed():
             now = time.monotonic()
@@ -348,14 +433,23 @@ async def _worker(bot) -> None:
                 await _post_stats_once(bot)
                 next_stats = now + _STATS_INTERVAL_SECONDS
 
-            if _clean_env("DISCORDBOTLIST_TOKEN") and now >= next_commands:
+            if _clean_env("DISCORDBOTLIST_TOKEN") and now >= next_dbl_commands:
                 ok = await _sync_discordbotlist_commands(bot)
                 if ok:
-                    next_commands = now + _COMMAND_SUCCESS_INTERVAL_SECONDS
-                    command_retry = _COMMAND_RETRY_MIN_SECONDS
+                    next_dbl_commands = now + _COMMAND_SUCCESS_INTERVAL_SECONDS
+                    dbl_retry = _COMMAND_RETRY_MIN_SECONDS
                 else:
-                    next_commands = now + command_retry
-                    command_retry = min(command_retry * 2, _COMMAND_RETRY_MAX_SECONDS)
+                    next_dbl_commands = now + dbl_retry
+                    dbl_retry = min(dbl_retry * 2, _COMMAND_RETRY_MAX_SECONDS)
+
+            if _clean_env("TOPGG_TOKEN") and now >= next_topgg_commands:
+                ok = await _sync_topgg_commands(bot)
+                if ok:
+                    next_topgg_commands = now + _COMMAND_SUCCESS_INTERVAL_SECONDS
+                    topgg_retry = _COMMAND_RETRY_MIN_SECONDS
+                else:
+                    next_topgg_commands = now + topgg_retry
+                    topgg_retry = min(topgg_retry * 2, _COMMAND_RETRY_MAX_SECONDS)
 
             await asyncio.sleep(_WORKER_TICK_SECONDS)
     except asyncio.CancelledError:
@@ -365,7 +459,6 @@ async def _worker(bot) -> None:
 
 
 async def directory_status(request: web.Request) -> web.Response:
-    """Diagnostic sans secrets et sans réponse brute d'un service tiers."""
     bot = request.app["bot"]
     state = _state(bot)
     state["configured"] = {
@@ -394,8 +487,7 @@ def install(dashboard) -> None:
             async def dblstatus_cmd(ctx):
                 if not await _is_owner(bot, ctx.author.id):
                     return
-                await ctx.send(_status_text(bot))
-
+                await ctx.send(_dbl_status_text(bot))
             bot.add_command(dblstatus_cmd)
 
         if bot.get_command("dblsync") is None:
@@ -407,13 +499,34 @@ def install(dashboard) -> None:
                     return await ctx.send(
                         "DiscordBotList : **DISCORDBOTLIST_TOKEN n'est pas détecté sur ce service Railway.**"
                     )
-
                 message = await ctx.send("DiscordBotList : synchronisation forcée en cours…")
                 await _post_stats_once(bot)
                 await _sync_discordbotlist_commands(bot)
-                await message.edit(content=_status_text(bot))
-
+                await message.edit(content=_dbl_status_text(bot))
             bot.add_command(dblsync_cmd)
+
+        if bot.get_command("topggstatus") is None:
+            @discord_commands.command(name="topggstatus", hidden=True)
+            async def topggstatus_cmd(ctx):
+                if not await _is_owner(bot, ctx.author.id):
+                    return
+                await ctx.send(_topgg_status_text(bot))
+            bot.add_command(topggstatus_cmd)
+
+        if bot.get_command("topggsync") is None:
+            @discord_commands.command(name="topggsync", hidden=True)
+            async def topggsync_cmd(ctx):
+                if not await _is_owner(bot, ctx.author.id):
+                    return
+                if not _clean_env("TOPGG_TOKEN"):
+                    return await ctx.send(
+                        "Top.gg : **TOPGG_TOKEN n'est pas détecté sur ce service Railway.**"
+                    )
+                message = await ctx.send("Top.gg : synchronisation forcée en cours…")
+                await _post_stats_once(bot)
+                await _sync_topgg_commands(bot)
+                await message.edit(content=_topgg_status_text(bot))
+            bot.add_command(topggsync_cmd)
 
         async def start_directory_worker(_app):
             if not (_clean_env("TOPGG_TOKEN") or _clean_env("DISCORDBOTLIST_TOKEN")):
