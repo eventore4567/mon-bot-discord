@@ -40,16 +40,20 @@ def _snapshot(bot) -> dict[str, int]:
     }
 
 
-def _discordbotlist_auth(token: str) -> str:
-    """DiscordBotList attend `Authorization: Bot <token>`.
-
-    Accepte aussi une valeur déjà préfixée pour éviter `Bot Bot ...` si l'utilisateur
-    a copié le préfixe avec le token dans Railway.
-    """
+def _discordbotlist_command_auth(token: str) -> str:
+    """L'endpoint Commands exige `Authorization: Bot <token>`."""
     token = str(token or "").strip()
     if token.casefold().startswith("bot "):
         return token
     return f"Bot {token}"
+
+
+def _discordbotlist_raw_auth(token: str) -> str:
+    """Les endpoints Stats/Vote API utilisent le token brut dans Authorization."""
+    token = str(token or "").strip()
+    if token.casefold().startswith("bot "):
+        return token[4:].strip()
+    return token
 
 
 def _command_type_value(command) -> int:
@@ -177,7 +181,7 @@ async def _post_stats_once(bot) -> dict[str, bool]:
                 method="POST",
                 url=f"https://discordbotlist.com/api/v1/bots/{bot.user.id}/stats",
                 headers={
-                    "Authorization": _discordbotlist_auth(dbl_token),
+                    "Authorization": _discordbotlist_raw_auth(dbl_token),
                     "Content-Type": "application/json",
                     "User-Agent": "SentriX/1.0 directory-stats",
                 },
@@ -220,7 +224,7 @@ async def _sync_discordbotlist_commands(bot) -> bool | None:
             method="POST",
             url=f"https://discordbotlist.com/api/v1/bots/{bot.user.id}/commands",
             headers={
-                "Authorization": _discordbotlist_auth(token),
+                "Authorization": _discordbotlist_command_auth(token),
                 "Content-Type": "application/json",
                 "User-Agent": "SentriX/1.0 directory-commands",
             },
