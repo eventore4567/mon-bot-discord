@@ -192,10 +192,11 @@ def install(dashboard) -> None:
 
     dashboard.build_app = build_app
 
-    from . import dashboard_user_avatar_v46, growth_referrals_v43, marketing_growth_indexing_v40, marketing_growth_v40, topgg_import_v45
+    from . import dashboard_confirm_modal_v47, dashboard_user_avatar_v46, growth_referrals_v43, marketing_growth_indexing_v40, marketing_growth_v40, topgg_import_v45
 
     marketing_growth_v40.install(dashboard)
     marketing_growth_indexing_v40.install(dashboard)
     growth_referrals_v43.install(dashboard)
     topgg_import_v45.install(dashboard)
     dashboard_user_avatar_v46.install(dashboard)
+    dashboard_confirm_modal_v47.install(dashboard)
