@@ -1,6 +1,11 @@
 """Sessions persistantes du dashboard SentriX."""
 from __future__ import annotations
-import json, logging, time
+
+import json
+import logging
+import time
+from email.utils import formatdate
+
 from aiohttp import web
 
 logger = logging.getLogger("bot.dashboard.persistent-session")
@@ -17,11 +22,13 @@ CREATE TABLE IF NOT EXISTS dashboard_sessions (
 )
 """
 
+
 async def _prepare_database(app: web.Application) -> None:
     db = app["bot"].db
     await db.execute(_SCHEMA)
     await db.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expires ON dashboard_sessions (expires_at)")
     await db.execute("DELETE FROM dashboard_sessions WHERE expires_at <= ?", (int(time.time()),))
+
 
 async def _save_session(request: web.Request, session_id: str, session: dict) -> None:
     if not session_id or not session:
@@ -39,6 +46,7 @@ async def _save_session(request: web.Request, session_id: str, session: dict) ->
         "expires_at=excluded.expires_at, updated_at=excluded.updated_at",
         (session_id, payload, user_id, expires_at, now_ts, now_ts),
     )
+
 
 async def _restore_session(request: web.Request, dashboard) -> None:
     session_id = request.cookies.get(dashboard.SESSION_COOKIE)
@@ -75,10 +83,24 @@ async def _restore_session(request: web.Request, dashboard) -> None:
         except Exception:
             pass
         return
-    # La date enregistrée en base reste l'autorité : un ancien JSON ne peut jamais
-    # prolonger lui-même sa durée de vie.
     session["expires_at"] = float(expires_at)
     request.app["sessions"][session_id] = session
+
+
+def _set_persistent_cookie(response: web.StreamResponse, request: web.Request, dashboard, session_id: str, expires_at: float) -> None:
+    """Écrit un vrai cookie persistant navigateur, pas un cookie de session d'onglet."""
+    remaining = max(1, int(expires_at - time.time()))
+    response.set_cookie(
+        dashboard.SESSION_COOKIE,
+        session_id,
+        max_age=remaining,
+        expires=formatdate(expires_at, usegmt=True),
+        path="/",
+        httponly=True,
+        secure=dashboard._public_url(request).startswith("https://"),
+        samesite="Lax",
+    )
+
 
 def install(dashboard) -> None:
     global _INSTALLED
@@ -86,8 +108,6 @@ def install(dashboard) -> None:
         return
     _INSTALLED = True
 
-    # 30 jours fixes depuis la connexion : fermer le navigateur ou redémarrer Railway
-    # ne remet pas le compteur à zéro.
     dashboard.SESSION_TTL = SESSION_TTL_SECONDS
     original_callback = dashboard.handle_callback
     original_logout = dashboard.handle_logout
@@ -97,8 +117,6 @@ def install(dashboard) -> None:
         try:
             return await original_callback(request)
         except web.HTTPFound as redirect:
-            # Une connexion OAuth réussie crée la session en mémoire et son cookie.
-            # On persiste uniquement la session applicative ; jamais le token OAuth.
             morsel = redirect.cookies.get(dashboard.SESSION_COOKIE)
             if morsel is not None:
                 session_id = morsel.value
@@ -108,6 +126,15 @@ def install(dashboard) -> None:
                         await _save_session(request, session_id, session)
                     except Exception:
                         logger.exception("Sauvegarde de session dashboard impossible.")
+                    # Réécrit explicitement le cookie avec Max-Age + Expires + Path=/. Cela
+                    # évite qu'un navigateur le traite comme un simple cookie d'onglet.
+                    _set_persistent_cookie(
+                        redirect,
+                        request,
+                        dashboard,
+                        session_id,
+                        float(session.get("expires_at") or (time.time() + SESSION_TTL_SECONDS)),
+                    )
             raise
 
     async def handle_logout(request: web.Request):
@@ -124,13 +151,9 @@ def install(dashboard) -> None:
 
     @web.middleware
     async def persistent_session_middleware(request: web.Request, handler):
-        # Restaure la session depuis SQLite avant que le verrou Administrateur ne la lise.
         await _restore_session(request, dashboard)
         response = await handler(request)
 
-        # Les permissions Discord restent revérifiées à chaque accès par le middleware
-        # Administrateur. On synchronise seulement le contenu de la session sans repousser
-        # sa date d'expiration originale.
         session_id = request.cookies.get(dashboard.SESSION_COOKIE)
         if session_id:
             session = request.app["sessions"].get(session_id)
