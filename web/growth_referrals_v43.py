@@ -105,3 +105,10 @@ def install(dashboard) -> None:
         return app
 
     dashboard.build_app = build_app
+
+    # Les couches V44/V45 sont installées ici car V43 est déjà appelée en dernier par
+    # l'identité publique V39. Cela garantit qu'elles sont branchées avant build_app().
+    from . import bot_directory_stats_v44, health_runtime_v45
+
+    bot_directory_stats_v44.install(dashboard)
+    health_runtime_v45.install(dashboard)
