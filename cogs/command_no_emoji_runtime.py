@@ -198,6 +198,10 @@ def install(bot: commands.Bot) -> None:
             install_official_server(bot)
             from .official_server_polish import install as install_official_server_polish
             install_official_server_polish(bot)
+            # Toujours après official_server : ce correctif remplace son ancien wrapper
+            # par une version qui conserve la signature originale de create-server.
+            from .official_server_command_fix import install as install_official_server_command_fix
+            install_official_server_command_fix(bot)
         except Exception:
             # Un outil de construction du serveur officiel ne doit jamais bloquer le bot.
             pass
