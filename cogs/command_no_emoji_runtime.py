@@ -11,6 +11,7 @@ et limites Discord. La logique des commandes et des composants n'est jamais modi
 from __future__ import annotations
 
 import re
+import sys
 from typing import Any
 
 import discord
@@ -176,6 +177,17 @@ def install(bot: commands.Bot) -> None:
     except Exception:
         # Une annonce de mise à jour ne doit jamais empêcher SentriX de démarrer.
         pass
+
+    # Le correctif des identités de logs est chargé seulement une fois que le renderer
+    # V50/V53 existe réellement. Il est ensuite rejoué après chaque extension afin de
+    # rester le dernier mot si une ancienne couche remplace encore une fonction visuelle.
+    if "cogs.log_fixed_height_v50" in sys.modules:
+        try:
+            from .log_identity_context_v60 import install as install_log_identity_context_v60
+            install_log_identity_context_v60(bot)
+        except Exception:
+            # Le rendu d'un journal ne doit jamais empêcher SentriX de démarrer.
+            pass
 
     # Le constructeur officiel dépend du vrai Cog ServerBuilder. Ne pas importer son
     # module avant le chargement de cette extension évite de conserver une ancienne
