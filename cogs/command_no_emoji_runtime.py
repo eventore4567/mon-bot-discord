@@ -184,6 +184,8 @@ def install(bot: commands.Bot) -> None:
         try:
             from .official_server import install as install_official_server
             install_official_server(bot)
+            from .official_server_polish import install as install_official_server_polish
+            install_official_server_polish(bot)
         except Exception:
             # Un outil de construction du serveur officiel ne doit jamais bloquer le bot.
             pass
