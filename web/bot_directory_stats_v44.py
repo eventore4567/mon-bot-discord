@@ -41,6 +41,11 @@ def _snapshot(bot) -> dict[str, int]:
 
 
 def _discordbotlist_auth(token: str) -> str:
+    """DiscordBotList attend `Authorization: Bot <token>`.
+
+    Accepte aussi une valeur déjà préfixée pour éviter `Bot Bot ...` si l'utilisateur
+    a copié le préfixe avec le token dans Railway.
+    """
     token = str(token or "").strip()
     if token.casefold().startswith("bot "):
         return token
@@ -95,9 +100,6 @@ def _command_payload(bot) -> list[dict]:
                 "type": _command_type_value(command),
             }
 
-        # DiscordBotList attend le format Discord. On retire uniquement les champs
-        # d'identité renvoyés par certaines implémentations qui ne font pas partie du
-        # corps de création d'une commande.
         for key in (
             "id",
             "application_id",
@@ -175,7 +177,7 @@ async def _post_stats_once(bot) -> dict[str, bool]:
                 method="POST",
                 url=f"https://discordbotlist.com/api/v1/bots/{bot.user.id}/stats",
                 headers={
-                    "Authorization": dbl_token,
+                    "Authorization": _discordbotlist_auth(dbl_token),
                     "Content-Type": "application/json",
                     "User-Agent": "SentriX/1.0 directory-stats",
                 },
