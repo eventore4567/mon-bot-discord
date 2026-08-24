@@ -1,90 +1,118 @@
-# SentriX — Kit YouTube / Shorts basé sur les recherches
+# SentriX — Kit YouTube / Shorts SEO France
 
-Recherche vidIQ effectuée pour la France autour de **bot discord**.
+Recherche vidIQ mise à jour le 24 août 2026.
 
-## Mots-clés prioritaires
+## Mots-clés prioritaires en France
 
-- `discord bot` — env. 2 926 recherches/mois en France ; volume global élevé et concurrence modérée.
-- `discord bots` — env. 3 388 recherches/mois en France.
-- `discord server` — env. 2 938 recherches/mois en France.
-- `bot discord` — bon score d'opportunité global pour le sujet.
-- `best discord bots` — fort volume global ; utile pour des vidéos comparatives.
-- `discord bot setup` — bon angle pour montrer le dashboard et l'installation.
+- `ticket tool discord` — env. **3 569 recherches/mois** ;
+- `discord bots` — env. **3 388 recherches/mois** ;
+- `discord server` — env. **2 938 recherches/mois** ;
+- `discord bot` — env. **2 926 recherches/mois** ;
+- `discord` — env. **16 619 recherches/mois**, mais intention trop générale pour servir de mot-clé principal.
 
-Le nom **SentriX** doit être ajouté aux titres/descriptions, mais il ne faut pas compter uniquement sur la recherche de marque tant que le bot est encore peu connu.
+Les recherches globales déjà relevées autour de `discord ticket bot`, `discord moderation bot`, `discord ai bot` et `best discord bots` restent utiles pour toucher un public anglophone ou bilingue.
 
-## Titres Shorts conseillés
+## Ordre éditorial
 
-1. **Ce Discord Bot remplace 5 bots à lui seul — SentriX**
-2. **Le Discord Bot qui gère tout ton serveur — SentriX**
-3. **Best Discord Bot pour sécuriser ton serveur ? SentriX**
-4. **Ce Discord Bot crée tes tickets sans commandes**
-5. **Un vrai Dashboard pour ton Discord Bot**
+1. Tickets / ticket tool Discord.
+2. Bot Discord tout-en-un / plusieurs bots vs SentriX.
+3. Dashboard.
+4. Modération et sécurité.
+5. IA.
+6. Recrutement, vocaux temporaires, niveaux et communauté.
+
+## Titres Shorts prioritaires
+
+1. **Ticket Tool Discord : crée tes tickets avec un dashboard — SentriX**
+2. **Ce Discord Bot remplace plusieurs bots à lui seul — SentriX**
+3. **Discord Bot Dashboard : configure ton serveur sans commandes**
+4. **Discord Ticket Bot : panel + claim + transcript avec SentriX**
+5. **5 Discord Bots vs 1 seul : SentriX**
 6. **Comment protéger un Discord Server contre les raids**
-7. **Discord Bot Setup en quelques clics avec SentriX**
-8. **J'ai mis une IA dans un Discord Bot**
-9. **Ce bot Discord recrute ton staff automatiquement**
-10. **5 Discord Bots vs 1 seul : SentriX**
+7. **Discord Moderation Bot : gérer son staff avec SentriX**
+8. **J’ai mis une IA dans un Discord Bot**
+9. **Ce bot Discord gère tes recrutements staff**
+10. **Un vocal privé automatique sur Discord avec SentriX**
 
-## Titres longs / vidéos de démonstration
+## Titres vidéos longues
 
-- **SentriX : le Discord Bot tout-en-un avec Dashboard, Tickets, IA et Sécurité**
-- **Comment configurer un Discord Bot complet sans commandes — SentriX**
-- **Best Discord Bots 2026 : pourquoi j'ai créé SentriX**
+- **SentriX : Bot Discord tout-en-un avec Dashboard, Tickets, IA et Sécurité**
+- **Ticket Tool Discord : créer un système de tickets complet avec SentriX**
+- **Comment configurer un Discord Bot complet sans mémoriser 30 commandes**
 - **Comment sécuriser un Discord Server avec AutoMod, Anti-Raid et Anti-Nuke**
-
-## Description courte réutilisable
-
-SentriX est un Discord bot tout-en-un avec dashboard : sécurité, modération, tickets, IA, logs, niveaux, économie, automatisations et outils staff. Ajoute SentriX à ton serveur depuis le site officiel.
+- **5 Discord Bots vs SentriX : qu’est-ce qu’un bot tout-en-un peut remplacer ?**
 
 ## Première ligne de description
 
-**Ajoute SentriX à ton Discord : [DASHBOARD_PUBLIC_URL]/start**
+Pour YouTube, utiliser le lien mesuré :
 
-La première ligne doit contenir le CTA et le lien, avant la longue description.
+**Ajoute SentriX à ton Discord : https://mon-bot-discord-production-8944.up.railway.app/go/youtube**
 
-## Mots-clés / tags à utiliser naturellement
+## Description courte réutilisable
 
-`discord bot`, `discord bots`, `bot discord`, `discord server`, `best discord bots`, `discord bot setup`, `moderation bot`, `ticket bot`, `discord automod`, `sentrix`
+SentriX est un bot Discord tout-en-un avec dashboard : tickets, modération, sécurité, IA, logs, niveaux, économie, automatisations et outils staff. Ajoute SentriX depuis le site officiel et configure chaque fonction serveur par serveur.
 
-Ne pas bourrer le titre avec tous les mots-clés. Un titre = une promesse claire + 1 mot-clé principal.
+## Description Tickets
+
+Crée un système de tickets Discord avec panels, formulaires, claim staff, fermeture et transcripts depuis SentriX. Le dashboard permet de centraliser la configuration sans dépendre uniquement de commandes Discord.
+
+Page dédiée : https://mon-bot-discord-production-8944.up.railway.app/bot-discord-tickets
+
+## Description Modération
+
+SentriX centralise sanctions, historique, permissions staff, logs et protections serveur dans un seul bot Discord avec dashboard.
+
+Page dédiée : https://mon-bot-discord-production-8944.up.railway.app/bot-discord-moderation
+
+## Description Dashboard
+
+Configure tickets, sécurité, logs, IA, niveaux et autres fonctions depuis le dashboard web SentriX, avec accès contrôlé par les permissions Discord.
+
+Page dédiée : https://mon-bot-discord-production-8944.up.railway.app/bot-discord-dashboard
+
+## Tags / expressions à utiliser naturellement
+
+`ticket tool discord`, `discord bot`, `discord bots`, `discord server`, `discord ticket bot`, `discord bot dashboard`, `discord moderation bot`, `discord automod`, `discord ai bot`, `sentrix`
+
+Ne pas bourrer le titre. Une vidéo doit viser une intention principale.
 
 ## Stratégie Shorts
 
-Pour les vidéos courtes, la priorité reste la rétention :
-
-- résultat visible dans les 1–2 premières secondes ;
+- résultat visible en 1–2 secondes ;
+- 12–25 secondes pour une fonction ;
+- 25–45 secondes pour un mini tutoriel ;
 - texte écran très court ;
-- 12–25 secondes ;
-- aucune longue intro ;
-- montrer le dashboard ou l'action réelle ;
-- CTA final : **« Ajoute SentriX — lien en description »**.
+- aucune intro longue ;
+- montrer le dashboard ou l’action réelle ;
+- CTA final unique ;
+- lien `/go/youtube` dans la première ligne de description.
 
-## Angles de recherche à tester
+## A/B tests de titres
 
-### `discord bot`
-Montrer SentriX comme bot tout-en-un.
+Tickets :
+- **Ticket Tool Discord : le système de tickets que ton serveur attend**
+- **Créer des tickets Discord sans commandes — SentriX**
+- **Discord Ticket Bot avec Dashboard : SentriX**
 
-### `discord bots`
-Format comparatif : « Pourquoi utiliser 5 Discord bots quand un seul peut faire ça ? »
+Bot tout-en-un :
+- **Ce Discord Bot remplace 5 bots**
+- **Pourquoi utiliser plusieurs Discord Bots ?**
+- **Le Discord Bot qui centralise tout ton serveur**
 
-### `discord server`
-Angle problème : sécurité, raids, tickets, organisation du staff.
+Dashboard :
+- **Un vrai Dashboard pour ton Discord Bot**
+- **Configure ton serveur Discord sans 30 commandes**
+- **Tout ton Discord depuis une seule page**
 
-### `best discord bots`
-Vidéo comparative honnête. Expliquer ce que SentriX centralise plutôt que prétendre être objectivement n°1.
+## Indicateurs de réussite
 
-### `discord bot setup`
-Tutoriel très court : ajout → connexion Discord → sélection serveur → activation d'une fonction.
+Pour chaque vidéo noter :
+- impressions ;
+- taux de clic du titre/miniature pour les vidéos longues ;
+- rétention à 3 secondes ;
+- pourcentage moyen regardé ;
+- clics `/go/youtube` ;
+- installations ;
+- serveurs encore actifs après 7 jours.
 
-## A/B tests de hooks
-
-Pour une même démonstration, publier des variantes de hook lors de futures vidéos :
-
-- `Tu utilises encore 5 bots sur Discord ?`
-- `Ton Discord bot peut faire ça ?`
-- `J'ai remplacé mes bots Discord par un seul.`
-- `Voilà comment je protège un Discord server.`
-- `Un dashboard pour gérer tout ton serveur Discord.`
-
-Mesurer surtout : rétention à 3 secondes, durée moyenne vue, clics vers `/start` et installations réellement conservées.
+La meilleure vidéo est celle qui crée des serveurs actifs, pas seulement celle qui obtient le plus de vues.
