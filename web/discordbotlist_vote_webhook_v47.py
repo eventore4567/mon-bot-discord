@@ -3,6 +3,11 @@
 DiscordBotList POST les informations du votant vers l'URL configurée et envoie le
 Webhook Secret dans le header Authorization. Le secret est lu uniquement depuis
 DISCORDBOTLIST_WEBHOOK_SECRET et n'est jamais renvoyé par l'API.
+
+Le bouton « Test Webhook » de DiscordBotList effectue sa requête depuis le navigateur.
+Une politique CORS très limitée autorise donc uniquement discordbotlist.com à tester
+ce endpoint avec Authorization + Content-Type. Les vrais votes restent protégés par le
+même secret.
 """
 from __future__ import annotations
 
@@ -19,17 +24,32 @@ from database.db import PRIMARY_CREATOR_ID
 logger = logging.getLogger("bot.dashboard.discordbotlist-vote-v47")
 _INSTALLED = False
 _ROUTE = "/api/discordbotlist/vote"
+_ALLOWED_ORIGINS = {
+    "https://discordbotlist.com",
+    "https://www.discordbotlist.com",
+}
 
 
 def _secret() -> str:
     return str(os.getenv("DISCORDBOTLIST_WEBHOOK_SECRET", "") or "").strip()
 
 
-def _headers() -> dict[str, str]:
-    return {
+def _cors_headers(request: web.Request | None = None) -> dict[str, str]:
+    headers = {
         "Cache-Control": "no-store, max-age=0",
         "X-Robots-Tag": "noindex, nofollow",
     }
+    if request is not None:
+        origin = str(request.headers.get("Origin", "") or "").strip()
+        if origin in _ALLOWED_ORIGINS:
+            headers.update({
+                "Access-Control-Allow-Origin": origin,
+                "Vary": "Origin",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                "Access-Control-Max-Age": "600",
+            })
+    return headers
 
 
 async def _ensure_table(bot) -> None:
@@ -86,18 +106,27 @@ async def _notify_creator(bot, *, user_id: str, username: str, total_votes: int)
         logger.warning("Impossible d'envoyer le MP de vote DiscordBotList au créateur.", exc_info=True)
 
 
+async def vote_preflight(request: web.Request) -> web.Response:
+    """Autorise uniquement le test navigateur provenant de DiscordBotList."""
+    origin = str(request.headers.get("Origin", "") or "").strip()
+    if origin not in _ALLOWED_ORIGINS:
+        return web.Response(status=403, headers=_cors_headers(request))
+    return web.Response(status=204, headers=_cors_headers(request))
+
+
 async def vote_webhook(request: web.Request) -> web.Response:
+    headers = _cors_headers(request)
     if not _secret():
         return web.json_response(
             {"ok": False, "error": "webhook_not_configured"},
             status=503,
-            headers=_headers(),
+            headers=headers,
         )
     if not _authorized(request):
         return web.json_response(
             {"ok": False, "error": "unauthorized"},
             status=401,
-            headers=_headers(),
+            headers=headers,
         )
 
     try:
@@ -106,13 +135,13 @@ async def vote_webhook(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": "invalid_json"},
             status=400,
-            headers=_headers(),
+            headers=headers,
         )
     if not isinstance(payload, dict):
         return web.json_response(
             {"ok": False, "error": "invalid_payload"},
             status=400,
-            headers=_headers(),
+            headers=headers,
         )
 
     user_id = str(payload.get("id") or "").strip()
@@ -122,7 +151,7 @@ async def vote_webhook(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": "invalid_user_id"},
             status=400,
-            headers=_headers(),
+            headers=headers,
         )
 
     bot = request.app["bot"]
@@ -141,7 +170,7 @@ async def vote_webhook(request: web.Request) -> web.Response:
             return web.json_response(
                 {"ok": True, "duplicate": True},
                 status=200,
-                headers=_headers(),
+                headers=headers,
             )
 
         await bot.db.execute(
@@ -155,7 +184,7 @@ async def vote_webhook(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": "storage_error"},
             status=500,
-            headers=_headers(),
+            headers=headers,
         )
 
     logger.info("Vote DiscordBotList reçu pour user_id=%s.", user_id)
@@ -163,7 +192,7 @@ async def vote_webhook(request: web.Request) -> web.Response:
     return web.json_response(
         {"ok": True},
         status=200,
-        headers=_headers(),
+        headers=headers,
     )
 
 
@@ -176,7 +205,7 @@ async def vote_status(request: web.Request) -> web.Response:
             "configured": bool(_secret()),
             "method": "POST",
         },
-        headers=_headers(),
+        headers=_cors_headers(request),
     )
 
 
@@ -191,6 +220,7 @@ def install(dashboard) -> None:
         app = original_build_app(bot)
         app.router.add_get(_ROUTE, vote_status)
         app.router.add_post(_ROUTE, vote_webhook)
+        app.router.add_options(_ROUTE, vote_preflight)
 
         async def prepare_vote_table(_app):
             try:
