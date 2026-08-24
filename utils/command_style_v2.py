@@ -13,6 +13,7 @@ persistantes, pièces jointes et données restent donc inchangés.
 from __future__ import annotations
 
 import re
+import sys
 from datetime import datetime, timezone
 from typing import Any
 
@@ -272,6 +273,37 @@ def _gentle_clean_view(view):
     return style_view(view)
 
 
+def _patch_help_raw_edits(bot) -> None:
+    """Style aussi les pages +help qui utilisent volontairement Message.edit brut.
+
+    L'ancien help contourne les wrappers globaux pour éviter d'autres runtimes historiques.
+    On garde ce comportement, mais on applique V2 juste avant l'édition afin que l'accueil,
+    les catégories, la recherche et les pages suivantes aient exactement la même carte.
+    """
+    module = sys.modules.get("cogs.help_clean_style")
+    if module is None or getattr(module, "_sentrix_command_style_v2_patched", False):
+        return
+
+    original_edit = getattr(module, "_edit_help_message", None)
+    if original_edit is None:
+        return
+
+    async def styled_edit(interaction, *, embed, view):
+        style_embed(
+            embed,
+            guild=getattr(interaction, "guild", None),
+            requester=getattr(interaction, "user", None),
+            bot_user=getattr(getattr(interaction, "client", None), "user", None),
+        )
+        style_view(view)
+        return await original_edit(interaction, embed=embed, view=view)
+
+    module._edit_help_message = styled_edit
+    module._sentrix_command_style_v2_patched = True
+    if bot is not None:
+        setattr(bot, "_sentrix_help_style_v2", True)
+
+
 def install(bot=None) -> None:
     """Branche le thème V2 sur les moteurs historiques, de façon idempotente."""
     global _INSTALLED
@@ -293,5 +325,6 @@ def install(bot=None) -> None:
         pass
 
     if bot is not None:
+        _patch_help_raw_edits(bot)
         setattr(bot, "_sentrix_command_style_v2", True)
     _INSTALLED = True
