@@ -15,6 +15,8 @@ V34 ajoute +createalllogs / /createalllogs et fait aussi de +create-logs une ins
 complète des 13 salons de logs réellement utilisés.
 V34 Ticket Transcript s'installe en tout dernier pour les fermetures : carte dédiée,
 participants, raison, transcript HTML joint et bouton Transcript.
+V50 est installé après toutes ces couches et impose la structure visuelle uniforme des
+cartes standards : mêmes blocs, padding invisible et taille maximale des contenus.
 """
 from __future__ import annotations
 
@@ -183,6 +185,12 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     # Toujours le dernier wrapper TextChannel.send pour les fermetures de tickets + transcript.
     from .ticket_transcript_logs_v34 import install as install_ticket_transcript_v34
     install_ticket_transcript_v34(bot, extension_name)
+
+    # V50 doit être la dernière couche VISUELLE : elle ne touche ni au routage ni aux
+    # listeners. Les logs courts sont remplis avec des lignes invisibles et les gros sont
+    # tronqués, ce qui donne une hauteur quasi identique sur Discord desktop.
+    from .log_fixed_height_v50 import install as install_fixed_height_v50
+    install_fixed_height_v50(bot, extension_name)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
