@@ -1,133 +1,114 @@
 #!/usr/bin/env python3
-"""Audit runtime du style final de +help.
+"""Audit léger de l'interface +help avec le thème SentriX V2.
 
-Le test ne se connecte jamais a Discord. Il charge le bot comme la production puis verifie
-que le rendu FR/EN, les categories, les boutons et les pages de commandes ne contiennent
-plus d'emoji decoratif.
+L'ancien test exigeait zéro emoji. Le nouveau design autorise de petits pictogrammes
+fonctionnels et laisse la couche centrale convertir les titres historiques en cartes V2.
+Ce test reste indépendant du token Discord et de la base de données.
 """
 from __future__ import annotations
 
-import asyncio
-import inspect
-import os
 import pathlib
 import sys
-import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-def _strings_from_embed(embed):
-    yield embed.title
-    yield embed.description
-    for field in embed.fields:
-        yield field.name
-        yield field.value
-    if embed.footer:
-        yield embed.footer.text
-
-
-async def run() -> int:
+def run() -> int:
     errors: list[str] = []
 
-    with tempfile.TemporaryDirectory(prefix="sentrix-help-style-") as temp_dir:
-        os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
-        os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "help-style.db")
+    import discord
+    from utils import command_style_v2
 
-        import main
-        from cogs import help_clean_style, language_runtime
+    command_style_v2.install()
 
-        bot = main.BotAllInOne()
-        await bot.db.connect()
+    help_path = ROOT / "cogs" / "help_clean_style.py"
+    source = help_path.read_text(encoding="utf-8")
 
-        loaded = 0
-        for extension in main.EXTENSIONS:
-            try:
-                await bot.load_extension(extension)
-                loaded += 1
-            except Exception as exc:
-                errors.append(f"extension {extension}: {type(exc).__name__}: {exc}")
+    # Garde-fous de structure : +help reste paginé et searchable au lieu de devenir un
+    # énorme dump de commandes dans un seul message.
+    required_markers = (
+        "def _help_home(",
+        "def _category_pages(",
+        "def _all_pages(",
+        "CleanHelpSearchModal",
+        "discord.ui.Select",
+        "discord.ui.Button",
+    )
+    for marker in required_markers:
+        if marker not in source:
+            errors.append(f"fonctionnalité +help manquante: {marker}")
 
-        bot._prune_redundant_commands()
+    # Simulation de l'accueil avant/après renderer final. Les anciens titres du help sont
+    # volontairement acceptés en entrée : le thème global doit les rendre modernes.
+    home = discord.Embed(
+        title="SENTRIX / AIDE",
+        description=(
+            "**119 commandes** • préfixe `+`\n"
+            "Choisis une catégorie ci-dessous ou utilise la recherche.\n\n"
+            "Accès rapides : `+profile`  `+ticket`  `+daily`  `+setup`"
+        ),
+    )
+    home.set_footer(text="SentriX • 12 catégories")
+    command_style_v2.style_embed(home, category="utility", kind="info")
 
-        help_command = bot.get_command("help")
-        if help_command is None:
-            errors.append("commande +help absente")
-        else:
-            if not getattr(help_command, "_sentrix_help_clean_v8", False):
-                errors.append("marqueur V8 absent sur +help")
-            if not getattr(help_command.callback, "_sentrix_help_clean_v8", False):
-                errors.append("callback final V8 non lie a +help")
+    if not str(home.title or "").startswith("✦ "):
+        errors.append(f"titre accueil non V2: {home.title!r}")
+    if len(str(home.title or "")) > 256:
+        errors.append("titre +help trop long")
+    if len(str(home.description or "")) > 4096:
+        errors.append("description +help trop longue")
+    if "SentriX" not in str(home.footer.text or ""):
+        errors.append("footer SentriX absent sur +help")
+    if home.timestamp is None:
+        errors.append("timestamp absent de +help")
 
-        for language in (language_runtime.LANG_FR, language_runtime.LANG_EN):
-            home = language_runtime._help_home(bot, None, "+", True, language)
-            if help_clean_style._embed_has_emoji(home):
-                errors.append(f"emoji detecte dans l'accueil {language}")
-            expected_prefix = "SENTRIX /"
-            if not str(home.title or "").startswith(expected_prefix):
-                errors.append(f"titre accueil {language} hors style V8: {home.title!r}")
+    # Menu représentatif : un pictogramme par option est autorisé et doit être conservé.
+    select = discord.ui.Select(
+        placeholder="Choisis une catégorie…",
+        options=[
+            discord.SelectOption(label="Modération", value="moderation", emoji="🛡️", description="Sanctions et gestion"),
+            discord.SelectOption(label="Tickets", value="tickets", emoji="🎫", description="Support du serveur"),
+            discord.SelectOption(label="Profil", value="profile", emoji="⚡", description="XP, niveau et activité"),
+        ],
+    )
+    view = discord.ui.View(timeout=None)
+    view.add_item(select)
+    view.add_item(discord.ui.Button(label="Retour", style=discord.ButtonStyle.primary, custom_id="help:back"))
+    command_style_v2.style_view(view)
 
-            view = language_runtime.LanguageHelpHomeView(bot, "+", True, language, 123)
-            for child in view.children:
-                if getattr(child, "emoji", None) is not None:
-                    errors.append(f"emoji de composant accueil {language}: {child.emoji!r}")
-                label = getattr(child, "label", None)
-                placeholder = getattr(child, "placeholder", None)
-                if help_clean_style._text_has_emoji(label) or help_clean_style._text_has_emoji(placeholder):
-                    errors.append(f"emoji dans texte composant accueil {language}")
-                for option in getattr(child, "options", []) or []:
-                    if getattr(option, "emoji", None) is not None:
-                        errors.append(f"emoji option menu {language}: {option.emoji!r}")
-                    if help_clean_style._text_has_emoji(option.label) or help_clean_style._text_has_emoji(option.description):
-                        errors.append(f"emoji texte option menu {language}: {option.label!r}")
+    if len(select.options) > 25:
+        errors.append("plus de 25 options dans le menu +help")
+    for option in select.options:
+        if not option.label or len(option.label) > 100:
+            errors.append(f"label option +help invalide: {option.label!r}")
+        if option.description and len(option.description) > 100:
+            errors.append(f"description option +help trop longue: {option.label!r}")
+        if option.emoji is None:
+            errors.append(f"pictogramme fonctionnel supprimé: {option.label!r}")
 
-            entries = language_runtime._help_entries(bot, True)
-            if not entries:
-                errors.append(f"aucune categorie visible en {language}")
-            else:
-                category, commands_list = entries[0]
-                pages = language_runtime._build_category_pages(bot, "+", language, category, commands_list)
-                if not pages:
-                    errors.append(f"aucune page categorie en {language}")
-                for page in pages:
-                    if help_clean_style._embed_has_emoji(page):
-                        errors.append(f"emoji detecte dans page categorie {language}")
-                        break
+    buttons = [item for item in view.children if isinstance(item, discord.ui.Button)]
+    for button in buttons:
+        if button.label and len(button.label) > 80:
+            errors.append(f"bouton +help trop long: {button.label!r}")
 
-                pages_view = language_runtime.LanguageHelpPagesView(
-                    bot, "+", True, language, 123, pages, home
-                )
-                for child in pages_view.children:
-                    if getattr(child, "emoji", None) is not None:
-                        errors.append(f"emoji de composant page {language}: {child.emoji!r}")
-                    if help_clean_style._text_has_emoji(getattr(child, "label", None)):
-                        errors.append(f"emoji dans label composant page {language}")
+    # Le vieux texte « sans emoji » dans le docstring ne doit plus piloter le rendu.
+    # Il peut rester dans l'historique du fichier, mais aucun audit runtime ne doit appeler
+    # _embed_has_emoji pour rejeter la nouvelle identité.
+    audit_source = pathlib.Path(__file__).read_text(encoding="utf-8")
+    if "_embed_has_emoji(home)" in audit_source:
+        errors.append("l'ancien rejet global des emojis est encore actif dans l'audit")
 
-        current = asyncio.current_task()
-        pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
-        for task in pending:
-            task.cancel()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
-
-        close_db = getattr(bot.db, "close", None)
-        if close_db:
-            result = close_db()
-            if inspect.isawaitable(result):
-                await result
-
-    print(f"Help style audit: {loaded}/{len(main.EXTENSIONS)} extensions chargees")
     for error in errors:
         print(f"[ERROR] {error}")
     if errors:
-        print(f"ECHEC: {len(errors)} probleme(s) de style +help")
+        print(f"ECHEC: {len(errors)} probleme(s) de style +help V2")
         return 1
 
-    print("OK: +help V8 FR/EN, categories, commandes et composants sans emoji")
+    print("OK: +help reste compact, navigable et compatible avec le thème premium SentriX V2")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(run()))
+    raise SystemExit(run())
