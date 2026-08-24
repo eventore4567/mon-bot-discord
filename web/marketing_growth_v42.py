@@ -50,15 +50,16 @@ PAGES = {
         ],
     },
     "/bot-discord-tickets": {
-        "title": "Bot ticket Discord — SentriX Tickets",
-        "heading": "Un système de tickets Discord complet dans SentriX",
-        "description": "Créez des panels de tickets, formulaires, claims, transcripts et suivis staff depuis SentriX et son dashboard.",
+        "title": "Ticket Tool Discord et bot tickets avec dashboard — SentriX",
+        "heading": "Un outil de tickets Discord complet avec dashboard",
+        "description": "Vous cherchez un ticket tool Discord ? SentriX permet de créer panels, formulaires, claims, transcripts et suivis staff depuis Discord et un dashboard web.",
         "cards": [
-            ("Panels", "Créez des points d'entrée clairs pour ouvrir un ticket selon le type de demande."),
+            ("Panels de tickets", "Créez des points d'entrée clairs pour ouvrir un ticket selon le type de demande."),
             ("Gestion staff", "Claim, fermeture, notes et suivi des tickets avec règles d'accès adaptées."),
             ("Transcripts", "Conservez une trace des échanges lorsque le système de transcript est activé."),
         ],
         "faq": [
+            ("SentriX peut-il servir de Ticket Tool Discord ?", "Oui. SentriX fournit un système de tickets avec panels, formulaires, claim staff, transcripts et configuration web dans le même bot."),
             ("Peut-on avoir plusieurs types de tickets ?", "Oui. SentriX prend en charge des types, formulaires et configurations de tickets différents."),
             ("Les tickets peuvent-ils être gérés depuis le dashboard ?", "Oui. SentriX possède un centre de tickets web en complément des interactions Discord."),
         ],
