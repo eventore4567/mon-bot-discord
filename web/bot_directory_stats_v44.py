@@ -65,78 +65,57 @@ def _command_type_value(command) -> int:
         return 1
 
 
-def _serialize_commands(commands, tree) -> list[dict]:
+def _serialize_commands(commands) -> list[dict]:
+    """Construit le payload minimal montré par la documentation DiscordBotList.
+
+    DiscordBotList n'a besoin que de name/description/type pour afficher le bouton
+    Commands. Envoyer le JSON Discord complet peut inclure des champs récents que leur
+    validateur ne connaît pas encore. On limite donc volontairement le payload aux
+    commandes slash CHAT_INPUT (type 1).
+    """
     payload: list[dict] = []
-    seen: set[tuple[str, int]] = set()
+    seen: set[str] = set()
 
     for command in commands:
-        data = None
-        to_dict = getattr(command, "to_dict", None)
-        if callable(to_dict):
-            # AppCommand récupéré depuis Discord utilise to_dict() sans argument ;
-            # Command local de discord.py peut demander le CommandTree.
-            for args in (tuple(), (tree,)):
-                try:
-                    data = to_dict(*args)
-                    if isinstance(data, dict):
-                        break
-                except TypeError:
-                    continue
-                except Exception:
-                    logger.debug("Sérialisation complète d'une commande impossible.", exc_info=True)
-                    break
+        command_type = _command_type_value(command)
+        if command_type != 1:
+            continue
 
-        if not isinstance(data, dict):
-            name = str(getattr(command, "name", "") or "").strip()
-            if not name:
-                continue
-            description = str(getattr(command, "description", "") or "Commande SentriX").strip()
-            data = {
-                "name": name,
-                "description": description[:100] or "Commande SentriX",
-                "type": _command_type_value(command),
-            }
-
-        # DiscordBotList attend le corps de création Discord, pas les identifiants
-        # renvoyés par GET /applications/.../commands.
-        for key in ("id", "application_id", "guild_id", "version"):
-            data.pop(key, None)
-
-        name = str(data.get("name") or "").strip()
+        name = str(getattr(command, "name", "") or "").strip()
         if not name:
             continue
-        try:
-            command_type = int(data.get("type", 1) or 1)
-        except (TypeError, ValueError):
-            command_type = 1
-            data["type"] = 1
-
-        marker = (name.casefold(), command_type)
+        marker = name.casefold()
         if marker in seen:
             continue
         seen.add(marker)
-        payload.append(data)
+
+        description = str(getattr(command, "description", "") or "Commande SentriX").strip()
+        if not description:
+            description = "Commande SentriX"
+
+        payload.append(
+            {
+                "name": name[:32],
+                "description": description[:100],
+                "type": 1,
+            }
+        )
 
     return payload
 
 
 async def _command_payload(bot) -> tuple[list[dict], str]:
-    """Préfère les slash commands réellement enregistrées chez Discord.
-
-    L'arbre local peut être incomplet selon la façon dont les cogs/hybrid commands ont
-    été chargés. DiscordBotList doit afficher ce que les utilisateurs voient réellement,
-    donc on interroge d'abord Discord puis on garde l'arbre local comme fallback.
-    """
+    """Préfère les slash commands réellement enregistrées chez Discord."""
     tree = getattr(bot, "tree", None)
     if tree is None:
         return [], "no_tree"
 
     try:
         registered = list(await tree.fetch_commands())
-        payload = _serialize_commands(registered, tree)
+        payload = _serialize_commands(registered)
         if payload:
-            return payload, "discord_registered"
-        logger.warning("DiscordBotList commands : Discord ne renvoie aucune commande globale.")
+            return payload, "discord_registered_minimal"
+        logger.warning("DiscordBotList commands : Discord ne renvoie aucune slash command globale exploitable.")
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -148,7 +127,7 @@ async def _command_payload(bot) -> tuple[list[dict], str]:
         logger.exception("Impossible de lire l'arbre local des commandes slash SentriX.")
         return [], "local_error"
 
-    return _serialize_commands(local, tree), "local_tree"
+    return _serialize_commands(local), "local_tree_minimal"
 
 
 async def _request(
@@ -258,25 +237,48 @@ async def _sync_discordbotlist_commands(bot) -> bool | None:
             "count": 0,
             "ok": False,
             "source": source,
-            "reason": "no_commands_found",
+            "http_status": None,
+            "response": "no_commands_found",
         }
         bot._sentrix_directory_stats = state
         return False
 
     timeout = ClientTimeout(total=20, connect=6)
-    async with ClientSession(timeout=timeout) as session:
-        ok = await _request(
-            session,
-            method="POST",
-            url=f"https://discordbotlist.com/api/v1/bots/{bot.user.id}/commands",
-            headers={
-                "Authorization": _discordbotlist_command_auth(token),
-                "Content-Type": "application/json",
-                "User-Agent": "SentriX/1.0 directory-commands",
-            },
-            payload=commands,
-            label="DiscordBotList commands",
-        )
+    ok = False
+    http_status = None
+    response_body = ""
+    try:
+        async with ClientSession(timeout=timeout) as session:
+            async with session.post(
+                f"https://discordbotlist.com/api/v1/bots/{bot.user.id}/commands",
+                headers={
+                    "Authorization": _discordbotlist_command_auth(token),
+                    "Content-Type": "application/json",
+                    "User-Agent": "SentriX/1.0 directory-commands",
+                },
+                json=commands,
+            ) as response:
+                http_status = int(response.status)
+                response_body = (await response.text())[:500]
+                ok = 200 <= response.status < 300
+                if ok:
+                    logger.info(
+                        "DiscordBotList commands synchronisées : HTTP %s, %s commande(s), source=%s.",
+                        response.status,
+                        len(commands),
+                        source,
+                    )
+                else:
+                    logger.warning(
+                        "DiscordBotList commands refusées : HTTP %s — %s",
+                        response.status,
+                        response_body,
+                    )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        response_body = f"request_error:{type(exc).__name__}"
+        logger.exception("Impossible de publier les commandes vers DiscordBotList.")
 
     state = getattr(bot, "_sentrix_directory_stats", None)
     if not isinstance(state, dict):
@@ -294,6 +296,8 @@ async def _sync_discordbotlist_commands(bot) -> bool | None:
         "count": len(commands),
         "ok": bool(ok),
         "source": source,
+        "http_status": http_status,
+        "response": response_body or ("ok" if ok else "empty_response"),
     }
     bot._sentrix_directory_stats = state
     return ok
@@ -318,7 +322,7 @@ async def _worker(bot) -> None:
 
 
 async def directory_status(request: web.Request) -> web.Response:
-    """Diagnostic sans secret, volontairement noindex."""
+    """Diagnostic sans secret : statut uniquement, jamais le token."""
     bot = request.app["bot"]
     state = getattr(bot, "_sentrix_directory_stats", None)
     if not isinstance(state, dict):
