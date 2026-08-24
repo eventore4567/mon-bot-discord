@@ -133,6 +133,25 @@ async def strict_readiness(request: web.Request) -> web.Response:
     return web.json_response(data, status=200 if data["ok"] else 503, headers=_headers())
 
 
+async def _alert_degraded_startup(bot, data: dict) -> None:
+    """Réutilise le canal/DM ops existant sans dupliquer la logique d'alerte ni exposer de secret."""
+    try:
+        from cogs import production_ops
+
+        sender = getattr(production_ops, "_send_ops_alert", None)
+        if sender is None:
+            return
+        detail = (
+            "Démarrage dégradé détecté : "
+            f"status={data['status']}, Discord={data['discord_ready']}, DB={data['database_ok']}, "
+            f"extensions={data['extensions_loaded']}/{data['extensions_expected']}, "
+            f"policy={data['command_policy_ok']}."
+        )
+        await sender(bot, "startup-health-v45", detail)
+    except Exception:
+        logger.exception("Impossible d'envoyer l'alerte de démarrage V45.")
+
+
 async def _boot_audit(bot, dashboard) -> None:
     try:
         await asyncio.wait_for(bot.wait_until_ready(), timeout=90)
@@ -162,6 +181,7 @@ async def _boot_audit(bot, dashboard) -> None:
             data["extensions_ok"],
             data["command_policy_ok"],
         )
+        await _alert_degraded_startup(bot, data)
 
 
 def install(dashboard) -> None:
