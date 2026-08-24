@@ -12,6 +12,12 @@ Toujours garder cette écriture comme nom principal. Si un annuaire impose une d
 
 **Tout votre serveur Discord, au même endroit.**
 
+## Positionnement à mettre en avant
+
+Ne pas se contenter de « bot tout-en-un », formulation déjà très utilisée dans les annuaires. La différence SentriX à montrer en premier :
+
+**Tickets + gestion staff + sécurité + dashboard web**, puis IA et communauté.
+
 ## Préfixe
 
 `+` et commandes slash `/`
@@ -26,29 +32,21 @@ Python / discord.py
 
 ## Description courte — moins de 140 caractères
 
-SentriX : bot Discord tout-en-un avec dashboard, modération, sécurité, tickets, IA, logs, niveaux, économie et automatisations.
+SentriX : tickets, modération, sécurité et outils staff dans un bot Discord avec dashboard web, IA, logs et automatisations.
 
 ## Description courte alternative
 
-Gérez tout votre serveur avec SentriX : sécurité, tickets, IA, logs, automatisations, communauté et dashboard web complet.
+Gérez tickets, staff et sécurité depuis SentriX : bot Discord avec dashboard, logs, IA, automatisations et outils communautaires.
 
 ## Accroche annuaire
 
-**Un seul bot pour modérer, sécuriser, gérer les tickets et piloter votre serveur depuis un dashboard web.**
+**Tickets, staff, sécurité et dashboard : gérez votre serveur Discord depuis un seul endroit.**
 
 ## Description longue
 
 # SentriX — Tout votre serveur, au même endroit
 
-SentriX est un bot Discord tout-en-un conçu pour centraliser la gestion d'un serveur dans un bot et un dashboard web complet.
-
-### Modération et sécurité
-- sanctions et historique de modération
-- AutoMod
-- anti-spam et anti-liens
-- anti-raid et anti-nuke
-- surveillance configurable
-- protection et outils staff
+SentriX est un bot Discord avec dashboard conçu pour centraliser les fonctions qui prennent le plus de temps aux équipes staff : tickets, modération, sécurité, logs et configuration.
 
 ### Tickets et support
 - panels de tickets
@@ -57,6 +55,17 @@ SentriX est un bot Discord tout-en-un conçu pour centraliser la gestion d'un se
 - transcripts
 - historique et statistiques
 - gestion depuis le dashboard
+
+### Modération et sécurité
+- sanctions et historique de modération
+- AutoMod
+- anti-spam et anti-liens
+- anti-raid et anti-nuke
+- surveillance configurable
+- permissions et outils staff
+
+### Dashboard web
+La majorité des systèmes peuvent être activés, désactivés et configurés directement depuis le dashboard SentriX, serveur par serveur.
 
 ### IA et automatisations
 - assistant IA SentriX
@@ -77,20 +86,22 @@ SentriX est un bot Discord tout-en-un conçu pour centraliser la gestion d'un se
 - Sticky Roles
 - vérification
 
-### Dashboard web
-La majorité des systèmes peuvent être activés, désactivés et configurés directement depuis le dashboard SentriX, serveur par serveur.
-
-SentriX est pensé pour les communautés qui veulent un seul outil configurable au lieu d'empiler plusieurs bots différents.
+SentriX est pensé pour les communautés qui veulent réduire le nombre d'outils séparés et donner au staff une interface centrale.
 
 ## Catégories / tags recommandés
 
+Priorité :
+
+- Tickets
 - Moderation
 - Utility
 - Security
-- Automod
-- Tickets
-- AI
 - Dashboard
+- Automod
+
+Puis selon la limite de la plateforme :
+
+- AI
 - Logging
 - Leveling
 - Economy
@@ -101,17 +112,20 @@ SentriX est pensé pour les communautés qui veulent un seul outil configurable 
 
 Utiliser naturellement, sans répétition artificielle :
 
-- `discord bot`
+- `ticket tool discord`
 - `discord ticket bot`
+- `discord bot`
+- `discord bots`
 - `discord moderation bot`
-- `discord ai bot`
 - `discord bot dashboard`
 - `discord security bot`
+- `discord ai bot`
 - `bot Discord français`
-- `bot Discord tout-en-un`
 - `SentriX bot Discord`
 
-Les recherches vidIQ du 24 août 2026 donnent notamment environ **16 477 recherches/mois** pour `discord ticket bot`, **15 206** pour `discord moderation bot` et **7 374** pour `discord ai bot` au niveau global. Le positionnement des fiches doit donc montrer concrètement Tickets + Modération + Dashboard avant d'énumérer toutes les autres fonctions.
+Recherche vidIQ du 24 août 2026 : `ticket tool discord` représente environ **3 569 recherches/mois en France**, `discord bots` environ **3 388**, `discord server` environ **2 938** et `discord bot` environ **2 926**. Les recherches globales autour de `discord ticket bot`, `discord moderation bot` et `discord ai bot` restent également importantes.
+
+Conséquence : les premières lignes d'une fiche doivent montrer **Tickets + Dashboard + Staff/Sécurité** avant d'énumérer le reste.
 
 ## Liens publics officiels
 
@@ -140,6 +154,15 @@ Les autres chemins servent aux boutons, au référencement et aux fiches qui dem
 
 Ajouter `DASHBOARD_PUBLIC_URL` devant chaque chemin.
 
+## Liens de campagne
+
+Pour mesurer les clics selon l'annuaire :
+
+- Top.gg : `/go/topgg`
+- DiscordBotList : `/go/discordbotlist`
+- Bots.gg : `/go/botsgg`
+- DiscordList : `/go/discordlist`
+
 ## Visuels disponibles
 
 Le media kit public contient la PP officielle et des visuels de fonctions. Les ressources du projet existent également dans `assets/sentrix/`.
@@ -147,10 +170,22 @@ Le media kit public contient la PP officielle et des visuels de fonctions. Les r
 Pour une fiche d'annuaire, privilégier cet ordre :
 
 1. PP officielle SentriX ;
-2. dashboard / configuration ;
-3. tickets ;
+2. tickets / support ;
+3. dashboard / configuration ;
 4. sécurité / modération ;
 5. IA.
+
+## Après publication d'une fiche
+
+Ne pas laisser la fiche abandonnée :
+
+- garder la description à jour ;
+- publier les statistiques serveur lorsque l'API officielle de la plateforme est configurée ;
+- demander uniquement à de vrais utilisateurs satisfaits de voter ou noter la fiche ;
+- ne jamais acheter ou automatiser de faux votes ;
+- surveiller les clics du lien de campagne correspondant.
+
+DiscordBotList indique notamment que ses classements de catégories utilisent des signaux comme les votes, le nombre de serveurs, les évaluations, la fraîcheur et la qualité de la fiche. Une fiche complète et maintenue est donc plus utile qu'une simple présence.
 
 ## Discord App Discovery — checklist
 
@@ -165,7 +200,7 @@ Pour une fiche d'annuaire, privilégier cet ordre :
 - politique de confidentialité : `/privacy` ;
 - conditions : `/terms` lorsqu'un lien est demandé ;
 - liens externes vers le site/dashboard ;
-- au moins deux visuels clairs montrant SentriX en fonctionnement ;
+- visuels clairs montrant SentriX en fonctionnement ;
 - informations de découverte relues avant publication.
 
 La validation finale ne peut être faite que depuis le compte propriétaire de l'application Discord.
@@ -174,12 +209,12 @@ La validation finale ne peut être faite que depuis le compte propriétaire de l
 
 Priorité :
 
-1. Discord App Discovery
-2. Top.gg
-3. Discord Bot List — discordbotlist.com
-4. Discord Bots — discord.bots.gg
-5. DiscordList — discordlist.gg
+1. Top.gg
+2. Discord Bot List — discordbotlist.com
+3. Discord Bots — discord.bots.gg
+4. DiscordList — discordlist.gg
+5. Discord App Discovery dès que la vérification nécessaire est possible
 
-Puis, lorsqu'ils acceptent encore les nouvelles soumissions gratuitement : Infinity Bot List, Disforge, Discords.com et autres annuaires Discord pertinents.
+Puis, après vérification de leur disponibilité et de leurs règles actuelles : autres annuaires gratuits pertinents.
 
 Pour les plateformes exigeant une connexion OAuth Discord ou une preuve de propriété du bot, la soumission doit être validée avec le compte propriétaire.
