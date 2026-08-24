@@ -112,7 +112,8 @@ def _title(log_type: str, embed: discord.Embed) -> str:
 
 
 def _description(embed: discord.Embed) -> str:
-    description = _clip(embed.description, 178, fallback="Événement enregistré automatiquement par SentriX.")
+    # ~125 caractères correspondent à environ deux lignes sur la carte desktop de référence.
+    description = _clip(embed.description, 125, fallback="Événement enregistré automatiquement par SentriX.")
     return _pad_rows(description, HEADER_DESCRIPTION_ROWS)
 
 
@@ -124,7 +125,7 @@ def _mention_value(value: object, *, fallback: str = "Non disponible") -> str:
     uid = v28._first_id(raw)
     if uid:
         return f"<@{uid}>"
-    return _clip(raw, 74, fallback=fallback)
+    return _clip(raw, 64, fallback=fallback)
 
 
 def _channel_value(guild: discord.Guild, embed: discord.Embed) -> str:
@@ -135,7 +136,7 @@ def _channel_value(guild: discord.Guild, embed: discord.Embed) -> str:
     channel_match = re.search(r"<#(\d{15,22})>", raw or "")
     if channel_match:
         return f"<#{channel_match.group(1)}>"
-    return _clip(raw, 70)
+    return _clip(raw, 60)
 
 
 def _target_value(embed: discord.Embed) -> str:
@@ -166,17 +167,19 @@ def _detail_candidates(guild: discord.Guild, embed: discord.Embed) -> list[tuple
     result: list[tuple[str, str]] = []
 
     if _is_role_batch(embed):
-        description = _clip(v30._restore_role_mentions(guild, embed.description or ""), 260)
+        description = _clip(v30._restore_role_mentions(guild, embed.description or ""), 180)
         return [("Détails", description)]
 
     before = _field_value(embed, "avant")
     after = _field_value(embed, "apres")
     if before:
-        result.append(("Avant", _clip(v30._restore_role_mentions(guild, before), 120)))
-    if after:
-        result.append(("Après", _clip(v30._restore_role_mentions(guild, after), 120)))
+        result.append(("Avant", _clip(v30._restore_role_mentions(guild, before), 105)))
+    if after and len(result) < 2:
+        result.append(("Après", _clip(v30._restore_role_mentions(guild, after), 105)))
 
     for field in embed.fields:
+        if len(result) >= 2:
+            break
         name = str(field.name or "Information").strip() or "Information"
         if v30._is_id_field(name) or _is_context_field(name):
             continue
@@ -188,11 +191,12 @@ def _detail_candidates(guild: discord.Guild, embed: discord.Embed) -> list[tuple
             continue
         value = v30._restore_role_mentions(guild, value)
         clean_name = re.sub(r"^[^\wÀ-ÿ]+\s*", "", name).strip() or "Information"
-        # Les contenus de message sont les plus susceptibles de faire exploser la carte.
-        limit = 205 if any(token in normalized for token in ("contenu", "message", "raison")) else 125
+        # Une ligne principale peut occuper ~2 lignes visuelles ; la seconde reste courte.
+        if not result and any(token in normalized for token in ("contenu", "message", "raison")):
+            limit = 135
+        else:
+            limit = 82
         result.append((clean_name, _clip(value, limit)))
-        if len(result) >= 3:
-            break
 
     if not result:
         actor = _field_value(embed, "effectue par", "effectué par", "moderateur", "modérateur", "acteur")
@@ -201,19 +205,19 @@ def _detail_candidates(guild: discord.Guild, embed: discord.Embed) -> list[tuple
 
     if not result:
         result.append(("Information", "Aucun détail supplémentaire."))
-    return result[:3]
+    return result[:2]
 
 
 def _details_block(guild: discord.Guild, embed: discord.Embed) -> str:
     rows: list[str] = []
     for label, value in _detail_candidates(guild, embed):
-        rows.append(f"**{_clip(label, 34)}**  {value}")
+        rows.append(f"**{_clip(label, 28)}**  {value}")
     text = "\n".join(rows)
 
-    # Cap global : même un message de plusieurs milliers de caractères ne peut plus
-    # transformer un log en carte géante. On garde cependant assez de texte pour être utile.
-    if len(text) > 430:
-        text = text[:429].rstrip() + "…"
+    # Cap strict : même un message de plusieurs milliers de caractères reste proche de
+    # la hauteur de référence. Le texte complet existe toujours dans Discord lui-même.
+    if len(text) > 295:
+        text = text[:294].rstrip() + "…"
     return _pad_rows(text, DETAIL_ROWS)
 
 
