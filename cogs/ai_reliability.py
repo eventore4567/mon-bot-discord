@@ -4,6 +4,10 @@ Cette couche est volontairement runtime : toutes les commandes IA historiques co
 à appeler ``utils.ai_service`` mais gagnent automatiquement le cache de réglages, la
 coalescence des doubles requêtes, une concurrence bornée et l'identité propre de chaque
 instance Railway.
+
+V56 renforce aussi les appels OpenAI contre les 429 transitoires : le SDK peut retenter
+une fois, les rafales sont davantage bornées et SentriX bascule automatiquement sur un
+modèle de secours si la limite du modèle demandé est atteinte.
 """
 from __future__ import annotations
 
@@ -33,12 +37,22 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
-AI_CONCURRENCY = _env_int("SENTRIX_AI_CONCURRENCY", 8, 1, 32)
+# 8 appels simultanés était trop agressif pour les limites de petits projets OpenAI et
+# pouvait transformer une courte rafale Discord en 429 répétés. 3 garde le bot réactif
+# tout en laissant de la marge aux limites de requêtes/tokens du projet.
+AI_CONCURRENCY = _env_int("SENTRIX_AI_CONCURRENCY", 3, 1, 16)
 SETTINGS_CACHE_TTL = _env_int("SENTRIX_AI_SETTINGS_CACHE_TTL", 20, 2, 300)
 _SETTINGS_CACHE: dict[int, tuple[float, dict]] = {}
 _INFLIGHT: dict[tuple, asyncio.Task] = {}
 _INFLIGHT_LOCK: asyncio.Lock | None = None
 _AI_SEMAPHORE: asyncio.Semaphore | None = None
+
+# Modèle de secours indépendant de Luna/Terra/Sol. Les rate limits OpenAI pouvant être
+# différents selon les familles de modèles, ce repli permet souvent de répondre même si
+# le modèle 5.6 demandé est momentanément limité.
+_FALLBACK_MODEL_KEY = "sentrix-fallback-mini"
+_FALLBACK_MODEL_ID = (os.getenv("OPENAI_MODEL_FALLBACK", "gpt-5.4-mini") or "gpt-5.4-mini").strip()
+_RATE_LIMIT_RETRY_DELAYS = (0.35, 0.90)
 
 
 def _semaphore() -> asyncio.Semaphore:
@@ -86,6 +100,17 @@ def _request_key(args, kwargs) -> tuple | None:
     )
 
 
+def _rate_limit_fallbacks(model_key: str) -> tuple[str, ...]:
+    """Ordre des modèles à essayer après un 429, sans refaire trois fois le même modèle."""
+    if model_key == ai_service.MODEL_LUNA:
+        return (ai_service.MODEL_TERRA, _FALLBACK_MODEL_KEY)
+    if model_key == ai_service.MODEL_TERRA:
+        return (ai_service.MODEL_LUNA, _FALLBACK_MODEL_KEY)
+    if model_key == ai_service.MODEL_SOL:
+        return (ai_service.MODEL_TERRA, _FALLBACK_MODEL_KEY)
+    return (ai_service.MODEL_LUNA, ai_service.MODEL_TERRA)
+
+
 def install() -> None:
     """Installe les optimisations une seule fois pour SentriX et Bot'Odboug."""
     global _INSTALLED
@@ -98,9 +123,28 @@ def install() -> None:
         TEXT_TIMEOUT_SECONDS,
     )
 
-    # Le client est normalement encore inutilisé au chargement des cogs. Le remettre à
-    # None garantit néanmoins que le nouveau timeout sera bien appliqué au premier appel.
+    # Le code historique désactivait totalement les retries du SDK (max_retries=0). Une
+    # unique réponse 429 transitoire devenait donc immédiatement l'erreur visible par
+    # l'utilisateur. On conserve un seul retry SDK, puis le repli multi-modèles ci-dessous.
+    def robust_get_client():
+        if not getattr(ai_service.config, "OPENAI_API_KEY", None):
+            return None
+        if ai_service._TEXT_CLIENT is None:
+            from openai import AsyncOpenAI
+            ai_service._TEXT_CLIENT = AsyncOpenAI(
+                api_key=ai_service.config.OPENAI_API_KEY,
+                timeout=ai_service.REQUEST_TIMEOUT_SECONDS,
+                max_retries=1,
+            )
+        return ai_service._TEXT_CLIENT
+
+    ai_service.get_client = robust_get_client
     ai_service._TEXT_CLIENT = None
+
+    # Repli interne : il n'apparaît jamais dans +aisetup, il ne sert que lorsqu'un 429 est
+    # renvoyé par le modèle normalement sélectionné.
+    ai_service.MODEL_IDS[_FALLBACK_MODEL_KEY] = _FALLBACK_MODEL_ID
+    ai_service.MODEL_LABELS[_FALLBACK_MODEL_KEY] = "GPT-5.4 Mini (secours)"
 
     # Le texte interne reste commun dans GitHub ; l'identité publique est injectée à
     # l'exécution selon le service Railway. Le bot SentriX principal reste inchangé.
@@ -165,24 +209,54 @@ def install() -> None:
     # ---------------------------------------------------------------- appels OpenAI
     original_generate = ai_service.generate
 
+    async def call_openai(args, kwargs):
+        async with _semaphore():
+            return await original_generate(*args, **kwargs)
+
     async def execute_once(args, kwargs):
         call_kwargs = dict(kwargs)
         call_kwargs.setdefault("instructions", _instance_system_prompt())
 
-        async with _semaphore():
-            result = await original_generate(*args, **call_kwargs)
+        result = await call_openai(args, call_kwargs)
 
         model_key = call_kwargs.get("model_key", ai_service.MODEL_TERRA)
         command = str(call_kwargs.get("command") or "")
 
+        # Un 429 n'est plus affiché dès la première tentative. On essaie un autre pool de
+        # modèle, puis le mini de secours. Cela couvre les limites transitoires propres à
+        # Luna/Terra/Sol sans faire une boucle infinie en cas de quota réellement épuisé.
+        if result.error == ai_service.ERROR_RATE_LIMIT:
+            last = result
+            for index, fallback_key in enumerate(_rate_limit_fallbacks(model_key)):
+                await asyncio.sleep(_RATE_LIMIT_RETRY_DELAYS[min(index, len(_RATE_LIMIT_RETRY_DELAYS) - 1)])
+                retry_kwargs = dict(call_kwargs)
+                retry_kwargs.update(
+                    model_key=fallback_key,
+                    reasoning_effort="none" if fallback_key in {ai_service.MODEL_LUNA, _FALLBACK_MODEL_KEY} else "low",
+                    previous_response_id=None,
+                    command=f"{command or 'ai'}-429-fallback-{index + 1}",
+                )
+                logger.warning(
+                    "429 OpenAI : repli automatique %s -> %s — commande=%s",
+                    model_key,
+                    fallback_key,
+                    command or "ai",
+                )
+                retry = await call_openai(args, retry_kwargs)
+                last = retry
+                if retry.ok:
+                    return retry
+                if retry.error != ai_service.ERROR_RATE_LIMIT:
+                    return retry
+            result = last
+
         # Une panne réseau très brève mérite une seconde tentative. Aucune relance n'est
-        # faite pour les erreurs auth, quota, contenu ou bad-request.
+        # faite pour les erreurs auth, quota persistant, contenu ou bad-request.
         if result.error == ai_service.ERROR_CONNECTION:
             await asyncio.sleep(0.20)
             retry_kwargs = dict(call_kwargs)
             retry_kwargs["command"] = f"{command or 'ai'}-connection-retry"
-            async with _semaphore():
-                retry = await original_generate(*args, **retry_kwargs)
+            retry = await call_openai(args, retry_kwargs)
             if retry.ok:
                 return retry
 
@@ -202,8 +276,7 @@ def install() -> None:
                     "Timeout du modèle avancé : nouvelle tentative automatique avec Terra — commande=%s",
                     command or "ai",
                 )
-                async with _semaphore():
-                    retry = await original_generate(*args, **retry_kwargs)
+                retry = await call_openai(args, retry_kwargs)
                 if retry.ok or retry.error != ai_service.ERROR_TIMEOUT:
                     return retry
         return result
@@ -237,16 +310,22 @@ def install() -> None:
     ai_service.ERROR_MESSAGES[ai_service.ERROR_TIMEOUT] = brand_text(
         "⏱️ Le service IA n'a pas répondu après deux tentatives. Réessaie dans quelques instants."
     )
+    ai_service.ERROR_MESSAGES[ai_service.ERROR_RATE_LIMIT] = brand_text(
+        "⏳ OpenAI refuse encore la requête après les modèles de secours. Réessaie dans quelques instants."
+    )
     ai_service._SENTRIX_AI_RUNTIME = {
         "brand": brand_label(),
         "instance_key": instance_key(),
         "concurrency": AI_CONCURRENCY,
         "settings_cache_ttl": SETTINGS_CACHE_TTL,
+        "sdk_retries": 1,
+        "rate_limit_fallback": _FALLBACK_MODEL_ID,
     }
     logger.info(
-        "IA V2 active pour %s : timeout=%ss, concurrence=%s, cache réglages=%ss, coalescence double-clic active.",
+        "IA V56 active pour %s : timeout=%ss, concurrence=%s, retry SDK=1, repli 429=%s, cache=%ss.",
         brand_label(),
         TEXT_TIMEOUT_SECONDS,
         AI_CONCURRENCY,
+        _FALLBACK_MODEL_ID,
         SETTINGS_CACHE_TTL,
     )
