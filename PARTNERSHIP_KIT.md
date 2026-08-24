@@ -1,4 +1,4 @@
-# SentriX — Kit partenariats
+# SentriX — Kit partenariats et acquisition
 
 But : obtenir de vraies installations sur des serveurs actifs et des démonstrations par des créateurs Discord, gaming et Roblox.
 
@@ -9,65 +9,118 @@ Chercher d'abord des communautés où SentriX résout un problème concret :
 - serveurs Discord de 300 à 20 000 membres ;
 - communautés gaming / Roblox ;
 - créateurs TikTok, YouTube ou Twitch avec un serveur Discord ;
-- serveurs qui utilisent plusieurs bots séparés pour tickets, sécurité et niveaux ;
-- communautés qui recrutent régulièrement des modérateurs.
+- serveurs utilisant plusieurs bots séparés pour tickets, sécurité, logs et niveaux ;
+- communautés qui recrutent régulièrement des modérateurs ;
+- serveurs ayant un support/tickets actif.
 
-Ne pas spammer des centaines de propriétaires. Une proposition personnalisée à un serveur pertinent vaut mieux qu'un message copié partout.
+Ne pas faire de DM de masse. Une proposition personnalisée à un serveur pertinent vaut mieux qu'un copier-coller envoyé partout.
 
-## Proposition simple
+## Proposition principale
 
 **SentriX — Tout votre serveur Discord, au même endroit.**
 
-Valeur à montrer en premier :
+Ordre de démonstration conseillé :
 
-1. sécurité / AutoMod / anti-raid ;
-2. tickets et gestion staff ;
-3. IA et automatisations ;
-4. dashboard web ;
-5. communauté : niveaux, économie, événements et vocaux temporaires.
+1. tickets / support ;
+2. dashboard ;
+3. sécurité / AutoMod / anti-raid ;
+4. modération et logs ;
+5. IA / automatisations ;
+6. communauté : niveaux, événements, recrutements, vocaux temporaires.
 
-## Message court pour propriétaire de serveur
+## Lien partenaire mesurable
 
-Bonjour, je développe **SentriX**, un bot Discord tout-en-un avec dashboard. Il regroupe notamment sécurité, tickets, logs, IA, automatisations et outils staff.
+Utiliser :
 
-Je cherche quelques serveurs actifs pour l'utiliser en conditions réelles. Si ça t'intéresse, je peux te montrer rapidement le dashboard et tu peux tester uniquement les fonctions dont ton serveur a besoin.
+`https://mon-bot-discord-production-8944.up.railway.app/go/partner`
 
-Site : `[DASHBOARD_PUBLIC_URL]/sentrix`
+Cela permet de compter les clics venant des partenariats sans enregistrer d'IP ou d'identifiant Discord.
 
-## Message pour créateur TikTok / YouTube
+## Message court — propriétaire de serveur
 
-Salut, je développe **SentriX**, un bot Discord avec un vrai dashboard pour gérer sécurité, tickets, IA et communauté au même endroit.
+Bonjour, je développe **SentriX**, un bot Discord tout-en-un avec dashboard. Il regroupe notamment tickets, modération, sécurité, logs, IA, automatisations et outils staff.
 
-Je pense que ça peut faire une bonne démonstration courte pour une audience Discord/gaming. Je peux te donner un accès de test et un scénario vidéo très simple à montrer, sans obligation de présenter des fonctions que tu n'utilises pas.
+Je cherche quelques serveurs actifs pour le tester en conditions réelles. Si ça t'intéresse, je peux te montrer en moins d'une minute le système de tickets et le dashboard, puis tu actives uniquement les fonctions dont ton serveur a besoin.
 
-Media kit : `[DASHBOARD_PUBLIC_URL]/media-kit`
+Test : `https://mon-bot-discord-production-8944.up.railway.app/go/partner`
+
+## Message ciblé — serveur qui utilise beaucoup de bots
+
+Salut, j'ai vu que votre serveur utilise plusieurs outils différents pour la gestion. Je développe **SentriX**, qui centralise tickets, sécurité, modération, logs, IA et communauté dans un seul dashboard.
+
+Je ne te demande pas de remplacer quoi que ce soit directement : tu peux simplement tester SentriX sur un serveur de test et voir si une partie du système vous simplifie la gestion.
+
+Démo : `https://mon-bot-discord-production-8944.up.railway.app/go/partner`
+
+## Message — créateur TikTok / YouTube / Twitch
+
+Salut, je développe **SentriX**, un bot Discord avec un vrai dashboard pour gérer tickets, sécurité, modération, IA et communauté au même endroit.
+
+Je pense que le système de tickets / dashboard peut faire une démo courte intéressante pour une audience Discord ou gaming. Je peux fournir un scénario vidéo simple et le media kit officiel.
+
+Media kit : `https://mon-bot-discord-production-8944.up.railway.app/media-kit`
+Lien mesuré : `https://mon-bot-discord-production-8944.up.railway.app/go/partner`
 
 ## Démo de 60 secondes
 
-- 0–10 s : ajouter SentriX / choisir le serveur ;
-- 10–25 s : sécurité ;
-- 25–40 s : créer un panel de tickets ;
-- 40–50 s : IA / automatisation ;
-- 50–60 s : montrer que tout se configure depuis le dashboard.
+- 0–5 s : montrer le résultat final du dashboard ;
+- 5–20 s : créer / ouvrir un ticket ;
+- 20–30 s : claim + transcript ;
+- 30–40 s : modération / logs ;
+- 40–50 s : sécurité ou IA ;
+- 50–60 s : retour dashboard + CTA.
 
-## Ce qu'il faut mesurer
+## Offre de test recommandée
 
-Pour chaque partenariat, noter :
+Ne pas promettre de premium inexistant. Proposer simplement :
+
+- installation sur un serveur de test ;
+- aide à la configuration ;
+- récupération du feedback ;
+- correction des bugs réellement rencontrés ;
+- possibilité d'être cité comme serveur testeur si le propriétaire le souhaite.
+
+## Qualification avant contact
+
+Avant d'envoyer un message, vérifier au moins 2 critères :
+
+- communauté active ;
+- besoin visible de tickets/modération ;
+- serveur gaming / Roblox / créateur ;
+- équipe staff organisée ;
+- plusieurs bots de gestion ;
+- taille suffisante pour obtenir du feedback réel.
+
+## Suivi des partenariats
+
+Pour chaque contact noter :
 
 - date ;
-- serveur ou créateur ;
-- taille approximative de la communauté ;
-- lien de la publication ;
-- installations obtenues ;
-- utilisateurs réellement actifs après quelques jours ;
-- fonction qui a convaincu le plus.
+- serveur / créateur ;
+- plateforme ;
+- taille approximative ;
+- problème principal identifié ;
+- réponse obtenue ;
+- lien de publication éventuel ;
+- clics ;
+- installations ;
+- serveurs encore actifs à J+7 ;
+- fonction qui a convaincu.
 
-L'objectif n'est pas seulement le nombre d'installations : il faut surtout conserver des serveurs qui utilisent vraiment SentriX.
+## Objectif de départ
 
-## Règles de communication
+Plutôt que 100 messages génériques, viser :
 
-- Ne jamais acheter de faux membres ou de faux votes.
+- 5 contacts réellement personnalisés par jour ;
+- 2 démonstrations par semaine ;
+- 1 serveur testeur actif par semaine ;
+- demander un témoignage uniquement après une vraie utilisation réussie.
+
+## Règles
+
+- Ne jamais acheter de faux membres, faux votes ou fausses évaluations.
+- Ne pas spammer les propriétaires de serveurs.
 - Ne jamais promettre une disponibilité ou une sécurité « parfaite ».
-- Ne pas envoyer de DM de masse.
-- Montrer des fonctions réellement disponibles.
+- Montrer seulement des fonctions réellement disponibles.
+- Ne jamais demander le token d'un autre bot ou des secrets du serveur.
 - Toujours utiliser le nom **SentriX** et sa PP officielle.
