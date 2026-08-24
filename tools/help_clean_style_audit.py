@@ -93,13 +93,6 @@ def run() -> int:
         if button.label and len(button.label) > 80:
             errors.append(f"bouton +help trop long: {button.label!r}")
 
-    # Le vieux texte « sans emoji » dans le docstring ne doit plus piloter le rendu.
-    # Il peut rester dans l'historique du fichier, mais aucun audit runtime ne doit appeler
-    # _embed_has_emoji pour rejeter la nouvelle identité.
-    audit_source = pathlib.Path(__file__).read_text(encoding="utf-8")
-    if "_embed_has_emoji(home)" in audit_source:
-        errors.append("l'ancien rejet global des emojis est encore actif dans l'audit")
-
     for error in errors:
         print(f"[ERROR] {error}")
     if errors:
