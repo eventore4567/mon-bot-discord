@@ -8,6 +8,10 @@ instance Railway.
 V56 renforce aussi les appels OpenAI contre les 429 transitoires : le SDK peut retenter
 une fois, les rafales sont davantage bornées et SentriX bascule automatiquement sur un
 modèle de secours si la limite du modèle demandé est atteinte.
+
+V57 garantit enfin qu'un message naturel « sentrix ... » ne produit qu'une seule réponse :
+le service Railway SentriX principal est le seul à publier les réponses passives, et une
+même ID de message Discord est dédupliquée localement par sécurité.
 """
 from __future__ import annotations
 
@@ -46,6 +50,11 @@ _SETTINGS_CACHE: dict[int, tuple[float, dict]] = {}
 _INFLIGHT: dict[tuple, asyncio.Task] = {}
 _INFLIGHT_LOCK: asyncio.Lock | None = None
 _AI_SEMAPHORE: asyncio.Semaphore | None = None
+
+# Déduplication des messages IA passifs (« sentrix ... »). La clé est l'ID du message
+# Discord source : elle est donc stable même si deux listeners du même process le voient.
+_PASSIVE_REPLY_TTL = 30.0
+_PASSIVE_REPLY_RECENT: dict[int, float] = {}
 
 # Modèle de secours indépendant de Luna/Terra/Sol. Les rate limits OpenAI pouvant être
 # différents selon les familles de modèles, ce repli permet souvent de répondre même si
@@ -111,12 +120,78 @@ def _rate_limit_fallbacks(model_key: str) -> tuple[str, ...]:
     return (ai_service.MODEL_LUNA, ai_service.MODEL_TERRA)
 
 
+def _install_single_passive_reply() -> None:
+    """Empêche deux services/listeners de répondre au même message naturel Discord.
+
+    Les commandes explicites (+ai, /sentrix, etc.) restent inchangées. Cette protection ne
+    s'applique que lorsque send_sentrix_reply() reçoit reply_to, c'est-à-dire le chemin
+    passif on_message déclenché par « sentrix ... » ou une mention.
+    """
+    try:
+        from .ai import Ai
+        from .log_rectangle_v25 import _is_primary_process
+    except Exception:
+        logger.exception("Impossible d'installer l'anti-double réponse IA passive V57.")
+        return
+
+    if getattr(Ai, "_sentrix_single_passive_reply_v57", False):
+        return
+
+    original_send_sentrix_reply = Ai.send_sentrix_reply
+
+    @functools.wraps(original_send_sentrix_reply)
+    async def single_send_sentrix_reply(self, destination, author, question: str, *, reply_to=None):
+        if reply_to is not None:
+            # Les deux services Railway partagent le même code et peuvent recevoir le même
+            # message Discord. Comme pour les logs, une seule instance doit publier pour le
+            # bot SentriX afin d'éviter deux réponses IA différentes au même message.
+            if not _is_primary_process():
+                return None
+
+            try:
+                message_id = int(reply_to.id)
+            except (TypeError, ValueError, AttributeError):
+                message_id = 0
+
+            if message_id:
+                now = time.monotonic()
+                stale = [mid for mid, expires in _PASSIVE_REPLY_RECENT.items() if expires <= now]
+                for mid in stale[:1000]:
+                    _PASSIVE_REPLY_RECENT.pop(mid, None)
+
+                if _PASSIVE_REPLY_RECENT.get(message_id, 0.0) > now:
+                    logger.info("Réponse IA passive doublon bloquée — message=%s", message_id)
+                    return None
+
+                _PASSIVE_REPLY_RECENT[message_id] = now + _PASSIVE_REPLY_TTL
+                if len(_PASSIVE_REPLY_RECENT) > 5000:
+                    for mid in list(_PASSIVE_REPLY_RECENT)[:1000]:
+                        _PASSIVE_REPLY_RECENT.pop(mid, None)
+
+        return await original_send_sentrix_reply(
+            self,
+            destination,
+            author,
+            question,
+            reply_to=reply_to,
+        )
+
+    Ai.send_sentrix_reply = single_send_sentrix_reply
+    Ai._sentrix_single_passive_reply_v57 = True
+    logger.info("IA V57 active : une seule réponse passive SentriX par message Discord.")
+
+
 def install() -> None:
     """Installe les optimisations une seule fois pour SentriX et Bot'Odboug."""
     global _INSTALLED
     if _INSTALLED:
         return
     _INSTALLED = True
+
+    # Le Cog IA est déjà chargé lorsque cet installateur est exécuté. Patcher la méthode
+    # appelée dynamiquement par son listener suffit donc aussi pour les listeners déjà
+    # enregistrés dans discord.py.
+    _install_single_passive_reply()
 
     ai_service.REQUEST_TIMEOUT_SECONDS = max(
         float(getattr(ai_service, "REQUEST_TIMEOUT_SECONDS", 15.0)),
@@ -320,12 +395,12 @@ def install() -> None:
         "settings_cache_ttl": SETTINGS_CACHE_TTL,
         "sdk_retries": 1,
         "rate_limit_fallback": _FALLBACK_MODEL_ID,
+        "single_passive_reply": True,
     }
     logger.info(
-        "IA V56 active pour %s : timeout=%ss, concurrence=%s, retry SDK=1, repli 429=%s, cache=%ss.",
+        "IA V57 active pour %s : timeout=%ss, concurrence=%s, retry SDK=1, repli 429=%s, réponse passive unique.",
         brand_label(),
         TEXT_TIMEOUT_SECONDS,
         AI_CONCURRENCY,
         _FALLBACK_MODEL_ID,
-        SETTINGS_CACHE_TTL,
     )
