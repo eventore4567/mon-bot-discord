@@ -32,10 +32,10 @@ async def _discord_avatar_url(request: web.Request, session: dict) -> str | None
             avatar = getattr(discord_user, "display_avatar", None)
             if avatar is not None:
                 try:
-                    avatar = avatar.replace(size=128, format="png")
+                    avatar = avatar.replace(size=128, static_format="png")
                 except Exception:
                     try:
-                        avatar = avatar.with_size(128).with_format("png")
+                        avatar = avatar.with_size(128)
                     except Exception:
                         pass
                 value = str(getattr(avatar, "url", avatar) or "").strip()
@@ -43,7 +43,6 @@ async def _discord_avatar_url(request: web.Request, session: dict) -> str | None
                     return value
 
     if user_id:
-        # Discord utilise 6 avatars par défaut pour les comptes au nouveau système de nom.
         return f"https://cdn.discordapp.com/embed/avatars/{(user_id >> 22) % 6}.png"
     return None
 
@@ -63,9 +62,11 @@ async def user_avatar(request: web.Request) -> web.Response:
 
     try:
         timeout = ClientTimeout(total=10)
-        async with ClientSession(timeout=timeout) as client:
+        headers = {"User-Agent": "SentriX-Dashboard/1.0"}
+        async with ClientSession(timeout=timeout, headers=headers) as client:
             async with client.get(url) as upstream:
                 if upstream.status != 200:
+                    logger.warning("CDN Discord avatar HTTP %s pour %s", upstream.status, url)
                     raise web.HTTPBadGateway(text="Avatar Discord temporairement indisponible")
                 body = await upstream.read()
                 content_type = upstream.headers.get("Content-Type", "image/png").split(";", 1)[0]
@@ -95,9 +96,7 @@ async def handle_me_with_local_avatar(request: web.Request) -> web.Response:
         return error
 
     user = dict(session.get("user") or {})
-    # L'image passe par le domaine SentriX : plus de PP cassée si le navigateur
-    # refuse/échoue à charger directement le CDN Discord.
-    user["avatar_url"] = _AVATAR_PATH
+    user["avatar_url"] = _AVATAR_PATH + "?v=discord-v46"
     return web.json_response({"user": user, "csrf": session["csrf"]})
 
 
@@ -107,8 +106,18 @@ def install(dashboard) -> None:
         return
     _INSTALLED = True
 
-    # build_app résout dashboard.handle_me au moment de la construction des routes.
     dashboard.handle_me = handle_me_with_local_avatar
+
+    # Une ancienne couche dashboard_profile_images forçait encore une image locale "T"
+    # après loadSession(). On la remplace ici, en dernier, par la vraie PP Discord.
+    dashboard.INDEX_HTML = dashboard.INDEX_HTML.replace(
+        "/assets/user-avatar?v=t3d",
+        _AVATAR_PATH + "?v=discord-v46",
+    )
+    dashboard.INDEX_HTML = dashboard.INDEX_HTML.replace(
+        "Photo de profil T",
+        "Photo de profil Discord",
+    )
 
     original_build_app = dashboard.build_app
 
