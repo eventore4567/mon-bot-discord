@@ -222,6 +222,17 @@ async def install(bot: commands.Bot) -> None:
 
     hardening._record_created_resource = MethodType(smart_record_created_resource, hardening)
     hardening._sentrix_smart_creation_guard_v47 = True
+
+    # Le système Vérification + Honeypot V48 est une protection complémentaire :
+    # il est installé dans la même pile sécurité mais reste opt-in par serveur via
+    # +honeypot-setup. Aucune permission de salon n'est modifiée tant que cette commande
+    # n'est pas exécutée par un propriétaire/admin.
+    try:
+        from .honeypot_verification_v48 import install as install_honeypot_verification_v48
+        await install_honeypot_verification_v48(bot)
+    except Exception:
+        logger.exception("Impossible d'installer Vérification + Honeypot V48.")
+
     bot._sentrix_smart_creation_guard_v47 = True
     logger.info(
         "Anti-nuke V47 activé : créations de salons/rôles analysées par risque, volume seul autorisé."
