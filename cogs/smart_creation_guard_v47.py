@@ -233,6 +233,16 @@ async def install(bot: commands.Bot) -> None:
     except Exception:
         logger.exception("Impossible d'installer Vérification + Honeypot V48.")
 
+    # V55 complète la détection historique : attribution fiable via Audit Logs,
+    # bannissement de l'auteur avant le rollback et restauration multi-passes de toute
+    # la structure supprimée. Il reste séparé de V47 pour ne pas réintroduire de faux
+    # positifs sur les bots légitimes qui créent beaucoup de ressources.
+    try:
+        from .antinuke_emergency_v55 import install as install_antinuke_emergency_v55
+        await install_antinuke_emergency_v55(bot)
+    except Exception:
+        logger.exception("Impossible d'installer l'anti-nuke restauration V55.")
+
     bot._sentrix_smart_creation_guard_v47 = True
     logger.info(
         "Anti-nuke V47 activé : créations de salons/rôles analysées par risque, volume seul autorisé."
