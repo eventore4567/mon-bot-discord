@@ -17,6 +17,7 @@ _PUBLIC_PAGES = {
     "/privacy",
     "/terms",
     "/media-kit",
+    "/commands",
 }
 _PRIORITIES = {
     "/start": "0.95",
@@ -25,11 +26,12 @@ _PRIORITIES = {
     "/privacy": "0.55",
     "/terms": "0.50",
     "/media-kit": "0.80",
+    "/commands": "0.95",
 }
 
 
 def _patch_robots(text: str) -> str:
-    if "Allow: /start" in text:
+    if "Allow: /start" in text and "Allow: /commands" in text:
         return text
     additions = "".join(f"Allow: {path}\n" for path in sorted(_PUBLIC_PAGES))
     marker = "Disallow: /app\n"
@@ -39,12 +41,13 @@ def _patch_robots(text: str) -> str:
 
 
 def _patch_sitemap(text: str, base: str) -> str:
-    if f"{base}/start" in text:
-        return text
     today = datetime.now(timezone.utc).date().isoformat()
+    missing = [path for path in sorted(_PUBLIC_PAGES) if f"{base}{path}" not in text]
+    if not missing:
+        return text
     entries = "".join(
         f"<url><loc>{html.escape(base + path)}</loc><lastmod>{today}</lastmod><changefreq>weekly</changefreq><priority>{_PRIORITIES[path]}</priority></url>"
-        for path in sorted(_PUBLIC_PAGES)
+        for path in missing
     )
     return text.replace("</urlset>", entries + "</urlset>", 1)
 
@@ -54,13 +57,9 @@ async def public_growth_indexing(request: web.Request, handler):
     response = await handler(request)
     path = request.path
 
-    # Ce middleware est inséré en première position. Il s'exécute donc en dernier lors du
-    # retour de réponse et peut corriger le noindex volontaire appliqué aux pages privées.
     if path in _PUBLIC_PAGES or path.startswith("/sentrix-media/"):
         response.headers["X-Robots-Tag"] = "index, follow"
 
-    # Ne lire response.text que pour les deux réponses textuelles que nous devons modifier.
-    # Cela évite de tenter de décoder la PP ou un autre fichier binaire en UTF-8.
     if isinstance(response, web.Response) and path == "/robots.txt":
         response.text = _patch_robots(response.text or "")
     elif isinstance(response, web.Response) and path == "/sitemap.xml":
@@ -72,7 +71,7 @@ async def public_growth_indexing(request: web.Request, handler):
 
 
 async def _submit_indexnow(dashboard) -> None:
-    """Signale les nouvelles pages V40 au réseau IndexNow au démarrage."""
+    """Signale les pages publiques au réseau IndexNow au démarrage."""
     try:
         from . import seo_v38
 
@@ -94,11 +93,11 @@ async def _submit_indexnow(dashboard) -> None:
         async with ClientSession(timeout=ClientTimeout(total=12)) as client:
             async with client.post(endpoint, json=payload) as response:
                 if response.status in {200, 202}:
-                    logger.info("IndexNow a accepté les pages publiques V40 (%s).", response.status)
+                    logger.info("IndexNow a accepté les pages publiques SentriX (%s).", response.status)
                 else:
-                    logger.warning("IndexNow a refusé les pages V40 (%s).", response.status)
+                    logger.warning("IndexNow a refusé les pages publiques SentriX (%s).", response.status)
     except Exception:
-        logger.exception("Soumission IndexNow V40 impossible.")
+        logger.exception("Soumission IndexNow SentriX impossible.")
 
 
 def install(dashboard) -> None:
@@ -120,11 +119,8 @@ def install(dashboard) -> None:
 
     dashboard.build_app = build_app
 
-    # V42 est branchée après les pages V40 et leur indexation afin de conserver le même
-    # domaine public et le même dashboard sans modifier les routes privées.
-    from . import bot_directory_stats_v44, marketing_growth_v42
+    from . import bot_directory_stats_v44, marketing_growth_v42, public_commands_v46
 
     marketing_growth_v42.install(dashboard)
-    # V44 prépare l'envoi de stats Top.gg/DiscordBotList. Sans token, il reste en veille
-    # et n'effectue aucune requête réseau.
+    public_commands_v46.install(dashboard)
     bot_directory_stats_v44.install(dashboard)
