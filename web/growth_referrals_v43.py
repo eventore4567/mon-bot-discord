@@ -92,6 +92,8 @@ def install(dashboard) -> None:
 
     def build_app(bot):
         app = original_build_app(bot)
+        # Listener opérationnel : n'altère jamais l'arrivée du bot dans un serveur.
+        guild_join_notify_v46.install(bot)
         app.router.add_get("/go/{source}", referral_redirect)
         app.router.add_get("/marketing-stats", referral_stats)
 
@@ -106,9 +108,9 @@ def install(dashboard) -> None:
 
     dashboard.build_app = build_app
 
-    # Les couches V44/V45 sont installées ici car V43 est déjà appelée en dernier par
+    # Les couches V44/V45/V46 sont installées ici car V43 est déjà appelée en dernier par
     # l'identité publique V39. Cela garantit qu'elles sont branchées avant build_app().
-    from . import bot_directory_stats_v44, health_runtime_v45
+    from . import bot_directory_stats_v44, guild_join_notify_v46, health_runtime_v45
 
     bot_directory_stats_v44.install(dashboard)
     health_runtime_v45.install(dashboard)
