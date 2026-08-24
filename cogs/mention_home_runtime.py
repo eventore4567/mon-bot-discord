@@ -3,10 +3,16 @@
 Le panneau tient dans un unique embed et une unique rangée de boutons. Il utilise
 l'avatar Discord du compte bot comme miniature distante : aucune pièce jointe ne peut
 donc se détacher et s'afficher en grand lors d'un clic ou d'une mise à jour du panneau.
+
+Cette couche est installée très tard dans le runtime. Elle porte donc aussi le dernier
+verrou anti-doublon des réponses IA passives : les couches V5/V6 remplacent la méthode
+``send_sentrix_reply`` après le premier garde-fou de ``ai_reliability``. Sans ce verrou
+final, deux services/listeners pouvaient répondre au même message Discord.
 """
 from __future__ import annotations
 
 import logging
+import time
 import types
 
 import discord
@@ -17,9 +23,16 @@ from utils import visual_v5
 from utils.instance_identity import brand_label
 
 from . import bot_experience_v5
+from .log_rectangle_v25 import _is_primary_process
 
 logger = logging.getLogger("bot.mention-home")
 _ACCENT = 0x6C5CE7
+
+# Déduplication locale finale des messages naturels. Le cache est indexé par l'ID Discord
+# du message source : deux listeners du même process ne peuvent donc jamais publier deux
+# réponses différentes au même message.
+_PASSIVE_REPLY_TTL = 30.0
+_PASSIVE_REPLY_RECENT: dict[int, float] = {}
 
 
 def _prefix(bot: commands.Bot, message: discord.Message | None) -> str:
@@ -143,8 +156,79 @@ async def _send_home(
     return await destination.send(**kwargs)
 
 
+def _claim_local_passive_reply(message_id: int) -> bool:
+    """Réserve localement un message Discord pendant quelques secondes."""
+    now = time.monotonic()
+    stale = [mid for mid, expires in _PASSIVE_REPLY_RECENT.items() if expires <= now]
+    for mid in stale[:1000]:
+        _PASSIVE_REPLY_RECENT.pop(mid, None)
+
+    if _PASSIVE_REPLY_RECENT.get(message_id, 0.0) > now:
+        return False
+
+    _PASSIVE_REPLY_RECENT[message_id] = now + _PASSIVE_REPLY_TTL
+    if len(_PASSIVE_REPLY_RECENT) > 5000:
+        for mid in list(_PASSIVE_REPLY_RECENT)[:1000]:
+            _PASSIVE_REPLY_RECENT.pop(mid, None)
+    return True
+
+
+async def _claim_passive_reply(bot: commands.Bot, reply_to: discord.Message | None) -> bool:
+    """Garantit une seule sortie pour un message naturel, même avec plusieurs runtimes.
+
+    1. seul le service Railway principal est autorisé à publier ;
+    2. un cache local bloque les doubles listeners dans le même process ;
+    3. si Redis Enterprise est disponible, un lease par ID de message bloque aussi deux
+       replicas du même service. Le lease n'est volontairement pas libéré : son TTL est la
+       fenêtre anti-doublon.
+    """
+    if reply_to is None:
+        # /sentrix et les autres commandes explicites n'utilisent pas ce verrou : leur cycle
+        # de réponse est déjà détenu par discord.py et elles n'ont pas de message passif source.
+        return True
+
+    if not _is_primary_process():
+        logger.info(
+            "Réponse IA passive ignorée sur service Railway secondaire — message=%s",
+            getattr(reply_to, "id", "?"),
+        )
+        return False
+
+    try:
+        message_id = int(reply_to.id)
+    except (TypeError, ValueError, AttributeError):
+        # Sans ID stable, on préfère conserver la réponse plutôt que bloquer un utilisateur.
+        return True
+
+    if not _claim_local_passive_reply(message_id):
+        logger.info("Réponse IA passive doublon local bloquée — message=%s", message_id)
+        return False
+
+    # EnterpriseSuite expose Redis via .infra lorsqu'il est disponible. Le lookup se fait
+    # au moment du message (et non à l'installation) pour fonctionner même si le Cog est
+    # initialisé plus tard pendant le démarrage.
+    service = bot.get_cog("EnterpriseSuite")
+    infra = getattr(service, "infra", None) if service is not None else None
+    acquire_lease = getattr(infra, "acquire_lease", None)
+    if callable(acquire_lease):
+        try:
+            claimed = await acquire_lease(
+                f"ai-passive-reply:{message_id}",
+                str(message_id),
+                ttl=int(_PASSIVE_REPLY_TTL),
+            )
+            if not claimed:
+                logger.info("Réponse IA passive doublon Redis bloquée — message=%s", message_id)
+                return False
+        except Exception:
+            # Le cache local et le garde Railway restent actifs si Redis tombe momentanément.
+            logger.debug("Lease Redis anti-doublon IA indisponible.", exc_info=True)
+
+    return True
+
+
 def install(bot: commands.Bot) -> None:
-    """Pose la version compacte au-dessus du pipeline d'accueil V6 existant."""
+    """Pose la version compacte et le dernier verrou anti-doublon au-dessus de V5/V6."""
     ai_cog = bot.get_cog("Ai")
     if ai_cog is None or getattr(ai_cog, "_sentrix_compact_mention_home", False):
         return
@@ -159,10 +243,13 @@ def install(bot: commands.Bot) -> None:
         *,
         reply_to: discord.Message | None = None,
     ):
+        if not await _claim_passive_reply(self.bot, reply_to):
+            return None
+
         if bot_experience_v5._is_bare_trigger(self.bot, reply_to):
             return await _send_home(self.bot, destination, author, reply_to)
         return await original(destination, author, question, reply_to=reply_to)
 
     ai_cog.send_sentrix_reply = types.MethodType(compact_send_sentrix_reply, ai_cog)
     ai_cog._sentrix_compact_mention_home = True
-    logger.info("Accueil compact sur mention activé pour %s.", brand_label())
+    logger.info("Accueil compact + anti-doublon final IA activés pour %s.", brand_label())
