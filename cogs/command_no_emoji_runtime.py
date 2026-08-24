@@ -166,5 +166,16 @@ def install(bot: commands.Bot) -> None:
     except Exception:
         # Le style premium historique reste fonctionnel même si le thème V2 est absent.
         pass
+
+    # L'installateur de compatibilité passe déjà à chaque chargement d'extension. On en
+    # profite pour brancher l'annonceur des releases sans ajouter une nouvelle commande
+    # publique ni modifier le budget slash. L'annonceur est lui-même idempotent.
+    try:
+        from .release_announcer import install as install_release_announcer
+        install_release_announcer(bot)
+    except Exception:
+        # Une annonce de mise à jour ne doit jamais empêcher SentriX de démarrer.
+        pass
+
     bot._sentrix_no_emoji_commands = False
     bot._sentrix_command_style_v2 = True
