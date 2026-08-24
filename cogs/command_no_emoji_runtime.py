@@ -177,5 +177,18 @@ def install(bot: commands.Bot) -> None:
         # Une annonce de mise à jour ne doit jamais empêcher SentriX de démarrer.
         pass
 
+    # Le constructeur officiel dépend du vrai Cog ServerBuilder. Ne pas importer son
+    # module avant le chargement de cette extension évite de conserver une ancienne
+    # référence Python si discord.py recharge ensuite cogs.server_builder.
+    if bot.get_cog("ServerBuilder") is not None:
+        try:
+            from .official_server import install as install_official_server
+            install_official_server(bot)
+            from .official_server_polish import install as install_official_server_polish
+            install_official_server_polish(bot)
+        except Exception:
+            # Un outil de construction du serveur officiel ne doit jamais bloquer le bot.
+            pass
+
     bot._sentrix_no_emoji_commands = False
     bot._sentrix_command_style_v2 = True
