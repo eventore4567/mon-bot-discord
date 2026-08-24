@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import base64
 import logging
 
 from aiohttp import ClientSession, ClientTimeout, web
 
 _INSTALLED = False
 logger = logging.getLogger("bot.dashboard.user-avatar-v46")
-_AVATAR_PATH = "/api/me/avatar"
 
 
 async def _discord_avatar_url(request: web.Request, session: dict) -> str | None:
@@ -47,18 +47,15 @@ async def _discord_avatar_url(request: web.Request, session: dict) -> str | None
     return None
 
 
-async def user_avatar(request: web.Request) -> web.Response:
-    dashboard = request.app.get("dashboard_module")
-    if dashboard is None:
-        raise web.HTTPNotFound()
+async def _avatar_data_uri(request: web.Request, session: dict) -> str | None:
+    """Charge la PP côté serveur puis l'embarque dans /api/me.
 
-    session = dashboard._session(request)
-    if not session:
-        raise web.HTTPUnauthorized(text="Connexion Discord requise")
-
+    Cela évite complètement les problèmes de CDN, CORS, cache ou middleware sur une
+    deuxième requête image : le navigateur reçoit directement les octets de la vraie PP.
+    """
     url = await _discord_avatar_url(request, session)
     if not url:
-        raise web.HTTPNotFound(text="Avatar Discord indisponible")
+        return None
 
     try:
         timeout = ClientTimeout(total=10)
@@ -66,27 +63,23 @@ async def user_avatar(request: web.Request) -> web.Response:
         async with ClientSession(timeout=timeout, headers=headers) as client:
             async with client.get(url) as upstream:
                 if upstream.status != 200:
-                    logger.warning("CDN Discord avatar HTTP %s pour %s", upstream.status, url)
-                    raise web.HTTPBadGateway(text="Avatar Discord temporairement indisponible")
+                    logger.warning("CDN Discord avatar HTTP %s", upstream.status)
+                    return None
                 body = await upstream.read()
+                if not body or len(body) > 2_000_000:
+                    return None
                 content_type = upstream.headers.get("Content-Type", "image/png").split(";", 1)[0]
-    except web.HTTPException:
-        raise
+                if not content_type.startswith("image/"):
+                    content_type = "image/png"
     except Exception as exc:
         logger.warning("Impossible de charger la PP Discord du dashboard: %s", exc)
-        raise web.HTTPBadGateway(text="Avatar Discord temporairement indisponible") from exc
+        return None
 
-    return web.Response(
-        body=body,
-        content_type=content_type,
-        headers={
-            "Cache-Control": "private, max-age=300, stale-while-revalidate=3600",
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
+    encoded = base64.b64encode(body).decode("ascii")
+    return f"data:{content_type};base64,{encoded}"
 
 
-async def handle_me_with_local_avatar(request: web.Request) -> web.Response:
+async def handle_me_with_embedded_avatar(request: web.Request) -> web.Response:
     dashboard = request.app.get("dashboard_module")
     if dashboard is None:
         raise web.HTTPInternalServerError(text="Dashboard indisponible")
@@ -96,8 +89,11 @@ async def handle_me_with_local_avatar(request: web.Request) -> web.Response:
         return error
 
     user = dict(session.get("user") or {})
-    user["avatar_url"] = _AVATAR_PATH + "?v=discord-v46"
-    return web.json_response({"user": user, "csrf": session["csrf"]})
+    user["avatar_url"] = await _avatar_data_uri(request, session)
+    return web.json_response(
+        {"user": user, "csrf": session["csrf"]},
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 def install(dashboard) -> None:
@@ -106,24 +102,21 @@ def install(dashboard) -> None:
         return
     _INSTALLED = True
 
-    dashboard.handle_me = handle_me_with_local_avatar
+    # /api/me fournit la vraie PP sous forme data URI. Aucune route image séparée n'est
+    # nécessaire et les contrôles Administrateur restent appliqués à /api/me.
+    dashboard.handle_me = handle_me_with_embedded_avatar
 
-    # Une ancienne couche dashboard_profile_images forçait encore une image locale "T"
-    # après loadSession(). On la remplace ici, en dernier, par la vraie PP Discord.
-    dashboard.INDEX_HTML = dashboard.INDEX_HTML.replace(
-        "/assets/user-avatar?v=t3d",
-        _AVATAR_PATH + "?v=discord-v46",
-    )
+    # dashboard_profile_images contenait encore un ancien avatar local "T" et le
+    # réappliquait toutes les 500 ms. On garde son mécanisme de rafraîchissement mais on
+    # lui fait utiliser l'avatar déjà reçu depuis /api/me.
+    old_call = 'putImage("userAvatar", "/assets/user-avatar?v=t3d", "T", "Photo de profil T");'
+    new_call = '''try {
+      if (typeof state !== "undefined" && state.user && state.user.avatar_url) {
+        putImage("userAvatar", state.user.avatar_url, "U", "Photo de profil Discord");
+      }
+    } catch (_) {}'''
+    dashboard.INDEX_HTML = dashboard.INDEX_HTML.replace(old_call, new_call)
     dashboard.INDEX_HTML = dashboard.INDEX_HTML.replace(
         "Photo de profil T",
         "Photo de profil Discord",
     )
-
-    original_build_app = dashboard.build_app
-
-    def build_app(bot):
-        app = original_build_app(bot)
-        app.router.add_get(_AVATAR_PATH, user_avatar)
-        return app
-
-    dashboard.build_app = build_app
