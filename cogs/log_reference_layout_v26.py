@@ -17,8 +17,7 @@ V34 Ticket Transcript s'installe en tout dernier pour les fermetures : carte dé
 participants, raison, transcript HTML joint et bouton Transcript.
 V50 est installé après toutes ces couches et impose la structure visuelle uniforme des
 cartes standards : mêmes blocs, padding invisible et taille maximale des contenus.
-V51 marque explicitement V50 comme compatible avec la garde V25 : les cartes uniformes
-ne sont plus prises pour d'anciens layouts et donc ne sont plus bloquées à l'envoi.
+V52 élargit légèrement la présence visuelle des cartes sans modifier leur hauteur cible.
 """
 from __future__ import annotations
 
@@ -191,12 +190,28 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     # V50 doit être la dernière couche VISUELLE. La garde de sortie V25 considère
     # `_sentrix_rectangle_v25` comme le marqueur de compatibilité ; sans ce marqueur elle
     # prenait V50 pour un ancien layout et supprimait silencieusement tous les logs.
-    from .log_fixed_height_v50 import FixedHeightLogV50, install as install_fixed_height_v50
+    from . import log_fixed_height_v50 as fixed_v50
+    FixedHeightLogV50 = fixed_v50.FixedHeightLogV50
     FixedHeightLogV50._sentrix_rectangle_v25 = True
     FixedHeightLogV50._sentrix_reference_v26 = True
     FixedHeightLogV50._sentrix_unified_v27 = True
     FixedHeightLogV50._sentrix_premium_v28 = True
-    install_fixed_height_v50(bot, extension_name)
+
+    # V52 : Discord ne donne pas de propriété `width` aux Components V2. Pour gagner
+    # légèrement en largeur sans ajouter une ligne ni modifier la hauteur, on réserve
+    # quelques espaces Unicode de largeur réelle à la fin de la description du header.
+    # Cela pousse le Container à utiliser un peu plus de largeur sur desktop, tout en
+    # restant responsive sur mobile.
+    if not getattr(fixed_v50, "_sentrix_wider_v52", False):
+        original_description = fixed_v50._description
+
+        def wider_description(embed: discord.Embed) -> str:
+            return original_description(embed) + ("\u2003" * 7)
+
+        fixed_v50._description = wider_description
+        fixed_v50._sentrix_wider_v52 = True
+
+    fixed_v50.install(bot, extension_name)
 
     # Panneau de vérification V51 : aucune nouvelle commande, uniquement le runtime de
     # +setup > Sécurité et les boutons persistants du portail.
