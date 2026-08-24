@@ -65,24 +65,17 @@ def _command_type_value(command) -> int:
         return 1
 
 
-def _command_payload(bot) -> list[dict]:
-    """Construit un payload compatible Discord API sans exposer de données privées."""
-    tree = getattr(bot, "tree", None)
-    if tree is None:
-        return []
-
+def _serialize_commands(commands, tree) -> list[dict]:
     payload: list[dict] = []
-    try:
-        commands = list(tree.get_commands())
-    except Exception:
-        logger.exception("Impossible de lire l'arbre des commandes slash SentriX.")
-        return []
+    seen: set[tuple[str, int]] = set()
 
     for command in commands:
         data = None
         to_dict = getattr(command, "to_dict", None)
         if callable(to_dict):
-            for args in ((tree,), tuple()):
+            # AppCommand récupéré depuis Discord utilise to_dict() sans argument ;
+            # Command local de discord.py peut demander le CommandTree.
+            for args in (tuple(), (tree,)):
                 try:
                     data = to_dict(*args)
                     if isinstance(data, dict):
@@ -104,16 +97,58 @@ def _command_payload(bot) -> list[dict]:
                 "type": _command_type_value(command),
             }
 
-        for key in (
-            "id",
-            "application_id",
-            "guild_id",
-            "version",
-        ):
+        # DiscordBotList attend le corps de création Discord, pas les identifiants
+        # renvoyés par GET /applications/.../commands.
+        for key in ("id", "application_id", "guild_id", "version"):
             data.pop(key, None)
+
+        name = str(data.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            command_type = int(data.get("type", 1) or 1)
+        except (TypeError, ValueError):
+            command_type = 1
+            data["type"] = 1
+
+        marker = (name.casefold(), command_type)
+        if marker in seen:
+            continue
+        seen.add(marker)
         payload.append(data)
 
     return payload
+
+
+async def _command_payload(bot) -> tuple[list[dict], str]:
+    """Préfère les slash commands réellement enregistrées chez Discord.
+
+    L'arbre local peut être incomplet selon la façon dont les cogs/hybrid commands ont
+    été chargés. DiscordBotList doit afficher ce que les utilisateurs voient réellement,
+    donc on interroge d'abord Discord puis on garde l'arbre local comme fallback.
+    """
+    tree = getattr(bot, "tree", None)
+    if tree is None:
+        return [], "no_tree"
+
+    try:
+        registered = list(await tree.fetch_commands())
+        payload = _serialize_commands(registered, tree)
+        if payload:
+            return payload, "discord_registered"
+        logger.warning("DiscordBotList commands : Discord ne renvoie aucune commande globale.")
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Impossible de récupérer les slash commands enregistrées chez Discord.")
+
+    try:
+        local = list(tree.get_commands())
+    except Exception:
+        logger.exception("Impossible de lire l'arbre local des commandes slash SentriX.")
+        return [], "local_error"
+
+    return _serialize_commands(local, tree), "local_tree"
 
 
 async def _request(
@@ -212,9 +247,20 @@ async def _sync_discordbotlist_commands(bot) -> bool | None:
     if not token or not getattr(bot, "user", None) or not bot.is_ready():
         return None
 
-    commands = _command_payload(bot)
+    commands, source = await _command_payload(bot)
     if not commands:
         logger.warning("DiscordBotList commands : aucune slash command trouvée, envoi ignoré.")
+        state = getattr(bot, "_sentrix_directory_stats", None)
+        if not isinstance(state, dict):
+            state = {}
+        state["commands"] = {
+            "updated_at": int(time.time()),
+            "count": 0,
+            "ok": False,
+            "source": source,
+            "reason": "no_commands_found",
+        }
+        bot._sentrix_directory_stats = state
         return False
 
     timeout = ClientTimeout(total=20, connect=6)
@@ -247,6 +293,7 @@ async def _sync_discordbotlist_commands(bot) -> bool | None:
         "updated_at": int(time.time()),
         "count": len(commands),
         "ok": bool(ok),
+        "source": source,
     }
     bot._sentrix_directory_stats = state
     return ok
