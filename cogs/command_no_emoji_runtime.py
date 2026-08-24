@@ -177,5 +177,15 @@ def install(bot: commands.Bot) -> None:
         # Une annonce de mise à jour ne doit jamais empêcher SentriX de démarrer.
         pass
 
+    # Même principe pour le serveur officiel : le runtime ajoute seulement un alias à
+    # +create-server et des listeners idempotents. Aucune commande slash supplémentaire
+    # n'est créée, ce qui évite d'aggraver le registre historique de SentriX.
+    try:
+        from .official_server import install as install_official_server
+        install_official_server(bot)
+    except Exception:
+        # Un outil de construction du serveur officiel ne doit jamais bloquer le bot.
+        pass
+
     bot._sentrix_no_emoji_commands = False
     bot._sentrix_command_style_v2 = True
