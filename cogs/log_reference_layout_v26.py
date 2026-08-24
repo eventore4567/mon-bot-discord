@@ -18,8 +18,10 @@ participants, raison, transcript HTML joint et bouton Transcript.
 V50 est installé après toutes ces couches et impose la structure visuelle uniforme des
 cartes standards : mêmes blocs, padding invisible et taille maximale des contenus.
 V52 élargit légèrement la présence visuelle des cartes sans modifier leur hauteur cible.
-V53 termine la pile : largeur renforcée partout, fichiers/images dessous, surplus en
-pièce jointe, vraies mentions silencieuses et déduplication finale.
+V53 termine la pile visuelle : largeur renforcée partout, fichiers/images dessous, surplus en
+pièce jointe et vraies mentions silencieuses.
+V54 est le verrou de sortie final : un seul service Railway publie et une seule copie de
+chaque événement peut passer pendant la fenêtre anti-doublon.
 """
 from __future__ import annotations
 
@@ -220,10 +222,14 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .verification_polish_v51 import install as install_verification_polish_v51
     install_verification_polish_v51(bot)
 
-    # V53 est volontairement le dernier mot de la pile : il doit voir les wrappers de
-    # transcript, la garde anti-doublon V25 et le renderer V50 déjà installés.
+    # V53 pose la dernière couche visuelle et les pièces jointes.
     from .log_output_polish_v53 import install as install_log_output_polish_v53
     install_log_output_polish_v53(bot, extension_name)
+
+    # V54 DOIT rester le dernier wrapper TextChannel.send. C'est le verrou absolu contre
+    # les doublons inter-services et inter-renderers.
+    from .log_dedupe_guard_v54 import install as install_log_dedupe_guard_v54
+    install_log_dedupe_guard_v54(bot, extension_name)
 
 
 __all__ = ["install", "ReferenceLogLayout"]
