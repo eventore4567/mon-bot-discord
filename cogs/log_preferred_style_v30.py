@@ -102,12 +102,7 @@ def _one_line(value: object, limit: int = 220) -> str:
 
 
 def _restore_role_mentions(guild: discord.Guild, value: object) -> str:
-    """Restaure @NomDuRôle en vraie mention <@&id> sans permettre le ping.
-
-    Les nouvelles sources utilisent déjà role.mention. Cette restauration couvre aussi les
-    anciennes couches qui avaient transformé une mention en simple texte @NomDuRôle.
-    AllowedMentions.none() est imposé plus bas dans le pipeline V25.
-    """
+    """Restaure @NomDuRôle en vraie mention <@&id> sans permettre le ping."""
     text = str(value or "")
     if not text:
         return text
@@ -192,9 +187,6 @@ def _context_line(guild: discord.Guild, log_type: str, embed: discord.Embed) -> 
         "acteur", "executant", "exécutant",
     )
 
-    # Les logs d'arrivée/départ avaient parfois seulement l'ID dans le footer. On le
-    # transforme maintenant en vraie mention membre pour garder la même qualité visuelle
-    # que les logs de messages.
     if not target and str(log_type) in {"members", "moderation"}:
         footer_target = _target_id(embed)
         if footer_target:
@@ -253,6 +245,35 @@ def _generic_details(guild: discord.Guild, embed: discord.Embed, consumed: set[i
         description = _restore_role_mentions(guild, description)
         return _one_line(description, 620) if description else None
     return "  •  ".join(items)[:1500]
+
+
+def _member_extra_details(guild: discord.Guild, embed: discord.Embed) -> str | None:
+    """Complète les logs membres courts pour qu'ils aient autant d'info que les logs messages."""
+    target_id = _target_id(embed)
+    if not target_id:
+        return None
+
+    items: list[str] = []
+    member = guild.get_member(target_id)
+    if member is not None:
+        if member.joined_at is not None:
+            items.append(f"📥 **Sur le serveur** {discord.utils.format_dt(member.joined_at, 'R')}")
+        items.append(f"👥 **Membres** `{guild.member_count or len(guild.members)}`")
+        items.append(f"🏷️ **Rôles** `{max(0, len(member.roles) - 1)}`")
+        items.append(f"🤖 **Type** {'Bot' if member.bot else 'Membre'}")
+    else:
+        title = _norm(str(embed.title or ""))
+        if "membre parti" in title:
+            description = str(embed.description or "").strip()
+            if description and not re.fullmatch(r"<@!?\d{15,22}>", description):
+                items.append(f"👤 **Compte** {_one_line(description, 140)}")
+            roles = _field_value(embed, "roles", "rôles")
+            role_count = len(re.findall(r"<@&\d{15,22}>", roles))
+            if role_count:
+                items.append(f"🏷️ **Rôles au départ** `{role_count}`")
+            items.append(f"👥 **Membres restants** `{guild.member_count or len(guild.members)}`")
+
+    return "  •  ".join(items[:4]) if items else None
 
 
 def _ids_line(guild: discord.Guild, log_type: str, embed: discord.Embed) -> str:
@@ -341,6 +362,9 @@ class PreferredLogV30(discord.ui.LayoutView):
         ts = _event_timestamp(clean)
         context, consumed = _context_line(guild, str(log_type), clean)
         details = _generic_details(guild, clean, consumed)
+        member_extra = _member_extra_details(guild, clean) if str(log_type) == "members" else None
+        if member_extra:
+            details = f"{details}  •  {member_extra}" if details else member_extra
 
         lines = [
             f"-# 🛡️ SENTRIX • {category} • {guild.name} • <t:{ts}:R>",
@@ -348,11 +372,11 @@ class PreferredLogV30(discord.ui.LayoutView):
             context,
         ]
         if details:
-            lines.append(details)
+            lines.append(details[:1900])
         lines.append(f"-# {_ids_line(guild, log_type, clean)}")
 
         container = discord.ui.Container(accent_colour=_accent(log_type, clean))
-        container.add_item(discord.ui.TextDisplay("\n".join(lines)[:2800]))
+        container.add_item(discord.ui.TextDisplay("\n".join(lines)[:3200]))
 
         final_buttons = _button_items(guild, log_type, clean)
         if final_buttons:
