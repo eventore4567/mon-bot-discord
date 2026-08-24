@@ -2,12 +2,15 @@
 
 Garanties :
 1. Les journaux SentriX n'envoient jamais de ping membre/rôle.
-2. Une rafale de >=3 rôles créée/supprimée/modifiée dans une fenêtre FIXE de 3 secondes
+2. Les membres/rôles restent de vraies mentions Discord cliquables (`<@id>` / `<@&id>`).
+3. Une rafale de >=3 rôles créée/supprimée/modifiée dans une fenêtre FIXE de 3 secondes
    devient UNE carte avec UNE liste, jamais une carte par rôle.
-3. Une ou deux actions dans la fenêtre gardent leurs cartes individuelles détaillées.
+4. Une ou deux actions dans la fenêtre gardent leurs cartes individuelles détaillées.
 
 Le regroupement travaille au point d'envoi central afin de couvrir +create-server,
-+create sentrix, dashboard et actions manuelles Discord.
++create sentrix, dashboard et actions manuelles Discord. La notification est neutralisée
+uniquement au dernier envoi avec AllowedMentions.none(), ce qui conserve l'apparence
+native des mentions sans réellement ping la personne ou le rôle.
 """
 from __future__ import annotations
 
@@ -101,10 +104,10 @@ def _safe_name(value: str) -> str:
 
 
 def _actor_text(actor: discord.abc.User | None) -> str:
+    """Vraie mention Discord, rendue sans notification au dernier envoi."""
     if actor is None:
         return "**Auteur inconnu**"
-    display = getattr(actor, "display_name", None) or getattr(actor, "name", None) or str(actor)
-    return f"**@{_safe_name(str(display))}** (`{actor.id}`)"
+    return f"{actor.mention} (`{actor.id}`)"
 
 
 def _update_summary(embed: discord.Embed) -> str:
@@ -144,8 +147,10 @@ def _event_line(
     actor: discord.abc.User | None,
 ) -> str:
     role = guild.get_role(event.role_id)
-    role_name = role.name if role is not None else event.role_name
-    role_label = f"**@{_safe_name(role_name)}** (`{event.role_id}`)"
+    # Même si le rôle vient d'être supprimé, on conserve le token de mention Discord.
+    # Lorsqu'il existe encore, Discord rend la vraie pastille du rôle ; dans tous les cas
+    # AllowedMentions.none() empêche la notification.
+    role_label = f"<@&{event.role_id}> (`{event.role_id}`)"
     actor_label = _actor_text(actor)
 
     if action_key == "delete":
@@ -275,7 +280,8 @@ def install() -> None:
         send_with_role_batching._sentrix_role_batcher = True
         log_service.send_log = send_with_role_batching
 
-    # Dernière sécurité : toute carte de log Components V2 impose AllowedMentions.none().
+    # Dernière sécurité : les mentions restent de vraies mentions Discord mais aucune
+    # notification n'est envoyée, même pour un membre ou un rôle réellement mentionné.
     original_channel_send = discord.TextChannel.send
     if not getattr(original_channel_send, "_sentrix_logs_no_ping", False):
         async def send_without_log_mentions(self, *args, **kwargs):
@@ -300,7 +306,7 @@ def install() -> None:
 
     _INSTALLED = True
     logger.info(
-        "Logs rôles : fenêtre fixe %.1fs, seuil=%s, liste unique et mentions désactivées.",
+        "Logs rôles : fenêtre fixe %.1fs, seuil=%s, vraies mentions sans ping.",
         ROLE_BATCH_DELAY,
         ROLE_BATCH_THRESHOLD,
     )
