@@ -30,6 +30,19 @@ SentriX centralise la gestion d'un serveur Discord : modération, AutoMod, anti-
 
 `Moderation`, `Utility`, `Security`, `Automod`, `Ticket`, `Web Dashboard`, `AI`, `Logging`, `Multipurpose`, `Leveling`
 
+## Liens de campagne SentriX
+
+Ces URLs passent par le site officiel puis redirigent vers l'installation Discord. Elles servent à mesurer les clics par source sans enregistrer d'IP ni d'identifiant Discord.
+
+- Top.gg : `/go/topgg`
+- DiscordBotList : `/go/discordbotlist`
+- Bots.gg : `/go/botsgg`
+- DiscordList : `/go/discordlist`
+- TikTok : `/go/tiktok`
+- YouTube : `/go/youtube`
+- Partenariats : `/go/partner`
+- Diagnostic compteurs : `/marketing-stats`
+
 ---
 
 ## 1. Top.gg
@@ -38,6 +51,10 @@ SentriX centralise la gestion d'un serveur Discord : modération, AutoMod, anti-
 - Connexion propriétaire requise.
 - Fiche détaillée : voir `TOPGG_SUBMISSION.md`.
 - Priorité : **très haute**.
+- État au 24 août 2026 : Discord reconnaît et permet d'installer l'application `1532010415951839252`, `Public Bot` est activé et `Requires OAuth2 Code Grant` est désactivé, mais le formulaire Top.gg renvoie encore `Your application was not found`.
+- Ne pas modifier l'Application ID : le souci observé est la détection Top.gg, pas l'installation Discord.
+- Après approbation de la fiche, récupérer un token API v1 dans les intégrations Top.gg et l'ajouter uniquement dans Railway sous `TOPGG_TOKEN`.
+- SentriX publiera alors automatiquement `server_count` et `shard_count` toutes les 30 minutes avec `PATCH /api/v1/projects/@me/metrics`.
 
 ## 2. DiscordBotList
 
@@ -45,20 +62,25 @@ SentriX centralise la gestion d'un serveur Discord : modération, AutoMod, anti-
 - Utiliser l'identité commune ci-dessus.
 - Catégories prioritaires : Moderation, Utility, Web Dashboard, Ticket, Automod.
 - Ajouter le site officiel et le serveur support lorsqu'il sera configuré.
-- Une connexion au service est nécessaire pour gérer une fiche de bot ; ne pas automatiser une soumission sans compte propriétaire.
+- Une connexion au service est nécessaire pour gérer une fiche de bot ; ne pas simuler une publication sans compte propriétaire.
+- L'API officielle accepte les statistiques via `POST https://discordbotlist.com/api/v1/bots/:id/stats`.
+- Après approbation, mettre le token uniquement dans Railway sous `DISCORDBOTLIST_TOKEN`.
+- SentriX publiera automatiquement le nombre de serveurs et d'utilisateurs toutes les 30 minutes.
 
 ## 3. Discord Bots / Bots.gg
 
 - Site : `https://discord.bots.gg/`
 - Utiliser l'identité commune ci-dessus.
 - Préfixe principal à afficher : `/` si un seul préfixe est accepté ; sinon `+ /`.
-- Important : les règles développeur de Bots.gg interdisent l'automatisation de l'ajout, de la modification ou de la suppression de bots. La publication doit donc être faite manuellement depuis le compte propriétaire.
+- Les conditions publiques interdisent l'automatisation de l'ajout, modification ou suppression de fiches de bots. La publication de la fiche reste donc manuelle depuis le compte propriétaire.
+- Ne pas ajouter d'automatisation de gestion de fiche tant que la plateforme ne l'autorise pas explicitement.
 
 ## 4. DiscordList
 
 - Site : `https://discordlist.gg/`
 - Utiliser les mêmes descriptions, avatar et liens officiels.
 - Priorité après Top.gg, DiscordBotList et Bots.gg.
+- Publication manuelle jusqu'à confirmation d'une API officielle actuelle et de ses règles.
 
 ## 5. Discord App Directory
 
@@ -67,6 +89,21 @@ SentriX centralise la gestion d'un serveur Discord : modération, AutoMod, anti-
 - Ne pas contourner cette vérification avec l'identité d'une autre personne.
 
 ---
+
+## Publication automatique des statistiques
+
+Fichier : `web/bot_directory_stats_v44.py`.
+
+Le système est **désactivé par défaut**. Si aucun token n'est présent, aucune requête réseau vers un annuaire n'est effectuée.
+
+Variables Railway :
+
+```text
+TOPGG_TOKEN=
+DISCORDBOTLIST_TOKEN=
+```
+
+Les secrets ne doivent jamais être écrits dans GitHub. Le diagnostic sans secret est disponible sur `/api/directory-status`.
 
 ## Texte partenaire court
 
@@ -78,7 +115,7 @@ Site : https://mon-bot-discord-production-8944.up.railway.app/
 
 ## Ordre de publication recommandé
 
-1. Top.gg
+1. Top.gg — retenter la détection / support si le problème persiste
 2. DiscordBotList
 3. Bots.gg
 4. DiscordList
