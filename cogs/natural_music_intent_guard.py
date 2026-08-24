@@ -1,15 +1,20 @@
-"""Évite que le routeur naturel SentriX confonde du français courant avec la musique.
+"""Protège le langage naturel SentriX contre les faux positifs et les réponses trop scolaires.
 
-Exemple corrigé : « fais-moi un résumé sur Pythagore » ne doit jamais devenir +resume.
-Les commandes musique restent accessibles quand elles sont demandées directement ou quand
-la phrase contient un contexte audio/musical clair.
+Deux protections vivent ici :
+- « fais-moi un résumé sur Pythagore » ne doit jamais devenir +resume musique ;
+- les messages Discord très courts comme « cv ? » restent une vraie conversation et ne
+  doivent jamais déclencher une définition de l'abréviation ni une liste d'exemples.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import re
+import unicodedata
 
 from discord.ext import commands
+
+from utils import ai_service
 
 logger = logging.getLogger("bot.ai.natural-music-guard")
 _INSTALLED = False
@@ -44,14 +49,95 @@ PLAYBACK_RESUME_PATTERN = re.compile(
     r"\b(reprend|reprends|reprendre|continue|continuer|relance|relancer)\b"
 )
 
+# Le modèle comprend déjà ces expressions, mais un fast-path déterministe évite qu'une
+# question de small-talk ultra courte soit parfois traitée comme une demande de définition.
+# Cela rend aussi « cv ? » quasi instantané puisqu'aucun appel OpenAI n'est nécessaire.
+_CASUAL_REPLIES = {
+    "cv": "Oui tranquille, et toi ?",
+    "ca va": "Oui tranquille, et toi ?",
+    "sava": "Oui tranquille, et toi ?",
+    "sa va": "Oui tranquille, et toi ?",
+    "tu vas bien": "Oui tranquille, et toi ?",
+    "comment ca va": "Ça va bien, et toi ?",
+    "ca dit quoi": "Tranquille, et toi ?",
+    "bien ou quoi": "Oui tranquille, et toi ?",
+    "slt": "Salut !",
+    "salut": "Salut !",
+    "cc": "Coucou !",
+    "coucou": "Coucou !",
+    "yo": "Yo !",
+    "wsh": "Wsh, ça dit quoi ?",
+    "t es la": "Oui, je suis là.",
+    "tes la": "Oui, je suis là.",
+    "tu fais quoi": "Je suis là, je te réponds. Et toi ?",
+}
+
+_CASUAL_PROMPT_MARKER = "[SENTRIX_CASUAL_CHAT_V58]"
+_CASUAL_PROMPT = (
+    "\n\n[SENTRIX_CASUAL_CHAT_V58]\n"
+    "Règles de conversation Discord naturelle :\n"
+    "- Un message court comme « cv ? », « ça va ? », « slt », « wsh », « yo », « bien ou quoi » "
+    "est une conversation, pas une demande de définition. Réponds directement comme dans un chat.\n"
+    "- N'explique JAMAIS spontanément le sens d'un mot, d'une abréviation, d'un argot ou d'une "
+    "expression si l'utilisateur ne demande pas explicitement sa signification.\n"
+    "- Après une réponse de small-talk, n'ajoute ni définition, ni cours, ni liste d'exemples, "
+    "ni formulations que l'utilisateur pourrait envoyer.\n"
+    "- Pour les messages de conversation très courts, fais généralement une seule phrase courte.\n"
+    "- Si l'utilisateur demande explicitement « ça veut dire quoi ? », « ça signifie quoi ? », "
+    "« définis » ou équivalent, alors seulement tu peux expliquer le terme."
+)
+
+
+def _normalize_casual_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or ""))
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = normalized.casefold().replace("’", "'")
+    normalized = re.sub(r"[^a-z0-9' ]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _casual_reply(text: str) -> str | None:
+    """Réponse locale uniquement pour les small-talks sans ambiguïté.
+
+    Les demandes de définition (« cv veut dire quoi ? ») ne correspondent volontairement
+    à aucune clé exacte et continuent donc vers l'IA normalement.
+    """
+    return _CASUAL_REPLIES.get(_normalize_casual_text(text))
+
+
+def _install_casual_chat_guard(ai_module) -> None:
+    """Ajoute les règles globales et le fast-path aux routes legacy /sentrix/passives."""
+    if _CASUAL_PROMPT_MARKER not in ai_service.SYSTEM_PROMPT:
+        ai_service.SYSTEM_PROMPT += _CASUAL_PROMPT
+
+    original_ask_ai = ai_module.Ai.ask_ai
+    if getattr(original_ask_ai, "_sentrix_casual_chat_v58", False):
+        return
+
+    @functools.wraps(original_ask_ai)
+    async def casual_aware_ask_ai(self, prompt, *args, **kwargs):
+        if isinstance(prompt, str):
+            direct = _casual_reply(prompt)
+            if direct is not None:
+                logger.debug("Réponse small-talk locale SentriX : %r", prompt[:80])
+                return direct
+        return await original_ask_ai(self, prompt, *args, **kwargs)
+
+    casual_aware_ask_ai._sentrix_casual_chat_v58 = True
+    ai_module.Ai.ask_ai = casual_aware_ask_ai
+    logger.info("Conversation naturelle IA V58 active : small-talk court sans définition parasite.")
+
 
 def install(bot: commands.Bot) -> None:
-    """Protège Ai._natural_command_line contre les faux positifs de commandes musique."""
+    """Protège Ai contre les faux positifs musique et les réponses de small-talk scolaires."""
     global _INSTALLED
     if _INSTALLED:
         return
 
     from . import ai
+
+    _install_casual_chat_guard(ai)
 
     original = ai.Ai._natural_command_line
     if getattr(original, "_sentrix_music_intent_guard", False):
