@@ -2,15 +2,29 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
+import string
 import time
+from dataclasses import dataclass
 
 import discord
 from discord.ext import commands
 
 from utils import helpers
 
-logger = logging.getLogger("bot.security.honeypot-v49")
+logger = logging.getLogger("bot.security.honeypot-v50")
 _COG_NAME = "HoneypotVerification"
+
+# Protection volontairement conservatrice : un compte créé à l'instant ne peut pas
+# traverser le portail immédiatement. Ce seuil bloque surtout les comptes de raid jetables
+# sans pénaliser les comptes Discord normaux.
+MIN_ACCOUNT_AGE_SECONDS = 30 * 60
+MIN_JOIN_DELAY_SECONDS = 8
+CHALLENGE_TTL_SECONDS = 120
+START_COOLDOWN_SECONDS = 12
+FAILURE_WINDOW_SECONDS = 10 * 60
+FAILURE_LOCK_SECONDS = 10 * 60
+MAX_FAILURES = 5
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS honeypot_verification (
@@ -26,13 +40,160 @@ CREATE TABLE IF NOT EXISTS honeypot_verification (
 )
 """
 
+_PENDING_SCHEMA = """
+CREATE TABLE IF NOT EXISTS honeypot_pending_members (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    joined_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, user_id)
+)
+"""
+
+_VERIFIED_SCHEMA = """
+CREATE TABLE IF NOT EXISTS honeypot_verified_members (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    verified_at INTEGER NOT NULL,
+    method TEXT NOT NULL,
+    account_age_seconds INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+)
+"""
+
+
+@dataclass
+class ChallengeState:
+    token: str
+    guild_id: int
+    user_id: int
+    created_at: float
+    expires_at: float
+    code: str
+    math_answer: str
+    sequence: tuple[str, ...]
+    sequence_done: bool = False
+
+
+class VerificationModal(discord.ui.Modal):
+    def __init__(self, cog: "HoneypotVerification", state: ChallengeState, math_question: str):
+        super().__init__(title="SentriX • Vérification humaine", timeout=CHALLENGE_TTL_SECONDS)
+        self.cog = cog
+        self.state = state
+
+        self.code_input = discord.ui.TextInput(
+            label=f"Recopie exactement : {state.code}",
+            placeholder="Code affiché ci-dessus",
+            min_length=len(state.code),
+            max_length=len(state.code),
+            required=True,
+        )
+        self.math_input = discord.ui.TextInput(
+            label=f"Calcul rapide : {math_question}",
+            placeholder="Réponse en chiffres",
+            min_length=1,
+            max_length=4,
+            required=True,
+        )
+        self.add_item(self.code_input)
+        self.add_item(self.math_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.cog.complete_human_challenge(
+            interaction,
+            self.state.token,
+            str(self.code_input.value),
+            str(self.math_input.value),
+        )
+
+
+class SequenceButton(discord.ui.Button):
+    def __init__(self, symbol: str):
+        super().__init__(label=symbol, style=discord.ButtonStyle.secondary, row=0)
+        self.symbol = symbol
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        if not isinstance(view, VerificationSequenceView):
+            return
+        await view.press(interaction, self.symbol)
+
+
+class VerificationSequenceView(discord.ui.View):
+    """Étape 1 : mini challenge interactif individuel, impossible à valider par un clic unique."""
+
+    SYMBOLS = ("1", "2", "3", "4", "5")
+
+    def __init__(self, cog: "HoneypotVerification", state: ChallengeState, math_question: str):
+        super().__init__(timeout=CHALLENGE_TTL_SECONDS)
+        self.cog = cog
+        self.state = state
+        self.math_question = math_question
+        self.position = 0
+
+        symbols = list(self.SYMBOLS)
+        secrets.SystemRandom().shuffle(symbols)
+        for symbol in symbols:
+            self.add_item(SequenceButton(symbol))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.state.user_id:
+            await interaction.response.send_message(
+                "Cette vérification appartient à un autre membre.",
+                ephemeral=True,
+            )
+            return False
+        if interaction.guild is None or interaction.guild.id != self.state.guild_id:
+            await interaction.response.send_message("Vérification invalide.", ephemeral=True)
+            return False
+        return True
+
+    async def press(self, interaction: discord.Interaction, symbol: str):
+        current = self.cog._challenges.get((self.state.guild_id, self.state.user_id))
+        if current is None or current.token != self.state.token or time.time() > current.expires_at:
+            self.stop()
+            return await interaction.response.edit_message(
+                content="⌛ Cette vérification a expiré. Clique de nouveau sur **Commencer la vérification**.",
+                view=None,
+            )
+
+        expected = current.sequence[self.position]
+        if symbol != expected:
+            await self.cog._record_failure(self.state.guild_id, self.state.user_id)
+            self.cog._challenges.pop((self.state.guild_id, self.state.user_id), None)
+            for child in self.children:
+                child.disabled = True
+            self.stop()
+            return await interaction.response.edit_message(
+                content=(
+                    "❌ Mauvais ordre. La tentative a été annulée.\n"
+                    "Clique de nouveau sur **Commencer la vérification** pour obtenir un nouveau challenge."
+                ),
+                view=self,
+            )
+
+        self.position += 1
+        if self.position < len(current.sequence):
+            progress = "●" * self.position + "○" * (len(current.sequence) - self.position)
+            return await interaction.response.edit_message(
+                content=(
+                    "**Étape 1/2 — challenge anti-automatisation**\n"
+                    f"Clique dans cet ordre : **{' → '.join(current.sequence)}**\n"
+                    f"Progression : {progress}"
+                ),
+                view=self,
+            )
+
+        current.sequence_done = True
+        self.stop()
+        await interaction.response.send_modal(VerificationModal(self.cog, current, self.math_question))
+
 
 class HoneypotVerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Vérifier mon accès",
+        label="Commencer la vérification",
         style=discord.ButtonStyle.success,
         custom_id="sentrix:honeypot:verify",
     )
@@ -43,15 +204,20 @@ class HoneypotVerifyView(discord.ui.View):
                 "La vérification SentriX est temporairement indisponible.",
                 ephemeral=True,
             )
-        await cog.verify_member(interaction)
+        await cog.start_human_verification(interaction)
 
 
 class HoneypotVerification(commands.Cog, name=_COG_NAME):
-    """Vérification + salon piège anti-bot, configurable uniquement depuis +setup."""
+    """Vérification renforcée + salon piège anti-bot, configurable uniquement via +setup."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._trap_locks: set[tuple[int, int]] = set()
+        self._verification_in_progress: set[tuple[int, int]] = set()
+        self._challenges: dict[tuple[int, int], ChallengeState] = {}
+        self._last_start: dict[tuple[int, int], float] = {}
+        self._failures: dict[tuple[int, int], list[float]] = {}
+        self._lock_until: dict[tuple[int, int], float] = {}
 
     async def config(self, guild_id: int, *, enabled_only: bool = True):
         query = "SELECT * FROM honeypot_verification WHERE guild_id = ?"
@@ -59,13 +225,46 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             query += " AND enabled = 1"
         return await self.bot.db.fetchone(query, (guild_id,))
 
+    async def _pending(self, guild_id: int, user_id: int):
+        return await self.bot.db.fetchone(
+            "SELECT * FROM honeypot_pending_members WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+
+    async def _mark_pending(self, guild_id: int, user_id: int, joined_at: int | None = None):
+        await self.bot.db.execute(
+            "INSERT INTO honeypot_pending_members (guild_id, user_id, joined_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET joined_at=excluded.joined_at",
+            (guild_id, user_id, int(joined_at or time.time())),
+        )
+
+    async def _clear_pending(self, guild_id: int, user_id: int):
+        await self.bot.db.execute(
+            "DELETE FROM honeypot_pending_members WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+
+    async def _record_failure(self, guild_id: int, user_id: int):
+        now_ts = time.time()
+        key = (guild_id, user_id)
+        failures = self._failures.setdefault(key, [])
+        failures.append(now_ts)
+        failures[:] = [stamp for stamp in failures if now_ts - stamp <= FAILURE_WINDOW_SECONDS]
+        if len(failures) >= MAX_FAILURES:
+            self._lock_until[key] = now_ts + FAILURE_LOCK_SECONDS
+            self._failures[key] = []
+
+    def _seconds_locked(self, guild_id: int, user_id: int) -> int:
+        remaining = self._lock_until.get((guild_id, user_id), 0.0) - time.time()
+        return max(0, int(remaining))
+
     async def _log(self, guild: discord.Guild, title: str, description: str, *, danger: bool = False):
         embed = discord.Embed(
             title=title,
             description=description,
             colour=discord.Color.red() if danger else discord.Color.blurple(),
         )
-        embed.set_footer(text="SentriX • Vérification & Honeypot")
+        embed.set_footer(text="SentriX • Vérification renforcée & Honeypot")
         try:
             await helpers.send_log(self.bot, guild, "automod", embed)
         except Exception:
@@ -93,16 +292,12 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         return await guild.create_role(
             name=name,
             permissions=discord.Permissions.none(),
-            reason="SentriX : configuration vérification/honeypot depuis +setup",
+            reason="SentriX : configuration vérification renforcée depuis +setup",
         )
 
-    async def _lock_existing_channels(
-        self,
-        guild: discord.Guild,
-        unverified: discord.Role,
-        excluded_ids: set[int],
-    ) -> None:
-        overwrite = discord.PermissionOverwrite(
+    @staticmethod
+    def _unverified_overwrite() -> discord.PermissionOverwrite:
+        return discord.PermissionOverwrite(
             view_channel=False,
             send_messages=False,
             add_reactions=False,
@@ -111,6 +306,14 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             connect=False,
             speak=False,
         )
+
+    async def _lock_existing_channels(
+        self,
+        guild: discord.Guild,
+        unverified: discord.Role,
+        excluded_ids: set[int],
+    ) -> None:
+        overwrite = self._unverified_overwrite()
         for channel in list(guild.channels):
             if channel.id in excluded_ids:
                 continue
@@ -118,7 +321,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 await channel.set_permissions(
                     unverified,
                     overwrite=overwrite,
-                    reason="SentriX : accès limité jusqu'à vérification",
+                    reason="SentriX : accès interdit avant vérification complète",
                 )
             except (discord.Forbidden, discord.HTTPException):
                 logger.warning("Impossible de verrouiller %s sur %s.", channel.id, guild.id)
@@ -160,7 +363,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                         manage_messages=True,
                     ),
                 },
-                reason="SentriX : vérification + honeypot depuis +setup",
+                reason="SentriX : vérification renforcée + honeypot depuis +setup",
             )
 
         verify_channel = guild.get_channel(old["verify_channel_id"]) if old and old["verify_channel_id"] else None
@@ -178,7 +381,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                     verified: discord.PermissionOverwrite(view_channel=False),
                     me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
                 },
-                reason="SentriX : salon de vérification",
+                reason="SentriX : salon de vérification renforcée",
             )
 
         trap_channel = guild.get_channel(old["trap_channel_id"]) if old and old["trap_channel_id"] else None
@@ -216,14 +419,20 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             pass
 
         verify_embed = discord.Embed(
-            title="Vérification SentriX",
+            title="🔐 Vérification renforcée SentriX",
             description=(
-                "Clique sur **Vérifier mon accès** pour accéder au serveur.\n\n"
-                "SentriX retirera le rôle `Non vérifié` et ajoutera le rôle `Vérifié`."
+                "L'accès au serveur reste **bloqué** tant que la vérification complète n'est pas terminée.\n\n"
+                "SentriX contrôle :\n"
+                "• les règles Discord / Membership Screening si elles sont activées ;\n"
+                "• l'ancienneté minimale du compte ;\n"
+                "• un challenge interactif anti-automatisation ;\n"
+                "• un code unique + un calcul à usage unique ;\n"
+                "• les tentatives répétées et les délais anormaux.\n\n"
+                "Clique sur **Commencer la vérification**. Un simple clic ne donne jamais accès au serveur."
             ),
             colour=discord.Color.blurple(),
         )
-        verify_embed.set_footer(text="SentriX • Protection automatique")
+        verify_embed.set_footer(text="SentriX • Vérification renforcée")
         await verify_channel.send(embed=verify_embed, view=HoneypotVerifyView())
 
         try:
@@ -237,7 +446,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             description=(
                 "Ce salon sert à détecter les **comptes automatisés et spam-bots**.\n"
                 f"Tout message envoyé ici peut entraîner un **{sanction_label}**.\n\n"
-                f"Pour accéder au serveur, utilise {verify_channel.mention}."
+                f"Pour accéder au serveur, termine la vérification dans {verify_channel.mention}."
             ),
             colour=discord.Color.red(),
         )
@@ -283,12 +492,13 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             "UPDATE honeypot_verification SET enabled = 0 WHERE guild_id = ?",
             (guild.id,),
         )
+        await self.bot.db.execute(
+            "DELETE FROM honeypot_pending_members WHERE guild_id = ?",
+            (guild.id,),
+        )
 
         unverified = guild.get_role(conf["unverified_role_id"]) if conf["unverified_role_id"] else None
         if unverified is not None:
-            # Retire les restrictions posées sur les salons puis libère les membres qui
-            # étaient encore en attente. Les salons/rôles sont conservés pour permettre
-            # une réactivation propre depuis +setup sans tout recréer.
             for channel in list(guild.channels):
                 try:
                     overwrite = channel.overwrites_for(unverified)
@@ -312,67 +522,248 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                     pass
                 await asyncio.sleep(0.03)
 
-        return True, "Vérification + salon piège désactivés. Les salons ont été conservés."
+        return True, "Vérification renforcée + salon piège désactivés. Les salons ont été conservés."
 
-    async def verify_member(self, interaction: discord.Interaction):
+    async def start_human_verification(self, interaction: discord.Interaction):
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message(
-                "Cette vérification fonctionne uniquement dans un serveur.",
-                ephemeral=True,
+                "Cette vérification fonctionne uniquement dans un serveur.", ephemeral=True
             )
 
+        member = interaction.user
         conf = await self.config(interaction.guild.id)
         if not conf:
             return await interaction.response.send_message(
-                "Le système de vérification n'est pas activé sur ce serveur.",
-                ephemeral=True,
+                "Le système de vérification n'est pas activé sur ce serveur.", ephemeral=True
             )
 
         unverified = interaction.guild.get_role(conf["unverified_role_id"])
         verified = interaction.guild.get_role(conf["verified_role_id"])
         if unverified is None or verified is None:
             return await interaction.response.send_message(
-                "La configuration des rôles est incomplète. Préviens un administrateur.",
+                "La configuration des rôles est incomplète. Préviens un administrateur.", ephemeral=True
+            )
+        if unverified not in member.roles:
+            if verified in member.roles:
+                return await interaction.response.send_message("Tu es déjà vérifié.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Ton accès n'est pas marqué comme étant en attente de vérification.", ephemeral=True
+            )
+
+        # Discord Membership Screening : lorsqu'il est activé sur le serveur, Member.pending
+        # reste vrai tant que les règles natives Discord n'ont pas été acceptées.
+        if bool(getattr(member, "pending", False)):
+            return await interaction.response.send_message(
+                "⚠️ Tu dois d'abord accepter les **règles Discord du serveur**. Une fois fait, relance la vérification.",
                 ephemeral=True,
             )
 
-        if verified in interaction.user.roles and unverified not in interaction.user.roles:
-            return await interaction.response.send_message("Tu es déjà vérifié.", ephemeral=True)
+        account_age = max(0, int((discord.utils.utcnow() - member.created_at).total_seconds()))
+        if account_age < MIN_ACCOUNT_AGE_SECONDS:
+            wait_seconds = MIN_ACCOUNT_AGE_SECONDS - account_age
+            minutes = max(1, (wait_seconds + 59) // 60)
+            await self._log(
+                interaction.guild,
+                "Vérification refusée — compte trop récent",
+                f"{member.mention} (`{member.id}`) — compte âgé de seulement {account_age // 60} minute(s).",
+                danger=True,
+            )
+            return await interaction.response.send_message(
+                f"🛡️ Ton compte Discord est trop récent pour la vérification automatique. Réessaie dans environ **{minutes} min**.",
+                ephemeral=True,
+            )
 
+        pending = await self._pending(interaction.guild.id, member.id)
+        if not pending:
+            await self._mark_pending(interaction.guild.id, member.id)
+            pending = await self._pending(interaction.guild.id, member.id)
+
+        joined_at = int(pending["joined_at"] if pending else time.time())
+        joined_for = int(time.time()) - joined_at
+        if joined_for < MIN_JOIN_DELAY_SECONDS:
+            return await interaction.response.send_message(
+                f"⏳ Attends encore **{MIN_JOIN_DELAY_SECONDS - joined_for}s** avant de commencer la vérification.",
+                ephemeral=True,
+            )
+
+        locked = self._seconds_locked(interaction.guild.id, member.id)
+        if locked > 0:
+            minutes = max(1, (locked + 59) // 60)
+            return await interaction.response.send_message(
+                f"🔒 Trop de tentatives incorrectes. Réessaie dans environ **{minutes} min**.",
+                ephemeral=True,
+            )
+
+        key = (interaction.guild.id, member.id)
+        now_ts = time.time()
+        if now_ts - self._last_start.get(key, 0.0) < START_COOLDOWN_SECONDS:
+            return await interaction.response.send_message(
+                "⏳ Une vérification vient déjà d'être générée. Attends quelques secondes.",
+                ephemeral=True,
+            )
+        self._last_start[key] = now_ts
+
+        sequence = tuple(secrets.SystemRandom().sample(VerificationSequenceView.SYMBOLS, 3))
+        alphabet = string.ascii_uppercase + string.digits
+        code = "".join(secrets.choice(alphabet) for _ in range(6))
+        left = secrets.randbelow(13) + 3
+        right = secrets.randbelow(9) + 2
+        math_question = f"{left} + {right} = ?"
+        token = secrets.token_urlsafe(18)
+        state = ChallengeState(
+            token=token,
+            guild_id=interaction.guild.id,
+            user_id=member.id,
+            created_at=now_ts,
+            expires_at=now_ts + CHALLENGE_TTL_SECONDS,
+            code=code,
+            math_answer=str(left + right),
+            sequence=sequence,
+        )
+        self._challenges[key] = state
+        view = VerificationSequenceView(self, state, math_question)
+
+        age_days = account_age // 86400
+        await interaction.response.send_message(
+            (
+                "**Étape 1/2 — challenge anti-automatisation**\n"
+                f"Compte Discord : **{age_days} jour(s)** · règles Discord : **validées**\n\n"
+                f"Clique dans cet ordre : **{' → '.join(sequence)}**\n"
+                "Ensuite SentriX ouvrira une seconde vérification avec un code unique et un calcul.\n"
+                f"Le challenge expire dans **{CHALLENGE_TTL_SECONDS // 60} minutes**."
+            ),
+            view=view,
+            ephemeral=True,
+        )
+
+    async def complete_human_challenge(
+        self,
+        interaction: discord.Interaction,
+        token: str,
+        typed_code: str,
+        typed_math: str,
+    ):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Vérification invalide.", ephemeral=True)
+
+        key = (interaction.guild.id, interaction.user.id)
+        state = self._challenges.get(key)
+        if (
+            state is None
+            or state.token != token
+            or state.guild_id != interaction.guild.id
+            or state.user_id != interaction.user.id
+            or time.time() > state.expires_at
+            or not state.sequence_done
+        ):
+            self._challenges.pop(key, None)
+            return await interaction.response.send_message(
+                "⌛ Challenge expiré ou invalide. Recommence depuis le panneau de vérification.",
+                ephemeral=True,
+            )
+
+        normalized_code = typed_code.strip().upper()
+        normalized_math = typed_math.strip()
+        if normalized_code != state.code or normalized_math != state.math_answer:
+            await self._record_failure(interaction.guild.id, interaction.user.id)
+            self._challenges.pop(key, None)
+            locked = self._seconds_locked(interaction.guild.id, interaction.user.id)
+            if locked:
+                text = "❌ Réponse incorrecte. Trop d'échecs : vérification temporairement verrouillée."
+            else:
+                text = "❌ Code ou calcul incorrect. Recommence depuis **Commencer la vérification**."
+            return await interaction.response.send_message(text, ephemeral=True)
+
+        # Revalidation finale : aucune information du premier clic n'est considérée comme
+        # suffisante. On vérifie de nouveau l'état Discord et les rôles juste avant l'accès.
+        conf = await self.config(interaction.guild.id)
+        if not conf:
+            self._challenges.pop(key, None)
+            return await interaction.response.send_message("La vérification a été désactivée.", ephemeral=True)
+
+        member = interaction.user
+        if bool(getattr(member, "pending", False)):
+            self._challenges.pop(key, None)
+            return await interaction.response.send_message(
+                "⚠️ Les règles Discord du serveur ne sont plus validées. Accepte-les puis recommence.",
+                ephemeral=True,
+            )
+
+        unverified = interaction.guild.get_role(conf["unverified_role_id"])
+        verified = interaction.guild.get_role(conf["verified_role_id"])
+        pending = await self._pending(interaction.guild.id, member.id)
+        if unverified is None or verified is None or unverified not in member.roles or not pending:
+            self._challenges.pop(key, None)
+            return await interaction.response.send_message(
+                "La session de vérification n'est plus cohérente. Recommence depuis le panneau.",
+                ephemeral=True,
+            )
+
+        account_age = max(0, int((discord.utils.utcnow() - member.created_at).total_seconds()))
+        if account_age < MIN_ACCOUNT_AGE_SECONDS:
+            self._challenges.pop(key, None)
+            return await interaction.response.send_message(
+                "Ton compte est encore trop récent pour être validé.", ephemeral=True
+            )
+
+        self._verification_in_progress.add(key)
         try:
-            if verified not in interaction.user.roles:
-                await interaction.user.add_roles(verified, reason="SentriX : vérification réussie")
-            if unverified in interaction.user.roles:
-                await interaction.user.remove_roles(unverified, reason="SentriX : vérification réussie")
+            if verified not in member.roles:
+                await member.add_roles(verified, reason="SentriX : vérification renforcée réussie")
+            if unverified in member.roles:
+                await member.remove_roles(unverified, reason="SentriX : vérification renforcée réussie")
         except (discord.Forbidden, discord.HTTPException):
             return await interaction.response.send_message(
-                "SentriX ne peut pas modifier tes rôles. Vérifie la hiérarchie des rôles.",
-                ephemeral=True,
+                "SentriX ne peut pas modifier tes rôles. Préviens un administrateur.", ephemeral=True
             )
+        finally:
+            self._verification_in_progress.discard(key)
 
+        await self._clear_pending(interaction.guild.id, member.id)
+        await self.bot.db.execute(
+            "INSERT INTO honeypot_verified_members "
+            "(guild_id, user_id, verified_at, method, account_age_seconds) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET verified_at=excluded.verified_at, "
+            "method=excluded.method, account_age_seconds=excluded.account_age_seconds",
+            (
+                interaction.guild.id,
+                member.id,
+                int(time.time()),
+                "membership_screening+sequence+code+math",
+                account_age,
+            ),
+        )
         try:
             await self.bot.db.execute(
                 "INSERT OR IGNORE INTO verified_users (guild_id, user_id, verified_at) "
                 "VALUES (?, ?, strftime('%s','now'))",
-                (interaction.guild.id, interaction.user.id),
+                (interaction.guild.id, member.id),
             )
         except Exception:
             pass
 
+        self._challenges.pop(key, None)
+        self._failures.pop(key, None)
+        self._lock_until.pop(key, None)
+
+        elapsed = max(1, int(time.time() - state.created_at))
         await interaction.response.send_message(
-            "✅ Vérification réussie. Tu as maintenant accès au serveur.",
+            "✅ **Vérification complète réussie.** Ton accès au serveur vient d'être débloqué.",
             ephemeral=True,
         )
         await self._log(
             interaction.guild,
-            "Membre vérifié",
-            f"{interaction.user.mention} (`{interaction.user.id}`) a terminé la vérification.",
+            "Membre vérifié — contrôle renforcé réussi",
+            (
+                f"{member.mention} (`{member.id}`)\n"
+                f"Compte âgé de : **{account_age // 86400} jour(s)**\n"
+                f"Challenge terminé en : **{elapsed}s**\n"
+                "Contrôles : Membership Screening + séquence + code unique + calcul."
+            ),
         )
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        # Les bots Discord officiels ne sont jamais placés dans le honeypot. Le système
-        # cible les comptes utilisateurs automatisés / selfbots / spam-bots.
         if member.bot:
             return
         conf = await self.config(member.guild.id)
@@ -381,17 +772,83 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         unverified = member.guild.get_role(conf["unverified_role_id"])
         if unverified is None:
             return
+
+        # Chaque nouvelle entrée exige une nouvelle vérification, même si le membre avait
+        # déjà été vérifié lors d'un précédent passage sur le serveur.
+        await self._mark_pending(member.guild.id, member.id, int(time.time()))
         try:
             await member.add_roles(
                 unverified,
-                reason="SentriX : vérification requise à l'arrivée",
+                reason="SentriX : vérification complète obligatoire à l'arrivée",
             )
         except (discord.Forbidden, discord.HTTPException):
-            logger.warning(
-                "Impossible d'ajouter le rôle Non vérifié à %s sur %s.",
-                member.id,
-                member.guild.id,
+            logger.warning("Impossible d'ajouter Non vérifié à %s sur %s.", member.id, member.guild.id)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        try:
+            await self._clear_pending(member.guild.id, member.id)
+        except Exception:
+            pass
+        key = (member.guild.id, member.id)
+        self._challenges.pop(key, None)
+        self._last_start.pop(key, None)
+        self._failures.pop(key, None)
+        self._lock_until.pop(key, None)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        if after.bot:
+            return
+        key = (after.guild.id, after.id)
+        if key in self._verification_in_progress:
+            return
+        conf = await self.config(after.guild.id)
+        if not conf:
+            return
+        pending = await self._pending(after.guild.id, after.id)
+        if not pending:
+            return
+
+        unverified = after.guild.get_role(conf["unverified_role_id"])
+        verified = after.guild.get_role(conf["verified_role_id"])
+        if unverified is None or verified is None:
+            return
+
+        # Tant que la DB dit "en attente", aucun retrait manuel du rôle bloquant ni ajout
+        # du rôle Vérifié ne doit contourner le portail SentriX.
+        try:
+            if verified in after.roles:
+                await after.remove_roles(verified, reason="SentriX : vérification non terminée")
+            if unverified not in after.roles:
+                await after.add_roles(unverified, reason="SentriX : vérification non terminée")
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Impossible de restaurer l'état Non vérifié de %s.", after.id)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
+        """Un salon créé après le setup ne doit jamais devenir une porte de contournement."""
+        conf = await self.config(channel.guild.id)
+        if not conf:
+            return
+        excluded = {
+            int(conf["category_id"] or 0),
+            int(conf["verify_channel_id"] or 0),
+            int(conf["trap_channel_id"] or 0),
+        }
+        if channel.id in excluded:
+            return
+        unverified = channel.guild.get_role(conf["unverified_role_id"])
+        if unverified is None:
+            return
+        try:
+            await channel.set_permissions(
+                unverified,
+                overwrite=self._unverified_overwrite(),
+                reason="SentriX : nouveau salon inaccessible avant vérification",
             )
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Impossible de verrouiller le nouveau salon %s.", channel.id)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -430,9 +887,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
 
             if sanction == "kick":
                 try:
-                    await member.kick(
-                        reason="SentriX honeypot : message envoyé dans le salon piège"
-                    )
+                    await member.kick(reason="SentriX honeypot : message envoyé dans le salon piège")
                     action_label = "expulsé automatiquement"
                 except (discord.Forbidden, discord.HTTPException):
                     action_label = "expulsion impossible (permissions/hiérarchie)"
@@ -479,32 +934,27 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
 
 
 async def _patch_setup_when_available(bot: commands.Bot) -> None:
-    """Attend le chargement de Configuration puis injecte le contrôle dans +setup.
-
-    Le module honeypot est chargé avec la pile sécurité, avant cogs.configuration dans
-    l'ordre actuel des extensions. On attend donc le Cog Configuration au lieu d'ajouter
-    une commande séparée.
-    """
-    for _ in range(240):  # jusqu'à ~2 minutes, largement au-delà d'un boot normal
+    """Attend Configuration puis injecte la vérification renforcée dans +setup > Sécurité."""
+    for _ in range(240):
         if bot.get_cog("Configuration") is not None:
             break
         await asyncio.sleep(0.5)
     else:
-        logger.warning("Configuration non chargée : intégration honeypot +setup reportée.")
+        logger.warning("Configuration non chargée : intégration vérification +setup reportée.")
         return
 
     try:
         from cogs import configuration as configuration_module
     except Exception:
-        logger.exception("Impossible d'importer cogs.configuration pour le honeypot.")
+        logger.exception("Impossible d'importer cogs.configuration pour la vérification.")
         return
 
     setup_cls = getattr(configuration_module, "SetupView", None)
     steps = getattr(configuration_module, "SETUP_STEPS", None)
     if setup_cls is None or not steps:
-        logger.warning("SetupView/SETUP_STEPS introuvable pour l'intégration honeypot.")
+        logger.warning("SetupView/SETUP_STEPS introuvable pour l'intégration vérification.")
         return
-    if getattr(setup_cls, "_sentrix_honeypot_setup_v49", False):
+    if getattr(setup_cls, "_sentrix_honeypot_setup_v50", False):
         return
 
     original_render_page = setup_cls.render_page
@@ -522,23 +972,23 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
             return
 
         menu = discord.ui.Select(
-            placeholder="🧩 Vérification + salon piège anti-bot",
+            placeholder="🔐 Vérification renforcée + salon piège",
             min_values=1,
             max_values=1,
             options=[
                 discord.SelectOption(
-                    label="Activer — Softban",
-                    description="Recommandé : bannit puis débannit le compte piégé.",
+                    label="Activer — Renforcée + Softban",
+                    description="Challenge humain complet + softban du honeypot.",
                     value="enable_softban",
                 ),
                 discord.SelectOption(
-                    label="Activer — Expulsion",
-                    description="Expulse le compte qui écrit dans #stay-muted.",
+                    label="Activer — Renforcée + Expulsion",
+                    description="Challenge humain complet + kick du honeypot.",
                     value="enable_kick",
                 ),
                 discord.SelectOption(
                     label="Désactiver",
-                    description="Désactive le piège et libère les membres en attente.",
+                    description="Désactive le portail et libère les membres en attente.",
                     value="disable",
                 ),
             ],
@@ -549,13 +999,11 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
             honeypot = self.bot.get_cog(_COG_NAME)
             if honeypot is None:
                 return await interaction.response.send_message(
-                    "Le module Vérification + Honeypot n'est pas chargé.",
-                    ephemeral=True,
+                    "Le module de vérification renforcée n'est pas chargé.", ephemeral=True
                 )
             if not interaction.guild:
                 return await interaction.response.send_message(
-                    "Cette option fonctionne uniquement dans un serveur.",
-                    ephemeral=True,
+                    "Cette option fonctionne uniquement dans un serveur.", ephemeral=True
                 )
 
             value = menu.values[0] if menu.values else ""
@@ -568,7 +1016,7 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                         self.guild_id,
                         interaction.user.id,
                         "Sécurité",
-                        "vérification + honeypot désactivés",
+                        "vérification renforcée + honeypot désactivés",
                         new_value="off",
                     )
                 except Exception:
@@ -578,22 +1026,16 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                 return await interaction.followup.send(message, ephemeral=True)
 
             sanction = "kick" if value == "enable_kick" else "softban"
-            result, error = await honeypot.create_or_refresh_system(
-                interaction.guild,
-                sanction=sanction,
-            )
+            result, error = await honeypot.create_or_refresh_system(interaction.guild, sanction=sanction)
             if error:
-                return await interaction.followup.send(
-                    f"⚠️ {error}",
-                    ephemeral=True,
-                )
+                return await interaction.followup.send(f"⚠️ {error}", ephemeral=True)
 
             try:
                 await self.bot.db.log_setup_history(
                     self.guild_id,
                     interaction.user.id,
                     "Sécurité",
-                    "vérification + honeypot activés",
+                    "vérification renforcée + honeypot activés",
                     new_value=sanction,
                 )
             except Exception:
@@ -604,10 +1046,11 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
             await self._refresh_message(interaction)
             await interaction.followup.send(
                 (
-                    "✅ Vérification + salon piège activés.\n"
-                    f"Vérification : {result['verify'].mention}\n"
+                    "✅ **Vérification renforcée activée.**\n"
+                    f"Portail : {result['verify'].mention}\n"
                     f"Piège : {result['trap'].mention}\n"
-                    f"Sanction : **{'Softban' if sanction == 'softban' else 'Expulsion'}**"
+                    f"Sanction honeypot : **{'Softban' if sanction == 'softban' else 'Expulsion'}**\n"
+                    "Accès : uniquement après Membership Screening + challenge interactif + code unique + calcul."
                 ),
                 ephemeral=True,
             )
@@ -616,7 +1059,7 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
         try:
             self.add_item(menu)
         except ValueError:
-            logger.warning("Impossible d'ajouter le contrôle honeypot à +setup : lignes de composants pleines.")
+            logger.warning("Impossible d'ajouter la vérification renforcée à +setup : composants pleins.")
 
     async def build_embed_with_honeypot(self):
         embed = await original_build_embed(self)
@@ -634,35 +1077,34 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
             return embed
         conf = await honeypot.config(self.guild_id, enabled_only=False)
         if not conf or not conf["enabled"]:
-            value = "○ Désactivé"
+            value = "○ Désactivée"
         else:
             verify = f"<#{conf['verify_channel_id']}>" if conf["verify_channel_id"] else "introuvable"
             trap = f"<#{conf['trap_channel_id']}>" if conf["trap_channel_id"] else "introuvable"
             sanction = "Softban" if str(conf["sanction"]) == "softban" else "Expulsion"
             value = (
-                f"● Activé — **{sanction}**\n"
+                f"● **Renforcée** — Honeypot : **{sanction}**\n"
                 f"Vérification : {verify}\n"
-                f"Salon piège : {trap}"
+                f"Salon piège : {trap}\n"
+                "Contrôles : règles Discord + âge du compte + séquence + code unique + calcul"
             )
-        embed.add_field(
-            name="🧩 Vérification + salon piège anti-bot",
-            value=value,
-            inline=False,
-        )
+        embed.add_field(name="🔐 Vérification d'accès", value=value, inline=False)
         return embed
 
     setup_cls.render_page = render_page_with_honeypot
     setup_cls.build_embed = build_embed_with_honeypot
-    setup_cls._sentrix_honeypot_setup_v49 = True
-    logger.info("Vérification + Honeypot intégrés directement dans +setup > Sécurité.")
+    setup_cls._sentrix_honeypot_setup_v50 = True
+    logger.info("Vérification renforcée V50 intégrée dans +setup > Sécurité.")
 
 
 async def install(bot: commands.Bot) -> None:
     """Installe le runtime sans créer aucune nouvelle commande publique."""
-    if getattr(bot, "_sentrix_honeypot_verification_v49", False):
+    if getattr(bot, "_sentrix_honeypot_verification_v50", False):
         return
 
     await bot.db.execute(_SCHEMA)
+    await bot.db.execute(_PENDING_SCHEMA)
+    await bot.db.execute(_VERIFIED_SCHEMA)
 
     if bot.get_cog(_COG_NAME) is None:
         await bot.add_cog(HoneypotVerification(bot))
@@ -673,5 +1115,5 @@ async def install(bot: commands.Bot) -> None:
 
     task = asyncio.create_task(_patch_setup_when_available(bot))
     bot._sentrix_honeypot_setup_task = task
-    bot._sentrix_honeypot_verification_v49 = True
-    logger.info("Honeypot V49 chargé sans commande publique ; configuration via +setup uniquement.")
+    bot._sentrix_honeypot_verification_v50 = True
+    logger.info("Vérification renforcée V50 chargée ; configuration via +setup uniquement.")
