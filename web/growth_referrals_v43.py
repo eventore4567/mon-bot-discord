@@ -108,9 +108,15 @@ def install(dashboard) -> None:
 
     dashboard.build_app = build_app
 
-    # Les couches V44/V45/V46 sont installées ici car V43 est déjà appelée en dernier par
-    # l'identité publique V39. Cela garantit qu'elles sont branchées avant build_app().
-    from . import bot_directory_stats_v44, guild_join_notify_v46, health_runtime_v45
+    # Les couches V44+ sont installées ici car V43 est déjà appelée en dernier par
+    # l'identité publique V39. Elles enveloppent build_app avant la création du serveur.
+    from . import (
+        bot_directory_stats_v44,
+        discordbotlist_vote_webhook_v47,
+        guild_join_notify_v46,
+        health_runtime_v45,
+    )
 
     bot_directory_stats_v44.install(dashboard)
     health_runtime_v45.install(dashboard)
+    discordbotlist_vote_webhook_v47.install(dashboard)
