@@ -1,4 +1,4 @@
-"""Accueil unique et complet envoyé automatiquement lorsque SentriX rejoint un serveur."""
+"""Accueil unique et premium envoyé automatiquement lorsque SentriX rejoint un serveur."""
 from __future__ import annotations
 
 import asyncio
@@ -12,8 +12,9 @@ import config
 
 logger = logging.getLogger("bot.guild-arrival")
 
-WELCOME_COLOUR = 0x6D5DF5
-SUPPORT_URL = (os.getenv("SUPPORT_SERVER_URL") or "").strip()
+WELCOME_COLOUR = 0x6C5CE7
+OFFICIAL_SUPPORT_URL = "https://discord.gg/5P5Bqjqu5t"
+SUPPORT_URL = (os.getenv("SUPPORT_SERVER_URL") or OFFICIAL_SUPPORT_URL).strip()
 LEGACY_WELCOME_TITLE = "Bienvenue sur SentriX V3"
 LEGACY_WELCOME_MARKER = "Pour les membres"
 
@@ -52,32 +53,63 @@ def _invite_url(bot: commands.Bot) -> str | None:
 
 def _arrival_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embed:
     owner = guild.owner.mention if guild.owner else f"<@{guild.owner_id}>"
+    invite = _invite_url(bot)
+    dashboard = _safe_url(getattr(config, "DASHBOARD_APP_URL", None))
+    support = _safe_url(SUPPORT_URL) or OFFICIAL_SUPPORT_URL
+
+    links = [f"[Serveur officiel]({support})"]
+    if dashboard:
+        links.append(f"[Dashboard]({dashboard})")
+    if invite:
+        links.append(f"[Inviter SentriX]({invite})")
+
     embed = discord.Embed(
-        title="Bienvenue sur SentriX",
+        title="SentriX • Installation réussie",
         description=(
-            f"{owner}, **SentriX est maintenant actif sur {guild.name}.**\n\n"
-            "## Configuration du serveur\n"
-            "**`+setup`** ouvre le centre de configuration complet : **rôles, salons, permissions, "
-            "sécurité, AutoMod, tickets, niveaux, bienvenue, départs, logs et automatisations**.\n"
-            "**`+help`** affiche toutes les commandes disponibles et explique leur utilisation.\n\n"
-            "## Pour les membres\n"
-            "**`+profile`** affiche le profil communautaire, la saison, le streak, les missions et les succès.\n"
-            "**IA SentriX** : écris simplement `SentriX ...` ou utilise **`+ai`** pour parler au bot.\n\n"
-            "## À vérifier avant de commencer\n"
-            "Place le rôle **SentriX** au-dessus des rôles qu'il doit gérer. Cela permet aux fonctions de "
-            "modération, rôles, tickets et sécurité de fonctionner correctement.\n\n"
-            "## Choisis la langue\n"
-            "Utilise **Français** ou **English** ci-dessous. Tu pourras ensuite la modifier depuis la configuration."
+            f"{owner}, **SentriX est maintenant actif sur {guild.name}.**\n"
+            "Tu peux configurer l'essentiel en quelques minutes depuis le centre de contrôle."
         ),
         colour=discord.Colour(WELCOME_COLOUR),
     )
+    embed.add_field(
+        name="Démarrage rapide",
+        value=(
+            "**`+setup`** — ouvre toute la configuration du serveur\n"
+            "**`+help`** — affiche les commandes et leur utilisation\n"
+            "**`SentriX ...`** — parle naturellement avec l'IA"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Ce que SentriX peut gérer",
+        value=(
+            "Modération • sécurité • AutoMod • tickets • logs • rôles • niveaux • "
+            "bienvenue/départs • automatisations • communauté"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Avant de commencer",
+        value=(
+            "Place le rôle **SentriX** au-dessus des rôles qu'il doit gérer, puis utilise "
+            "le bouton **Configurer** ci-dessous."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Liens officiels",
+        value=" • ".join(links),
+        inline=False,
+    )
+
     bot_user = getattr(bot, "user", None)
     avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
     if avatar:
-        embed.set_author(name="SentriX • Démarrage", icon_url=str(avatar))
+        embed.set_author(name="SentriX • Nouveau serveur", icon_url=str(avatar))
+        embed.set_thumbnail(url=str(avatar))
     else:
-        embed.set_author(name="SentriX • Démarrage")
-    embed.set_footer(text="SentriX • Configure tout depuis les boutons ci-dessous")
+        embed.set_author(name="SentriX • Nouveau serveur")
+    embed.set_footer(text="SentriX • Configuration rapide • Support officiel disponible ci-dessous")
     return embed
 
 
@@ -108,16 +140,16 @@ class GuildArrivalView(discord.ui.View):
                 )
             )
 
-        support = _safe_url(SUPPORT_URL)
-        if support:
-            self.add_item(
-                discord.ui.Button(
-                    label="Support",
-                    style=discord.ButtonStyle.link,
-                    url=support,
-                    row=0,
-                )
+        # Toujours présent : le serveur officiel ne dépend plus d'une variable Railway.
+        support = _safe_url(SUPPORT_URL) or OFFICIAL_SUPPORT_URL
+        self.add_item(
+            discord.ui.Button(
+                label="Serveur officiel",
+                style=discord.ButtonStyle.link,
+                url=support,
+                row=0,
             )
+        )
 
     @discord.ui.button(
         label="Configurer",
@@ -172,7 +204,6 @@ class GuildArrivalView(discord.ui.View):
 
         try:
             from . import language_runtime
-
             await language_runtime.set_language(self.bot, interaction.guild_id, language)
         except Exception:
             logger.exception("Impossible de changer la langue depuis l'accueil guild=%s", interaction.guild_id)
@@ -280,7 +311,7 @@ class GuildArrival(commands.Cog):
         try:
             if channel is not None:
                 message = await channel.send(embed=embed, view=view, allowed_mentions=allowed_mentions)
-                logger.info("Accueil unique SentriX envoyé dans %s (%s).", guild.name, guild.id)
+                logger.info("Accueil premium SentriX envoyé dans %s (%s).", guild.name, guild.id)
                 asyncio.create_task(
                     self._cleanup_legacy_welcome(channel, message.id),
                     name=f"sentrix-welcome-cleanup-{guild.id}",
@@ -288,11 +319,19 @@ class GuildArrival(commands.Cog):
                 return
             if guild.owner is not None:
                 await guild.owner.send(embed=embed, view=view, allowed_mentions=allowed_mentions)
-                logger.info("Accueil unique SentriX envoyé en MP au propriétaire de %s.", guild.id)
+                logger.info("Accueil premium SentriX envoyé en MP au propriétaire de %s.", guild.id)
         except (discord.Forbidden, discord.HTTPException):
             logger.exception("Impossible d'envoyer l'accueil sur %s (%s).", guild.name, guild.id)
 
 
 async def setup(bot: commands.Bot):
+    # La finition visuelle se branche ici car guild_arrival est une extension de base
+    # chargée sur toutes les instances SentriX. Elle ne crée aucune commande.
+    try:
+        from .sentrix_v3_global_style import install as install_global_style
+        install_global_style(bot)
+    except Exception:
+        logger.exception("Impossible d'installer la finition visuelle V3.2 ; démarrage poursuivi.")
+
     await bot.add_cog(GuildArrival(bot))
     bot.add_view(GuildArrivalView(bot))
