@@ -54,9 +54,10 @@ def _category_only_update(embed: discord.Embed) -> bool:
     if "categorie modifiee" not in text and "category changed" not in text:
         return False
 
-    # Ces marqueurs correspondent à une vraie modification que l'on doit conserver.
+    # _all_text() normalise ponctuation/accents : ces marqueurs doivent donc eux aussi
+    # être sous forme normalisée. Une update mixte catégorie + nom/sujet reste visible.
     meaningful = (
-        "nom :", "name :", "sujet modifie", "topic", "permissions modifie",
+        "nom", "name", "sujet modifie", "topic", "permissions modifie",
         "slowmode", "mode lent", "nsfw", "bitrate", "debit", "limite utilisateurs",
         "user limit", "type modifie",
     )
@@ -98,8 +99,6 @@ def _merge_update_into_primary(guild: discord.Guild, update_embed: discord.Embed
         return False
 
     update_subject = v55._primary_subject("server", update_embed)
-    # Si Discord rapporte une update sur exactement le même objet que la fiche principale,
-    # V55 devrait déjà la dédupliquer. Ici on vise surtout le salon voisin réorganisé.
     label = _channel_label(guild, update_embed)
     note = f"Catégorie réorganisée automatiquement pour {label}."
 
@@ -117,8 +116,7 @@ def _merge_update_into_primary(guild: discord.Guild, update_embed: discord.Embed
             )
         return True
 
-    # Éviter de produire une information inutile si le second event désigne exactement
-    # le même salon et n'apporte rien de plus.
+    # Même objet : la seconde fiche n'apporte aucune identité supplémentaire.
     if update_subject == primary_subject:
         return True
 
