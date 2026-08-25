@@ -1,4 +1,4 @@
-"""Erreurs de commandes SentriX : une seule réponse, courte et utile."""
+"""Gestionnaire officiel des erreurs des commandes préfixées SentriX."""
 from __future__ import annotations
 
 import difflib
@@ -11,27 +11,14 @@ from discord.ext import commands
 
 from utils import embeds
 
-logger = logging.getLogger("bot.error-experience-v3")
+logger = logging.getLogger("bot.errors")
 _TECHNICAL_PARAMS = {"ctx", "context", "interaction", "self", "cog"}
 _UNKNOWN_REPLY_COOLDOWN = 2.0
-
 _PARAM_LABELS = {
-    "member": "membre",
-    "user": "utilisateur",
-    "target": "cible",
-    "role": "rôle",
-    "channel": "salon",
-    "reason": "raison",
-    "duration": "durée",
-    "time": "durée",
-    "amount": "montant",
-    "number": "nombre",
-    "message": "message",
-    "text": "texte",
-    "commande": "commande",
-    "command": "commande",
-    "query": "recherche",
-    "name": "nom",
+    "member": "membre", "user": "utilisateur", "target": "cible", "role": "rôle",
+    "channel": "salon", "reason": "raison", "duration": "durée", "time": "durée",
+    "amount": "montant", "number": "nombre", "message": "message", "text": "texte",
+    "commande": "commande", "command": "commande", "query": "recherche", "name": "nom",
 }
 
 
@@ -43,12 +30,8 @@ def _safe_usage(ctx: commands.Context) -> str:
     command = getattr(ctx, "command", None)
     if command is None:
         return f"{_prefix(ctx)}help"
-
     usage = str(getattr(command, "usage", None) or getattr(command, "signature", None) or "").strip()
-    parts = [
-        part for part in usage.split()
-        if part.strip("<[]>*=").casefold() not in _TECHNICAL_PARAMS
-    ]
+    parts = [part for part in usage.split() if part.strip("<[]>*=").casefold() not in _TECHNICAL_PARAMS]
     suffix = " ".join(parts).strip()
     base = f"{_prefix(ctx)}{command.qualified_name}"
     return f"{base} {suffix}".strip()
@@ -64,18 +47,14 @@ def _param_label(param: commands.Parameter | None) -> str:
 def _command_candidates(bot: commands.Bot) -> tuple[list[str], dict[str, str]]:
     candidates: list[str] = []
     canonical: dict[str, str] = {}
-    for command in bot.commands:
+    for command in bot.walk_commands():
         if getattr(command, "hidden", False):
             continue
-        name = str(command.name).casefold()
-        if name:
-            candidates.append(name)
-            canonical[name] = command.name
-        for alias in getattr(command, "aliases", ()) or ():
-            alias_name = str(alias).casefold()
-            if alias_name:
-                candidates.append(alias_name)
-                canonical[alias_name] = command.name
+        for value in (command.qualified_name, command.name, *(getattr(command, "aliases", ()) or ())):
+            key = str(value or "").casefold().strip()
+            if key:
+                candidates.append(key)
+                canonical[key] = command.qualified_name
     return list(dict.fromkeys(candidates)), canonical
 
 
@@ -97,70 +76,86 @@ def _suggestions(bot: commands.Bot, typed: str, *, limit: int = 2) -> list[str]:
 
 def _can_reply_unknown(bot: commands.Bot, ctx: commands.Context) -> bool:
     now = time.monotonic()
-    state = getattr(bot, "_sentrix_unknown_command_replies_v3", None)
+    state = getattr(bot, "_sentrix_unknown_command_replies", None)
     if not isinstance(state, dict):
         state = {}
-        bot._sentrix_unknown_command_replies_v3 = state
+        bot._sentrix_unknown_command_replies = state
     user_id = int(getattr(getattr(ctx, "author", None), "id", 0) or 0)
     previous = float(state.get(user_id, 0.0))
     if now - previous < _UNKNOWN_REPLY_COOLDOWN:
         return False
     state[user_id] = now
-    if len(state) > 2000:
-        cutoff = now - 60.0
-        for key, stamp in list(state.items()):
-            if stamp < cutoff:
-                state.pop(key, None)
     return True
 
 
 async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: commands.CommandError) -> bool:
     base = getattr(error, "original", error)
+    prefix = _prefix(ctx)
 
     if isinstance(base, commands.CommandNotFound):
         if not _can_reply_unknown(bot, ctx):
             return True
         typed = str(getattr(ctx, "invoked_with", "") or "").strip()
         suggestions = _suggestions(bot, typed)
-        prefix = _prefix(ctx)
+        description = f"La commande `{prefix}{typed}` n’existe pas.\n\nUtilisez `{prefix}help` pour consulter les commandes disponibles."
         if suggestions:
             proposed = ", ".join(f"`{prefix}{name}`" for name in suggestions)
-            text = f"`{prefix}{typed}` n'existe pas. Essaie {proposed}."
-        else:
-            text = f"`{prefix}{typed}` n'existe pas. Ouvre `{prefix}help` pour rechercher une commande."
-        await ctx.send(embed=embeds.warning(text))
+            description += f"\n\nCommandes proches : {proposed}"
+        await ctx.send(embed=embeds.error(description, title="Commande introuvable"))
         return True
 
     if isinstance(base, commands.MissingRequiredArgument):
-        label = _param_label(getattr(base, "param", None))
         await ctx.send(embed=embeds.warning(
-            f"Il manque **{label}**. Utilise : `{_safe_usage(ctx)}`"
+            f"Il manque **{_param_label(getattr(base, 'param', None))}**.\n\nUtilisation : `{_safe_usage(ctx)}`",
+            title="Argument manquant",
         ))
         return True
 
     if isinstance(base, commands.TooManyArguments):
-        await ctx.send(embed=embeds.warning(
-            f"Trop d'arguments. Utilise : `{_safe_usage(ctx)}`"
-        ))
+        await ctx.send(embed=embeds.warning(f"Utilisation : `{_safe_usage(ctx)}`", title="Trop d’arguments"))
         return True
 
-    target_errors = (
-        commands.MemberNotFound,
-        commands.UserNotFound,
-        commands.RoleNotFound,
-        commands.ChannelNotFound,
-        commands.MessageNotFound,
-    )
-    if isinstance(base, target_errors):
-        await ctx.send(embed=embeds.warning(
-            f"Cible introuvable. Vérifie la mention, le nom ou l'ID.\nUtilise : `{_safe_usage(ctx)}`"
-        ))
+    if isinstance(base, (commands.MemberNotFound, commands.UserNotFound)):
+        await ctx.send(embed=embeds.error("Vérifiez la mention, le nom ou l’ID.", title="Utilisateur introuvable"))
+        return True
+    if isinstance(base, commands.RoleNotFound):
+        await ctx.send(embed=embeds.error("Vérifiez la mention, le nom ou l’ID du rôle.", title="Rôle introuvable"))
+        return True
+    if isinstance(base, commands.ChannelNotFound):
+        await ctx.send(embed=embeds.error("Vérifiez la mention, le nom ou l’ID du salon.", title="Salon introuvable"))
+        return True
+    if isinstance(base, commands.MessageNotFound):
+        await ctx.send(embed=embeds.error("Vérifiez l’ID ou le lien du message.", title="Message introuvable"))
         return True
 
     if isinstance(base, (commands.BadUnionArgument, commands.BadArgument, commands.ConversionError)):
-        await ctx.send(embed=embeds.warning(
-            f"Argument invalide. Utilise : `{_safe_usage(ctx)}`"
-        ))
+        await ctx.send(embed=embeds.warning(f"Utilisation : `{_safe_usage(ctx)}`", title="Argument invalide"))
+        return True
+
+    if isinstance(base, commands.CommandOnCooldown):
+        await ctx.send(embed=embeds.warning(f"Réessayez dans **{base.retry_after:.1f} s**.", title="Commande en cooldown"))
+        return True
+
+    if isinstance(base, commands.MissingPermissions):
+        required = ", ".join(permission.replace("_", " ") for permission in base.missing_permissions)
+        await ctx.send(embed=embeds.error(f"Permission requise : **{required}**.", title="Permission insuffisante"))
+        return True
+
+    if isinstance(base, commands.BotMissingPermissions):
+        required = ", ".join(permission.replace("_", " ") for permission in base.missing_permissions)
+        await ctx.send(embed=embeds.error(f"SentriX a besoin de : **{required}**.", title="Permission du bot insuffisante"))
+        return True
+
+    if isinstance(base, commands.NoPrivateMessage):
+        await ctx.send(embed=embeds.warning("Cette commande doit être utilisée dans un serveur.", title="Serveur requis"))
+        return True
+
+    if isinstance(base, commands.PrivateMessageOnly):
+        await ctx.send(embed=embeds.warning("Cette commande doit être utilisée en message privé.", title="Message privé requis"))
+        return True
+
+    if isinstance(base, commands.CheckFailure):
+        await ctx.send(embed=embeds.error("Vous n’êtes pas autorisé à utiliser cette commande.", title="Accès refusé"))
         return True
 
     return False
@@ -168,11 +163,8 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
 
 def install(bot: commands.Bot) -> None:
     current = getattr(bot, "on_command_error", None)
-    if not callable(current):
+    if not callable(current) or getattr(current, "_sentrix_official_errors", False):
         return
-    if getattr(current, "_sentrix_error_experience_v3", False):
-        return
-
     original = current
 
     async def improved_on_command_error(self, ctx: commands.Context, error: commands.CommandError):
@@ -180,18 +172,16 @@ def install(bot: commands.Bot) -> None:
             if await _handle_user_error(self, ctx, error):
                 return
         except Exception:
-            logger.exception("Erreur dans l'expérience d'erreur V3 ; fallback handler historique.")
-
+            logger.exception("Erreur du gestionnaire officiel ; utilisation du fallback historique.")
         result = original(ctx, error)
         if inspect.isawaitable(result):
             return await result
         return result
 
-    improved_on_command_error._sentrix_error_experience_v3 = True
+    improved_on_command_error._sentrix_official_errors = True
     improved_on_command_error._sentrix_previous_error_handler = original
     bot.on_command_error = MethodType(improved_on_command_error, bot)
-    bot._sentrix_error_experience_v3 = True
-    logger.info("Erreurs V3 actives : une seule carte compacte par erreur utilisateur.")
+    logger.info("Gestionnaire officiel des erreurs préfixées actif.")
 
 
 __all__ = ["install", "_suggestions", "_safe_usage"]
