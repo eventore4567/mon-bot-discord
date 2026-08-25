@@ -178,13 +178,16 @@ def install(bot: commands.Bot) -> None:
         # Une annonce de mise à jour ne doit jamais empêcher SentriX de démarrer.
         pass
 
-    # Le correctif des identités de logs est chargé seulement une fois que le renderer
-    # V50/V53 existe réellement. Il est ensuite rejoué après chaque extension afin de
-    # rester le dernier mot si une ancienne couche remplace encore une fonction visuelle.
+    # Les correctifs de logs V60/V61 sont chargés seulement une fois que le renderer
+    # V50/V53 existe réellement. V60 fiabilise les identités ; V61 reste la dernière
+    # couche source afin de fusionner les événements techniques liés et d'éviter les
+    # mentions/noms de salon répétés.
     if "cogs.log_fixed_height_v50" in sys.modules:
         try:
             from .log_identity_context_v60 import install as install_log_identity_context_v60
             install_log_identity_context_v60(bot)
+            from .log_consolidation_v61 import install as install_log_consolidation_v61
+            install_log_consolidation_v61(bot)
         except Exception:
             # Le rendu d'un journal ne doit jamais empêcher SentriX de démarrer.
             pass
