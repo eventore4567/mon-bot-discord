@@ -52,8 +52,6 @@ _BUTTON_EMOJIS = (
     (("supprimer", "delete", "effacer"), "🗑️"),
 )
 
-# Deux formats seulement. Les cartes qui contiennent naturellement beaucoup de données
-# basculent automatiquement sur le grand format afin de ne rien couper.
 _LARGE_COMMAND_HINTS = {
     "help", "setup", "profile", "profile-card", "userinfo", "botinfo",
     "ticketsetup", "ticket", "shoppanel", "shop", "inventory", "leaderboard-levels",
@@ -90,7 +88,6 @@ def _compact_description(value: Any, *, limit: int = 4096) -> str | None:
 
 
 def _promote_real_title(embed: discord.Embed, *, kind: str) -> None:
-    """Transforme « SentriX • Catégorie » + **Action** en vraie hiérarchie premium."""
     current_title = str(getattr(embed, "title", "") or "").strip()
     description = _compact_description(getattr(embed, "description", None))
 
@@ -117,7 +114,6 @@ def _set_premium_author(
     category: str,
     bot_user: Any,
 ) -> None:
-    """Conserve les auteurs métier personnalisés ; harmonise seulement ceux de SentriX."""
     current = getattr(getattr(embed, "author", None), "name", None)
     current_text = str(current or "").strip()
     if current_text and not current_text.casefold().startswith("sentrix"):
@@ -133,7 +129,6 @@ def _set_premium_author(
 
 
 def _refine_fields(embed: discord.Embed) -> None:
-    """Nettoie l'espacement sans modifier la structure métier des champs."""
     for index, field in enumerate(list(embed.fields)):
         name = premium_style.display_label(field.name, "Information")
         value = _compact_description(field.value) or "—"
@@ -177,7 +172,6 @@ def _has_media(embed: discord.Embed) -> bool:
 
 
 def _layout_size(embed: discord.Embed, *, command: Any, category: str) -> str:
-    """Retourne strictement `small` ou `large`."""
     command_name = _command_name(command)
     description = str(getattr(embed, "description", "") or "")
 
@@ -197,12 +191,10 @@ def _layout_size(embed: discord.Embed, *, command: Any, category: str) -> str:
 
 
 def _trim_field_value(value: Any, *, limit: int) -> str:
-    text = _compact_description(value, limit=limit) or "—"
-    return text
+    return _compact_description(value, limit=limit) or "—"
 
 
 def _pad_field_slots(embed: discord.Embed, *, slots: int) -> None:
-    """Réserve le même nombre de blocs sans afficher de texte artificiel."""
     if len(embed.fields) >= slots:
         return
     for _ in range(slots - len(embed.fields)):
@@ -210,7 +202,6 @@ def _pad_field_slots(embed: discord.Embed, *, slots: int) -> None:
 
 
 def _apply_two_size_layout(embed: discord.Embed, *, size: str) -> None:
-    """Normalise la densité visuelle selon l'un des deux formats SentriX."""
     if size == "large":
         description_limit = _LARGE_DESCRIPTION_LIMIT
         field_limit = _LARGE_FIELD_LIMIT
@@ -227,8 +218,6 @@ def _apply_two_size_layout(embed: discord.Embed, *, size: str) -> None:
     if embed.description:
         embed.description = _compact_description(embed.description, limit=description_limit)
 
-    # Ne retire jamais un champ métier. Les cartes <= slots sont simplement complétées
-    # par des emplacements invisibles pour conserver une silhouette stable.
     for index, field in enumerate(list(embed.fields)):
         if str(field.name) == _ZWSP and str(field.value) == _ZWSP:
             continue
@@ -258,7 +247,6 @@ def _refine_embed(
     resolved_category = premium_style.infer_category(command=command, embed=embed, hint=category)
     resolved_kind = kind or premium_style.infer_kind(embed)
 
-    # Les logs ont un renderer Secure Audit dédié. V3.4 n'y touche volontairement pas.
     is_log = bool(log_type) or resolved_category == "logs"
     if is_log:
         return embed
@@ -284,7 +272,6 @@ def _refine_embed(
 
 
 def _safe_button_emoji(item: discord.ui.Button) -> None:
-    """Ajoute seulement des emojis Unicode standards et uniquement quand le bouton n'en a pas."""
     if item.emoji is not None or not item.label:
         return
     haystack = f"{item.label} {item.custom_id or ''}".casefold()
@@ -311,36 +298,43 @@ def _refine_view(view: discord.ui.View | None) -> discord.ui.View | None:
 
 
 def install(bot: commands.Bot) -> None:
-    del bot
     global _INSTALLED
-    if _INSTALLED:
-        return
 
-    original_embed = premium_style.style_embed
-    original_view = premium_style.style_view
+    if not _INSTALLED:
+        original_embed = premium_style.style_embed
+        original_view = premium_style.style_view
 
-    def styled_v34(embed: discord.Embed, *args, **kwargs):
-        result = original_embed(embed, *args, **kwargs)
-        if not isinstance(result, discord.Embed):
-            return result
-        return _refine_embed(
-            result,
-            command=kwargs.get("command"),
-            guild=kwargs.get("guild"),
-            requester=kwargs.get("requester"),
-            bot_user=kwargs.get("bot_user"),
-            category=kwargs.get("category"),
-            kind=kwargs.get("kind"),
-            log_type=kwargs.get("log_type"),
-        )
+        def styled_v34(embed: discord.Embed, *args, **kwargs):
+            result = original_embed(embed, *args, **kwargs)
+            if not isinstance(result, discord.Embed):
+                return result
+            return _refine_embed(
+                result,
+                command=kwargs.get("command"),
+                guild=kwargs.get("guild"),
+                requester=kwargs.get("requester"),
+                bot_user=kwargs.get("bot_user"),
+                category=kwargs.get("category"),
+                kind=kwargs.get("kind"),
+                log_type=kwargs.get("log_type"),
+            )
 
-    def styled_view_v34(view: discord.ui.View | None):
-        return _refine_view(original_view(view))
+        def styled_view_v34(view: discord.ui.View | None):
+            return _refine_view(original_view(view))
 
-    premium_style.style_embed = styled_v34
-    premium_style.style_view = styled_view_v34
-    _INSTALLED = True
-    logger.info("SentriX V3.4 : cartes compactes/grandes symétriques actives.")
+        premium_style.style_embed = styled_v34
+        premium_style.style_view = styled_view_v34
+        _INSTALLED = True
+        logger.info("SentriX V3.4 : cartes compactes/grandes symétriques actives.")
+
+    # V3.6 doit être posé APRES V3.4 : il remplace les emojis Unicode ajoutés par les
+    # anciennes couches au lieu de les empiler, tout en réutilisant exactement le même
+    # moteur d'embed et les deux mêmes tailles de cartes.
+    try:
+        from .sentrix_emoji_runtime import install as install_animated_emoji_pack
+        install_animated_emoji_pack(bot)
+    except Exception:
+        logger.exception("Impossible d'installer le pack animé SentriX V3.6.")
 
 
 __all__ = ["install", "_layout_size", "_apply_two_size_layout"]
