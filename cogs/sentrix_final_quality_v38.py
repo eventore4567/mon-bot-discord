@@ -7,6 +7,8 @@ commande ni modifier les fonctions métier :
   structurelles comme Gérer les rôles/salons/expressions ;
 - une interaction slash refusée par la matrice centrale libère toujours son verrou de
   concurrence (les erreurs sont déjà couvertes par command_error_release_v41) ;
+- les commandes slash normales sont réellement publiques par défaut ; seules les réponses
+  qui demandent explicitement ``ephemeral=True`` restent privées ;
 - les vérifications propriétaire/DB restent fail-closed en cas de panne ;
 - la hiérarchie du bot échoue proprement si le membre bot n'est pas encore résolu ;
 - les grands panneaux d'information gardent un vrai titre et évitent le branding répété.
@@ -156,6 +158,31 @@ def _patch_permission_helpers() -> None:
         checks.check_bot_hierarchy = safe_bot_hierarchy
 
 
+def _patch_permission_decision_message() -> None:
+    current = permission_guard.evaluate_command_access
+    if getattr(current, "_sentrix_v38_permission_copy", False):
+        return
+
+    async def evaluate_with_precise_copy(*args, **kwargs):
+        decision = await current(*args, **kwargs)
+        policy = str(getattr(decision, "policy", "") or "")
+        if decision.allowed or not policy.startswith("discord:"):
+            return decision
+        permission = policy.split(":", 1)[1]
+        if mod_role_fallback_allowed(permission):
+            return decision
+        return permission_guard.AccessDecision(
+            False,
+            "Cette commande nécessite directement la permission Discord "
+            f"`{permission}`. Le rôle modérateur configuré ne suffit pas pour cette action sensible.",
+            policy,
+        )
+
+    evaluate_with_precise_copy._sentrix_v38_permission_copy = True
+    evaluate_with_precise_copy._sentrix_original = current
+    permission_guard.evaluate_command_access = evaluate_with_precise_copy
+
+
 def _patch_permission_denial_release() -> None:
     current = permission_guard.evaluate_interaction_access
     if getattr(current, "_sentrix_v38_release", False):
@@ -174,6 +201,44 @@ def _patch_permission_denial_release() -> None:
     evaluate_and_release._sentrix_v38_release = True
     evaluate_and_release._sentrix_original = current
     permission_guard.evaluate_interaction_access = evaluate_and_release
+
+
+def _registered_slash_roots(bot: commands.Bot) -> frozenset[str]:
+    roots: set[str] = set()
+    try:
+        for command in bot.tree.get_commands():
+            name = str(getattr(command, "name", "") or "").strip().casefold()
+            if name:
+                roots.add(name)
+    except Exception:
+        logger.debug("V3.8 : lecture du registre slash impossible.", exc_info=True)
+    try:
+        for command in bot.commands:
+            root = getattr(command, "root_parent", None) or command
+            name = str(getattr(root, "name", "") or "").strip().casefold()
+            if name:
+                roots.add(name)
+    except Exception:
+        logger.debug("V3.8 : lecture du registre préfixé impossible.", exc_info=True)
+    return frozenset(roots)
+
+
+def _make_normal_slash_public(bot: commands.Bot) -> None:
+    """Neutralise l'ancien défaut V3.4 « slash privé sauf whitelist ».
+
+    Les transports utilisent ``setdefault(ephemeral=True)`` uniquement lorsque la racine
+    n'est pas dans SHARED_SLASH_ROOTS. En y plaçant toutes les racines réellement
+    enregistrées, on revient au comportement demandé : public par défaut, tout en respectant
+    un ``ephemeral=True`` explicitement fourni par une commande sensible ou un handler d'erreur.
+    """
+    try:
+        from . import community_v34
+    except Exception:
+        return
+    roots = _registered_slash_roots(bot)
+    if roots:
+        community_v34.SHARED_SLASH_ROOTS = roots
+        bot._sentrix_v38_public_slash_roots = roots
 
 
 def _patch_visual_finish(style_module: Any) -> None:
@@ -240,6 +305,7 @@ def _install_security_audit(bot: commands.Bot) -> None:
         return
 
     async def audit_on_ready() -> None:
+        _make_normal_slash_public(bot)
         try:
             row = await bot.db.fetchone(
                 """
@@ -270,7 +336,9 @@ def _install_security_audit(bot: commands.Bot) -> None:
 def install(bot: commands.Bot, *, style_module: Any = None) -> None:
     global _INSTALLED
     _patch_permission_helpers()
+    _patch_permission_decision_message()
     _patch_permission_denial_release()
+    _make_normal_slash_public(bot)
 
     if style_module is None:
         try:
@@ -283,9 +351,14 @@ def install(bot: commands.Bot, *, style_module: Any = None) -> None:
     bot._sentrix_final_quality_v38 = True
     if not _INSTALLED:
         logger.info(
-            "SentriX V3.8 : finition active — permissions mod-role resserrées, refus slash auto-libérés, style final harmonisé."
+            "SentriX V3.8 : finition active — sécurité resserrée, slash publics par défaut, refus auto-libérés, style harmonisé."
         )
         _INSTALLED = True
 
 
-__all__ = ["SAFE_MOD_ROLE_PERMISSIONS", "mod_role_fallback_allowed", "install"]
+__all__ = [
+    "SAFE_MOD_ROLE_PERMISSIONS",
+    "mod_role_fallback_allowed",
+    "_registered_slash_roots",
+    "install",
+]
