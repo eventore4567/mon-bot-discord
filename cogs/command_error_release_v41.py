@@ -22,12 +22,20 @@ def _install_final_surfaces(bot: commands.Bot) -> None:
     except Exception:
         logger.exception("V64 : impossible d'installer la surface finale des commandes.")
 
-    # Une seule couche visuelle finale. V70 remplace les anciennes sorties V65/V56.
+    # Une seule couche visuelle générale finale.
     try:
         from .sentrix_visual_refactor_v70 import install as install_sentrix_visual_refactor_v70
         install_sentrix_visual_refactor_v70(bot)
     except Exception:
         logger.exception("V70 : impossible d'installer la refonte visuelle finale.")
+
+    # Le profil possède une organisation métier spécifique (Compte / Serveur / Économie /
+    # Activité) mais utilise exactement la même fabrique d'embed V70.
+    try:
+        from .sentrix_profile_refactor_v70 import install as install_sentrix_profile_refactor_v70
+        install_sentrix_profile_refactor_v70(bot)
+    except Exception:
+        logger.exception("V70 : impossible d'installer la présentation du profil.")
 
 
 def _install_ready_reassert(bot: commands.Bot) -> None:
@@ -35,8 +43,6 @@ def _install_ready_reassert(bot: commands.Bot) -> None:
         return
 
     async def reassert_final_surfaces():
-        # Les autres listeners on_ready terminent d'abord ; V70 reste ensuite la dernière
-        # décision de présentation et ne laisse pas un renderer historique reprendre la main.
         await asyncio.sleep(0)
         _install_final_surfaces(bot)
 
