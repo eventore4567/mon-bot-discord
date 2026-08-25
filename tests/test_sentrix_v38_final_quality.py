@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import discord
 
+from cogs import community_v34
 from cogs import sentrix_final_quality_v38 as quality
 from cogs import sentrix_v3_global_style as visual
 
@@ -28,6 +31,39 @@ def test_mod_role_fallback_is_limited_to_daily_moderation() -> None:
         "manage_webhooks",
     ):
         assert not quality.mod_role_fallback_allowed(permission)
+
+
+def test_registered_slash_roots_include_tree_and_hybrid_roots() -> None:
+    class DummyTree:
+        def get_commands(self):
+            return [SimpleNamespace(name="help"), SimpleNamespace(name="setup")]
+
+    root = SimpleNamespace(name="profile")
+    hybrid = SimpleNamespace(name="profile-card", root_parent=root)
+    dummy_bot = SimpleNamespace(
+        tree=DummyTree(),
+        commands=[SimpleNamespace(name="ping", root_parent=None), hybrid],
+    )
+    assert quality._registered_slash_roots(dummy_bot) == frozenset({
+        "help", "setup", "ping", "profile",
+    })
+
+
+def test_normal_slash_roots_become_public_by_default() -> None:
+    class DummyTree:
+        def get_commands(self):
+            return [SimpleNamespace(name="help"), SimpleNamespace(name="profile")]
+
+    dummy_bot = SimpleNamespace(
+        tree=DummyTree(),
+        commands=[SimpleNamespace(name="ping", root_parent=None)],
+    )
+    previous = community_v34.SHARED_SLASH_ROOTS
+    try:
+        quality._make_normal_slash_public(dummy_bot)
+        assert {"help", "profile", "ping"}.issubset(community_v34.SHARED_SLASH_ROOTS)
+    finally:
+        community_v34.SHARED_SLASH_ROOTS = previous
 
 
 def test_rich_information_panel_keeps_meaningful_title() -> None:
