@@ -174,8 +174,8 @@ def install(bot: commands.Bot) -> None:
     try:
         from .release_announcer import install as install_release_announcer
         install_release_announcer(bot)
-        # V63 remplace uniquement la décision de ping : toutes les releases restent
-        # annoncées, mais @everyone est réservé aux vraies mises à jour majeures.
+        # V64 : aucune release ordinaire n'est annoncée ; seules celles marquées
+        # explicitement [MAJOR] / [PING] sont publiées sur le serveur officiel.
         from .release_ping_policy_v63 import install as install_release_ping_policy_v63
         install_release_ping_policy_v63(bot)
     except Exception:
@@ -231,6 +231,16 @@ def install(bot: commands.Bot) -> None:
         install_help_cooldown_exemption_v3(bot)
     except Exception:
         # Un correctif de confort ne doit jamais empêcher SentriX de démarrer.
+        pass
+
+    # V3 : une faute de frappe ou un mauvais argument doit produire une aide utile, pas
+    # un silence ou un message Python. Le handler conserve toutes les protections métier
+    # et délègue les permissions/cooldowns au système historique.
+    try:
+        from .error_experience_v3 import install as install_error_experience_v3
+        install_error_experience_v3(bot)
+    except Exception:
+        # Une amélioration UX ne doit jamais empêcher SentriX de démarrer.
         pass
 
     bot._sentrix_no_emoji_commands = False
