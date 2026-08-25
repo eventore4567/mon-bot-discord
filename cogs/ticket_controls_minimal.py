@@ -36,7 +36,15 @@ def _is_ticket_control_message(message: discord.Message) -> bool:
 async def _migrate_open_ticket_messages(bot) -> None:
     global _MIGRATION_STARTED
     try:
-        await bot.wait_until_ready()
+        # Les audits CI construisent parfois le Bot sans appeler login(). Dans ce cas
+        # discord.py lève RuntimeError : ce n'est pas une erreur de ticket et aucune tâche
+        # ne doit rester en exception non récupérée.
+        try:
+            await bot.wait_until_ready()
+        except RuntimeError:
+            logger.debug("Migration tickets ignorée : client Discord non initialisé.")
+            return
+
         from . import tickets as tickets_mod
 
         cog = bot.get_cog("Tickets")
@@ -162,10 +170,20 @@ def install(bot, extension_name: str = "") -> None:
     if not _MIGRATION_STARTED:
         try:
             _MIGRATION_STARTED = True
-            asyncio.get_running_loop().create_task(
+            task = asyncio.get_running_loop().create_task(
                 _migrate_open_ticket_messages(bot),
                 name="sentrix-ticket-controls-minimal-migration",
             )
+            # Consomme toute exception inattendue afin qu'une migration auxiliaire ne puisse
+            # jamais produire « Task exception was never retrieved » ni polluer les logs.
+            def _consume_result(done: asyncio.Task) -> None:
+                try:
+                    done.result()
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception("Migration asynchrone des boutons ticket interrompue.")
+            task.add_done_callback(_consume_result)
         except RuntimeError:
             _MIGRATION_STARTED = False
 
