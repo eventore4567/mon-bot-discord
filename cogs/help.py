@@ -15,7 +15,7 @@ from discord.ext import commands
 
 from utils import embeds
 
-PAGE_SIZE = 6
+PAGE_SIZE = 8
 
 CATEGORY_NAMES = {
     "Ai": "Intelligence artificielle",
@@ -119,7 +119,7 @@ def _slash_map(bot: commands.Bot) -> dict[str, str]:
 
 def _description(command: commands.Command) -> str:
     raw = (command.description or command.help or "Aucune description.").strip()
-    return raw.split("\n", 1)[0][:220]
+    return raw.split("\n", 1)[0][:190]
 
 
 def _usage(command: commands.Command, prefix: str) -> str:
@@ -151,16 +151,8 @@ def _home(bot: commands.Bot, member) -> discord.Embed:
         "SentriX — Centre d’aide",
         "Choisissez une catégorie avec le menu sous cette carte. Toutes les commandes et toutes les pages restent dans cet embed.",
     )
-    panel.add_field(
-        name="Commandes disponibles",
-        value=str(sum(grouped.values())),
-        inline=True,
-    )
-    panel.add_field(
-        name="Catégories",
-        value=str(len(grouped)),
-        inline=True,
-    )
+    panel.add_field(name="Commandes disponibles", value=str(sum(grouped.values())), inline=True)
+    panel.add_field(name="Catégories", value=str(len(grouped)), inline=True)
     panel.add_field(
         name="Recherche",
         value="Utilisez le bouton **Rechercher** pour trouver directement une commande.",
@@ -386,11 +378,7 @@ class HelpView(discord.ui.View):
         self.index = max(0, self.index - 1)
         self.member = interaction.user
         self._sync()
-        await interaction.response.edit_message(
-            content=None,
-            embed=self.pages[self.index],
-            view=self,
-        )
+        await interaction.response.edit_message(content=None, embed=self.pages[self.index], view=self)
 
     @discord.ui.button(label="Accueil", style=discord.ButtonStyle.secondary, row=2)
     async def home(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -408,11 +396,7 @@ class HelpView(discord.ui.View):
         self.index = min(len(self.pages) - 1, self.index + 1)
         self.member = interaction.user
         self._sync()
-        await interaction.response.edit_message(
-            content=None,
-            embed=self.pages[self.index],
-            view=self,
-        )
+        await interaction.response.edit_message(content=None, embed=self.pages[self.index], view=self)
 
 
 class OfficialHelp(commands.Cog, name="SentriXHelp"):
