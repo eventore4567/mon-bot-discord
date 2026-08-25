@@ -223,5 +223,15 @@ def install(bot: commands.Bot) -> None:
         # Une évolution UX ne doit jamais empêcher le bot de démarrer.
         pass
 
+    # +help et /help sont des commandes de navigation. Elles doivent rester accessibles
+    # même quand l'utilisateur vient d'utiliser plusieurs commandes, sans désactiver les
+    # protections anti-spam des actions réelles du bot.
+    try:
+        from .help_cooldown_exemption_v3 import install as install_help_cooldown_exemption_v3
+        install_help_cooldown_exemption_v3(bot)
+    except Exception:
+        # Un correctif de confort ne doit jamais empêcher SentriX de démarrer.
+        pass
+
     bot._sentrix_no_emoji_commands = False
     bot._sentrix_command_style_v2 = True
