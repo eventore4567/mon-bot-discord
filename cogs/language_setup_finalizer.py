@@ -1,9 +1,14 @@
-"""Setup V7 : interface sobre sans emoji, langue native et ouverture verrouillée."""
+"""Finaliseur de langue pour le Setup SentriX.
+
+Cette couche ne remplace plus le design du Setup. Elle ajoute uniquement le choix de
+langue au centre de configuration déjà stylé par setup_oxyde_style, puis délègue toutes
+les pages normales à cette interface. Les anciennes cartes V6 avec progression, liste de
+modules, historique et dashboard ne sont volontairement plus reconstruites ici.
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 import types
 
@@ -17,8 +22,7 @@ logger = logging.getLogger("bot.language-setup-finalizer")
 
 LANGUAGE_CATEGORY_VALUE = "__sentrix_language__"
 LANGUAGE_PAGE = -20260809
-_SETUP_BUILD_MARKER = "Interface setup v6"
-_SETUP_COLOR = 0x6D5DFB
+_SETUP_COLOR = 0x6C5CE7
 _EMOJI_RE = re.compile(
     r"<a?:[A-Za-z0-9_]+:\d+>|"
     r"[\U0001F1E6-\U0001F1FF\U0001F300-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\uFE0F\u200D]"
@@ -55,81 +59,19 @@ def _step_meta(step: dict) -> tuple[str, str]:
     return title or "Configuration", summary or "Configurer ce module."
 
 
-def _status_text(value: str, english: bool) -> str:
-    if english:
-        return {
-            "Configuré": "Ready",
-            "Partiel": "Partial",
-            "Non configuré": "Not configured",
-        }.get(value, _clean_text(value))
-    return {
-        "Configuré": "Prêt",
-        "Partiel": "Partiel",
-        "Non configuré": "Non configuré",
-    }.get(value, _clean_text(value))
+def _avatar_url(bot: commands.Bot) -> str | None:
+    try:
+        return str(bot.user.display_avatar.url) if bot.user else None
+    except Exception:
+        return None
 
 
-def _sanitize_view(view: discord.ui.View) -> None:
-    """Retire les emojis hérités des anciennes couches de +setup."""
-    for item in list(getattr(view, "children", ())):
-        try:
-            if hasattr(item, "emoji"):
-                item.emoji = None
-        except Exception:
-            pass
-        try:
-            if getattr(item, "label", None):
-                item.label = _clean_text(item.label)
-        except Exception:
-            pass
-        try:
-            if getattr(item, "placeholder", None):
-                item.placeholder = _clean_text(item.placeholder)
-        except Exception:
-            pass
-        for option in list(getattr(item, "options", ()) or ()):
-            try:
-                option.emoji = None
-            except Exception:
-                pass
-            try:
-                option.label = _clean_text(option.label)
-            except Exception:
-                pass
-            try:
-                if option.description:
-                    option.description = _clean_text(option.description)
-            except Exception:
-                pass
-
-
-def _sanitize_embed(embed: discord.Embed) -> discord.Embed:
-    """Applique le style texte V7 aux pages héritées du setup historique."""
-    if embed.title:
-        clean_title = _clean_text(embed.title)
-        if clean_title and not clean_title.upper().startswith("SENTRIX"):
-            clean_title = f"SENTRIX / {clean_title}"
-        embed.title = clean_title[:256]
-    if embed.description:
-        embed.description = _clean_text(embed.description)[:4096]
-
-    for index, field in enumerate(list(embed.fields)):
-        embed.set_field_at(
-            index,
-            name=(_clean_text(field.name) or "Configuration")[:256],
-            value=(_clean_text(field.value) or "-")[:1024],
-            inline=field.inline,
-        )
-
-    if embed.author and embed.author.name:
-        try:
-            embed.set_author(name=_clean_text(embed.author.name), icon_url=embed.author.icon_url)
-        except Exception:
-            pass
-
-    embed.color = discord.Color(_SETUP_COLOR)
-    embed.set_footer(text=f"SentriX / {_SETUP_BUILD_MARKER}")
-    return embed
+def _set_author(embed: discord.Embed, bot: commands.Bot) -> None:
+    icon = _avatar_url(bot)
+    if icon:
+        embed.set_author(name="SentriX", icon_url=icon)
+    else:
+        embed.set_author(name="SentriX")
 
 
 async def _purge_local_slash_for_guild(bot: commands.Bot, guild: discord.Guild) -> int:
@@ -165,7 +107,7 @@ def _install_local_slash_cleanup(bot: commands.Bot) -> None:
                     await asyncio.sleep(delay)
                 for guild in list(bot.guilds):
                     total += await _purge_local_slash_for_guild(bot, guild)
-            logger.info("Nettoyage slash V6 terminé : %s commande(s) locale(s) supprimée(s).", total)
+            logger.info("Nettoyage slash terminé : %s commande(s) locale(s) supprimée(s).", total)
         finally:
             bot._sentrix_local_slash_cleanup_running_v6 = False
 
@@ -224,6 +166,8 @@ def install(bot: commands.Bot) -> None:
         return
 
     class SetupViewV6(base_view_cls):
+        """Ajoute la page Langue sans remplacer le rendu compact du Setup principal."""
+
         _sentrix_setup_v6 = True
         _sentrix_setup_v7_clean = True
         _sentrix_setup_v5 = True
@@ -231,18 +175,23 @@ def install(bot: commands.Bot) -> None:
         _sentrix_native_language = True
         _sentrix_language_patch = True
         _sentrix_language_payload_guard = True
+        _sentrix_setup_compact_final = True
 
         def _render_home(self) -> None:
             self.clear_items()
             english = _is_english(self)
-            options = [discord.SelectOption(
-                label="Server language" if english else "Langue du serveur",
-                value=LANGUAGE_CATEGORY_VALUE,
-                description=(
-                    "Choose the language used on this server"
-                    if english else "Choisir la langue utilisée sur ce serveur"
-                ),
-            )]
+            options: list[discord.SelectOption] = [
+                discord.SelectOption(
+                    label="Server language" if english else "Langue du serveur",
+                    value=LANGUAGE_CATEGORY_VALUE,
+                    description=(
+                        "Choose the language used by SentriX"
+                        if english else "Choisir la langue utilisée par SentriX"
+                    ),
+                    emoji="🌐",
+                )
+            ]
+
             for index, step in enumerate(configuration.SETUP_STEPS):
                 if step.get("key") == "summary":
                     continue
@@ -254,46 +203,26 @@ def install(bot: commands.Bot) -> None:
                     label=title[:100],
                     value=str(index),
                     description=summary[:100],
+                    emoji=step.get("icon") or None,
                 ))
 
             selector = discord.ui.Select(
-                placeholder="Select a category" if english else "Sélectionner une catégorie",
+                placeholder="Choose what you want to configure…" if english else "Choisis ce que tu veux configurer…",
                 options=options[:25],
+                min_values=1,
+                max_values=1,
                 row=0,
                 custom_id="sentrix:setup:v6:category",
             )
             selector.callback = self._v6_category_callback(selector)
             self.add_item(selector)
             self.add_item(configuration.SetupNavButton(
-                "summary", self.message_id,
-                label="Summary" if english else "Résumé",
-                style=discord.ButtonStyle.primary,
-                row=1,
-            ))
-            self.add_item(configuration.SetupNavButton(
-                "history", self.message_id,
-                label="History" if english else "Historique",
+                "cancel",
+                self.message_id,
+                label="Close" if english else "Fermer",
                 style=discord.ButtonStyle.secondary,
                 row=1,
             ))
-            self.add_item(configuration.SetupNavButton(
-                "cancel", self.message_id,
-                label="Close" if english else "Fermer",
-                style=discord.ButtonStyle.danger,
-                row=1,
-            ))
-
-            dashboard_url = os.getenv(
-                "DASHBOARD_PUBLIC_URL", "https://mon-bot-discord-production-8944.up.railway.app"
-            ).strip().rstrip("/")
-            if dashboard_url.startswith(("https://", "http://")):
-                self.add_item(discord.ui.Button(
-                    label="Web dashboard" if english else "Dashboard web",
-                    style=discord.ButtonStyle.link,
-                    url=f"{dashboard_url}/app?guild={self.guild_id}&tab=overview",
-                    row=2,
-                ))
-            _sanitize_view(self)
 
         def _v6_category_callback(self, selector: discord.ui.Select):
             async def callback(interaction: discord.Interaction) -> None:
@@ -316,6 +245,7 @@ def install(bot: commands.Bot) -> None:
             self.clear_items()
             english = _is_english(self)
             current = language_runtime.LANG_EN if english else language_runtime.LANG_FR
+
             fr = discord.ui.Button(
                 label="Français",
                 style=discord.ButtonStyle.primary if current == language_runtime.LANG_FR else discord.ButtonStyle.secondary,
@@ -338,7 +268,8 @@ def install(bot: commands.Bot) -> None:
             async def choose(interaction: discord.Interaction, choice: str) -> None:
                 if not _can_change_language(interaction):
                     return await interaction.response.send_message(
-                        "Permission Administrateur requise. / Administrator permission required.", ephemeral=True
+                        "Permission Administrateur requise. / Administrator permission required.",
+                        ephemeral=True,
                     )
                 await language_runtime.set_language(self.bot, self.guild_id, choice)
                 self.page = -1
@@ -363,7 +294,6 @@ def install(bot: commands.Bot) -> None:
             self.add_item(fr)
             self.add_item(en)
             self.add_item(home)
-            _sanitize_view(self)
 
         def render_page(self) -> None:
             if getattr(self, "page", -1) == -1:
@@ -372,83 +302,40 @@ def install(bot: commands.Bot) -> None:
             if getattr(self, "page", -1) == LANGUAGE_PAGE:
                 self._render_language_page()
                 return
+            # Important : le design vient du Setup compact installé juste avant cette
+            # couche. On ne le reconstruit plus ici.
             super().render_page()
-            _sanitize_view(self)
 
         async def _build_home_embed_v6(self) -> discord.Embed:
             english = _is_english(self)
             guild = self._guild()
-            conf = await self.bot.db.get_guild_config(self.guild_id)
-            rows = await self._compute_categories(conf)
-            statuses = [status for _name, status in rows]
-            configured = 1 + sum(1 for status in statuses if status == "Configuré")
-            total = 1 + len(statuses)
-            current_language = "English" if english else "Français"
-
             embed = discord.Embed(
-                title="SENTRIX / SETUP" if english else "SENTRIX / CONFIGURATION",
+                title="SentriX • Configuration",
                 description=(
-                    "Manage the server from one clean control panel. Select a category below to configure it."
+                    "Choose a category below to configure SentriX for this server."
                     if english else
-                    "Gère le serveur depuis un seul panneau. Sélectionne une catégorie ci-dessous pour la configurer."
+                    "Choisis une catégorie ci-dessous pour configurer SentriX sur ce serveur."
                 ),
                 color=_SETUP_COLOR,
             )
-            embed.add_field(
-                name="Server" if english else "Serveur",
-                value=guild.name if guild else "-",
-                inline=True,
-            )
-            embed.add_field(
-                name="Progress" if english else "Progression",
-                value=f"{configured} / {total}",
-                inline=True,
-            )
-            embed.add_field(
-                name="Language" if english else "Langue",
-                value=current_language,
-                inline=True,
-            )
-
-            lines = [f"**{'Server language' if english else 'Langue du serveur'}** — {current_language}"]
-            visible_steps = [s for s in configuration.SETUP_STEPS if s.get("key") != "summary"]
-            for index, step in enumerate(visible_steps):
-                title, _ = _step_meta(step)
-                if english:
-                    title = _clean_text(language_runtime._english_setup_text(title) or title)
-                status = statuses[index] if index < len(statuses) else "Partiel"
-                lines.append(f"**{title}** — {_status_text(status, english)}")
-            embed.add_field(
-                name="Modules",
-                value="\n".join(lines)[:1024],
-                inline=False,
-            )
-            embed.set_footer(text=f"SentriX / {_SETUP_BUILD_MARKER}")
+            _set_author(embed, self.bot)
+            embed.set_footer(text=f"SentriX • {guild.name if guild else 'Serveur'}")
             return embed
 
         async def _build_language_embed_v6(self) -> discord.Embed:
             english = _is_english(self)
-            current = "English" if english else "Français"
+            guild = self._guild()
             embed = discord.Embed(
-                title="SENTRIX / Language" if english else "SENTRIX / Langue",
+                title="SentriX • Language" if english else "SentriX • Langue",
                 description=(
-                    "Choose the language used for commands, help and the main SentriX interfaces."
+                    "Choose the language used by SentriX on this server."
                     if english else
-                    "Choisis la langue utilisée pour les commandes, l'aide et les interfaces principales de SentriX."
+                    "Choisis la langue utilisée par SentriX sur ce serveur."
                 ),
                 color=_SETUP_COLOR,
             )
-            embed.add_field(
-                name="Current language" if english else "Langue actuelle",
-                value=f"**{current}**",
-                inline=False,
-            )
-            embed.add_field(
-                name="Available" if english else "Disponibles",
-                value="Français\nEnglish",
-                inline=False,
-            )
-            embed.set_footer(text=f"SentriX / {_SETUP_BUILD_MARKER}")
+            _set_author(embed, self.bot)
+            embed.set_footer(text=f"SentriX • {guild.name if guild else 'Serveur'}")
             return embed
 
         async def build_embed(self) -> discord.Embed:
@@ -456,13 +343,14 @@ def install(bot: commands.Bot) -> None:
                 return await self._build_home_embed_v6()
             if getattr(self, "page", -1) == LANGUAGE_PAGE:
                 return await self._build_language_embed_v6()
+
             embed = await super().build_embed()
             if _is_english(self):
                 try:
                     language_runtime._translate_setup_embed(embed)
                 except Exception:
                     logger.debug("Traduction d'une page +setup impossible.", exc_info=True)
-            return _sanitize_embed(embed)
+            return embed
 
     configuration.SetupView = SetupViewV6
 
@@ -477,7 +365,6 @@ def install(bot: commands.Bot) -> None:
         channel_id = channel.id if channel is not None else ctx_or_channel.id
 
         await language_runtime.get_language(self.bot, guild.id)
-        english = language_runtime.cached_language(self.bot, guild.id) == language_runtime.LANG_EN
 
         rows = await self.bot.db.list_bot_managers(guild.id)
         existing_managers = {}
@@ -494,13 +381,17 @@ def install(bot: commands.Bot) -> None:
         existing_exempt = [row["role_id"] for row in exempt_rows]
 
         placeholder = discord.Embed(
-            title="SENTRIX / SETUP" if english else "SENTRIX / CONFIGURATION",
-            description="Opening configuration panel..." if english else "Ouverture du panneau de configuration...",
+            title="SentriX • Configuration",
+            description="Ouverture…",
             color=_SETUP_COLOR,
         )
         message = await ctx_or_channel.send(embed=placeholder)
         view = SetupViewV6(
-            self.bot, guild.id, author.id, message.id, channel_id,
+            self.bot,
+            guild.id,
+            author.id,
+            message.id,
+            channel_id,
             existing_managers=existing_managers,
             existing_security=existing_security,
             existing_exempt_roles=existing_exempt,
@@ -520,6 +411,4 @@ def install(bot: commands.Bot) -> None:
     config_cls._sentrix_open_setup_panel_v6 = open_setup_panel_v6
     _bind_live_opener(config_cog, config_cls, open_setup_panel_v6)
 
-    logger.info(
-        "+setup V7 clean actif : interface sans emoji, langue première catégorie et ouverture verrouillée."
-    )
+    logger.info("+setup final : interface compacte conservée et langue ajoutée sans ancien dashboard.")
