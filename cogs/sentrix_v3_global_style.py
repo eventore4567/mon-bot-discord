@@ -1,15 +1,20 @@
-"""SentriX V3.4 — deux formats visuels cohérents pour toutes les cartes.
+"""SentriX V3.9 — système visuel unifié et plus léger.
 
-La couche reste non destructive : aucune permission, commande ou logique métier n'est
-modifiée. Les cartes ordinaires sont classées automatiquement dans deux familles :
+Cette couche reste strictement visuelle : aucune permission, aucune commande et aucune
+logique métier ne sont modifiées.
 
-- compact : erreurs, confirmations et actions rapides ;
-- large : help, setup, profils, tickets et panneaux riches.
+Objectif V3.9 : rendre les panneaux réellement uniformes sans leur donner artificiellement
+la même hauteur. L'ancien V3.4 ajoutait des champs invisibles pour remplir les grandes
+cartes ; cela produisait des panneaux trop hauts et irréguliers selon le client Discord.
+V3.9 remplace cette approche par un contrat simple :
 
-Discord calcule lui-même la hauteur finale selon la police, la largeur du client et les
-retours à la ligne. V3.4 ne prétend donc pas imposer une hauteur en pixels, mais rend les
-cartes de chaque famille visuellement symétriques grâce à une structure, des limites et
-des emplacements de champs constants. Les logs Secure Audit restent intacts.
+- deux densités seulement : compact et panel ;
+- aucun champ vide ajouté ;
+- titres courts et métier, jamais un gros branding répété ;
+- grands panneaux organisés en sections pleine largeur ;
+- petites métriques autorisées en inline, le reste reste lisible sur toute la largeur ;
+- descriptions et champs raccourcis proprement, sans casser les logs Secure Audit ;
+- boutons et sélecteurs gardent la même grammaire visuelle partout.
 """
 from __future__ import annotations
 
@@ -25,9 +30,10 @@ from utils import premium_style
 logger = logging.getLogger("bot.sentrix-v3-global-style")
 _INSTALLED = False
 
-_CANONICAL_TITLE_RE = re.compile(r"^SentriX\s*•\s*.+$", re.IGNORECASE)
+_CANONICAL_TITLE_RE = re.compile(r"^SentriX\s*•\s*(.+)$", re.IGNORECASE)
 _LEADING_DETAIL_RE = re.compile(r"^\*\*(.{1,96}?)\*\*(?:\n+|$)")
 _MANY_BLANKS_RE = re.compile(r"\n{3,}")
+_DECORATIVE_TITLE_RE = re.compile(r"^[\s\u200b]*(?:[^\wÀ-ÿ]{1,4}\s*)+")
 _ZWSP = "\u200b"
 
 _GENERIC_STATE_TITLES = {
@@ -44,29 +50,35 @@ _BUTTON_EMOJIS = (
     (("rechercher", "search"), "🔎"),
     (("actualiser", "refresh", "recharger"), "🔄"),
     (("support", "ticket"), "🎫"),
+    (("sécurité", "security"), "🛡️"),
+    (("modération", "moderation"), "🔨"),
     (("dashboard", "tableau de bord"), "🌐"),
     (("inviter", "invite"), "➕"),
     (("retour", "back", "précédent", "precedent"), "⬅️"),
     (("suivant", "next"), "➡️"),
-    (("fermer", "close", "annuler", "cancel"), "✖️"),
+    (("fermer", "close", "annuler", "cancel"), "❌"),
     (("supprimer", "delete", "effacer"), "🗑️"),
 )
 
-_LARGE_COMMAND_HINTS = {
+_PANEL_COMMAND_HINTS = {
     "help", "setup", "profile", "profile-card", "userinfo", "botinfo",
     "ticketsetup", "ticket", "shoppanel", "shop", "inventory", "leaderboard-levels",
     "economyleaderboard", "command-stats", "server-growth", "security-check",
     "automod-status", "config-view", "rolepanel", "diagnostic", "bot-status",
+    "security", "antiraid", "antinuke", "giveaway", "warnings",
 }
-_LARGE_CATEGORIES = {
+_PANEL_CATEGORIES = {
     "configuration", "tickets", "profile", "shop", "leaderboard", "premium",
+    "security", "moderation",
 }
-_SMALL_FIELD_SLOTS = 2
-_LARGE_FIELD_SLOTS = 6
-_SMALL_DESCRIPTION_LIMIT = 520
-_LARGE_DESCRIPTION_LIMIT = 1800
-_SMALL_FIELD_LIMIT = 280
-_LARGE_FIELD_LIMIT = 700
+
+# Limites éditoriales, volontairement sous les limites Discord.
+_COMPACT_DESCRIPTION_LIMIT = 460
+_PANEL_DESCRIPTION_LIMIT = 1150
+_COMPACT_FIELD_LIMIT = 260
+_PANEL_FIELD_LIMIT = 620
+_PANEL_TITLE_LIMIT = 56
+_COMPACT_TITLE_LIMIT = 44
 
 
 def _asset_url(bot_user: Any) -> str | None:
@@ -87,57 +99,79 @@ def _compact_description(value: Any, *, limit: int = 4096) -> str | None:
     return premium_style.clip(text, limit)
 
 
+def _clean_panel_title(value: Any, *, fallback: str) -> str:
+    text = premium_style.clean_title(value, fallback=fallback)
+    text = _DECORATIVE_TITLE_RE.sub("", text).strip()
+    return premium_style.clip(text or fallback, _PANEL_TITLE_LIMIT)
+
+
 def _promote_real_title(embed: discord.Embed, *, kind: str) -> None:
     current_title = str(getattr(embed, "title", "") or "").strip()
     description = _compact_description(getattr(embed, "description", None))
 
-    if not _CANONICAL_TITLE_RE.match(current_title):
+    canonical = _CANONICAL_TITLE_RE.match(current_title)
+    if canonical is None:
+        if current_title:
+            embed.title = _clean_panel_title(current_title, fallback="Information")
         embed.description = description
         return
 
     match = _LEADING_DETAIL_RE.match(description or "")
     if match:
-        promoted = premium_style.clean_title(match.group(1), fallback="Information")
-        if promoted and len(promoted) <= premium_style.VISUAL_LIMITS["title"]:
+        promoted = _clean_panel_title(match.group(1), fallback="Information")
+        if promoted:
             embed.title = promoted
             remaining = (description or "")[match.end():].lstrip()
             embed.description = remaining or None
             return
 
-    embed.title = _GENERIC_STATE_TITLES.get(kind, "Information")
+    # Pour une carte informative, le nom métier/catégorie est beaucoup plus utile que
+    # « Information ». Les états courts conservent un titre d'état explicite.
+    if kind == "info":
+        suffix = _clean_panel_title(canonical.group(1), fallback="Information")
+        embed.title = suffix
+    else:
+        embed.title = _GENERIC_STATE_TITLES.get(kind, "Information")
     embed.description = description
 
 
-def _set_premium_author(
-    embed: discord.Embed,
-    *,
-    category: str,
-    bot_user: Any,
-) -> None:
+def _set_premium_author(embed: discord.Embed, *, category: str, bot_user: Any) -> None:
     current = getattr(getattr(embed, "author", None), "name", None)
     current_text = str(current or "").strip()
     if current_text and not current_text.casefold().startswith("sentrix"):
         return
 
-    label = _category_label(category)
+    # Le titre porte déjà le contexte métier : l'auteur reste uniquement la marque.
     icon = _asset_url(bot_user)
-    name = "SentriX" if category == "brand" else f"SentriX • {label}"
     if icon:
-        embed.set_author(name=name, icon_url=icon)
+        embed.set_author(name="SentriX", icon_url=icon)
     else:
-        embed.set_author(name=name)
+        embed.set_author(name="SentriX")
+
+
+def _is_blank_field(name: Any, value: Any) -> bool:
+    clean_name = str(name or "").replace(_ZWSP, "").strip()
+    clean_value = str(value or "").replace(_ZWSP, "").strip()
+    return not clean_name and not clean_value
 
 
 def _refine_fields(embed: discord.Embed) -> None:
-    for index, field in enumerate(list(embed.fields)):
+    """Nettoie les champs sans en créer artificiellement."""
+    refined: list[tuple[str, str, bool]] = []
+    for field in list(embed.fields):
+        if _is_blank_field(field.name, field.value):
+            continue
         name = premium_style.display_label(field.name, "Information")
         value = _compact_description(field.value) or "—"
-        embed.set_field_at(
-            index,
-            name=premium_style.clip(name, 256),
-            value=premium_style.clip(value, 1024),
-            inline=bool(field.inline),
-        )
+        refined.append((
+            premium_style.clip(name, 256),
+            premium_style.clip(value, 1024),
+            bool(field.inline),
+        ))
+
+    embed.clear_fields()
+    for name, value, inline in refined:
+        embed.add_field(name=name, value=value, inline=inline)
 
 
 def _refine_footer(embed: discord.Embed, *, category: str, guild: discord.Guild | None) -> None:
@@ -145,16 +179,15 @@ def _refine_footer(embed: discord.Embed, *, category: str, guild: discord.Guild 
     footer_text = str(getattr(footer, "text", "") or "").strip()
     footer_icon = getattr(footer, "icon_url", None)
 
-    generic = not footer_text or footer_text.casefold().startswith("sentrix")
-    if not generic:
+    if footer_text and not footer_text.casefold().startswith("sentrix"):
         return
 
-    parts = ["SentriX"]
+    parts: list[str] = []
     if category not in {"brand", "utility"}:
         parts.append(_category_label(category))
     if guild is not None:
-        parts.append(premium_style.clip(getattr(guild, "name", "Serveur"), 42))
-    text = " • ".join(parts)
+        parts.append(premium_style.clip(getattr(guild, "name", "Serveur"), 38))
+    text = " • ".join(parts) if parts else "SentriX"
     if footer_icon:
         embed.set_footer(text=text, icon_url=footer_icon)
     else:
@@ -175,61 +208,93 @@ def _layout_size(embed: discord.Embed, *, command: Any, category: str) -> str:
     command_name = _command_name(command)
     description = str(getattr(embed, "description", "") or "")
 
-    if command_name in _LARGE_COMMAND_HINTS:
-        return "large"
-    if any(command_name.startswith(f"{name} ") for name in _LARGE_COMMAND_HINTS):
-        return "large"
-    if category in _LARGE_CATEGORIES:
-        return "large"
+    if command_name in _PANEL_COMMAND_HINTS:
+        return "panel"
+    if any(command_name.startswith(f"{name} ") for name in _PANEL_COMMAND_HINTS):
+        return "panel"
+    if category in _PANEL_CATEGORIES:
+        return "panel"
     if _has_media(embed):
-        return "large"
-    if len(embed.fields) > _SMALL_FIELD_SLOTS:
-        return "large"
-    if len(description) > _SMALL_DESCRIPTION_LIMIT:
-        return "large"
-    return "small"
+        return "panel"
+    if len(embed.fields) >= 3 or len(description) > _COMPACT_DESCRIPTION_LIMIT:
+        return "panel"
+    return "compact"
 
 
-def _trim_field_value(value: Any, *, limit: int) -> str:
-    return _compact_description(value, limit=limit) or "—"
+def _field_should_be_inline(name: str, value: str, *, original_inline: bool) -> bool:
+    """Réserve les colonnes aux vraies petites métriques, pas aux paragraphes."""
+    if not original_inline:
+        return False
+    if len(value) > 150 or value.count("\n") > 2:
+        return False
+    if "```" in value or len(name) > 34:
+        return False
+    return True
 
 
-def _pad_field_slots(embed: discord.Embed, *, slots: int) -> None:
-    if len(embed.fields) >= slots:
-        return
-    for _ in range(slots - len(embed.fields)):
-        embed.add_field(name=_ZWSP, value=_ZWSP, inline=True)
+def _apply_compact_layout(embed: discord.Embed) -> None:
+    if embed.title:
+        embed.title = premium_style.clip(embed.title, _COMPACT_TITLE_LIMIT)
+    if embed.description:
+        embed.description = _compact_description(embed.description, limit=_COMPACT_DESCRIPTION_LIMIT)
+
+    rebuilt: list[tuple[str, str, bool]] = []
+    for field in list(embed.fields):
+        if _is_blank_field(field.name, field.value):
+            continue
+        value = _compact_description(field.value, limit=_COMPACT_FIELD_LIMIT) or "—"
+        rebuilt.append((premium_style.clip(field.name, 80), value, False))
+    embed.clear_fields()
+    for name, value, inline in rebuilt[:3]:
+        embed.add_field(name=name, value=value, inline=inline)
+
+
+def _apply_panel_layout(embed: discord.Embed) -> None:
+    """Structure les gros panneaux sans padding ni grille artificielle."""
+    if embed.title:
+        embed.title = premium_style.clip(embed.title, _PANEL_TITLE_LIMIT)
+    if embed.description:
+        embed.description = _compact_description(embed.description, limit=_PANEL_DESCRIPTION_LIMIT)
+
+    rebuilt: list[tuple[str, str, bool]] = []
+    for field in list(embed.fields):
+        if _is_blank_field(field.name, field.value):
+            continue
+        name = premium_style.clip(field.name, 72)
+        value = _compact_description(field.value, limit=_PANEL_FIELD_LIMIT) or "—"
+        inline = _field_should_be_inline(name, value, original_inline=bool(field.inline))
+        rebuilt.append((name, value, inline))
+
+    embed.clear_fields()
+    for name, value, inline in rebuilt:
+        embed.add_field(name=name, value=value, inline=inline)
 
 
 def _apply_two_size_layout(embed: discord.Embed, *, size: str) -> None:
-    if size == "large":
-        description_limit = _LARGE_DESCRIPTION_LIMIT
-        field_limit = _LARGE_FIELD_LIMIT
-        slots = _LARGE_FIELD_SLOTS
-        title_limit = 64
+    # Nom conservé pour compatibilité avec les tests/couches V3.4 historiques.
+    if size in {"large", "panel"}:
+        _apply_panel_layout(embed)
     else:
-        description_limit = _SMALL_DESCRIPTION_LIMIT
-        field_limit = _SMALL_FIELD_LIMIT
-        slots = _SMALL_FIELD_SLOTS
-        title_limit = 48
+        _apply_compact_layout(embed)
 
-    if embed.title:
-        embed.title = premium_style.clip(embed.title, title_limit)
-    if embed.description:
-        embed.description = _compact_description(embed.description, limit=description_limit)
 
-    for index, field in enumerate(list(embed.fields)):
-        if str(field.name) == _ZWSP and str(field.value) == _ZWSP:
-            continue
-        embed.set_field_at(
-            index,
-            name=premium_style.clip(field.name, 256),
-            value=_trim_field_value(field.value, limit=field_limit),
-            inline=bool(field.inline),
-        )
-
-    if len(embed.fields) <= slots:
-        _pad_field_slots(embed, slots=slots)
+def _dedupe_title_field(embed: discord.Embed) -> None:
+    """Évite « Configuration » puis un champ « Configuration » juste dessous."""
+    title = premium_style.clean_title(getattr(embed, "title", ""), fallback="").casefold()
+    if not title or not embed.fields:
+        return
+    first = embed.fields[0]
+    first_name = premium_style.clean_title(first.name, fallback="").casefold()
+    if first_name != title:
+        return
+    value = str(first.value or "").strip()
+    remaining = list(embed.fields)[1:]
+    body = str(getattr(embed, "description", "") or "").strip()
+    if value and value != "—":
+        embed.description = _compact_description(f"{body}\n\n{value}" if body else value, limit=_PANEL_DESCRIPTION_LIMIT)
+    embed.clear_fields()
+    for field in remaining:
+        embed.add_field(name=field.name, value=field.value, inline=field.inline)
 
 
 def _refine_embed(
@@ -247,6 +312,7 @@ def _refine_embed(
     resolved_category = premium_style.infer_category(command=command, embed=embed, hint=category)
     resolved_kind = kind or premium_style.infer_kind(embed)
 
+    # Les logs Secure Audit ont leur propre contrat visuel et ne doivent pas être remodelés.
     is_log = bool(log_type) or resolved_category == "logs"
     if is_log:
         return embed
@@ -267,6 +333,8 @@ def _refine_embed(
 
     size = _layout_size(embed, command=command, category=resolved_category)
     _apply_two_size_layout(embed, size=size)
+    if size == "panel":
+        _dedupe_title_field(embed)
     _refine_footer(embed, category=resolved_category, guild=guild)
     return embed
 
@@ -289,11 +357,16 @@ def _refine_view(view: discord.ui.View | None) -> discord.ui.View | None:
         return None
     for item in list(getattr(view, "children", ()) or ()):
         if isinstance(item, discord.ui.Button):
+            label = str(item.label or "").strip()
+            if label:
+                item.label = premium_style.clip(label, premium_style.VISUAL_LIMITS["button_label"])
             _safe_button_emoji(item)
         elif isinstance(item, discord.ui.Select):
             placeholder = str(item.placeholder or "").strip()
-            if not placeholder:
-                item.placeholder = "Choisir une option…"
+            item.placeholder = premium_style.clip(
+                placeholder or "Choisir une option…",
+                premium_style.VISUAL_LIMITS["select_label"],
+            )
     return view
 
 
@@ -304,7 +377,7 @@ def install(bot: commands.Bot) -> None:
         original_embed = premium_style.style_embed
         original_view = premium_style.style_view
 
-        def styled_v34(embed: discord.Embed, *args, **kwargs):
+        def styled_v39(embed: discord.Embed, *args, **kwargs):
             result = original_embed(embed, *args, **kwargs)
             if not isinstance(result, discord.Embed):
                 return result
@@ -319,22 +392,21 @@ def install(bot: commands.Bot) -> None:
                 log_type=kwargs.get("log_type"),
             )
 
-        def styled_view_v34(view: discord.ui.View | None):
+        def styled_view_v39(view: discord.ui.View | None):
             return _refine_view(original_view(view))
 
-        premium_style.style_embed = styled_v34
-        premium_style.style_view = styled_view_v34
+        premium_style.style_embed = styled_v39
+        premium_style.style_view = styled_view_v39
         _INSTALLED = True
-        logger.info("SentriX V3.4 : cartes compactes/grandes symétriques actives.")
+        logger.info("SentriX V3.9 : design uniforme compact/panel sans padding artificiel actif.")
 
-    # V3.6 doit être posé APRES V3.4 : il remplace les emojis Unicode ajoutés par les
-    # anciennes couches au lieu de les empiler, tout en réutilisant exactement le même
-    # moteur d'embed et les deux mêmes tailles de cartes.
+    # Le pack d'emojis est installé après le moteur visuel afin qu'une ancienne couche ne
+    # puisse pas remplacer ses composants. Les logs restent exclus des transformations.
     try:
         from .sentrix_emoji_runtime import install as install_animated_emoji_pack
         install_animated_emoji_pack(bot)
     except Exception:
-        logger.exception("Impossible d'installer le pack animé SentriX V3.6.")
+        logger.exception("Impossible d'installer le pack animé SentriX.")
 
 
-__all__ = ["install", "_layout_size", "_apply_two_size_layout"]
+__all__ = ["install", "_layout_size", "_apply_two_size_layout", "_refine_embed"]
