@@ -1,12 +1,12 @@
-"""SentriX V3 — aide toujours accessible et signature utilisateur propre.
+"""SentriX V3 — aide toujours accessible, signature propre et pack animé final.
 
 `help` est une commande de navigation, pas une action métier coûteuse. Elle ne doit donc
 pas consommer le quota global ni être refusée par l'anti-double-exécution V41.
 
 Cette couche protège aussi l'interface V3 contre les composants Discord fragiles et
 supprime explicitement des paramètres utilisateur tous les arguments techniques internes
-(`ctx`, `context`, `interaction`, `self`, `cog`). Ainsi +help ne peut plus demander à un
-membre d'écrire un argument Python interne.
+(`ctx`, `context`, `interaction`, `self`, `cog`). Depuis V3.6, les anciens pictogrammes
+Unicode des composants sont remplacés par le pack d'emojis animés officiel SentriX.
 """
 from __future__ import annotations
 
@@ -42,7 +42,6 @@ def _sanitize_help_command_params(help_command: commands.Command | None) -> None
         for name in list(params):
             if str(name).casefold() in _TECHNICAL_PARAMS:
                 params.pop(name, None)
-    # Le seul argument utilisateur accepté est le nom optionnel d'une commande.
     help_command.usage = "[commande]"
 
 
@@ -113,14 +112,57 @@ def _patch_v41_guards() -> None:
     hardening._sentrix_help_exempt_v3 = True
 
 
+def _install_final_visuals(bot: commands.Bot) -> None:
+    """Réaffirme V3.4 + V3.6 après command_style_v2 qui réécrit le renderer à chaque passe."""
+    try:
+        from . import sentrix_emoji_runtime as animated
+        from . import sentrix_v3_global_style as global_style
+
+        # command_no_emoji_runtime appelle command_style_v2 juste avant ce module : la base
+        # est donc propre à chaque passe. Réinitialiser uniquement ces marqueurs permet de
+        # reconstruire une chaîne V2 -> V3.4 -> V3.6 sans empiler les wrappers historiques.
+        global_style._INSTALLED = False
+        animated._INSTALLED = False
+        global_style.install(bot)
+    except Exception:
+        logger.exception("Impossible de réaffirmer le style V3.4/V3.6 après le thème historique.")
+
+
 def _sanitize_view(view: discord.ui.View) -> None:
-    """Retire les emojis des composants V3 uniquement, pas ceux des embeds."""
+    """Retire les anciens emojis de composants puis applique uniquement le pack V3.6."""
     for item in list(getattr(view, "children", ()) or ()):
         if isinstance(item, discord.ui.Button):
             item.emoji = None
         elif isinstance(item, discord.ui.Select):
             for option in item.options:
                 option.emoji = None
+
+    try:
+        from . import sentrix_emoji_runtime as animated
+        animated._decorate_view(view)
+    except Exception:
+        # L'aide doit rester utilisable même si les emojis ne sont pas encore synchronisés.
+        pass
+
+
+def _patch_help_raw_edits(clean) -> None:
+    """Applique V3.6 aux pages help qui utilisent volontairement Message.edit brut."""
+    current = getattr(clean, "_edit_help_message", None)
+    if current is None or getattr(current, "_sentrix_animated_help_v36", False):
+        return
+
+    async def animated_help_edit(interaction, *, embed, view):
+        try:
+            from . import sentrix_emoji_runtime as animated
+            animated._decorate_embed(embed, command=getattr(interaction, "command", None))
+            animated._decorate_view(view)
+        except Exception:
+            pass
+        return await current(interaction, embed=embed, view=view)
+
+    animated_help_edit._sentrix_animated_help_v36 = True
+    animated_help_edit._sentrix_original = current
+    clean._edit_help_message = animated_help_edit
 
 
 def _patch_v3_components(bot: commands.Bot) -> None:
@@ -134,23 +176,22 @@ def _patch_v3_components(bot: commands.Bot) -> None:
     if help_command is None:
         return
 
-    # Important : même si une autre couche a recalculé la signature du callback,
-    # les arguments techniques ne doivent jamais devenir des arguments utilisateur.
     _sanitize_help_command_params(help_command)
+    _patch_help_raw_edits(clean)
 
-    if not getattr(v3.V3Select, "_sentrix_component_compat_v3", False):
+    if not getattr(v3.V3Select, "_sentrix_component_compat_v36", False):
         original_select_init = v3.V3Select.__init__
 
         def select_init(self, *args, **kwargs):
             original_select_init(self, *args, **kwargs)
-            for option in self.options:
-                option.emoji = None
+            _sanitize_view(self)
 
         v3.V3Select.__init__ = select_init
         v3.V3Select._sentrix_component_compat_v3 = True
+        v3.V3Select._sentrix_component_compat_v36 = True
 
     for view_cls in (v3.V3HomeView, v3.V3PagesView):
-        if getattr(view_cls, "_sentrix_component_compat_v3", False):
+        if getattr(view_cls, "_sentrix_component_compat_v36", False):
             continue
         original_init = view_cls.__init__
 
@@ -162,6 +203,7 @@ def _patch_v3_components(bot: commands.Bot) -> None:
 
         view_cls.__init__ = make_init(original_init)
         view_cls._sentrix_component_compat_v3 = True
+        view_cls._sentrix_component_compat_v36 = True
 
     clean.CleanHelpSelect = v3.V3Select
     clean.CleanHelpHomeView = v3.V3HomeView
@@ -201,6 +243,11 @@ def _patch_v3_components(bot: commands.Bot) -> None:
                     pass
 
                 embed = v3._home_embed(ctx.bot, ctx.guild, prefix, is_staff, language)
+                try:
+                    from . import sentrix_emoji_runtime as animated
+                    animated._decorate_embed(embed, command=ctx.command)
+                except Exception:
+                    pass
                 return await ctx.send(embed=embed)
 
         safe_help_callback.__name__ = getattr(current_callback, "__name__", "help_cmd")
@@ -209,15 +256,18 @@ def _patch_v3_components(bot: commands.Bot) -> None:
         safe_help_callback._sentrix_v3_ux = True
         help_command.callback = safe_help_callback
 
-    # Le setter du callback peut recalculer Command.params : nettoyer une seconde fois
-    # APRES l'affectation est ce qui empêche définitivement « ctx est obligatoire ».
     _sanitize_help_command_params(help_command)
 
     bot._sentrix_help_components_safe_v3 = True
-    logger.info("+help V3 compatible : aucun argument ctx interne, cooldown neutralisé et fallback actif.")
+    bot._sentrix_help_animated_v36 = True
+    logger.info("+help V3 compatible : signature propre, cooldown neutralisé et pack animé V3.6 actif.")
 
 
 def install(bot: commands.Bot) -> None:
+    # Toujours après command_style_v2 : garantit que V3.4/V3.6 restent la dernière couche
+    # visuelle, même lorsque l'architecture historique repasse après une extension.
+    _install_final_visuals(bot)
+
     if not getattr(bot, "_sentrix_help_cooldown_exemption_v3", False):
         _patch_global_prefix_cooldown(bot)
         _patch_v41_guards()
