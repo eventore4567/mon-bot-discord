@@ -21,7 +21,7 @@ def test_v61_source_exists_and_compiles() -> None:
 def test_v61_keeps_real_updates() -> None:
     source = MODULE.read_text(encoding="utf-8")
     # Une update de nom/sujet ne doit jamais être absorbée avec un delete/create voisin.
-    for marker in ("nom :", "sujet modifie", "permissions modifie", "slowmode", "nsfw"):
+    for marker in ("\"nom\"", "sujet modifie", "permissions modifie", "slowmode", "nsfw"):
         assert marker in source
 
 
