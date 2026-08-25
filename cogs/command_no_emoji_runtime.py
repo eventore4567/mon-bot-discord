@@ -213,5 +213,15 @@ def install(bot: commands.Bot) -> None:
             # Un outil de construction du serveur officiel ne doit jamais bloquer le bot.
             pass
 
+    # Fondation SentriX V3 : cette couche est réaffirmée après les anciens systèmes
+    # help/style à chaque chargement d'extension. Elle ne crée aucune commande et ne
+    # modifie pas les protections métier ; elle choisit seulement l'expérience finale.
+    try:
+        from .sentrix_v3_ux import install as install_sentrix_v3_ux
+        install_sentrix_v3_ux(bot)
+    except Exception:
+        # Une évolution UX ne doit jamais empêcher le bot de démarrer.
+        pass
+
     bot._sentrix_no_emoji_commands = False
     bot._sentrix_command_style_v2 = True
