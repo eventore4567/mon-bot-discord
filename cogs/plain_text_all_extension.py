@@ -57,6 +57,14 @@ def _disconnect_configuration_log_listeners(bot: commands.Bot) -> int:
 
 
 async def _register_official_help(bot: commands.Bot) -> None:
+    """Réenregistre l'aide finale sans jamais exposer ``ctx`` à l'utilisateur.
+
+    ``OfficialHelp`` reste le propriétaire de toute l'interface et du slash ``/help``.
+    Pour la commande préfixée, on utilise volontairement une petite entrée autonome :
+    discord.py sait alors que son premier paramètre est le Context technique et ne peut
+    pas le confondre avec un argument utilisateur, même si un ancien cog ``Utility`` ou
+    une couche runtime a précédemment manipulé la commande ``help``.
+    """
     old = bot.get_command("help")
     if old is not None:
         bot.remove_command("help")
@@ -70,7 +78,48 @@ async def _register_official_help(bot: commands.Bot) -> None:
     except Exception:
         pass
 
+    # Le Cog fournit les builders, vues, recherche et /help.
     await bot.add_cog(OfficialHelp(bot))
+
+    # Son Command préfixé de classe est retiré du registre racine puis remplacé par une
+    # entrée sans Cog. Avec command.cog == None, discord.py retire exactement le premier
+    # paramètre (ctx) du parsing et ne garde que ``commande`` comme argument optionnel.
+    registered = bot.get_command("help")
+    if registered is not None:
+        bot.remove_command("help")
+
+    async def prefix_help_entry(ctx: commands.Context, *, commande: str | None = None) -> None:
+        help_cog = bot.get_cog("SentriXHelp")
+        if not isinstance(help_cog, OfficialHelp):
+            logger.error("SentriXHelp absent pendant l'exécution de +help.")
+            return
+        await help_cog._send_prefix_help(ctx, query=commande)
+
+    prefix_command = commands.Command(
+        prefix_help_entry,
+        name="help",
+        help="Ouvrir l'aide interactive SentriX ou afficher une commande précise.",
+        usage="[commande]",
+    )
+    prefix_command.hidden = False
+    prefix_command._sentrix_official_help_owner = True
+    prefix_command._sentrix_context_is_internal = True
+    bot.add_command(prefix_command)
+
+    # Contrat runtime : l'utilisateur ne doit JAMAIS voir self/ctx/context/interaction.
+    exposed = {str(name).casefold() for name in prefix_command.clean_params}
+    forbidden = exposed & {"self", "ctx", "context", "interaction", "bot", "cog"}
+    if forbidden:
+        bot.remove_command("help")
+        raise RuntimeError(
+            "Signature +help invalide : paramètres techniques exposés : "
+            + ", ".join(sorted(forbidden))
+        )
+
+    logger.info(
+        "Help préfixé officiel enregistré : paramètres utilisateur=%s.",
+        ", ".join(prefix_command.clean_params) or "aucun",
+    )
 
 
 async def setup(bot: commands.Bot) -> None:
