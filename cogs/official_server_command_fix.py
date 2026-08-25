@@ -44,6 +44,14 @@ def install(bot: commands.Bot) -> None:
     except Exception:
         logger.exception("Impossible d'installer le correctif d'identification du serveur officiel.")
 
+    # V62 transforme #serveurs-sentrix en journal d'ajouts uniquement. Il doit être
+    # installé même lorsque le callback create-server est déjà corrigé/idempotent.
+    try:
+        from .official_server_join_feed_v62 import install as install_join_feed_v62
+        install_join_feed_v62(bot)
+    except Exception:
+        logger.exception("Impossible d'installer le journal d'ajouts serveurs V62.")
+
     # Les aliases restent rattachés au même objet Command. Cela n'ajoute donc aucune
     # commande slash/racine supplémentaire.
     for alias in OFFICIAL_ALIASES:
