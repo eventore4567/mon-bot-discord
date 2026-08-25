@@ -1,9 +1,8 @@
-"""Finalisation légère du runtime SentriX.
+"""Finalisation produit légère du runtime SentriX.
 
-Les anciennes piles V2/V2.1/V2.2/V2.3/V2.4 et les restaurateurs V3 de commandes ne sont
-plus chargés ici. Les fonctionnalités métier restent dans leurs vrais Cogs ; cette couche
-ne fait que préparer très tôt le registre slash, nettoyer la surface visible et conserver
-les opérations d'instance non conflictuelles.
+Les anciens restaurateurs V2/V3 ne sont plus utilisés. Une seule surface utilisateur est
+finalisée ici : registre slash utile + aide simple. Les fonctionnalités métier restent dans
+leurs Cogs historiques pour préserver la compatibilité des commandes +.
 """
 from __future__ import annotations
 
@@ -16,8 +15,7 @@ from discord.ext import commands
 
 from . import slash_command_budget
 
-# Important : final_runtime_polish est importé par cogs.__init__ pendant l'import du
-# package, donc avant le setup du premier Cog. Le plafond slash est ainsi actif à temps.
+# Le garde slash doit être actif avant le premier Cog.
 slash_command_budget.install_class_guard()
 
 logger = logging.getLogger("bot.final-runtime")
@@ -47,7 +45,6 @@ def _install_odboug_account_username(bot: commands.Bot) -> None:
 
 
 def _schedule_safe(bot: commands.Bot, *, marker: str, name: str, coroutine) -> None:
-    """Crée une tâche optionnelle avec récupération explicite de son exception."""
     if getattr(bot, marker, False):
         return
     try:
@@ -69,7 +66,6 @@ def _schedule_safe(bot: commands.Bot, *, marker: str, name: str, coroutine) -> N
 
 
 async def _bootstrap_community_growth(bot: commands.Bot) -> None:
-    """Fonction métier conservée, sans installer de renderer ou de politique de commandes."""
     if getattr(bot, "_sentrix_community_growth_ready", False):
         return
     try:
@@ -85,29 +81,38 @@ async def _bootstrap_community_growth(bot: commands.Bot) -> None:
         logger.exception("Community Growth impossible à initialiser.")
 
 
-def _clean_command_surface(bot: commands.Bot) -> None:
-    """Un seul nettoyeur de catalogue ; aucun restaurateur/alias V2/V3 n'est réappliqué."""
-    try:
-        from . import command_catalog_cleanup
-        command_catalog_cleanup.install(bot)
-    except Exception:
-        logger.exception("Nettoyage du catalogue de commandes impossible.")
-    slash_command_budget.finalize(bot)
-
-
-def install(bot: commands.Bot) -> None:
+async def install(bot: commands.Bot) -> None:
+    """Finalise une seule fois la surface produit visible par les utilisateurs."""
     _install_odboug_account_username(bot)
-    _clean_command_surface(bot)
+
+    # Propriétaire unique du registre `/` : restaure les anciennes commandes utiles,
+    # garde les centres regroupés et respecte strictement le plafond Discord.
+    try:
+        from . import easy_command_surface
+        await easy_command_surface.install(bot)
+    except Exception:
+        logger.exception("Surface slash canonique impossible à finaliser.")
+
+    # Propriétaire unique de +help / /help. Cette installation arrive après les anciennes
+    # couches d'aide : elles ne peuvent donc plus réécrire l'accueil final.
+    try:
+        from . import help_simple
+        help_simple.install(bot)
+    except Exception:
+        logger.exception("Aide simple canonique impossible à installer.")
+
     _schedule_safe(
         bot,
         marker="_sentrix_community_growth_scheduled_clean",
         name="sentrix-community-growth",
         coroutine=_bootstrap_community_growth(bot),
     )
+
     bot._sentrix_legacy_v2_runtime_disabled = True
-    bot._sentrix_command_surface_owner = "command_catalog_cleanup + slash_command_budget"
+    bot._sentrix_command_surface_owner = "cogs.easy_command_surface"
+    bot._sentrix_help_owner = "cogs.help_simple"
     logger.info(
-        "Finalisation propre : runtimes V2/V3 retirés, catalogue unique, registre slash=%s.",
+        "Finalisation produit : registre slash=%s, aide simple active, anciens restaurateurs V2/V3 inactifs.",
         getattr(bot, "_sentrix_slash_registry_count", "?"),
     )
 
