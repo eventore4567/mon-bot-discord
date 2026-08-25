@@ -1,9 +1,14 @@
-"""Initialisation commune des cogs SentriX.
+"""Initialisation des correctifs runtime SentriX.
 
-Ce module conserve la compatibilité avec l'architecture historique de SentriX, mais
-centralise désormais l'installation des correctifs runtime : chaque installateur est
-isolé, journalisé et ne peut plus empêcher les suivants de s'installer s'il rencontre
-une erreur. L'ordre des couches critiques de +setup est volontairement conservé.
+La base historique installait plusieurs couches globales après CHAQUE extension Discord.
+Cela permettait à un ancien renderer/setup/handler de repasser au-dessus d'une correction
+plus récente. Le chargeur ne pose désormais que les correctifs propres au cog qui vient
+d'être chargé. Les couches transversales sont finalisées une seule fois, explicitement,
+après le chargement complet des extensions via :func:`finalize_runtime`.
+
+Les anciens coordinateurs visuels ``plain_response_policy``, ``setup_mobile_cleanup`` et
+``command_no_emoji_runtime`` restent éventuellement présents dans le dépôt pour la
+compatibilité historique, mais ils ne font plus partie du chemin runtime actif.
 """
 
 from __future__ import annotations
@@ -20,7 +25,6 @@ from .ai_reliability import install as install_ai_reliability
 from .bot_tracker import install as install_bot_tracker
 from .command_error_release_v41 import install as install_command_error_release_v41
 from .command_hardening_v41 import install as install_command_hardening_v41
-from .command_no_emoji_runtime import install as install_command_no_emoji
 from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
 from .dashboard_access import install_dashboard_access
@@ -41,7 +45,6 @@ from .natural_music_intent_guard import install as install_natural_music_intent_
 from .no_auto_tracker import install as install_no_auto_tracker
 from .owner_sanction_immunity import install as install_owner_sanction_immunity
 from .permission_guard import install as install_permission_guard
-from .plain_response_policy import install as install_plain_response_policy
 from .poll_ui import install_poll_ui
 from .premium_logs import install as install_premium_logs
 from .premium_logs_v2 import install as install_premium_logs_v2
@@ -67,7 +70,6 @@ from .server_choice_roles import install as install_server_choice_roles
 from .shop_default_prices import install as install_shop_default_prices
 from .setup_close_fix import install as install_setup_close_fix
 from .setup_create_logs_sync import install as install_setup_create_logs_sync
-from .setup_mobile_cleanup import install as install_setup_mobile_cleanup
 from .setup_oxyde_style import install as install_setup_oxyde_style
 from .slash_reliability_v7 import install as install_slash_reliability_v7
 from .stability_runtime import install as install_stability_runtime
@@ -85,22 +87,11 @@ def _matches(name: str, extension: str) -> bool:
 
 
 def _discord_session_started(bot: commands.Bot) -> bool:
-    """Vrai après l'authentification HTTP Discord.
-
-    setup_hook() s'exécute après static_login(), donc en production le token HTTP est déjà
-    présent. Les audits CI construisent seulement l'objet Bot : ils ne doivent pas lancer
-    des bootstraps qui attendent on_ready(), sinon discord.py lève RuntimeError.
-    """
     return bool(getattr(getattr(bot, "http", None), "token", None))
 
 
 async def _run_installer(label: str, installer, *args):
-    """Exécute un installateur sync ou async sans casser la chaîne de démarrage.
-
-    Les extensions elles-mêmes continuent à lever leurs erreurs normalement. Seules les
-    couches runtime optionnelles sont isolées : une erreur de style, dashboard ou panel
-    ne doit jamais empêcher une protection sécurité ou le moteur de langue de s'installer.
-    """
+    """Isole une couche optionnelle sans masquer l'échec de l'extension principale."""
     try:
         result = installer(*args)
         if inspect.isawaitable(result):
@@ -112,7 +103,6 @@ async def _run_installer(label: str, installer, *args):
 
 
 def _install_embed_component_fix(bot: commands.Bot) -> None:
-    """Garantit que le bouton Annuler de +embed n'utilise aucun emoji."""
     if getattr(bot, "_sentrix_embed_component_fix", False):
         return
     try:
@@ -131,27 +121,27 @@ def _install_embed_component_fix(bot: commands.Bot) -> None:
             embed_builder.EmbedBuilderView._sentrix_cancel_emoji_fix = True
 
         bot._sentrix_embed_component_fix = True
-        logger.info("Correctif +embed installé : bouton Annuler sans emoji.")
     except Exception:
         logger.exception("Impossible d'installer le correctif de composant +embed.")
 
 
 async def _install_configuration_critical_patches(bot: commands.Bot) -> None:
-    """Installe les couches essentielles de +setup immédiatement après Configuration."""
+    """Une seule chaîne autoritaire pour +setup / /setup."""
+    if bot.get_cog("Configuration") is None:
+        return
     await _run_installer("fermeture setup", install_setup_close_fix, bot)
     await _run_installer("synchronisation logs setup", install_setup_create_logs_sync, bot)
-    await _run_installer("style setup", install_setup_oxyde_style, bot)
-    await _run_installer("nettoyage mobile setup", install_setup_mobile_cleanup, bot)
+    await _run_installer("style setup canonique", install_setup_oxyde_style, bot)
     await _run_installer("rôle de ping tickets setup", install_ticket_ping_setup, bot)
     await _run_installer("choix de langue public", install_public_language_choice, bot)
     await _run_installer("moteur de langue setup", install_language_runtime, bot)
     await _run_installer("finaliseur de langue setup", install_language_setup_finalizer, bot)
-    logger.info("+setup prioritaire installé immédiatement après le Cog Configuration.")
 
 
 async def _install_common_runtime(bot: commands.Bot) -> None:
-    """Couches idempotentes qui peuvent être appelées après chaque extension."""
-    await _run_installer("style premium", install_premium_style, bot)
+    """Socle transversal installé une seule fois après tous les cogs."""
+    await _run_installer("aliases techniques", install_common_command_names, bot)
+    await _run_installer("style premium transport", install_premium_style, bot)
     await _run_installer("réponses sans référence fragile", install_reply_reference_fix)
     await _run_installer("suivi bot", install_bot_tracker, bot)
     await _run_installer("prix boutique par défaut", install_shop_default_prices, bot)
@@ -161,7 +151,7 @@ async def _install_common_runtime(bot: commands.Bot) -> None:
 
 
 async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
-    """Correctifs qui ne doivent être posés qu'une fois leur cog cible chargé."""
+    """Correctifs dépendant réellement du cog qui vient d'être chargé."""
     if _matches(name, "cogs.automod"):
         await _run_installer("renforcement sécurité", install_security_hardening, bot)
         await _run_installer("analyse intelligente créations anti-nuke", install_smart_creation_guard_v47, bot)
@@ -192,16 +182,11 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
         await _run_installer("interface sondages", install_poll_ui, bot)
         await _run_installer("aide complète", install_complete_help, bot)
         await _run_installer("accès dashboard depuis aide", install_dashboard_access, bot)
-        await _run_installer("style accueil aide", install_help_home_circles, bot)
         await _run_installer("pseudo AFK", install_afk_nickname, bot)
         await _run_installer("signature AFK", install_afk_signature_fix, bot)
 
     if _matches(name, "cogs.configuration"):
-        await _run_installer("fermeture setup (final)", install_setup_close_fix, bot)
-        await _run_installer("synchronisation logs setup (final)", install_setup_create_logs_sync, bot)
-        await _run_installer("style setup (final)", install_setup_oxyde_style, bot)
-        await _run_installer("nettoyage mobile setup (final)", install_setup_mobile_cleanup, bot)
-        await _run_installer("rôle de ping tickets setup (final)", install_ticket_ping_setup, bot)
+        await _install_configuration_critical_patches(bot)
 
     if _matches(name, "cogs.tickets"):
         await _run_installer("sécurité claim tickets", install_ticket_claim_security, bot)
@@ -223,41 +208,119 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
         _install_embed_component_fix(bot)
         await _run_installer("fiabilité slash V7", install_slash_reliability_v7, bot)
 
+    # Les correctifs de stabilité ciblent des cogs précis (notifications, invites,
+    # mini-jeux, IA...). Ils restent donc liés au chargement de l'extension, contrairement
+    # aux renderers/style/handlers globaux qui sont désormais finalisés une seule fois.
+    await _run_installer("stabilité ciblée", install_stability_runtime, bot, name)
+
 
 async def _install_log_stack(bot: commands.Bot) -> None:
-    """Ordre important : routage -> style -> Components V2 -> anti-doublon -> format final."""
+    """Une seule chaîne logs, dans un ordre déterministe."""
     if _discord_session_started(bot):
         await _run_installer("routage logs modération", install_moderation_logs_fix, bot)
     await _run_installer("style premium logs", install_premium_logs, bot)
     await _run_installer("Components V2 logs", install_premium_logs_v2, bot)
     await _run_installer("mentions silencieuses logs", install_logs_no_ping)
-    # V25 garde la sortie unique/anti-doublon ; V26 choisit uniquement le rendu final.
-    await _run_installer("anti-doublon final logs V25", install_log_rectangle_v25, bot)
-    await _run_installer("taille référence logs V26 finale", install_log_reference_layout_v26, bot)
+
+    # Ces deux couches étaient auparavant cachées dans command_no_emoji_runtime.
+    try:
+        from .log_identity_context_v60 import install as install_log_identity_context_v60
+        from .log_consolidation_v61 import install as install_log_consolidation_v61
+        await _run_installer("identités logs V60", install_log_identity_context_v60, bot)
+        await _run_installer("consolidation logs V61", install_log_consolidation_v61, bot)
+    except Exception:
+        logger.exception("Impossible de préparer les correctifs logs V60/V61.")
+
+    await _run_installer("anti-doublon logs V25", install_log_rectangle_v25, bot)
+    await _run_installer("rendu final logs V26", install_log_reference_layout_v26, bot)
 
 
-async def _install_finalizers(bot: commands.Bot, name: str) -> None:
-    """Dernières couches, toujours dans le même ordre déterministe."""
-    await _run_installer("stabilité transversale", install_stability_runtime, bot, name)
-    await _run_installer("aliases techniques", install_common_command_names, bot)
-    await _run_installer("choix de langue public", install_public_language_choice, bot)
-    await _run_installer("moteur de langue", install_language_runtime, bot)
-    await _run_installer("finaliseur langue setup", install_language_setup_finalizer, bot)
-    await _run_installer("style final aide sans emoji", install_help_clean_style, bot)
-    await _run_installer("aide racine et canary externe", install_final_runtime_polish, bot)
+async def _install_release_and_official_server(bot: commands.Bot) -> None:
+    try:
+        from .release_announcer import install as install_release_announcer
+        from .release_ping_policy_v63 import install as install_release_ping_policy_v63
+        await _run_installer("annonceur releases", install_release_announcer, bot)
+        await _run_installer("politique releases majeures", install_release_ping_policy_v63, bot)
+    except Exception:
+        logger.exception("Impossible de préparer la politique de release.")
+
+    if bot.get_cog("ServerBuilder") is not None:
+        try:
+            from .official_server import install as install_official_server
+            from .official_server_polish import install as install_official_server_polish
+            from .official_server_command_fix import install as install_official_server_command_fix
+            await _run_installer("serveur officiel", install_official_server, bot)
+            await _run_installer("finition serveur officiel", install_official_server_polish, bot)
+            await _run_installer("signature serveur officiel", install_official_server_command_fix, bot)
+        except Exception:
+            logger.exception("Impossible de préparer le constructeur officiel.")
+
+
+async def _install_help_and_error_stack(bot: commands.Bot) -> None:
+    """Un seul propriétaire pour l'aide et un seul pour les erreurs utilisateur."""
+    await _run_installer("style aide canonique", install_help_clean_style, bot)
+    try:
+        from .sentrix_v3_ux import install as install_sentrix_v3_ux
+        await _run_installer("UX aide V3", install_sentrix_v3_ux, bot)
+        from .help_cooldown_exemption_v3 import install as install_help_cooldown_exemption_v3
+        await _run_installer("help sans cooldown global", install_help_cooldown_exemption_v3, bot)
+    except Exception:
+        logger.exception("Impossible de préparer la couche UX d'aide.")
+
+    await _run_installer("style accueil aide", install_help_home_circles, bot)
+    await _run_installer("aide racine et surface commandes", install_final_runtime_polish, bot)
     await _run_installer("accueil compact sur mention", install_mention_home, bot)
-    await _run_installer("garde de réponse commandes", install_command_response_guard, bot)
+
+    # error_experience_v3 répond ; command_response_guard observe seulement (V3.11).
+    try:
+        from .error_experience_v3 import install as install_error_experience_v3
+        await _run_installer("erreurs utilisateur uniques", install_error_experience_v3, bot)
+    except Exception:
+        logger.exception("Impossible de préparer le handler d'erreurs utilisateur.")
+    await _run_installer("observabilité réponses commandes", install_command_response_guard, bot)
+
+
+async def finalize_runtime(bot: commands.Bot) -> None:
+    """Finalise UNE FOIS le runtime après le chargement de toutes les extensions.
+
+    Cette fonction est l'unique point d'entrée des couches globales. Elle supprime la
+    course historique où un vieux renderer se réinstallait après un renderer récent.
+    """
+    if getattr(bot, "_sentrix_runtime_finalized_clean", False):
+        return
+
+    await _install_common_runtime(bot)
+    await _install_configuration_critical_patches(bot)
+    await _install_log_stack(bot)
+    await _install_release_and_official_server(bot)
+
+    # Renderer global canonique. Il n'est plus installé implicitement par GuildArrival.
+    try:
+        from .sentrix_v3_global_style import install as install_global_style
+        await _run_installer("style global SentriX", install_global_style, bot)
+    except Exception:
+        logger.exception("Impossible de préparer le style global SentriX.")
+
+    await _install_help_and_error_stack(bot)
+
+    # Protection du markup emoji après les renderers visuels, sans coordinateur legacy.
+    try:
+        from .sentrix_emoji_markup_guard_v361 import install as install_emoji_markup_guard_v361
+        await _run_installer("protection markup emojis", install_emoji_markup_guard_v361, bot)
+    except Exception:
+        logger.exception("Impossible de préparer la protection des emojis.")
+
+    # Sécurité et transports finaux : aucune ancienne couche visuelle n'est installée après.
     await _run_installer("renforcement global commandes V41", install_command_hardening_v41, bot)
     await _run_installer("opérations production", install_production_ops, bot)
-    await _run_installer("politique finale commandes sans emoji", install_command_no_emoji, bot)
     await _run_installer("permissions commandes", install_permission_guard, bot)
     await _run_installer("politique finale interactions", install_final_interaction_policy, bot)
     await _run_installer("libération concurrence slash V41", install_command_error_release_v41, bot)
-    # VRAIMENT EN DERNIER : aucune réponse ordinaire ne doit être remise dans un embed
-    # par premium_style_runtime ou une autre couche historique après cette étape.
-    await _run_installer("réponses finales sans box", install_plain_response_policy, bot)
-    # Et le renderer de logs doit lui aussi rester le tout dernier choix visuel.
-    await _run_installer("taille référence logs V26 finale", install_log_reference_layout_v26, bot)
+
+    bot._sentrix_runtime_finalized_clean = True
+    logger.info(
+        "Runtime SentriX finalisé une fois : setup/style/help/erreurs/permissions sans réempilement legacy."
+    )
 
 
 async def _load_extension_with_sentrix_patches(
@@ -266,19 +329,15 @@ async def _load_extension_with_sentrix_patches(
     *,
     package: str | None = None,
 ):
-    """Charge une vraie extension puis applique les couches SentriX de façon déterministe."""
+    """Charge l'extension et seulement les correctifs qui dépendent de cette extension."""
     result = await _ORIGINAL_LOAD_EXTENSION(bot, name, package=package)
-
-    if _matches(name, "cogs.configuration"):
-        await _install_configuration_critical_patches(bot)
-
-    await _install_common_runtime(bot)
     await _install_extension_specific(bot, name)
-    await _install_log_stack(bot)
-    await _install_finalizers(bot, name)
     return result
 
 
 if not getattr(commands.Bot, "_sentrix_extension_loader", False):
     commands.Bot.load_extension = _load_extension_with_sentrix_patches
     commands.Bot._sentrix_extension_loader = True
+
+
+__all__ = ["finalize_runtime"]
