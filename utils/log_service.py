@@ -1,13 +1,9 @@
-"""Service officiel et unique d'envoi des logs SentriX.
-
-Ce module conserve la configuration historique des catégories de logs, mais possède
-maintenant aussi les règles de transport obligatoires des journaux : aucune mention
-utilisateur/rôle/everyone ne peut notifier, les boutons d'ID répondent en éphémère et
-la déduplication ne s'applique qu'aux événements portant une clé explicite.
-"""
+"""Transport officiel et unique des journaux Discord SentriX."""
 from __future__ import annotations
 
 import logging
+import os
+import re
 import time
 from collections import OrderedDict
 
@@ -21,37 +17,44 @@ LOG_TYPES = {
     "roles": {"label": "Rôles (création/suppression/attribution)", "category": "Rôles", "legacy_column": "log_roles", "emits": True},
     "server": {"label": "Salons (création/suppression/modification)", "category": "Salons", "legacy_column": "log_server", "emits": True},
     "voice": {"label": "Vocal (connexion/déconnexion/changement de salon)", "category": "Vocal", "legacy_column": "log_voice", "emits": True},
-    "moderation": {"label": "Modération (avertissements, mutes, kicks, bans)", "category": "Modération", "legacy_column": "log_moderation", "emits": True},
-    "tickets": {"label": "Tickets (ouverture, fermeture, transcript)", "category": "Tickets", "legacy_column": "ticket_log_channel", "emits": True},
+    "moderation": {"label": "Modération (warns, mutes, kicks, bans)", "category": "Modération", "legacy_column": "log_moderation", "emits": True},
+    "tickets": {"label": "Tickets (ouverture, claim, fermeture)", "category": "Tickets", "legacy_column": "ticket_log_channel", "emits": True},
     "automod": {"label": "Sécurité (anti-spam, anti-raid, anti-nuke, AutoMod)", "category": "Sécurité", "legacy_column": "log_automod", "emits": True},
-    "economy": {"label": "Économie (gains, transferts, achats)", "category": "Économie", "legacy_column": None, "emits": False},
+    "economy": {"label": "Économie", "category": "Économie", "legacy_column": None, "emits": False},
     "levels": {"label": "Niveaux", "category": "Niveaux", "legacy_column": None, "emits": False},
     "ai": {"label": "Intelligence artificielle", "category": "IA", "legacy_column": None, "emits": False},
     "games": {"label": "Jeux", "category": "Jeux", "legacy_column": None, "emits": False},
     "system": {"label": "Système", "category": "Système", "legacy_column": None, "emits": False},
 }
-
 CATEGORY_ORDER = ["Messages", "Membres", "Rôles", "Salons", "Vocal", "Modération", "Tickets", "Sécurité", "Économie", "Niveaux", "IA", "Jeux", "Système"]
-DEFAULT_LOG_SETTING = {
-    "enabled": False,
-    "channel_id": None,
-    "include_content": True,
-    "include_attachments": True,
-    "include_actor": True,
-    "include_reason": True,
-}
+DEFAULT_LOG_SETTING = {"enabled": False, "channel_id": None, "include_content": True, "include_attachments": True, "include_actor": True, "include_reason": True}
 
-# Equivalent discord.py de allowedMentions {parse: [], users: [], roles: [], repliedUser: false}.
-LOG_ALLOWED_MENTIONS = discord.AllowedMentions(
-    everyone=False,
-    users=False,
-    roles=False,
-    replied_user=False,
-)
+# discord.py équivalent strict de allowedMentions {parse: [], users: [], roles: [], repliedUser: false}.
+LOG_ALLOWED_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=False)
 
-_DEDUP_TTL = 6.0
+# Source de vérité Railway déjà utilisée par le projet avant la consolidation.
+PRIMARY_RAILWAY_SERVICE_ID = "d4fb0c3a-d62b-4817-aae1-3cfc859d32c0"
+PRIMARY_RAILWAY_SERVICE_NAME = "mon-bot-discord"
+
+_DEDUP_TTL = 8.0
 _DEDUP_MAX = 4096
 _recent_event_keys: OrderedDict[str, float] = OrderedDict()
+
+
+def is_primary_process() -> bool:
+    """Un seul service Railway est autorisé à publier des logs.
+
+    En local/CI, sans variables Railway, l'envoi reste actif pour les tests.
+    """
+    service_id = (os.getenv("RAILWAY_SERVICE_ID") or "").strip()
+    if service_id:
+        return service_id == PRIMARY_RAILWAY_SERVICE_ID
+    service_name = (os.getenv("RAILWAY_SERVICE_NAME") or "").strip().casefold()
+    if service_name:
+        return service_name == PRIMARY_RAILWAY_SERVICE_NAME or service_name.endswith(" - " + PRIMARY_RAILWAY_SERVICE_NAME)
+    if (os.getenv("RAILWAY_PROJECT_ID") or "").strip():
+        return False
+    return True
 
 
 def categories_with_types() -> dict[str, list[str]]:
@@ -65,30 +68,24 @@ def _now() -> int:
     return int(time.time())
 
 
-def make_event_key(
-    guild_id: int,
-    event_type: str,
-    *,
-    target_id: int | None = None,
-    executor_id: int | None = None,
-    audit_log_id: int | None = None,
-    message_id: int | None = None,
-    discriminator: str | int | None = None,
-) -> str:
-    """Clé déterministe. Deux vraies actions proches restent distinctes via leur ID/audit/message."""
+def make_event_key(guild_id: int, event_type: str, *, target_id: int | None = None, executor_id: int | None = None, audit_log_id: int | None = None, message_id: int | None = None, discriminator: str | int | None = None) -> str:
     parts = [guild_id, event_type, target_id or 0, executor_id or 0, audit_log_id or 0, message_id or 0, discriminator or ""]
     return ":".join(str(part) for part in parts)
+
+
+def _prune_recent(now: float) -> None:
+    while _recent_event_keys:
+        first_key, first_at = next(iter(_recent_event_keys.items()))
+        if now - first_at <= _DEDUP_TTL and len(_recent_event_keys) <= _DEDUP_MAX:
+            break
+        _recent_event_keys.pop(first_key, None)
 
 
 def _is_duplicate(event_key: str | None) -> bool:
     if not event_key:
         return False
     now = time.monotonic()
-    while _recent_event_keys:
-        first_key, first_at = next(iter(_recent_event_keys.items()))
-        if now - first_at <= _DEDUP_TTL and len(_recent_event_keys) <= _DEDUP_MAX:
-            break
-        _recent_event_keys.pop(first_key, None)
+    _prune_recent(now)
     previous = _recent_event_keys.get(event_key)
     if previous is not None and now - previous <= _DEDUP_TTL:
         return True
@@ -97,19 +94,45 @@ def _is_duplicate(event_key: str | None) -> bool:
     return False
 
 
+def _first_snowflake(text: str) -> int | None:
+    match = re.search(r"(?<!\d)(\d{15,22})(?!\d)", text or "")
+    return int(match.group(1)) if match else None
+
+
+def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> str | None:
+    """Protection secondaire uniquement pour actions Discord pouvant être vues par deux chemins.
+
+    Elle ne s'applique pas à warn/kick/tickets, afin que deux vraies actions rapprochées
+    continuent de produire deux journaux.
+    """
+    sample = " ".join([str(embed.title or ""), str(embed.description or "")] + [f"{f.name} {f.value}" for f in embed.fields]).casefold()
+    action = None
+    if "unban" in sample or "débann" in sample or "debann" in sample:
+        action = "unban"
+    elif "ban" in sample or "bann" in sample:
+        action = "ban"
+    elif "timeout" in sample or "mute" in sample:
+        action = "timeout"
+    if action is None or log_type != "moderation":
+        return None
+    target = _first_snowflake(sample)
+    if target is None:
+        return None
+    return f"semantic:{guild_id}:{action}:{target}"
+
+
 class RevealIdButton(discord.ui.Button):
     def __init__(self, label: str, entity_id: int, *, row: int = 0):
         self.entity_id = int(entity_id)
-        # Le custom_id reste court et ne contient aucune donnée administrative dangereuse.
         super().__init__(label=label[:80], style=discord.ButtonStyle.secondary, custom_id=f"sxid:{self.entity_id}", row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        # discord.py 2.6.x ne fournit pas de bouton standard de copie presse-papiers.
         await interaction.response.send_message(f"`{self.entity_id}`", ephemeral=True, allowed_mentions=LOG_ALLOWED_MENTIONS)
 
 
 class LogActionsView(discord.ui.View):
-    """Actions de consultation uniquement, toujours rendues sous le log par Discord."""
-
+    """Actions de consultation, affichées par Discord sous l'embed et jamais au milieu."""
     def __init__(self, *, jump_url: str | None = None, ids: list[tuple[str, int]] | None = None):
         super().__init__(timeout=None)
         if jump_url:
@@ -119,9 +142,7 @@ class LogActionsView(discord.ui.View):
 
 
 def log_actions(*, jump_url: str | None = None, ids: list[tuple[str, int]] | None = None) -> LogActionsView | None:
-    if not jump_url and not ids:
-        return None
-    return LogActionsView(jump_url=jump_url, ids=ids)
+    return LogActionsView(jump_url=jump_url, ids=ids) if jump_url or ids else None
 
 
 async def _migrate_from_legacy(bot, guild_id: int, log_type: str) -> dict:
@@ -153,14 +174,7 @@ async def get_log_setting(bot, guild_id: int, log_type: str) -> dict:
     row = await bot.db.fetchone("SELECT * FROM log_settings WHERE guild_id = ? AND log_type = ?", (guild_id, log_type))
     if row is None:
         return await _migrate_from_legacy(bot, guild_id, log_type)
-    return {
-        "enabled": bool(row["enabled"]),
-        "channel_id": row["channel_id"],
-        "include_content": bool(row["include_content"]),
-        "include_attachments": bool(row["include_attachments"]),
-        "include_actor": bool(row["include_actor"]),
-        "include_reason": bool(row["include_reason"]),
-    }
+    return {"enabled": bool(row["enabled"]), "channel_id": row["channel_id"], "include_content": bool(row["include_content"]), "include_attachments": bool(row["include_attachments"]), "include_actor": bool(row["include_actor"]), "include_reason": bool(row["include_reason"])}
 
 
 async def get_all_log_settings(bot, guild_id: int) -> dict[str, dict]:
@@ -171,20 +185,14 @@ async def set_log_enabled(bot, guild_id: int, log_type: str, enabled: bool) -> d
     current = await get_log_setting(bot, guild_id, log_type)
     if enabled and not current["channel_id"]:
         raise ValueError("channel_required")
-    await bot.db.execute(
-        "UPDATE log_settings SET enabled = ?, updated_at = ? WHERE guild_id = ? AND log_type = ?",
-        (1 if enabled else 0, _now(), guild_id, log_type),
-    )
+    await bot.db.execute("UPDATE log_settings SET enabled = ?, updated_at = ? WHERE guild_id = ? AND log_type = ?", (1 if enabled else 0, _now(), guild_id, log_type))
     current["enabled"] = enabled
     return current
 
 
 async def set_log_channel(bot, guild_id: int, log_type: str, channel_id: int | None) -> dict:
     await get_log_setting(bot, guild_id, log_type)
-    await bot.db.execute(
-        "UPDATE log_settings SET channel_id = ?, updated_at = ? WHERE guild_id = ? AND log_type = ?",
-        (channel_id, _now(), guild_id, log_type),
-    )
+    await bot.db.execute("UPDATE log_settings SET channel_id = ?, updated_at = ? WHERE guild_id = ? AND log_type = ?", (channel_id, _now(), guild_id, log_type))
     setting = await get_log_setting(bot, guild_id, log_type)
     setting["channel_id"] = channel_id
     return setting
@@ -208,20 +216,21 @@ def validate_channel(guild: discord.Guild, channel_id: int | None, *, needs_file
     return True, "ok"
 
 
-async def send_log(
-    bot,
-    guild: discord.Guild,
-    log_type: str,
-    embed: discord.Embed,
-    file: discord.File | None = None,
-    *,
-    view: discord.ui.View | None = None,
-    event_key: str | None = None,
-) -> bool:
-    """SEUL point de sortie des logs. Les mentions restent visuelles mais ne notifient jamais."""
-    if _is_duplicate(event_key):
-        logger.debug("Log dupliqué ignoré: %s", event_key)
+async def send_log(bot, guild: discord.Guild, log_type: str, embed: discord.Embed, file: discord.File | None = None, *, view: discord.ui.View | None = None, event_key: str | None = None) -> bool:
+    """Seul point de sortie : renderer unique, service primaire, zéro ping, déduplication."""
+    if not is_primary_process():
+        logger.debug("Log bloqué sur service Railway secondaire guild=%s type=%s", guild.id, log_type)
         return False
+
+    # Le renderer officiel s'applique même aux cogs historiques encore migrés progressivement.
+    from utils import embeds as embeds_mod
+    rendered = embeds_mod.normalize_log(embed) if embed.image.url != embeds_mod.SENTRIX_BANNER_URL else embed
+
+    semantic_key = semantic_event_key(guild.id, log_type, rendered)
+    if _is_duplicate(event_key) or _is_duplicate(semantic_key):
+        logger.debug("Log dupliqué ignoré guild=%s type=%s key=%s", guild.id, log_type, event_key or semantic_key)
+        return False
+
     try:
         setting = await get_log_setting(bot, guild.id, log_type)
     except Exception:
@@ -234,10 +243,7 @@ async def send_log(
         logger.warning("Log %s non envoyé sur %s: %s", log_type, guild.id, reason)
         return False
     channel = guild.get_channel(setting["channel_id"])
-    kwargs = {
-        "embed": embed,
-        "allowed_mentions": LOG_ALLOWED_MENTIONS,
-    }
+    kwargs = {"embed": rendered, "allowed_mentions": LOG_ALLOWED_MENTIONS}
     if view is not None:
         kwargs["view"] = view
     if file is not None:
@@ -256,11 +262,7 @@ async def send_test_log(bot, guild: discord.Guild, log_type: str, author: discor
     if not ok:
         return False, f"Impossible d'envoyer un test : {reason}."
     from utils import embeds as embeds_mod
-    meta = LOG_TYPES.get(log_type, {})
-    test_embed = embeds_mod.log_embed(
-        "Test de log",
-        fields=(("Catégorie", meta.get("label", log_type), False), ("Déclenché par", f"<@{author.id}>", True)),
-    )
+    test_embed = embeds_mod.log_embed("Test de log", fields=(("Catégorie", LOG_TYPES.get(log_type, {}).get("label", log_type), False), ("Déclenché par", f"<@{author.id}>", True)))
     channel = guild.get_channel(setting["channel_id"])
     try:
         await channel.send(embed=test_embed, allowed_mentions=LOG_ALLOWED_MENTIONS)
