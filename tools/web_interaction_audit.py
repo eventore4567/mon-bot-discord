@@ -1,18 +1,11 @@
 """Audit CI des interactions web SentriX.
 
-Vérifie les régressions qui rendent visuellement les boutons « morts » :
-- le verrou Administrateur ne doit jamais intercepter l'API publique /api/appeal/{token};
-- chaque bloc JavaScript inline des pages avancées doit être syntaxiquement valide ;
-- chaque bouton statique des centres Operations/Enterprise et de la page Recours doit
-  réellement être référencé par leur JavaScript ;
-- le mode simplifié du dashboard principal doit rester installé et offrir un retour vers
-  le mode avancé sans remplacer le moteur historique du dashboard.
-
-Node est déjà disponible sur les runners GitHub Actions (actions/* l'utilise) et sert ici
-uniquement de parseur JavaScript, sans réseau ni exécution du code du dashboard.
+Vérifie les régressions qui rendent visuellement les boutons « morts ». Les blocs JSON-LD
+SEO sont validés comme JSON et ne sont jamais envoyés à `node --check` comme du JavaScript.
 """
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -26,14 +19,43 @@ if str(ROOT) not in sys.path:
 from web import dashboard, operations_center, setup_center
 from web import enterprise_suite
 
-SCRIPT_RE = re.compile(r"<script(?:\s[^>]*)?>(.*?)</script>", re.I | re.S)
+SCRIPT_RE = re.compile(
+    r"<script(?P<attrs>\s[^>]*)?>(?P<body>.*?)</script>",
+    re.I | re.S,
+)
 BUTTON_ID_RE = re.compile(r"<button\b[^>]*\bid=[\"']([^\"']+)[\"']", re.I)
+TYPE_RE = re.compile(r"\btype\s*=\s*[\"']([^\"']+)[\"']", re.I)
+
+
+def _script_sources(html: str) -> tuple[list[str], list[str]]:
+    javascript: list[str] = []
+    json_ld: list[str] = []
+    for match in SCRIPT_RE.finditer(html or ""):
+        attrs = str(match.group("attrs") or "")
+        body = str(match.group("body") or "")
+        type_match = TYPE_RE.search(attrs)
+        script_type = type_match.group(1).casefold().strip() if type_match else ""
+        if script_type == "application/ld+json":
+            json_ld.append(body)
+            continue
+        # Les scripts inline classiques, module ou sans attribut sont du JavaScript.
+        if not script_type or script_type in {
+            "text/javascript", "application/javascript", "module",
+        }:
+            javascript.append(body)
+    return javascript, json_ld
 
 
 def check_js(name: str, html: str) -> None:
-    scripts = SCRIPT_RE.findall(html or "")
-    if not scripts:
-        return
+    scripts, json_blocks = _script_sources(html)
+    for index, source in enumerate(json_blocks, 1):
+        if not source.strip():
+            continue
+        try:
+            json.loads(source)
+        except json.JSONDecodeError as exc:
+            raise AssertionError(f"JSON-LD invalide dans {name}, bloc #{index}: {exc}") from exc
+
     for index, source in enumerate(scripts, 1):
         if not source.strip():
             continue
@@ -58,8 +80,9 @@ def check_js(name: str, html: str) -> None:
 
 def check_button_bindings(name: str, html: str) -> None:
     ids = BUTTON_ID_RE.findall(html or "")
-    scripts = "\n".join(SCRIPT_RE.findall(html or ""))
-    missing = [button_id for button_id in ids if button_id not in scripts]
+    scripts, _json_blocks = _script_sources(html)
+    source = "\n".join(scripts)
+    missing = [button_id for button_id in ids if button_id not in source]
     assert not missing, f"Boutons sans branchement JavaScript dans {name}: {missing}"
 
 
@@ -104,7 +127,7 @@ def main() -> None:
         "Le mode simplifié ne doit pas remplacer les fonctions historiques du dashboard."
     )
 
-    print("OK: API recours publique, scripts dashboard valides, boutons secondaires branchés et mode simplifié installé")
+    print("OK: API recours publique, JSON-LD valide, scripts dashboard valides, boutons branchés et mode simplifié installé")
 
 
 if __name__ == "__main__":
