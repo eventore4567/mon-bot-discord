@@ -1,8 +1,10 @@
-"""Surface canonique des commandes SentriX.
+"""Surface utilisateur canonique de SentriX.
 
-Les fonctionnalités historiques restent chargées pour compatibilité, mais l'aide et les
-commandes slash n'exposent que la surface directe décidée. Les anciens réglages fusionnés
-restent utilisables en préfixe + par les habitués, tout en étant masqués de +help.
+SentriX conserve ses anciennes commandes préfixées pour la compatibilité, mais l'interface
+normale ne doit plus demander de mémoriser un catalogue énorme. L'aide et Discord `/`
+n'exposent donc qu'un petit ensemble de commandes essentielles. Les fonctions avancées
+restent accessibles via leurs centres (`setup`, `security`, `ticket`, `giveaway`) ou via
+les anciennes commandes `+` pour les utilisateurs qui les connaissent déjà.
 """
 from __future__ import annotations
 
@@ -12,6 +14,7 @@ from discord.ext import commands
 logger = logging.getLogger("bot.command-catalog-cleanup")
 _INSTALLED = False
 
+# Catalogue historique : conservé uniquement pour compatibilité des anciennes commandes +.
 GAME_COMMANDS = frozenset({
     "rps", "guess-number", "trivia", "tictactoe", "hangman", "math-quiz",
     "blackjack", "slots", "coinflip", "dice", "luckyroll", "highlow", "memory",
@@ -23,22 +26,38 @@ GAME_COMMANDS = frozenset({
     "dailygames",
 })
 
-NORMAL_DIRECT_COMMANDS = frozenset({
-    "help", "setup", "ping", "avatar", "userinfo", "afk", "setprefix", "setmodrole",
-    "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
-    "lock", "unlock", "quarantine", "unquarantine", "nickname", "resetnick",
-    "giverole", "removerole",
-    "security", "antiraid", "antinuke", "blacklist-add", "blacklist-users",
-    "panic", "syncbl",
-    "sentrix", "image", "ai-translate", "chat-reset",
-    "balance", "daily", "work", "pay", "inventory", "banque",
-    "economyleaderboard", "leaderboard-money",
-    "me", "level", "set-xp", "add-xp", "set-level-role", "remove-level-role",
-    "reset-levels",
-    "ticket", "giveaway", "giveaway-reroll",
-    "play", "pause", "skip", "stop",
-}) | GAME_COMMANDS
+# Seulement quelques jeux immédiatement découvrables. Tous les autres restent disponibles
+# avec le préfixe historique sans encombrer le sélecteur `/` de Discord.
+POPULAR_GAME_COMMANDS = frozenset({
+    "rps", "guess-number", "trivia", "blackjack", "slots",
+})
 
+# Surface normale : une trentaine de racines au lieu d'approcher la limite Discord de 100.
+# Les actions rares de configuration/sécurité sont regroupées derrière /setup et /security.
+EASY_SLASH_COMMANDS = frozenset({
+    # Point d'entrée et informations
+    "help", "ping", "avatar", "userinfo", "afk",
+    # IA et création
+    "sentrix", "image",
+    # Membre / économie / progression
+    "balance", "daily", "work", "pay", "inventory", "me", "level",
+    # Support / événements
+    "ticket", "giveaway",
+    # Musique
+    "play", "pause", "skip", "stop",
+    # Administration guidée
+    "setup", "security",
+    # Modération quotidienne
+    "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
+    "lock", "unlock", "nickname",
+}) | POPULAR_GAME_COMMANDS
+
+# Nom historique utilisé par plusieurs audits/runtimes. Il désigne désormais volontairement
+# la surface FACILE et non plus toutes les commandes que SentriX sait techniquement exécuter.
+NORMAL_DIRECT_COMMANDS = EASY_SLASH_COMMANDS
+
+# Commandes techniques : toujours utilisables en + avec leurs permissions, mais jamais
+# présentées comme des points d'entrée normaux dans l'aide ou le catalogue slash.
 ADMIN_DIRECT_COMMANDS = frozenset({
     "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
     "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
@@ -51,7 +70,7 @@ PURE_DUPLICATE_COMMANDS = frozenset({
 
 SETUP_MERGED_COMMANDS = frozenset({
     "config-view", "config-reset", "create-logs", "logsetup", "logs-status",
-    "designsetup", "welcome-config", "shopsetup", "aisetup",
+    "designsetup", "welcome-config", "shopsetup", "aisetup", "setprefix", "setmodrole",
     "setwelcomechannel", "setwelcomemessage", "setgoodbyechannel",
     "setgoodbyemessage", "setlogchannel", "setticketlogchannel", "setwarnrole",
     "setannouncechannel", "setgiveawaychannel", "setsuggestchannel",
@@ -59,7 +78,8 @@ SETUP_MERGED_COMMANDS = frozenset({
     "rolepanel", "rolepanel-refresh", "reactionrole-add", "reactionrole-remove",
     "reactionrole-list", "repconfig", "repadd", "repremove", "represet",
     "statsconfig", "addbonusinvites", "removebonusinvites", "invitebonushistory",
-    "embedconfig", "set-nickname", "alias",
+    "embedconfig", "set-nickname", "alias", "set-xp", "add-xp", "set-level-role",
+    "remove-level-role", "reset-levels",
 })
 
 TICKET_MERGED_COMMANDS = frozenset({
@@ -69,11 +89,12 @@ TICKET_MERGED_COMMANDS = frozenset({
 })
 
 GIVEAWAY_MERGED_COMMANDS = frozenset({
-    "giveaway-create", "giveaway-end", "giveaway-cancel",
+    "giveaway-create", "giveaway-end", "giveaway-cancel", "giveaway-reroll",
     "giveaway-blacklist", "giveaway-unblacklist", "giveaway-list",
 })
 
 SECURITY_MERGED_COMMANDS = frozenset({
+    "antiraid", "antinuke", "blacklist-add", "blacklist-users", "panic", "syncbl",
     "antinuke-whitelist-add", "antinuke-whitelist-list",
     "antinuke-whitelist-remove", "automod-exempt-role-add",
     "automod-exempt-role-remove", "automod-history", "automod-status",
@@ -87,7 +108,9 @@ SECURITY_MERGED_COMMANDS = frozenset({
 LOW_VALUE_HIDDEN_COMMANDS = frozenset({
     "aidiag", "diagnostic", "bot-status", "command-stats", "levelcheck",
     "levelrepair", "weekly", "rewrite", "shop", "resume", "queue", "profile",
-})
+    "ai-translate", "chat-reset", "banque", "economyleaderboard", "leaderboard-money",
+    "quarantine", "unquarantine", "resetnick", "giverole", "removerole",
+}) | (GAME_COMMANDS - POPULAR_GAME_COMMANDS)
 
 MERGED_COMMANDS = (
     SETUP_MERGED_COMMANDS
@@ -98,7 +121,7 @@ MERGED_COMMANDS = (
 )
 INTENTIONALLY_REMOVED_COMMANDS = PURE_DUPLICATE_COMMANDS
 CONFIRMED_DUPLICATE_COMMANDS = PURE_DUPLICATE_COMMANDS
-RESTORED_COMMANDS = NORMAL_DIRECT_COMMANDS
+RESTORED_COMMANDS = EASY_SLASH_COMMANDS
 LOW_VALUE_REMOVED_COMMANDS = LOW_VALUE_HIDDEN_COMMANDS
 
 MERGED_COMMAND_TARGETS: dict[str, str] = {
@@ -125,6 +148,11 @@ KEEP_AS_IS = frozenset({
 })
 
 
+def slash_surface_names() -> frozenset[str]:
+    """Noms racine réellement autorisés dans Discord `/`."""
+    return frozenset("nick" if name == "nickname" else name for name in EASY_SLASH_COMMANDS)
+
+
 def _install_short_command_names() -> None:
     try:
         from . import common_command_names
@@ -136,11 +164,10 @@ def _install_short_command_names() -> None:
 
 
 def apply_surface(bot: commands.Bot) -> None:
-    """Rend visibles uniquement les commandes directes, sans casser les anciennes +."""
-    direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS
+    """L'aide montre seulement la surface facile ; les anciennes + restent exécutables."""
     for command in bot.commands:
         name = command.name.casefold()
-        if name in direct:
+        if name in EASY_SLASH_COMMANDS:
             command.hidden = False
         elif name in PURE_DUPLICATE_COMMANDS:
             continue
@@ -160,7 +187,7 @@ def apply_surface(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    """Installe la politique puis la réapplique après chaque chargement de cog."""
+    """Installe la politique de découverte sans supprimer les fonctions historiques."""
     global _INSTALLED
     import main
 
@@ -182,7 +209,7 @@ def install(bot: commands.Bot) -> None:
 
     apply_surface(bot)
     logger.info(
-        "Surface SentriX : %s commandes directes normales, %s admin, %s jeux; "
-        "anciennes commandes fusionnées conservées en + mais masquées.",
-        len(NORMAL_DIRECT_COMMANDS), len(ADMIN_DIRECT_COMMANDS), len(GAME_COMMANDS),
+        "Surface facile SentriX : %s racines principales (%s jeux visibles) ; "
+        "les fonctions avancées restent disponibles via centres ou anciennes commandes +.",
+        len(slash_surface_names()), len(POPULAR_GAME_COMMANDS),
     )
