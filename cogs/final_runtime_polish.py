@@ -148,6 +148,24 @@ def _patch_help(bot: commands.Bot) -> None:
     if command is None:
         return
 
+    # cogs.help est désormais l'unique propriétaire de +help et /help. Les anciennes
+    # couches V8/V9 utilisaient un callback prévu pour l'ancien cog Utility et appelaient
+    # notamment cog._user_is_staff(ctx). Si elles reprennent OfficialHelp, la commande
+    # plante avec AttributeError. Ne jamais monkey-patcher le propriétaire officiel.
+    cog = getattr(command, "cog", None)
+    cog_name = getattr(cog, "qualified_name", "") or getattr(cog, "__cog_name__", "")
+    if cog_name == "SentriXHelp" or cog.__class__.__name__ == "OfficialHelp" if cog is not None else False:
+        command.hidden = False
+        local_checks = getattr(command, "checks", None)
+        if isinstance(local_checks, list):
+            local_checks.clear()
+        app = getattr(command, "app_command", None)
+        app_checks = getattr(app, "checks", None)
+        if isinstance(app_checks, list):
+            app_checks.clear()
+        command._sentrix_official_help_owner = True
+        return
+
     from . import help_clean_style, language_runtime
 
     original_home = getattr(help_clean_style, "_sentrix_root_only_original_home", None)
