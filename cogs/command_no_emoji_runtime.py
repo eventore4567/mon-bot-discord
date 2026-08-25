@@ -174,6 +174,10 @@ def install(bot: commands.Bot) -> None:
     try:
         from .release_announcer import install as install_release_announcer
         install_release_announcer(bot)
+        # V63 remplace uniquement la décision de ping : toutes les releases restent
+        # annoncées, mais @everyone est réservé aux vraies mises à jour majeures.
+        from .release_ping_policy_v63 import install as install_release_ping_policy_v63
+        install_release_ping_policy_v63(bot)
     except Exception:
         # Une annonce de mise à jour ne doit jamais empêcher SentriX de démarrer.
         pass
