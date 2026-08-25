@@ -1,12 +1,10 @@
-"""Fabrique visuelle officielle de SentriX.
+"""Design system Discord officiel et unique de SentriX.
 
-Ce module est la source de vérité pour les embeds Discord : couleur, footer, bannière,
-titres, dates et disposition des fields. Les anciennes fonctions publiques sont gardées
-pour ne casser aucun cog historique.
+FORMAT A : petites cartes pour commandes, erreurs, confirmations, aide et configuration.
+FORMAT B : grandes cartes pour les journaux, avec bannière SentriX permanente.
 
-Règle importante : les fonctions de nettoyage ne touchent qu'aux éléments d'interface
-(titres, noms de fields, boutons). Les valeurs métier et contenus utilisateurs ne sont
-jamais nettoyés d'emojis automatiquement.
+Le nettoyage s'applique uniquement aux libellés d'interface. Les valeurs utilisateur,
+mentions, raisons et contenus de messages sont conservés tels quels.
 """
 from __future__ import annotations
 
@@ -18,14 +16,12 @@ import discord
 
 from config import COLOR_BRAND
 
-
 SENTRIX_COLOR = int(COLOR_BRAND)
 SENTRIX_FOOTER = "SentriX"
 SENTRIX_BANNER_URL = (
     "https://raw.githubusercontent.com/eventore4567/mon-bot-discord/"
-    "main/assets/sentrix/banner-v70.png"
+    "main/assets/sentrix-log-header.png"
 )
-
 FOOTER_TEXT = SENTRIX_FOOTER
 FOOTER_ICON: str | None = None
 
@@ -43,7 +39,6 @@ def _is_emoji_codepoint(code: int) -> bool:
 
 
 def clean_ui_text(value: Any, limit: int = 256, fallback: str = "") -> str:
-    """Retire uniquement la décoration ajoutée par SentriX d'un libellé d'interface."""
     text = _CUSTOM_EMOJI_RE.sub("", str(value or ""))
     text = "".join(char for char in text if not _is_emoji_codepoint(ord(char)))
     text = _SPACE_RE.sub(" ", text.replace("\r", " ")).strip(" \n\t-•·|:/")
@@ -74,13 +69,6 @@ def set_footer_text(text: str) -> None:
 def set_brand_color(color: int) -> None:
     global SENTRIX_COLOR
     SENTRIX_COLOR = int(color)
-    # Compatibilité : premium_style lit encore son dictionnaire dans quelques anciens cogs.
-    try:
-        from utils import premium_style
-        for key in list(premium_style.COLORS):
-            premium_style.COLORS[key] = SENTRIX_COLOR
-    except Exception:
-        pass
 
 
 def set_banner_url(url: str) -> None:
@@ -94,7 +82,7 @@ def format_datetime_fr(value: datetime | None = None) -> str:
     dt = value or datetime.now(timezone.utc)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone().strftime("%d/%m/%Y • %H:%M")
+    return dt.astimezone().strftime("%d/%m/%Y à %H:%M")
 
 
 def _footer(embed: discord.Embed, text: str | None = None) -> discord.Embed:
@@ -128,46 +116,27 @@ def _base(
     return _footer(embed, footer)
 
 
-def standard(
-    title: str,
-    description: str = "",
-    *,
-    thumbnail: str | None = None,
-    timestamp: bool = False,
-) -> discord.Embed:
+# ---------------------------------------------------------------------------
+# FORMAT A — petites cartes d'interface
+# ---------------------------------------------------------------------------
+def standard(title: str, description: str = "", *, thumbnail: str | None = None, timestamp: bool = False) -> discord.Embed:
     return _base(title, description or None, thumbnail=thumbnail, timestamp=timestamp)
 
 
-def large(
-    title: str,
-    description: str = "",
-    *,
-    thumbnail: str | None = None,
-    timestamp: bool = False,
-) -> discord.Embed:
-    return _base(
-        title,
-        description or None,
-        banner=True,
-        thumbnail=thumbnail,
-        timestamp=timestamp,
-    )
-
-
 def success(description: str, title: str = "Action effectuée") -> discord.Embed:
-    return standard(clean_ui_text(title, 90, "Action effectuée"), description)
+    return standard(title, description)
 
 
 def error(description: str, title: str = "Erreur") -> discord.Embed:
-    return standard(clean_ui_text(title, 90, "Erreur"), description)
+    return standard(title, description)
 
 
 def warning(description: str, title: str = "Vérification nécessaire") -> discord.Embed:
-    return standard(clean_ui_text(title, 90, "Vérification nécessaire"), description)
+    return standard(title, description)
 
 
 def info(description: str, title: str = "Information") -> discord.Embed:
-    return standard(clean_ui_text(title, 90, "Information"), description)
+    return standard(title, description)
 
 
 def neutral(title: str, description: str = "", color: int | None = None) -> discord.Embed:
@@ -184,23 +153,22 @@ def category(category_name: str, title: str, description: str = "") -> discord.E
     return standard(title, description)
 
 
-def panel(
-    title: str,
-    description: str = "",
-    *,
-    category_name: str = "configuration",
-    thumbnail: str | None = None,
-) -> discord.Embed:
+def panel(title: str, description: str = "", *, category_name: str = "configuration", thumbnail: str | None = None) -> discord.Embed:
     del category_name
-    return large(title, description, thumbnail=thumbnail)
+    return standard(title, description, thumbnail=thumbnail)
 
 
 def help_embed(title: str = "Commandes", description: str = "") -> discord.Embed:
-    return large(title, description)
+    return standard(title, description)
 
 
 def profile_embed(title: str = "Profil", description: str = "", *, thumbnail: str | None = None) -> discord.Embed:
-    return large(title, description, thumbnail=thumbnail)
+    return standard(title, description, thumbnail=thumbnail)
+
+
+# Compatibilité d'API : `large()` reste disponible mais désigne explicitement le format B.
+def large(title: str, description: str = "", *, thumbnail: str | None = None, timestamp: bool = False) -> discord.Embed:
+    return _base(title, description or None, banner=True, thumbnail=thumbnail, timestamp=timestamp)
 
 
 def _field_inline(name: str, value: str, requested: bool | None) -> bool:
@@ -209,18 +177,15 @@ def _field_inline(name: str, value: str, requested: bool | None) -> bool:
     normalized = clean_ui_text(name, 80).casefold()
     long_labels = {
         "raison", "motif", "message", "contenu", "avant", "après", "apres",
-        "description", "permissions", "changements", "transcript", "pièces jointes",
-        "pieces jointes",
+        "description", "permissions", "permissions ajoutées", "permissions supprimées",
+        "changements", "transcript", "pièces jointes", "pieces jointes",
     }
     if normalized in long_labels:
         return False
     return len(str(value or "")) <= 120 and str(value or "").count("\n") <= 1
 
 
-def add_fields(
-    embed: discord.Embed,
-    fields: Iterable[tuple[str, Any, bool | None] | tuple[str, Any]],
-) -> discord.Embed:
+def add_fields(embed: discord.Embed, fields: Iterable[tuple[str, Any, bool | None] | tuple[str, Any]]) -> discord.Embed:
     for item in fields:
         if len(item) == 2:
             name, value = item
@@ -230,15 +195,16 @@ def add_fields(
         if value is None or str(value).strip() == "":
             continue
         safe_name = clean_ui_text(name, 256, "Information")
-        raw_value = clip(value, 1024) or "—"
-        embed.add_field(
-            name=safe_name,
-            value=raw_value,
-            inline=_field_inline(safe_name, raw_value, requested),
-        )
+        raw_value = clip(value, 1024)
+        if not raw_value:
+            continue
+        embed.add_field(name=safe_name, value=raw_value, inline=_field_inline(safe_name, raw_value, requested))
     return embed
 
 
+# ---------------------------------------------------------------------------
+# FORMAT B — grand journal SentriX
+# ---------------------------------------------------------------------------
 def log_embed(
     title: str,
     *,
@@ -247,25 +213,39 @@ def log_embed(
     event_time: datetime | None = None,
     banner: bool = True,
 ) -> discord.Embed:
-    embed = _base(
-        title,
-        description or None,
-        banner=banner,
-        timestamp=False,
-        footer=SENTRIX_FOOTER,
+    footer = f"SentriX • {format_datetime_fr(event_time)}"
+    embed = _base(title, description or None, banner=banner, footer=footer)
+    return add_fields(embed, fields)
+
+
+def normalize_log(source: discord.Embed, *, event_time: datetime | None = None) -> discord.Embed:
+    """Convertit un ancien embed métier en véritable grand log SentriX.
+
+    Tous les anciens appelants qui passent encore un embed à helpers.send_log obtiennent
+    ainsi le même renderer officiel sans réintroduire un second design system.
+    """
+    fields = [(str(field.name), str(field.value), bool(field.inline)) for field in source.fields]
+    panel = log_embed(
+        str(source.title or "Journal SentriX"),
+        description=str(source.description or ""),
+        fields=fields,
+        event_time=event_time,
     )
-    add_fields(embed, fields)
-    # Date commune pour tous les journaux ; on l'ajoute seulement si elle n'existe pas déjà.
-    if not any(clean_ui_text(field.name, 40).casefold() == "date" for field in embed.fields):
-        embed.add_field(name="Date", value=format_datetime_fr(event_time), inline=True)
-    return embed
+    thumbnail = getattr(source.thumbnail, "url", None)
+    if thumbnail:
+        panel.set_thumbnail(url=str(thumbnail))
+    author_name = getattr(source.author, "name", None)
+    author_icon = getattr(source.author, "icon_url", None)
+    if author_name:
+        panel.set_author(name=clean_ui_text(author_name, 256, "SentriX"), icon_url=str(author_icon) if author_icon else None)
+    return panel
 
 
 def _who(entity: Any) -> str:
     if entity is None:
-        return "Non disponible"
-    mention = getattr(entity, "mention", None)
+        return ""
     entity_id = getattr(entity, "id", None)
+    mention = getattr(entity, "mention", None)
     if mention and entity_id:
         return f"{mention}\n`{entity_id}`"
     if entity_id:
@@ -292,19 +272,14 @@ def log_entry(
         fields.append((acteur_label, _who(acteur), True))
     if extra:
         for name, value in list(extra.items())[:20]:
-            fields.append((name, value, None))
-    if raison is not None:
-        fields.append(("Raison", raison or "Aucune raison fournie", False))
+            if value is not None and str(value).strip():
+                fields.append((name, value, None))
+    if raison:
+        fields.append(("Raison", raison, False))
     return log_embed(title, fields=fields)
 
 
-def bar(
-    value: float,
-    maximum: float,
-    length: int = 10,
-    filled_char: str = "▰",
-    empty_char: str = "▱",
-) -> str:
+def bar(value: float, maximum: float, length: int = 10, filled_char: str = "▰", empty_char: str = "▱") -> str:
     try:
         ratio = float(value) / float(maximum) if maximum else 0.0
     except (TypeError, ValueError, ZeroDivisionError):
