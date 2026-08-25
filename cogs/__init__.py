@@ -3,7 +3,7 @@
 Les correctifs fonctionnels restent ciblés par cog. L'interface, l'aide et les journaux
 ne sont plus monkey-patchés par une succession de versions concurrentes :
 - embeds : utils.embeds ;
-- help : cogs.utility ;
+- help : cogs.help ;
 - logs : cogs.logs -> utils.log_service.
 """
 from __future__ import annotations
@@ -58,6 +58,7 @@ from .ticket_ping_role import install_ticket_runtime as install_ticket_ping_runt
 logger = logging.getLogger("bot.cogs")
 _ORIGINAL_LOAD_EXTENSION = commands.Bot.load_extension
 _FINAL_EXTENSION = "cogs.visual_experience_v5"
+_OFFICIAL_HELP_EXTENSION = "cogs.help"
 
 
 def _matches(name: str, extension: str) -> bool:
@@ -184,6 +185,27 @@ async def _install_error_stack(bot: commands.Bot) -> None:
     await _run_installer("observabilité réponses commandes", install_command_response_guard, bot)
 
 
+async def _load_official_help(bot: commands.Bot) -> None:
+    """Branche réellement le propriétaire unique de +help et /help.
+
+    `main.py` charge historiquement `cogs.utility`, qui possède encore l'ancien help dans
+    son fichier. Le nouveau `cogs.help` n'était pas dans EXTENSIONS : il existait donc dans
+    le dépôt sans jamais être exécuté, ce qui expliquait la grosse page verticale encore
+    visible sur Discord. On le charge avant tree.sync(); son setup retire alors l'ancien
+    +help et /help du registre et les remplace par l'implémentation officielle.
+    """
+    if bot.get_cog("SentriXHelp") is not None:
+        return
+    if _OFFICIAL_HELP_EXTENSION in bot.extensions:
+        return
+    try:
+        await _ORIGINAL_LOAD_EXTENSION(bot, _OFFICIAL_HELP_EXTENSION)
+        logger.info("Help officiel SentriX chargé : ancien +help remplacé.")
+    except Exception:
+        logger.exception("Impossible de charger le help officiel SentriX.")
+        raise
+
+
 async def finalize_runtime(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_runtime_finalized_clean", False):
         return
@@ -196,6 +218,8 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _run_installer("permissions commandes", install_permission_guard, bot)
     await _run_installer("politique finale interactions", install_final_interaction_policy, bot)
     await _run_installer("libération concurrence slash V41", install_command_error_release_v41, bot)
+    # Important : après tous les cogs métier, mais AVANT main.py -> tree.sync().
+    await _load_official_help(bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info("Runtime SentriX finalisé : un renderer, un help, un logger.")
 
