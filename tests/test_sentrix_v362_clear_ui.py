@@ -32,6 +32,8 @@ def test_animations_are_reserved_for_states() -> None:
 
 
 def test_help_embed_does_not_keep_broken_markup() -> None:
+    # En production le garde est installé après les renderers V2/V3.4/V3.6.
+    guard.install(None)
     embed = discord.Embed(title="a a a Centre de contrôle")
     embed.add_field(name="<a Information", value="<a Sécurité & modération\n<a Tickets & support")
     result = ui._decorate_embed(embed, category="utility", kind="info")
@@ -44,6 +46,7 @@ def test_help_embed_does_not_keep_broken_markup() -> None:
 
 
 def test_buttons_use_simple_unicode_not_custom_animated_emoji() -> None:
+    guard.install(None)
     view = discord.ui.View(timeout=None)
     view.add_item(discord.ui.Button(label="Setup & logs", custom_id="setup"))
     view.add_item(discord.ui.Button(label="Sécurité", custom_id="security"))
