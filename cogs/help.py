@@ -1,6 +1,8 @@
-"""Aide officielle SentriX, basée sur le registre réel des commandes.
+"""Centre d'aide officiel SentriX.
 
-Ce cog retire l'ancien +help de Utility et possède seul +help et /help.
+Le message d'aide reste toujours un vrai ``discord.Embed`` : accueil, recherche,
+catégories et pagination modifient uniquement l'embed du même message. Les composants
+(menu/boutons) restent sous la carte, comme l'impose Discord.
 """
 from __future__ import annotations
 
@@ -13,9 +15,7 @@ from discord.ext import commands
 
 from utils import embeds
 
-# 8 commandes gardent les pages suffisamment courtes pour que la navigation reste
-# accessible sur mobile tout en respectant la cible demandée (8 à 12 commandes/page).
-PAGE_SIZE = 8
+PAGE_SIZE = 6
 
 CATEGORY_NAMES = {
     "Ai": "Intelligence artificielle",
@@ -43,7 +43,6 @@ CATEGORY_NAMES = {
 }
 
 CATEGORY_ORDER = [
-    "Essentiels",
     "Intelligence artificielle",
     "Économie et boutique",
     "Niveaux et communauté",
@@ -71,7 +70,7 @@ STAFF_COGS = {
 }
 
 
-def _is_staff(member: discord.Member | discord.User | None) -> bool:
+def _is_staff(member) -> bool:
     return isinstance(member, discord.Member) and (
         member.guild_permissions.administrator
         or member.guild_permissions.manage_guild
@@ -107,7 +106,7 @@ def _visible(bot: commands.Bot, member) -> list[commands.Command]:
 def _slash_map(bot: commands.Bot) -> dict[str, str]:
     result: dict[str, str] = {}
 
-    def walk(node, parent=""):
+    def walk(node, parent: str = "") -> None:
         name = f"{parent} {node.name}".strip()
         result[name.casefold()] = name
         for child in getattr(node, "commands", []):
@@ -118,6 +117,11 @@ def _slash_map(bot: commands.Bot) -> dict[str, str]:
     return result
 
 
+def _description(command: commands.Command) -> str:
+    raw = (command.description or command.help or "Aucune description.").strip()
+    return raw.split("\n", 1)[0][:220]
+
+
 def _usage(command: commands.Command, prefix: str) -> str:
     if command.usage:
         return f"{prefix}{command.qualified_name} {command.usage}".strip()
@@ -125,52 +129,50 @@ def _usage(command: commands.Command, prefix: str) -> str:
     return f"{prefix}{command.qualified_name} {signature}".strip()
 
 
-def _description(command: commands.Command) -> str:
-    raw = (command.description or command.help or "Aucune description.").strip()
-    return raw.split("\n", 1)[0][:170]
+def _command_label(bot: commands.Bot, command: commands.Command, prefix: str) -> str:
+    slash = _slash_map(bot).get(command.qualified_name.casefold())
+    label = f"{prefix}{command.qualified_name}"
+    if slash:
+        label += f"   /{slash}"
+    return label[:256]
 
 
-def _search(commands_list: list[commands.Command], query: str) -> list[commands.Command]:
-    needle = query.casefold().strip()
-    if not needle:
-        return []
-    matches: list[tuple[int, commands.Command]] = []
-    for command in commands_list:
-        aliases = command.aliases or []
-        name = command.qualified_name.casefold()
-        alias_values = [alias.casefold() for alias in aliases]
-        category = _category(command).casefold()
-        description = _description(command).casefold()
-        haystack = " ".join([name, *alias_values, description, category])
-        if needle not in haystack:
-            continue
-        if needle == name or needle == command.name.casefold() or needle in alias_values:
-            rank = 0
-        elif name.startswith(needle):
-            rank = 1
-        elif any(alias.startswith(needle) for alias in alias_values):
-            rank = 2
-        elif needle in name:
-            rank = 3
-        elif needle in category:
-            rank = 4
-        else:
-            rank = 5
-        matches.append((rank, command))
-    matches.sort(key=lambda item: (item[0], item[1].qualified_name.casefold()))
-    return [command for _, command in matches]
+def _decorate(panel: discord.Embed, bot: commands.Bot) -> discord.Embed:
+    user = getattr(bot, "user", None)
+    avatar = getattr(getattr(user, "display_avatar", None), "url", None)
+    if avatar:
+        panel.set_thumbnail(url=str(avatar))
+    return panel
 
 
-def _home() -> discord.Embed:
-    return embeds.standard(
+def _home(bot: commands.Bot, member) -> discord.Embed:
+    grouped = _ordered_categories(bot, member)
+    panel = embeds.help_embed(
         "SentriX — Centre d’aide",
-        "Sélectionnez une catégorie pour consulter les commandes.",
+        "Choisissez une catégorie avec le menu sous cette carte. Toutes les commandes et toutes les pages restent dans cet embed.",
     )
+    panel.add_field(
+        name="Commandes disponibles",
+        value=str(sum(grouped.values())),
+        inline=True,
+    )
+    panel.add_field(
+        name="Catégories",
+        value=str(len(grouped)),
+        inline=True,
+    )
+    panel.add_field(
+        name="Recherche",
+        value="Utilisez le bouton **Rechercher** pour trouver directement une commande.",
+        inline=False,
+    )
+    panel.set_footer(text="SentriX • Aide")
+    return _decorate(panel, bot)
 
 
 def _detail(bot: commands.Bot, command: commands.Command, prefix: str) -> discord.Embed:
     slash = _slash_map(bot).get(command.qualified_name.casefold())
-    panel = embeds.standard(command.qualified_name, _description(command))
+    panel = embeds.help_embed(command.qualified_name, _description(command))
     panel.add_field(name="Utilisation", value=f"`{_usage(command, prefix)}`", inline=False)
     if slash:
         panel.add_field(name="Slash", value=f"`/{slash}`", inline=True)
@@ -181,7 +183,8 @@ def _detail(bot: commands.Bot, command: commands.Command, prefix: str) -> discor
             inline=True,
         )
     panel.add_field(name="Catégorie", value=_category(command), inline=True)
-    return panel
+    panel.set_footer(text="SentriX • Aide commande")
+    return _decorate(panel, bot)
 
 
 def _pages(
@@ -190,41 +193,68 @@ def _pages(
     prefix: str,
     title: str,
 ) -> list[discord.Embed]:
-    slash = _slash_map(bot)
-    chunks = [
-        commands_list[i:i + PAGE_SIZE]
-        for i in range(0, len(commands_list), PAGE_SIZE)
-    ] or [[]]
+    chunks = [commands_list[i:i + PAGE_SIZE] for i in range(0, len(commands_list), PAGE_SIZE)] or [[]]
     pages: list[discord.Embed] = []
-    for index, chunk in enumerate(chunks, start=1):
-        lines = []
-        for command in chunk:
-            slash_name = slash.get(command.qualified_name.casefold())
-            access = f"`{prefix}{command.qualified_name}`"
-            if slash_name:
-                access += f"  `/{slash_name}`"
-            lines.append(f"**{access}**\n{_description(command)}")
-        panel = embeds.standard(
+    for page_index, chunk in enumerate(chunks, start=1):
+        panel = embeds.help_embed(
             title,
-            "\n\n".join(lines) if lines else "Aucune commande dans cette catégorie.",
+            "Les commandes de cette catégorie sont affichées directement dans la carte.",
         )
-        panel.set_footer(text=f"SentriX • Page {index}/{len(chunks)}")
-        pages.append(panel)
+        if not chunk:
+            panel.add_field(name="Aucun résultat", value="Aucune commande trouvée.", inline=False)
+        else:
+            for command in chunk:
+                panel.add_field(
+                    name=_command_label(bot, command, prefix),
+                    value=_description(command),
+                    inline=False,
+                )
+        panel.set_footer(text=f"SentriX • Page {page_index}/{len(chunks)}")
+        pages.append(_decorate(panel, bot))
     return pages
 
 
 def _ordered_categories(bot: commands.Bot, member) -> OrderedDict[str, int]:
-    grouped: OrderedDict[str, int] = OrderedDict()
     counts: dict[str, int] = {}
     for command in _visible(bot, member):
         name = _category(command)
         counts[name] = counts.get(name, 0) + 1
+
+    result: OrderedDict[str, int] = OrderedDict()
     for category in CATEGORY_ORDER:
         if category in counts:
-            grouped[category] = counts.pop(category)
+            result[category] = counts.pop(category)
     for category in sorted(counts, key=str.casefold):
-        grouped[category] = counts[category]
-    return grouped
+        result[category] = counts[category]
+    return result
+
+
+def _search(commands_list: list[commands.Command], query: str) -> list[commands.Command]:
+    needle = query.casefold().strip()
+    if not needle:
+        return []
+    ranked: list[tuple[int, commands.Command]] = []
+    for command in commands_list:
+        aliases = [alias.casefold() for alias in (command.aliases or [])]
+        name = command.qualified_name.casefold()
+        category = _category(command).casefold()
+        description = _description(command).casefold()
+        haystack = " ".join([name, *aliases, category, description])
+        if needle not in haystack:
+            continue
+        if needle == name or needle == command.name.casefold() or needle in aliases:
+            rank = 0
+        elif name.startswith(needle):
+            rank = 1
+        elif needle in name:
+            rank = 2
+        elif needle in category:
+            rank = 3
+        else:
+            rank = 4
+        ranked.append((rank, command))
+    ranked.sort(key=lambda row: (row[0], row[1].qualified_name.casefold()))
+    return [command for _, command in ranked]
 
 
 async def _private_error(interaction: discord.Interaction, text: str) -> None:
@@ -247,10 +277,7 @@ class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
         self.help_view = view
 
     async def on_submit(self, interaction: discord.Interaction):
-        rows = _search(
-            _visible(self.help_view.bot, interaction.user),
-            str(self.query.value),
-        )
+        rows = _search(_visible(self.help_view.bot, interaction.user), str(self.query.value))
         pages = _pages(
             self.help_view.bot,
             rows,
@@ -264,21 +291,22 @@ class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
             pages=pages,
             member=interaction.user,
         )
-        await interaction.response.edit_message(embed=pages[0], view=view)
+        await interaction.response.edit_message(content=None, embed=pages[0], view=view)
 
 
 class CategorySelect(discord.ui.Select):
     def __init__(self, owner: "HelpView"):
         self.owner = owner
-        grouped = _ordered_categories(owner.bot, owner.member)
         options = [
             discord.SelectOption(
                 label=name[:100],
                 value=name,
                 description=f"{count} commande(s)",
             )
-            for name, count in grouped.items()
+            for name, count in _ordered_categories(owner.bot, owner.member).items()
         ]
+        if not options:
+            options = [discord.SelectOption(label="Aucune catégorie", value="__empty__")]
         super().__init__(
             placeholder="Sélectionnez une catégorie",
             options=options[:25],
@@ -287,20 +315,15 @@ class CategorySelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.owner.author_id:
-            return await _private_error(
-                interaction,
-                "Ce panneau appartient à une autre personne.",
-            )
+            return await _private_error(interaction, "Ce panneau appartient à une autre personne.")
         category = self.values[0]
+        if category == "__empty__":
+            return await _private_error(interaction, "Aucune catégorie disponible.")
         rows = [
-            command
-            for command in _visible(self.owner.bot, interaction.user)
+            command for command in _visible(self.owner.bot, interaction.user)
             if _category(command) == category
         ]
         pages = _pages(self.owner.bot, rows, self.owner.prefix, category)
-        # Important : on conserve le vrai discord.Member. Avant, cette information était
-        # perdue après un changement de catégorie, ce qui pouvait recalculer le help comme
-        # si le staff était un simple User et rendre la navigation incohérente.
         view = HelpView(
             self.owner.bot,
             self.owner.prefix,
@@ -308,7 +331,7 @@ class CategorySelect(discord.ui.Select):
             pages=pages,
             member=interaction.user,
         )
-        await interaction.response.edit_message(embed=pages[0], view=view)
+        await interaction.response.edit_message(content=None, embed=pages[0], view=view)
 
 
 class HelpView(discord.ui.View):
@@ -324,7 +347,7 @@ class HelpView(discord.ui.View):
         super().__init__(timeout=180)
         self.bot = bot
         self.prefix = prefix
-        self.author_id = author_id
+        self.author_id = int(author_id)
         self.pages = pages
         self.index = 0
         self.member = member or bot.get_user(author_id)
@@ -342,7 +365,7 @@ class HelpView(discord.ui.View):
             )
         self._sync()
 
-    def _sync(self):
+    def _sync(self) -> None:
         self.previous.disabled = not self.pages or self.index <= 0
         self.next.disabled = not self.pages or self.index >= len(self.pages) - 1
 
@@ -353,39 +376,40 @@ class HelpView(discord.ui.View):
         return False
 
     @discord.ui.button(label="Rechercher", style=discord.ButtonStyle.secondary, row=1)
-    async def search(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def search(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(SearchModal(self))
 
     @discord.ui.button(label="Précédent", style=discord.ButtonStyle.secondary, row=2)
-    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def previous(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if not self.pages:
             return
         self.index = max(0, self.index - 1)
         self.member = interaction.user
         self._sync()
         await interaction.response.edit_message(
+            content=None,
             embed=self.pages[self.index],
             view=self,
         )
 
     @discord.ui.button(label="Accueil", style=discord.ButtonStyle.secondary, row=2)
-    async def home(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = HelpView(
-            self.bot,
-            self.prefix,
-            self.author_id,
-            member=interaction.user,
+    async def home(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        view = HelpView(self.bot, self.prefix, self.author_id, member=interaction.user)
+        await interaction.response.edit_message(
+            content=None,
+            embed=_home(self.bot, interaction.user),
+            view=view,
         )
-        await interaction.response.edit_message(embed=_home(), view=view)
 
     @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary, row=2)
-    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if not self.pages:
             return
         self.index = min(len(self.pages) - 1, self.index + 1)
         self.member = interaction.user
         self._sync()
         await interaction.response.edit_message(
+            content=None,
             embed=self.pages[self.index],
             view=self,
         )
@@ -398,14 +422,15 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
     async def send_help(self, target, query: str | None = None):
         prefix = "+"
         member = getattr(target, "author", None) or getattr(target, "user", None)
+        if member is None:
+            return
+
         if query:
             rows = _search(_visible(self.bot, member), query)
             exact = next(
                 (
-                    command
-                    for command in rows
-                    if query.casefold()
-                    in {
+                    command for command in rows
+                    if query.casefold() in {
                         command.name.casefold(),
                         command.qualified_name.casefold(),
                         *(alias.casefold() for alias in command.aliases),
@@ -416,30 +441,20 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
             if exact:
                 panel = _detail(self.bot, exact, prefix)
                 if isinstance(target, commands.Context):
-                    return await target.send(embed=panel)
-                return await target.response.send_message(embed=panel)
+                    return await target.send(content=None, embed=panel)
+                return await target.response.send_message(content=None, embed=panel)
 
-            pages = _pages(
-                self.bot,
-                rows,
-                prefix,
-                f"Recherche : {query[:40]}",
-            )
-            view = HelpView(
-                self.bot,
-                prefix,
-                member.id,
-                pages=pages,
-                member=member,
-            )
+            pages = _pages(self.bot, rows, prefix, f"Recherche : {query[:40]}")
+            view = HelpView(self.bot, prefix, member.id, pages=pages, member=member)
             if isinstance(target, commands.Context):
-                return await target.send(embed=pages[0], view=view)
-            return await target.response.send_message(embed=pages[0], view=view)
+                return await target.send(content=None, embed=pages[0], view=view)
+            return await target.response.send_message(content=None, embed=pages[0], view=view)
 
+        panel = _home(self.bot, member)
         view = HelpView(self.bot, prefix, member.id, member=member)
         if isinstance(target, commands.Context):
-            return await target.send(embed=_home(), view=view)
-        return await target.response.send_message(embed=_home(), view=view)
+            return await target.send(content=None, embed=panel, view=view)
+        return await target.response.send_message(content=None, embed=panel, view=view)
 
     @commands.command(name="help", aliases=["aide"])
     async def prefix_help(self, ctx: commands.Context, *, query: str | None = None):
@@ -447,11 +462,7 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
 
     @app_commands.command(name="help", description="Ouvrir le centre d’aide SentriX")
     @app_commands.describe(commande="Nom ou mot-clé d'une commande")
-    async def slash_help(
-        self,
-        interaction: discord.Interaction,
-        commande: str | None = None,
-    ):
+    async def slash_help(self, interaction: discord.Interaction, commande: str | None = None):
         await self.send_help(interaction, commande)
 
 
