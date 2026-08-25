@@ -243,5 +243,15 @@ def install(bot: commands.Bot) -> None:
         # Une amélioration UX ne doit jamais empêcher SentriX de démarrer.
         pass
 
+    # V3.6.1 : doit rester après les renderers historiques et V3.6. Il protège le token
+    # complet <a:emoji:id> contre les nettoyeurs de titres qui supprimaient le caractère
+    # '<' et répare les fragments a:sxv36_...> lors des prochaines éditions de panneaux.
+    try:
+        from .sentrix_emoji_markup_guard_v361 import install as install_emoji_markup_guard_v361
+        install_emoji_markup_guard_v361(bot)
+    except Exception:
+        # Un garde purement visuel ne doit jamais empêcher le bot de démarrer.
+        pass
+
     bot._sentrix_no_emoji_commands = False
     bot._sentrix_command_style_v2 = True
