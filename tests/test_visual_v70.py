@@ -19,6 +19,7 @@ class VisualV70Tests(unittest.TestCase):
             ROOT / "cogs" / "sentrix_visual_refactor_v70.py",
             ROOT / "cogs" / "sentrix_profile_refactor_v70.py",
             ROOT / "cogs" / "sentrix_log_safety_v71.py",
+            ROOT / "cogs" / "help_catalog_v72.py",
             ROOT / "cogs" / "command_error_release_v41.py",
             ROOT / "cogs" / "user_command_final_v64.py",
         )
@@ -81,6 +82,12 @@ class VisualV70Tests(unittest.TestCase):
         self.assertIn("_repair_log_target", source)
         self.assertIn("_source_key", source)
         self.assertIn("doublon ticket", source)
+
+    def test_help_catalog_includes_prefix_and_slash_subcommands(self):
+        source = (ROOT / "cogs" / "help_catalog_v72.py").read_text(encoding="utf-8")
+        self.assertIn("bot.walk_commands()", source)
+        self.assertIn("for child in getattr(item, \"commands\"", source)
+        self.assertIn("slash-only", source)
 
     def test_obsolete_plain_help_and_components_log_layers_removed(self):
         self.assertFalse((ROOT / "cogs" / "help_plain_compact_v65.py").exists())
