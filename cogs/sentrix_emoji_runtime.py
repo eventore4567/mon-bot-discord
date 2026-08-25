@@ -1,11 +1,9 @@
-"""SentriX V3.9 — pack animé réservé aux états, navigation simple et lisible.
+"""SentriX V3.10 — emojis simples dans l'interface, animations réservées aux états.
 
-Les dix GIFs 64x64 restent disponibles et synchronisés sur le serveur officiel. Le design
-V3.9 évite cependant d'utiliser un emoji animé devant chaque champ ou catégorie :
-les animations servent aux vrais états (chargement, succès, erreur, alerte, mise à jour),
-tandis que la navigation utilise des pictogrammes Unicode simples et immédiatement lisibles.
-
-Aucune commande, permission métier ou logique de modération n'est modifiée.
+Les dix GIFs 64x64 restent synchronisés sur le serveur officiel. Un emoji animé n'est
+plus injecté dans les boutons, menus ou noms de champs : il sert uniquement à signaler
+un vrai état (chargement, réussite, erreur, alerte, mise à jour, connexion). La navigation
+utilise au maximum un pictogramme Unicode simple et stable.
 """
 from __future__ import annotations
 
@@ -45,10 +43,7 @@ _INSTALLED = False
 
 _CUSTOM_EMOJI_RE = re.compile(r"<a?:[A-Za-z0-9_~]+:\d+>")
 _PACK_TOKEN_RE = re.compile(r"<a?:sxv(?:36|37)_[A-Za-z0-9_~]+:\d+>\s*", re.I)
-_BROKEN_PACK_RE = re.compile(
-    r"(?<![A-Za-z0-9_])(?:<?a?:?|:)?sxv(?:36|37)_[A-Za-z0-9_~]+:\d+>",
-    re.I,
-)
+_BROKEN_PACK_RE = re.compile(r"(?<![A-Za-z0-9_])(?:<?a?:?|:)?sxv(?:36|37)_[A-Za-z0-9_~]+:\d+>", re.I)
 _MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
 
 CATEGORY_ICONS: dict[str, str] = {
@@ -59,33 +54,29 @@ CATEGORY_ICONS: dict[str, str] = {
 }
 
 STATIC_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("🔎", ("rechercher", "recherche", "chercher", "search", "trouver n’importe quoi", "trouver n'importe quoi")),
-    ("🚀", ("commencer", "démarrer", "demarrer", "getting started", "start")),
-    ("🧩", ("systèmes principaux", "systemes principaux", "main systems", "modules")),
-    ("📡", ("en direct", "live", "gateway", "racines slash")),
-    ("ℹ️", ("information", "informations", "info")),
-    ("⚙️", ("setup", "configuration", "configurer", "paramètres", "parametres", "settings", "logs")),
+    ("🔎", ("rechercher", "recherche", "chercher", "search")),
+    ("⚙️", ("setup", "configuration", "configurer", "paramètres", "parametres", "settings")),
     ("🛡️", ("sécurité", "securite", "security", "protection", "automod")),
     ("🔨", ("modération", "moderation", "ban", "mute", "warn", "sanction")),
     ("🎫", ("ticket", "support")),
-    ("🤖", (" ia", "intelligence artificielle", " ai", "utilitaires")),
-    ("🌍", ("communauté", "communaute", "community", "progression")),
+    ("🤖", (" ia", "intelligence artificielle", " ai")),
     ("👤", ("profil", "profile", "userinfo")),
     ("📈", ("niveau", "level", "xp", "classement")),
     ("🎮", ("jeu", "game", "mini-jeu")),
     ("🎵", ("musique", "music")),
     ("🛒", ("boutique", "shop", "inventaire", "inventory")),
+    ("📋", ("logs", "journal", "résumé", "resume", "historique")),
 )
 
 BUTTON_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("⚙️", ("setup", "config", "log", "paramètre", "setting", "dashboard")),
+    ("⚙️", ("setup", "config", "paramètre", "setting", "dashboard")),
     ("🛡️", ("sécurité", "securite", "security", "automod", "protection")),
     ("🔨", ("modération", "moderation", "ban", "mute", "warn")),
     ("🎫", ("ticket", "support")),
     ("🔎", ("rechercher", "search", "chercher")),
+    ("💾", ("enregistrer", "save", "sauvegarder")),
     ("❌", ("fermer", "close", "annuler", "cancel", "supprimer", "delete")),
-    ("✅", ("valider", "confirm", "confirmer", "enregistrer", "save")),
-    ("⬅️", ("retour", "back", "précédent", "precedent")),
+    ("⬅️", ("retour", "back", "accueil", "home", "précédent", "precedent")),
     ("➡️", ("suivant", "next")),
 )
 
@@ -120,7 +111,6 @@ def _restore_custom_tokens(text: str, protected: dict[str, str]) -> str:
 
 
 def _clean_artifacts(value: Any) -> str:
-    """Nettoie les anciens fragments sans jamais abîmer un vrai <a:nom:id>."""
     text = str(value or "")
     if not text:
         return ""
@@ -141,7 +131,6 @@ def _strip_existing_icon(value: Any) -> str:
 
 
 def _static_icon(text: Any, *, category: str | None = None) -> str:
-    """Navigation = pictogramme simple, jamais une animation répétée partout."""
     haystack = f" {str(text or '').casefold()} "
     for icon, words in STATIC_RULES:
         if any(word in haystack for word in words):
@@ -169,6 +158,7 @@ def _animated_state_key(text: Any, *, kind: str | None = None) -> str | None:
 
 
 def _decorate_label(value: Any, *, category: str | None = None, kind: str | None = None) -> str:
+    """Un seul pictogramme sur le titre : animé pour un état, sinon simple."""
     text = _strip_existing_icon(value) or "Information"
     state_key = _animated_state_key(text, kind=kind)
     if state_key:
@@ -196,42 +186,29 @@ def _decorate_embed(
     if resolved_category == "logs":
         return embed
     resolved_kind = kind or premium_style.infer_kind(embed)
+
     if embed.title is not None:
         embed.title = _decorate_label(embed.title, category=resolved_category, kind=resolved_kind)[:256]
     if embed.description is not None:
         embed.description = _clean_body(embed.description)[:4096] or None
+
+    # Les champs restent du texte : répéter une icône devant chaque bloc était la source
+    # principale du rendu chargé et des alignements incohérents.
     for index, field in enumerate(list(embed.fields)):
-        clean_name = _strip_existing_icon(field.name)
+        clean_name = _strip_existing_icon(field.name) or "Information"
         clean_value = _clean_body(field.value)[:1024] or "—"
-        icon = _static_icon(f"{clean_name} {clean_value}", category=resolved_category)
-        embed.set_field_at(
-            index,
-            name=f"{icon} {clean_name or 'Information'}"[:256],
-            value=clean_value,
-            inline=bool(field.inline),
-        )
+        embed.set_field_at(index, name=clean_name[:256], value=clean_value, inline=bool(field.inline))
     return embed
 
 
 def _button_animated_key(text: str) -> str | None:
-    """Animation uniquement pour une action d'état, pas pour naviguer entre catégories."""
-    haystack = str(text or "").casefold()
-    if any(word in haystack for word in ("actualiser", "refresh", "update")):
-        return "update"
-    if any(word in haystack for word in ("valider", "confirm", "confirmer", "enregistrer", "save")):
-        return "ok"
-    if any(word in haystack for word in ("fermer", "close", "annuler", "cancel")):
-        return "no"
+    """Compatibilité tests/runtime : aucune animation n'est autorisée dans un composant."""
+    del text
     return None
 
 
-def _button_icon(text: str) -> str | discord.Emoji | None:
-    key = _button_animated_key(text)
-    if key:
-        animated = emoji(key)
-        if animated is not None:
-            return animated
-    haystack = text.casefold()
+def _button_icon(text: str) -> str | None:
+    haystack = str(text or "").casefold()
     for icon, words in BUTTON_RULES:
         if any(word in haystack for word in words):
             return icon
@@ -252,8 +229,8 @@ def _decorate_view(view: discord.ui.View | None) -> discord.ui.View | None:
             for option in list(getattr(item, "options", ()) or ()):
                 label = _strip_existing_icon(option.label or "")
                 option.label = (label or "Option")[:100]
-                icon = _button_icon(f"{label} {option.value} {option.description or ''}")
-                option.emoji = icon if icon is not None else _static_icon(f"{label} {option.description or ''}")
+                # Une option garde au maximum un emoji simple. Jamais de custom animated.
+                option.emoji = _static_icon(f"{label} {option.value} {option.description or ''}")
     return view
 
 
@@ -311,11 +288,7 @@ def _can_manage_expressions(guild: discord.Guild) -> bool:
     if member is None:
         return False
     perms = member.guild_permissions
-    return bool(
-        perms.administrator
-        or getattr(perms, "manage_emojis_and_stickers", False)
-        or getattr(perms, "manage_expressions", False)
-    )
+    return bool(perms.administrator or getattr(perms, "manage_emojis_and_stickers", False) or getattr(perms, "manage_expressions", False))
 
 
 def _is_legacy_pack_emoji_name(name: str | None) -> bool:
@@ -334,7 +307,6 @@ def _refresh_registry(emojis: list[discord.Emoji] | tuple[discord.Emoji, ...]) -
 
 
 async def _delete_legacy_pack(guild: discord.Guild, current: list[discord.Emoji]) -> list[discord.Emoji]:
-    """Supprime uniquement les emojis SentriX V3.6, jamais ceux de l'utilisateur."""
     legacy = [value for value in current if _is_legacy_pack_emoji_name(value.name)]
     if not legacy:
         return current
@@ -344,7 +316,7 @@ async def _delete_legacy_pack(guild: discord.Guild, current: list[discord.Emoji]
     deleted_ids: set[int] = set()
     for value in legacy:
         try:
-            await value.delete(reason="SentriX V3.7 — remplacement du pack animé")
+            await value.delete(reason="SentriX — nettoyage ancien pack")
         except discord.Forbidden:
             logger.warning("Pack SentriX : suppression de %s refusée.", value.name)
             break
@@ -352,13 +324,10 @@ async def _delete_legacy_pack(guild: discord.Guild, current: list[discord.Emoji]
             logger.warning("Pack SentriX : suppression de %s impossible : %s", value.name, exc)
             continue
         deleted_ids.add(value.id)
-    if deleted_ids:
-        logger.info("Pack SentriX : %s ancien(s) sxv36_* supprimé(s).", len(deleted_ids))
     return [value for value in current if value.id not in deleted_ids]
 
 
 async def sync_pack(bot: commands.Bot) -> int:
-    """Synchronise les dix emojis SentriX sur le serveur officiel."""
     async with _SYNC_LOCK:
         guild = await _resolve_official_guild(bot)
         if guild is None:
@@ -414,11 +383,7 @@ def _install_sync(bot: commands.Bot) -> None:
         except Exception:
             logger.exception("Synchronisation du pack emojis SentriX impossible.")
 
-    async def refresh_on_emoji_update(
-        guild: discord.Guild,
-        before: tuple[discord.Emoji, ...],
-        after: tuple[discord.Emoji, ...],
-    ) -> None:
+    async def refresh_on_emoji_update(guild: discord.Guild, before: tuple[discord.Emoji, ...], after: tuple[discord.Emoji, ...]) -> None:
         del before
         official = await _resolve_official_guild(bot)
         if official is None or guild.id != official.id:
@@ -439,23 +404,21 @@ def _install_visual_pipeline() -> None:
     original_embed = premium_style.style_embed
     original_view = premium_style.style_view
 
-    def style_embed_v39(embed: discord.Embed, *args, **kwargs):
+    def style_embed_v310(embed: discord.Embed, *args, **kwargs):
         result = original_embed(embed, *args, **kwargs)
         if not isinstance(result, discord.Embed):
             return result
         return _decorate_embed(
             result,
-            command=kwargs.get("command"),
-            category=kwargs.get("category"),
-            kind=kwargs.get("kind"),
-            log_type=kwargs.get("log_type"),
+            command=kwargs.get("command"), category=kwargs.get("category"),
+            kind=kwargs.get("kind"), log_type=kwargs.get("log_type"),
         )
 
-    def style_view_v39(view: discord.ui.View | None):
+    def style_view_v310(view: discord.ui.View | None):
         return _decorate_view(original_view(view))
 
-    premium_style.style_embed = style_embed_v39
-    premium_style.style_view = style_view_v39
+    premium_style.style_embed = style_embed_v310
+    premium_style.style_view = style_view_v310
     _INSTALLED = True
 
 
@@ -464,19 +427,11 @@ def install(bot: commands.Bot) -> None:
     _install_sync(bot)
     bot._sentrix_animated_emoji_pack_v37 = True
     bot._sentrix_clear_ui_emojis_v362 = True
-    logger.info("SentriX V3.9 : emojis animés réservés aux états ; navigation simple active.")
+    logger.info("SentriX V3.10 : champs sans emojis, composants statiques, animations d'état uniquement.")
 
 
 __all__ = [
-    "PACK",
-    "LEGACY_PACK_PREFIXES",
-    "CATEGORY_ICONS",
-    "emoji",
-    "emoji_text",
-    "install",
-    "sync_pack",
-    "_clean_artifacts",
-    "_decorate_embed",
-    "_decorate_view",
-    "_is_legacy_pack_emoji_name",
+    "PACK", "LEGACY_PACK_PREFIXES", "CATEGORY_ICONS", "emoji", "emoji_text", "install",
+    "sync_pack", "_clean_artifacts", "_decorate_embed", "_decorate_view",
+    "_is_legacy_pack_emoji_name", "_button_animated_key", "_static_icon",
 ]
