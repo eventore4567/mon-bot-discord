@@ -81,9 +81,28 @@ async def _bootstrap_community_growth(bot: commands.Bot) -> None:
         logger.exception("Community Growth impossible à initialiser.")
 
 
+def _repair_final_command_contracts(bot: commands.Bot) -> int:
+    """Répare une dernière fois le cache de paramètres après TOUS les vieux wrappers.
+
+    Certaines couches historiques sont encore nécessaires à la logique métier et remplacent
+    des callbacks pendant le bootstrap. V18 sait retrouver le callback original ; l'appeler
+    ici, juste avant la construction du registre `/`, garantit que `ctx`/`self` ne deviennent
+    jamais des arguments utilisateur et permet de restaurer les hybrides valides.
+    """
+    try:
+        from .command_runtime_hardening_v18 import repair_wrapped_signatures
+        repaired = repair_wrapped_signatures(bot)
+        logger.info("Contrats de commandes finalisés : %s signature(s) réparée(s).", repaired)
+        return repaired
+    except Exception:
+        logger.exception("Réparation finale des signatures impossible.")
+        return 0
+
+
 async def install(bot: commands.Bot) -> None:
     """Finalise une seule fois la surface produit visible par les utilisateurs."""
     _install_odboug_account_username(bot)
+    _repair_final_command_contracts(bot)
 
     # Propriétaire unique du registre `/` : restaure les anciennes commandes utiles,
     # garde les centres regroupés et respecte strictement le plafond Discord.
