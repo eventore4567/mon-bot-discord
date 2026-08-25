@@ -1,24 +1,17 @@
-name: SentriX V2.4 Intelligent UX
+name: Legacy SentriX V2.4 Intelligent UX
 
+# Conservé uniquement comme outil manuel d'historique. Les tests utiles sont désormais
+# exécutés par SentriX Preproduction avec les contrats du runtime canonique actuel.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'utils/intelligent_ux.py'
-      - 'cogs/sentrix_intelligent_ux.py'
-      - 'web/dashboard_intelligent_ux.py'
-      - 'cogs/final_runtime_polish.py'
-      - 'tests/test_intelligent_ux.py'
-      - 'tools/intelligent_ux_v24_gate.py'
-      - '.github/workflows/intelligent-ux-v24.yml'
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
-  intelligent-ux:
+  legacy-intelligent-ux:
     runs-on: ubuntu-latest
     timeout-minutes: 6
+    env:
+      DISCORD_TOKEN: "ci.fake.token"
+      DATABASE_PATH: "/tmp/sentrix-legacy-v24.db"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,9 +19,5 @@ jobs:
           python-version: '3.11'
       - name: Install Discord runtime
         run: python -m pip install 'discord.py>=2.6.3,<3.0'
-      - name: Compile V2.4 sources
-        run: python -m compileall -q utils/intelligent_ux.py cogs/sentrix_intelligent_ux.py web/dashboard_intelligent_ux.py cogs/final_runtime_polish.py tools/intelligent_ux_v24_gate.py
-      - name: Intelligent UX pure tests
+      - name: Pure Intelligent UX tests
         run: python -m unittest tests.test_intelligent_ux
-      - name: V2.4 regression gate
-        run: python tools/intelligent_ux_v24_gate.py
