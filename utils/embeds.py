@@ -286,3 +286,36 @@ def bar(value: float, maximum: float, length: int = 10, filled_char: str = "▰"
         ratio = 0.0
     filled = max(0, min(length, round(length * max(0.0, min(1.0, ratio)))))
     return filled_char * filled + empty_char * (length - filled)
+
+
+# ---------------------------------------------------------------------------
+# Filet de transport pour les anciens envois directs de journaux
+# ---------------------------------------------------------------------------
+# Quelques systèmes historiques (notamment certaines branches des tickets) possèdent
+# encore un `channel.send(embed=...)` direct. Dès qu'ils utilisent le renderer officiel
+# FORMAT B, ce garde-fou impose la même politique no-ping que utils.log_service sans
+# modifier les messages normaux du bot ni les notifications volontaires.
+_LOG_ALLOWED_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=False)
+_ORIGINAL_MESSAGEABLE_SEND = getattr(discord.abc.Messageable.send, "_sentrix_original_send", discord.abc.Messageable.send)
+
+
+def is_official_log_embed(embed: discord.Embed | None) -> bool:
+    return bool(embed is not None and getattr(embed.image, "url", None) == SENTRIX_BANNER_URL)
+
+
+if not getattr(discord.abc.Messageable.send, "_sentrix_log_transport_guard", False):
+    async def _sentrix_messageable_send(self, *args, **kwargs):
+        embed = kwargs.get("embed")
+        embeds_arg = kwargs.get("embeds")
+        official = is_official_log_embed(embed)
+        if not official and embeds_arg:
+            official = any(is_official_log_embed(item) for item in embeds_arg)
+        if official:
+            # Cette affectation est volontairement forcée : un journal ne peut jamais
+            # réactiver users/roles/everyone par erreur dans un appelant historique.
+            kwargs["allowed_mentions"] = _LOG_ALLOWED_MENTIONS
+        return await _ORIGINAL_MESSAGEABLE_SEND(self, *args, **kwargs)
+
+    _sentrix_messageable_send._sentrix_log_transport_guard = True
+    _sentrix_messageable_send._sentrix_original_send = _ORIGINAL_MESSAGEABLE_SEND
+    discord.abc.Messageable.send = _sentrix_messageable_send
