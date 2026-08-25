@@ -80,6 +80,7 @@ from .ticket_ping_role import install_ticket_runtime as install_ticket_ping_runt
 
 logger = logging.getLogger("bot.cogs")
 _ORIGINAL_LOAD_EXTENSION = commands.Bot.load_extension
+_FINAL_EXTENSION = "cogs.visual_experience_v5"
 
 
 def _matches(name: str, extension: str) -> bool:
@@ -208,9 +209,8 @@ async def _install_extension_specific(bot: commands.Bot, name: str) -> None:
         _install_embed_component_fix(bot)
         await _run_installer("fiabilité slash V7", install_slash_reliability_v7, bot)
 
-    # Les correctifs de stabilité ciblent des cogs précis (notifications, invites,
-    # mini-jeux, IA...). Ils restent donc liés au chargement de l'extension, contrairement
-    # aux renderers/style/handlers globaux qui sont désormais finalisés une seule fois.
+    # Ces correctifs sont fonctionnels, pas visuels, et dépendent du cog venant d'être
+    # chargé. Les renderers globaux, eux, ne sont plus réappliqués ici.
     await _run_installer("stabilité ciblée", install_stability_runtime, bot, name)
 
 
@@ -222,7 +222,6 @@ async def _install_log_stack(bot: commands.Bot) -> None:
     await _run_installer("Components V2 logs", install_premium_logs_v2, bot)
     await _run_installer("mentions silencieuses logs", install_logs_no_ping)
 
-    # Ces deux couches étaient auparavant cachées dans command_no_emoji_runtime.
     try:
         from .log_identity_context_v60 import install as install_log_identity_context_v60
         from .log_consolidation_v61 import install as install_log_consolidation_v61
@@ -271,7 +270,6 @@ async def _install_help_and_error_stack(bot: commands.Bot) -> None:
     await _run_installer("aide racine et surface commandes", install_final_runtime_polish, bot)
     await _run_installer("accueil compact sur mention", install_mention_home, bot)
 
-    # error_experience_v3 répond ; command_response_guard observe seulement (V3.11).
     try:
         from .error_experience_v3 import install as install_error_experience_v3
         await _run_installer("erreurs utilisateur uniques", install_error_experience_v3, bot)
@@ -281,11 +279,7 @@ async def _install_help_and_error_stack(bot: commands.Bot) -> None:
 
 
 async def finalize_runtime(bot: commands.Bot) -> None:
-    """Finalise UNE FOIS le runtime après le chargement de toutes les extensions.
-
-    Cette fonction est l'unique point d'entrée des couches globales. Elle supprime la
-    course historique où un vieux renderer se réinstallait après un renderer récent.
-    """
+    """Finalise UNE FOIS le runtime après le chargement de toutes les extensions."""
     if getattr(bot, "_sentrix_runtime_finalized_clean", False):
         return
 
@@ -294,7 +288,6 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _install_log_stack(bot)
     await _install_release_and_official_server(bot)
 
-    # Renderer global canonique. Il n'est plus installé implicitement par GuildArrival.
     try:
         from .sentrix_v3_global_style import install as install_global_style
         await _run_installer("style global SentriX", install_global_style, bot)
@@ -303,7 +296,6 @@ async def finalize_runtime(bot: commands.Bot) -> None:
 
     await _install_help_and_error_stack(bot)
 
-    # Protection du markup emoji après les renderers visuels, sans coordinateur legacy.
     try:
         from .sentrix_emoji_markup_guard_v361 import install as install_emoji_markup_guard_v361
         await _run_installer("protection markup emojis", install_emoji_markup_guard_v361, bot)
@@ -329,9 +321,16 @@ async def _load_extension_with_sentrix_patches(
     *,
     package: str | None = None,
 ):
-    """Charge l'extension et seulement les correctifs qui dépendent de cette extension."""
+    """Charge l'extension et seulement ses correctifs locaux.
+
+    ``visual_experience_v5`` est aujourd'hui la dernière entrée de ``main.EXTENSIONS``.
+    Elle sert uniquement de point de synchronisation : après son chargement, toutes les
+    couches globales sont finalisées une seule fois. Un test de contrat protège cet ordre.
+    """
     result = await _ORIGINAL_LOAD_EXTENSION(bot, name, package=package)
     await _install_extension_specific(bot, name)
+    if _matches(name, _FINAL_EXTENSION):
+        await finalize_runtime(bot)
     return result
 
 
