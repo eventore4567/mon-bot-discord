@@ -1,4 +1,4 @@
-"""Libère le verrou de concurrence slash V41, sans modifier l'interface Discord."""
+"""Libère le verrou de concurrence slash et verrouille le contrat runtime final."""
 from __future__ import annotations
 
 import inspect
@@ -8,17 +8,17 @@ import discord
 from discord.ext import commands
 
 from .command_hardening_v41 import release_slash
+from .runtime_contract_final import install as install_runtime_contract_final
 
 logger = logging.getLogger("bot.command-error-release-v41")
 
 
 def install(bot: commands.Bot) -> None:
-    """Ajoute uniquement la libération du verrou en cas d'erreur slash.
+    """Installe le contrat final puis conserve la libération du verrou slash."""
+    # Cette étape est volontairement exécutée avant le garde ci-dessous : même si le
+    # handler d'erreur est déjà installé, le contrat logs/embeds doit toujours l'être.
+    install_runtime_contract_final(bot)
 
-    Les anciens installateurs visuels V64/V70/V71/V72 ont été retirés d'ici : un handler
-    d'erreur ne doit jamais réinstaller un second help, un second renderer ou un second
-    logger au démarrage/on_ready.
-    """
     current = bot.tree.on_error
     if getattr(current, "_sentrix_v41_release", False):
         return
@@ -36,4 +36,4 @@ def install(bot: commands.Bot) -> None:
     error_with_release._sentrix_v41_release = True
     error_with_release._sentrix_previous = current
     bot.tree.on_error = error_with_release
-    logger.info("V41 : verrou slash libéré sans couche visuelle supplémentaire.")
+    logger.info("V41 : verrou slash libéré et contrat runtime final appliqué.")
