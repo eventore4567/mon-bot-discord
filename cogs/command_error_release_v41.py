@@ -4,6 +4,10 @@ final_interaction_policy réinstalle le gestionnaire d'erreurs après chaque ext
 petite couche se place juste après lui et enveloppe le handler final sans modifier le texte
 d'erreur envoyé à l'utilisateur. Elle déclenche aussi la passe de finition/sécurité V3.8,
 qui doit s'exécuter après la politique de permissions et avant les derniers transports UI.
+
+La surface commandes demandée par l'utilisateur est appliquée ici en toute dernière
+position : les anciennes couches ne peuvent donc plus remettre l'accueil +help en embed
+ni retirer de nouveau les commandes slash utiles avant la synchronisation Discord.
 """
 from __future__ import annotations
 
@@ -26,6 +30,14 @@ def install(bot: commands.Bot) -> None:
         install_final_quality_v38(bot)
     except Exception:
         logger.exception("V3.8 : impossible d'installer la passe finale qualité/sécurité.")
+
+    # Dernière décision de catalogue/UX. Elle est volontairement exécutée après V3.8,
+    # final_runtime_polish et le budget slash historique.
+    try:
+        from .user_command_final_v64 import install as install_user_command_final_v64
+        install_user_command_final_v64(bot)
+    except Exception:
+        logger.exception("V64 : impossible d'installer la surface finale des commandes.")
 
     current = bot.tree.on_error
     if getattr(current, "_sentrix_v41_release", False):
