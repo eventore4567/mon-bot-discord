@@ -1,10 +1,4 @@
-"""SentriX V3 — erreurs de commandes utiles et suggestions intelligentes.
-
-Cette couche n'ajoute aucune commande. Elle améliore uniquement l'expérience des
-commandes préfixées : faute de frappe, argument manquant, trop d'arguments ou cible
-invalide. Les erreurs de permissions, cooldowns et erreurs métier restent gérées par le
-handler central existant afin de ne pas affaiblir la sécurité.
-"""
+"""Erreurs de commandes SentriX : une seule réponse, courte et utile."""
 from __future__ import annotations
 
 import difflib
@@ -85,7 +79,7 @@ def _command_candidates(bot: commands.Bot) -> tuple[list[str], dict[str, str]]:
     return list(dict.fromkeys(candidates)), canonical
 
 
-def _suggestions(bot: commands.Bot, typed: str, *, limit: int = 3) -> list[str]:
+def _suggestions(bot: commands.Bot, typed: str, *, limit: int = 2) -> list[str]:
     typed = str(typed or "").casefold().strip()
     if not typed:
         return []
@@ -130,39 +124,24 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
         suggestions = _suggestions(bot, typed)
         prefix = _prefix(ctx)
         if suggestions:
-            proposed = "  ".join(f"`{prefix}{name}`" for name in suggestions)
-            text = (
-                f"La commande `{prefix}{typed}` n'existe pas.\n"
-                f"Tu voulais peut-être utiliser : {proposed}\n\n"
-                f"Utilise `{prefix}help` pour ouvrir toutes les commandes."
-            )
+            proposed = ", ".join(f"`{prefix}{name}`" for name in suggestions)
+            text = f"`{prefix}{typed}` n'existe pas. Essaie {proposed}."
         else:
-            text = (
-                f"La commande `{prefix}{typed}` n'existe pas.\n"
-                f"Utilise `{prefix}help` pour rechercher la commande dont tu as besoin."
-            )
+            text = f"`{prefix}{typed}` n'existe pas. Ouvre `{prefix}help` pour rechercher une commande."
         await ctx.send(embed=embeds.warning(text))
         return True
 
     if isinstance(base, commands.MissingRequiredArgument):
         label = _param_label(getattr(base, "param", None))
-        await ctx.send(
-            embed=embeds.warning(
-                f"Il manque **{label}** pour utiliser cette commande.\n"
-                f"Syntaxe : `{_safe_usage(ctx)}`\n"
-                f"Astuce : `{_prefix(ctx)}help {ctx.command.qualified_name}` affiche les détails."
-            )
-        )
+        await ctx.send(embed=embeds.warning(
+            f"Il manque **{label}**. Utilise : `{_safe_usage(ctx)}`"
+        ))
         return True
 
     if isinstance(base, commands.TooManyArguments):
-        await ctx.send(
-            embed=embeds.warning(
-                f"Tu as donné trop d'arguments.\n"
-                f"Syntaxe : `{_safe_usage(ctx)}`\n"
-                f"Utilise `{_prefix(ctx)}help {ctx.command.qualified_name}` si tu veux un exemple."
-            )
-        )
+        await ctx.send(embed=embeds.warning(
+            f"Trop d'arguments. Utilise : `{_safe_usage(ctx)}`"
+        ))
         return True
 
     target_errors = (
@@ -173,22 +152,15 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
         commands.MessageNotFound,
     )
     if isinstance(base, target_errors):
-        await ctx.send(
-            embed=embeds.warning(
-                f"Je n'arrive pas à trouver la cible indiquée. Vérifie la mention, le nom ou l'ID.\n"
-                f"Syntaxe : `{_safe_usage(ctx)}`"
-            )
-        )
+        await ctx.send(embed=embeds.warning(
+            f"Cible introuvable. Vérifie la mention, le nom ou l'ID.\nUtilise : `{_safe_usage(ctx)}`"
+        ))
         return True
 
     if isinstance(base, (commands.BadUnionArgument, commands.BadArgument, commands.ConversionError)):
-        await ctx.send(
-            embed=embeds.warning(
-                f"Un argument n'est pas valide pour cette commande.\n"
-                f"Syntaxe : `{_safe_usage(ctx)}`\n"
-                f"Utilise `{_prefix(ctx)}help {ctx.command.qualified_name}` pour voir les paramètres attendus."
-            )
-        )
+        await ctx.send(embed=embeds.warning(
+            f"Argument invalide. Utilise : `{_safe_usage(ctx)}`"
+        ))
         return True
 
     return False
@@ -219,7 +191,7 @@ def install(bot: commands.Bot) -> None:
     improved_on_command_error._sentrix_previous_error_handler = original
     bot.on_command_error = MethodType(improved_on_command_error, bot)
     bot._sentrix_error_experience_v3 = True
-    logger.info("Erreurs V3 actives : suggestions de commandes et syntaxes utilisateur intelligentes.")
+    logger.info("Erreurs V3 actives : une seule carte compacte par erreur utilisateur.")
 
 
 __all__ = ["install", "_suggestions", "_safe_usage"]
