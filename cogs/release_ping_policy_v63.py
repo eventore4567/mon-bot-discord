@@ -1,12 +1,12 @@
-"""SentriX V63 — politique intelligente de ping des mises à jour.
+"""SentriX V64 — annonces de mises à jour uniquement sur demande explicite.
 
-Toutes les releases restent annoncées dans #annonces-sentrix, mais @everyone n'est utilisé
-que pour une vraie mise à jour majeure. Les petits fixes, hotfixes, ajustements, doublons,
-polish et corrections de texte sont annoncés silencieusement.
+Aucune petite correction, hotfix, refactor, polish ou mise à jour normale n'est publiée
+dans #annonces-sentrix. Une release n'est annoncée que si son message de commit contient
+explicitement le marqueur [MAJOR] (ou [PING]). Dans ce cas, l'annonce est considérée comme
+importante et peut notifier @everyone.
 
-Forçages disponibles dans le message de commit :
-- [MAJOR] / [PING] : force le ping
-- [NO-PING] / [MINOR] : interdit le ping
+Cette politique est volontairement manuelle : pas de détection automatique de « grosse »
+mise à jour. Cela évite tout spam du serveur officiel lors des nombreux correctifs internes.
 """
 from __future__ import annotations
 
@@ -18,93 +18,34 @@ from discord.ext import commands
 
 from . import release_announcer as releases
 
-logger = logging.getLogger("bot.release-ping-policy-v63")
+logger = logging.getLogger("bot.release-ping-policy-v64")
 _INSTALLED = False
 
 
 def _norm(value: str) -> str:
-    text = str(value or "").casefold()
-    for old, new in (
-        ("é", "e"), ("è", "e"), ("ê", "e"), ("ë", "e"),
-        ("à", "a"), ("â", "a"), ("ä", "a"),
-        ("ù", "u"), ("û", "u"), ("ü", "u"),
-        ("ô", "o"), ("ö", "o"), ("î", "i"), ("ï", "i"), ("ç", "c"),
-    ):
-        text = text.replace(old, new)
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", str(value or "").casefold()).strip()
 
 
 def is_major_update(raw_message: str) -> bool:
-    """Détermine si une release mérite réellement de notifier @everyone."""
-    raw = str(raw_message or "")
-    low = _norm(raw)
-
-    # Forçages explicites : utiles quand l'automatique ne peut pas comprendre le contexte.
-    if re.search(r"\[(?:no[-_ ]?ping|minor)\]", low):
-        return False
-    if re.search(r"\[(?:major|ping)\]", low):
-        return True
-
-    # Une vraie annonce majeure doit pouvoir être reconnue sans ambiguïté.
-    strong_phrases = (
-        "mise a jour majeure",
-        "grosse mise a jour",
-        "major update",
-        "refonte complete",
-        "refonte majeure",
-        "nouvelle version majeure",
-        "nouveau systeme complet",
-        "nouvelle fonctionnalite majeure",
-        "breaking change",
-        "breaking changes",
-        "lancement officiel",
-        "nouvelle generation",
-    )
-    if any(phrase in low for phrase in strong_phrases):
-        return True
-
-    # Un commit explicitement de correction reste silencieux, même s'il touche un domaine
-    # important comme les logs ou la sécurité. Cela évite de ping pour chaque petit patch.
-    minor_markers = (
-        "fix", "bug", "hotfix", "corrig", "correction", "patch", "typo",
-        "doublon", "duplicate", "ajustement", "cleanup", "nettoyage", "polish",
-        "wording", "texte", "fallback", "compatibilite", "regression",
-    )
-    if any(marker in low for marker in minor_markers):
-        return False
-
-    # Une grosse release multi-systèmes peut mériter le ping même si le titre ne contient
-    # pas littéralement « majeure ». Il faut au moins 3 domaines significatifs ET un
-    # marqueur de nouveauté/refonte pour rester volontairement conservateur.
-    domains = (
-        ("tickets", ("ticket",)),
-        ("logs", ("log", "journal")),
-        ("security", ("security", "secur", "antinuke", "automod", "anti-raid")),
-        ("moderation", ("moderation", "ban", "mute", "warn")),
-        ("ai", (" ia ", "intelligence artificielle", "image generation", "generation d image")),
-        ("dashboard", ("dashboard", "setup", "configuration")),
-        ("commands", ("100 commandes", "commandes", "slash", "prefix")),
-        ("economy", ("economie", "economy", "money", "shop")),
-        ("community", ("giveaway", "level", "profile", "communaute")),
-        ("server", ("create-server", "serveur complet", "server builder")),
-    )
-    changed_domains = {
-        name for name, keywords in domains if any(keyword in f" {low} " for keyword in keywords)
-    }
-    novelty = any(token in low for token in (
-        "nouveau systeme", "nouvelle fonctionnalite", "nouvelles fonctionnalites",
-        "ajoute", "ajout de", "refonte", "nouvelle interface", "nouveau dashboard",
-    ))
-    return novelty and len(changed_domains) >= 3
+    """Vrai uniquement lorsqu'une annonce importante a été demandée explicitement."""
+    low = _norm(raw_message)
+    return bool(re.search(r"\[(?:major|ping)\]", low))
 
 
-async def announce_current_release_v63(bot: commands.Bot) -> None:
+async def announce_current_release_v64(bot: commands.Bot) -> None:
     info = releases._deployment_info()
     if info is None:
         return
     sha, branch, commit_message = info
 
-    # Même délai que le moteur historique pour laisser le cache Discord se stabiliser.
+    # Politique principale : aucune annonce automatique pour une release ordinaire.
+    if not is_major_update(commit_message):
+        logger.info(
+            "V64: release %s non marquée [MAJOR] ; aucune annonce envoyée dans le serveur officiel.",
+            sha[:8],
+        )
+        return
+
     import asyncio
     await asyncio.sleep(2)
 
@@ -115,52 +56,58 @@ async def announce_current_release_v63(bot: commands.Bot) -> None:
 
     me = guild.me
     if me is None:
-        logger.error("V63: membre SentriX introuvable dans le serveur d'aide.")
+        logger.error("V64: membre SentriX introuvable dans le serveur d'aide.")
         return
     permissions = channel.permissions_for(me)
     if not permissions.view_channel or not permissions.send_messages:
-        logger.error("V63: SentriX ne peut pas écrire dans #%s.", channel.name)
+        logger.error("V64: SentriX ne peut pas écrire dans #%s.", channel.name)
         return
     if not permissions.embed_links:
-        logger.error("V63: permission Intégrer des liens absente dans #%s.", channel.name)
+        logger.error("V64: permission Intégrer des liens absente dans #%s.", channel.name)
         return
 
     try:
         reserved = await releases._reserve_release(bot, sha, guild.id, channel.id, commit_message)
     except Exception:
-        logger.exception("V63: anti-doublon release indisponible ; annonce annulée.")
+        logger.exception("V64: anti-doublon release indisponible ; annonce annulée.")
         return
     if not reserved:
-        logger.info("V63: release %s déjà annoncée.", sha[:8])
+        logger.info("V64: release majeure %s déjà annoncée.", sha[:8])
         return
 
-    major = is_major_update(commit_message)
-    if major and not permissions.mention_everyone:
-        logger.warning("V63: release majeure détectée mais permission @everyone absente dans #%s.", channel.name)
+    if not permissions.mention_everyone:
+        logger.warning(
+            "V64: release [MAJOR] détectée mais permission @everyone absente dans #%s.",
+            channel.name,
+        )
 
     embed = releases._build_embed(sha=sha, branch=branch, commit_message=commit_message)
-    if major:
-        content = "@everyone **Grosse mise à jour de SentriX disponible !**"
-        mentions = discord.AllowedMentions(everyone=True, users=False, roles=False, replied_user=False)
-    else:
-        content = "**Mise à jour de SentriX disponible.**"
-        mentions = discord.AllowedMentions.none()
+    content = "@everyone **Grosse mise à jour de SentriX disponible !**"
+    mentions = discord.AllowedMentions(
+        everyone=True,
+        users=False,
+        roles=False,
+        replied_user=False,
+    )
 
     try:
         sent = await channel.send(content=content, embed=embed, allowed_mentions=mentions)
     except Exception:
-        logger.exception("V63: échec annonce release %s dans #%s.", sha[:8], channel.name)
+        logger.exception("V64: échec annonce release %s dans #%s.", sha[:8], channel.name)
         await releases._release_reservation_failed(bot, sha)
         return
 
     try:
         await releases._mark_sent(bot, sha, sent.id)
     except Exception:
-        logger.exception("V63: annonce envoyée mais message_id non persisté.")
+        logger.exception("V64: annonce envoyée mais message_id non persisté.")
 
     logger.info(
-        "V63: release %s annoncée dans %s / #%s ; majeure=%s ; ping_effectif=%s.",
-        sha[:8], guild.name, channel.name, major, bool(major and permissions.mention_everyone),
+        "V64: release [MAJOR] %s annoncée dans %s / #%s ; ping_effectif=%s.",
+        sha[:8],
+        guild.name,
+        channel.name,
+        bool(permissions.mention_everyone),
     )
 
 
@@ -169,11 +116,11 @@ def install(bot: commands.Bot) -> None:
     global _INSTALLED
     if _INSTALLED:
         return
-    # Le listener créé par release_announcer résout ce nom global lors de chaque READY.
-    # Remplacer la fonction suffit donc sans ajouter un deuxième listener ni un doublon.
-    releases.announce_current_release = announce_current_release_v63
+    # Le listener historique appelle ce nom global à chaque READY : on remplace uniquement
+    # la politique, sans ajouter de listener supplémentaire ni créer de doublon.
+    releases.announce_current_release = announce_current_release_v64
     _INSTALLED = True
-    logger.info("V63: @everyone réservé aux mises à jour majeures.")
+    logger.info("V64: annonces automatiques désactivées ; seules les releases [MAJOR] sont publiées.")
 
 
 __all__ = ["install", "is_major_update"]
