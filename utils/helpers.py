@@ -4,11 +4,10 @@ import logging
 import re
 import discord
 
+from utils import embeds
+
 logger = logging.getLogger("bot")
 
-# Historique (pré-refonte logs indépendants) : colonnes de guild_config pour chaque type
-# de log spécialisé. N'est plus utilisé par send_log() ci-dessous (voir utils/log_service.py
-# et sa migration automatique depuis ces mêmes colonnes) — conservé pour référence/lecture.
 LOG_KIND_COLUMNS = {
     "messages": "log_messages",
     "members": "log_members",
@@ -17,21 +16,17 @@ LOG_KIND_COLUMNS = {
     "server": "log_server",
     "automod": "log_automod",
     "moderation": "log_moderation",
+    "tickets": "ticket_log_channel",
 }
 
 
-async def send_log(bot, guild: discord.Guild, kind: str, embed: discord.Embed) -> None:
-    """Compatibilité : délègue désormais entièrement à utils/log_service.py (refonte des
-    logs indépendants on/off — voir ce fichier pour la logique réelle). Signature et
-    comportement d'appel INCHANGÉS pour tous les appelants existants (configuration.py,
-    automod.py, moderation.py, events.py, security_tools.py, tickets.py...) : aucun de
-    ces fichiers n'a besoin d'être modifié pour bénéficier du nouveau système on/off,
-    puisque `kind` correspond exactement à un `log_type` de log_service.LOG_TYPES."""
+async def send_log(bot, guild: discord.Guild, kind: str, embed: discord.Embed, *, view: discord.ui.View | None = None, event_key: str | None = None) -> None:
+    """Point de compatibilité : tous les anciens appelants passent par le logger officiel."""
     from utils import log_service
-    await log_service.send_log(bot, guild, kind, embed)
+    await log_service.send_log(bot, guild, kind, embed, view=view, event_key=event_key)
+
 
 DURATION_RE = re.compile(r"(\d+)\s*(s|sec|m|min|h|heure|heures|j|jour|jours|d|w|sem|semaine)", re.IGNORECASE)
-
 UNIT_SECONDS = {
     "s": 1, "sec": 1,
     "m": 60, "min": 60,
@@ -42,7 +37,6 @@ UNIT_SECONDS = {
 
 
 def parse_duration(text: str) -> int | None:
-    """Convertit '10m', '2h', '1j', '30s' en secondes. Retourne None si invalide."""
     text = text.strip().lower()
     total = 0
     matches = DURATION_RE.findall(text)
@@ -54,7 +48,6 @@ def parse_duration(text: str) -> int | None:
 
 
 def format_duration(seconds: int) -> str:
-    """Formate un nombre de secondes en texte lisible en français."""
     if seconds <= 0:
         return "0 seconde"
     units = [("jour", 86400), ("heure", 3600), ("minute", 60), ("seconde", 1)]
@@ -74,8 +67,19 @@ def truncate(text: str, limit: int = 1024) -> str:
     return text[: limit - 3] + "..."
 
 
+def confirm_embed(message: str, *, state: str = "pending") -> discord.Embed:
+    """Petite box SentriX officielle pour confirmations partagées."""
+    if state == "confirmed":
+        return embeds.success(message, title="Action confirmée")
+    if state == "cancelled":
+        return embeds.info(message, title="Action annulée")
+    if state == "expired":
+        return embeds.warning(message, title="Confirmation expirée")
+    return embeds.warning(message, title="Confirmation requise")
+
+
 class ConfirmView(discord.ui.View):
-    """Vue de confirmation générique (bouton Oui / Non) utilisée pour les actions sensibles."""
+    """Confirmation générique sobre, sans emoji décoratif."""
 
     def __init__(self, author_id: int, timeout: float = 30):
         super().__init__(timeout=timeout)
@@ -90,15 +94,13 @@ class ConfirmView(discord.ui.View):
             return False
         return True
 
-    # De vrais emojis Unicode sont obligatoires dans le champ `emoji` d'un composant.
-    # Les anciens glyphes ● / ○ pouvaient être refusés par Discord avec HTTP 400 / 50035.
-    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger, emoji="✅")
+    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = True
         self.stop()
         await interaction.response.defer()
 
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="❌")
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = False
         self.stop()
@@ -106,7 +108,7 @@ class ConfirmView(discord.ui.View):
 
 
 class PaginatorView(discord.ui.View):
-    """Vue de pagination générique pour les embeds (listes, classements, aide, etc.)."""
+    """Pagination générique qui modifie le message existant."""
 
     def __init__(self, embeds: list[discord.Embed], author_id: int, timeout: float = 90):
         super().__init__(timeout=timeout)
@@ -127,13 +129,13 @@ class PaginatorView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Précédent", style=discord.ButtonStyle.secondary)
     async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.index = max(0, self.index - 1)
         self._update_buttons()
         await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
 
-    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.index = min(len(self.embeds) - 1, self.index + 1)
         self._update_buttons()
