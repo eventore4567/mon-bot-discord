@@ -29,6 +29,14 @@ def _install_final_surfaces(bot: commands.Bot) -> None:
     except Exception:
         logger.exception("V70 : impossible d'installer la refonte visuelle finale.")
 
+    # Le catalogue d'aide est un fournisseur de données, pas un autre renderer : il expose
+    # également les sous-commandes + et / sans modifier leur logique ni leurs permissions.
+    try:
+        from .help_catalog_v72 import install as install_help_catalog_v72
+        install_help_catalog_v72(bot)
+    except Exception:
+        logger.exception("V72 : impossible d'exposer le catalogue complet dans l'aide.")
+
     # Le profil possède une organisation métier spécifique (Compte / Serveur / Économie /
     # Activité) mais utilise exactement la même fabrique d'embed V70.
     try:
@@ -85,4 +93,4 @@ def install(bot: commands.Bot) -> None:
     error_with_release._sentrix_v41_release = True
     error_with_release._sentrix_previous = current
     bot.tree.on_error = error_with_release
-    logger.info("V41 : concurrence slash libérée, refonte V70 et sécurité logs V71 appliquées en dernier.")
+    logger.info("V41 : concurrence slash libérée, refonte V70, catalogue V72 et sécurité logs V71 appliqués en dernier.")
