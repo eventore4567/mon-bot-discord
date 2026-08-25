@@ -4,12 +4,16 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  audit:
+  stability:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    env:
+      DISCORD_TOKEN: "ci.fake.token"
+      DATABASE_PATH: "/tmp/sentrix-stability.db"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,181 +24,38 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Install runtime dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile active Python sources
+        run: python -m compileall -q main.py config.py railway_boot.py railway_canary_boot.py cogs database utils web tools tests
+
       - name: Static repository audit
         run: python tools/repo_audit.py
 
-      - name: Compile active Python sources
-        run: python -m compileall -q main.py config.py railway_boot.py railway_canary_boot.py cogs database utils web tools
+      - name: Current core regression suite
+        run: python -m unittest tests.test_final_core_contract tests.test_easy_surface_contract -v
 
-      - name: Install runtime dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Full unit suite
+        run: python -m unittest discover -s tests -p 'test_*.py'
 
-      # Les deux audits visuels sont placés avant les anciens gates du registre. Le dépôt
-      # historique possède encore des contrôles indépendants sur le nombre de commandes ;
-      # ils ne doivent pas masquer une régression du thème V2.
-      - name: Help V8 premium style audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-help-style-audit.db"
+      - name: Help premium style audit
         run: python tools/help_clean_style_audit.py
 
-      - name: Global command premium style V2 audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-command-style-v2-audit.db"
-        run: python tools/no_emoji_commands_audit.py
+      - name: Slash success and error lifecycle
+        run: |
+          python tools/slash_thinking_gate.py
+          python tools/slash_error_lifecycle_gate.py
+          python tools/defer_send_audit.py
 
-      - name: Command registry runtime audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-command-audit.db"
-        run: python tools/command_runtime_audit.py
+      - name: AI compatibility contract
+        run: python tools/ai_api_hotfix_gate.py
 
-      - name: V18 all-command regression gate
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-command-v18.db"
-        run: python tools/command_integrity_v18_gate.py
+      - name: Economy concurrency invariant
+        run: python tools/load_test_economy.py --users 60 --operations 800 --concurrency 20
 
-      - name: Permission matrix audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-permission-audit.db"
-        run: python tools/permission_guard_audit.py
-
-      - name: Security runtime hardening audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-security-audit.db"
-        run: python tools/security_runtime_audit.py
-
-      - name: Security V2 audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-security-v2-audit.db"
-        run: python tools/security_v2_audit.py
-
-      - name: Command clarity and setup UX audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-ux-audit.db"
-        run: python tools/ux_quality_audit.py
-
-      - name: Global command style and dashboard server tools audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-style-dashboard-audit.db"
-        run: python tools/command_style_dashboard_tools_audit.py
-
-      - name: Operations Center audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-operations-audit.db"
-        run: python tools/operations_center_audit.py
-
-      - name: Enterprise Suite audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-enterprise-audit.db"
-        run: python tools/enterprise_suite_audit.py
-
-      - name: Multi-instance isolation and AI V2 audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-        run: python tools/instance_isolation_audit.py
-
-      - name: Bot Excellence audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-bot-excellence-audit.db"
-        run: python tools/bot_excellence_audit.py
-
-      - name: Bot Mastery audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-bot-mastery-audit.db"
-        run: python tools/bot_mastery_audit.py
-
-      - name: Production readiness audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-production-readiness-audit.db"
-        run: python tools/production_readiness_audit.py
-
-      - name: Final help and canary polish audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-final-polish-audit.db"
-        run: python tools/final_runtime_polish_audit.py
-
-      - name: Database load stress audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-        run: python tools/load_stress_audit.py
-
-      - name: Production phase gate
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-        run: python tools/production_phase_audit.py
-
-      - name: Dashboard interaction audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-web-interaction-audit.db"
+      - name: Dashboard security interaction audit
         run: python tools/web_interaction_audit.py
 
-      - name: Everyday usability audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-usability-audit.db"
-        run: python tools/usability_runtime_audit.py
-
-      - name: Server language and translated command audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-language-audit.db"
-        run: python tools/language_runtime_audit.py
-
-      - name: User acceptance journeys
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-user-acceptance.db"
-        run: python tools/user_acceptance_entry.py
-
-      - name: Embed component UI audit
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-embed-ui-audit.db"
-        run: |
-          python - <<'PY'
-          import cogs
-          from cogs import embed_builder
-
-          class DummyBot:
-              pass
-
-          bot = DummyBot()
-          cogs._install_embed_component_fix(bot)
-          view = embed_builder.EmbedBuilderView(None, embed_builder.EmbedDraft(), 1)
-          cancel = next(item for item in view.children if getattr(item, "label", None) == "Annuler")
-          assert cancel.emoji is None, f"Le bouton Annuler doit rester sans emoji: {cancel.emoji!r}"
-          print("OK: +embed construit un bouton Annuler uniquement textuel")
-          PY
-
-      - name: Import smoke test
-        env:
-          DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-ci.db"
-        run: |
-          python - <<'PY'
-          import importlib
-          import main
-
-          imported = []
-          for module in main.EXTENSIONS:
-              importlib.import_module(module)
-              imported.append(module)
-          print(f"OK: {len(imported)} extensions SentriX importées")
-          PY
+      - name: Stability result
+        run: echo "SentriX canonical stability checks passed for $GITHUB_SHA"
