@@ -1,9 +1,8 @@
-"""SentriX V3.10 — contrat visuel uniforme, compact et sans répétition.
+"""SentriX V3.11 — taille basée sur le contenu, rendu compact et sans répétition.
 
-Cette couche est uniquement visuelle. Elle ne modifie ni permissions, ni commandes, ni
-logique métier. Une réponse doit avoir une hiérarchie unique : titre -> courte explication
--> blocs utiles -> contrôles. Les anciens champs vides, répétitions et grilles artificielles
-sont supprimés. Les logs Secure Audit restent totalement exclus de cette transformation.
+Aucune logique métier n'est modifiée ici. Les réponses courtes restent réellement
+compactes ; seuls les panneaux riches deviennent grands. Les logs Secure Audit sont
+exclus de toute transformation.
 """
 from __future__ import annotations
 
@@ -38,23 +37,8 @@ _GENERIC_FIELD_NAMES = {
     "resume", "résumé", "aperçu", "apercu", "description", "etat", "état",
 }
 
-_BUTTON_EMOJIS = (
-    (("configurer", "configuration", "setup", "paramètre", "settings"), "⚙️"),
-    (("enregistrer", "save", "sauvegarder"), "💾"),
-    (("confirmer", "confirm", "valider", "verify"), "✅"),
-    (("rechercher", "search"), "🔎"),
-    (("actualiser", "refresh", "recharger"), "🔄"),
-    (("support", "ticket"), "🎫"),
-    (("sécurité", "security"), "🛡️"),
-    (("modération", "moderation"), "🔨"),
-    (("dashboard", "tableau de bord"), "🌐"),
-    (("inviter", "invite"), "➕"),
-    (("retour", "back", "précédent", "precedent"), "⬅️"),
-    (("suivant", "next"), "➡️"),
-    (("fermer", "close", "annuler", "cancel"), "❌"),
-    (("supprimer", "delete", "effacer"), "🗑️"),
-)
-
+# Conservés pour compatibilité avec les audits historiques. V3.11 ne force plus une
+# commande ou une catégorie à être grande : seul le contenu décide.
 _PANEL_COMMAND_HINTS = {
     "help", "setup", "profile", "profile-card", "userinfo", "botinfo",
     "ticketsetup", "ticket", "shoppanel", "shop", "inventory", "leaderboard-levels",
@@ -67,9 +51,26 @@ _PANEL_CATEGORIES = {
     "security", "moderation",
 }
 
-_COMPACT_DESCRIPTION_LIMIT = 420
+_BUTTON_EMOJIS = (
+    (("configurer", "configuration", "setup", "paramètre", "settings"), "⚙️"),
+    (("enregistrer", "save", "sauvegarder"), "💾"),
+    (("confirmer", "confirm", "valider", "verify"), "✅"),
+    (("rechercher", "search"), "🔎"),
+    (("actualiser", "refresh", "recharger"), "🔄"),
+    (("support", "ticket"), "🎫"),
+    (("sécurité", "security"), "🛡️"),
+    (("modération", "moderation"), "🔨"),
+    (("dashboard", "tableau de bord"), "🌐"),
+    (("inviter", "invite"), "➕"),
+    (("retour", "back", "précédent", "precedent", "accueil", "home"), "⬅️"),
+    (("suivant", "next"), "➡️"),
+    (("fermer", "close", "annuler", "cancel"), "❌"),
+    (("supprimer", "delete", "effacer"), "🗑️"),
+)
+
+_COMPACT_DESCRIPTION_LIMIT = 360
 _PANEL_DESCRIPTION_LIMIT = 900
-_COMPACT_FIELD_LIMIT = 240
+_COMPACT_FIELD_LIMIT = 220
 _PANEL_FIELD_LIMIT = 520
 _PANEL_TITLE_LIMIT = 52
 _COMPACT_TITLE_LIMIT = 42
@@ -78,10 +79,6 @@ _COMPACT_TITLE_LIMIT = 42
 def _asset_url(bot_user: Any) -> str | None:
     avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
     return str(avatar) if avatar else None
-
-
-def _category_label(category: str) -> str:
-    return str(premium_style.CATEGORY_NAMES.get(category, "SentriX"))
 
 
 def _compact_description(value: Any, *, limit: int = 4096) -> str | None:
@@ -94,7 +91,6 @@ def _compact_description(value: Any, *, limit: int = 4096) -> str | None:
 
 
 def _semantic_text(value: Any) -> str:
-    """Forme stable utilisée seulement pour détecter les répétitions visuelles."""
     text = str(value or "").replace(_ZWSP, " ")
     text = _CANONICAL_TITLE_RE.sub(r"\1", text)
     text = _DECORATIVE_TITLE_RE.sub("", text)
@@ -104,7 +100,7 @@ def _semantic_text(value: Any) -> str:
 
 
 def _dedupe_description(value: Any) -> str | None:
-    """Supprime les paragraphes identiques empilés par plusieurs runtimes historiques."""
+    """Supprime les paragraphes identiques empilés par d'anciennes couches."""
     text = _compact_description(value)
     if not text:
         return None
@@ -153,25 +149,14 @@ def _promote_real_title(embed: discord.Embed, *, kind: str) -> None:
     embed.description = description
 
 
-def _set_premium_author(embed: discord.Embed, *, category: str, bot_user: Any) -> None:
-    del category
-    current = getattr(getattr(embed, "author", None), "name", None)
-    current_text = str(current or "").strip()
-    if current_text and not current_text.casefold().startswith("sentrix"):
-        return
-    icon = _asset_url(bot_user)
-    if icon:
-        embed.set_author(name="SentriX", icon_url=icon)
-    else:
-        embed.set_author(name="SentriX")
-
-
 def _is_blank_field(name: Any, value: Any) -> bool:
-    return not str(name or "").replace(_ZWSP, "").strip() and not str(value or "").replace(_ZWSP, "").strip()
+    return (
+        not str(name or "").replace(_ZWSP, "").strip()
+        and not str(value or "").replace(_ZWSP, "").strip()
+    )
 
 
 def _refine_fields(embed: discord.Embed) -> None:
-    """Nettoie et déduplique les champs sans jamais en ajouter."""
     description_key = _semantic_text(getattr(embed, "description", ""))
     title_key = _semantic_text(getattr(embed, "title", ""))
     seen: set[tuple[str, str]] = set()
@@ -185,11 +170,8 @@ def _refine_fields(embed: discord.Embed) -> None:
         name_key = _semantic_text(name)
         value_key = _semantic_text(value)
 
-        # Un champ « Information/Résumé » qui répète la description n'apporte rien.
         if name_key in _GENERIC_FIELD_NAMES and value_key and value_key == description_key:
             continue
-        # Même règle quand un ancien renderer a recopié le titre comme champ avec la même
-        # information déjà présente dans le corps.
         if name_key == title_key and value_key and value_key == description_key:
             continue
 
@@ -197,7 +179,11 @@ def _refine_fields(embed: discord.Embed) -> None:
         if signature in seen:
             continue
         seen.add(signature)
-        refined.append((premium_style.clip(name, 256), premium_style.clip(value, 1024), bool(field.inline)))
+        refined.append((
+            premium_style.clip(name, 256),
+            premium_style.clip(value, 1024),
+            bool(field.inline),
+        ))
 
     embed.clear_fields()
     for name, value, inline in refined:
@@ -205,7 +191,6 @@ def _refine_fields(embed: discord.Embed) -> None:
 
 
 def _dedupe_title_field(embed: discord.Embed) -> None:
-    """Un titre ne doit jamais réapparaître comme première section juste en dessous."""
     title_key = _semantic_text(getattr(embed, "title", ""))
     if not title_key or not embed.fields:
         return
@@ -219,7 +204,6 @@ def _dedupe_title_field(embed: discord.Embed) -> None:
         name_key = _semantic_text(name)
         value_key = _semantic_text(value)
         if name_key == title_key:
-            # On conserve l'information du champ uniquement si elle n'existe pas déjà.
             if value and value != "—" and value_key and value_key != body_key:
                 body = f"{body}\n\n{value}".strip()
                 body_key = _semantic_text(body)
@@ -232,29 +216,6 @@ def _dedupe_title_field(embed: discord.Embed) -> None:
         embed.add_field(name=name, value=value, inline=inline)
 
 
-def _refine_footer(embed: discord.Embed, *, category: str, guild: discord.Guild | None) -> None:
-    footer = getattr(embed, "footer", None)
-    footer_text = str(getattr(footer, "text", "") or "").strip()
-    footer_icon = getattr(footer, "icon_url", None)
-    if footer_text and not footer_text.casefold().startswith("sentrix"):
-        return
-
-    parts: list[str] = []
-    if category not in {"brand", "utility"}:
-        parts.append(_category_label(category))
-    if guild is not None:
-        parts.append(premium_style.clip(getattr(guild, "name", "Serveur"), 38))
-    text = " • ".join(parts) if parts else "SentriX"
-    if footer_icon:
-        embed.set_footer(text=text, icon_url=footer_icon)
-    else:
-        embed.set_footer(text=text)
-
-
-def _command_name(command: Any) -> str:
-    return str(getattr(command, "qualified_name", "") or "").casefold().strip()
-
-
 def _has_media(embed: discord.Embed) -> bool:
     thumbnail = str(getattr(getattr(embed, "thumbnail", None), "url", "") or "")
     image = str(getattr(getattr(embed, "image", None), "url", "") or "")
@@ -262,13 +223,18 @@ def _has_media(embed: discord.Embed) -> bool:
 
 
 def _layout_size(embed: discord.Embed, *, command: Any, category: str) -> str:
-    command_name = _command_name(command)
+    """La taille dépend uniquement de ce qui doit réellement être affiché."""
+    del command, category
     description = str(getattr(embed, "description", "") or "")
-    if command_name in _PANEL_COMMAND_HINTS or any(command_name.startswith(f"{name} ") for name in _PANEL_COMMAND_HINTS):
+    fields = list(embed.fields)
+
+    if _has_media(embed):
         return "panel"
-    if category in _PANEL_CATEGORIES or _has_media(embed):
+    if len(fields) >= 3:
         return "panel"
-    if len(embed.fields) >= 3 or len(description) > _COMPACT_DESCRIPTION_LIMIT:
+    if len(description) > _COMPACT_DESCRIPTION_LIMIT:
+        return "panel"
+    if len(fields) == 2 and sum(len(str(field.value or "")) for field in fields) > 320:
         return "panel"
     return "compact"
 
@@ -287,14 +253,17 @@ def _apply_compact_layout(embed: discord.Embed) -> None:
     if embed.title:
         embed.title = premium_style.clip(embed.title, _COMPACT_TITLE_LIMIT)
     embed.description = _compact_description(embed.description, limit=_COMPACT_DESCRIPTION_LIMIT)
+
     rebuilt: list[tuple[str, str, bool]] = []
     for field in list(embed.fields):
         if _is_blank_field(field.name, field.value):
             continue
+        name = premium_style.clip(field.name, 64)
         value = _compact_description(field.value, limit=_COMPACT_FIELD_LIMIT) or "—"
-        rebuilt.append((premium_style.clip(field.name, 72), value, False))
+        rebuilt.append((name, value, False))
+
     embed.clear_fields()
-    for name, value, inline in rebuilt[:3]:
+    for name, value, inline in rebuilt[:2]:
         embed.add_field(name=name, value=value, inline=inline)
 
 
@@ -302,6 +271,7 @@ def _apply_panel_layout(embed: discord.Embed) -> None:
     if embed.title:
         embed.title = premium_style.clip(embed.title, _PANEL_TITLE_LIMIT)
     embed.description = _compact_description(embed.description, limit=_PANEL_DESCRIPTION_LIMIT)
+
     rebuilt: list[tuple[str, str, bool]] = []
     for field in list(embed.fields):
         if _is_blank_field(field.name, field.value):
@@ -310,6 +280,7 @@ def _apply_panel_layout(embed: discord.Embed) -> None:
         value = _compact_description(field.value, limit=_PANEL_FIELD_LIMIT) or "—"
         inline = _field_should_be_inline(name, value, original_inline=bool(field.inline))
         rebuilt.append((name, value, inline))
+
     embed.clear_fields()
     for name, value, inline in rebuilt[:6]:
         embed.add_field(name=name, value=value, inline=inline)
@@ -320,6 +291,46 @@ def _apply_two_size_layout(embed: discord.Embed, *, size: str) -> None:
         _apply_panel_layout(embed)
     else:
         _apply_compact_layout(embed)
+
+
+def _set_panel_author(embed: discord.Embed, *, bot_user: Any, size: str) -> None:
+    """Les petites cartes gagnent une ligne en retirant l'auteur redondant."""
+    if size == "compact":
+        embed.remove_author()
+        return
+
+    current = getattr(getattr(embed, "author", None), "name", None)
+    current_text = str(current or "").strip()
+    if current_text and not current_text.casefold().startswith("sentrix"):
+        return
+    icon = _asset_url(bot_user)
+    if icon:
+        embed.set_author(name="SentriX", icon_url=icon)
+    else:
+        embed.set_author(name="SentriX")
+
+
+def _canonical_footer(embed: discord.Embed, *, guild: discord.Guild | None) -> None:
+    """Évite SentriX • SentriX • SentriX et garde un footer unique."""
+    footer = getattr(embed, "footer", None)
+    current = str(getattr(footer, "text", "") or "").strip()
+    icon = getattr(footer, "icon_url", None)
+
+    # Un footer métier totalement personnalisé est conservé, sauf s'il contient déjà la
+    # marque SentriX : dans ce cas on le normalise pour supprimer les doublons historiques.
+    if current and "sentrix" not in current.casefold():
+        return
+
+    parts = ["SentriX"]
+    if guild is not None:
+        name = premium_style.clip(getattr(guild, "name", "Serveur"), 42)
+        if name:
+            parts.append(name)
+    text = " • ".join(parts)
+    if icon:
+        embed.set_footer(text=text, icon_url=icon)
+    else:
+        embed.set_footer(text=text)
 
 
 def _refine_embed(
@@ -339,9 +350,10 @@ def _refine_embed(
     if bool(log_type) or resolved_category == "logs":
         return embed
 
-    _set_premium_author(embed, category=resolved_category, bot_user=bot_user)
     _promote_real_title(embed, kind=resolved_kind)
     _refine_fields(embed)
+    _dedupe_title_field(embed)
+    embed.description = _dedupe_description(embed.description)
 
     state_colours = {
         "success": premium_style.COLORS["success"],
@@ -355,9 +367,8 @@ def _refine_embed(
 
     size = _layout_size(embed, command=command, category=resolved_category)
     _apply_two_size_layout(embed, size=size)
-    _dedupe_title_field(embed)
-    embed.description = _dedupe_description(embed.description)
-    _refine_footer(embed, category=resolved_category, guild=guild)
+    _set_panel_author(embed, bot_user=bot_user, size=size)
+    _canonical_footer(embed, guild=guild)
     return embed
 
 
@@ -385,7 +396,10 @@ def _refine_view(view: discord.ui.View | None) -> discord.ui.View | None:
             _safe_button_emoji(item)
         elif isinstance(item, discord.ui.Select):
             placeholder = str(item.placeholder or "").strip()
-            item.placeholder = premium_style.clip(placeholder or "Choisis une option…", premium_style.VISUAL_LIMITS["select_label"])
+            item.placeholder = premium_style.clip(
+                placeholder or "Choisis une option…",
+                premium_style.VISUAL_LIMITS["select_label"],
+            )
     return view
 
 
@@ -395,25 +409,28 @@ def install(bot: commands.Bot) -> None:
         original_embed = premium_style.style_embed
         original_view = premium_style.style_view
 
-        def styled_v310(embed: discord.Embed, *args, **kwargs):
+        def styled_v311(embed: discord.Embed, *args, **kwargs):
             result = original_embed(embed, *args, **kwargs)
             if not isinstance(result, discord.Embed):
                 return result
             return _refine_embed(
                 result,
-                command=kwargs.get("command"), guild=kwargs.get("guild"),
-                requester=kwargs.get("requester"), bot_user=kwargs.get("bot_user"),
-                category=kwargs.get("category"), kind=kwargs.get("kind"),
+                command=kwargs.get("command"),
+                guild=kwargs.get("guild"),
+                requester=kwargs.get("requester"),
+                bot_user=kwargs.get("bot_user"),
+                category=kwargs.get("category"),
+                kind=kwargs.get("kind"),
                 log_type=kwargs.get("log_type"),
             )
 
-        def styled_view_v310(view: discord.ui.View | None):
+        def styled_view_v311(view: discord.ui.View | None):
             return _refine_view(original_view(view))
 
-        premium_style.style_embed = styled_v310
-        premium_style.style_view = styled_view_v310
+        premium_style.style_embed = styled_v311
+        premium_style.style_view = styled_view_v311
         _INSTALLED = True
-        logger.info("SentriX V3.10 : hiérarchie visuelle unique et déduplication globale actives.")
+        logger.info("SentriX V3.11 : taille par contenu, cartes compactes et footer canonique actifs.")
 
     try:
         from .sentrix_emoji_runtime import install as install_animated_emoji_pack
@@ -423,6 +440,10 @@ def install(bot: commands.Bot) -> None:
 
 
 __all__ = [
-    "install", "_layout_size", "_apply_two_size_layout", "_refine_embed",
-    "_dedupe_description", "_semantic_text",
+    "install",
+    "_layout_size",
+    "_apply_two_size_layout",
+    "_refine_embed",
+    "_dedupe_description",
+    "_semantic_text",
 ]
