@@ -25,6 +25,7 @@ jobs:
             cogs/sentrix_visual_refactor_v70.py \
             cogs/sentrix_profile_refactor_v70.py \
             cogs/sentrix_log_safety_v71.py \
+            cogs/help_catalog_v72.py \
             cogs/command_error_release_v41.py \
             cogs/user_command_final_v64.py
       - name: Run V70 visual contracts
