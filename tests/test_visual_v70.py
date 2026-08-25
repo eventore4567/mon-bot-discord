@@ -18,6 +18,7 @@ class VisualV70Tests(unittest.TestCase):
             ROOT / "utils" / "embeds.py",
             ROOT / "cogs" / "sentrix_visual_refactor_v70.py",
             ROOT / "cogs" / "sentrix_profile_refactor_v70.py",
+            ROOT / "cogs" / "sentrix_log_safety_v71.py",
             ROOT / "cogs" / "command_error_release_v41.py",
             ROOT / "cogs" / "user_command_final_v64.py",
         )
@@ -73,6 +74,13 @@ class VisualV70Tests(unittest.TestCase):
         self.assertEqual(panel.image.url, embeds.SENTRIX_BANNER_URL)
         self.assertTrue(next(field for field in panel.fields if field.name == "Auteur").inline)
         self.assertFalse(next(field for field in panel.fields if field.name == "Avant").inline)
+
+    def test_log_safety_keeps_primary_guard_and_repair(self):
+        source = (ROOT / "cogs" / "sentrix_log_safety_v71.py").read_text(encoding="utf-8")
+        self.assertIn("_is_primary_process", source)
+        self.assertIn("_repair_log_target", source)
+        self.assertIn("_source_key", source)
+        self.assertIn("doublon ticket", source)
 
     def test_obsolete_plain_help_and_components_log_layers_removed(self):
         self.assertFalse((ROOT / "cogs" / "help_plain_compact_v65.py").exists())
