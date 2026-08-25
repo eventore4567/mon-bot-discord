@@ -1,16 +1,14 @@
 """Transport officiel et unique des journaux Discord SentriX.
 
-Ce module est la seule sortie logique pour les journaux centralisés :
-- renderer SentriX unique ;
-- mentions Discord natives sans notification ;
-- déduplication ciblée ;
-- compatibilité avec les anciens salons de logs ;
-- aucune dépendance à un ID Railway codé en dur.
+Ce module centralise la configuration, la migration historique, la déduplication,
+le rendu et l'envoi des logs. Une migration de secours est exécutée une seule fois par
+serveur pour réparer le cas où les anciens salons existent mais ``log_settings`` est
+resté entièrement désactivé après une ancienne version.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-import os
 import re
 import time
 from collections import OrderedDict
@@ -23,11 +21,11 @@ LOG_TYPES = {
     "messages": {"label": "Messages (suppression/modification)", "category": "Messages", "legacy_column": "log_messages", "emits": True},
     "members": {"label": "Membres (arrivées/départs/pseudo/rôles)", "category": "Membres", "legacy_column": "log_members", "emits": True},
     "roles": {"label": "Rôles (création/suppression/attribution)", "category": "Rôles", "legacy_column": "log_roles", "emits": True},
-    "server": {"label": "Salons (création/suppression/modification)", "category": "Salons", "legacy_column": "log_server", "emits": True},
-    "voice": {"label": "Vocal (connexion/déconnexion/changement de salon)", "category": "Vocal", "legacy_column": "log_voice", "emits": True},
+    "server": {"label": "Salons et serveur", "category": "Salons", "legacy_column": "log_server", "emits": True},
+    "voice": {"label": "Vocal (connexion/déconnexion/changement)", "category": "Vocal", "legacy_column": "log_voice", "emits": True},
     "moderation": {"label": "Modération (warns, mutes, kicks, bans)", "category": "Modération", "legacy_column": "log_moderation", "emits": True},
     "tickets": {"label": "Tickets (ouverture, claim, fermeture)", "category": "Tickets", "legacy_column": "ticket_log_channel", "emits": True},
-    "automod": {"label": "Sécurité (anti-spam, anti-raid, anti-nuke, AutoMod)", "category": "Sécurité", "legacy_column": "log_automod", "emits": True},
+    "automod": {"label": "Sécurité (AutoMod / anti-raid / anti-nuke)", "category": "Sécurité", "legacy_column": "log_automod", "emits": True},
     "economy": {"label": "Économie", "category": "Économie", "legacy_column": None, "emits": False},
     "levels": {"label": "Niveaux", "category": "Niveaux", "legacy_column": None, "emits": False},
     "ai": {"label": "Intelligence artificielle", "category": "IA", "legacy_column": None, "emits": False},
@@ -49,10 +47,6 @@ DEFAULT_LOG_SETTING = {
     "include_reason": True,
 }
 
-# Équivalent discord.py de :
-# allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }
-# Les chaînes <@id>, <@&id> et <#id> restent rendues nativement par Discord,
-# mais aucun membre/rôle n'est notifié à cause d'un log.
 LOG_ALLOWED_MENTIONS = discord.AllowedMentions(
     everyone=False,
     users=False,
@@ -63,21 +57,25 @@ LOG_ALLOWED_MENTIONS = discord.AllowedMentions(
 _DEDUP_TTL = 8.0
 _DEDUP_MAX = 4096
 _recent_event_keys: OrderedDict[str, float] = OrderedDict()
+_bootstrap_locks: dict[int, asyncio.Lock] = {}
+
+_BOOTSTRAP_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_log_migration_state (
+    guild_id INTEGER PRIMARY KEY,
+    legacy_bootstrap_done INTEGER NOT NULL DEFAULT 0,
+    repaired_at INTEGER
+)
+"""
 
 
 def is_primary_process() -> bool:
-    """Autorise les logs par défaut.
+    """Les logs ne doivent jamais être coupés par une variable d'hébergement obsolète.
 
-    L'ancien code comparait RAILWAY_SERVICE_ID à un UUID codé en dur. Dès qu'un service
-    Railway était recréé/renommé, TOUS les logs étaient silencieusement bloqués.
-
-    Désormais un service secondaire n'est désactivé que si l'administrateur le demande
-    explicitement avec SENTRIX_LOG_PRODUCER=0/false/no/off. Sans cette variable, le bot
-    fonctionne normalement en local comme sur Railway.
+    Les anciennes versions utilisaient un UUID Railway ou ``SENTRIX_LOG_PRODUCER`` et
+    pouvaient donc désactiver tous les journaux après un redéploiement. La déduplication
+    est maintenant gérée dans le logger lui-même ; le processus actif peut toujours
+    produire ses logs.
     """
-    raw = (os.getenv("SENTRIX_LOG_PRODUCER") or "").strip().casefold()
-    if raw in {"0", "false", "no", "off", "disabled"}:
-        return False
     return True
 
 
@@ -102,16 +100,18 @@ def make_event_key(
     message_id: int | None = None,
     discriminator: str | int | None = None,
 ) -> str:
-    parts = [
-        guild_id,
-        event_type,
-        target_id or 0,
-        executor_id or 0,
-        audit_log_id or 0,
-        message_id or 0,
-        discriminator or "",
-    ]
-    return ":".join(str(part) for part in parts)
+    return ":".join(
+        str(part)
+        for part in (
+            guild_id,
+            event_type,
+            target_id or 0,
+            executor_id or 0,
+            audit_log_id or 0,
+            message_id or 0,
+            discriminator or "",
+        )
+    )
 
 
 def _prune_recent(now: float) -> None:
@@ -141,13 +141,6 @@ def _first_snowflake(text: str) -> int | None:
 
 
 def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> str | None:
-    """Filet de sécurité commande + événement Discord pour une même sanction.
-
-    Ban, unban, timeout/mute et kick peuvent être vus une première fois par la commande
-    SentriX puis une seconde fois par le listener Discord. Pour ces actions seulement,
-    la clé sémantique combine serveur + action + cible. Warn et tickets restent exclus :
-    deux vraies actions rapprochées doivent toujours produire deux journaux distincts.
-    """
     if log_type != "moderation":
         return None
     sample = " ".join(
@@ -181,8 +174,6 @@ class RevealIdButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        # discord.py 2.6.x ne fournit pas un bouton standard de copie presse-papiers.
-        # On affiche donc uniquement l'ID, en éphémère, sans polluer le salon de logs.
         await interaction.response.send_message(
             f"`{self.entity_id}`",
             ephemeral=True,
@@ -191,8 +182,6 @@ class RevealIdButton(discord.ui.Button):
 
 
 class LogActionsView(discord.ui.View):
-    """Actions de consultation affichées sous l'embed."""
-
     def __init__(self, *, jump_url: str | None = None, ids: list[tuple[str, int]] | None = None):
         super().__init__(timeout=None)
         if jump_url:
@@ -208,16 +197,11 @@ class LogActionsView(discord.ui.View):
             self.add_item(RevealIdButton(label, entity_id, row=0))
 
 
-def log_actions(
-    *,
-    jump_url: str | None = None,
-    ids: list[tuple[str, int]] | None = None,
-) -> LogActionsView | None:
+def log_actions(*, jump_url: str | None = None, ids: list[tuple[str, int]] | None = None) -> LogActionsView | None:
     return LogActionsView(jump_url=jump_url, ids=ids) if jump_url or ids else None
 
 
 async def _legacy_channel_id(bot, guild_id: int, log_type: str) -> int | None:
-    """Lit le salon historique sans modifier la nouvelle configuration."""
     meta = LOG_TYPES.get(log_type, {})
     legacy_column = meta.get("legacy_column")
     if not legacy_column:
@@ -235,6 +219,76 @@ async def _legacy_channel_id(bot, guild_id: int, log_type: str) -> int | None:
         except (KeyError, IndexError, TypeError):
             channel_id = None
     return int(channel_id) if channel_id else None
+
+
+async def _ensure_bootstrap_table(bot) -> None:
+    await bot.db.execute(_BOOTSTRAP_SCHEMA)
+
+
+async def _ensure_legacy_bootstrap(bot, guild_id: int) -> None:
+    """Répare une seule fois la migration ancienne -> nouvelle configuration.
+
+    Le bug historique était le suivant : ``/create-logs`` enregistrait les salons dans
+    ``guild_config`` alors qu'une ligne ``log_settings`` déjà créée pouvait rester à
+    ``enabled=0``. Si aucun type de log actif n'existe encore, on considère que cette
+    configuration est une migration cassée et on reprend les vrais salons historiques.
+    Une ligne d'état empêche ensuite toute réactivation automatique future : les choix
+    manuels de l'administrateur redeviennent totalement prioritaires.
+    """
+    await _ensure_bootstrap_table(bot)
+    marker = await bot.db.fetchone(
+        "SELECT legacy_bootstrap_done FROM sentrix_log_migration_state WHERE guild_id = ?",
+        (guild_id,),
+    )
+    if marker and marker["legacy_bootstrap_done"]:
+        return
+
+    lock = _bootstrap_locks.setdefault(guild_id, asyncio.Lock())
+    async with lock:
+        marker = await bot.db.fetchone(
+            "SELECT legacy_bootstrap_done FROM sentrix_log_migration_state WHERE guild_id = ?",
+            (guild_id,),
+        )
+        if marker and marker["legacy_bootstrap_done"]:
+            return
+
+        rows = await bot.db.fetchall(
+            "SELECT log_type, enabled, channel_id FROM log_settings WHERE guild_id = ?",
+            (guild_id,),
+        )
+        enabled_any = any(bool(row["enabled"]) for row in rows)
+        repaired = 0
+
+        if not enabled_any:
+            for log_type, meta in LOG_TYPES.items():
+                if not meta.get("emits"):
+                    continue
+                legacy_channel = await _legacy_channel_id(bot, guild_id, log_type)
+                if not legacy_channel:
+                    continue
+                now_ts = _now()
+                await bot.db.execute(
+                    "INSERT INTO log_settings "
+                    "(guild_id, log_type, enabled, channel_id, created_at, updated_at) "
+                    "VALUES (?, ?, 1, ?, ?, ?) "
+                    "ON CONFLICT(guild_id, log_type) DO UPDATE SET "
+                    "enabled = 1, channel_id = excluded.channel_id, updated_at = excluded.updated_at",
+                    (guild_id, log_type, legacy_channel, now_ts, now_ts),
+                )
+                repaired += 1
+
+        await bot.db.execute(
+            "INSERT INTO sentrix_log_migration_state (guild_id, legacy_bootstrap_done, repaired_at) "
+            "VALUES (?, 1, ?) "
+            "ON CONFLICT(guild_id) DO UPDATE SET legacy_bootstrap_done = 1, repaired_at = excluded.repaired_at",
+            (guild_id, _now()),
+        )
+        if repaired:
+            logger.warning(
+                "Réparation automatique des logs guild=%s : %s catégorie(s) réactivée(s) depuis guild_config.",
+                guild_id,
+                repaired,
+            )
 
 
 async def _migrate_from_legacy(bot, guild_id: int, log_type: str) -> dict:
@@ -259,52 +313,18 @@ async def _migrate_from_legacy(bot, guild_id: int, log_type: str) -> dict:
 
 
 async def get_log_setting(bot, guild_id: int, log_type: str) -> dict:
-    """Retourne le réglage actif et répare les migrations historiques incomplètes.
-
-    Cas corrigé : une ligne `log_settings` pouvait être créée AVANT `/create-logs`.
-    Elle restait alors `enabled=0, channel_id=NULL` même après que l'ancien système ait
-    créé et enregistré les salons. Si la ligne n'a jamais été explicitement modifiée
-    (`created_at == updated_at`), on reprend automatiquement le salon historique.
-    """
+    if log_type not in LOG_TYPES:
+        raise KeyError(log_type)
+    await _ensure_legacy_bootstrap(bot, guild_id)
     row = await bot.db.fetchone(
         "SELECT * FROM log_settings WHERE guild_id = ? AND log_type = ?",
         (guild_id, log_type),
     )
     if row is None:
         return await _migrate_from_legacy(bot, guild_id, log_type)
-
-    channel_id = row["channel_id"]
-    enabled = bool(row["enabled"])
-    created_at = row["created_at"]
-    updated_at = row["updated_at"]
-
-    untouched_migration = (
-        not channel_id
-        and not enabled
-        and created_at is not None
-        and updated_at is not None
-        and int(created_at) == int(updated_at)
-    )
-    if untouched_migration:
-        legacy_channel = await _legacy_channel_id(bot, guild_id, log_type)
-        if legacy_channel:
-            now_ts = _now()
-            await bot.db.execute(
-                "UPDATE log_settings SET enabled = 1, channel_id = ?, updated_at = ? "
-                "WHERE guild_id = ? AND log_type = ?",
-                (legacy_channel, now_ts, guild_id, log_type),
-            )
-            channel_id = legacy_channel
-            enabled = True
-            logger.info(
-                "Réparation automatique du log %s sur guild=%s depuis la configuration historique.",
-                log_type,
-                guild_id,
-            )
-
     return {
-        "enabled": enabled,
-        "channel_id": channel_id,
+        "enabled": bool(row["enabled"]),
+        "channel_id": int(row["channel_id"]) if row["channel_id"] else None,
         "include_content": bool(row["include_content"]),
         "include_attachments": bool(row["include_attachments"]),
         "include_actor": bool(row["include_actor"]),
@@ -313,6 +333,7 @@ async def get_log_setting(bot, guild_id: int, log_type: str) -> dict:
 
 
 async def get_all_log_settings(bot, guild_id: int) -> dict[str, dict]:
+    await _ensure_legacy_bootstrap(bot, guild_id)
     return {
         log_type: await get_log_setting(bot, guild_id, log_type)
         for log_type in LOG_TYPES
@@ -327,7 +348,7 @@ async def set_log_enabled(bot, guild_id: int, log_type: str, enabled: bool) -> d
         "UPDATE log_settings SET enabled = ?, updated_at = ? WHERE guild_id = ? AND log_type = ?",
         (1 if enabled else 0, _now(), guild_id, log_type),
     )
-    current["enabled"] = enabled
+    current["enabled"] = bool(enabled)
     return current
 
 
@@ -342,15 +363,10 @@ async def set_log_channel(bot, guild_id: int, log_type: str, channel_id: int | N
     return setting
 
 
-def validate_channel(
-    guild: discord.Guild,
-    channel_id: int | None,
-    *,
-    needs_file: bool = False,
-):
+def validate_channel(guild: discord.Guild, channel_id: int | None, *, needs_file: bool = False):
     if not channel_id:
         return False, "aucun salon configuré"
-    channel = guild.get_channel(channel_id)
+    channel = guild.get_channel(int(channel_id))
     if channel is None:
         return False, "salon introuvable"
     me = guild.me
@@ -378,15 +394,6 @@ async def send_log(
     view: discord.ui.View | None = None,
     event_key: str | None = None,
 ) -> bool:
-    """Seul point de sortie central : renderer unique, zéro ping et déduplication."""
-    if not is_primary_process():
-        logger.info(
-            "Log volontairement désactivé par SENTRIX_LOG_PRODUCER guild=%s type=%s",
-            guild.id,
-            log_type,
-        )
-        return False
-
     from utils import embeds as embeds_mod
 
     rendered = (
@@ -397,41 +404,22 @@ async def send_log(
 
     semantic_key = semantic_event_key(guild.id, log_type, rendered)
     if _is_duplicate(event_key) or _is_duplicate(semantic_key):
-        logger.debug(
-            "Log dupliqué ignoré guild=%s type=%s key=%s",
-            guild.id,
-            log_type,
-            event_key or semantic_key,
-        )
+        logger.debug("Log dupliqué ignoré guild=%s type=%s", guild.id, log_type)
         return False
 
     try:
         setting = await get_log_setting(bot, guild.id, log_type)
     except Exception:
-        logger.warning(
-            "Impossible de lire la configuration du log %s sur %s.",
-            log_type,
-            guild.id,
-            exc_info=True,
-        )
+        logger.exception("Impossible de lire/réparer la configuration du log %s sur %s.", log_type, guild.id)
         return False
 
     if not setting["enabled"]:
-        logger.debug("Log désactivé guild=%s type=%s", guild.id, log_type)
+        logger.info("Log désactivé guild=%s type=%s", guild.id, log_type)
         return False
 
-    ok, reason = validate_channel(
-        guild,
-        setting["channel_id"],
-        needs_file=file is not None,
-    )
+    ok, reason = validate_channel(guild, setting["channel_id"], needs_file=file is not None)
     if not ok:
-        logger.warning(
-            "Log %s non envoyé sur %s : %s",
-            log_type,
-            guild.id,
-            reason,
-        )
+        logger.warning("Log %s non envoyé sur guild=%s : %s", log_type, guild.id, reason)
         return False
 
     channel = guild.get_channel(setting["channel_id"])
@@ -446,24 +434,17 @@ async def send_log(
 
     try:
         await channel.send(**kwargs)
+        logger.info("Log envoyé guild=%s type=%s channel=%s", guild.id, log_type, channel.id)
         return True
     except (discord.Forbidden, discord.HTTPException):
-        logger.warning(
-            "Échec d'envoi du log %s dans %s.",
-            log_type,
-            setting["channel_id"],
-            exc_info=True,
-        )
+        logger.exception("Échec d'envoi du log %s dans %s.", log_type, setting["channel_id"])
         return False
 
 
-async def send_test_log(
-    bot,
-    guild: discord.Guild,
-    log_type: str,
-    author: discord.abc.User,
-) -> tuple[bool, str]:
+async def send_test_log(bot, guild: discord.Guild, log_type: str, author: discord.abc.User) -> tuple[bool, str]:
     setting = await get_log_setting(bot, guild.id, log_type)
+    if not setting["enabled"]:
+        return False, "Ce type de log est désactivé. Activez-le avant le test."
     ok, reason = validate_channel(guild, setting["channel_id"])
     if not ok:
         return False, f"Impossible d'envoyer un test : {reason}."
@@ -479,10 +460,7 @@ async def send_test_log(
     )
     channel = guild.get_channel(setting["channel_id"])
     try:
-        await channel.send(
-            embed=test_embed,
-            allowed_mentions=LOG_ALLOWED_MENTIONS,
-        )
+        await channel.send(embed=test_embed, allowed_mentions=LOG_ALLOWED_MENTIONS)
         return True, f"Test envoyé dans {channel.mention}."
     except discord.HTTPException as exc:
         return False, f"Échec de l'envoi du test : {exc}."
