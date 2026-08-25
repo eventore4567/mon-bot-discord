@@ -1,8 +1,4 @@
-"""Libère toujours les verrous V41 lorsqu'une commande slash échoue.
-
-Cette couche est aussi le dernier point de finition du runtime : elle réapplique la surface
-slash, puis verrouille l'aide compacte sans embed et le renderer de logs à taille fixe.
-"""
+"""Libère les verrous V41 et applique la finition visuelle finale SentriX."""
 from __future__ import annotations
 
 import asyncio
@@ -18,35 +14,29 @@ logger = logging.getLogger("bot.command-error-release-v41")
 
 
 def _install_final_surfaces(bot: commands.Bot) -> None:
-    # Catalogue slash : anciennes / utiles prioritaires, + uniquement dans les places restantes.
+    # Le catalogue de commandes reste séparé de la présentation : les anciennes /
+    # utiles sont prioritaires et les + remplissent seulement les places restantes.
     try:
         from .user_command_final_v64 import install as install_user_command_final_v64
         install_user_command_final_v64(bot)
     except Exception:
         logger.exception("V64 : impossible d'installer la surface finale des commandes.")
 
-    # V65 DOIT passer après V64 et toutes les anciennes couches help.
+    # Une seule couche visuelle finale. V70 remplace les anciennes sorties V65/V56.
     try:
-        from .help_plain_compact_v65 import install as install_help_plain_compact_v65
-        install_help_plain_compact_v65(bot)
+        from .sentrix_visual_refactor_v70 import install as install_sentrix_visual_refactor_v70
+        install_sentrix_visual_refactor_v70(bot)
     except Exception:
-        logger.exception("V65 : impossible d'installer l'aide compacte finale.")
-
-    # V56 DOIT passer après V30/V50/V53/V55 : un seul renderer de logs reste actif.
-    try:
-        from .log_fixed_compact_v56 import install as install_log_fixed_compact_v56
-        install_log_fixed_compact_v56(bot)
-    except Exception:
-        logger.exception("V56 : impossible de verrouiller la taille finale des logs.")
+        logger.exception("V70 : impossible d'installer la refonte visuelle finale.")
 
 
 def _install_ready_reassert(bot: commands.Bot) -> None:
-    """Réaffirme une dernière fois les deux surfaces après tous les hooks on_ready."""
     if getattr(bot, "_sentrix_final_surfaces_ready_listener", False):
         return
 
     async def reassert_final_surfaces():
-        # Laisse terminer les autres listeners on_ready de ce cycle, puis reprend la priorité.
+        # Les autres listeners on_ready terminent d'abord ; V70 reste ensuite la dernière
+        # décision de présentation et ne laisse pas un renderer historique reprendre la main.
         await asyncio.sleep(0)
         _install_final_surfaces(bot)
 
@@ -55,7 +45,6 @@ def _install_ready_reassert(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    # V3.8 reste la passe qualité/sécurité historique.
     try:
         from .sentrix_final_quality_v38 import install as install_final_quality_v38
         install_final_quality_v38(bot)
@@ -82,4 +71,4 @@ def install(bot: commands.Bot) -> None:
     error_with_release._sentrix_v41_release = True
     error_with_release._sentrix_previous = current
     bot.tree.on_error = error_with_release
-    logger.info("V41 : concurrence slash libérée, help V65 et logs V56 verrouillés en dernier.")
+    logger.info("V41 : concurrence slash libérée, refonte visuelle V70 appliquée en dernier.")
