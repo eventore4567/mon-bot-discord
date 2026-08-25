@@ -72,8 +72,6 @@ def install(bot: commands.Bot) -> None:
         original_clean = ui._clean_artifacts
         if not getattr(original_clean, "_sentrix_guard_v362", False):
             def guarded_clean(value: Any) -> str:
-                # Répare directement la source afin qu'une ancienne regex V3.6 ne puisse
-                # pas supprimer un vrai article anglais « A ... » avant nous.
                 return _repair_broken(value)
 
             guarded_clean._sentrix_guard_v362 = True
@@ -108,6 +106,7 @@ def install(bot: commands.Bot) -> None:
             def clear_static_icon(text: Any, *, category: str | None = None) -> str:
                 haystack = str(text or "").casefold()
                 specific = (
+                    ("⚙️", ("centre de contrôle", "centre de controle", "control center")),
                     ("🌐", ("serveur", "server")),
                     ("📈", ("progression", "progress")),
                     ("🌍", ("langue", "language")),
