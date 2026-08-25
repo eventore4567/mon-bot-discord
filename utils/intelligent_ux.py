@@ -3,6 +3,10 @@
 Ce module ne dépend pas de Discord. Il transforme uniquement des formulations naturelles
 TRÈS explicites en plans d'action vers des commandes existantes. Une simple discussion
 qui contient « ban », « mute », « payer », etc. ne doit jamais devenir une action.
+
+L'objectif produit est que l'utilisateur puisse utiliser SentriX sans mémoriser le nom de
+ses commandes : aide, configuration, profil, économie, tickets et modération comprennent
+des formulations humaines courtes. Les actions sensibles conservent leur confirmation.
 """
 from __future__ import annotations
 
@@ -93,15 +97,23 @@ def parse_natural_action(value: str | None) -> NaturalAction | None:
     if not text or len(text) > 500:
         return None
 
+    # Entrées sans risque : elles peuvent être exécutées immédiatement. Ces formulations
+    # couvrent volontairement les besoins les plus courants afin que +help ne soit plus
+    # quelque chose que les membres doivent apprendre avant de pouvoir utiliser le bot.
     safe_patterns: tuple[tuple[str, str, str], ...] = (
+        (r"^(?:aide|help|menu|ouvre (?:l )?aide|ouvre le menu|montre (?:les )?commandes|que peux tu faire)$", "help", "Ouvrir le menu SentriX"),
+        (r"^(?:ouvre|lance|affiche|montre) (?:la |le |les )?(?:configuration|config|setup|parametres)$", "setup", "Ouvrir la configuration"),
+        (r"^(?:ping|latence|montre (?:la )?latence|affiche (?:la )?latence)$", "ping", "Tester SentriX"),
+        (r"^(?:montre|affiche|voir|je veux voir) (?:mon |ma )?(?:avatar|photo de profil|pp)$", "avatar", "Afficher ton avatar"),
+        (r"^(?:montre|affiche|voir|je veux voir) (?:mes |mon )?(?:infos|informations|userinfo)$", "userinfo", "Afficher tes informations"),
         (r"^(?:ouvre|montre|affiche|voir|je veux voir) (?:mon |ma )?(?:profil|profile)$", "profile", "Ouvrir ton profil"),
         (r"^(?:ouvre|montre|affiche|voir|je veux voir) (?:mon |mes )?(?:solde|balance)$", "balance", "Afficher ton solde"),
         (r"^(?:ouvre|montre|affiche|voir|je veux voir) (?:mon |mes )?(?:niveau|level|xp)$", "level", "Afficher ta progression"),
         (r"^(?:ouvre|montre|affiche|voir|je veux voir) (?:mon |mes )?(?:inventaire|inventory|objets)$", "inventory", "Ouvrir ton inventaire"),
         (r"^(?:ouvre|montre|affiche|voir|je veux voir) (?:la |le )?(?:boutique|shop)$", "shop", "Ouvrir la boutique"),
-        (r"^(?:ouvre|cree|faire|fais) (?:un |mon )?ticket$", "ticket", "Ouvrir les tickets"),
-        (r"^(?:prends|prend|recupere|donne moi) (?:ma |la )?(?:recompense )?quotidienne$", "daily", "Récupérer la récompense quotidienne"),
-        (r"^(?:prends|prend|recupere|donne moi) (?:ma |la )?(?:recompense )?hebdomadaire$", "weekly", "Récupérer la récompense hebdomadaire"),
+        (r"^(?:ouvre|cree|crée|faire|fais) (?:un |mon )?ticket$", "ticket", "Ouvrir les tickets"),
+        (r"^(?:prends|prend|recupere|récupère|donne moi) (?:ma |la )?(?:recompense |récompense )?quotidienne$", "daily", "Récupérer la récompense quotidienne"),
+        (r"^(?:prends|prend|recupere|récupère|donne moi) (?:ma |la )?(?:recompense |récompense )?hebdomadaire$", "weekly", "Récupérer la récompense hebdomadaire"),
         (r"^(?:fais moi travailler|je veux travailler|travaille|work)$", "work", "Travailler"),
     )
     for pattern, command, label in safe_patterns:
