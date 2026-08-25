@@ -27,6 +27,23 @@ FOOTER_ICON: str | None = None
 
 _CUSTOM_EMOJI_RE = re.compile(r"<a?:[A-Za-z0-9_]{2,32}:\d+>")
 _SPACE_RE = re.compile(r"[ \t]{2,}")
+_EMPTY_LOG_VALUES = {
+    "aucune",
+    "aucun",
+    "aucune raison",
+    "aucune raison fournie",
+    "non précisé",
+    "non précisée",
+    "non precise",
+    "non precisee",
+    "null",
+    "none",
+    "undefined",
+    "nan",
+}
+_LEGACY_FILLER_FIELDS = {
+    "historique",
+}
 
 
 def _is_emoji_codepoint(code: int) -> bool:
@@ -54,6 +71,10 @@ def clip(value: Any, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(1, limit - 1)].rstrip() + "…"
+
+
+def _empty_log_value(value: Any) -> bool:
+    return str(value or "").strip().casefold() in _EMPTY_LOG_VALUES
 
 
 def set_footer_icon(url: str) -> None:
@@ -119,8 +140,19 @@ def _base(
 # ---------------------------------------------------------------------------
 # FORMAT A — petites cartes d'interface
 # ---------------------------------------------------------------------------
-def standard(title: str, description: str = "", *, thumbnail: str | None = None, timestamp: bool = False) -> discord.Embed:
-    return _base(title, description or None, thumbnail=thumbnail, timestamp=timestamp)
+def standard(
+    title: str,
+    description: str = "",
+    *,
+    thumbnail: str | None = None,
+    timestamp: bool = False,
+) -> discord.Embed:
+    return _base(
+        title,
+        description or None,
+        thumbnail=thumbnail,
+        timestamp=timestamp,
+    )
 
 
 def success(description: str, title: str = "Action effectuée") -> discord.Embed:
@@ -153,7 +185,13 @@ def category(category_name: str, title: str, description: str = "") -> discord.E
     return standard(title, description)
 
 
-def panel(title: str, description: str = "", *, category_name: str = "configuration", thumbnail: str | None = None) -> discord.Embed:
+def panel(
+    title: str,
+    description: str = "",
+    *,
+    category_name: str = "configuration",
+    thumbnail: str | None = None,
+) -> discord.Embed:
     del category_name
     return standard(title, description, thumbnail=thumbnail)
 
@@ -162,13 +200,29 @@ def help_embed(title: str = "Commandes", description: str = "") -> discord.Embed
     return standard(title, description)
 
 
-def profile_embed(title: str = "Profil", description: str = "", *, thumbnail: str | None = None) -> discord.Embed:
+def profile_embed(
+    title: str = "Profil",
+    description: str = "",
+    *,
+    thumbnail: str | None = None,
+) -> discord.Embed:
     return standard(title, description, thumbnail=thumbnail)
 
 
-# Compatibilité d'API : `large()` reste disponible mais désigne explicitement le format B.
-def large(title: str, description: str = "", *, thumbnail: str | None = None, timestamp: bool = False) -> discord.Embed:
-    return _base(title, description or None, banner=True, thumbnail=thumbnail, timestamp=timestamp)
+def large(
+    title: str,
+    description: str = "",
+    *,
+    thumbnail: str | None = None,
+    timestamp: bool = False,
+) -> discord.Embed:
+    return _base(
+        title,
+        description or None,
+        banner=True,
+        thumbnail=thumbnail,
+        timestamp=timestamp,
+    )
 
 
 def _field_inline(name: str, value: str, requested: bool | None) -> bool:
@@ -176,16 +230,31 @@ def _field_inline(name: str, value: str, requested: bool | None) -> bool:
         return bool(requested)
     normalized = clean_ui_text(name, 80).casefold()
     long_labels = {
-        "raison", "motif", "message", "contenu", "avant", "après", "apres",
-        "description", "permissions", "permissions ajoutées", "permissions supprimées",
-        "changements", "transcript", "pièces jointes", "pieces jointes",
+        "raison",
+        "motif",
+        "message",
+        "contenu",
+        "avant",
+        "après",
+        "apres",
+        "description",
+        "permissions",
+        "permissions ajoutées",
+        "permissions supprimées",
+        "changements",
+        "transcript",
+        "pièces jointes",
+        "pieces jointes",
     }
     if normalized in long_labels:
         return False
     return len(str(value or "")) <= 120 and str(value or "").count("\n") <= 1
 
 
-def add_fields(embed: discord.Embed, fields: Iterable[tuple[str, Any, bool | None] | tuple[str, Any]]) -> discord.Embed:
+def add_fields(
+    embed: discord.Embed,
+    fields: Iterable[tuple[str, Any, bool | None] | tuple[str, Any]],
+) -> discord.Embed:
     for item in fields:
         if len(item) == 2:
             name, value = item
@@ -198,7 +267,11 @@ def add_fields(embed: discord.Embed, fields: Iterable[tuple[str, Any, bool | Non
         raw_value = clip(value, 1024)
         if not raw_value:
             continue
-        embed.add_field(name=safe_name, value=raw_value, inline=_field_inline(safe_name, raw_value, requested))
+        embed.add_field(
+            name=safe_name,
+            value=raw_value,
+            inline=_field_inline(safe_name, raw_value, requested),
+        )
     return embed
 
 
@@ -218,13 +291,21 @@ def log_embed(
     return add_fields(embed, fields)
 
 
-def normalize_log(source: discord.Embed, *, event_time: datetime | None = None) -> discord.Embed:
-    """Convertit un ancien embed métier en véritable grand log SentriX.
+def normalize_log(
+    source: discord.Embed,
+    *,
+    event_time: datetime | None = None,
+) -> discord.Embed:
+    """Convertit un ancien embed métier en grand log SentriX sans faux remplissage."""
+    fields = []
+    for field in source.fields:
+        safe_name = clean_ui_text(field.name, 256, "Information")
+        if safe_name.casefold() in _LEGACY_FILLER_FIELDS:
+            continue
+        if _empty_log_value(field.value):
+            continue
+        fields.append((safe_name, str(field.value), bool(field.inline)))
 
-    Tous les anciens appelants qui passent encore un embed à helpers.send_log obtiennent
-    ainsi le même renderer officiel sans réintroduire un second design system.
-    """
-    fields = [(str(field.name), str(field.value), bool(field.inline)) for field in source.fields]
     panel = log_embed(
         str(source.title or "Journal SentriX"),
         description=str(source.description or ""),
@@ -237,7 +318,10 @@ def normalize_log(source: discord.Embed, *, event_time: datetime | None = None) 
     author_name = getattr(source.author, "name", None)
     author_icon = getattr(source.author, "icon_url", None)
     if author_name:
-        panel.set_author(name=clean_ui_text(author_name, 256, "SentriX"), icon_url=str(author_icon) if author_icon else None)
+        panel.set_author(
+            name=clean_ui_text(author_name, 256, "SentriX"),
+            icon_url=str(author_icon) if author_icon else None,
+        )
     return panel
 
 
@@ -272,35 +356,55 @@ def log_entry(
         fields.append((acteur_label, _who(acteur), True))
     if extra:
         for name, value in list(extra.items())[:20]:
-            if value is not None and str(value).strip():
+            if value is not None and str(value).strip() and not _empty_log_value(value):
                 fields.append((name, value, None))
-    if raison:
+    if raison and not _empty_log_value(raison):
         fields.append(("Raison", raison, False))
     return log_embed(title, fields=fields)
 
 
-def bar(value: float, maximum: float, length: int = 10, filled_char: str = "▰", empty_char: str = "▱") -> str:
+def bar(
+    value: float,
+    maximum: float,
+    length: int = 10,
+    filled_char: str = "▰",
+    empty_char: str = "▱",
+) -> str:
     try:
         ratio = float(value) / float(maximum) if maximum else 0.0
     except (TypeError, ValueError, ZeroDivisionError):
         ratio = 0.0
-    filled = max(0, min(length, round(length * max(0.0, min(1.0, ratio)))))
+    filled = max(
+        0,
+        min(length, round(length * max(0.0, min(1.0, ratio)))),
+    )
     return filled_char * filled + empty_char * (length - filled)
 
 
 # ---------------------------------------------------------------------------
-# Filet de transport pour les anciens envois directs de journaux
+# Filet de transport pour les rares envois directs historiques de journaux
 # ---------------------------------------------------------------------------
-# Quelques systèmes historiques (notamment certaines branches des tickets) possèdent
-# encore un `channel.send(embed=...)` direct. Dès qu'ils utilisent le renderer officiel
-# FORMAT B, ce garde-fou impose la même politique no-ping que utils.log_service sans
-# modifier les messages normaux du bot ni les notifications volontaires.
-_LOG_ALLOWED_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=False)
-_ORIGINAL_MESSAGEABLE_SEND = getattr(discord.abc.Messageable.send, "_sentrix_original_send", discord.abc.Messageable.send)
+# Les nouveaux logs passent par utils.log_service. Quelques branches historiques de
+# tickets peuvent encore envoyer directement un embed déjà rendu en FORMAT B vers leur
+# salon dédié par type. Ce garde-fou ne touche qu'aux embeds portant la bannière officielle.
+_LOG_ALLOWED_MENTIONS = discord.AllowedMentions(
+    everyone=False,
+    users=False,
+    roles=False,
+    replied_user=False,
+)
+_ORIGINAL_MESSAGEABLE_SEND = getattr(
+    discord.abc.Messageable.send,
+    "_sentrix_original_send",
+    discord.abc.Messageable.send,
+)
 
 
 def is_official_log_embed(embed: discord.Embed | None) -> bool:
-    return bool(embed is not None and getattr(embed.image, "url", None) == SENTRIX_BANNER_URL)
+    return bool(
+        embed is not None
+        and getattr(embed.image, "url", None) == SENTRIX_BANNER_URL
+    )
 
 
 if not getattr(discord.abc.Messageable.send, "_sentrix_log_transport_guard", False):
@@ -310,10 +414,20 @@ if not getattr(discord.abc.Messageable.send, "_sentrix_log_transport_guard", Fal
         official = is_official_log_embed(embed)
         if not official and embeds_arg:
             official = any(is_official_log_embed(item) for item in embeds_arg)
+
         if official:
-            # Cette affectation est volontairement forcée : un journal ne peut jamais
-            # réactiver users/roles/everyone par erreur dans un appelant historique.
             kwargs["allowed_mentions"] = _LOG_ALLOWED_MENTIONS
+            # Les anciens tickets dédiés utilisent déjà le renderer officiel mais pas
+            # toujours log_service. On leur ajoute uniquement les actions de consultation.
+            if kwargs.get("view") is None and embed is not None:
+                try:
+                    from utils.helpers import _derive_log_view
+                    derived = _derive_log_view(embed)
+                    if derived is not None:
+                        kwargs["view"] = derived
+                except Exception:
+                    pass
+
         return await _ORIGINAL_MESSAGEABLE_SEND(self, *args, **kwargs)
 
     _sentrix_messageable_send._sentrix_log_transport_guard = True
