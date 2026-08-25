@@ -9,6 +9,11 @@ COGS_INIT = (ROOT / "cogs" / "__init__.py").read_text(encoding="utf-8")
 MAIN = (ROOT / "main.py").read_text(encoding="utf-8")
 GUILD_ARRIVAL = (ROOT / "cogs" / "guild_arrival.py").read_text(encoding="utf-8")
 FINAL_INTERACTION = (ROOT / "cogs" / "final_interaction_policy.py").read_text(encoding="utf-8")
+LEGACY_COORDINATORS = {
+    "plain_response_policy.py": "plain_response_policy",
+    "setup_mobile_cleanup.py": "setup_mobile_cleanup",
+    "command_no_emoji_runtime.py": "command_no_emoji_runtime",
+}
 
 
 def _main_extensions() -> list[str]:
@@ -27,15 +32,41 @@ def _main_extensions() -> list[str]:
     return []
 
 
+def _external_imports(module_name: str, own_filename: str) -> list[str]:
+    hits: list[str] = []
+    import_needles = (
+        f"from .{module_name} import",
+        f"from cogs.{module_name} import",
+        f"import cogs.{module_name}",
+        f"from cogs import {module_name}",
+    )
+    for path in ROOT.rglob("*.py"):
+        if path.name in {own_filename, Path(__file__).name}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        if any(needle in text for needle in import_needles):
+            hits.append(str(path.relative_to(ROOT)))
+    return hits
+
+
 def test_legacy_global_coordinators_are_out_of_active_runtime():
-    # Ces fichiers peuvent rester quelques temps dans le dépôt pour compatibilité historique,
-    # mais le coordinateur actif ne doit plus les importer ni les installer.
     assert "from .plain_response_policy" not in COGS_INIT
     assert "from .setup_mobile_cleanup" not in COGS_INIT
     assert "from .command_no_emoji_runtime" not in COGS_INIT
     assert "install_plain_response_policy" not in COGS_INIT
     assert "install_setup_mobile_cleanup" not in COGS_INIT
     assert "install_command_no_emoji" not in COGS_INIT
+
+
+def test_legacy_coordinators_have_no_external_python_imports():
+    leftovers = {
+        module: _external_imports(module, filename)
+        for filename, module in LEGACY_COORDINATORS.items()
+    }
+    assert leftovers == {module: [] for module in LEGACY_COORDINATORS.values()}
 
 
 def test_global_runtime_is_finalized_once_at_end_of_extension_list():
