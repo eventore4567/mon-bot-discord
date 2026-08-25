@@ -15,10 +15,9 @@ from discord.ext import commands
 
 from . import slash_command_budget
 
-# Le garde slash doit être actif avant le premier Cog.
 slash_command_budget.install_class_guard()
-
 logger = logging.getLogger("bot.final-runtime")
+_INTERNAL_PARAMS = {"self", "cog", "ctx", "context", "interaction"}
 
 
 def _install_odboug_account_username(bot: commands.Bot) -> None:
@@ -81,22 +80,45 @@ async def _bootstrap_community_growth(bot: commands.Bot) -> None:
         logger.exception("Community Growth impossible à initialiser.")
 
 
-def _repair_final_command_contracts(bot: commands.Bot) -> int:
-    """Répare une dernière fois le cache de paramètres après TOUS les vieux wrappers.
+def _remove_internal_parser_params(bot: commands.Bot) -> int:
+    """Supprime les paramètres runtime qui ne peuvent jamais provenir d'un utilisateur.
 
-    Certaines couches historiques sont encore nécessaires à la logique métier et remplacent
-    des callbacks pendant le bootstrap. V18 sait retrouver le callback original ; l'appeler
-    ici, juste avant la construction du registre `/`, garantit que `ctx`/`self` ne deviennent
-    jamais des arguments utilisateur et permet de restaurer les hybrides valides.
+    Discord.py construit normalement `Command.params` sans `self`/`ctx`. Quelques vieux
+    wrappers historiques l'ont recalculé depuis leur propre callback et ont réintroduit
+    `ctx`, ce qui cassait des commandes parfaitement valides comme `+withdraw 50` et
+    empêchait certaines HybridCommand d'être reconstruites en `/`.
     """
+    changed = 0
+    for command in bot.walk_commands():
+        params = getattr(command, "params", None)
+        if not isinstance(params, dict):
+            continue
+        cleaned = {
+            name: parameter for name, parameter in params.items()
+            if str(name).casefold().lstrip("_") not in _INTERNAL_PARAMS
+        }
+        if len(cleaned) != len(params):
+            command.params = cleaned
+            changed += 1
+    if changed:
+        logger.info("Parsing final : paramètres internes retirés de %s commande(s).", changed)
+    return changed
+
+
+def _repair_final_command_contracts(bot: commands.Bot) -> int:
+    """Répare puis assainit les contrats après TOUS les wrappers historiques."""
+    repaired = 0
     try:
         from .command_runtime_hardening_v18 import repair_wrapped_signatures
         repaired = repair_wrapped_signatures(bot)
-        logger.info("Contrats de commandes finalisés : %s signature(s) réparée(s).", repaired)
-        return repaired
     except Exception:
         logger.exception("Réparation finale des signatures impossible.")
-        return 0
+    cleaned = _remove_internal_parser_params(bot)
+    logger.info(
+        "Contrats de commandes finalisés : %s signature(s) réparée(s), %s cache(s) assaini(s).",
+        repaired, cleaned,
+    )
+    return repaired + cleaned
 
 
 async def install(bot: commands.Bot) -> None:
@@ -104,16 +126,12 @@ async def install(bot: commands.Bot) -> None:
     _install_odboug_account_username(bot)
     _repair_final_command_contracts(bot)
 
-    # Propriétaire unique du registre `/` : restaure les anciennes commandes utiles,
-    # garde les centres regroupés et respecte strictement le plafond Discord.
     try:
         from . import easy_command_surface
         await easy_command_surface.install(bot)
     except Exception:
         logger.exception("Surface slash canonique impossible à finaliser.")
 
-    # Propriétaire unique de +help / /help. Cette installation arrive après les anciennes
-    # couches d'aide : elles ne peuvent donc plus réécrire l'accueil final.
     try:
         from . import help_simple
         help_simple.install(bot)
