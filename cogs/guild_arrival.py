@@ -140,7 +140,6 @@ class GuildArrivalView(discord.ui.View):
                 )
             )
 
-        # Toujours présent : le serveur officiel ne dépend plus d'une variable Railway.
         support = _safe_url(SUPPORT_URL) or OFFICIAL_SUPPORT_URL
         self.add_item(
             discord.ui.Button(
@@ -325,13 +324,7 @@ class GuildArrival(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    # La finition visuelle se branche ici car guild_arrival est une extension de base
-    # chargée sur toutes les instances SentriX. Elle ne crée aucune commande.
-    try:
-        from .sentrix_v3_global_style import install as install_global_style
-        install_global_style(bot)
-    except Exception:
-        logger.exception("Impossible d'installer la finition visuelle V3.2 ; démarrage poursuivi.")
-
+    # GuildArrival gère uniquement l'accueil. Le renderer global est finalisé par
+    # cogs.finalize_runtime après le chargement complet des extensions.
     await bot.add_cog(GuildArrival(bot))
     bot.add_view(GuildArrivalView(bot))

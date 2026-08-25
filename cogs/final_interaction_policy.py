@@ -1,16 +1,14 @@
 """Politique finale des interactions SentriX.
 
-Cette couche est installée près de la fin par ``cogs/__init__.py`` et possède la politique
-finale des commandes slash :
-- les embeds restent des cartes et utilisent le même moteur visuel que les commandes + ;
-- les commandes hybrides qui répondent via ``ctx.send`` repassent elles aussi dans V3.4 ;
-- les réponses slash normales sont publiques par défaut dans le salon ;
-- une commande qui demande explicitement ``ephemeral=True`` reste privée ;
-- les erreurs et refus de permission restent privés ;
-- les éditions après defer et les followups utilisent le même moteur visuel.
+Cette couche possède l'unique transport final des réponses de commandes :
+- les embeds utilisent le même moteur visuel pour + et / ;
+- les réponses slash normales sont publiques par défaut ;
+- ``ephemeral=True`` explicite reste privé ;
+- erreurs et refus de permission restent privés ;
+- éditions après defer et followups passent dans le même moteur.
 
-Les logs serveur ne sont pas concernés : ce sont des enregistrements, pas des réponses de
-commande.
+Les anciens transports V3.2/V3.3/V3.4 ne sont plus réinstallés avant cette politique. De
+V3.4, seuls le watchdog slash et le routage IA rapide sont conservés.
 """
 from __future__ import annotations
 
@@ -66,6 +64,15 @@ def _disable_legacy_embed_flattening() -> None:
     community_v32.simple_embed_text = keep_embed
     community_v33._simple_embed_to_text = keep_embed
     community_v34._embed_to_text = keep_embed
+
+
+def _install_v34_runtime_only(bot: commands.Bot) -> None:
+    """Conserve les briques utiles de V3.4 sans ses anciens transports visuels."""
+    try:
+        community_v34._install_slash_watchdog_policy(bot)
+        community_v34._install_fast_ai(bot)
+    except Exception:
+        logger.exception("Impossible d'installer les briques runtime utiles de V3.4.")
 
 
 def _clean(value: Any) -> str:
@@ -161,7 +168,6 @@ def _unwrap(callable_obj):
 
 
 def _style_context_payload(ctx: commands.Context, args: tuple, kwargs: dict):
-    """Même pipeline V3.4 pour +commande et /commande hybride."""
     return premium_style.style_kwargs(
         args,
         kwargs,
@@ -184,8 +190,6 @@ def _install_context_send() -> None:
         root = _root_from_ctx(self)
         args, kwargs = _style_context_payload(self, args, kwargs)
         args, kwargs = _convert_kwargs(args, kwargs, root=root)
-        # V3.5 : ne force plus ephemeral pour les slash hybrides. Une commande qui met
-        # explicitement ephemeral=True conserve ce choix, les autres sont publiques.
         return await base(self, *args, **kwargs)
 
     send_final._sentrix_final_plain = True
@@ -213,8 +217,6 @@ def _install_interaction_response() -> None:
                 include_brand_asset=True,
             )
             args, kwargs = _convert_kwargs(args, kwargs, root=root)
-            # Aucun setdefault(ephemeral=True) ici : les réponses normales sont publiques.
-            # On respecte toutefois un ephemeral=True demandé explicitement par la commande.
             return await base_send(self, *args, **kwargs)
 
         response_send._sentrix_final_plain = True
@@ -284,7 +286,6 @@ def _install_followup_send() -> None:
     base = _unwrap(current)
 
     async def webhook_send(self: discord.Webhook, *args, **kwargs):
-        # Uniquement les followups d'interaction ; les webhooks serveur/logs restent intacts.
         if getattr(self, "type", None) == discord.WebhookType.application:
             args, kwargs = premium_style.style_kwargs(
                 args,
@@ -302,7 +303,6 @@ def _install_followup_send() -> None:
 
 
 async def _plain_permission_denial(interaction: discord.Interaction, decision) -> None:
-    """Les refus de permission restent volontairement privés."""
     text = _clean(getattr(decision, "reason", None) or "Tu n'as pas accès à cette commande.")
     try:
         if interaction.response.is_done():
@@ -355,7 +355,6 @@ def _install_tree_error(bot: commands.Bot) -> None:
             logger.error("Erreur slash finale dans /%s : %s", command_name, type(original).__name__, exc_info=original)
         text = _slash_error_text(error)
         try:
-            # Les erreurs restent privées même si les réponses normales sont publiques.
             if interaction.response.is_done():
                 await interaction.followup.send(text, ephemeral=True)
             else:
@@ -368,9 +367,9 @@ def _install_tree_error(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    """Réapplique la politique finale après les anciens runtimes."""
+    """Installe directement la politique finale, sans réempiler les transports V3.4."""
     _disable_legacy_embed_flattening()
-    community_v34.install(bot)
+    _install_v34_runtime_only(bot)
 
     _install_context_send()
     _install_interaction_response()
@@ -382,5 +381,5 @@ def install(bot: commands.Bot) -> None:
     bot._sentrix_final_interaction_policy = True
     bot._sentrix_slash_public_v35 = True
     logger.info(
-        "Politique finale SentriX V3.5 active : style identique +/slash, réponses slash normales publiques, erreurs privées."
+        "Politique finale SentriX active : un seul transport +/slash, réponses normales publiques, erreurs privées."
     )
