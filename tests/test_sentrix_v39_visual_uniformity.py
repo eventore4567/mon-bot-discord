@@ -13,20 +13,33 @@ def _command(name: str, cog: str = "Configuration"):
     return SimpleNamespace(qualified_name=name, cog_name=cog)
 
 
-def test_large_panel_removes_artificial_padding_and_keeps_real_title():
-    embed = discord.Embed(title="SentriX • Configuration", description="Gère le serveur depuis un seul panneau.")
-    embed.add_field(name="Serveur", value="Prêt", inline=True)
-    embed.add_field(name="Modules", value="Tickets\nLogs\nAutoMod\nNiveaux", inline=True)
+def test_short_setup_is_compact_and_has_no_artificial_padding():
+    embed = discord.Embed(
+        title="SentriX • Configuration",
+        description="Choisis une catégorie ci-dessous pour configurer SentriX.",
+    )
     for _ in range(4):
         embed.add_field(name="\u200b", value="\u200b", inline=True)
 
     result = style._refine_embed(embed, command=_command("setup"), category="configuration")
 
     assert result.title == "Configuration"
-    assert len(result.fields) == 2
-    assert all(str(field.name).replace("\u200b", "").strip() for field in result.fields)
+    assert style._layout_size(result, command=_command("setup"), category="configuration") == "compact"
+    assert len(result.fields) == 0
+    assert result.author.name is None
+
+
+def test_rich_content_still_uses_panel_layout():
+    embed = discord.Embed(title="SentriX • Configuration", description="Panneau détaillé.")
+    embed.add_field(name="Serveur", value="Prêt", inline=True)
+    embed.add_field(name="Modules", value="Tickets\nLogs\nAutoMod\nNiveaux", inline=True)
+    embed.add_field(name="Sécurité", value="Active", inline=True)
+
+    result = style._refine_embed(embed, command=_command("setup"), category="configuration")
+
+    assert style._layout_size(result, command=_command("setup"), category="configuration") == "panel"
     assert result.author.name == "SentriX"
-    assert result.fields[1].inline is False
+    assert len(result.fields) == 3
 
 
 def test_compact_cards_do_not_receive_fake_fields():
@@ -35,6 +48,7 @@ def test_compact_cards_do_not_receive_fake_fields():
     assert style._layout_size(result, command=_command("ping", "Utility"), category="utility") == "compact"
     assert len(result.fields) == 0
     assert result.title == "Utilitaires"
+    assert result.author.name is None
 
 
 def test_panel_deduplicates_title_and_repeated_information():
@@ -52,6 +66,13 @@ def test_panel_deduplicates_title_and_repeated_information():
     assert result.title == "Sécurité"
     assert (result.description or "").count("Protection active") == 1
     assert [field.name for field in result.fields] == ["AutoMod"]
+
+
+def test_footer_is_canonical_and_does_not_repeat_sentrix():
+    embed = discord.Embed(title="SentriX • Utilitaires", description="Réponse courte.")
+    embed.set_footer(text="SentriX • SentriX • SentriX")
+    result = style._refine_embed(embed, command=_command("ping", "Utility"), category="utility")
+    assert result.footer.text == "SentriX"
 
 
 def test_navigation_icons_are_static_and_components_never_animated():
