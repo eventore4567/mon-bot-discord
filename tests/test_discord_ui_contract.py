@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import discord
 
@@ -62,6 +64,23 @@ class DiscordUiContractTests(unittest.TestCase):
         self.assertNotIn("roles", payload)
         self.assertFalse(payload.get("replied_user", False))
 
+    def test_log_producer_is_not_tied_to_a_railway_uuid(self):
+        source = (ROOT / "utils" / "log_service.py").read_text(encoding="utf-8")
+        self.assertNotIn("PRIMARY_RAILWAY_SERVICE_ID", source)
+        self.assertNotIn("d4fb0c3a-d62b-4817-aae1-3cfc859d32c0", source)
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(log_service.is_primary_process())
+        with patch.dict(os.environ, {"RAILWAY_SERVICE_ID": "un-nouvel-id"}, clear=True):
+            self.assertTrue(log_service.is_primary_process())
+        with patch.dict(os.environ, {"SENTRIX_LOG_PRODUCER": "false"}, clear=True):
+            self.assertFalse(log_service.is_primary_process())
+
+    def test_legacy_log_settings_have_self_heal_path(self):
+        source = (ROOT / "utils" / "log_service.py").read_text(encoding="utf-8")
+        self.assertIn("untouched_migration", source)
+        self.assertIn("_legacy_channel_id", source)
+        self.assertIn("UPDATE log_settings SET enabled = 1, channel_id = ?", source)
+
     def test_log_layout_skips_empty_filler_and_uses_inline_width(self):
         panel = embeds.log_embed(
             "Rôle retiré",
@@ -87,11 +106,12 @@ class DiscordUiContractTests(unittest.TestCase):
         self.assertEqual(view.children[2].custom_id, "sxid:1355855757991481476")
         self.assertTrue(all(item.row == 0 for item in view.children))
 
-    def test_help_is_registry_backed_and_compact(self):
+    def test_help_is_registry_backed_compact_and_preserves_member_state(self):
         source = (ROOT / "cogs" / "help.py").read_text(encoding="utf-8")
         self.assertIn("bot.walk_commands()", source)
         self.assertIn("bot.tree.get_commands", source)
-        self.assertIn("PAGE_SIZE = 10", source)
+        self.assertIn("PAGE_SIZE = 8", source)
+        self.assertIn("member=interaction.user", source)
         self.assertIn("SentriX — Centre d’aide", source)
         self.assertIn("Rechercher", source)
         self.assertIn("Précédent", source)
