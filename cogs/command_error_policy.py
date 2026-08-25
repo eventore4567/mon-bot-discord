@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import traceback
-from typing import Any
 
 import discord
 from discord.ext import commands
@@ -37,8 +36,11 @@ def _safe_usage(ctx: commands.Context) -> str:
 
 
 def _error_embed(text: str, *, command=None, guild=None, requester=None, bot_user=None, kind: str = "danger") -> discord.Embed:
-    title = "À vérifier" if kind == "warning" else "Action impossible"
-    embed = discord.Embed(title=title, description=text, colour=discord.Colour(0xF0B232 if kind == "warning" else 0xED4245))
+    embed = discord.Embed(
+        title="À vérifier" if kind == "warning" else "Action impossible",
+        description=text,
+        colour=discord.Colour(0xF0B232 if kind == "warning" else 0xED4245),
+    )
     return command_ui_policy.style_embed(
         embed,
         command=command,
@@ -51,16 +53,11 @@ def _error_embed(text: str, *, command=None, guild=None, requester=None, bot_use
 
 def _permission_labels(names) -> str:
     labels = {
-        "administrator": "Administrateur",
-        "manage_guild": "Gérer le serveur",
-        "manage_channels": "Gérer les salons",
-        "manage_roles": "Gérer les rôles",
-        "manage_messages": "Gérer les messages",
-        "manage_nicknames": "Gérer les pseudos",
-        "moderate_members": "Exclure temporairement des membres",
-        "kick_members": "Expulser des membres",
-        "ban_members": "Bannir des membres",
-        "move_members": "Déplacer des membres",
+        "administrator": "Administrateur", "manage_guild": "Gérer le serveur",
+        "manage_channels": "Gérer les salons", "manage_roles": "Gérer les rôles",
+        "manage_messages": "Gérer les messages", "manage_nicknames": "Gérer les pseudos",
+        "moderate_members": "Exclure temporairement des membres", "kick_members": "Expulser des membres",
+        "ban_members": "Bannir des membres", "move_members": "Déplacer des membres",
         "manage_emojis_and_stickers": "Gérer les expressions",
     }
     return ", ".join(labels.get(name, str(name).replace("_", " ").capitalize()) for name in names)
@@ -126,6 +123,24 @@ def _slash_error_text(error: BaseException) -> tuple[str, str, bool]:
     return "Cette commande a rencontré un problème technique. Réessaie dans quelques instants.", "danger", False
 
 
+def _claim_slash_error(bot: commands.Bot, interaction: discord.Interaction) -> bool:
+    """Empêche deux hooks de répondre à la même interaction sans écrire sur un objet slots."""
+    interaction_id = int(getattr(interaction, "id", 0) or 0)
+    if not interaction_id:
+        return True
+    handled = getattr(bot, "_sentrix_handled_slash_errors", None)
+    if not isinstance(handled, set):
+        handled = set()
+        bot._sentrix_handled_slash_errors = handled
+    if interaction_id in handled:
+        return False
+    handled.add(interaction_id)
+    if len(handled) > 5000:
+        # Les IDs Discord augmentent avec le temps : garder les plus récents suffit.
+        bot._sentrix_handled_slash_errors = set(sorted(handled)[-2500:])
+    return True
+
+
 async def prefix_error_handler(bot: commands.Bot, ctx: commands.Context, error: commands.CommandError) -> None:
     if getattr(ctx, "_sentrix_error_answered", False):
         return
@@ -152,10 +167,8 @@ async def prefix_error_handler(bot: commands.Bot, ctx: commands.Context, error: 
 
 
 async def slash_error_handler(bot: commands.Bot, interaction: discord.Interaction, error: discord.app_commands.AppCommandError) -> None:
-    marker = "_sentrix_error_answered"
-    if getattr(interaction, marker, False):
+    if not _claim_slash_error(bot, interaction):
         return
-    setattr(interaction, marker, True)
     try:
         from .command_hardening_v41 import release_slash
         release_slash(interaction)
@@ -207,4 +220,4 @@ def install(bot: commands.Bot) -> None:
     logger.info("Gestionnaire d'erreurs canonique actif pour + et /.")
 
 
-__all__ = ["install", "prefix_error_handler", "slash_error_handler", "_safe_usage"]
+__all__ = ["install", "prefix_error_handler", "slash_error_handler", "_safe_usage", "_claim_slash_error"]
