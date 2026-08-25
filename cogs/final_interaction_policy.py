@@ -1,15 +1,16 @@
-"""Final interaction policy for SentriX.
+"""Politique finale des interactions SentriX.
 
-This module is intentionally installed near the end by cogs/__init__.py. It owns the final
-slash reliability policy after every historical runtime wrapper has finished installing:
-- command embeds are preserved so the interface never alternates between card and text;
-- real control panels keep their card UI;
-- slash errors and permission denials are text, private and deterministic;
-- direct interaction replies, edits after defer and application-webhook followups all use
-  the same conversion policy;
-- the final slash watchdog from V3.4 is re-applied after legacy runtimes.
+Cette couche est installée près de la fin par ``cogs/__init__.py`` et possède la politique
+finale des commandes slash :
+- les embeds restent des cartes et utilisent le même moteur visuel que les commandes + ;
+- les commandes hybrides qui répondent via ``ctx.send`` repassent elles aussi dans V3.4 ;
+- les réponses slash normales sont publiques par défaut dans le salon ;
+- une commande qui demande explicitement ``ephemeral=True`` reste privée ;
+- les erreurs et refus de permission restent privés ;
+- les éditions après defer et les followups utilisent le même moteur visuel.
 
-It does not touch server log embeds: logs are records, not conversational replies.
+Les logs serveur ne sont pas concernés : ce sont des enregistrements, pas des réponses de
+commande.
 """
 from __future__ import annotations
 
@@ -24,7 +25,6 @@ from utils import premium_style
 
 logger = logging.getLogger("bot.final-interaction-policy")
 
-# Conservé pour compatibilité avec les modules qui importent encore cette constante.
 RICH_ROOTS = frozenset({
     "help",
     "profile",
@@ -59,12 +59,7 @@ _GENERIC_TITLES = frozenset({
 
 
 def _disable_legacy_embed_flattening() -> None:
-    """Neutralise toutes les anciennes couches qui transformaient les cartes en texte.
-
-    Trois générations historiques (V3.2, V3.3 et V3.4) possédaient chacune leur propre
-    convertisseur. N'en désactiver qu'un laissait donc réapparaître le rendu libre lors
-    d'un clic sur Suivant, d'une sélection ou d'une modification de message.
-    """
+    """Neutralise les anciennes couches qui transformaient les cartes en texte."""
     def keep_embed(*_args, **_kwargs):
         return None
 
@@ -75,7 +70,6 @@ def _disable_legacy_embed_flattening() -> None:
 
 def _clean(value: Any) -> str:
     try:
-        from . import community_v32
         return community_v32.strip_decorative_emoji(value or "").strip()
     except Exception:
         return str(value or "").strip()
@@ -112,12 +106,7 @@ def _has_media(embed: discord.Embed) -> bool:
 
 
 def _embed_to_plain(embed: discord.Embed | None, *, root: str = "") -> str | None:
-    """Ne convertit plus jamais un embed en texte simple.
-
-    L'ancienne politique expliquait exactement l'alternance signalée : les panneaux et
-    médias restaient dans un cadre, tandis que les réponses courtes en sortaient. Garder
-    ce point d'entrée en no-op préserve la compatibilité sans modifier les données.
-    """
+    """Les embeds de commandes ne sont plus convertis en texte simple."""
     del embed, root
     return None
 
@@ -171,27 +160,43 @@ def _unwrap(callable_obj):
     return current
 
 
+def _style_context_payload(ctx: commands.Context, args: tuple, kwargs: dict):
+    """Même pipeline V3.4 pour +commande et /commande hybride."""
+    return premium_style.style_kwargs(
+        args,
+        kwargs,
+        command=getattr(ctx, "command", None),
+        guild=getattr(ctx, "guild", None),
+        requester=getattr(ctx, "author", None),
+        bot_user=getattr(getattr(ctx, "bot", None), "user", None),
+        allow_content_wrap=True,
+        include_brand_asset=True,
+    )
+
+
 def _install_context_send() -> None:
     current = commands.Context.send
-    if getattr(current, "_sentrix_final_plain", False):
+    if getattr(current, "_sentrix_final_plain_v35", False):
         return
     base = _unwrap(current)
 
-    async def send_plain(self: commands.Context, *args, **kwargs):
+    async def send_final(self: commands.Context, *args, **kwargs):
         root = _root_from_ctx(self)
-        if self.interaction is not None and root and root not in community_v34.SHARED_SLASH_ROOTS:
-            kwargs["ephemeral"] = True
+        args, kwargs = _style_context_payload(self, args, kwargs)
         args, kwargs = _convert_kwargs(args, kwargs, root=root)
+        # V3.5 : ne force plus ephemeral pour les slash hybrides. Une commande qui met
+        # explicitement ephemeral=True conserve ce choix, les autres sont publiques.
         return await base(self, *args, **kwargs)
 
-    send_plain._sentrix_final_plain = True
-    send_plain._sentrix_original = base
-    commands.Context.send = send_plain
+    send_final._sentrix_final_plain = True
+    send_final._sentrix_final_plain_v35 = True
+    send_final._sentrix_original = base
+    commands.Context.send = send_final
 
 
 def _install_interaction_response() -> None:
     current_send = discord.InteractionResponse.send_message
-    if not getattr(current_send, "_sentrix_final_plain", False):
+    if not getattr(current_send, "_sentrix_final_public_v35", False):
         base_send = _unwrap(current_send)
 
         async def response_send(self, *args, **kwargs):
@@ -208,16 +213,17 @@ def _install_interaction_response() -> None:
                 include_brand_asset=True,
             )
             args, kwargs = _convert_kwargs(args, kwargs, root=root)
-            if root and root not in community_v34.SHARED_SLASH_ROOTS:
-                kwargs.setdefault("ephemeral", True)
+            # Aucun setdefault(ephemeral=True) ici : les réponses normales sont publiques.
+            # On respecte toutefois un ephemeral=True demandé explicitement par la commande.
             return await base_send(self, *args, **kwargs)
 
         response_send._sentrix_final_plain = True
+        response_send._sentrix_final_public_v35 = True
         response_send._sentrix_original = base_send
         discord.InteractionResponse.send_message = response_send
 
     current_edit = discord.InteractionResponse.edit_message
-    if not getattr(current_edit, "_sentrix_final_plain", False):
+    if not getattr(current_edit, "_sentrix_final_public_v35", False):
         base_edit = _unwrap(current_edit)
 
         async def response_edit(self, *args, **kwargs):
@@ -238,13 +244,14 @@ def _install_interaction_response() -> None:
             return await base_edit(self, *args, **kwargs)
 
         response_edit._sentrix_final_plain = True
+        response_edit._sentrix_final_public_v35 = True
         response_edit._sentrix_original = base_edit
         discord.InteractionResponse.edit_message = response_edit
 
 
 def _install_original_response_edit() -> None:
     current = discord.Interaction.edit_original_response
-    if getattr(current, "_sentrix_final_plain", False):
+    if getattr(current, "_sentrix_final_public_v35", False):
         return
     base = _unwrap(current)
 
@@ -265,18 +272,19 @@ def _install_original_response_edit() -> None:
         return await base(self, *args, **kwargs)
 
     edit_original._sentrix_final_plain = True
+    edit_original._sentrix_final_public_v35 = True
     edit_original._sentrix_original = base
     discord.Interaction.edit_original_response = edit_original
 
 
 def _install_followup_send() -> None:
     current = discord.Webhook.send
-    if getattr(current, "_sentrix_final_plain", False):
+    if getattr(current, "_sentrix_final_public_v35", False):
         return
     base = _unwrap(current)
 
     async def webhook_send(self: discord.Webhook, *args, **kwargs):
-        # Only interaction followups. Normal server webhooks/log webhooks are untouched.
+        # Uniquement les followups d'interaction ; les webhooks serveur/logs restent intacts.
         if getattr(self, "type", None) == discord.WebhookType.application:
             args, kwargs = premium_style.style_kwargs(
                 args,
@@ -288,11 +296,13 @@ def _install_followup_send() -> None:
         return await base(self, *args, **kwargs)
 
     webhook_send._sentrix_final_plain = True
+    webhook_send._sentrix_final_public_v35 = True
     webhook_send._sentrix_original = base
     discord.Webhook.send = webhook_send
 
 
 async def _plain_permission_denial(interaction: discord.Interaction, decision) -> None:
+    """Les refus de permission restent volontairement privés."""
     text = _clean(getattr(decision, "reason", None) or "Tu n'as pas accès à cette commande.")
     try:
         if interaction.response.is_done():
@@ -345,6 +355,7 @@ def _install_tree_error(bot: commands.Bot) -> None:
             logger.error("Erreur slash finale dans /%s : %s", command_name, type(original).__name__, exc_info=original)
         text = _slash_error_text(error)
         try:
+            # Les erreurs restent privées même si les réponses normales sont publiques.
             if interaction.response.is_done():
                 await interaction.followup.send(text, ephemeral=True)
             else:
@@ -357,9 +368,7 @@ def _install_tree_error(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    """Re-apply the final interaction policy after every legacy runtime installer."""
-    # V3.4 owns the fast AI and slash defer cleanup. Re-applying it here makes the final
-    # order deterministic even if runtime_quality_v25 is not loaded by a particular boot.
+    """Réapplique la politique finale après les anciens runtimes."""
     _disable_legacy_embed_flattening()
     community_v34.install(bot)
 
@@ -371,4 +380,7 @@ def install(bot: commands.Bot) -> None:
     _install_tree_error(bot)
 
     bot._sentrix_final_interaction_policy = True
-    logger.info("Politique finale SentriX active : embeds cohérents, réponses slash privées et aucun vieux runtime après elle.")
+    bot._sentrix_slash_public_v35 = True
+    logger.info(
+        "Politique finale SentriX V3.5 active : style identique +/slash, réponses slash normales publiques, erreurs privées."
+    )
