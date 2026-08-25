@@ -6,6 +6,11 @@ from cogs import sentrix_emoji_markup_guard_v361 as guard
 from cogs import sentrix_emoji_runtime as ui
 
 
+class DummyView:
+    def __init__(self, children):
+        self.children = list(children)
+
+
 def test_repairs_legacy_a_fragments() -> None:
     assert guard._repair_broken("a a a Centre de contrôle") == "Centre de contrôle"
     assert guard._repair_broken("<a Sécurité & modération") == "Sécurité & modération"
@@ -47,13 +52,15 @@ def test_help_embed_does_not_keep_broken_markup() -> None:
 
 def test_buttons_use_simple_unicode_not_custom_animated_emoji() -> None:
     guard.install(None)
-    view = discord.ui.View(timeout=None)
-    view.add_item(discord.ui.Button(label="Setup & logs", custom_id="setup"))
-    view.add_item(discord.ui.Button(label="Sécurité", custom_id="security"))
-    view.add_item(discord.ui.Button(label="Modération", custom_id="moderation"))
-    view.add_item(discord.ui.Button(label="Tickets", custom_id="tickets"))
-    view.add_item(discord.ui.Button(label="Rechercher", custom_id="search"))
-    view.add_item(discord.ui.Button(label="Fermer", custom_id="close"))
+    buttons = [
+        discord.ui.Button(label="Setup & logs", custom_id="setup"),
+        discord.ui.Button(label="Sécurité", custom_id="security"),
+        discord.ui.Button(label="Modération", custom_id="moderation"),
+        discord.ui.Button(label="Tickets", custom_id="tickets"),
+        discord.ui.Button(label="Rechercher", custom_id="search"),
+        discord.ui.Button(label="Fermer", custom_id="close"),
+    ]
+    view = DummyView(buttons)
 
     ui._decorate_view(view)
     rendered = [str(item.emoji) for item in view.children]
