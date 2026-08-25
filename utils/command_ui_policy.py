@@ -1,7 +1,8 @@
 """Politique visuelle canonique des réponses de commandes SentriX.
 
-Le renderer de base ``premium_style`` est appelé exactement une fois, puis cette couche
-applique le contrat final compact/panneau. Aucun monkey-patch n'est installé ici.
+Le renderer de base est appelé une seule fois. Cette couche impose ensuite le contrat final
+compact/panneau et retire les emojis décoratifs des interfaces de commandes. Les logs et le
+texte libre saisi par les utilisateurs ne sont pas modifiés.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ _DECORATIVE_TITLE_RE = re.compile(r"^[\s\u200b]*(?:[^\wÀ-ÿ]{1,4}\s*)+")
 _SPACE_RE = re.compile(r"\s+")
 _CANONICAL_TITLE_RE = re.compile(r"^(?:SentriX|Odboug)\s*•\s*(.+)$", re.IGNORECASE)
 _LEADING_DETAIL_RE = re.compile(r"^\*\*(.{1,96}?)\*\*(?:\n+|$)")
+_CUSTOM_EMOJI_RE = re.compile(r"<a?:[A-Za-z0-9_]{2,32}:[0-9]+>")
 _ZWSP = "\u200b"
 
 COMPACT_DESCRIPTION_LIMIT = 360
@@ -35,18 +37,24 @@ _GENERIC_FIELDS = {
     "information", "informations", "details", "détails", "detail", "détail",
     "resume", "résumé", "aperçu", "apercu", "description", "etat", "état",
 }
-_BUTTON_EMOJIS = (
-    (("configurer", "configuration", "setup", "paramètre", "settings"), "⚙️"),
-    (("enregistrer", "save", "sauvegarder"), "💾"),
-    (("confirmer", "confirm", "valider", "verify"), "✅"),
-    (("rechercher", "search"), "🔎"), (("actualiser", "refresh", "recharger"), "🔄"),
-    (("support", "ticket"), "🎫"), (("sécurité", "security"), "🛡️"),
-    (("modération", "moderation"), "🔨"), (("dashboard", "tableau de bord"), "🌐"),
-    (("inviter", "invite"), "➕"),
-    (("retour", "back", "précédent", "precedent", "accueil", "home"), "⬅️"),
-    (("suivant", "next"), "➡️"), (("fermer", "close", "annuler", "cancel"), "❌"),
-    (("supprimer", "delete", "effacer"), "🗑️"),
-)
+
+
+def _is_emoji_char(char: str) -> bool:
+    code = ord(char)
+    return (
+        0x1F000 <= code <= 0x1FAFF
+        or 0x2600 <= code <= 0x27BF
+        or 0x2300 <= code <= 0x23FF
+        or 0x1F1E6 <= code <= 0x1F1FF
+        or code in {0x200D, 0xFE0F, 0x20E3}
+    )
+
+
+def strip_interface_emojis(value: Any) -> str:
+    """Retire uniquement la décoration emoji d'un libellé d'interface."""
+    text = _CUSTOM_EMOJI_RE.sub("", str(value or ""))
+    text = "".join(char for char in text if not _is_emoji_char(char))
+    return _SPACE_RE.sub(" ", text).strip()
 
 
 def _semantic(value: Any) -> str:
@@ -87,7 +95,7 @@ def _dedupe_blocks(value: Any) -> str | None:
 
 def _title(value: Any, fallback: str = "Information", *, limit: int = PANEL_TITLE_LIMIT) -> str:
     text = premium_style.clean_title(value, fallback=fallback)
-    text = _DECORATIVE_TITLE_RE.sub("", text).strip()
+    text = strip_interface_emojis(_DECORATIVE_TITLE_RE.sub("", text).strip())
     return premium_style.clip(text or fallback, limit)
 
 
@@ -116,6 +124,7 @@ def _refine_fields(embed: discord.Embed) -> None:
     output: list[tuple[str, str, bool]] = []
     for field in list(embed.fields):
         name = premium_style.display_label(field.name, "Information")
+        name = strip_interface_emojis(name) or "Information"
         value = _dedupe_blocks(field.value) or "—"
         name_key, value_key = _semantic(name), _semantic(value)
         if not name_key and not value_key:
@@ -153,11 +162,11 @@ def _apply_layout(embed: discord.Embed, size: str) -> None:
     field_limit = COMPACT_FIELD_LIMIT if compact else PANEL_FIELD_LIMIT
     field_count = 2 if compact else 6
     if embed.title:
-        embed.title = premium_style.clip(embed.title, title_limit)
+        embed.title = premium_style.clip(strip_interface_emojis(embed.title), title_limit)
     embed.description = _clean_block(embed.description, limit=description_limit)
     output: list[tuple[str, str, bool]] = []
     for field in list(embed.fields)[:field_count]:
-        name = premium_style.clip(field.name, 64)
+        name = premium_style.clip(strip_interface_emojis(field.name), 64) or "Information"
         value = _clean_block(field.value, limit=field_limit) or "—"
         inline = False if compact else bool(
             field.inline and len(value) <= 105 and value.count("\n") <= 1
@@ -248,22 +257,24 @@ def _refine_view_after_base(view: discord.ui.View | None) -> discord.ui.View | N
         return None
     for item in list(getattr(view, "children", ()) or ()):
         if isinstance(item, discord.ui.Button):
+            # Les composants des commandes restent volontairement textuels.
+            item.emoji = None
             if item.label:
-                item.label = premium_style.clip(str(item.label).strip(), premium_style.VISUAL_LIMITS["button_label"])
-            if item.emoji is None and item.label:
-                haystack = f"{item.label} {item.custom_id or ''}".casefold()
-                for words, emoji in _BUTTON_EMOJIS:
-                    if any(word in haystack for word in words):
-                        try:
-                            item.emoji = emoji
-                        except (TypeError, ValueError):
-                            pass
-                        break
+                item.label = premium_style.clip(
+                    strip_interface_emojis(item.label),
+                    premium_style.VISUAL_LIMITS["button_label"],
+                )
         elif isinstance(item, discord.ui.Select):
             item.placeholder = premium_style.clip(
-                str(item.placeholder or "Choisis une option…").strip(),
+                strip_interface_emojis(item.placeholder or "Choisis une option…") or "Choisis une option…",
                 premium_style.VISUAL_LIMITS["select_label"],
             )
+            for option in list(getattr(item, "options", ()) or ()):
+                option.emoji = None
+                option.label = premium_style.clip(
+                    strip_interface_emojis(option.label),
+                    100,
+                )
     return view
 
 
@@ -299,4 +310,4 @@ def style_kwargs(
     return args, output
 
 
-__all__ = ["style_embed", "style_view", "style_kwargs", "layout_size"]
+__all__ = ["style_embed", "style_view", "style_kwargs", "layout_size", "strip_interface_emojis"]
