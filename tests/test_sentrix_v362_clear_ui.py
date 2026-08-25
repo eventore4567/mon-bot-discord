@@ -11,6 +11,7 @@ def test_repairs_legacy_a_fragments() -> None:
     assert guard._repair_broken("<a Sécurité & modération") == "Sécurité & modération"
     assert guard._repair_broken("a:sxv36_update:1541658913592713327> Configuration") == "Configuration"
     assert guard._repair_broken("a a a Information\n<a Tickets & support") == "Information\nTickets & support"
+    assert guard._repair_broken("A server overview") == "A server overview"
 
 
 def test_clear_static_icons_are_unambiguous() -> None:
@@ -32,7 +33,6 @@ def test_animations_are_reserved_for_states() -> None:
 
 
 def test_help_embed_does_not_keep_broken_markup() -> None:
-    # En production le garde est installé après les renderers V2/V3.4/V3.6.
     guard.install(None)
     embed = discord.Embed(title="a a a Centre de contrôle")
     embed.add_field(name="<a Information", value="<a Sécurité & modération\n<a Tickets & support")
