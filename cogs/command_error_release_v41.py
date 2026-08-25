@@ -37,6 +37,14 @@ def _install_final_surfaces(bot: commands.Bot) -> None:
     except Exception:
         logger.exception("V70 : impossible d'installer la présentation du profil.")
 
+    # Cette dernière couche ne change aucun visuel : elle conserve uniquement les garanties
+    # anti-doublon, service Railway principal et réparation de salon de logs.
+    try:
+        from .sentrix_log_safety_v71 import install as install_sentrix_log_safety_v71
+        install_sentrix_log_safety_v71(bot)
+    except Exception:
+        logger.exception("V71 : impossible d'installer la garde de sécurité des logs.")
+
 
 def _install_ready_reassert(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_final_surfaces_ready_listener", False):
@@ -77,4 +85,4 @@ def install(bot: commands.Bot) -> None:
     error_with_release._sentrix_v41_release = True
     error_with_release._sentrix_previous = current
     bot.tree.on_error = error_with_release
-    logger.info("V41 : concurrence slash libérée, refonte visuelle V70 appliquée en dernier.")
+    logger.info("V41 : concurrence slash libérée, refonte V70 et sécurité logs V71 appliquées en dernier.")
