@@ -1,19 +1,18 @@
 """SentriX V3.8 — finition, stabilité et sécurité transversale.
 
-Cette couche corrige des risques qui se trouvent entre plusieurs runtimes historiques sans
-ajouter de commande ni modifier les fonctionnalités métier :
+Cette couche corrige des risques entre plusieurs runtimes historiques sans ajouter de
+commande ni modifier les fonctions métier :
 
 - le rôle modérateur configuré ne peut plus servir de raccourci pour des permissions
   structurelles comme Gérer les rôles/salons/expressions ;
-- une interaction slash refusée ou en erreur libère toujours son verrou de concurrence ;
+- une interaction slash refusée par la matrice centrale libère toujours son verrou de
+  concurrence (les erreurs sont déjà couvertes par command_error_release_v41) ;
 - les vérifications propriétaire/DB restent fail-closed en cas de panne ;
 - la hiérarchie du bot échoue proprement si le membre bot n'est pas encore résolu ;
-- les grands panneaux d'information conservent un vrai titre au lieu de finir sur
-  « Information », et la marque n'est pas répétée inutilement dans l'auteur.
+- les grands panneaux d'information gardent un vrai titre et évitent le branding répété.
 """
 from __future__ import annotations
 
-import inspect
 import logging
 import re
 from typing import Any
@@ -22,12 +21,13 @@ import discord
 from discord.ext import commands
 
 from utils import checks
-from . import command_hardening_v41, final_interaction_policy, permission_guard
+from . import command_hardening_v41, permission_guard
 
 logger = logging.getLogger("bot.sentrix-final-quality-v38")
 
-# Un rôle de modération peut couvrir les actions de modération quotidiennes, mais jamais
-# des permissions qui permettent de restructurer le serveur ou d'élever des privilèges.
+# Le rôle staff configuré couvre seulement les actions quotidiennes de modération. Les
+# permissions qui permettent de restructurer le serveur exigent la vraie permission Discord
+# ou une catégorie de gestionnaire explicite.
 SAFE_MOD_ROLE_PERMISSIONS = frozenset({
     "ban_members",
     "kick_members",
@@ -63,7 +63,6 @@ async def _safe_is_mod_or_permission(ctx: commands.Context, permission: str) -> 
     perms = getattr(author, "guild_permissions", None)
     if perms is not None and bool(getattr(perms, permission, False)):
         return True
-
     if not mod_role_fallback_allowed(permission):
         return False
 
@@ -94,7 +93,6 @@ async def _safe_transversal_mod_permission(
     perms = getattr(author, "guild_permissions", None)
     if perms is not None and bool(getattr(perms, permission, False)):
         return True
-
     if not mod_role_fallback_allowed(permission):
         return False
 
@@ -145,8 +143,7 @@ def _patch_permission_helpers() -> None:
     hierarchy = checks.check_bot_hierarchy
     if not getattr(hierarchy, "_sentrix_v38_safe", False):
         def safe_bot_hierarchy(guild: discord.Guild, target: discord.Member) -> str | None:
-            me = getattr(guild, "me", None)
-            if me is None:
+            if getattr(guild, "me", None) is None:
                 return "SentriX ne peut pas vérifier sa hiérarchie pour le moment. Réessaie dans quelques secondes."
             try:
                 return hierarchy(guild, target)
@@ -179,39 +176,6 @@ def _patch_permission_denial_release() -> None:
     permission_guard.evaluate_interaction_access = evaluate_and_release
 
 
-def _patch_tree_error_release(bot: commands.Bot) -> None:
-    installer = final_interaction_policy._install_tree_error
-    if not getattr(installer, "_sentrix_v38_release", False):
-        original_installer = installer
-
-        def install_tree_error_with_release(target_bot: commands.Bot) -> None:
-            original_installer(target_bot)
-            current_error = target_bot.tree.on_error
-            if getattr(current_error, "_sentrix_v38_release", False):
-                return
-
-            async def release_then_error(
-                interaction: discord.Interaction,
-                error: discord.app_commands.AppCommandError,
-            ) -> None:
-                command_hardening_v41.release_slash(interaction)
-                result = current_error(interaction, error)
-                if inspect.isawaitable(result):
-                    await result
-
-            release_then_error._sentrix_v38_release = True
-            release_then_error._sentrix_original = current_error
-            target_bot.tree.on_error = release_then_error
-
-        install_tree_error_with_release._sentrix_v38_release = True
-        install_tree_error_with_release._sentrix_original = original_installer
-        final_interaction_policy._install_tree_error = install_tree_error_with_release
-
-    # Si la politique finale a déjà été installée, réapplique immédiatement le wrapper.
-    if getattr(bot, "_sentrix_final_interaction_policy", False):
-        final_interaction_policy._install_tree_error(bot)
-
-
 def _patch_visual_finish(style_module: Any) -> None:
     if style_module is None:
         return
@@ -226,14 +190,12 @@ def _patch_visual_finish(style_module: Any) -> None:
             original_field_count = len(getattr(embed, "fields", ()) or ())
             promote(embed, kind=kind)
 
-            # Les résultats courts gardent « Information ». Les vrais panneaux riches
-            # récupèrent le nom de leur catégorie si aucun titre métier n'a pu être promu.
+            # Un résultat court peut rester « Information ». Un vrai panneau riche garde
+            # au minimum son nom de catégorie au lieu d'un titre générique.
             if kind != "info" or str(getattr(embed, "title", "") or "").casefold() != "information":
                 return
             match = canonical.match(original_title)
-            if match is None:
-                return
-            if original_field_count < 2 and len(original_description) < 240:
+            if match is None or (original_field_count < 2 and len(original_description) < 240):
                 return
             suffix = match.group(1).strip()
             if suffix:
@@ -249,17 +211,11 @@ def _patch_visual_finish(style_module: Any) -> None:
             result = refine(embed, *args, **kwargs)
             if not isinstance(result, discord.Embed):
                 return result
-            category = kwargs.get("category")
-            if not category:
-                try:
-                    from utils import premium_style
-                    category = premium_style.infer_category(
-                        command=kwargs.get("command"), embed=result, hint=kwargs.get("category")
-                    )
-                except Exception:
-                    category = None
             try:
                 from utils import premium_style
+                category = premium_style.infer_category(
+                    command=kwargs.get("command"), embed=result, hint=kwargs.get("category")
+                )
                 label = str(premium_style.CATEGORY_NAMES.get(str(category), ""))
             except Exception:
                 label = ""
@@ -315,14 +271,19 @@ def install(bot: commands.Bot, *, style_module: Any = None) -> None:
     global _INSTALLED
     _patch_permission_helpers()
     _patch_permission_denial_release()
-    _patch_tree_error_release(bot)
+
+    if style_module is None:
+        try:
+            from . import sentrix_v3_global_style as style_module
+        except Exception:
+            style_module = None
     _patch_visual_finish(style_module)
     _install_security_audit(bot)
 
     bot._sentrix_final_quality_v38 = True
     if not _INSTALLED:
         logger.info(
-            "SentriX V3.8 : finition active — permissions mod-role resserrées, verrous slash auto-libérés, style final harmonisé."
+            "SentriX V3.8 : finition active — permissions mod-role resserrées, refus slash auto-libérés, style final harmonisé."
         )
         _INSTALLED = True
 
