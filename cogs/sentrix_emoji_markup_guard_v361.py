@@ -18,7 +18,6 @@ logger = logging.getLogger("bot.sentrix-emoji-markup-v361")
 
 _CUSTOM_PREFIX_RE = re.compile(r"^\s*(<a?:[A-Za-z0-9_~]+:\d+>)\s*")
 _BROKEN_V36_RE = re.compile(r"(?<![A-Za-z0-9_])(?:<?a?:?|:)?sxv36_[A-Za-z0-9_~]+:\d+>", re.I)
-_BROKEN_PREFIX_RE = re.compile(r"^\s*(?:(?:<a|a)(?:\s+|(?=[A-ZÀ-ÖØ-Þ]))){1,8}", re.I)
 _MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
 _INSTALLED = False
 
@@ -28,7 +27,8 @@ def _repair_broken(value: Any) -> str:
     if not text:
         return ""
     text = _BROKEN_V36_RE.sub("", text)
-    text = _BROKEN_PREFIX_RE.sub("", text)
+    # Un seul « A ... » peut être une vraie phrase anglaise. On ne retire que le
+    # fragment clairement invalide « <a » ou au moins deux lettres a répétées.
     text = re.sub(r"(?m)^\s*<a\s+(?=\S)", "", text, flags=re.I)
     text = re.sub(r"(?m)^\s*(?:a\s+){2,8}(?=\S)", "", text, flags=re.I)
     text = _MULTI_SPACE_RE.sub(" ", text)
@@ -72,7 +72,9 @@ def install(bot: commands.Bot) -> None:
         original_clean = ui._clean_artifacts
         if not getattr(original_clean, "_sentrix_guard_v362", False):
             def guarded_clean(value: Any) -> str:
-                return _repair_broken(original_clean(value))
+                # Répare directement la source afin qu'une ancienne regex V3.6 ne puisse
+                # pas supprimer un vrai article anglais « A ... » avant nous.
+                return _repair_broken(value)
 
             guarded_clean._sentrix_guard_v362 = True
             guarded_clean._sentrix_original = original_clean
