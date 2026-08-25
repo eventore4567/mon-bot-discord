@@ -1,4 +1,9 @@
+import os
 from types import SimpleNamespace
+
+# Les modules SentriX importent config.py au chargement. Les tests visuels n'utilisent
+# jamais le réseau Discord, mais config.py exige quand même une valeur non vide.
+os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 import discord
 
