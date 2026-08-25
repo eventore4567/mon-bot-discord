@@ -62,7 +62,7 @@ def _derive_log_view(embed: discord.Embed):
             add("Copier l'ID du rôle", entity_id)
         elif "message" in name and ("id" in name or "identifiant" in name):
             add("Copier l'ID du message", entity_id)
-        elif any(token in name for token in ("auteur",)):
+        elif "auteur" in name:
             add("Copier l'ID de l'auteur", entity_id)
         elif any(token in name for token in ("membre", "utilisateur", "cible", "créateur", "createur")):
             add("Copier l'ID du membre", entity_id)
@@ -73,6 +73,20 @@ def _derive_log_view(embed: discord.Embed):
         jump_url = url_match.group(0)
 
     return log_service.log_actions(jump_url=jump_url, ids=ids)
+
+
+def _normalize_log_kind(kind: str, embed: discord.Embed) -> str:
+    """Répare les anciens appelants qui classaient un log ticket en modération.
+
+    Certaines branches historiques de fermeture de ticket appelaient
+    `helpers.send_log(..., "moderation", ticket_embed)`. Le titre métier permet de les
+    router sans ambiguïté vers le logger `tickets`, sans toucher aux vrais logs de modération.
+    """
+    normalized = str(kind or "").strip().casefold()
+    title = embeds.clean_ui_text(embed.title or "", 120).casefold()
+    if normalized == "moderation" and "ticket" in title:
+        return "tickets"
+    return normalized
 
 
 async def send_log(
@@ -87,6 +101,7 @@ async def send_log(
     """Point de compatibilité : tous les anciens appelants passent par le logger officiel."""
     from utils import log_service
 
+    kind = _normalize_log_kind(kind, embed)
     if view is None:
         view = _derive_log_view(embed)
     await log_service.send_log(
