@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import discord
 
-from utils import embeds, log_service
+from utils import embeds, helpers, log_service
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -81,6 +81,38 @@ class DiscordUiContractTests(unittest.TestCase):
         self.assertIn("_legacy_channel_id", source)
         self.assertIn("UPDATE log_settings SET enabled = 1, channel_id = ?", source)
 
+    def test_kick_command_and_discord_event_share_semantic_dedup_key(self):
+        target = 1355855757991481475
+        command_log = embeds.log_embed(
+            "Dossier 12 — Expulsion",
+            fields=(("Membre", f"<@{target}>\n`ID: {target}`", True),),
+        )
+        event_log = embeds.log_embed(
+            "Membre expulsé",
+            fields=(("Membre", f"<@{target}>", True),),
+        )
+        self.assertEqual(
+            log_service.semantic_event_key(1, "moderation", command_log),
+            log_service.semantic_event_key(1, "moderation", event_log),
+        )
+        self.assertEqual(
+            log_service.semantic_event_key(1, "moderation", event_log),
+            f"semantic:1:kick:{target}",
+        )
+
+    def test_legacy_ticket_fallback_is_never_sent_to_moderation_logger(self):
+        ticket_log = embeds.log_entry(
+            "Ticket fermé",
+            cible=discord.Object(id=1355855757991481475),
+            raison="Terminé",
+        )
+        self.assertEqual(helpers._normalize_log_kind("moderation", ticket_log), "tickets")
+        moderation_log = embeds.log_embed(
+            "Membre banni",
+            fields=(("Membre", "<@1355855757991481475>", True),),
+        )
+        self.assertEqual(helpers._normalize_log_kind("moderation", moderation_log), "moderation")
+
     def test_log_layout_skips_empty_filler_and_uses_inline_width(self):
         panel = embeds.log_embed(
             "Rôle retiré",
@@ -94,6 +126,14 @@ class DiscordUiContractTests(unittest.TestCase):
         self.assertEqual([field.name for field in panel.fields], ["Membre", "Rôle", "Modérateur"])
         self.assertTrue(all(field.inline for field in panel.fields))
         self.assertTrue(panel.footer.text.startswith("SentriX • "))
+
+    def test_legacy_log_normalization_removes_filler(self):
+        old = discord.Embed(title="Sanction")
+        old.add_field(name="Historique", value="7 sanctions", inline=True)
+        old.add_field(name="Raison", value="Aucune raison fournie", inline=False)
+        old.add_field(name="Membre", value="<@1355855757991481475>", inline=True)
+        rendered = embeds.normalize_log(old)
+        self.assertEqual([field.name for field in rendered.fields], ["Membre"])
 
     def test_message_buttons_have_real_behavior(self):
         view = log_service.log_actions(
@@ -123,9 +163,10 @@ class DiscordUiContractTests(unittest.TestCase):
         self.assertIn('return f"<@{int(user_id)}>"', source)
         self.assertIn('return f"<@&{int(role_id)}>"', source)
         self.assertIn('return f"<#{int(channel_id)}>"', source)
-        self.assertIn("entry_target != target_id", source)
+        self.assertIn("entry.target", source)
         self.assertIn("max_age_seconds", source)
         self.assertIn("after.jump_url", source)
+        self.assertIn("AuditLogAction.kick", source)
         self.assertIn("log_service.send_log", source)
 
     def test_old_v_layers_are_gone(self):
