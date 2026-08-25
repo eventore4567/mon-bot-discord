@@ -1,17 +1,24 @@
-"""SentriX V3 — l'aide reste toujours accessible.
+"""SentriX V3 — aide toujours accessible et composants Discord sûrs.
 
 `help` est une commande de navigation, pas une action métier coûteuse. Elle ne doit donc
-pas consommer le quota global ni être refusée par l'anti-double-exécution V41. Cette
-couche garde toutes les protections pour les autres commandes et ne modifie aucune
-permission.
+pas consommer le quota global ni être refusée par l'anti-double-exécution V41.
+
+Cette couche protège aussi l'interface V3 contre les emojis de composants que Discord
+refuse parfois (symboles décoratifs, cercles, croix typographiques, etc.). Les icônes
+restent visibles dans les embeds, mais les composants interactifs utilisent un format
+strictement compatible. Si Discord refuse malgré tout une vue, l'aide retombe sur un
+embed sans boutons au lieu de rester silencieuse.
 """
 from __future__ import annotations
 
 import inspect
+import logging
 from types import MethodType
 
+import discord
 from discord.ext import commands
 
+logger = logging.getLogger("bot.help-v3-compat")
 _HELP_ROOTS = frozenset({"help"})
 
 
@@ -42,9 +49,6 @@ def _patch_global_prefix_cooldown(bot: commands.Bot) -> None:
     global_cooldown_with_help_exemption._sentrix_help_exempt_v3 = True
     patched = MethodType(global_cooldown_with_help_exemption, bot)
 
-    # Normalement l'installation se produit pendant le chargement des extensions, avant
-    # setup_hook.add_check(). Ce remplacement d'attribut suffit alors. Le bloc ci-dessous
-    # couvre aussi un reload à chaud où l'ancien check serait déjà enregistré.
     checks = list(getattr(bot, "_checks", ()) or ())
     was_registered = any(check == original for check in checks)
     if was_registered:
@@ -54,7 +58,6 @@ def _patch_global_prefix_cooldown(bot: commands.Bot) -> None:
             pass
 
     bot.global_cooldown_check = patched
-
     if was_registered:
         bot.add_check(patched)
 
@@ -97,10 +100,130 @@ def _patch_v41_guards() -> None:
     hardening._sentrix_help_exempt_v3 = True
 
 
-def install(bot: commands.Bot) -> None:
-    if getattr(bot, "_sentrix_help_cooldown_exemption_v3", False):
+def _sanitize_view(view: discord.ui.View) -> None:
+    """Retire les emojis des composants V3 uniquement.
+
+    Les anciens menus SentriX avaient déjà rencontré ce cas : Discord accepte de nombreux
+    emojis Unicode dans le texte d'un embed mais rejette certains symboles lorsqu'ils sont
+    envoyés dans le champ `emoji` d'un bouton ou d'une option de Select.
+    """
+    for item in list(getattr(view, "children", ()) or ()):
+        if isinstance(item, discord.ui.Button):
+            item.emoji = None
+        elif isinstance(item, discord.ui.Select):
+            for option in item.options:
+                option.emoji = None
+
+
+def _patch_v3_components(bot: commands.Bot) -> None:
+    try:
+        from . import help_clean_style as clean
+        from . import sentrix_v3_ux as v3
+    except Exception:
         return
 
-    _patch_global_prefix_cooldown(bot)
-    _patch_v41_guards()
-    bot._sentrix_help_cooldown_exemption_v3 = True
+    # Tant que cogs.utility n'est pas chargé, la commande help n'existe pas encore.
+    # install() est rappelé après chaque extension : on réessaie donc naturellement plus tard.
+    help_command = bot.get_command("help")
+    if help_command is None:
+        return
+
+    if not getattr(v3.V3Select, "_sentrix_component_compat_v3", False):
+        original_select_init = v3.V3Select.__init__
+
+        def select_init(self, *args, **kwargs):
+            original_select_init(self, *args, **kwargs)
+            for option in self.options:
+                option.emoji = None
+
+        v3.V3Select.__init__ = select_init
+        v3.V3Select._sentrix_component_compat_v3 = True
+
+    for view_cls in (v3.V3HomeView, v3.V3PagesView):
+        if getattr(view_cls, "_sentrix_component_compat_v3", False):
+            continue
+        original_init = view_cls.__init__
+
+        def make_init(previous):
+            def compatible_init(self, *args, **kwargs):
+                previous(self, *args, **kwargs)
+                _sanitize_view(self)
+            return compatible_init
+
+        view_cls.__init__ = make_init(original_init)
+        view_cls._sentrix_component_compat_v3 = True
+
+    # Réaffirme les classes patchées dans les couches historiques qui les référencent.
+    clean.CleanHelpSelect = v3.V3Select
+    clean.CleanHelpHomeView = v3.V3HomeView
+    clean.CleanHelpPagesView = v3.V3PagesView
+
+    # Fallback : si Discord rejette quand même une vue, renvoyer l'accueil sans composants.
+    current_callback = help_command.callback
+    if not getattr(current_callback, "_sentrix_safe_help_v3", False):
+        async def safe_help_callback(*args, **kwargs):
+            try:
+                result = current_callback(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    result = await result
+                return result
+            except discord.HTTPException:
+                logger.warning("Discord a refusé les composants de +help ; fallback embed seul.", exc_info=True)
+                ctx = next((value for value in args if isinstance(value, commands.Context)), None)
+                if ctx is None:
+                    raise
+
+                callback_cog = next(
+                    (
+                        value for value in args
+                        if value is not ctx and hasattr(value, "bot") and hasattr(value, "_user_is_staff")
+                    ),
+                    None,
+                )
+                language = "fr"
+                try:
+                    from . import language_runtime
+                    language = await language_runtime.get_language(
+                        ctx.bot, ctx.guild.id if ctx.guild else None
+                    )
+                except Exception:
+                    pass
+
+                prefix = "+"
+                try:
+                    conf = await ctx.bot.db.get_guild_config(ctx.guild.id) if ctx.guild else None
+                    prefix = conf["prefix"] if conf and conf["prefix"] else "+"
+                except Exception:
+                    pass
+
+                is_staff = False
+                if callback_cog is not None:
+                    try:
+                        is_staff = bool(await callback_cog._user_is_staff(ctx))
+                    except Exception:
+                        pass
+
+                embed = v3._home_embed(ctx.bot, ctx.guild, prefix, is_staff, language)
+                return await ctx.send(embed=embed)
+
+        safe_help_callback.__name__ = getattr(current_callback, "__name__", "help_cmd")
+        safe_help_callback.__doc__ = getattr(current_callback, "__doc__", None)
+        safe_help_callback.__wrapped__ = current_callback
+        safe_help_callback._sentrix_safe_help_v3 = True
+        safe_help_callback._sentrix_v3_ux = True
+        help_command.callback = safe_help_callback
+
+    bot._sentrix_help_components_safe_v3 = True
+    logger.info("+help V3 compatible Discord : composants nettoyés et fallback sans vue actif.")
+
+
+def install(bot: commands.Bot) -> None:
+    # Les protections de cooldown sont installées une seule fois.
+    if not getattr(bot, "_sentrix_help_cooldown_exemption_v3", False):
+        _patch_global_prefix_cooldown(bot)
+        _patch_v41_guards()
+        bot._sentrix_help_cooldown_exemption_v3 = True
+
+    # Cette partie doit être retentée après chaque extension, car help n'existe qu'après
+    # le chargement de cogs.utility.
+    _patch_v3_components(bot)
