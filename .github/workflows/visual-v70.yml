@@ -27,7 +27,7 @@ jobs:
             cogs/command_error_release_v41.py \
             cogs/user_command_final_v64.py
       - name: Run V70 visual contracts
-        run: python tests/test_visual_v70.py
+        run: PYTHONPATH=. python tests/test_visual_v70.py
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-visual-v70.db"
