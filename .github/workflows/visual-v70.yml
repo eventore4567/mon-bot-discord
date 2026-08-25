@@ -1,0 +1,33 @@
+name: SentriX Visual V70
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  visual-v70:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile V70 files
+        run: |
+          python -m compileall -q \
+            utils/embeds.py \
+            cogs/sentrix_visual_refactor_v70.py \
+            cogs/sentrix_profile_refactor_v70.py \
+            cogs/command_error_release_v41.py \
+            cogs/user_command_final_v64.py
+      - name: Run V70 visual contracts
+        run: python tests/test_visual_v70.py
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-visual-v70.db"
