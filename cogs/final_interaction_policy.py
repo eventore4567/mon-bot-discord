@@ -1,96 +1,38 @@
-"""Politique finale des interactions SentriX.
+"""Transport canonique des réponses de commandes SentriX.
 
-Cette couche possède l'unique transport final des réponses de commandes :
-- les embeds utilisent le même moteur visuel pour + et / ;
-- les réponses slash normales sont publiques par défaut ;
-- ``ephemeral=True`` explicite reste privé ;
-- erreurs et refus de permission restent privés ;
-- éditions après defer et followups passent dans le même moteur.
-
-Les anciens transports V3.2/V3.3/V3.4 ne sont plus réinstallés avant cette politique. De
-V3.4, seuls le watchdog slash et le routage IA rapide sont conservés.
+Une seule couche possède désormais les transports de commandes : + et / passent par
+``utils.command_ui_policy``. Les logs, webhooks serveur ordinaires et messages d'événements
+ne sont pas transformés ici. Les erreurs sont la responsabilité exclusive de
+``cogs.command_error_policy``.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import discord
 from discord.ext import commands
 
-from . import community_v32, community_v33, community_v34, permission_guard
-from utils import premium_style
+from utils import command_ui_policy
+from . import community_v34, permission_guard
 
-logger = logging.getLogger("bot.final-interaction-policy")
-
-RICH_ROOTS = frozenset({
-    "help",
-    "profile",
-    "setup",
-    "ticketsetup",
-    "logsetup",
-    "aisetup",
-    "designsetup",
-    "embed",
-    "shoppanel",
-    "rolepanel",
-    "verify-panel",
-})
-
-_GENERIC_TITLES = frozenset({
-    "information",
-    "action terminee",
-    "action terminée",
-    "action impossible",
-    "a verifier",
-    "à vérifier",
-    "verification necessaire",
-    "vérification nécessaire",
-    "erreur",
-    "erreur ia",
-    "succes",
-    "succès",
-    "avertissement",
-    "termine",
-    "terminé",
-})
+logger = logging.getLogger("bot.command-transport")
 
 
-def _disable_legacy_embed_flattening() -> None:
-    """Neutralise les anciennes couches qui transformaient les cartes en texte."""
-    def keep_embed(*_args, **_kwargs):
-        return None
-
-    community_v32.simple_embed_text = keep_embed
-    community_v33._simple_embed_to_text = keep_embed
-    community_v34._embed_to_text = keep_embed
-
-
-def _install_v34_runtime_only(bot: commands.Bot) -> None:
-    """Conserve les briques utiles de V3.4 sans ses anciens transports visuels."""
-    try:
-        community_v34._install_slash_watchdog_policy(bot)
-        community_v34._install_fast_ai(bot)
-    except Exception:
-        logger.exception("Impossible d'installer les briques runtime utiles de V3.4.")
+def _unwrap(callable_obj):
+    """Retire uniquement les anciens wrappers SentriX qui exposent leur original."""
+    seen: set[int] = set()
+    current = callable_obj
+    while hasattr(current, "_sentrix_original") and id(current) not in seen:
+        seen.add(id(current))
+        current = getattr(current, "_sentrix_original")
+    return current
 
 
-def _clean(value: Any) -> str:
-    try:
-        return community_v32.strip_decorative_emoji(value or "").strip()
-    except Exception:
-        return str(value or "").strip()
-
-
-def _root_from_command(command: Any) -> str:
+def _root_from_command(command) -> str:
     if command is None:
         return ""
     root = getattr(command, "root_parent", None) or command
     return str(getattr(root, "name", "") or "").casefold()
-
-
-def _root_from_ctx(ctx: commands.Context) -> str:
-    return _root_from_command(getattr(ctx, "command", None))
 
 
 def _root_from_interaction(interaction: discord.Interaction | None) -> str:
@@ -103,72 +45,8 @@ def _root_from_interaction(interaction: discord.Interaction | None) -> str:
     return str(data.get("name") or "").casefold() if isinstance(data, dict) else ""
 
 
-def _has_media(embed: discord.Embed) -> bool:
-    image = getattr(embed, "image", None)
-    thumbnail = getattr(embed, "thumbnail", None)
-    return bool(
-        (image and getattr(image, "url", None))
-        or (thumbnail and getattr(thumbnail, "url", None))
-    )
-
-
-def _embed_to_plain(embed: discord.Embed | None, *, root: str = "") -> str | None:
-    """Les embeds de commandes ne sont plus convertis en texte simple."""
-    del embed, root
-    return None
-
-
-def _merge_content(args: tuple, kwargs: dict, text: str) -> tuple[tuple, dict]:
-    mutable = list(args)
-    if mutable:
-        current = str(mutable[0] or "").strip()
-        combined = f"{current}\n{text}".strip() if current else text
-        if len(combined) > 1950:
-            return args, kwargs
-        mutable[0] = combined
-        kwargs.pop("content", None)
-        return tuple(mutable), kwargs
-
-    current = str(kwargs.get("content") or "").strip()
-    combined = f"{current}\n{text}".strip() if current else text
-    if len(combined) <= 1950:
-        kwargs["content"] = combined
-    return tuple(mutable), kwargs
-
-
-def _convert_kwargs(args: tuple, kwargs: dict, *, root: str, editing: bool = False):
-    kwargs = dict(kwargs)
-    embed = kwargs.get("embed")
-    text = _embed_to_plain(embed, root=root)
-    if text:
-        kwargs.pop("embed", None)
-        if editing:
-            kwargs["embeds"] = []
-        args, kwargs = _merge_content(args, kwargs, text)
-        return args, kwargs
-
-    embeds = kwargs.get("embeds")
-    if isinstance(embeds, (list, tuple)) and len(embeds) == 1:
-        text = _embed_to_plain(embeds[0], root=root)
-        if text:
-            kwargs.pop("embeds", None)
-            if editing:
-                kwargs["embeds"] = []
-            args, kwargs = _merge_content(args, kwargs, text)
-    return args, kwargs
-
-
-def _unwrap(callable_obj):
-    seen: set[int] = set()
-    current = callable_obj
-    while hasattr(current, "_sentrix_original") and id(current) not in seen:
-        seen.add(id(current))
-        current = getattr(current, "_sentrix_original")
-    return current
-
-
-def _style_context_payload(ctx: commands.Context, args: tuple, kwargs: dict):
-    return premium_style.style_kwargs(
+def _style_context(ctx: commands.Context, args: tuple, kwargs: dict):
+    return command_ui_policy.style_kwargs(
         args,
         kwargs,
         command=getattr(ctx, "command", None),
@@ -180,206 +58,160 @@ def _style_context_payload(ctx: commands.Context, args: tuple, kwargs: dict):
     )
 
 
-def _install_context_send() -> None:
-    current = commands.Context.send
-    if getattr(current, "_sentrix_final_plain_v35", False):
-        return
-    base = _unwrap(current)
-
-    async def send_final(self: commands.Context, *args, **kwargs):
-        root = _root_from_ctx(self)
-        args, kwargs = _style_context_payload(self, args, kwargs)
-        args, kwargs = _convert_kwargs(args, kwargs, root=root)
-        return await base(self, *args, **kwargs)
-
-    send_final._sentrix_final_plain = True
-    send_final._sentrix_final_plain_v35 = True
-    send_final._sentrix_original = base
-    commands.Context.send = send_final
+def _style_interaction(interaction: discord.Interaction | None, args: tuple, kwargs: dict, *, wrap: bool):
+    return command_ui_policy.style_kwargs(
+        args,
+        kwargs,
+        command=getattr(interaction, "command", None),
+        guild=getattr(interaction, "guild", None),
+        requester=getattr(interaction, "user", None),
+        bot_user=getattr(getattr(interaction, "client", None), "user", None),
+        allow_content_wrap=wrap,
+        include_brand_asset=wrap,
+    )
 
 
-def _install_interaction_response() -> None:
-    current_send = discord.InteractionResponse.send_message
-    if not getattr(current_send, "_sentrix_final_public_v35", False):
+def _install_context_transport() -> None:
+    current_send = commands.Context.send
+    if not getattr(current_send, "_sentrix_canonical_transport", False):
         base_send = _unwrap(current_send)
 
-        async def response_send(self, *args, **kwargs):
+        async def send(self: commands.Context, *args, **kwargs):
+            args, kwargs = _style_context(self, args, kwargs)
+            result = await base_send(self, *args, **kwargs)
+            self._sentrix_response_sent = True
+            return result
+
+        send._sentrix_canonical_transport = True
+        send._sentrix_original = base_send
+        commands.Context.send = send
+
+    current_reply = commands.Context.reply
+    if not getattr(current_reply, "_sentrix_canonical_transport", False):
+        base_reply = _unwrap(current_reply)
+
+        async def reply(self: commands.Context, *args, **kwargs):
+            args, kwargs = _style_context(self, args, kwargs)
+            result = await base_reply(self, *args, **kwargs)
+            self._sentrix_response_sent = True
+            return result
+
+        reply._sentrix_canonical_transport = True
+        reply._sentrix_original = base_reply
+        commands.Context.reply = reply
+
+
+def _install_interaction_transport() -> None:
+    current_send = discord.InteractionResponse.send_message
+    if not getattr(current_send, "_sentrix_canonical_transport", False):
+        base_send = _unwrap(current_send)
+
+        async def send_message(self: discord.InteractionResponse, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
-            root = _root_from_interaction(interaction)
-            args, kwargs = premium_style.style_kwargs(
-                args,
-                kwargs,
-                command=getattr(interaction, "command", None),
-                guild=getattr(interaction, "guild", None),
-                requester=getattr(interaction, "user", None),
-                bot_user=getattr(getattr(interaction, "client", None), "user", None),
-                allow_content_wrap=True,
-                include_brand_asset=True,
-            )
-            args, kwargs = _convert_kwargs(args, kwargs, root=root)
+            args, kwargs = _style_interaction(interaction, args, kwargs, wrap=True)
             return await base_send(self, *args, **kwargs)
 
-        response_send._sentrix_final_plain = True
-        response_send._sentrix_final_public_v35 = True
-        response_send._sentrix_original = base_send
-        discord.InteractionResponse.send_message = response_send
+        send_message._sentrix_canonical_transport = True
+        send_message._sentrix_original = base_send
+        discord.InteractionResponse.send_message = send_message
 
     current_edit = discord.InteractionResponse.edit_message
-    if not getattr(current_edit, "_sentrix_final_public_v35", False):
+    if not getattr(current_edit, "_sentrix_canonical_transport", False):
         base_edit = _unwrap(current_edit)
 
-        async def response_edit(self, *args, **kwargs):
+        async def edit_message(self: discord.InteractionResponse, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
-            root = _root_from_interaction(interaction)
-            args, kwargs = premium_style.style_kwargs(
-                args,
-                kwargs,
-                command=getattr(interaction, "command", None),
-                guild=getattr(interaction, "guild", None),
-                requester=getattr(interaction, "user", None),
-                bot_user=getattr(getattr(interaction, "client", None), "user", None),
-                allow_content_wrap=True,
-            )
+            args, kwargs = _style_interaction(interaction, args, kwargs, wrap=False)
             if kwargs.get("embed") is not None or kwargs.get("embeds"):
                 kwargs.setdefault("content", None)
-            args, kwargs = _convert_kwargs(args, kwargs, root=root, editing=True)
             return await base_edit(self, *args, **kwargs)
 
-        response_edit._sentrix_final_plain = True
-        response_edit._sentrix_final_public_v35 = True
-        response_edit._sentrix_original = base_edit
-        discord.InteractionResponse.edit_message = response_edit
+        edit_message._sentrix_canonical_transport = True
+        edit_message._sentrix_original = base_edit
+        discord.InteractionResponse.edit_message = edit_message
+
+    current_original = discord.Interaction.edit_original_response
+    if not getattr(current_original, "_sentrix_canonical_transport", False):
+        base_original = _unwrap(current_original)
+
+        async def edit_original_response(self: discord.Interaction, *args, **kwargs):
+            args, kwargs = _style_interaction(self, args, kwargs, wrap=False)
+            if kwargs.get("embed") is not None or kwargs.get("embeds"):
+                kwargs.setdefault("content", None)
+            return await base_original(self, *args, **kwargs)
+
+        edit_original_response._sentrix_canonical_transport = True
+        edit_original_response._sentrix_original = base_original
+        discord.Interaction.edit_original_response = edit_original_response
+
+    current_webhook = discord.Webhook.send
+    if not getattr(current_webhook, "_sentrix_canonical_transport", False):
+        base_webhook = _unwrap(current_webhook)
+
+        async def webhook_send(self: discord.Webhook, *args, **kwargs):
+            # Seulement les followups d'application Discord. Les vrais webhooks serveur et
+            # les logs gardent leur payload exact.
+            if getattr(self, "type", None) == discord.WebhookType.application:
+                args, kwargs = command_ui_policy.style_kwargs(
+                    args,
+                    kwargs,
+                    allow_content_wrap=True,
+                    include_brand_asset=True,
+                )
+            return await base_webhook(self, *args, **kwargs)
+
+        webhook_send._sentrix_canonical_transport = True
+        webhook_send._sentrix_original = base_webhook
+        discord.Webhook.send = webhook_send
 
 
-def _install_original_response_edit() -> None:
-    current = discord.Interaction.edit_original_response
-    if getattr(current, "_sentrix_final_public_v35", False):
-        return
-    base = _unwrap(current)
-
-    async def edit_original(self: discord.Interaction, *args, **kwargs):
-        root = _root_from_interaction(self)
-        args, kwargs = premium_style.style_kwargs(
-            args,
-            kwargs,
-            command=getattr(self, "command", None),
-            guild=getattr(self, "guild", None),
-            requester=getattr(self, "user", None),
-            bot_user=getattr(getattr(self, "client", None), "user", None),
-            allow_content_wrap=True,
-        )
-        if kwargs.get("embed") is not None or kwargs.get("embeds"):
-            kwargs.setdefault("content", None)
-        args, kwargs = _convert_kwargs(args, kwargs, root=root, editing=True)
-        return await base(self, *args, **kwargs)
-
-    edit_original._sentrix_final_plain = True
-    edit_original._sentrix_final_public_v35 = True
-    edit_original._sentrix_original = base
-    discord.Interaction.edit_original_response = edit_original
-
-
-def _install_followup_send() -> None:
-    current = discord.Webhook.send
-    if getattr(current, "_sentrix_final_public_v35", False):
-        return
-    base = _unwrap(current)
-
-    async def webhook_send(self: discord.Webhook, *args, **kwargs):
-        if getattr(self, "type", None) == discord.WebhookType.application:
-            args, kwargs = premium_style.style_kwargs(
-                args,
-                kwargs,
-                allow_content_wrap=True,
-                include_brand_asset=True,
-            )
-            args, kwargs = _convert_kwargs(args, kwargs, root="")
-        return await base(self, *args, **kwargs)
-
-    webhook_send._sentrix_final_plain = True
-    webhook_send._sentrix_final_public_v35 = True
-    webhook_send._sentrix_original = base
-    discord.Webhook.send = webhook_send
-
-
-async def _plain_permission_denial(interaction: discord.Interaction, decision) -> None:
-    text = _clean(getattr(decision, "reason", None) or "Tu n'as pas accès à cette commande.")
+async def _permission_denial(interaction: discord.Interaction, decision) -> None:
+    embed = discord.Embed(
+        title="Accès refusé",
+        description=str(getattr(decision, "reason", None) or "Tu n'as pas accès à cette commande."),
+        colour=discord.Colour(0xED4245),
+    )
+    embed = command_ui_policy.style_embed(
+        embed,
+        command=getattr(interaction, "command", None),
+        guild=getattr(interaction, "guild", None),
+        requester=getattr(interaction, "user", None),
+        bot_user=getattr(getattr(interaction, "client", None), "user", None),
+        kind="danger",
+    )
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(text, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=True)
         else:
-            await interaction.response.send_message(text, ephemeral=True)
-    except (discord.Forbidden, discord.HTTPException, discord.InteractionResponded):
-        logger.debug("Impossible d'envoyer le refus slash final.", exc_info=True)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+        logger.debug("Refus de permission impossible à envoyer.", exc_info=True)
 
 
 def _install_permission_denial() -> None:
-    permission_guard._send_interaction_denial = _plain_permission_denial
+    permission_guard._send_interaction_denial = _permission_denial
 
 
-def _slash_error_text(error: BaseException) -> str:
-    original = getattr(error, "original", error)
-    name = type(original).__name__
-    if name == "BotPermissionError":
-        return _clean(getattr(original, "message", None) or "Tu n'as pas accès à cette commande.")
-    if name == "BotBlacklistedError":
-        return f"Tu n'es pas autorisé à utiliser SentriX. Raison : {_clean(getattr(original, 'reason', None) or 'Aucune raison fournie')}"
-    if isinstance(error, discord.app_commands.CommandOnCooldown):
-        return f"Cette commande est en recharge. Réessaie dans {max(1, round(error.retry_after))} s."
-    if isinstance(error, discord.app_commands.MissingPermissions):
-        return "Tu n'as pas les permissions nécessaires pour cette commande."
-    if isinstance(error, discord.app_commands.BotMissingPermissions):
-        return "SentriX n'a pas les permissions nécessaires pour terminer cette action."
-    if isinstance(error, (discord.app_commands.TransformerError, discord.app_commands.CommandSignatureMismatch)):
-        return "Une option de cette commande n'est plus valide. Relance la commande et sélectionne les options à nouveau."
-    if isinstance(original, discord.Forbidden):
-        return "Discord a refusé cette action. Vérifie les permissions et la position du rôle SentriX."
-    if isinstance(error, discord.app_commands.CheckFailure):
-        return "Tu n'as pas accès à cette commande."
-    return "Cette commande a rencontré un problème technique. Réessaie dans quelques instants."
-
-
-def _install_tree_error(bot: commands.Bot) -> None:
-    async def final_tree_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-        command_name = str(getattr(getattr(interaction, "command", None), "qualified_name", "inconnue"))
-        original = getattr(error, "original", error)
-        known = isinstance(error, (
-            discord.app_commands.CommandOnCooldown,
-            discord.app_commands.MissingPermissions,
-            discord.app_commands.BotMissingPermissions,
-            discord.app_commands.TransformerError,
-            discord.app_commands.CommandSignatureMismatch,
-            discord.app_commands.CheckFailure,
-        )) or type(original).__name__ in {"BotPermissionError", "BotBlacklistedError"}
-        if not known:
-            logger.error("Erreur slash finale dans /%s : %s", command_name, type(original).__name__, exc_info=original)
-        text = _slash_error_text(error)
-        try:
-            if interaction.response.is_done():
-                await interaction.followup.send(text, ephemeral=True)
-            else:
-                await interaction.response.send_message(text, ephemeral=True)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.InteractionResponded):
-            logger.warning("Impossible d'envoyer l'erreur slash finale pour /%s.", command_name)
-
-    bot.tree.on_error = final_tree_error
-    bot._sentrix_final_tree_error = True
+def _install_v34_runtime_only(bot: commands.Bot) -> None:
+    """Conserve la fiabilité slash et le routage IA, jamais les anciens renderers V3.4."""
+    try:
+        community_v34._install_slash_watchdog_policy(bot)
+        community_v34._install_fast_ai(bot)
+    except Exception:
+        logger.exception("Briques runtime V3.4 utiles impossibles à installer.")
 
 
 def install(bot: commands.Bot) -> None:
-    """Installe directement la politique finale, sans réempiler les transports V3.4."""
-    _disable_legacy_embed_flattening()
+    if getattr(bot, "_sentrix_canonical_transport_installed", False):
+        _install_permission_denial()
+        return
     _install_v34_runtime_only(bot)
-
-    _install_context_send()
-    _install_interaction_response()
-    _install_original_response_edit()
-    _install_followup_send()
+    _install_context_transport()
+    _install_interaction_transport()
     _install_permission_denial()
-    _install_tree_error(bot)
+    bot._sentrix_canonical_transport_installed = True
+    bot._sentrix_command_transport_owner = "cogs.final_interaction_policy"
+    logger.info("Transport canonique actif : une seule chaîne +/slash, erreurs séparées, logs intacts.")
 
-    bot._sentrix_final_interaction_policy = True
-    bot._sentrix_slash_public_v35 = True
-    logger.info(
-        "Politique finale SentriX active : un seul transport +/slash, réponses normales publiques, erreurs privées."
-    )
+
+__all__ = ["install"]
