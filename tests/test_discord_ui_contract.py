@@ -21,6 +21,7 @@ class DiscordUiContractTests(unittest.TestCase):
             "utils/helpers.py",
             "cogs/help.py",
             "cogs/logs.py",
+            "cogs/final_interaction_policy.py",
             "cogs/error_experience_v3.py",
             "cogs/command_error_release_v41.py",
             "cogs/__init__.py",
@@ -157,6 +158,20 @@ class DiscordUiContractTests(unittest.TestCase):
         self.assertIn("Précédent", source)
         self.assertIn("Accueil", source)
         self.assertIn("Suivant", source)
+
+    def test_official_help_is_really_loaded_before_tree_sync(self):
+        source = (ROOT / "cogs" / "__init__.py").read_text(encoding="utf-8")
+        self.assertIn('_OFFICIAL_HELP_EXTENSION = "cogs.help"', source)
+        self.assertIn("await _load_official_help(bot)", source)
+        self.assertIn("_ORIGINAL_LOAD_EXTENSION(bot, _OFFICIAL_HELP_EXTENSION)", source)
+
+    def test_final_command_transport_uses_only_official_embed_renderer(self):
+        source = (ROOT / "cogs" / "final_interaction_policy.py").read_text(encoding="utf-8")
+        self.assertIn("from utils import embeds as sentrix_embeds", source)
+        self.assertIn("sentrix_embeds.standard", source)
+        self.assertIn("sentrix_embeds.error", source)
+        self.assertNotIn("from utils import premium_style", source)
+        self.assertNotIn("premium_style.style_kwargs", source)
 
     def test_real_listener_logger_uses_native_refs_and_audit_correlation(self):
         source = (ROOT / "cogs" / "logs.py").read_text(encoding="utf-8")
