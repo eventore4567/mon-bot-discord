@@ -1,16 +1,15 @@
-"""SentriX V3.3 — finition visuelle globale premium.
+"""SentriX V3.4 — deux formats visuels cohérents pour toutes les cartes.
 
-Cette couche reste volontairement non destructive : elle ne change aucune permission,
-aucune commande et aucune logique métier. Elle améliore uniquement la hiérarchie
-visuelle finale des embeds et des composants après le moteur premium historique.
+La couche reste non destructive : aucune permission, commande ou logique métier n'est
+modifiée. Les cartes ordinaires sont classées automatiquement dans deux familles :
 
-Objectifs V3.3 :
-- petit header = SentriX + catégorie ;
-- gros titre = action réellement effectuée ;
-- moins de répétitions et de pavés ;
-- couleurs d'état immédiatement compréhensibles ;
-- boutons plus cohérents et lisibles sur mobile ;
-- logs Secure Audit laissés totalement intacts.
+- compact : erreurs, confirmations et actions rapides ;
+- large : help, setup, profils, tickets et panneaux riches.
+
+Discord calcule lui-même la hauteur finale selon la police, la largeur du client et les
+retours à la ligne. V3.4 ne prétend donc pas imposer une hauteur en pixels, mais rend les
+cartes de chaque famille visuellement symétriques grâce à une structure, des limites et
+des emplacements de champs constants. Les logs Secure Audit restent intacts.
 """
 from __future__ import annotations
 
@@ -29,6 +28,7 @@ _INSTALLED = False
 _CANONICAL_TITLE_RE = re.compile(r"^SentriX\s*•\s*.+$", re.IGNORECASE)
 _LEADING_DETAIL_RE = re.compile(r"^\*\*(.{1,96}?)\*\*(?:\n+|$)")
 _MANY_BLANKS_RE = re.compile(r"\n{3,}")
+_ZWSP = "\u200b"
 
 _GENERIC_STATE_TITLES = {
     "success": "Action réussie",
@@ -52,6 +52,24 @@ _BUTTON_EMOJIS = (
     (("supprimer", "delete", "effacer"), "🗑️"),
 )
 
+# Deux formats seulement. Les cartes qui contiennent naturellement beaucoup de données
+# basculent automatiquement sur le grand format afin de ne rien couper.
+_LARGE_COMMAND_HINTS = {
+    "help", "setup", "profile", "profile-card", "userinfo", "botinfo",
+    "ticketsetup", "ticket", "shoppanel", "shop", "inventory", "leaderboard-levels",
+    "economyleaderboard", "command-stats", "server-growth", "security-check",
+    "automod-status", "config-view", "rolepanel", "diagnostic", "bot-status",
+}
+_LARGE_CATEGORIES = {
+    "configuration", "tickets", "profile", "shop", "leaderboard", "premium",
+}
+_SMALL_FIELD_SLOTS = 2
+_LARGE_FIELD_SLOTS = 6
+_SMALL_DESCRIPTION_LIMIT = 520
+_LARGE_DESCRIPTION_LIMIT = 1800
+_SMALL_FIELD_LIMIT = 280
+_LARGE_FIELD_LIMIT = 700
+
 
 def _asset_url(bot_user: Any) -> str | None:
     avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
@@ -62,13 +80,13 @@ def _category_label(category: str) -> str:
     return str(premium_style.CATEGORY_NAMES.get(category, "SentriX"))
 
 
-def _compact_description(value: Any) -> str | None:
+def _compact_description(value: Any, *, limit: int = 4096) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = _MANY_BLANKS_RE.sub("\n\n", text)
-    return premium_style.clip(text, 4096)
+    return premium_style.clip(text, limit)
 
 
 def _promote_real_title(embed: discord.Embed, *, kind: str) -> None:
@@ -89,8 +107,6 @@ def _promote_real_title(embed: discord.Embed, *, kind: str) -> None:
             embed.description = remaining or None
             return
 
-    # Si aucune action spécifique n'est disponible, le gros titre décrit l'état au lieu
-    # de répéter une seconde fois « SentriX • Utilitaires » sous le header.
     embed.title = _GENERIC_STATE_TITLES.get(kind, "Information")
     embed.description = description
 
@@ -117,7 +133,7 @@ def _set_premium_author(
 
 
 def _refine_fields(embed: discord.Embed) -> None:
-    """Nettoie uniquement l'espacement sans modifier la structure métier des champs."""
+    """Nettoie l'espacement sans modifier la structure métier des champs."""
     for index, field in enumerate(list(embed.fields)):
         name = premium_style.display_label(field.name, "Information")
         value = _compact_description(field.value) or "—"
@@ -134,7 +150,6 @@ def _refine_footer(embed: discord.Embed, *, category: str, guild: discord.Guild 
     footer_text = str(getattr(footer, "text", "") or "").strip()
     footer_icon = getattr(footer, "icon_url", None)
 
-    # Les footers métier (pagination, références, etc.) restent intacts.
     generic = not footer_text or footer_text.casefold().startswith("sentrix")
     if not generic:
         return
@@ -149,6 +164,83 @@ def _refine_footer(embed: discord.Embed, *, category: str, guild: discord.Guild 
         embed.set_footer(text=text, icon_url=footer_icon)
     else:
         embed.set_footer(text=text)
+
+
+def _command_name(command: Any) -> str:
+    return str(getattr(command, "qualified_name", "") or "").casefold().strip()
+
+
+def _has_media(embed: discord.Embed) -> bool:
+    thumbnail = str(getattr(getattr(embed, "thumbnail", None), "url", "") or "")
+    image = str(getattr(getattr(embed, "image", None), "url", "") or "")
+    return bool(thumbnail or image)
+
+
+def _layout_size(embed: discord.Embed, *, command: Any, category: str) -> str:
+    """Retourne strictement `small` ou `large`."""
+    command_name = _command_name(command)
+    description = str(getattr(embed, "description", "") or "")
+
+    if command_name in _LARGE_COMMAND_HINTS:
+        return "large"
+    if any(command_name.startswith(f"{name} ") for name in _LARGE_COMMAND_HINTS):
+        return "large"
+    if category in _LARGE_CATEGORIES:
+        return "large"
+    if _has_media(embed):
+        return "large"
+    if len(embed.fields) > _SMALL_FIELD_SLOTS:
+        return "large"
+    if len(description) > _SMALL_DESCRIPTION_LIMIT:
+        return "large"
+    return "small"
+
+
+def _trim_field_value(value: Any, *, limit: int) -> str:
+    text = _compact_description(value, limit=limit) or "—"
+    return text
+
+
+def _pad_field_slots(embed: discord.Embed, *, slots: int) -> None:
+    """Réserve le même nombre de blocs sans afficher de texte artificiel."""
+    if len(embed.fields) >= slots:
+        return
+    for _ in range(slots - len(embed.fields)):
+        embed.add_field(name=_ZWSP, value=_ZWSP, inline=True)
+
+
+def _apply_two_size_layout(embed: discord.Embed, *, size: str) -> None:
+    """Normalise la densité visuelle selon l'un des deux formats SentriX."""
+    if size == "large":
+        description_limit = _LARGE_DESCRIPTION_LIMIT
+        field_limit = _LARGE_FIELD_LIMIT
+        slots = _LARGE_FIELD_SLOTS
+        title_limit = 64
+    else:
+        description_limit = _SMALL_DESCRIPTION_LIMIT
+        field_limit = _SMALL_FIELD_LIMIT
+        slots = _SMALL_FIELD_SLOTS
+        title_limit = 48
+
+    if embed.title:
+        embed.title = premium_style.clip(embed.title, title_limit)
+    if embed.description:
+        embed.description = _compact_description(embed.description, limit=description_limit)
+
+    # Ne retire jamais un champ métier. Les cartes <= slots sont simplement complétées
+    # par des emplacements invisibles pour conserver une silhouette stable.
+    for index, field in enumerate(list(embed.fields)):
+        if str(field.name) == _ZWSP and str(field.value) == _ZWSP:
+            continue
+        embed.set_field_at(
+            index,
+            name=premium_style.clip(field.name, 256),
+            value=_trim_field_value(field.value, limit=field_limit),
+            inline=bool(field.inline),
+        )
+
+    if len(embed.fields) <= slots:
+        _pad_field_slots(embed, slots=slots)
 
 
 def _refine_embed(
@@ -166,7 +258,7 @@ def _refine_embed(
     resolved_category = premium_style.infer_category(command=command, embed=embed, hint=category)
     resolved_kind = kind or premium_style.infer_kind(embed)
 
-    # Les logs ont un renderer Secure Audit dédié. V3.3 n'y touche volontairement pas.
+    # Les logs ont un renderer Secure Audit dédié. V3.4 n'y touche volontairement pas.
     is_log = bool(log_type) or resolved_category == "logs"
     if is_log:
         return embed
@@ -185,6 +277,8 @@ def _refine_embed(
     elif resolved_category in premium_style.COLORS:
         embed.colour = discord.Colour(premium_style.COLORS[resolved_category])
 
+    size = _layout_size(embed, command=command, category=resolved_category)
+    _apply_two_size_layout(embed, size=size)
     _refine_footer(embed, category=resolved_category, guild=guild)
     return embed
 
@@ -225,7 +319,7 @@ def install(bot: commands.Bot) -> None:
     original_embed = premium_style.style_embed
     original_view = premium_style.style_view
 
-    def styled_v33(embed: discord.Embed, *args, **kwargs):
+    def styled_v34(embed: discord.Embed, *args, **kwargs):
         result = original_embed(embed, *args, **kwargs)
         if not isinstance(result, discord.Embed):
             return result
@@ -240,13 +334,13 @@ def install(bot: commands.Bot) -> None:
             log_type=kwargs.get("log_type"),
         )
 
-    def styled_view_v33(view: discord.ui.View | None):
+    def styled_view_v34(view: discord.ui.View | None):
         return _refine_view(original_view(view))
 
-    premium_style.style_embed = styled_v33
-    premium_style.style_view = styled_view_v33
+    premium_style.style_embed = styled_v34
+    premium_style.style_view = styled_view_v34
     _INSTALLED = True
-    logger.info("SentriX V3.3 : hiérarchie visuelle premium et composants raffinés actifs.")
+    logger.info("SentriX V3.4 : cartes compactes/grandes symétriques actives.")
 
 
-__all__ = ["install"]
+__all__ = ["install", "_layout_size", "_apply_two_size_layout"]
