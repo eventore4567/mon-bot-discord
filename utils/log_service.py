@@ -141,10 +141,12 @@ def _first_snowflake(text: str) -> int | None:
 
 
 def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> str | None:
-    """Filet de sécurité pour les sanctions qui peuvent arriver par commande + event Discord.
+    """Filet de sécurité commande + événement Discord pour une même sanction.
 
-    On ne l'applique volontairement pas aux warns, kicks ou tickets : deux vraies actions
-    rapprochées doivent toujours produire deux logs distincts.
+    Ban, unban, timeout/mute et kick peuvent être vus une première fois par la commande
+    SentriX puis une seconde fois par le listener Discord. Pour ces actions seulement,
+    la clé sémantique combine serveur + action + cible. Warn et tickets restent exclus :
+    deux vraies actions rapprochées doivent toujours produire deux journaux distincts.
     """
     if log_type != "moderation":
         return None
@@ -158,6 +160,8 @@ def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> st
         action = "ban"
     elif "timeout" in sample or "mute" in sample:
         action = "timeout"
+    elif "kick" in sample or "expuls" in sample:
+        action = "kick"
     else:
         return None
     target = _first_snowflake(sample)
