@@ -1,8 +1,8 @@
-"""SentriX V3.6.2 — garde anti-fragments pour le markup des emojis Discord.
+"""SentriX V3.6.2 — garde anti-fragments et clarté finale de l'interface.
 
-La V3.6.2 utilise des emojis Unicode simples pour la navigation et réserve les emojis
-animés aux états. Ce garde protège toujours un vrai ``<a:nom:id>`` et nettoie les anciens
-fragments V3.6 (`a a a`, `<a`, `a:sxv36_...>`) avant tout passage dans la typographie.
+La navigation utilise des emojis Unicode simples ; les emojis animés restent réservés
+aux états. Ce garde protège un vrai ``<a:nom:id>``, nettoie les anciens fragments V3.6
+(`a a a`, `<a`, `a:sxv36_...>`) et affine les repères visuels help/setup.
 """
 from __future__ import annotations
 
@@ -29,7 +29,6 @@ def _repair_broken(value: Any) -> str:
         return ""
     text = _BROKEN_V36_RE.sub("", text)
     text = _BROKEN_PREFIX_RE.sub("", text)
-    # Corrige aussi les fragments placés au début des lignes d'une liste/champ.
     text = re.sub(r"(?m)^\s*<a\s+(?=\S)", "", text, flags=re.I)
     text = re.sub(r"(?m)^\s*(?:a\s+){2,8}(?=\S)", "", text, flags=re.I)
     text = _MULTI_SPACE_RE.sub(" ", text)
@@ -83,7 +82,6 @@ def install(bot: commands.Bot) -> None:
         if not getattr(original_strip, "_sentrix_legacy_marker_fix_v362", False):
             def strip_legacy_marker(value: Any) -> str:
                 text = original_strip(value)
-                # Ancien symbole de recherche/help qui n'est pas dans le bloc emoji Unicode.
                 text = re.sub(r"^[⌕✦✓✕▶◀]+\s*", "", text).strip()
                 return _repair_broken(text)
 
@@ -95,7 +93,6 @@ def install(bot: commands.Bot) -> None:
         if not getattr(original_body, "_sentrix_body_clarity_v362", False):
             def clear_body(value: Any) -> str:
                 text = _repair_broken(original_body(value))
-                # Le bloc principal de +help utilisait l'icône jeu pour « Communauté ».
                 text = text.replace("🎮 Communauté & progression", "🌍 Communauté & progression")
                 text = text.replace("🎮 Community & progression", "🌍 Community & progression")
                 return text
@@ -103,11 +100,48 @@ def install(bot: commands.Bot) -> None:
             clear_body._sentrix_body_clarity_v362 = True
             clear_body._sentrix_original = original_body
             ui._clean_body = clear_body
+
+        original_static_icon = ui._static_icon
+        if not getattr(original_static_icon, "_sentrix_setup_clarity_v362", False):
+            def clear_static_icon(text: Any, *, category: str | None = None) -> str:
+                haystack = str(text or "").casefold()
+                specific = (
+                    ("🌐", ("serveur", "server")),
+                    ("📈", ("progression", "progress")),
+                    ("🌍", ("langue", "language")),
+                    ("🧩", ("modules", "systèmes principaux", "systemes principaux", "main systems")),
+                    ("📡", ("en direct", "live")),
+                    ("ℹ️", ("information", "informations")),
+                )
+                for icon, words in specific:
+                    if any(word in haystack for word in words):
+                        return icon
+                return original_static_icon(text, category=category)
+
+            clear_static_icon._sentrix_setup_clarity_v362 = True
+            clear_static_icon._sentrix_original = original_static_icon
+            ui._static_icon = clear_static_icon
+
+        original_button_icon = ui._button_icon
+        if not getattr(original_button_icon, "_sentrix_button_clarity_v362", False):
+            def clear_button_icon(text: str) -> str | None:
+                haystack = str(text or "").casefold()
+                if "résumé" in haystack or "resume" in haystack or "summary" in haystack:
+                    return "📋"
+                if "historique" in haystack or "history" in haystack:
+                    return "🕘"
+                if "dashboard" in haystack or "tableau de bord" in haystack:
+                    return "🌐"
+                return original_button_icon(text)
+
+            clear_button_icon._sentrix_button_clarity_v362 = True
+            clear_button_icon._sentrix_original = original_button_icon
+            ui._button_icon = clear_button_icon
     except Exception:
         logger.exception("Le garde visuel V3.6.2 n'a pas pu être branché.")
 
     _INSTALLED = True
-    logger.info("SentriX V3.6.2 : fragments cassés supprimés et anciens marqueurs help nettoyés.")
+    logger.info("SentriX V3.6.2 : interface claire, fragments cassés supprimés, setup/help harmonisés.")
 
 
 __all__ = ["install", "_repair_broken"]
