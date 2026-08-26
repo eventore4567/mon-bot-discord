@@ -1,8 +1,8 @@
 """Correctif final du rendu +ping.
 
 Cette couche neutralise l'ancien enrichissement de ``command_style_v2`` qui réajoutait
-une barre de progression après le renderer principal. Elle ne touche à aucune autre
-commande ni aux logs.
+une barre de progression et des séparateurs après le renderer principal. Elle ne touche
+à aucune logique métier.
 """
 from __future__ import annotations
 
@@ -70,8 +70,8 @@ def install() -> None:
     if _INSTALLED:
         return
 
-    # command_style_v2.style_embed appelle ces fonctions dynamiquement : les remplacer
-    # ici suffit donc même si cette ancienne couche reste le dernier renderer actif.
+    # Supprime aussi le long séparateur ━━━ injecté par l'ancienne couche.
+    command_style_v2.BAR = ""
     command_style_v2._latency_quality = _latency_quality
     command_style_v2._enrich_ping = _enrich_ping
     _INSTALLED = True
