@@ -17,7 +17,14 @@ PING_BANNER_FILENAME = "sentrix-ping-information.jpg"
 
 
 def _is_sentrix_ping_panel(embed: discord.Embed | None) -> bool:
-    if embed is None or str(embed.title or "").strip().casefold() != "ping":
+    if embed is None:
+        return False
+
+    title = str(embed.title or "").strip().casefold()
+    if title in {"pong", "pong !"}:
+        return bool(re.search(r"latence\s*:\s*\*\*?\d+\s*ms", str(embed.description or ""), re.IGNORECASE))
+
+    if title != "ping":
         return False
 
     field_names = {str(field.name or "").strip().casefold() for field in embed.fields}
@@ -31,6 +38,11 @@ def _latency_from_embed(embed: discord.Embed, fallback: int) -> int:
         match = re.search(r"(\d+)", str(field.value or ""))
         if match:
             return max(0, int(match.group(1)))
+
+    match = re.search(r"(\d+)\s*ms", str(embed.description or ""), re.IGNORECASE)
+    if match:
+        return max(0, int(match.group(1)))
+
     return max(0, fallback)
 
 
@@ -88,7 +100,6 @@ class _SentriXPingLayout(discord.ui.LayoutView):
         children: list[discord.ui.Item] = []
         if with_banner:
             gallery = discord.ui.MediaGallery()
-            # Discord Components V2 references the JPEG uploaded alongside the message.
             gallery.add_item(
                 media=f"attachment://{PING_BANNER_FILENAME}",
                 description="SentriX — Information",
@@ -139,19 +150,17 @@ if not getattr(commands.Context.send, "_sentrix_ping_components_v2", False):
                 PING_BANNER_PATH,
                 filename=PING_BANNER_FILENAME,
             )
-            kwargs["file"] = banner_file
+            kwargs["files"] = [banner_file]
             kwargs["view"] = _SentriXPingLayout(self, latency_ms, with_banner=True)
 
             try:
                 return await _ORIGINAL_CONTEXT_SEND(self, *args, **kwargs)
             except discord.HTTPException:
-                # Never let a media-rendering issue break +ping. Retry instantly with
-                # the same compact Components V2 panel, only without the banner.
                 try:
                     banner_file.close()
                 except Exception:
                     pass
-                kwargs.pop("file", None)
+                kwargs.pop("files", None)
                 kwargs["view"] = _SentriXPingLayout(self, latency_ms, with_banner=False)
                 return await _ORIGINAL_CONTEXT_SEND(self, *args, **kwargs)
 
