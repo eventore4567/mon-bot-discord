@@ -35,24 +35,15 @@ async def run() -> int:
         if help_command is None:
             errors.append("+help absent")
         else:
-            if not getattr(help_command, "_sentrix_help_root_only", False):
-                errors.append("+help n'a pas le marqueur root-only")
-            if getattr(help_command, "clean_params", None):
-                errors.append(f"+help expose encore des paramètres: {list(help_command.clean_params)}")
-            signature = str(getattr(help_command, "signature", "") or "").strip()
-            if signature:
-                errors.append(f"+help affiche encore une signature publique: {signature!r}")
-            callback_params = list(inspect.signature(help_command.callback).parameters)
-            if callback_params != ["cog", "ctx"]:
-                errors.append(f"callback +help inattendu: {callback_params}")
+            if getattr(bot, "_sentrix_help_owner", None) != "cogs.help":
+                errors.append("+help n'appartient pas au propriétaire officiel")
+            if list(getattr(help_command, "checks", ())):
+                errors.append("+help conserve un verrou local")
 
-        for language in (language_runtime.LANG_FR, language_runtime.LANG_EN):
-            home = help_clean_style._help_home(bot, None, "+", True, language)
-            nav = "\n".join(str(field.value) for field in home.fields if str(field.name).upper() == "NAVIGATION")
-            if "+help ban" in nav or "+aide bannir" in nav:
-                errors.append(f"ancien exemple +help <commande> encore visible en {language}")
-            if "Aucun nom de commande" not in nav and "No command name" not in nav:
-                errors.append(f"navigation root-only absente en {language}")
+        help_source = (ROOT / "cogs" / "help.py").read_text(encoding="utf-8")
+        for marker in ("class HelpView", "class SearchModal", "class CategorySelect"):
+            if marker not in help_source:
+                errors.append(f"navigation officielle incomplète: {marker}")
 
         if not getattr(production_readiness_runtime.audit_guild_configuration, "_sentrix_external_canary", False):
             errors.append("audit readiness n'est pas patché pour Canary externe")

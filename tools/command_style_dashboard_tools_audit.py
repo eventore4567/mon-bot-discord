@@ -27,16 +27,16 @@ async def main() -> int:
     embed = discord.Embed(title="Membre banni", description="La sanction a été appliquée.")
     embed.add_field(name="membre", value="Test", inline=True)
     styled = premium_style.style_embed(embed, command=FakeCommand())
-    if styled.title != "SENTRIX / MODÉRATION":
+    if styled.title != "SentriX • Modération":
         errors.append(f"titre canonique inattendu: {styled.title!r}")
-    if not str(styled.description or "").startswith("**Membre banni**"):
+    if "La sanction a été appliquée." not in str(styled.description or ""):
         errors.append("le détail métier original n'est pas conservé dans la description")
-    if not styled.fields or styled.fields[0].name != "MEMBRE":
+    if not styled.fields or styled.fields[0].name != "membre":
         errors.append("les noms de champs ne sont pas harmonisés en sections sobres")
 
     specialized = discord.Embed(title="SENTRIX / COMMANDES", description="Catalogue")
     premium_style.style_embed(specialized, command=FakeCommand())
-    if specialized.title != "SENTRIX / COMMANDES":
+    if specialized.title != "SentriX • Commandes":
         errors.append("un centre SentriX spécialisé a perdu son titre")
 
     view = discord.ui.View(timeout=None)

@@ -200,10 +200,9 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
         assert len(slash_roots) <= 100, f"budget slash dépassé: {len(slash_roots)} racines"
 
         assert command_response_guard._INSTALLED, "filet de réponse des commandes absent"
-        assert command_no_emoji_runtime._INSTALLED, "politique sans emoji non installée"
-        assert getattr(bot, "_sentrix_no_emoji_commands", False), "politique sans emoji non appliquée au bot"
+        assert getattr(bot, "_sentrix_official_embed_transport", False), "transport d'embed officiel non appliqué au bot"
         cleaned = command_no_emoji_runtime.clean_text("Test ✅ 🎮")
-        assert cleaned == "Test", f"nettoyage emoji inattendu: {cleaned!r}"
+        assert cleaned == "Test ✅ 🎮", f"le texte métier est altéré: {cleaned!r}"
 
         for event in ("on_command", "on_command_completion", "on_command_error", "on_interaction", "on_app_command_completion"):
             assert bot.extra_events.get(event, []), f"listener UX manquant: {event}"

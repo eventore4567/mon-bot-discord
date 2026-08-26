@@ -309,6 +309,12 @@ def _category_for(command) -> CategorySpec:
     cog = getattr(command, "cog", None)
     cog_name = getattr(cog, "qualified_name", "") if cog else ""
 
+    # Les jeux directs partagent parfois un cog économie ; leur contrat de catalogue est
+    # plus précis que le nom technique du cog et doit gagner pour l'aide utilisateur.
+    from .command_catalog_cleanup import GAME_COMMANDS
+    if root in GAME_COMMANDS:
+        return CATEGORY_BY_KEY["games"]
+
     # Les règles exactes passent avant les règles de cog : un même cog peut contenir
     # plusieurs catégories logiques, par exemple Utility = informations + outils.
     for category in CATEGORIES:
