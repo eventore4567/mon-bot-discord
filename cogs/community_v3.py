@@ -380,6 +380,8 @@ async def _flush_loop(bot: commands.Bot) -> None:
             await _flush_pending_messages(bot)
     except asyncio.CancelledError:
         raise
+    except RuntimeError as exc:
+        logger.debug("V3 : boucle différée jusqu'au vrai démarrage Discord: %s", exc)
     except Exception:
         logger.exception("V3 : boucle de progression interrompue.")
 
