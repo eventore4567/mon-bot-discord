@@ -12,8 +12,8 @@ from discord.ext import commands
 
 
 PING_ACCENT = 0x5865F2
-PING_BANNER_PATH = "assets/sentrix-ping-header-v2.webp"
-PING_BANNER_FILENAME = "sentrix-information.webp"
+PING_BANNER_PATH = "assets/sentrix-ping-information.jpg"
+PING_BANNER_FILENAME = "sentrix-ping-information.jpg"
 
 
 def _is_sentrix_ping_panel(embed: discord.Embed | None) -> bool:
@@ -88,15 +88,13 @@ class _SentriXPingLayout(discord.ui.LayoutView):
         children: list[discord.ui.Item] = []
         if with_banner:
             gallery = discord.ui.MediaGallery()
-            # discord.py/Discord Components V2 expects an attachment URI when the
-            # actual file is uploaded alongside the message.
+            # Discord Components V2 references the JPEG uploaded alongside the message.
             gallery.add_item(
                 media=f"attachment://{PING_BANNER_FILENAME}",
                 description="SentriX — Information",
             )
             children.append(gallery)
 
-        # Compact horizontal card: one information block, one button row, one footer.
         children.extend(
             [
                 discord.ui.TextDisplay(
