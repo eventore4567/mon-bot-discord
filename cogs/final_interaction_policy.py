@@ -1,15 +1,12 @@
 """Transport Discord officiel et unique de SentriX.
 
-Règles :
-- toutes les réponses de commandes + et / sont des ``discord.Embed`` ;
-- les réponses envoyées indirectement depuis une commande (``ctx.channel.send``,
-  ``message.reply``...) sont également converties grâce au contexte d'invocation ;
-- les embeds déjà construits sont conservés ;
-- les pings explicitement autorisés et les notifications métier ne sont pas cassés ;
-- seule la conversation directe ``sentrix`` reste en texte Discord normal ;
-- les erreurs et refus slash utilisent les petites cartes officielles.
-
-Aucun autre module ne doit aplatir les embeds en texte.
+Règles finales :
+- toutes les réponses de commandes + et / utilisent le design SentriX officiel ;
+- les anciennes réponses texte sont converties en cartes ;
+- les embeds historiques sont normalisés au dernier moment ;
+- boutons et menus de commandes perdent leurs emojis décoratifs ;
+- les pings explicitement autorisés restent intacts ;
+- seule la conversation directe ``sentrix`` reste en texte Discord normal.
 """
 from __future__ import annotations
 
@@ -72,7 +69,8 @@ def _root_from_interaction(interaction: discord.Interaction | None) -> str:
 
 
 def _plain_root(root: str) -> bool:
-    return root == "sentrix"
+    # Le dialogue naturel avec SentriX doit rester du vrai texte Discord, sans carte.
+    return str(root or "").casefold() == "sentrix"
 
 
 def _remember_plain_interaction(interaction: discord.Interaction | None) -> None:
@@ -90,23 +88,13 @@ def _remember_plain_interaction(interaction: discord.Interaction | None) -> None
                 _PLAIN_WEBHOOK_TOKENS.pop(key, None)
 
 
-def _clean_embed(embed: discord.Embed | None) -> discord.Embed | None:
-    if not isinstance(embed, discord.Embed):
-        return embed
-    if embed.title:
-        embed.title = sentrix_embeds.clean_ui_text(embed.title, 256, "Information")
-    embed.colour = discord.Colour(sentrix_embeds.SENTRIX_COLOR)
-    for index, field in enumerate(list(embed.fields)):
-        embed.set_field_at(
-            index,
-            name=sentrix_embeds.clean_ui_text(field.name, 256, "Information"),
-            value=str(field.value or "—")[:1024],
-            inline=bool(field.inline),
-        )
-    footer = getattr(embed.footer, "text", None)
-    if not footer:
-        embed.set_footer(text="SentriX")
-    return embed
+def _clean_embed(
+    embed: discord.Embed | None,
+    *,
+    root: str = "",
+    bot: Any = None,
+) -> discord.Embed | None:
+    return sentrix_embeds.style_existing(embed, root=root, bot=bot)
 
 
 def _title_for_text(text: str) -> str:
@@ -144,18 +132,18 @@ def _cards_from_text(value: Any) -> list[discord.Embed]:
     chunks: list[str] = []
     remaining = text
     while remaining and len(chunks) < 10:
-        if len(remaining) <= 3900:
+        if len(remaining) <= 3850:
             chunks.append(remaining)
             break
-        cut = remaining.rfind("\n", 0, 3900)
+        cut = remaining.rfind("\n", 0, 3850)
         if cut < 800:
-            cut = remaining.rfind(" ", 0, 3900)
+            cut = remaining.rfind(" ", 0, 3850)
         if cut < 800:
-            cut = 3900
+            cut = 3850
         chunks.append(remaining[:cut].rstrip())
         remaining = remaining[cut:].lstrip()
     if remaining and chunks:
-        chunks[-1] = (chunks[-1][:3700] + "\n\nRéponse tronquée.")[:3900]
+        chunks[-1] = (chunks[-1][:3650] + "\n\nRéponse tronquée.")[:3850]
 
     total = len(chunks)
     cards = []
@@ -182,17 +170,22 @@ def _normalize_payload(
     *,
     editing: bool = False,
     force_embed: bool = True,
+    root: str = "",
+    bot: Any = None,
 ):
     new_args = list(args)
     new_kwargs = dict(kwargs)
 
     if isinstance(new_kwargs.get("embed"), discord.Embed):
-        new_kwargs["embed"] = _clean_embed(new_kwargs["embed"])
+        new_kwargs["embed"] = _clean_embed(new_kwargs["embed"], root=root, bot=bot)
     if new_kwargs.get("embeds"):
         new_kwargs["embeds"] = [
-            _clean_embed(item) if isinstance(item, discord.Embed) else item
+            _clean_embed(item, root=root, bot=bot) if isinstance(item, discord.Embed) else item
             for item in list(new_kwargs["embeds"])
         ]
+
+    if new_kwargs.get("view") is not None:
+        new_kwargs["view"] = sentrix_embeds.clean_view(new_kwargs["view"])
 
     content = new_kwargs.get("content")
     positional = False
@@ -209,6 +202,10 @@ def _normalize_payload(
         and not _explicit_ping_requested(new_kwargs)
     ):
         cards = _cards_from_text(content)
+        cards = [
+            _clean_embed(card, root=root, bot=bot)
+            for card in cards
+        ]
         if len(cards) == 1:
             new_kwargs["embed"] = cards[0]
         else:
@@ -254,7 +251,7 @@ def _install_context_send() -> None:
         root = _root_name(getattr(self, "command", None)) or _COMMAND_ROOT.get()
         if _plain_root(root):
             return await base(self, *args, **kwargs)
-        args, kwargs = _normalize_payload(args, kwargs)
+        args, kwargs = _normalize_payload(args, kwargs, root=root, bot=getattr(self, "bot", None))
         return await base(self, *args, **kwargs)
 
     context_send._sentrix_official_embed = True
@@ -271,9 +268,11 @@ def _install_messageable_send() -> None:
     async def messageable_send(self, *args, **kwargs):
         root = _COMMAND_ROOT.get()
         if root and not _plain_root(root):
-            args, kwargs = _normalize_payload(args, kwargs)
+            args, kwargs = _normalize_payload(args, kwargs, root=root)
         elif isinstance(kwargs.get("embed"), discord.Embed):
             kwargs["embed"] = _clean_embed(kwargs["embed"])
+            if kwargs.get("view") is not None:
+                kwargs["view"] = sentrix_embeds.clean_view(kwargs["view"])
         return await base(self, *args, **kwargs)
 
     messageable_send._sentrix_official_command_embed = True
@@ -290,7 +289,7 @@ def _install_message_edit() -> None:
     async def message_edit(self: discord.Message, *args, **kwargs):
         root = _COMMAND_ROOT.get()
         if root and not _plain_root(root):
-            args, kwargs = _normalize_payload(args, kwargs, editing=True)
+            args, kwargs = _normalize_payload(args, kwargs, editing=True, root=root)
         return await base(self, *args, **kwargs)
 
     message_edit._sentrix_official_command_embed = True
@@ -309,7 +308,12 @@ def _install_interactions() -> None:
             if _plain_root(root):
                 _remember_plain_interaction(interaction)
                 return await base_send(self, *args, **kwargs)
-            args, kwargs = _normalize_payload(args, kwargs)
+            args, kwargs = _normalize_payload(
+                args,
+                kwargs,
+                root=root,
+                bot=getattr(interaction, "client", None),
+            )
             return await base_send(self, *args, **kwargs)
 
         response_send._sentrix_official_embed = True
@@ -340,7 +344,13 @@ def _install_interactions() -> None:
             if _plain_root(root):
                 _remember_plain_interaction(interaction)
                 return await base_edit(self, *args, **kwargs)
-            args, kwargs = _normalize_payload(args, kwargs, editing=True)
+            args, kwargs = _normalize_payload(
+                args,
+                kwargs,
+                editing=True,
+                root=root,
+                bot=getattr(interaction, "client", None),
+            )
             return await base_edit(self, *args, **kwargs)
 
         response_edit._sentrix_official_embed = True
@@ -356,7 +366,13 @@ def _install_interactions() -> None:
             if _plain_root(root):
                 _remember_plain_interaction(self)
                 return await base_original(self, *args, **kwargs)
-            args, kwargs = _normalize_payload(args, kwargs, editing=True)
+            args, kwargs = _normalize_payload(
+                args,
+                kwargs,
+                editing=True,
+                root=root,
+                bot=getattr(self, "client", None),
+            )
             return await base_original(self, *args, **kwargs)
 
         edit_original._sentrix_official_embed = True
@@ -441,7 +457,7 @@ def install(bot: commands.Bot) -> None:
     _install_errors(bot)
     bot._sentrix_official_embed_transport = True
     logger.info(
-        "Transport officiel actif : toutes les commandes en embeds ; conversation sentrix en texte normal."
+        "Transport officiel actif : cartes larges SentriX sur toutes les commandes ; conversation sentrix en texte normal."
     )
 
 
