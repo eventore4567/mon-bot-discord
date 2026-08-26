@@ -1,0 +1,33 @@
+name: SentriX Reset Logs V2
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  reset-logs-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile reset logs runtime
+        run: |
+          python -m compileall -q \
+            cogs/owner_log_rebuild.py \
+            cogs/owner_log_rebuild_v2.py \
+            cogs/owner_log_rebuild_v2_health.py \
+            cogs/owner_log_rebuild_v2_concurrency.py \
+            cogs/slash_error_completion_guard.py
+      - name: Run reset logs V2 contracts
+        run: PYTHONPATH=. python tests/test_owner_log_rebuild_v2_resilience.py
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-reset-logs-v2.db"
