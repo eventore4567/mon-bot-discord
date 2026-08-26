@@ -5,18 +5,23 @@ still exists in cogs.utility, but when its legacy embed reaches Context.send we 
 it with a Discord Components V2 LayoutView.
 """
 
+import io
 import re
 from pathlib import Path
 
 import discord
+from PIL import Image
 from discord.ext import commands
 
 
-PING_BANNER_NAME = "sentrix-ping-header-v2.webp"
-PING_BANNER_PATH = Path(__file__).resolve().parents[1] / "assets" / PING_BANNER_NAME
+PING_BANNER_SOURCE_NAME = "sentrix-ping-header-v2.webp"
+PING_BANNER_SOURCE_PATH = (
+    Path(__file__).resolve().parents[1] / "assets" / PING_BANNER_SOURCE_NAME
+)
+PING_BANNER_UPLOAD_NAME = "sentrix-ping-header-v2.png"
 PING_BANNER_FALLBACK_URL = (
     "https://raw.githubusercontent.com/eventore4567/mon-bot-discord/"
-    "main/assets/sentrix-ping-header-v2.webp"
+    "main/assets/sentrix-log-header.png"
 )
 PING_ACCENT = 0x5865F2
 
@@ -49,6 +54,25 @@ def _latency_quality(latency_ms: int) -> tuple[str, str]:
     return "Dégradée", "▰▰▰▰▱▱▱▱▱▱"
 
 
+def _build_ping_banner_file() -> discord.File | None:
+    """Convertit la bannière WebP du dépôt en PNG avant l'envoi à Discord.
+
+    Discord accepte les pièces jointes dans MediaGallery, mais certains clients ont
+    refusé l'ancien WebP. Le PNG garde exactement le même visuel et est plus fiable.
+    """
+    if not PING_BANNER_SOURCE_PATH.is_file():
+        return None
+
+    try:
+        buffer = io.BytesIO()
+        with Image.open(PING_BANNER_SOURCE_PATH) as source:
+            source.convert("RGB").save(buffer, format="PNG", optimize=True)
+        buffer.seek(0)
+        return discord.File(buffer, filename=PING_BANNER_UPLOAD_NAME)
+    except Exception:
+        return None
+
+
 class _SentriXPingLayout(discord.ui.LayoutView):
     def __init__(self, ctx: commands.Context, latency_ms: int, *, banner_media: str):
         super().__init__(timeout=120)
@@ -68,16 +92,10 @@ class _SentriXPingLayout(discord.ui.LayoutView):
             description="SentriX — Informations générales",
         )
 
-        # Cinq boutons remplissent la ligne et donnent au panneau une vraie présence
-        # horizontale, sans ajouter de hauteur inutile.
+        # Quatre boutons gardent le panneau large sans l'étirer artificiellement.
         status_row = discord.ui.ActionRow(
             discord.ui.Button(
                 label=f"Discord • {latency_ms} ms",
-                style=discord.ButtonStyle.secondary,
-                disabled=True,
-            ),
-            discord.ui.Button(
-                label=f"Connexion • {connection}",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
@@ -106,14 +124,14 @@ class _SentriXPingLayout(discord.ui.LayoutView):
                 "-# État en temps réel de la connexion et des services SentriX."
             ),
             discord.ui.TextDisplay(
-                f"### Passerelle Discord    **{latency_ms} ms**  •  **{quality}**\n"
-                f"`{quality_bar}`"
+                "### Passerelle Discord\n"
+                f"**{latency_ms} ms**  •  **{quality}**    `{quality_bar}`"
             ),
             discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
             discord.ui.TextDisplay(
                 "### Informations\n"
-                f"**Connexion :** {connection}   •   **État :** {state}   •   "
-                f"**Serveurs :** {server_count:,}   •   **Membres :** {member_count:,}   •   "
+                f"**Connexion :** {connection}  •  **État :** {state}\n"
+                f"**Serveurs :** {server_count:,}  •  **Membres :** {member_count:,}  •  "
                 f"**Shards :** {shard_count}"
             ),
             status_row,
@@ -143,10 +161,10 @@ if not getattr(commands.Context.send, "_sentrix_ping_components_v2", False):
                 round(self.bot.latency * 1000),
             )
 
-            has_local_banner = PING_BANNER_PATH.is_file()
+            banner_file = _build_ping_banner_file()
             banner_media = (
-                f"attachment://{PING_BANNER_NAME}"
-                if has_local_banner
+                f"attachment://{PING_BANNER_UPLOAD_NAME}"
+                if banner_file is not None
                 else PING_BANNER_FALLBACK_URL
             )
 
@@ -160,13 +178,8 @@ if not getattr(commands.Context.send, "_sentrix_ping_components_v2", False):
                 banner_media=banner_media,
             )
 
-            # Une pièce jointe locale évite le chargement vide vu avec l'URL GitHub
-            # distante. Le MediaGallery la référence directement dans le même container.
-            if has_local_banner:
-                kwargs["file"] = discord.File(
-                    PING_BANNER_PATH,
-                    filename=PING_BANNER_NAME,
-                )
+            if banner_file is not None:
+                kwargs["file"] = banner_file
 
         return await _ORIGINAL_CONTEXT_SEND(self, *args, **kwargs)
 
