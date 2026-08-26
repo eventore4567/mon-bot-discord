@@ -211,8 +211,13 @@ async def setup(bot: commands.Bot) -> None:
     from . import owner_log_rebuild_v2
     await owner_log_rebuild_v2.install(bot)
 
+    # Notification indépendante des logs : le créateur reçoit un MP quand SentriX quitte
+    # ou est retiré d'un serveur.
+    from . import guild_departure_notify
+    await guild_departure_notify.install(bot)
+
     from . import final_error_embed_v5
     final_error_embed_v5.install(bot)
     logger.info(
-        "Runtime final V5.1 + reset logs V2 actif : routes live + listeners garantis + reconstruction résiliente."
+        "Runtime final V5.1 + reset logs V2 actif : routes live + listeners garantis + reconstruction résiliente + notifications départ serveur."
     )
