@@ -1,15 +1,8 @@
-"""Ferme aussi les placeholders slash lorsque la commande termine par une erreur.
+"""Ferme les placeholders slash sur erreur et installe la dernière autorité runtime.
 
-SlashReliabilityV7 couvre deja le chemin de succes via ``on_app_command_completion``.
-Discord n'emet toutefois pas cet evenement lorsqu'une commande leve une exception : elle
-passe par ``CommandTree.on_error``. Une commande peut donc avoir applique son action puis
-echouer pendant sa finalisation et laisser le defer ``thinking`` affiche sans fin.
-
-Cette garde est chargee en dernier sur Railway. Elle enveloppe le handler d'erreur existant
-sans le remplacer fonctionnellement et, dans un ``finally``, remplace uniquement une
-reponse originale encore vide et differee. Toute vraie reponse deja envoyee est preservee.
-Elle installe ensuite le correctif de production embeds/logs en toute dernière position afin
-qu'aucune couche chargée auparavant ne puisse reprendre la main.
+Cette extension est la dernière ajoutée par ``railway_boot.py``. Elle garde le nettoyage
+historique des interactions différées puis installe V3, qui couvre toute l'exécution des
+commandes préfixées et la récupération finale des routes de logs historiques.
 """
 from __future__ import annotations
 
@@ -20,7 +13,9 @@ import discord
 from discord.ext import commands
 
 logger = logging.getLogger("bot.slash-error-completion")
-_ERROR_FALLBACK = "La commande est terminée, mais SentriX a rencontré une erreur pendant sa finalisation."
+_ERROR_FALLBACK = (
+    "La commande est terminée, mais SentriX a rencontré une erreur pendant sa finalisation."
+)
 
 
 def _state(bot: commands.Bot) -> dict:
@@ -109,19 +104,22 @@ def _has_payload(message: discord.InteractionMessage) -> bool:
     )
 
 
-async def _settle_error_defer(bot: commands.Bot, interaction: discord.Interaction, error) -> None:
+async def _settle_error_defer(
+    bot: commands.Bot,
+    interaction: discord.Interaction,
+    error,
+) -> None:
     state = _state(bot)
-    state.update({
-        "last_error_seen_at": int(time.time()),
-        "last_command_name": _command_name(interaction),
-        "last_error_type": _error_type(error),
-        "last_cleanup_error": None,
-    })
+    state.update(
+        {
+            "last_error_seen_at": int(time.time()),
+            "last_command_name": _command_name(interaction),
+            "last_error_type": _error_type(error),
+            "last_cleanup_error": None,
+        }
+    )
 
-    if not interaction.response.is_done():
-        state["last_result"] = "response_not_deferred"
-        return
-    if not _is_deferred(interaction):
+    if not interaction.response.is_done() or not _is_deferred(interaction):
         state["last_result"] = "response_not_deferred"
         return
 
@@ -146,7 +144,7 @@ async def _settle_error_defer(bot: commands.Bot, interaction: discord.Interactio
         state["last_result"] = "error_defer_settled"
         state["last_settled_at"] = int(time.time())
         logger.info(
-            "Placeholder slash ferme sur erreur : /%s (%s).",
+            "Placeholder slash fermé sur erreur : /%s (%s).",
             state["last_command_name"],
             state["last_error_type"],
         )
@@ -184,17 +182,15 @@ def install(bot: commands.Bot) -> None:
     state["installed"] = True
     state["wrapped_at"] = int(time.time())
     _install_health_patch()
-    logger.info("Garde slash erreur active : tout defer vide est ferme meme sur exception.")
+    logger.info("Garde slash erreur active : tout defer vide est fermé même sur exception.")
 
 
 async def setup(bot: commands.Bot) -> None:
     install(bot)
 
-    # Cette extension est la dernière ajoutée par railway_boot.py. L'ancien invariant reste
-    # installé pour compatibilité, puis le correctif V2 protège directement SentriXContext,
-    # enlève l'auto-ping et répare les migrations de logs entièrement désactivées.
+    # Dernière extension Railway : aucune couche ne doit être chargée après V3.
     from . import command_embed_invariant
-    from . import production_embed_log_repair
+    from . import production_embed_log_repair_v3
 
     command_embed_invariant.install(bot)
-    await production_embed_log_repair.setup(bot)
+    await production_embed_log_repair_v3.setup(bot)
