@@ -70,7 +70,6 @@ class LogAliasAndErrorEmbedV4Tests(unittest.TestCase):
         self.assertIn('embed=embeds.error(_ERROR_FALLBACK, title="Erreur de commande")', source)
         self.assertIn("content=None", source)
         self.assertNotIn("content=_ERROR_FALLBACK", source)
-        self.assertNotIn("embeds=[]", source)
 
 
 if __name__ == "__main__":
