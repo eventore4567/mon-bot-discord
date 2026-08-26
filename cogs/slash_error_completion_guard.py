@@ -1,8 +1,9 @@
-"""Ferme les placeholders slash sur erreur et installe la dernière autorité runtime.
+"""Ferme les placeholders slash puis installe les autorités finales du runtime.
 
-Cette extension est la dernière ajoutée par ``railway_boot.py``. Elle garde le nettoyage
-historique des interactions différées puis installe V3, qui couvre toute l'exécution des
-commandes préfixées et la récupération finale des routes de logs historiques.
+Cette extension est la dernière ajoutée par ``railway_boot.py``. V5 est volontairement
+installée tout à la fin : livraison des logs avec auto-réparation au moment de l'événement,
+puis erreurs via le transport Discord brut afin qu'aucune couche suivante ne puisse les
+reconvertir en texte ou modifier leur carte.
 """
 from __future__ import annotations
 
@@ -137,8 +138,6 @@ async def _settle_error_defer(
         return
 
     try:
-        # Ne jamais laisser ce chemin de secours en texte brut : c'était le dernier
-        # fallback qui écrivait explicitement ``content=...`` avec ``embeds=[]``.
         await interaction.edit_original_response(
             content=None,
             embed=embeds.error(_ERROR_FALLBACK, title="Erreur de commande"),
@@ -192,9 +191,17 @@ def install(bot: commands.Bot) -> None:
 async def setup(bot: commands.Bot) -> None:
     install(bot)
 
-    # Dernière extension Railway : aucune couche ne doit être chargée après V3.
+    # V3 reste utile pour les migrations de démarrage et le contexte des commandes.
     from . import command_embed_invariant
     from . import production_embed_log_repair_v3
 
     command_embed_invariant.install(bot)
     await production_embed_log_repair_v3.setup(bot)
+
+    # V5 DOIT rester la dernière autorité chargée par Railway.
+    from . import live_log_delivery_v5
+    from . import final_error_embed_v5
+
+    live_log_delivery_v5.install(bot)
+    final_error_embed_v5.install(bot)
+    logger.info("Runtime final V5 actif : logs live auto-réparés + erreurs en embed Discord natif.")
