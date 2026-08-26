@@ -46,6 +46,72 @@ def _ping_stub(value: Any) -> str | None:
     return text[:1900] or None
 
 
+def _has_non_ping_text(value: Any) -> bool:
+    text = _MENTION_RE.sub("", str(value or ""))
+    return bool(text.strip(" \n\t,;:|•-—–"))
+
+
+def _move_content_next_to_existing_embeds(
+    kwargs: dict,
+    content: Any,
+    *,
+    root: str,
+    bot: Any,
+) -> dict:
+    """Déplace un ancien ``content + embed`` dans une carte sans perdre l'embed métier."""
+    text = str(content or "").strip()
+    if not text:
+        return kwargs
+
+    existing: list[discord.Embed] = []
+    single = kwargs.pop("embed", None)
+    if isinstance(single, discord.Embed):
+        existing.append(single)
+    for item in list(kwargs.pop("embeds", []) or []):
+        if isinstance(item, discord.Embed):
+            existing.append(item)
+
+    cards = [
+        policy._clean_embed(card, root=root, bot=bot)
+        for card in policy._cards_from_text(text)
+    ]
+    cards = [card for card in cards if isinstance(card, discord.Embed)]
+
+    available = max(0, 10 - len(existing))
+    if available:
+        kwargs["embeds"] = cards[:available] + existing
+    elif existing:
+        # Cas extrême : Discord autorise déjà 10 embeds. Ne pas en supprimer un ; ajoute
+        # le texte à la première carte dans la limite Discord.
+        first = existing[0]
+        description = str(first.description or "").strip()
+        combined = f"{description}\n\n{text}" if description else text
+        first.description = combined[:4096]
+        kwargs["embeds"] = existing[:10]
+    elif cards:
+        if len(cards) == 1:
+            kwargs["embed"] = cards[0]
+        else:
+            kwargs["embeds"] = cards[:10]
+    return kwargs
+
+
+def _set_remaining_content(
+    args: tuple,
+    kwargs: dict,
+    *,
+    positional: bool,
+    value: str | None,
+) -> tuple[tuple, dict]:
+    mutable_args = list(args)
+    if positional and mutable_args:
+        mutable_args[0] = value
+        kwargs.pop("content", None)
+    else:
+        kwargs["content"] = value
+    return tuple(mutable_args), kwargs
+
+
 def _normalize_command_payload(
     args: tuple,
     kwargs: dict,
@@ -59,6 +125,10 @@ def _normalize_command_payload(
     original_content, positional = _content_from(args, original_kwargs)
     allowed_mentions = original_kwargs.get("allowed_mentions")
     ping_requested = policy._explicit_ping_requested(original_kwargs)
+    original_had_embed = (
+        isinstance(original_kwargs.get("embed"), discord.Embed)
+        or bool(original_kwargs.get("embeds"))
+    )
 
     work_kwargs = dict(original_kwargs)
     if ping_requested:
@@ -78,18 +148,27 @@ def _normalize_command_payload(
     if allowed_mentions is not None:
         new_kwargs["allowed_mentions"] = allowed_mentions
 
-    if ping_requested and original_content is not None and str(original_content).strip():
-        stub = _ping_stub(original_content)
-        mutable_args = list(new_args)
-        if positional and mutable_args:
-            mutable_args[0] = stub
-            new_kwargs.pop("content", None)
-        else:
-            new_kwargs["content"] = stub
-        new_args = tuple(mutable_args)
+    if original_content is not None and str(original_content).strip():
+        # Le renderer officiel transforme déjà le texte lorsqu'il n'y avait PAS d'embed.
+        # Le cas historique ``content + embed`` doit être traité ici explicitement.
+        if original_had_embed and (not ping_requested or _has_non_ping_text(original_content)):
+            new_kwargs = _move_content_next_to_existing_embeds(
+                new_kwargs,
+                original_content,
+                root=root,
+                bot=bot,
+            )
 
-    # Si le payload avait déjà un embed, le normaliseur officiel l'a simplement remis au
-    # design SentriX. S'il n'y avait que du texte, il existe maintenant au moins un embed.
+        remaining = _ping_stub(original_content) if ping_requested else None
+        new_args, new_kwargs = _set_remaining_content(
+            new_args,
+            new_kwargs,
+            positional=positional,
+            value=remaining,
+        )
+
+    # Résultat : tout texte lisible d'une commande est dans un embed. Le seul ``content``
+    # encore permis est une suite de mentions lorsqu'un vrai ping a été demandé.
     return new_args, new_kwargs
 
 
@@ -266,4 +345,9 @@ async def setup(bot: commands.Bot) -> None:
     install(bot)
 
 
-__all__ = ["install", "_normalize_command_payload", "_ping_stub"]
+__all__ = [
+    "install",
+    "_normalize_command_payload",
+    "_ping_stub",
+    "_has_non_ping_text",
+]
