@@ -1,0 +1,29 @@
+name: SentriX Guild Departure Notify
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cogs/guild_departure_notify.py'
+      - 'cogs/slash_error_completion_guard.py'
+      - 'tests/test_guild_departure_notify.py'
+      - '.github/workflows/guild-departure-notify.yml'
+  pull_request:
+    paths:
+      - 'cogs/guild_departure_notify.py'
+      - 'cogs/slash_error_completion_guard.py'
+      - 'tests/test_guild_departure_notify.py'
+      - '.github/workflows/guild-departure-notify.yml'
+
+jobs:
+  guild-departure-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile departure listener
+        run: python -m py_compile cogs/guild_departure_notify.py cogs/slash_error_completion_guard.py
+      - name: Run source contracts
+        run: python -m pytest -q tests/test_guild_departure_notify.py
