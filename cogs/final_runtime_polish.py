@@ -148,13 +148,19 @@ def _patch_help(bot: commands.Bot) -> None:
     if command is None:
         return
 
-    # cogs.help est désormais l'unique propriétaire de +help et /help. Les anciennes
-    # couches V8/V9 utilisaient un callback prévu pour l'ancien cog Utility et appelaient
-    # notamment cog._user_is_staff(ctx). Si elles reprennent OfficialHelp, la commande
-    # plante avec AttributeError. Ne jamais monkey-patcher le propriétaire officiel.
+    # cogs.help est l'unique propriétaire de +help et /help. L'entrée préfixée finale
+    # peut être volontairement enregistrée hors Cog ; dans ce cas command.cog == None.
+    # Les marqueurs posés par le bootstrap final sont donc l'autorité principale : une
+    # ancienne couche V8/V9 ne doit jamais remplacer son callback par root_only_callback.
     cog = getattr(command, "cog", None)
     cog_name = getattr(cog, "qualified_name", "") or getattr(cog, "__cog_name__", "")
-    if cog_name == "SentriXHelp" or cog.__class__.__name__ == "OfficialHelp" if cog is not None else False:
+    is_official_help = bool(
+        getattr(command, "_sentrix_official_help_owner", False)
+        or getattr(command, "_sentrix_context_is_internal", False)
+        or cog_name == "SentriXHelp"
+        or (cog is not None and cog.__class__.__name__ == "OfficialHelp")
+    )
+    if is_official_help:
         command.hidden = False
         local_checks = getattr(command, "checks", None)
         if isinstance(local_checks, list):
@@ -164,6 +170,7 @@ def _patch_help(bot: commands.Bot) -> None:
         if isinstance(app_checks, list):
             app_checks.clear()
         command._sentrix_official_help_owner = True
+        command._sentrix_context_is_internal = True
         return
 
     from . import help_clean_style, language_runtime
