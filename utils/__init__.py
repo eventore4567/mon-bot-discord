@@ -5,8 +5,6 @@ still exists in cogs.utility, but when its legacy embed reaches Context.send we 
 it with a compact Discord Components V2 LayoutView.
 """
 
-import base64
-import io
 import re
 
 import discord
@@ -56,18 +54,6 @@ def _latency_quality(latency_ms: int) -> tuple[str, str]:
     if latency_ms <= 220:
         return "Correcte", "▰▰▰▰▰▰▰▱▱▱"
     return "Dégradée", "▰▰▰▰▱▱▱▱▱▱"
-
-
-def _load_ping_banner_file() -> discord.File:
-    """Decode the Base64 asset stored in GitHub into a real JPEG for Discord."""
-    with open(PING_BANNER_PATH, "r", encoding="ascii") as asset:
-        encoded = "".join(asset.read().split())
-
-    data = base64.b64decode(encoded, validate=True)
-    if not data.startswith(b"\xff\xd8\xff"):
-        raise ValueError("SentriX ping banner is not a valid JPEG after Base64 decoding")
-
-    return discord.File(io.BytesIO(data), filename=PING_BANNER_FILENAME)
 
 
 class _SentriXPingLayout(discord.ui.LayoutView):
@@ -160,12 +146,10 @@ if not getattr(commands.Context.send, "_sentrix_ping_components_v2", False):
             kwargs.pop("file", None)
             kwargs.pop("files", None)
 
-            try:
-                banner_file = _load_ping_banner_file()
-            except (OSError, ValueError):
-                kwargs["view"] = _SentriXPingLayout(self, latency_ms, with_banner=False)
-                return await _ORIGINAL_CONTEXT_SEND(self, *args, **kwargs)
-
+            banner_file = discord.File(
+                PING_BANNER_PATH,
+                filename=PING_BANNER_FILENAME,
+            )
             kwargs["files"] = [banner_file]
             kwargs["view"] = _SentriXPingLayout(self, latency_ms, with_banner=True)
 
