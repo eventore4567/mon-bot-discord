@@ -196,21 +196,21 @@ async def setup(bot: commands.Bot) -> None:
     command_embed_invariant.install(bot)
     await production_embed_log_repair_v3.setup(bot)
 
-    # V5 : réparation de route au moment de l'événement.
     from . import live_log_delivery_v5
     live_log_delivery_v5.install(bot)
 
-    # V5.1 : même si le setup de cogs.logs s'est interrompu sur SQLite, les listeners
-    # officiels sont enregistrés directement avant que le runtime soit déclaré prêt.
     from . import log_listener_guarantee_v51
     await log_listener_guarantee_v51.install(bot)
 
-    # V2 du reset propriétaire : idempotence, réparation ciblée 403, catégorie disparue
-    # et détection d'une autre instance qui reprend les routes pendant l'opération.
+    # Le critère strict est installé avant la commande V2 : seuls les 8 salons issus du
+    # rebuild officiel peuvent être considérés comme "déjà sains". Les deux rollback de
+    # la capture sont donc réellement retentés.
+    from . import owner_log_rebuild_v2_health
+    owner_log_rebuild_v2_health.install()
+
     from . import owner_log_rebuild_v2
     await owner_log_rebuild_v2.install(bot)
 
-    # Dernière autorité absolue : erreurs envoyées par transport Discord brut.
     from . import final_error_embed_v5
     final_error_embed_v5.install(bot)
     logger.info(
