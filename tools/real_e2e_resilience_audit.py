@@ -49,6 +49,12 @@ class _DummyBot:
     def add_listener(self, callback, name: str | None = None) -> None:
         self._listeners.append((name or getattr(callback, "__name__", "listener"), callback))
 
+    def get_command(self, name: str):
+        return None
+
+    def add_command(self, command) -> None:
+        return None
+
     async def wait_until_ready(self) -> None:
         return None
 
