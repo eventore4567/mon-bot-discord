@@ -55,52 +55,48 @@ class _SentriXPingLayout(discord.ui.LayoutView):
         quality, quality_bar = _latency_quality(latency_ms)
         measured_at = int(discord.utils.utcnow().timestamp())
 
-        # Five deliberately short buttons keep the card wide on desktop without
-        # adding vertical height. There is intentionally no MediaGallery here:
-        # Discord rendered a failed media placeholder that made +ping enormous.
+        # One single action row: the labels are long enough to visually fill the
+        # container, but remain short enough to stay on one desktop row.
         status_row = discord.ui.ActionRow(
             discord.ui.Button(
-                label=f"Ping {latency_ms} ms",
+                label=f"Discord · {latency_ms} ms",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
             discord.ui.Button(
-                label=connection,
+                label=f"Connexion · {connection}",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
             discord.ui.Button(
-                label=f"{server_count} srv",
+                label=f"Serveurs · {server_count}",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
             discord.ui.Button(
-                label=f"{member_count:,} membres",
+                label=f"Membres · {member_count:,}",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
             discord.ui.Button(
-                label=f"{shard_count} shard{'s' if shard_count != 1 else ''}",
+                label=f"Shards · {shard_count}",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
         )
 
+        # Deliberately only two text blocks and one button row. This keeps the panel
+        # wide and low instead of stacking multiple vertical sections.
         container = discord.ui.Container(
             discord.ui.TextDisplay(
-                "-# SENTRIX • ÉTAT DES SERVICES\n"
-                f"## Latence  ·  {latency_ms} ms  ·  {quality}\n"
-                f"`{quality_bar}`"
-            ),
-            discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
-            discord.ui.TextDisplay(
+                f"## Latence  ·  {latency_ms} ms  ·  {quality}    `{quality_bar}`\n"
                 f"**Connexion** {connection}   •   **État** {state}   •   "
                 f"**Serveurs** {server_count:,}   •   **Membres** {member_count:,}   •   "
                 f"**Shards** {shard_count}"
             ),
             status_row,
             discord.ui.TextDisplay(
-                f"-# Mesuré <t:{measured_at}:R> • SentriX"
+                f"-# SentriX • Mesuré <t:{measured_at}:R>"
             ),
             accent_colour=PING_ACCENT,
         )
