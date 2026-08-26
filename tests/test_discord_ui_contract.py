@@ -22,6 +22,7 @@ class DiscordUiContractTests(unittest.TestCase):
             "cogs/help.py",
             "cogs/logs.py",
             "cogs/final_interaction_policy.py",
+            "cogs/final_runtime_polish.py",
             "cogs/error_experience_v3.py",
             "cogs/command_error_release_v41.py",
             "cogs/__init__.py",
@@ -164,6 +165,19 @@ class DiscordUiContractTests(unittest.TestCase):
         self.assertIn('_OFFICIAL_HELP_EXTENSION = "cogs.help"', source)
         self.assertIn("await _load_official_help(bot)", source)
         self.assertIn("_ORIGINAL_LOAD_EXTENSION(bot, _OFFICIAL_HELP_EXTENSION)", source)
+
+    def test_official_prefix_help_cannot_be_repatched_with_ctx_callback(self):
+        bootstrap = (ROOT / "cogs" / "plain_text_all_extension.py").read_text(encoding="utf-8")
+        polish = (ROOT / "cogs" / "final_runtime_polish.py").read_text(encoding="utf-8")
+        self.assertIn("prefix_command._sentrix_official_help_owner = True", bootstrap)
+        self.assertIn("prefix_command._sentrix_context_is_internal = True", bootstrap)
+        self.assertIn('getattr(command, "_sentrix_official_help_owner", False)', polish)
+        self.assertIn('getattr(command, "_sentrix_context_is_internal", False)', polish)
+        marker_index = polish.index('getattr(command, "_sentrix_official_help_owner", False)')
+        callback_index = polish.index("command.callback = root_only_callback")
+        self.assertLess(marker_index, callback_index)
+        self.assertIn("if is_official_help:", polish)
+        self.assertIn("return\n\n    from . import help_clean_style", polish)
 
     def test_final_command_transport_uses_only_official_embed_renderer(self):
         source = (ROOT / "cogs" / "final_interaction_policy.py").read_text(encoding="utf-8")
