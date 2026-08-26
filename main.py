@@ -208,6 +208,7 @@ DISCORD_PERMISSION_COMMANDS = {
     "tickettranscript": "manage_channels",
     "ticketstats": "manage_channels",
     "nickname": "manage_nicknames",
+    "nick": "manage_nicknames",
     "resetnick": "manage_nicknames",
     "move": "move_members",
     "disconnect": "move_members",
