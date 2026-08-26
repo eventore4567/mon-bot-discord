@@ -1,9 +1,9 @@
 """Nettoyage visuel final de SentriX.
 
-Cette couche est volontairement petite et s'installe après ``sentrix_runtime`` :
-- aucune barre ASCII/Unicode répétée dans les commandes ;
-- +ping sans barre de progression ;
-- journaux espacés et lisibles sans faux séparateurs ;
+Cette couche s'installe après les renderers historiques :
+- une seule grande ligne de séparation par commande, assez courte pour ne jamais déborder ;
+- aucune barre de progression textuelle dans +ping ;
+- journaux espacés et lisibles sans faux séparateurs répétés ;
 - Avant / Après restent deux blocs Discord naturels.
 """
 from __future__ import annotations
@@ -30,6 +30,10 @@ COLOR_DANGER = runtime.COLOR_DANGER
 COLOR_SYSTEM = runtime.COLOR_SYSTEM
 COLOR_NEUTRAL = runtime.COLOR_NEUTRAL
 
+# Une seule ligne volontairement un peu plus courte que l'ancienne V6 : elle garde
+# l'effet visuel large sans produire un petit reste de ━━━ sur la ligne suivante.
+PANEL_BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
 _IDENTITY_FIELDS = {"membre", "auteur", "utilisateur", "cible"}
 _BEFORE_FIELDS = {"avant", "ancienne valeur", "ancien"}
 _AFTER_FIELDS = {"apres", "après", "nouvelle valeur", "nouveau"}
@@ -45,7 +49,7 @@ def _is_separator_line(line: str) -> bool:
 
 
 def _clean_text(value: Any, limit: int = 4096) -> str:
-    """Retire les anciens traits seuls et garde au maximum une ligne vide."""
+    """Retire tous les anciens traits seuls et garde au maximum une ligne vide."""
     raw = str(value or "").replace("\r", "")
     lines = [line.rstrip() for line in raw.splitlines() if not _is_separator_line(line)]
     cleaned: list[str] = []
@@ -61,6 +65,14 @@ def _clean_text(value: Any, limit: int = 4096) -> str:
     while cleaned and not cleaned[-1].strip():
         cleaned.pop()
     return sx.clip("\n".join(cleaned).strip(), limit)
+
+
+def _command_text(value: Any, limit: int = 4096) -> str:
+    """Normalise une commande vers exactement UNE séparation large et propre."""
+    body = _clean_text(value, max(1, limit - len(PANEL_BAR) - 1))
+    if body:
+        return sx.clip(f"{PANEL_BAR}\n{body}", limit)
+    return PANEL_BAR
 
 
 def _one_line(value: Any, limit: int = 600) -> str:
@@ -99,11 +111,11 @@ def _base(
         body = sx.clean_multiline_ui_text(description, 4096)
     else:
         body = sx.clip(description, 4096)
-    body = _clean_text(body, 4096)
+    clean_body = _clean_text(body, 4096)
     embed = discord.Embed(
         title=safe_title,
-        description=body or None,
-        colour=discord.Colour(_base_colour(safe_title, body, colour, kind)),
+        description=_command_text(clean_body, 4096),
+        colour=discord.Colour(_base_colour(safe_title, clean_body, colour, kind)),
         timestamp=datetime.now(timezone.utc) if timestamp else None,
     )
     if thumbnail:
@@ -232,7 +244,6 @@ def _log_embed(
             details.append((name, value))
             continue
         if requested is True:
-            # Une ligne vide ENTRE chaque information : Membre / Rôle / Modérateur / Salon.
             metadata.append(f"**{name} :** {_one_line(value)}")
         else:
             details.append((name, value))
@@ -251,8 +262,6 @@ def _log_embed(
     )
     embed.set_footer(text=f"SentriX • {sx.format_datetime_fr(event_dt)}")
 
-    # Les champs longs (contenu, raison, Avant/Après...) ont déjà leur propre séparation
-    # native dans Discord. Aucun trait artificiel n'est ajouté entre eux.
     for name, value in details[:25]:
         embed.add_field(name=name, value=sx.clip(value, 1024), inline=False)
     return embed
@@ -308,7 +317,8 @@ def _ping_embed(bot: commands.Bot) -> discord.Embed:
     return _base(
         "Ping",
         (
-            f"**Latence :** `{latency_ms} ms`   •   **Qualité :** {quality}\n"
+            f"## Latence : **{latency_ms} ms**\n"
+            f"**Qualité :** {quality}\n\n"
             f"**Connexion :** {'Active' if active else 'Hors ligne'}   •   "
             f"**État :** {'Opérationnel' if active else 'Indisponible'}\n"
             f"**Serveurs :** {len(guilds):,}   •   **Membres :** {members:,}   •   **Shards :** {shards}"
@@ -322,8 +332,7 @@ def _ping_embed(bot: commands.Bot) -> discord.Embed:
 def _clean_embed(embed: discord.Embed | None) -> discord.Embed | None:
     if not isinstance(embed, discord.Embed):
         return embed
-    body = _clean_text(embed.description, 4096)
-    embed.description = body or None
+    embed.description = _command_text(embed.description, 4096)
     for index, field in enumerate(list(embed.fields)):
         value = _clean_text(field.value, 1024) or "—"
         embed.set_field_at(index, name=field.name, value=value, inline=bool(field.inline))
@@ -345,11 +354,11 @@ def install() -> None:
     if _INSTALLED:
         return
 
-    # Remplace les symboles de séparation historiques : le titre, les espaces et les
-    # champs Discord assurent désormais la hiérarchie visuelle.
-    runtime.BAR = ""
+    # Les vieux renderers peuvent encore générer une barre trop longue ; toutes les
+    # commandes sont ensuite normalisées vers PANEL_BAR par cette dernière couche.
+    runtime.BAR = PANEL_BAR
     runtime.CHANGE_BAR = ""
-    sx.BAR = ""
+    sx.BAR = PANEL_BAR
 
     runtime._base = _base
     runtime._log_embed = _log_embed
