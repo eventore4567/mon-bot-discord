@@ -23,6 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install test runner
+        run: python -m pip install --disable-pip-version-check pytest
       - name: Compile departure listener
         run: python -m py_compile cogs/guild_departure_notify.py cogs/slash_error_completion_guard.py
       - name: Run source contracts
