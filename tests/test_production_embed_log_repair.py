@@ -64,12 +64,13 @@ class ProductionEmbedLogRepairTests(unittest.TestCase):
         self.assertIn('kwargs["mention_author"] = False', source)
         self.assertNotIn('kwargs["mention_author"] = True', source)
 
-    def test_log_repair_has_persistent_one_time_marker(self):
+    def test_log_repair_has_persistent_one_time_marker_and_listener_check(self):
         source = (ROOT / "cogs" / "production_embed_log_repair.py").read_text(encoding="utf-8")
         self.assertIn("sentrix_runtime_migrations", source)
         self.assertIn("production_embed_log_repair_v2", source)
         self.assertIn("await log_service.set_log_enabled", source)
         self.assertIn('bot.get_cog("Logs")', source)
+        self.assertIn("cog.get_listeners()", source)
 
 
 if __name__ == "__main__":
