@@ -10,13 +10,16 @@ import re
 import discord
 from discord.ext import commands
 
+import config
 
-# Use a normal public PNG URL for MediaGallery. Attachment references inside
-# Components V2 were rendered as "Image introuvable" by the Discord client.
-PING_BANNER_URL = (
-    "https://raw.githubusercontent.com/eventore4567/mon-bot-discord/"
-    "c9a3fc10cad21bff31944c2831d125b55905be18/assets/sentrix-log-header.png"
+
+# MediaGallery now loads the banner from SentriX itself on Railway. This avoids the
+# GitHub raw / attachment failures that produced a huge empty image placeholder.
+_SENTRIX_PUBLIC_URL = (
+    (getattr(config, "DASHBOARD_PUBLIC_URL", "") or "").strip().rstrip("/")
+    or "https://mon-bot-discord-production-8944.up.railway.app"
 )
+PING_BANNER_URL = f"{_SENTRIX_PUBLIC_URL}/assets/sentrix-ping-banner.png?v=3"
 PING_ACCENT = 0x5865F2
 
 
@@ -56,8 +59,8 @@ class _SentriXPingLayout(discord.ui.LayoutView):
         server_count = len(bot.guilds)
         member_count = sum((guild.member_count or 0) for guild in bot.guilds)
         shard_count = int(getattr(bot, "shard_count", None) or 1)
-        connection = "Active" if bot.is_ready() else "Connexion..."
-        state = "Opérationnel" if bot.is_ready() else "Initialisation"
+        connection = "Active" if not bot.is_closed() else "Hors ligne"
+        state = "Opérationnel" if not bot.is_closed() else "Indisponible"
         quality, quality_bar = _latency_quality(latency_ms)
         measured_at = int(discord.utils.utcnow().timestamp())
 
@@ -67,31 +70,31 @@ class _SentriXPingLayout(discord.ui.LayoutView):
             description="SentriX — Informations générales",
         )
 
-        # Five compact components occupy the complete row and keep the information
-        # horizontal instead of letting the text collapse into a vertical block.
+        # Very short labels keep all five buttons on ONE row on desktop. Long labels
+        # were forcing the fifth button onto a second row and making the panel vertical.
         status_row = discord.ui.ActionRow(
             discord.ui.Button(
-                label=f"Discord • {latency_ms} ms",
+                label=f"{latency_ms} ms",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
             discord.ui.Button(
-                label=f"Connexion • {connection}",
+                label=connection,
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
             discord.ui.Button(
-                label=f"Serveurs • {server_count}",
+                label=f"{server_count} srv",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
             discord.ui.Button(
-                label=f"Membres • {member_count:,}",
+                label=f"{member_count:,} membres",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
             discord.ui.Button(
-                label=f"Shards • {shard_count}",
+                label=f"{shard_count} shard{'s' if shard_count != 1 else ''}",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
@@ -101,19 +104,15 @@ class _SentriXPingLayout(discord.ui.LayoutView):
             gallery,
             discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
             discord.ui.TextDisplay(
-                "## Latence\n"
-                "-# État en temps réel de la connexion et des services SentriX."
-            ),
-            discord.ui.TextDisplay(
-                f"### Passerelle Discord    **{latency_ms} ms**  •  **{quality}**\n"
+                f"## Latence   **{latency_ms} ms**  •  **{quality}**\n"
                 f"`{quality_bar}`"
             ),
             discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
             discord.ui.TextDisplay(
                 "### Informations\n"
-                f"**{connection}** connexion   •   **{state}** état   •   "
-                f"**{server_count:,}** serveurs   •   **{member_count:,}** membres   •   "
-                f"**{shard_count}** shard{'s' if shard_count != 1 else ''}"
+                f"**Connexion :** {connection}   •   **État :** {state}   •   "
+                f"**Serveurs :** {server_count:,}   •   **Membres :** {member_count:,}   •   "
+                f"**Shards :** {shard_count}"
             ),
             status_row,
             discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
