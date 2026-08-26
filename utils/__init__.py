@@ -13,6 +13,7 @@ from discord.ext import commands
 
 PING_ACCENT = 0x5865F2
 PING_BANNER_PATH = "assets/sentrix-ping-header-v2.webp"
+PING_BANNER_FILENAME = "sentrix-information.webp"
 
 
 def _is_sentrix_ping_panel(embed: discord.Embed | None) -> bool:
@@ -44,7 +45,7 @@ def _latency_quality(latency_ms: int) -> tuple[str, str]:
 
 
 class _SentriXPingLayout(discord.ui.LayoutView):
-    def __init__(self, ctx: commands.Context, latency_ms: int):
+    def __init__(self, ctx: commands.Context, latency_ms: int, *, with_banner: bool = True):
         super().__init__(timeout=120)
 
         bot = ctx.bot
@@ -55,19 +56,6 @@ class _SentriXPingLayout(discord.ui.LayoutView):
         state = "Opérationnel" if not bot.is_closed() else "Indisponible"
         quality, quality_bar = _latency_quality(latency_ms)
         measured_at = int(discord.utils.utcnow().timestamp())
-
-        # The Information banner is uploaded directly with the Components V2 message.
-        # discord.py accepts discord.File directly as MediaGallery media, which avoids
-        # raw GitHub URLs / Railway routes and the broken-image placeholder seen before.
-        banner_file = discord.File(
-            PING_BANNER_PATH,
-            filename="sentrix-information.webp",
-        )
-        gallery = discord.ui.MediaGallery()
-        gallery.add_item(
-            media=banner_file,
-            description="SentriX — Information",
-        )
 
         status_row = discord.ui.ActionRow(
             discord.ui.Button(
@@ -97,22 +85,34 @@ class _SentriXPingLayout(discord.ui.LayoutView):
             ),
         )
 
-        # Keep the card low: one very thin banner, one information block, one row.
-        container = discord.ui.Container(
-            gallery,
-            discord.ui.TextDisplay(
-                f"## Latence  ·  {latency_ms} ms  ·  {quality}    `{quality_bar}`\n"
-                f"**Connexion** {connection}   •   **État** {state}   •   "
-                f"**Serveurs** {server_count:,}   •   **Membres** {member_count:,}   •   "
-                f"**Shards** {shard_count}"
-            ),
-            status_row,
-            discord.ui.TextDisplay(
-                f"-# SentriX • Mesuré <t:{measured_at}:R>"
-            ),
-            accent_colour=PING_ACCENT,
+        children: list[discord.ui.Item] = []
+        if with_banner:
+            gallery = discord.ui.MediaGallery()
+            # discord.py/Discord Components V2 expects an attachment URI when the
+            # actual file is uploaded alongside the message.
+            gallery.add_item(
+                media=f"attachment://{PING_BANNER_FILENAME}",
+                description="SentriX — Information",
+            )
+            children.append(gallery)
+
+        # Compact horizontal card: one information block, one button row, one footer.
+        children.extend(
+            [
+                discord.ui.TextDisplay(
+                    f"## Latence  ·  {latency_ms} ms  ·  {quality}    `{quality_bar}`\n"
+                    f"**Connexion** {connection}   •   **État** {state}   •   "
+                    f"**Serveurs** {server_count:,}   •   **Membres** {member_count:,}   •   "
+                    f"**Shards** {shard_count}"
+                ),
+                status_row,
+                discord.ui.TextDisplay(
+                    f"-# SentriX • Mesuré <t:{measured_at}:R>"
+                ),
+            ]
         )
-        self.add_item(container)
+
+        self.add_item(discord.ui.Container(*children, accent_colour=PING_ACCENT))
 
 
 _ORIGINAL_CONTEXT_SEND = getattr(
@@ -136,7 +136,26 @@ if not getattr(commands.Context.send, "_sentrix_ping_components_v2", False):
             kwargs.pop("embeds", None)
             kwargs.pop("file", None)
             kwargs.pop("files", None)
-            kwargs["view"] = _SentriXPingLayout(self, latency_ms)
+
+            banner_file = discord.File(
+                PING_BANNER_PATH,
+                filename=PING_BANNER_FILENAME,
+            )
+            kwargs["file"] = banner_file
+            kwargs["view"] = _SentriXPingLayout(self, latency_ms, with_banner=True)
+
+            try:
+                return await _ORIGINAL_CONTEXT_SEND(self, *args, **kwargs)
+            except discord.HTTPException:
+                # Never let a media-rendering issue break +ping. Retry instantly with
+                # the same compact Components V2 panel, only without the banner.
+                try:
+                    banner_file.close()
+                except Exception:
+                    pass
+                kwargs.pop("file", None)
+                kwargs["view"] = _SentriXPingLayout(self, latency_ms, with_banner=False)
+                return await _ORIGINAL_CONTEXT_SEND(self, *args, **kwargs)
 
         return await _ORIGINAL_CONTEXT_SEND(self, *args, **kwargs)
 
