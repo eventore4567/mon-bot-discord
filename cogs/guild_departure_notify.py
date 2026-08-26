@@ -90,6 +90,11 @@ async def install(bot: commands.Bot) -> None:
         await bot.remove_cog("GuildDepartureNotify")
     await bot.add_cog(GuildDepartureNotify(bot))
 
+    # Chargé depuis la dernière couche Railway : donne au créateur une vue exacte du
+    # Gateway, des listeners, des routes et du vrai transport des logs.
+    from . import log_runtime_diagnostic
+    await log_runtime_diagnostic.install(bot)
+
 
 async def setup(bot: commands.Bot) -> None:
     await install(bot)
