@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Audit du thème global des commandes SentriX V2.
 
-Historique : ce fichier interdisait autrefois tous les emojis. Le langage visuel actuel
-autorise au contraire de petits pictogrammes fonctionnels, comme sur le nouveau bot.
-On conserve le nom du script pour ne pas casser les workflows existants, mais l'audit
-vérifie désormais la cohérence du renderer central sans importer le bot de production.
+Le langage visuel canonique privilégie des titres sobres et retire les emojis décoratifs
+des composants. L'audit vérifie la cohérence du renderer central sans importer le bot.
 """
 from __future__ import annotations
 
@@ -24,7 +22,7 @@ def run() -> int:
 
     command_style_v2.install()
 
-    # Carte standard : le vrai titre doit rester visible, avec la signature courte V2.
+    # Carte standard : le vrai titre doit rester visible, sans préfixe décoratif.
     card = discord.Embed(
         title="Membre banni",
         description="Le membre a été banni avec succès.",
@@ -36,8 +34,8 @@ def run() -> int:
         kind="danger",
     )
 
-    if not str(card.title or "").startswith("✦ "):
-        errors.append(f"titre V2 absent: {card.title!r}")
+    if str(card.title or "") != "Membre banni":
+        errors.append(f"titre canonique altéré: {card.title!r}")
     if "membre banni" not in str(card.title or "").casefold():
         errors.append(f"le vrai titre de commande est perdu: {card.title!r}")
     if int(card.colour.value if card.colour else 0) != command_style_v2.COLORS["danger"]:
@@ -54,10 +52,10 @@ def run() -> int:
 
     info = discord.Embed(title="Profil", description="Aperçu du membre")
     command_style_v2.style_embed(info, category="profile", kind="info")
-    if not str(info.title or "").startswith("✦ "):
-        errors.append("les cartes d'information n'utilisent pas le repère ✦")
+    if str(info.title or "") != "Profil":
+        errors.append("le titre sobre des cartes d'information est altéré")
 
-    # Composants : utile = conservé ; hiérarchie visuelle = cohérente.
+    # Composants : emojis décoratifs retirés ; hiérarchie visuelle cohérente.
     view = discord.ui.View(timeout=None)
     open_button = discord.ui.Button(
         label="Ouvrir",
@@ -95,8 +93,8 @@ def run() -> int:
         errors.append("une action destructive n'est pas rouge")
     if neutral_button.style is not discord.ButtonStyle.secondary:
         errors.append("une navigation neutre n'est pas secondaire")
-    if open_button.emoji is None or save_button.emoji is None or delete_button.emoji is None:
-        errors.append("les pictogrammes fonctionnels ont été supprimés")
+    if any(button.emoji is not None for button in (open_button, save_button, delete_button)):
+        errors.append("des emojis décoratifs subsistent sur les actions")
 
     # Le moteur historique doit pointer vers le même renderer, sans wrapper de transport.
     if premium_style.style_embed is not command_style_v2.style_embed:
@@ -126,7 +124,7 @@ def run() -> int:
         print(f"ECHEC: {len(errors)} probleme(s) de style commandes V2")
         return 1
 
-    print("OK: thème global SentriX V2 — titres courts, palette premium, composants cohérents et pictogrammes utiles")
+    print("OK: thème global SentriX V2 — titres courts, palette premium et composants sobres")
     return 0
 
 
