@@ -38,12 +38,24 @@ class _DummyBot:
         self.latency = 0.042
         self._ready = False
         self.db = None
+        self._listeners = []
 
     def is_ready(self) -> bool:
         return self._ready
 
     def get_guild(self, guild_id: int):
         return None
+
+    def add_listener(self, callback, name: str | None = None) -> None:
+        self._listeners.append((name or getattr(callback, "__name__", "listener"), callback))
+
+    async def wait_until_ready(self) -> None:
+        return None
+
+    def is_closed(self) -> bool:
+        # Les boucles de fond installées par certains modules ne doivent pas tourner
+        # pendant le parcours HTTP synthétique : elles sont couvertes par le boot runtime.
+        return True
 
 
 async def dashboard_http_journey() -> int:
