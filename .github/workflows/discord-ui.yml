@@ -26,11 +26,16 @@ jobs:
             utils/helpers.py \
             cogs/help.py \
             cogs/logs.py \
+            cogs/final_interaction_policy.py \
+            cogs/command_embed_invariant.py \
+            cogs/slash_error_completion_guard.py \
             cogs/error_experience_v3.py \
             cogs/command_error_release_v41.py \
             cogs/__init__.py
       - name: Run Discord UI contracts
-        run: PYTHONPATH=. python tests/test_discord_ui_contract.py
+        run: |
+          PYTHONPATH=. python tests/test_discord_ui_contract.py
+          PYTHONPATH=. python tests/test_command_embed_invariant.py
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-discord-ui.db"
