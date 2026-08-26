@@ -8,6 +8,8 @@ echouer pendant sa finalisation et laisser le defer ``thinking`` affiche sans fi
 Cette garde est chargee en dernier sur Railway. Elle enveloppe le handler d'erreur existant
 sans le remplacer fonctionnellement et, dans un ``finally``, remplace uniquement une
 reponse originale encore vide et differee. Toute vraie reponse deja envoyee est preservee.
+Elle réinstalle ensuite l'invariant embed final afin qu'aucune couche chargée tardivement ne
+puisse faire repasser une réponse de commande en texte brut.
 """
 from __future__ import annotations
 
@@ -188,3 +190,10 @@ def install(bot: commands.Bot) -> None:
 
 async def setup(bot: commands.Bot) -> None:
     install(bot)
+
+    # Cette extension est la dernière ajoutée par railway_boot.py. On installe donc ici,
+    # après les gardes defer/slash, l'invariant qui force toutes les sorties de commandes
+    # + et / à repasser par le renderer embed SentriX.
+    from . import command_embed_invariant
+
+    command_embed_invariant.install(bot)
