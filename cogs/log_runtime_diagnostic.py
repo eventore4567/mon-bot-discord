@@ -1,7 +1,8 @@
-"""Diagnostic live propriétaire pour le pipeline de logs SentriX.
+"""Diagnostic live propriétaire du pipeline de logs SentriX.
 
-Le but n'est pas de deviner : on distingue explicitement quatre étages :
-Gateway Discord -> listeners -> Logs._send -> log_service.send_log -> salon Discord.
+Il observe le Gateway, les listeners officiels et teste directement le transport V5.3.
+Le diagnostic ne dépend plus de ``log_service.send_log`` car un ancien runtime pouvait
+réécrire ce symbole après l'installation du correctif.
 """
 from __future__ import annotations
 
@@ -14,8 +15,10 @@ import discord
 from discord.ext import commands
 
 from utils import checks, embeds, log_service
+from . import log_transport_v52
 
 _TRACKED = (
+    "message",
     "message_edit",
     "message_delete",
     "raw_message_delete",
@@ -71,11 +74,13 @@ def _seen(bot: commands.Bot, event: str, *items) -> None:
 
 
 def _patch_logs_send(bot: commands.Bot) -> None:
+    """Ajoute uniquement la télémétrie autour du Logs._send V5.3."""
     cog = bot.get_cog("Logs")
     if cog is None:
         return
     current = getattr(cog, "_send", None)
-    if not callable(current) or getattr(current, "_sentrix_live_diag", False):
+    function = getattr(current, "__func__", current)
+    if not callable(current) or getattr(function, "_sentrix_live_diag", False):
         return
 
     async def wrapped(_self, guild, config_key, embed, *, view=None, event_key=None):
@@ -94,8 +99,14 @@ def _patch_logs_send(bot: commands.Bot) -> None:
             raise
 
     wrapped._sentrix_live_diag = True
-    wrapped._sentrix_original = current
+    wrapped._sentrix_original = function
     cog._send = types.MethodType(wrapped, cog)
+
+
+def _reassert_transport(bot: commands.Bot) -> None:
+    # Réinstalle d'abord l'autorité V5.3, puis remet uniquement l'enveloppe de diagnostic.
+    log_transport_v52.install(bot)
+    _patch_logs_send(bot)
 
 
 class LogRuntimeDiagnostic(commands.Cog):
@@ -103,11 +114,16 @@ class LogRuntimeDiagnostic(commands.Cog):
         self.bot = bot
 
     async def cog_load(self) -> None:
-        _patch_logs_send(self.bot)
+        _reassert_transport(self.bot)
 
     @commands.Cog.listener()
     async def on_ready(self):
-        _patch_logs_send(self.bot)
+        _reassert_transport(self.bot)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.guild is not None:
+            _seen(self.bot, "message", message)
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
@@ -175,7 +191,7 @@ class LogRuntimeDiagnostic(commands.Cog):
         if ctx.guild is None:
             return await ctx.send(embed=embeds.warning("Utilise cette commande dans un serveur."))
 
-        _patch_logs_send(self.bot)
+        _reassert_transport(self.bot)
         state = _state(self.bot)
         logs_cog = self.bot.get_cog("Logs")
         try:
@@ -183,31 +199,34 @@ class LogRuntimeDiagnostic(commands.Cog):
         except Exception:
             listener_count = 0
 
-        # Test du VRAI pipeline des événements, pas de send_test_log qui contourne send_log.
         transport_embed = embeds.log_embed(
             "Diagnostic live des logs",
-            fields=(("Origine", "+logs-diag • pipeline réel", False),),
+            fields=(("Origine", "+logs-diag • transport V5.3 direct", False),),
         )
         transport_ok = False
-        transport_error = None
+        transport_exception = None
         try:
-            transport_ok = bool(await log_service.send_log(
+            # Teste exactement la fonction branchée directement sous Logs._send.
+            transport_ok = bool(await log_transport_v52.send_log_v52(
                 self.bot,
                 ctx.guild,
                 "messages",
                 transport_embed,
-                event_key=f"diag:{ctx.guild.id}:{time.time_ns()}",
+                event_key=f"diag-v53:{ctx.guild.id}:{time.time_ns()}",
             ))
         except Exception as exc:
-            transport_error = type(exc).__name__
+            transport_exception = f"{type(exc).__name__}: {exc}"[:300]
 
         v5 = getattr(self.bot, "live_log_delivery_v5_state", {}) or {}
+        v53 = getattr(self.bot, "log_transport_v52_state", {}) or {}
         counts = state.get("gateway_counts") or {}
         counts_text = " • ".join(
             f"{name}:{int(counts.get(name, 0))}" for name in _TRACKED
             if int(counts.get(name, 0)) > 0
         ) or "Aucun événement observé depuis ce démarrage"
 
+        active = log_service.send_log
+        active_name = f"{getattr(active, '__module__', '?')}.{getattr(active, '__name__', type(active).__name__)}"
         service_name = os.getenv("RAILWAY_SERVICE_NAME") or "inconnu"
         service_id = os.getenv("RAILWAY_SERVICE_ID") or "inconnu"
         commit = os.getenv("RAILWAY_GIT_COMMIT_SHA") or "inconnu"
@@ -239,22 +258,32 @@ class LogRuntimeDiagnostic(commands.Cog):
             inline=False,
         )
         panel.add_field(
+            name="Transport final",
+            value=(
+                f"Global : `{active_name[:180]}`\n"
+                f"V5.3 installé : `{bool(v53.get('installed'))}` • Logs._send direct : `{bool(v53.get('logs_send_patched'))}`\n"
+                f"Dernier V5.3 : `{v53.get('last_result') or '-'}` • erreur `{v53.get('last_error') or '-'}`\n"
+                f"Message : `{str(v53.get('last_error_message') or '-')[:250]}`"
+            ),
+            inline=False,
+        )
+        panel.add_field(
             name="Dernier événement réel",
             value=(
                 f"Gateway : `{state.get('last_gateway_event') or 'aucun'}` • guild `{state.get('last_gateway_guild_id') or '-'}`\n"
                 f"Logs._send : `{state.get('last_official_config_key') or 'aucun'}` • "
                 f"résultat `{state.get('last_official_result')}` • erreur `{state.get('last_official_error') or '-'}`\n"
-                f"V5 : `{v5.get('last_result') or 'aucune tentative'}` • type `{v5.get('last_log_type') or '-'}`"
+                f"Ancien V5 : `{v5.get('last_result') or 'aucune tentative'}`"
             ),
             inline=False,
         )
         panel.add_field(
-            name="Test pipeline réel",
+            name="Test pipeline V5.3 direct",
             value=(
                 f"**{'SUCCÈS' if transport_ok else 'ÉCHEC'}**"
-                + (f" • `{transport_error}`" if transport_error else "")
-                + "\nCe test passe par `log_service.send_log`, exactement comme les listeners."
-            ),
+                + (f" • `{transport_exception}`" if transport_exception else "")
+                + (f"\nInterne : `{v53.get('last_error')}` • `{str(v53.get('last_error_message') or '-')[:300]}`" if not transport_ok else "")
+            )[:1024],
             inline=False,
         )
         panel.add_field(
@@ -262,7 +291,7 @@ class LogRuntimeDiagnostic(commands.Cog):
             value="\n".join(await self._route_lines(ctx.guild))[:1024],
             inline=False,
         )
-        panel.set_footer(text="Après une modification/suppression de message, relance +logs-diag pour voir le chemin exact.")
+        panel.set_footer(text="Modifie/supprime ensuite un message puis relance +logs-diag.")
         await ctx.send(embed=panel)
 
 
@@ -271,7 +300,7 @@ async def install(bot: commands.Bot) -> None:
     if existing is not None:
         await bot.remove_cog("LogRuntimeDiagnostic")
     await bot.add_cog(LogRuntimeDiagnostic(bot))
-    _patch_logs_send(bot)
+    _reassert_transport(bot)
 
 
 async def setup(bot: commands.Bot) -> None:
