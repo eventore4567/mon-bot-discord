@@ -32,6 +32,7 @@ jobs:
             cogs/production_embed_log_repair.py \
             cogs/production_embed_log_repair_v3.py \
             cogs/live_log_delivery_v5.py \
+            cogs/log_listener_guarantee_v51.py \
             cogs/final_error_embed_v5.py \
             cogs/slash_error_completion_guard.py \
             cogs/error_experience_v3.py \
@@ -45,6 +46,7 @@ jobs:
           PYTHONPATH=. python tests/test_production_embed_log_repair_v3.py
           PYTHONPATH=. python tests/test_logs_alias_error_embed_v4.py
           PYTHONPATH=. python tests/test_live_errors_logs_v5.py
+          PYTHONPATH=. python tests/test_log_listener_guarantee_v51.py
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-discord-ui.db"
