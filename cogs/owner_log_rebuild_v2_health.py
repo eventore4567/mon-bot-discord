@@ -12,6 +12,7 @@ import discord
 from utils import log_service
 from . import owner_log_rebuild as v1
 from . import owner_log_rebuild_v2 as v2
+from . import owner_log_rebuild_v2_concurrency
 
 
 async def strict_is_healthy(bot, guild: discord.Guild) -> bool:
@@ -34,9 +35,9 @@ async def strict_is_healthy(bot, guild: discord.Guild) -> bool:
             return False
         route_ids.add(channel_id)
 
-    # Huit types doivent réellement avoir huit salons distincts.
     return len(route_ids) == len(v1.LOG_ROUTES)
 
 
 def install() -> None:
     v2._is_healthy = strict_is_healthy
+    owner_log_rebuild_v2_concurrency.install()
