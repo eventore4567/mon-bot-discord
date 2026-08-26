@@ -179,9 +179,8 @@ def create_embed(
     footer: Optional[str] = None,
 ) -> discord.Embed:
     # Test visuel demandé pour +ping : cette commande utilise exactement le renderer
-    # grand format des logs SentriX (bannière, largeur visuelle, champs et footer daté).
-    # Le test reste volontairement limité à "Pong !" afin de ne modifier aucune autre
-    # commande avant validation du design.
+    # grand format des logs SentriX. Sa bannière dédiée possède une URL immuable liée au
+    # commit pour empêcher Discord de réutiliser une ancienne image en cache.
     if title == "Pong !":
         from utils import embeds as sentrix_embeds
 
@@ -189,10 +188,17 @@ def create_embed(
         panel = sentrix_embeds.log_embed(
             "Ping",
             fields=(
-                ("Passerelle Discord", latency_value, True),
+                ("Passerelle Discord", latency_value, False),
                 ("Connexion", "Active", True),
                 ("État", "Opérationnel", True),
             ),
+            banner=False,
+        )
+        panel.set_image(
+            url=(
+                "https://raw.githubusercontent.com/eventore4567/mon-bot-discord/"
+                "8cb06a5a892722b093d4b9f1226acf84ae53769b/assets/sentrix-ping-header.webp"
+            )
         )
         if thumbnail:
             panel.set_thumbnail(url=thumbnail)
