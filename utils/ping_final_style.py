@@ -1,8 +1,10 @@
 """Correctif final du rendu +ping.
 
-Cette couche neutralise l'ancien enrichissement de ``command_style_v2`` qui réajoutait
-une barre de progression et des séparateurs après le renderer principal. Elle ne touche
-à aucune logique métier.
+Cette couche neutralise l'ancien enrichissement de ``command_style_v2`` :
+- une seule grande ligne sous le titre ;
+- aucune barre de progression blanche ;
+- latence mise en avant ;
+- aucune logique métier modifiée.
 """
 from __future__ import annotations
 
@@ -11,10 +13,10 @@ import discord
 from . import command_style_v2
 
 _INSTALLED = False
+PANEL_BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 
 def _latency_quality(latency_ms: int) -> tuple[str, str]:
-    """Conserve le contrat historique sans jamais retourner de barre visuelle."""
     if latency_ms <= 80:
         return "Excellente", ""
     if latency_ms <= 140:
@@ -53,6 +55,7 @@ def _enrich_ping(embed: discord.Embed, command) -> None:
 
     embed.title = "Ping"
     embed.description = (
+        f"{PANEL_BAR}\n"
         f"## Latence : **{latency_ms} ms**\n"
         f"**Qualité :** {quality}\n\n"
         f"**Connexion :** {'Active' if active else 'Hors ligne'}   •   "
@@ -70,8 +73,7 @@ def install() -> None:
     if _INSTALLED:
         return
 
-    # Supprime aussi le long séparateur ━━━ injecté par l'ancienne couche.
-    command_style_v2.BAR = ""
+    command_style_v2.BAR = PANEL_BAR
     command_style_v2._latency_quality = _latency_quality
     command_style_v2._enrich_ping = _enrich_ping
     _INSTALLED = True
