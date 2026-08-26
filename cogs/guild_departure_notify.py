@@ -21,21 +21,13 @@ def _departure_embed(guild: discord.Guild) -> discord.Embed:
         "SentriX n'est plus présent sur ce serveur.",
         title="SentriX retiré d’un serveur",
     )
-    embed.add_field(
-        name="Serveur",
-        value=f"{guild.name}\n`{guild.id}`",
-        inline=False,
-    )
+    embed.add_field(name="Serveur", value=f"{guild.name}\n`{guild.id}`", inline=False)
     embed.add_field(
         name="Propriétaire",
         value=f"{owner_text}\n`{guild.owner_id}`",
         inline=True,
     )
-    embed.add_field(
-        name="Membres",
-        value=str(guild.member_count or 0),
-        inline=True,
-    )
+    embed.add_field(name="Membres", value=str(guild.member_count or 0), inline=True)
     embed.add_field(
         name="Retrait détecté",
         value=f"<t:{timestamp}:F>\n<t:{timestamp}:R>",
@@ -60,7 +52,6 @@ class GuildDepartureNotify(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild) -> None:
-        # Protège d'un éventuel double dispatch local lors d'une reconnexion rapide.
         now = time.monotonic()
         last = self._recent.get(guild.id, 0.0)
         if now - last < 30.0:
@@ -90,8 +81,11 @@ async def install(bot: commands.Bot) -> None:
         await bot.remove_cog("GuildDepartureNotify")
     await bot.add_cog(GuildDepartureNotify(bot))
 
-    # Chargé depuis la dernière couche Railway : donne au créateur une vue exacte du
-    # Gateway, des listeners, des routes et du vrai transport des logs.
+    # Le diagnostic live a prouvé que l'ancienne chaîne send_log plante en TypeError
+    # malgré des routes valides. V5.2 devient l'unique transport final avant le probe.
+    from . import log_transport_v52
+    log_transport_v52.install(bot)
+
     from . import log_runtime_diagnostic
     await log_runtime_diagnostic.install(bot)
 
