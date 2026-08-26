@@ -1,14 +1,12 @@
-"""SentriX V50 — hauteur visuelle normalisée pour les journaux Discord.
+"""SentriX — renderer final des logs, format large et compact.
 
-Discord ne permet pas d'imposer une hauteur en pixels aux Components V2. Cette couche
-utilise donc une structure strictement identique pour tous les logs, réserve un nombre
-stable de lignes aux blocs CONTEXTE et DÉTAILS, puis tronque les contenus très longs.
-Le résultat est une hauteur quasi identique sur desktop pour les logs courts et moyens,
-sans toucher au routage, à l'Audit Log, à la déduplication ou aux permissions.
+Tous les journaux conservent les mêmes données, le même routage, la déduplication et les
+permissions existantes. Seule la présentation change : pas de bannière, pas d'emoji
+décoratif, un cadre Components V2 large, des séparateurs nets et les informations utiles
+sur peu de lignes.
 """
 from __future__ import annotations
 
-import math
 import re
 
 import discord
@@ -20,32 +18,28 @@ from . import log_preferred_style_v30 as v30
 from .log_rectangle_v25 import _event_timestamp, _field_value, _is_role_batch, _target_id
 
 
-ZWSP = "\u200b"
-HEADER_DESCRIPTION_ROWS = 2
-CONTEXT_ROWS = 2
-DETAIL_ROWS = 5
-ESTIMATED_CHARS_PER_ROW = 66
+BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 CATEGORY_LABELS = {
-    "messages": ("💬", "MESSAGES"),
-    "tickets": ("🎫", "TICKETS"),
-    "moderation": ("🛡️", "MODÉRATION"),
-    "voice": ("🔊", "VOCAL"),
-    "server": ("⚙️", "SERVEUR"),
-    "members": ("👥", "MEMBRES"),
-    "roles": ("🏷️", "RÔLES"),
-    "security": ("🛡️", "SÉCURITÉ"),
-    "automod": ("🛡️", "SÉCURITÉ"),
-    "economy": ("💳", "ÉCONOMIE"),
-    "levels": ("📈", "NIVEAUX"),
-    "ai": ("✨", "IA"),
-    "games": ("🎮", "JEUX"),
-    "system": ("🖥️", "SYSTÈME"),
-    "channels": ("#️⃣", "SALONS"),
-    "cases": ("📁", "DOSSIERS"),
-    "spam": ("🛡️", "ANTI-SPAM"),
-    "raid": ("🛡️", "ANTI-RAID"),
-    "staff": ("🛡️", "STAFF"),
+    "messages": "MESSAGES",
+    "tickets": "TICKETS",
+    "moderation": "MODÉRATION",
+    "voice": "VOCAL",
+    "server": "SERVEUR",
+    "members": "MEMBRES",
+    "roles": "RÔLES",
+    "security": "SÉCURITÉ",
+    "automod": "SÉCURITÉ",
+    "economy": "ÉCONOMIE",
+    "levels": "NIVEAUX",
+    "ai": "IA",
+    "games": "JEUX",
+    "system": "SYSTÈME",
+    "channels": "SALONS",
+    "cases": "DOSSIERS",
+    "spam": "ANTI-SPAM",
+    "raid": "ANTI-RAID",
+    "staff": "STAFF",
 }
 
 EVENT_STATUS = {
@@ -72,8 +66,7 @@ CONTEXT_TOKENS = {
 
 
 def _plain(value: object) -> str:
-    text = str(value or "")
-    text = text.replace("\r", " ").replace("\n", " ")
+    text = str(value or "").replace("\r", " ").replace("\n", " ")
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -86,35 +79,24 @@ def _clip(value: object, limit: int, *, fallback: str = "Non disponible") -> str
     return text[: max(1, limit - 1)].rstrip() + "…"
 
 
-def _approx_rows(text: str, chars_per_row: int = ESTIMATED_CHARS_PER_ROW) -> int:
-    rows = 0
-    for line in (text.splitlines() or [""]):
-        visible = re.sub(r"[*_`~>#|]", "", line)
-        # Mentions et timestamps sont plus courts visuellement que leur source texte.
-        visible = re.sub(r"<[@#&]!?(\d+)>", "mention", visible)
-        visible = re.sub(r"<t:\d+(?::[A-Za-z])?>", "temps", visible)
-        rows += max(1, math.ceil(max(1, len(visible)) / chars_per_row))
-    return rows
-
-
-def _pad_rows(text: str, target_rows: int) -> str:
-    text = text.strip() or ZWSP
-    rows = _approx_rows(text)
-    if rows >= target_rows:
-        return text
-    return text + "\n" + "\n".join(ZWSP for _ in range(target_rows - rows))
+def _clean_heading(value: object, *, fallback: str) -> str:
+    text = _plain(value)
+    # Retire uniquement les décorations placées devant le texte ; le contenu métier du
+    # log (y compris les emojis réellement écrits par un membre) reste intact.
+    text = re.sub(r"^[^A-Za-zÀ-ÿ0-9@#<]+", "", text).strip()
+    return _clip(text, 64, fallback=fallback)
 
 
 def _title(log_type: str, embed: discord.Embed) -> str:
-    title = v30._title(log_type, embed)
-    # Un titre excessivement long ferait varier la hauteur même avec le padding.
-    return _clip(title, 58, fallback="📋 Journal SentriX")
+    return _clean_heading(v30._title(log_type, embed), fallback="Journal SentriX")
 
 
 def _description(embed: discord.Embed) -> str:
-    # ~125 caractères correspondent à environ deux lignes sur la carte desktop de référence.
-    description = _clip(embed.description, 125, fallback="Événement enregistré automatiquement par SentriX.")
-    return _pad_rows(description, HEADER_DESCRIPTION_ROWS)
+    return _clip(
+        embed.description,
+        190,
+        fallback="Événement enregistré automatiquement par SentriX.",
+    )
 
 
 def _mention_value(value: object, *, fallback: str = "Non disponible") -> str:
@@ -125,7 +107,7 @@ def _mention_value(value: object, *, fallback: str = "Non disponible") -> str:
     uid = v28._first_id(raw)
     if uid:
         return f"<@{uid}>"
-    return _clip(raw, 64, fallback=fallback)
+    return _clip(raw, 58, fallback=fallback)
 
 
 def _channel_value(guild: discord.Guild, embed: discord.Embed) -> str:
@@ -133,10 +115,10 @@ def _channel_value(guild: discord.Guild, embed: discord.Embed) -> str:
     if channel is not None:
         return channel.mention
     raw = _field_value(embed, "salon", "channel")
-    channel_match = re.search(r"<#(\d{15,22})>", raw or "")
-    if channel_match:
-        return f"<#{channel_match.group(1)}>"
-    return _clip(raw, 60)
+    match = re.search(r"<#(\d{15,22})>", raw or "")
+    if match:
+        return f"<#{match.group(1)}>"
+    return _clip(raw, 58)
 
 
 def _target_value(embed: discord.Embed) -> str:
@@ -148,14 +130,21 @@ def _target_value(embed: discord.Embed) -> str:
     return _mention_value(raw)
 
 
-def _context_block(guild: discord.Guild, embed: discord.Embed) -> str:
-    # Toujours exactement les deux mêmes lignes principales : la hauteur ne dépend plus
-    # du nombre d'informations disponibles dans l'événement.
-    text = (
-        f"**Salon**  {_channel_value(guild, embed)}\n"
-        f"**Cible**  {_target_value(embed)}"
+def _actor_value(embed: discord.Embed) -> str:
+    raw = _field_value(
+        embed,
+        "effectue par", "effectué par", "moderateur", "modérateur", "acteur",
+        "executant", "exécutant",
     )
-    return _pad_rows(text, CONTEXT_ROWS)
+    return _mention_value(raw, fallback="Automatique")
+
+
+def _context_block(guild: discord.Guild, embed: discord.Embed) -> str:
+    return (
+        f"**Salon**  {_channel_value(guild, embed)}   •   "
+        f"**Cible**  {_target_value(embed)}   •   "
+        f"**Action par**  {_actor_value(embed)}"
+    )
 
 
 def _is_context_field(name: str) -> bool:
@@ -167,18 +156,18 @@ def _detail_candidates(guild: discord.Guild, embed: discord.Embed) -> list[tuple
     result: list[tuple[str, str]] = []
 
     if _is_role_batch(embed):
-        description = _clip(v30._restore_role_mentions(guild, embed.description or ""), 180)
-        return [("Détails", description)]
+        value = _clip(v30._restore_role_mentions(guild, embed.description or ""), 210)
+        return [("Détails", value)]
 
     before = _field_value(embed, "avant")
     after = _field_value(embed, "apres")
     if before:
-        result.append(("Avant", _clip(v30._restore_role_mentions(guild, before), 105)))
-    if after and len(result) < 2:
-        result.append(("Après", _clip(v30._restore_role_mentions(guild, after), 105)))
+        result.append(("Avant", _clip(v30._restore_role_mentions(guild, before), 120)))
+    if after:
+        result.append(("Après", _clip(v30._restore_role_mentions(guild, after), 120)))
 
     for field in embed.fields:
-        if len(result) >= 2:
+        if len(result) >= 3:
             break
         name = str(field.name or "Information").strip() or "Information"
         if v30._is_id_field(name) or _is_context_field(name):
@@ -190,56 +179,31 @@ def _detail_candidates(guild: discord.Guild, embed: discord.Embed) -> list[tuple
         if not value:
             continue
         value = v30._restore_role_mentions(guild, value)
-        clean_name = re.sub(r"^[^\wÀ-ÿ]+\s*", "", name).strip() or "Information"
-        # Une ligne principale peut occuper ~2 lignes visuelles ; la seconde reste courte.
-        if not result and any(token in normalized for token in ("contenu", "message", "raison")):
-            limit = 135
-        else:
-            limit = 82
+        clean_name = _clean_heading(name, fallback="Information")
+        limit = 170 if any(token in normalized for token in ("contenu", "message", "raison")) else 105
         result.append((clean_name, _clip(value, limit)))
 
     if not result:
-        actor = _field_value(embed, "effectue par", "effectué par", "moderateur", "modérateur", "acteur")
-        if actor:
-            result.append(("Action par", _mention_value(actor)))
-
-    if not result:
         result.append(("Information", "Aucun détail supplémentaire."))
-    return result[:2]
+    return result[:3]
 
 
 def _details_block(guild: discord.Guild, embed: discord.Embed) -> str:
-    rows: list[str] = []
-    for label, value in _detail_candidates(guild, embed):
-        rows.append(f"**{_clip(label, 28)}**  {value}")
+    rows = [f"**{_clip(label, 26)}**  {value}" for label, value in _detail_candidates(guild, embed)]
     text = "\n".join(rows)
-
-    # Cap strict : même un message de plusieurs milliers de caractères reste proche de
-    # la hauteur de référence. Le texte complet existe toujours dans Discord lui-même.
-    if len(text) > 295:
-        text = text[:294].rstrip() + "…"
-    return _pad_rows(text, DETAIL_ROWS)
+    return _clip(text, 430, fallback="Aucun détail supplémentaire.")
 
 
-def _avatar(bot: commands.Bot, guild: discord.Guild, embed: discord.Embed) -> str | None:
-    try:
-        avatar = v28._avatar(bot, guild, embed)
-        if avatar:
-            return str(avatar)
-    except Exception:
-        pass
-    if bot.user:
-        return str(bot.user.display_avatar.url)
-    if guild.icon:
-        return str(guild.icon.url)
-    return None
-
-
-def _button_set(guild: discord.Guild, log_type: str, embed: discord.Embed, inherited: list[tuple[str, int]]) -> list[tuple[str, int]]:
+def _button_set(
+    guild: discord.Guild,
+    log_type: str,
+    embed: discord.Embed,
+    inherited: list[tuple[str, int]],
+) -> list[tuple[str, int]]:
     result: list[tuple[str, int]] = []
     used: set[int] = set()
 
-    def add(label: str, value: int | None):
+    def add(label: str, value: int | None) -> None:
         if not value:
             return
         ivalue = int(value)
@@ -266,10 +230,11 @@ def _button_set(guild: discord.Guild, log_type: str, embed: discord.Embed, inher
 
 
 class FixedHeightLogV50(discord.ui.LayoutView):
-    """Carte de log à structure fixe, visuellement stable entre événements."""
+    """Renderer compatible V50, désormais en carte large SentriX sans décoration inutile."""
 
     _sentrix_log_layout = True
     _sentrix_fixed_height_v50 = True
+    _sentrix_wide_log_v4 = True
 
     def __init__(
         self,
@@ -288,60 +253,48 @@ class FixedHeightLogV50(discord.ui.LayoutView):
             pass
         clean = v28._ensure_message_id_field(log_type, clean)
 
-        category_icon, category = CATEGORY_LABELS.get(
-            str(log_type),
-            ("📋", str(log_type).upper()),
-        )
+        category = CATEGORY_LABELS.get(str(log_type), str(log_type).upper())
         event = v28._event(log_type, clean)
         status = EVENT_STATUS.get(event, "ÉVÉNEMENT")
         timestamp = _event_timestamp(clean)
         accent = v30._accent(log_type, clean)
 
         header_text = (
-            f"-# ✦ SENTRIX / {category_icon} {category} / SECURE AUDIT\n\n"
+            f"-# SENTRIX / {category} / LIVE AUDIT\n"
             f"# {_title(log_type, clean)}\n"
-            f"**{status}**  ·  <t:{timestamp}:R>  ·  `LIVE LOG`\n"
+            f"**{status}**   •   <t:{timestamp}:R>   •   `{category}`\n"
+            f"{BAR}\n"
             f"{_description(clean)}"
         )[:3900]
 
         container = discord.ui.Container(accent_colour=accent)
-        avatar = _avatar(bot, guild, clean)
-        header = discord.ui.TextDisplay(header_text)
-        if avatar:
-            try:
-                container.add_item(
-                    discord.ui.Section(
-                        header,
-                        accessory=discord.ui.Thumbnail(avatar, description="SentriX Secure Audit"),
-                    )
-                )
-            except Exception:
-                container.add_item(header)
-        else:
-            container.add_item(header)
-
-        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(header_text))
+        container.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.small))
         container.add_item(
             discord.ui.TextDisplay(
-                "### CONTEXTE\n" + _context_block(guild, clean)
+                "**CONTEXTE**\n" + _context_block(guild, clean)
             )
         )
-
-        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.small))
         container.add_item(
             discord.ui.TextDisplay(
-                "### DÉTAILS\n" + _details_block(guild, clean)
+                "**DÉTAILS**\n" + _details_block(guild, clean)
             )
         )
 
         final_buttons = _button_set(guild, log_type, clean, buttons)
         row = discord.ui.ActionRow()
         for index, (label, value) in enumerate(final_buttons):
-            row.add_item(premium_logs_v2.CopyIdButton(label, int(value), index))
+            button = premium_logs_v2.CopyIdButton(label, int(value), index)
+            try:
+                button.emoji = None
+            except Exception:
+                pass
+            row.add_item(button)
         if row.children:
             container.add_item(row)
 
-        container.add_item(discord.ui.TextDisplay("-# SentriX • Secure Audit"))
+        container.add_item(discord.ui.TextDisplay("-# SentriX • Journal sécurisé"))
 
         try:
             self._sentrix_log_fingerprint = v30._canonical_fingerprint(guild, log_type, clean)
@@ -352,9 +305,9 @@ class FixedHeightLogV50(discord.ui.LayoutView):
 
 
 def install(bot: commands.Bot | None = None, extension_name: str = "") -> None:
-    """Remplace uniquement le renderer visuel final ; aucun nouveau listener/commande."""
+    """Remplace uniquement le renderer visuel final ; aucun listener n'est ajouté."""
     del bot, extension_name
-    required = ("LayoutView", "Container", "Section", "TextDisplay", "Thumbnail", "Separator")
+    required = ("LayoutView", "Container", "TextDisplay", "Separator")
     if not all(hasattr(discord.ui, name) for name in required):
         return
     premium_logs_v2.PremiumLogLayout = FixedHeightLogV50
