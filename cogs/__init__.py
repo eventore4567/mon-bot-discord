@@ -20,6 +20,7 @@ from .ai_reliability import install as install_ai_reliability
 from .bot_tracker import install as install_bot_tracker
 from .command_error_release_v41 import install as install_command_error_release_v41
 from .command_hardening_v41 import install as install_command_hardening_v41
+from .command_runtime_hardening_v18 import repair_wrapped_signatures
 from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
 from .emoji_name_lookup import install as install_emoji_name_lookup
@@ -50,6 +51,7 @@ from .server_choice_roles import install as install_server_choice_roles
 from .shop_default_prices import install as install_shop_default_prices
 from .smart_creation_guard_v47 import install as install_smart_creation_guard_v47
 from .slash_reliability_v7 import install as install_slash_reliability_v7
+from .slash_command_budget import install as install_slash_command_budget
 from .stability_runtime import install as install_stability_runtime
 from .ticket_claim_security import install as install_ticket_claim_security
 from .ticket_ping_role import install_setup_ui as install_ticket_ping_setup
@@ -200,6 +202,10 @@ async def _load_official_help(bot: commands.Bot) -> None:
         return
     try:
         await _ORIGINAL_LOAD_EXTENSION(bot, _OFFICIAL_HELP_EXTENSION)
+        bot._sentrix_help_owner = _OFFICIAL_HELP_EXTENSION
+        # Le nouveau propriétaire est chargé après le garde central ; réappliquer sa
+        # règle publique au nouvel objet +help, et non à l'ancienne commande remplacée.
+        install_permission_guard(bot)
         logger.info("Help officiel SentriX chargé : ancien +help remplacé.")
     except Exception:
         logger.exception("Impossible de charger le help officiel SentriX.")
@@ -225,8 +231,12 @@ async def finalize_runtime(bot: commands.Bot) -> None:
 
 
 async def _load_extension_with_sentrix_patches(bot: commands.Bot, name: str, *, package: str | None = None):
+    # Installer le plafond avant la toute première extension : discord.py refuse
+    # immédiatement la 101e racine et ne laisse pas le finaliseur la retirer après coup.
+    install_slash_command_budget(bot)
     result = await _ORIGINAL_LOAD_EXTENSION(bot, name, package=package)
     await _install_extension_specific(bot, name)
+    repair_wrapped_signatures(bot)
     if _matches(name, _FINAL_EXTENSION):
         await finalize_runtime(bot)
     return result

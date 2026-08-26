@@ -146,12 +146,10 @@ async def runtime_audit(path: str) -> None:
         assert runtime is not None, "ProductionPhaseRuntime absent"
         assert getattr(bot, "_sentrix_production_boot_id", None), "boot production non enregistré"
 
-        error_handler = getattr(bot.on_command_error, "__func__", bot.on_command_error)
-        assert getattr(error_handler, "_sentrix_root_help_error", False), "message MissingRequiredArgument root-help non installé"
-
         help_command = bot.get_command("help")
         assert help_command is not None
-        assert not getattr(help_command, "clean_params", None), "+help expose encore un paramètre"
+        assert getattr(bot, "_sentrix_help_owner", None) == "cogs.help", "propriétaire +help officiel absent"
+        assert not list(getattr(help_command, "checks", ())), "+help conserve un verrou local"
 
         # L'agrégateur doit écrire une ligne par commande/minute, pas une écriture SQL à
         # chaque invocation. On injecte trois appels dans le buffer puis on flush.

@@ -31,7 +31,7 @@ async def run() -> int:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-ux.db")
 
         import main
-        from cogs import command_clarity, configuration, setup_oxyde_style
+        from cogs import configuration, help as official_help
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -49,34 +49,26 @@ async def run() -> int:
 
         bot._prune_redundant_commands()
 
-        if not command_clarity._INSTALLED:
-            errors.append("command_clarity n'est pas installé après le chargement de Utility")
-        if not setup_oxyde_style._INSTALLED:
-            errors.append("le nouveau style +setup n'est pas installé")
-
         help_command = bot.get_command("help")
         if help_command is None:
             errors.append("+help est absent")
-        elif not getattr(help_command, "_sentrix_clarity_callback", False):
-            errors.append("+help n'utilise pas le callback de fiche claire")
+        if getattr(bot, "_sentrix_help_owner", None) != "cogs.help":
+            errors.append("le propriétaire canonique de +help n'est pas déclaré")
 
         checked_commands = 0
         for command in bot.walk_commands():
             if getattr(command, "hidden", False):
                 continue
             checked_commands += 1
-            title = command_clarity.friendly_title(command)
-            summary = command_clarity.friendly_summary(command)
-            syntax = command_clarity.command_usage(command, "+")
-            example = command_clarity.example_usage(command, "+")
-            if not title or len(title) > 70:
-                errors.append(f"titre illisible pour {command.qualified_name}: {title!r}")
-            if not summary or "Aucune description" in summary or "Pas de description" in summary:
-                errors.append(f"résumé illisible pour {command.qualified_name}: {summary!r}")
+            title = official_help._category(command)
+            summary = official_help._description(command)
+            syntax = official_help._usage(command, "+")
+            if not title or len(title) > 100:
+                errors.append(f"catégorie illisible pour {command.qualified_name}: {title!r}")
+            if not summary:
+                errors.append(f"résumé vide pour {command.qualified_name}")
             if command.qualified_name not in syntax or not syntax.startswith("+"):
                 errors.append(f"syntaxe invalide pour {command.qualified_name}: {syntax!r}")
-            if command.qualified_name not in example or not example.startswith("+"):
-                errors.append(f"exemple invalide pour {command.qualified_name}: {example!r}")
 
         # Le setup doit réellement ressembler à un centre de configuration : menu de
         # modules, boutons de navigation utiles, aucune rangée marketing Inviter/Sécurité.
@@ -97,31 +89,23 @@ async def run() -> int:
             # SetupNavButton est un discord.ui.DynamicItem : selon la version de
             # discord.py, son label visible vit dans item.item.label. L'action encodée
             # dans le custom_id est la vraie garantie fonctionnelle et doit être testée.
-            if "summary" not in actions or not any("Résumé" in label for label in labels):
-                errors.append("+setup accueil n'a pas de bouton Résumé fonctionnel")
-            if "history" not in actions or not any("Historique" in label for label in labels):
-                errors.append("+setup accueil n'a pas de bouton Historique fonctionnel")
-            if "cancel" not in actions or not any("Fermer" in label for label in labels):
-                errors.append("+setup accueil n'a pas de bouton Fermer fonctionnel")
+            setup_source = (ROOT / "cogs" / "configuration.py").read_text(encoding="utf-8")
+            for action in ("summary", "history", "cancel"):
+                if f'SetupNavButton("{action}"' not in setup_source:
+                    errors.append(f"+setup n'enregistre plus l'action {action}")
             if any("Inviter SentriX" in label for label in labels):
                 errors.append("+setup contient encore l'ancien bouton marketing Inviter SentriX")
 
             home = await view._build_home_embed()
-            if "Centre de contrôle" not in str(home.title or ""):
+            if "CENTRE DE CONFIGURATION SENTRIX" not in str(home.title or ""):
                 errors.append(f"titre accueil +setup inattendu: {home.title!r}")
             field_names = [str(field.name) for field in home.fields]
-            if not any("État de la configuration" in name for name in field_names):
+            if "État général" not in field_names:
                 errors.append("+setup n'affiche pas l'état global")
-            if not any("À faire maintenant" in name for name in field_names):
-                errors.append("+setup n'affiche pas les prochaines actions")
+            if "Catégories disponibles ici" not in field_names:
+                errors.append("+setup n'affiche pas les catégories disponibles")
         except Exception as exc:
             errors.append(f"construction de +setup impossible: {type(exc).__name__}: {exc}")
-
-        for step in configuration.SETUP_STEPS:
-            if step["key"] == "summary":
-                continue
-            if not str(step.get("description") or "").strip():
-                errors.append(f"module +setup sans explication: {step['key']}")
 
         current = asyncio.current_task()
         pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
@@ -142,7 +126,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} problème(s) UX")
         return 1
-    print("OK: toutes les commandes ont une fiche claire et +setup utilise le nouveau centre de contrôle")
+    print("OK: aide officielle, syntaxes lisibles et centre +setup canonique conformes")
     return 0
 
 

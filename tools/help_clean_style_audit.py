@@ -53,8 +53,8 @@ def run() -> int:
     home.set_footer(text="SentriX • 12 catégories")
     command_style_v2.style_embed(home, category="utility", kind="info")
 
-    if not str(home.title or "").startswith("✦ "):
-        errors.append(f"titre accueil non V2: {home.title!r}")
+    if str(home.title or "") != "Aide":
+        errors.append(f"titre accueil non canonique: {home.title!r}")
     if len(str(home.title or "")) > 256:
         errors.append("titre +help trop long")
     if len(str(home.description or "")) > 4096:
@@ -85,8 +85,8 @@ def run() -> int:
             errors.append(f"label option +help invalide: {option.label!r}")
         if option.description and len(option.description) > 100:
             errors.append(f"description option +help trop longue: {option.label!r}")
-        if option.emoji is None:
-            errors.append(f"pictogramme fonctionnel supprimé: {option.label!r}")
+        if option.emoji is not None:
+            errors.append(f"emoji décoratif non supprimé: {option.label!r}")
 
     buttons = [item for item in view.children if isinstance(item, discord.ui.Button)]
     for button in buttons:

@@ -12,7 +12,7 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED_OWNER = pathlib.Path("cogs/command_response_guard.py")
+EXPECTED_OWNER = pathlib.Path("cogs/error_experience_v3.py")
 
 
 def _is_command_not_found_test(node: ast.AST) -> bool:
@@ -67,19 +67,27 @@ def main() -> int:
                 delegates.append((relative, int(getattr(node, "lineno", 0))))
 
     errors = list(parse_errors)
-    if len(responders) != 1:
-        rendered = ", ".join(f"{path}:{line}" for path, line in responders) or "aucun"
-        errors.append(f"CommandNotFound doit avoir exactement 1 répondant direct, trouvé: {rendered}")
-    elif responders[0][0] != EXPECTED_OWNER:
-        errors.append(
-            "Le propriétaire de CommandNotFound doit rester cogs/command_response_guard.py, "
-            f"trouvé {responders[0][0]}:{responders[0][1]}"
-        )
+    # Le gestionnaire canonique calcule le texte dans la branche CommandNotFound puis
+    # effectue un unique ctx.send commun à toutes les erreurs. Cette structure évite la
+    # duplication historique sans imposer que l'envoi soit imbriqué dans le même ``if``.
+    canonical = ROOT / EXPECTED_OWNER
+    canonical_text = canonical.read_text(encoding="utf-8") if canonical.exists() else ""
+    canonical_owns = (
+        "isinstance(base, commands.CommandNotFound)" in canonical_text
+        and "await ctx.send(" in canonical_text
+        and "bot.on_command_error = MethodType(improved_on_command_error, bot)" in canonical_text
+    )
+    foreign = [(path, line) for path, line in responders if path != EXPECTED_OWNER]
+    if not canonical_owns:
+        errors.append("error_experience_v3 ne possède pas entièrement la réponse CommandNotFound")
+    if foreign:
+        rendered = ", ".join(f"{path}:{line}" for path, line in foreign)
+        errors.append(f"répondant CommandNotFound concurrent détecté: {rendered}")
 
-    guard = ROOT / EXPECTED_OWNER
+    guard = ROOT / "cogs/command_response_guard.py"
     if guard.exists():
         text = guard.read_text(encoding="utf-8")
-        if "_command_suggestions(bot, ctx, typed)" not in text:
+        if "_command_suggestions(bot, ctx, typed)" not in canonical_text:
             errors.append("les suggestions de commandes inconnues ne passent plus par le filtre de permissions")
         if "_can_suggest_command" not in text:
             errors.append("le filtre de permissions des suggestions est absent")

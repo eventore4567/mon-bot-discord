@@ -10,6 +10,7 @@ from types import MethodType
 from discord.ext import commands
 
 from utils import embeds
+from cogs.command_response_guard import _command_suggestions
 
 logger = logging.getLogger("bot.errors")
 _TECHNICAL_PARAMS = {"ctx", "context", "interaction", "self", "cog"}
@@ -96,7 +97,7 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
         if not _can_reply_unknown(bot, ctx):
             return True
         typed = str(getattr(ctx, "invoked_with", "") or "").strip()
-        suggestions = _suggestions(bot, typed)
+        suggestions = _command_suggestions(bot, ctx, typed)[:2]
         description = f"La commande `{prefix}{typed}` n’existe pas.\n\nUtilisez `{prefix}help` pour consulter les commandes disponibles."
         if suggestions:
             proposed = ", ".join(f"`{prefix}{name}`" for name in suggestions)
@@ -184,4 +185,4 @@ def install(bot: commands.Bot) -> None:
     logger.info("Gestionnaire officiel des erreurs préfixées actif.")
 
 
-__all__ = ["install", "_suggestions", "_safe_usage"]
+__all__ = ["install", "_safe_usage"]

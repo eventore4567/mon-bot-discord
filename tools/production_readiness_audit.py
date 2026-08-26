@@ -66,9 +66,9 @@ def static_audit() -> None:
     assert "CANARY_GUILD_ID" in canary
     health = (ROOT / "web" / "production_health.py").read_text(encoding="utf-8")
     assert "database_ok" in health and "discord_ready" in health
-    uptime = (ROOT / ".github" / "workflows" / "uptime.yml").read_text(encoding="utf-8")
-    assert "*/5 * * * *" in uptime
-    assert "discord_ready" in uptime
+    resilience = (ROOT / ".github" / "workflows" / "real-e2e.yml").read_text(encoding="utf-8")
+    assert "real_e2e_resilience_audit.py" in resilience
+    assert "observability_v2_audit.py" in resilience
 
 
 async def schema_audit() -> None:

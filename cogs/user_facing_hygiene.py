@@ -377,13 +377,13 @@ def _repair_gamble_parser(bot: commands.Bot) -> None:
     annotation = getattr(getattr(command, "clean_params", {}).get("montant"), "annotation", None)
     if actual == ("montant",) and annotation is int:
         command.usage = "<montant>"
-        command._sentrix_gamble_parser_fixed = True
+        command._sentrix_gamble_contract_fixed = True
         return
 
     probe = commands.Command(_gamble_signature_probe, name="_sentrix_gamble_signature_probe")
     command.params = probe.params.copy()
     command.usage = "<montant>"
-    command._sentrix_gamble_parser_fixed = True
+    command._sentrix_gamble_contract_fixed = True
     logger.warning("Contrat du parseur +gamble réparé : %r -> ('montant',).", actual)
 
 
@@ -404,6 +404,10 @@ def apply(bot: commands.Bot) -> None:
     _patch_prefix_error_ux(bot)
     _repair_gamble_parser(bot)
     _install_runtime_quality(bot)
+    # Les modules de qualité peuvent remplacer des callbacks pendant cette passe ; leur
+    # cache de paramètres doit être nettoyé après, sinon ``ctx`` réapparaît dans +help.
+    from .command_runtime_hardening_v18 import repair_wrapped_signatures
+    repair_wrapped_signatures(bot)
     bot._sentrix_user_facing_hygiene = True
 
 

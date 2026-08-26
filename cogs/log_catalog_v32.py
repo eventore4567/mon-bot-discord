@@ -308,6 +308,11 @@ async def _sync_existing_channels(bot: commands.Bot) -> None:
         logger.info("V32 : synchronisation des salons de logs existants terminée.")
     except asyncio.CancelledError:
         raise
+    except RuntimeError as exc:
+        # Les audits chargent les extensions sans connecter le client Discord. Dans ce
+        # contexte wait_until_ready() n'est pas utilisable et la synchronisation sera
+        # naturellement rejouée au vrai on_ready.
+        logger.debug("V32 : synchronisation différée jusqu'au vrai démarrage Discord: %s", exc)
     except Exception:
         logger.exception("V32 : synchronisation automatique des salons de logs impossible.")
 
@@ -482,7 +487,12 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     _install_router(bot)
 
     if not getattr(bot, "_sentrix_log_catalog_sync_v32", None):
-        bot._sentrix_log_catalog_sync_v32 = bot.loop.create_task(_sync_existing_channels(bot))
+        try:
+            bot._sentrix_log_catalog_sync_v32 = asyncio.create_task(
+                _sync_existing_channels(bot), name="sentrix-log-catalog-sync-v32"
+            )
+        except RuntimeError:
+            bot._sentrix_log_catalog_sync_v32 = None
 
     logger.info(
         "V32 actif : salons/dossiers/anti-spam/anti-raid/staff + messages adaptatifs >= %s caractères.",

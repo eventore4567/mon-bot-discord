@@ -49,6 +49,8 @@ if "cogs.command_error_probe" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.command_error_probe")
 if "cogs.legacy_observability_conflict_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.legacy_observability_conflict_guard")
+if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.slash_reliability_v7")
 if "cogs.automod_enable_all" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.automod_enable_all")
 if "cogs.setup_auto_fix" not in bot_main.EXTENSIONS:
@@ -74,6 +76,10 @@ if "cogs.sentrix_ultimate" not in bot_main.EXTENSIONS:
 # Une seule politique visuelle finale.
 if "cogs.plain_text_all_extension" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.plain_text_all_extension")
+if "cogs.deferred_context_response_guard" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.deferred_context_response_guard")
+if "cogs.slash_error_completion_guard" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.slash_error_completion_guard")
 
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})

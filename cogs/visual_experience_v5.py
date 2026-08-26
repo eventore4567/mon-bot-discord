@@ -472,7 +472,9 @@ async def setup(bot: commands.Bot):
     # Cette vérification rend immédiatement visible dans les logs toute régression du
     # catalogue au lieu de laisser Railway afficher un déploiement sain avec des commandes
     # silencieusement absentes.
-    required = ("status", "about", "design-theme", "profile-card", "iconsetup")
+    # ``status`` est l'alias court ajouté pendant la finalisation globale, laquelle est
+    # déclenchée juste après ce setup. À ce stade, la commande canonique doit être présente.
+    required = ("bot-status", "about", "design-theme", "profile-card", "iconsetup")
     missing = [name for name in required if bot.get_command(name) is None]
     if missing:
         raise RuntimeError("Commandes V5 non enregistrées : " + ", ".join(missing))

@@ -183,6 +183,10 @@ def install(bot: commands.Bot) -> None:
                 return False
             return await _enforce(bot, interaction)
 
+        # Conserver la preuve que le verrou central précédent reste dans la chaîne.
+        guarded_interaction_check._sentrix_permission_guard = bool(
+            getattr(original_check, "_sentrix_permission_guard", False)
+        )
         tree.interaction_check = MethodType(guarded_interaction_check, tree)
         tree._sentrix_interaction_policy_v2 = True
         logger.info("Politique permissions slash fail-closed installée.")

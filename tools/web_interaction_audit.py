@@ -26,7 +26,10 @@ if str(ROOT) not in sys.path:
 from web import dashboard, operations_center, setup_center
 from web import enterprise_suite
 
-SCRIPT_RE = re.compile(r"<script(?:\s[^>]*)?>(.*?)</script>", re.I | re.S)
+SCRIPT_RE = re.compile(
+    r"<script(?![^>]*\btype=[\"']application/ld\+json[\"'])(?:\s[^>]*)?>(.*?)</script>",
+    re.I | re.S,
+)
 BUTTON_ID_RE = re.compile(r"<button\b[^>]*\bid=[\"']([^\"']+)[\"']", re.I)
 
 

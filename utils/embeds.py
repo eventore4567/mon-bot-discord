@@ -141,6 +141,8 @@ def _kind_from_text(title: Any, description: Any = "") -> str:
 
 
 def _colour(kind: str | None = None, fallback: int | None = None) -> int:
+    if fallback is not None:
+        return int(fallback)
     return {
         "info": COLOR_INFO,
         "success": COLOR_SUCCESS,
@@ -148,7 +150,7 @@ def _colour(kind: str | None = None, fallback: int | None = None) -> int:
         "danger": COLOR_DANGER,
         "neutral": COLOR_NEUTRAL,
         "brand": COLOR_BRAND_UI,
-    }.get(str(kind or "").casefold(), int(fallback or SENTRIX_COLOR))
+    }.get(str(kind or "").casefold(), SENTRIX_COLOR)
 
 
 def _panel_description(description: Any, *, clean: bool = True) -> str:
@@ -179,7 +181,6 @@ def _base(
     kind: str | None = None,
     clean_description: bool = True,
 ) -> discord.Embed:
-    del banner  # Les bannières sont volontairement désactivées dans le design officiel.
     safe_title = clean_ui_text(title, 90, "Information")
     resolved_kind = kind or _kind_from_text(safe_title, description)
     embed = discord.Embed(
@@ -190,6 +191,8 @@ def _base(
     )
     if thumbnail:
         embed.set_thumbnail(url=str(thumbnail))
+    if banner and SENTRIX_BANNER_URL:
+        embed.set_image(url=SENTRIX_BANNER_URL)
     return _footer(embed, footer)
 
 
@@ -207,15 +210,15 @@ def standard(
 
 
 def success(description: str, title: str = "Action effectuée") -> discord.Embed:
-    return _base(title, description, kind="success")
+    return _base(title, description, colour=SENTRIX_COLOR)
 
 
 def error(description: str, title: str = "Erreur") -> discord.Embed:
-    return _base(title, description, kind="danger")
+    return _base(title, description, colour=SENTRIX_COLOR)
 
 
 def warning(description: str, title: str = "Vérification nécessaire") -> discord.Embed:
-    return _base(title, description, kind="warning")
+    return _base(title, description, colour=SENTRIX_COLOR)
 
 
 def info(description: str, title: str = "Information") -> discord.Embed:
@@ -247,7 +250,7 @@ def panel(
 
 
 def help_embed(title: str = "Commandes", description: str = "") -> discord.Embed:
-    return _base(title, description, kind="info")
+    return _base(title, description, colour=SENTRIX_COLOR)
 
 
 def profile_embed(
@@ -451,7 +454,6 @@ def log_embed(
     event_time: datetime | None = None,
     banner: bool = True,
 ) -> discord.Embed:
-    del banner
     footer = f"SentriX • {format_datetime_fr(event_time)}"
     embed = _base(
         title,
@@ -459,6 +461,7 @@ def log_embed(
         footer=footer,
         kind=_kind_from_text(title, description),
         clean_description=False,
+        banner=banner,
     )
     return add_fields(embed, fields)
 

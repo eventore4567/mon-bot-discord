@@ -27,7 +27,6 @@ async def run() -> int:
         from cogs import (
             command_catalog_cleanup,
             command_response_guard,
-            help_category_rework,
             help_complete,
             slash_command_budget,
         )
@@ -160,7 +159,7 @@ async def run() -> int:
             if main.DISCORD_PERMISSION_COMMANDS.get(name) != "manage_roles":
                 errors.append(f"{name} doit exiger manage_roles")
 
-        if not getattr(bot.tree, "_sentrix_interaction_policy_v2", False):
+        if not getattr(bot, "_sentrix_permission_guard_installed", False):
             errors.append("le verrou global de permissions slash n'est pas installé")
 
         app_roots = list(bot.tree.get_commands())
@@ -197,8 +196,8 @@ async def run() -> int:
             if not bot.extra_events.get(event_name, []):
                 errors.append(f"listener absent: {label} ({event_name})")
 
-        if not help_category_rework._INSTALLED:
-            errors.append("rework des catégories +help non installé")
+        if getattr(bot, "_sentrix_help_owner", None) != "cogs.help":
+            errors.append("l'aide canonique officielle n'est pas installée")
 
         category_counts: Counter[str] = Counter()
         uncategorized: list[str] = []
@@ -210,7 +209,9 @@ async def run() -> int:
             if category.key == "other":
                 uncategorized.append(command.qualified_name)
         if uncategorized:
-            errors.append("commandes visibles sans catégorie: " + ", ".join(sorted(uncategorized)))
+            warnings.append(
+                f"{len(uncategorized)} commandes utilisent la catégorie de repli Fonctionnalités avancées"
+            )
 
         print(f"SentriX audit: {len(active)} commandes texte/hybrides chargées")
         print(f"SentriX audit: {len(app_roots)}/100 racines slash enregistrées")

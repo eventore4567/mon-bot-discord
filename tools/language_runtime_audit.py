@@ -191,8 +191,8 @@ async def run() -> int:
             setup_view.render_page()
             home_embed = await setup_view.build_embed()
             footer = str(home_embed.footer.text or "") if home_embed.footer else ""
-            if "Interface setup v6" not in footer:
-                errors.append(f"marqueur V6 absent du footer: {footer!r}")
+            if "SentriX" not in footer:
+                errors.append(f"marque SentriX absente du footer: {footer!r}")
 
             for item in setup_view.children:
                 values = {str(getattr(opt, "value", "")) for opt in getattr(item, "options", [])}

@@ -13,6 +13,7 @@ import os
 import pathlib
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -38,12 +39,36 @@ class _DummyBot:
         self.latency = 0.042
         self._ready = False
         self.db = None
+        self._listeners = []
 
     def is_ready(self) -> bool:
         return self._ready
 
     def get_guild(self, guild_id: int):
         return None
+
+    def get_user(self, user_id: int):
+        return None
+
+    async def fetch_user(self, user_id: int):
+        return None
+
+    def add_listener(self, callback, name: str | None = None) -> None:
+        self._listeners.append((name or getattr(callback, "__name__", "listener"), callback))
+
+    def get_command(self, name: str):
+        return None
+
+    def add_command(self, command) -> None:
+        return None
+
+    async def wait_until_ready(self) -> None:
+        return None
+
+    def is_closed(self) -> bool:
+        # Les boucles de fond installées par certains modules ne doivent pas tourner
+        # pendant le parcours HTTP synthétique : elles sont couvertes par le boot runtime.
+        return True
 
 
 async def dashboard_http_journey() -> int:
@@ -52,7 +77,7 @@ async def dashboard_http_journey() -> int:
 
     import config
     import web as sentrix_web  # noqa: F401 - active les installateurs du package web
-    from database.db import Database
+    from database.db import Database, PRIMARY_CREATOR_ID
     from web import dashboard
 
     old_secret = config.DISCORD_CLIENT_SECRET
@@ -63,7 +88,25 @@ async def dashboard_http_journey() -> int:
         await db.connect()
         bot = _DummyBot()
         bot.db = db
-        client = TestClient(TestServer(dashboard.build_app(bot)))
+        app = dashboard.build_app(bot)
+
+        # /app est désormais réellement privé. Le test doit d'abord prouver le fail-closed,
+        # puis utiliser une session synthétique du propriétaire pour contrôler le HTML
+        # d'administration sans contourner le middleware de sécurité.
+        session_id = "synthetic-owner-session"
+        app["sessions"][session_id] = {
+            "expires_at": time.time() + 3600,
+            "user": {
+                "id": str(PRIMARY_CREATOR_ID),
+                "username": "Synthetic Owner",
+                "avatar_url": None,
+            },
+            "guilds": [],
+            "csrf": "synthetic-csrf",
+        }
+        owner_headers = {"Cookie": f"{dashboard.SESSION_COOKIE}={session_id}"}
+
+        client = TestClient(TestServer(app))
         try:
             await client.start_server()
 
@@ -85,7 +128,12 @@ async def dashboard_http_journey() -> int:
             assert "no-store" in response.headers.get("Cache-Control", "")
             checks += 1
 
-            response = await client.get("/app")
+            response = await client.get("/app", allow_redirects=False)
+            assert response.status in {302, 303}
+            assert response.headers.get("Location") == "/login"
+            checks += 1
+
+            response = await client.get("/app", headers=owner_headers, allow_redirects=False)
             assert response.status == 200
             html = await response.text()
             assert 'id="sentrix-core-recovery"' in html

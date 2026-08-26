@@ -19,11 +19,12 @@ _AMOUNT_MULTIPLIERS = {"": 1, "k": 1_000, "m": 1_000_000, "b": 1_000_000_000}
 # capturé comme ``10m`` puis rejeté à cause du reste ``inutes``.
 _DURATION_RE = re.compile(
     r"(?P<value>\d+)\s*(?P<unit>"
-    r"secondes|seconde|secs|sec|s|"
-    r"minutes|minute|mins|min|m|"
-    r"heures|heure|h|"
-    r"jours|jour|j|d|"
-    r"semaines|semaine|sem|w"
+    r"secondes|seconde|secs|sec|"
+    r"minutes|minute|mins|min|"
+    r"heures|heure|"
+    r"semaines|semaine|sem|"
+    r"jours|jour|"
+    r"s|m|h|j|d|w"
     r")",
     re.IGNORECASE,
 )
