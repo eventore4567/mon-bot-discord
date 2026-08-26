@@ -139,7 +139,7 @@ async def _register_official_prefix_help(bot: commands.Bot) -> commands.Command:
         if not isinstance(help_cog, OfficialHelp):
             logger.error("SentriXHelp absent pendant l'exécution de +help.")
             return
-        await help_cog._send_prefix_help(ctx, query=commande)
+        await help_cog.send_help(ctx, commande)
 
     prefix_command = commands.Command(
         prefix_help_entry,
