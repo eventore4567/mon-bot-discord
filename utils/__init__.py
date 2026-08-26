@@ -12,6 +12,7 @@ from discord.ext import commands
 
 
 PING_ACCENT = 0x5865F2
+PING_BANNER_PATH = "assets/sentrix-ping-header-v2.webp"
 
 
 def _is_sentrix_ping_panel(embed: discord.Embed | None) -> bool:
@@ -55,8 +56,19 @@ class _SentriXPingLayout(discord.ui.LayoutView):
         quality, quality_bar = _latency_quality(latency_ms)
         measured_at = int(discord.utils.utcnow().timestamp())
 
-        # One single action row: the labels are long enough to visually fill the
-        # container, but remain short enough to stay on one desktop row.
+        # The Information banner is uploaded directly with the Components V2 message.
+        # discord.py accepts discord.File directly as MediaGallery media, which avoids
+        # raw GitHub URLs / Railway routes and the broken-image placeholder seen before.
+        banner_file = discord.File(
+            PING_BANNER_PATH,
+            filename="sentrix-information.webp",
+        )
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(
+            media=banner_file,
+            description="SentriX — Information",
+        )
+
         status_row = discord.ui.ActionRow(
             discord.ui.Button(
                 label=f"Discord · {latency_ms} ms",
@@ -85,9 +97,9 @@ class _SentriXPingLayout(discord.ui.LayoutView):
             ),
         )
 
-        # Deliberately only two text blocks and one button row. This keeps the panel
-        # wide and low instead of stacking multiple vertical sections.
+        # Keep the card low: one very thin banner, one information block, one row.
         container = discord.ui.Container(
+            gallery,
             discord.ui.TextDisplay(
                 f"## Latence  ·  {latency_ms} ms  ·  {quality}    `{quality_bar}`\n"
                 f"**Connexion** {connection}   •   **État** {state}   •   "
