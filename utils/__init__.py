@@ -2,7 +2,7 @@
 
 Only +ping is migrated here for the visual test requested by the owner. The command
 still exists in cogs.utility, but when its legacy embed reaches Context.send we replace
-it with a Discord Components V2 LayoutView.
+it with a compact Discord Components V2 LayoutView.
 """
 
 import re
@@ -10,16 +10,7 @@ import re
 import discord
 from discord.ext import commands
 
-import config
 
-
-# MediaGallery now loads the banner from SentriX itself on Railway. This avoids the
-# GitHub raw / attachment failures that produced a huge empty image placeholder.
-_SENTRIX_PUBLIC_URL = (
-    (getattr(config, "DASHBOARD_PUBLIC_URL", "") or "").strip().rstrip("/")
-    or "https://mon-bot-discord-production-8944.up.railway.app"
-)
-PING_BANNER_URL = f"{_SENTRIX_PUBLIC_URL}/assets/sentrix-ping-banner.png?v=3"
 PING_ACCENT = 0x5865F2
 
 
@@ -64,17 +55,12 @@ class _SentriXPingLayout(discord.ui.LayoutView):
         quality, quality_bar = _latency_quality(latency_ms)
         measured_at = int(discord.utils.utcnow().timestamp())
 
-        gallery = discord.ui.MediaGallery()
-        gallery.add_item(
-            media=PING_BANNER_URL,
-            description="SentriX — Informations générales",
-        )
-
-        # Very short labels keep all five buttons on ONE row on desktop. Long labels
-        # were forcing the fifth button onto a second row and making the panel vertical.
+        # Five deliberately short buttons keep the card wide on desktop without
+        # adding vertical height. There is intentionally no MediaGallery here:
+        # Discord rendered a failed media placeholder that made +ping enormous.
         status_row = discord.ui.ActionRow(
             discord.ui.Button(
-                label=f"{latency_ms} ms",
+                label=f"Ping {latency_ms} ms",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             ),
@@ -101,23 +87,20 @@ class _SentriXPingLayout(discord.ui.LayoutView):
         )
 
         container = discord.ui.Container(
-            gallery,
-            discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
             discord.ui.TextDisplay(
-                f"## Latence   **{latency_ms} ms**  •  **{quality}**\n"
+                "-# SENTRIX • ÉTAT DES SERVICES\n"
+                f"## Latence  ·  {latency_ms} ms  ·  {quality}\n"
                 f"`{quality_bar}`"
             ),
             discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
             discord.ui.TextDisplay(
-                "### Informations\n"
-                f"**Connexion :** {connection}   •   **État :** {state}   •   "
-                f"**Serveurs :** {server_count:,}   •   **Membres :** {member_count:,}   •   "
-                f"**Shards :** {shard_count}"
+                f"**Connexion** {connection}   •   **État** {state}   •   "
+                f"**Serveurs** {server_count:,}   •   **Membres** {member_count:,}   •   "
+                f"**Shards** {shard_count}"
             ),
             status_row,
-            discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
             discord.ui.TextDisplay(
-                f"-# SentriX • Mesuré <t:{measured_at}:R>"
+                f"-# Mesuré <t:{measured_at}:R> • SentriX"
             ),
             accent_colour=PING_ACCENT,
         )
