@@ -205,9 +205,14 @@ async def setup(bot: commands.Bot) -> None:
     from . import log_listener_guarantee_v51
     await log_listener_guarantee_v51.install(bot)
 
+    # V2 du reset propriétaire : idempotence, réparation ciblée 403, catégorie disparue
+    # et détection d'une autre instance qui reprend les routes pendant l'opération.
+    from . import owner_log_rebuild_v2
+    await owner_log_rebuild_v2.install(bot)
+
     # Dernière autorité absolue : erreurs envoyées par transport Discord brut.
     from . import final_error_embed_v5
     final_error_embed_v5.install(bot)
     logger.info(
-        "Runtime final V5.1 actif : routes live + listeners garantis + erreurs en embed Discord natif."
+        "Runtime final V5.1 + reset logs V2 actif : routes live + listeners garantis + reconstruction résiliente."
     )
