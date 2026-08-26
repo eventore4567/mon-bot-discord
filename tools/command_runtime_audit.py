@@ -196,8 +196,8 @@ async def run() -> int:
             if not bot.extra_events.get(event_name, []):
                 errors.append(f"listener absent: {label} ({event_name})")
 
-        if getattr(bot, "_sentrix_help_owner", None) != "cogs.help_simple":
-            errors.append("l'aide canonique simple n'est pas installée")
+        if getattr(bot, "_sentrix_help_owner", None) != "cogs.help":
+            errors.append("l'aide canonique officielle n'est pas installée")
 
         category_counts: Counter[str] = Counter()
         uncategorized: list[str] = []

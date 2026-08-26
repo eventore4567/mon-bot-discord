@@ -1,124 +1,265 @@
-"""Politique visuelle finale SentriX : texte libre + vraies cartes, sans mélange aléatoire."""
+"""Dernière étape déterministe du bootstrap Railway SentriX.
+
+Ce module est chargé en dernier par ``railway_boot.py``. Il ne transforme plus rien en
+texte. Il garantit simplement que la finalisation officielle s'exécute même si une
+extension optionnelle précédente a échoué, réenregistre l'unique help, débranche les
+anciens listeners de logs encore présents dans Configuration, puis répare le routage des
+salons historiques.
+"""
 from __future__ import annotations
 
-import re
+import logging
 
 import discord
 from discord.ext import commands
 
-from . import plain_text_all_runtime as plain
-from .community_v32 import strip_decorative_emoji
-from .profile_oxyde_runtime import install as install_clean_profile
+from . import finalize_runtime
+from .help import OfficialHelp
+from . import runtime_fix_v1
 
+logger = logging.getLogger("bot.bootstrap-final")
 
-# Les commandes de consultation riches gardent une carte. Les actions et réponses courtes
-# restent en texte Discord natif. Cela donne une hiérarchie visuelle stable au lieu de tout
-# encadrer ou de tout aplatir.
-CARD_ROOTS = frozenset({
-    "profile",
-    "help",
-    "userinfo",
-    "serverinfo",
-    "botinfo",
-    "avatar",
-    "stats",
-    "shop",
-    "inventory",
-    "economyleaderboard",
-    "repleaderboard",
-    "leaderboard-levels",
+_FRAMEWORK_HELP_PARAMS = frozenset({
+    "self", "ctx", "context", "interaction", "bot", "cog",
 })
 
-_CDN_LINE = re.compile(r"^<?https://(?:cdn|media)\.discordapp\.(?:com|net)/.+>?$", re.I)
+_DUPLICATE_CONFIGURATION_LOG_EVENTS = (
+    "on_message_delete",
+    "on_message_edit",
+    "on_member_join",
+    "on_member_remove",
+    "on_voice_state_update",
+    "on_guild_channel_create",
+    "on_guild_channel_delete",
+    "on_guild_role_create",
+    "on_guild_role_delete",
+    "on_member_update",
+)
 
 
-def _remove_completion_fallbacks(bot: commands.Bot) -> None:
-    """Supprime les anciens accusés automatiques qui créaient une deuxième réponse."""
-    targets = {
-        "on_command_completion": {"ensure_prefix_command_response"},
-        "on_app_command_completion": {"ensure_slash_command_response"},
-    }
-    for event_name, names in targets.items():
-        listeners = list(getattr(bot, "extra_events", {}).get(event_name, []))
-        for listener in listeners:
-            if getattr(listener, "__name__", "") in names:
-                bot.remove_listener(listener, event_name)
+def _is_official_help_command(command: commands.Command | None) -> bool:
+    if command is None:
+        return False
+    return bool(
+        getattr(command, "_sentrix_official_help_owner", False)
+        or getattr(command, "_sentrix_context_is_internal", False)
+    )
 
 
-def _install_clean_text_conversion() -> None:
-    """Nettoie et aère le contenu converti depuis les anciens embeds."""
-    def clean(value) -> str:
-        text = str(value or "").replace("**", "").strip()
-        text = strip_decorative_emoji(text)
-        text = re.sub(r"[ \t]{2,}", " ", text)
-        # Espacement stable autour des deux-points, sans coller les valeurs.
-        text = re.sub(r"[ \t]*:[ \t]*", " : ", text)
-        # Pas de cinq lignes vides, mais on conserve les vrais paragraphes des réponses longues.
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
+def _help_signature_is_safe(command: commands.Command | None) -> bool:
+    """Vérifie le contrat réel de la commande préfixée officielle.
 
-    def embed_to_text(embed) -> str:
-        if not isinstance(embed, discord.Embed):
-            return ""
-
-        sections: list[str] = []
-        title = clean(embed.title)
-        description = clean(embed.description)
-
-        generic_titles = {
-            "information", "succès", "succes", "erreur", "avertissement",
-            "action terminée", "action terminee", "commande exécutée", "commande executee",
-            "sentrix / utilitaires", "sentrix / économie", "sentrix / economie",
-            "sentrix / modération", "sentrix / moderation",
-            "sentrix / intelligence artificielle",
-        }
-        if title and title.casefold() not in generic_titles and not title.casefold().startswith("sentrix /"):
-            sections.append(title)
-        if description:
-            sections.append(description)
-
-        field_lines: list[str] = []
-        for field in list(embed.fields):
-            name = clean(field.name)
-            value = clean(field.value)
-            if not value:
-                continue
-            if name and name.casefold() not in {"information", "détail", "detail"}:
-                field_lines.append(f"{name} : {value}")
-            else:
-                field_lines.append(value)
-        if field_lines:
-            sections.append("\n".join(field_lines))
-
-        # Une image/PP d'embed ne devient jamais une URL brute dans une réponse texte.
-        cleaned_sections: list[str] = []
-        for section in sections:
-            lines = [line for line in section.splitlines() if not _CDN_LINE.match(line.strip())]
-            value = "\n".join(lines).strip()
-            if value:
-                cleaned_sections.append(value)
-        return "\n".join(cleaned_sections).strip()
-
-    plain._clean = clean
-    plain._embed_to_text = embed_to_text
-    plain.RICH_ROOTS = frozenset(set(plain.RICH_ROOTS) | set(CARD_ROOTS))
+    Le +help final est volontairement une Command autonome : son premier paramètre
+    ``ctx`` est donc consommé par discord.py, et ``clean_params`` ne doit contenir que les
+    arguments réellement saisissables par le membre (actuellement ``commande``).
+    """
+    if not _is_official_help_command(command):
+        return False
+    exposed = {str(name).casefold() for name in getattr(command, "clean_params", {})}
+    return getattr(command, "cog", None) is None and not (exposed & _FRAMEWORK_HELP_PARAMS)
 
 
-def _apply(bot: commands.Bot) -> None:
-    _install_clean_text_conversion()
-    _remove_completion_fallbacks(bot)
-    plain.install(bot)
-    install_clean_profile(bot)
+def _disable_legacy_help_mutators(bot: commands.Bot) -> None:
+    """Empêche définitivement les anciens moteurs V8/V9 de réécrire le vrai +help.
+
+    Ces modules restent importables parce que d'autres fonctions historiques les
+    référencent encore, mais ils ne sont plus propriétaires de la commande ``help``.
+    Une fois les marqueurs officiels présents, leurs installateurs deviennent donc des
+    no-op pour cette commande au lieu d'attacher un callback de forme ``(cog, ctx)`` à une
+    Command autonome.
+    """
+    try:
+        from . import help_clean_style
+
+        current = help_clean_style.install
+        if not getattr(current, "_sentrix_official_help_guard", False):
+            legacy_install = current
+
+            def guarded_help_clean_style(bot_obj: commands.Bot) -> None:
+                if _is_official_help_command(bot_obj.get_command("help")):
+                    return None
+                return legacy_install(bot_obj)
+
+            guarded_help_clean_style._sentrix_official_help_guard = True
+            guarded_help_clean_style._sentrix_legacy_install = legacy_install
+            help_clean_style.install = guarded_help_clean_style
+    except Exception:
+        logger.debug("Impossible de neutraliser help_clean_style legacy.", exc_info=True)
+
+    try:
+        from . import language_runtime
+
+        current = language_runtime._install_help_patch
+        if not getattr(current, "_sentrix_official_help_guard", False):
+            legacy_patch = current
+
+            def guarded_language_help_patch(bot_obj: commands.Bot) -> None:
+                if _is_official_help_command(bot_obj.get_command("help")):
+                    return None
+                return legacy_patch(bot_obj)
+
+            guarded_language_help_patch._sentrix_official_help_guard = True
+            guarded_language_help_patch._sentrix_legacy_patch = legacy_patch
+            language_runtime._install_help_patch = guarded_language_help_patch
+    except Exception:
+        logger.debug("Impossible de neutraliser language_runtime help legacy.", exc_info=True)
+
+
+def _disconnect_configuration_log_listeners(bot: commands.Bot) -> int:
+    """Débranche les listeners historiques du cog Configuration.
+
+    Le propriétaire unique des événements est ``cogs.logs``. Garder les méthodes dans le
+    fichier Configuration préserve la compatibilité du vieux code, mais elles ne sont plus
+    enregistrées auprès de discord.py : une action ne produit donc plus deux logs.
+    """
+    cog = bot.get_cog("Configuration")
+    if cog is None:
+        return 0
+    removed = 0
+    for event_name in _DUPLICATE_CONFIGURATION_LOG_EVENTS:
+        callback = getattr(cog, event_name, None)
+        if callback is None:
+            continue
+        try:
+            bot.remove_listener(callback, event_name)
+            removed += 1
+        except Exception:
+            logger.debug("Listener Configuration %s impossible à retirer.", event_name, exc_info=True)
+    return removed
+
+
+async def _register_official_prefix_help(bot: commands.Bot) -> commands.Command:
+    """Enregistre uniquement l'entrée préfixée autonome de l'aide officielle."""
+    registered = bot.get_command("help")
+    if registered is not None:
+        bot.remove_command("help")
+
+    async def prefix_help_entry(ctx: commands.Context, *, commande: str | None = None) -> None:
+        help_cog = bot.get_cog("SentriXHelp")
+        if not isinstance(help_cog, OfficialHelp):
+            logger.error("SentriXHelp absent pendant l'exécution de +help.")
+            return
+        await help_cog.send_help(ctx, commande)
+
+    prefix_command = commands.Command(
+        prefix_help_entry,
+        name="help",
+        help="Ouvrir l'aide interactive SentriX ou afficher une commande précise.",
+        usage="[commande]",
+    )
+    prefix_command.hidden = False
+    prefix_command._sentrix_official_help_owner = True
+    prefix_command._sentrix_context_is_internal = True
+    bot.add_command(prefix_command)
+
+    exposed = {str(name).casefold() for name in prefix_command.clean_params}
+    forbidden = exposed & _FRAMEWORK_HELP_PARAMS
+    if forbidden:
+        bot.remove_command("help")
+        raise RuntimeError(
+            "Signature +help invalide : paramètres techniques exposés : "
+            + ", ".join(sorted(forbidden))
+        )
+
+    logger.info(
+        "Help préfixé officiel enregistré : paramètres utilisateur=%s.",
+        ", ".join(prefix_command.clean_params) or "aucun",
+    )
+    return prefix_command
+
+
+async def _register_official_help(bot: commands.Bot) -> None:
+    """Réenregistre l'aide finale sans jamais exposer ``ctx`` à l'utilisateur.
+
+    ``OfficialHelp`` reste le propriétaire de toute l'interface et du slash ``/help``.
+    Pour la commande préfixée, on utilise volontairement une petite entrée autonome :
+    discord.py sait alors que son premier paramètre est le Context technique et ne peut
+    pas le confondre avec un argument utilisateur, même si un ancien cog ``Utility`` ou
+    une couche runtime a précédemment manipulé la commande ``help``.
+    """
+    old = bot.get_command("help")
+    if old is not None:
+        bot.remove_command("help")
+
+    existing = bot.get_cog("SentriXHelp")
+    if existing is not None:
+        await bot.remove_cog("SentriXHelp")
+
+    try:
+        bot.tree.remove_command("help", type=discord.AppCommandType.chat_input)
+    except Exception:
+        pass
+
+    # Le Cog fournit les builders, vues, recherche et /help.
+    await bot.add_cog(OfficialHelp(bot))
+
+    # Son Command préfixé de classe est retiré puis remplacé par une Command autonome.
+    await _register_official_prefix_help(bot)
+
+
+async def _ensure_official_help_on_ready(bot: commands.Bot) -> None:
+    """Dernier invariant après tous les bootstrap/tasks différés et les reconnects."""
+    _disable_legacy_help_mutators(bot)
+    command = bot.get_command("help")
+    if _help_signature_is_safe(command):
+        return
+
+    exposed = list(getattr(command, "clean_params", {})) if command is not None else []
+    logger.warning(
+        "Mutation legacy de +help détectée au on_ready (params=%s, callback=%s) ; réparation immédiate.",
+        exposed,
+        getattr(getattr(command, "callback", None), "__qualname__", "absent"),
+    )
+
+    # Le Cog officiel existe normalement déjà. On ne touche pas au slash synchronisé :
+    # seule l'entrée préfixée, celle qui peut être corrompue par un vieux callback, est
+    # reconstruite.
+    help_cog = bot.get_cog("SentriXHelp")
+    if isinstance(help_cog, OfficialHelp):
+        await _register_official_prefix_help(bot)
+    else:
+        await _register_official_help(bot)
+
+
+def _install_help_ready_guard(bot: commands.Bot) -> None:
+    if getattr(bot, "_sentrix_official_help_ready_guard", False):
+        return
+
+    async def ready_guard() -> None:
+        try:
+            await _ensure_official_help_on_ready(bot)
+        except Exception:
+            logger.exception("Impossible de garantir +help officiel au on_ready.")
+
+    bot.add_listener(ready_guard, "on_ready")
+    bot._sentrix_official_help_ready_guard = True
 
 
 async def setup(bot: commands.Bot) -> None:
-    _apply(bot)
+    # Ne dépend plus du succès de visual_experience_v5 : Railway arrive toujours ici
+    # après la boucle complète des extensions.
+    await finalize_runtime(bot)
 
-    if getattr(bot, "_sentrix_plain_text_ready_listener", False):
-        return
+    # Les deux anciennes implémentations possèdent encore des callbacks de forme
+    # ``(cog, ctx)``. Elles restent disponibles pour le vieux code, mais ne peuvent plus
+    # toucher à la Command autonome officielle.
+    _disable_legacy_help_mutators(bot)
 
-    async def apply_visual_policy_when_ready():
-        _apply(bot)
+    removed = _disconnect_configuration_log_listeners(bot)
+    await _register_official_help(bot)
+    _install_help_ready_guard(bot)
 
-    bot.add_listener(apply_visual_policy_when_ready, "on_ready")
-    bot._sentrix_plain_text_ready_listener = True
+    # RuntimeFixV1 ne possède pas le renderer/logger : il répare uniquement les routes
+    # guild_config -> log_settings et les permissions des salons existants.
+    await runtime_fix_v1.setup(bot)
+
+    # Vérification immédiate en plus du on_ready. Toute mutation synchrone d'un installateur
+    # chargé pendant ce setup est ainsi détectée avant même la connexion utilisateur.
+    if not _help_signature_is_safe(bot.get_command("help")):
+        await _register_official_prefix_help(bot)
+
+    bot._sentrix_bootstrap_final = True
+    logger.info(
+        "Bootstrap final : runtime officiel appliqué, help unique protégé, %s listener(s) de logs legacy débranché(s).",
+        removed,
+    )

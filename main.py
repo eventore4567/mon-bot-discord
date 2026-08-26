@@ -169,7 +169,7 @@ CATEGORY_COMMANDS = {
         "automod-exempt-role-add", "automod-exempt-role-remove",
         "automod-history", "security-level", "blacklist-add",
         "blacklist-remove", "blacklist-list", "blacklist-user",
-        "unblacklist-user", "blacklist-users", "whitelist-domain",
+        "unblacklist-user", "blacklist-users", "panic", "whitelist-domain",
         "unwhitelist-domain", "permission-audit", "server-backup",
         "server-restore", "syncbl", "unsyncbl",
     }),

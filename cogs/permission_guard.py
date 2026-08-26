@@ -1,9 +1,12 @@
-"""Politique de permissions canonique de SentriX.
+"""Garde de permissions centrale pour SentriX.
 
-Une seule matrice est utilisée pour les commandes + et /. Elle est fail-closed et sépare
-clairement : public, propriétaire, modération quotidienne, permissions Discord sensibles
-et catégories de gestion. Le rôle de modération configuré ne remplace jamais une
-permission structurelle telle que Gérer les rôles/salons/expressions.
+Le bot possede deja des checks locaux dans ses cogs et un second verrou global pour les
+commandes prefixees. Cette couche rend la meme politique obligatoire pour les commandes
+slash/hybrides, puis force ``help`` a rester publique. Le principe est fail-closed : une
+commande non classee reste reservee aux administrateurs/gestionnaires complets.
+
+Ce module ne remplace pas les checks metier (hierarchie des roles, cible sanctionnable,
+etc.). Il ajoute un verrou transversal qui s'applique avant eux.
 """
 from __future__ import annotations
 
@@ -20,16 +23,7 @@ import config
 from database.db import PRIMARY_CREATOR_ID
 from utils.checks import BotPermissionError
 
-logger = logging.getLogger("bot.permission-policy")
-
-SAFE_MOD_ROLE_PERMISSIONS = frozenset({
-    "ban_members",
-    "kick_members",
-    "moderate_members",
-    "manage_messages",
-    "manage_nicknames",
-    "move_members",
-})
+logger = logging.getLogger("bot.permission-guard")
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,23 +34,27 @@ class AccessDecision:
 
 
 def _policy_module(bot: commands.Bot):
-    return sys.modules.get(bot.__class__.__module__) or sys.modules.get("main") or sys.modules.get("__main__")
+    """Retourne le module qui porte la matrice de permissions du bot.
+
+    Les ensembles de ``main.py`` peuvent etre enrichis dynamiquement par certains runtimes.
+    Ils sont donc relus a chaque decision au lieu d'etre copies au chargement de ce module.
+    """
+    return sys.modules.get(bot.__class__.__module__)
 
 
 def _policy_sets(bot: commands.Bot):
     module = _policy_module(bot)
     if module is None:
         return frozenset(), frozenset(), frozenset(), {}, {}
-    return (
-        frozenset(getattr(module, "PUBLIC_COMMANDS", frozenset())),
-        frozenset(getattr(module, "OWNER_ONLY_COMMANDS", frozenset())),
-        frozenset(getattr(module, "CUSTOM_PERMISSION_COMMANDS", frozenset())),
-        dict(getattr(module, "DISCORD_PERMISSION_COMMANDS", {}) or {}),
-        dict(getattr(module, "CATEGORY_COMMANDS", {}) or {}),
-    )
+    public = frozenset(getattr(module, "PUBLIC_COMMANDS", frozenset()))
+    owner_only = frozenset(getattr(module, "OWNER_ONLY_COMMANDS", frozenset()))
+    custom = frozenset(getattr(module, "CUSTOM_PERMISSION_COMMANDS", frozenset()))
+    discord_permissions = dict(getattr(module, "DISCORD_PERMISSION_COMMANDS", {}))
+    categories = dict(getattr(module, "CATEGORY_COMMANDS", {}))
+    return public, owner_only, custom, discord_permissions, categories
 
 
-def _normalise(value: Any) -> str:
+def _normalise_name(value: Any) -> str:
     return str(value or "").strip().casefold()
 
 
@@ -64,15 +62,18 @@ def command_root_name(command: Any) -> str:
     if command is None:
         return ""
     root = getattr(command, "root_parent", None) or command
-    return _normalise(getattr(root, "name", ""))
+    return _normalise_name(getattr(root, "name", ""))
 
 
 def interaction_root_name(interaction: discord.Interaction) -> str:
-    name = command_root_name(getattr(interaction, "command", None))
+    command = getattr(interaction, "command", None)
+    name = command_root_name(command)
     if name:
         return name
     data = getattr(interaction, "data", None)
-    return _normalise(data.get("name")) if isinstance(data, dict) else ""
+    if isinstance(data, dict):
+        return _normalise_name(data.get("name"))
+    return ""
 
 
 async def _is_verified_owner(bot: commands.Bot, user_id: int) -> bool:
@@ -82,21 +83,24 @@ async def _is_verified_owner(bot: commands.Bot, user_id: int) -> bool:
     try:
         return bool(await bot.db.is_bot_creator(user_id))
     except Exception:
-        logger.exception("Vérification propriétaire impossible pour user=%s ; refus par sécurité.", user_id)
+        # Ne jamais accorder un acces sensible lorsque la verification DB echoue.
+        logger.exception("Verification proprietaire impossible pour user=%s", user_id)
         return False
 
 
-def _permissions(author: Any):
+def _member_permissions(author: Any):
     return getattr(author, "guild_permissions", None)
 
 
 async def _is_manager_for(bot: commands.Bot, guild: Any, author: Any, category: str) -> bool:
     if guild is None or author is None:
         return False
-    perms = _permissions(author)
-    if perms is not None and bool(getattr(perms, "administrator", False)):
+    permissions = _member_permissions(author)
+    if permissions is not None and bool(getattr(permissions, "administrator", False)):
         return True
-    guild_id, user_id = getattr(guild, "id", None), getattr(author, "id", None)
+
+    guild_id = getattr(guild, "id", None)
+    user_id = getattr(author, "id", None)
     if guild_id is None or user_id is None:
         return False
     try:
@@ -104,53 +108,60 @@ async def _is_manager_for(bot: commands.Bot, guild: Any, author: Any, category: 
             return False
         return bool(await bot.db.has_manager_permission(int(guild_id), int(user_id), category))
     except Exception:
-        logger.exception("Vérification gestionnaire impossible guild=%s user=%s category=%s.", guild_id, user_id, category)
+        logger.exception(
+            "Verification gestionnaire impossible (guild=%s user=%s category=%s)",
+            guild_id,
+            user_id,
+            category,
+        )
         return False
 
 
-async def _has_discord_or_modrole_permission(bot: commands.Bot, guild: Any, author: Any, permission: str) -> bool:
+async def _has_discord_or_modrole_permission(
+    bot: commands.Bot,
+    guild: Any,
+    author: Any,
+    permission: str,
+) -> bool:
     if guild is None or author is None:
         return False
-    perms = _permissions(author)
-    if perms is not None and bool(getattr(perms, permission, False)):
+
+    permissions = _member_permissions(author)
+    if permissions is not None and bool(getattr(permissions, permission, False)):
         return True
 
-    # Important : le rôle « modérateur SentriX » ne donne un raccourci que pour les
-    # actions quotidiennes. Jamais pour gérer rôles, salons, webhooks ou expressions.
-    if permission not in SAFE_MOD_ROLE_PERMISSIONS:
+    guild_id = getattr(guild, "id", None)
+    user_id = getattr(author, "id", None)
+    if guild_id is None or user_id is None:
         return False
 
-    guild_id = getattr(guild, "id", None)
-    if guild_id is None:
-        return False
     try:
         conf = await bot.db.get_guild_config(int(guild_id))
     except Exception:
-        logger.exception("Lecture du rôle de modération impossible guild=%s.", guild_id)
+        logger.exception("Lecture du role de moderation impossible pour guild=%s", guild_id)
         return False
+
     mod_role_id = conf["mod_role"] if conf and conf["mod_role"] else None
     if not mod_role_id:
         return False
-    try:
-        wanted = int(mod_role_id)
-        return any(int(getattr(role, "id", 0)) == wanted for role in getattr(author, "roles", ()))
-    except (TypeError, ValueError):
-        return False
+    return any(int(getattr(role, "id", 0)) == int(mod_role_id) for role in getattr(author, "roles", ()))
 
 
 async def _can_use_embed_builder(bot: commands.Bot, guild: Any, author: Any) -> bool:
     if guild is None or author is None:
         return False
-    perms = _permissions(author)
-    if perms is not None and (
-        bool(getattr(perms, "manage_messages", False))
-        or bool(getattr(perms, "manage_guild", False))
-        or bool(getattr(perms, "administrator", False))
+    permissions = _member_permissions(author)
+    if permissions is not None and (
+        bool(getattr(permissions, "manage_messages", False))
+        or bool(getattr(permissions, "manage_guild", False))
     ):
         return True
-    guild_id, user_id = getattr(guild, "id", None), getattr(author, "id", None)
+
+    guild_id = getattr(guild, "id", None)
+    user_id = getattr(author, "id", None)
     if guild_id is None or user_id is None:
         return False
+
     try:
         if await bot.db.is_bot_manager(int(guild_id), int(user_id)):
             if await bot.db.has_manager_permission(int(guild_id), int(user_id), "embeds"):
@@ -160,44 +171,77 @@ async def _can_use_embed_builder(bot: commands.Bot, guild: Any, author: Any) -> 
             (int(guild_id),),
         )
     except Exception:
-        logger.exception("Vérification permission embeds impossible guild=%s user=%s.", guild_id, user_id)
+        logger.exception(
+            "Verification createur d'embeds impossible (guild=%s user=%s)",
+            guild_id,
+            user_id,
+        )
         return False
-    allowed = {int(row["role_id"]) for row in rows}
-    return any(int(getattr(role, "id", 0)) in allowed for role in getattr(author, "roles", ()))
+
+    allowed_role_ids = {int(row["role_id"]) for row in rows}
+    return any(int(getattr(role, "id", 0)) in allowed_role_ids for role in getattr(author, "roles", ()))
 
 
-async def evaluate_command_access(bot: commands.Bot, *, command_name: str, author: Any, guild: Any) -> AccessDecision:
-    name = _normalise(command_name)
+async def evaluate_command_access(
+    bot: commands.Bot,
+    *,
+    command_name: str,
+    author: Any,
+    guild: Any,
+) -> AccessDecision:
+    """Evalue la matrice centrale pour une racine de commande.
+
+    L'ordre est volontaire : public -> owner-only -> bypass owner -> permissions ciblees ->
+    categories de gestion -> fail-closed. Les commandes publiques restent utilisables en DM
+    lorsqu'elles le supportent, tandis que toute commande sensible exige un serveur ou le
+    proprietaire verifie du bot.
+    """
+    name = _normalise_name(command_name)
     if not name:
-        return AccessDecision(False, "Commande impossible à identifier.", "invalid")
+        return AccessDecision(False, "Commande impossible a identifier.", "invalid")
 
     public, owner_only, custom, discord_permissions, categories = _policy_sets(bot)
+
+    # Chemin ultra-court : la grande majorite des usages normaux ne doit pas faire une
+    # requete DB uniquement pour savoir si l'utilisateur est proprietaire du bot.
     if name in public:
         return AccessDecision(True, policy="public")
 
     user_id = getattr(author, "id", None)
     owner = bool(user_id is not None and await _is_verified_owner(bot, int(user_id)))
+
     if name in owner_only:
-        return AccessDecision(True, policy="owner") if owner else AccessDecision(
-            False, "Cette commande est réservée au propriétaire vérifié de SentriX.", "owner"
+        if owner:
+            return AccessDecision(True, policy="owner")
+        return AccessDecision(
+            False,
+            "Cette commande est reservee au proprietaire verifie de SentriX.",
+            "owner",
         )
+
+    # Le proprietaire verifie garde un acces de secours a toutes les fonctions du bot.
     if owner:
         return AccessDecision(True, policy="owner-bypass")
 
     if name in custom:
         if await _can_use_embed_builder(bot, guild, author):
             return AccessDecision(True, policy="custom")
-        return AccessDecision(False, "Cette commande est réservée au staff autorisé à créer des embeds.", "custom")
+        return AccessDecision(
+            False,
+            "Cette commande est reservee au staff autorise a creer des embeds.",
+            "custom",
+        )
 
-    required = discord_permissions.get(name)
-    if required is not None:
-        if await _has_discord_or_modrole_permission(bot, guild, author, required):
-            return AccessDecision(True, policy=f"discord:{required}")
-        if required in SAFE_MOD_ROLE_PERMISSIONS:
-            reason = f"Permission requise : `{required}` ou rôle de modération configuré."
-        else:
-            reason = f"Permission Discord requise : `{required}`. Le rôle modérateur SentriX ne suffit pas pour cette action sensible."
-        return AccessDecision(False, reason, f"discord:{required}")
+    required_permission = discord_permissions.get(name)
+    if required_permission is not None:
+        if await _has_discord_or_modrole_permission(bot, guild, author, required_permission):
+            return AccessDecision(True, policy=f"discord:{required_permission}")
+        return AccessDecision(
+            False,
+            "Cette commande est reservee au staff autorise. "
+            f"Permission requise : `{required_permission}` ou role de moderation configure.",
+            f"discord:{required_permission}",
+        )
 
     for category, names in categories.items():
         if name not in names:
@@ -206,15 +250,18 @@ async def evaluate_command_access(bot: commands.Bot, *, command_name: str, autho
             return AccessDecision(True, policy=f"manager:{category}")
         return AccessDecision(
             False,
-            f"Cette commande de gestion exige Administrateur ou l'autorisation SentriX `{category}`.",
+            "Cette commande de gestion est reservee aux administrateurs ou a un "
+            f"gestionnaire autorise pour la categorie `{category}`.",
             f"manager:{category}",
         )
 
+    # Fail-closed : une future commande non classee ne devient jamais publique par oubli.
     if await _is_manager_for(bot, guild, author, "complete"):
         return AccessDecision(True, policy="fail-closed-admin")
     return AccessDecision(
         False,
-        "Cette commande n'a pas encore de niveau d'accès validé et reste administrateur par sécurité.",
+        "Cette commande n'a pas encore de niveau d'acces public valide. "
+        "Elle est reservee aux administrateurs par securite.",
         "fail-closed",
     )
 
@@ -224,24 +271,37 @@ async def _interaction_blacklist_reason(bot: commands.Bot, author: Any) -> str |
     if user_id is None:
         return None
     user_id = int(user_id)
+
+    # Le cache est le chemin normal et ne coute aucune I/O. On ne touche la DB que dans
+    # le cas rare ou l'utilisateur est effectivement present dans la blacklist.
     cache = getattr(bot, "blacklist_cache", {})
     reason = cache.get(user_id) if isinstance(cache, dict) else None
     if reason is None:
         return None
+
     if user_id == PRIMARY_CREATOR_ID or user_id in config.OWNER_IDS:
         return None
     try:
         if await bot.db.is_bot_creator(user_id):
             return None
     except Exception:
-        logger.exception("Vérification propriétaire impossible pour un utilisateur blacklisté=%s.", user_id)
+        # Ici l'utilisateur est deja dans la blacklist : en cas de panne DB, rester
+        # fail-closed est plus sur que de le laisser passer par erreur.
+        logger.exception("Verification proprietaire impossible pour user blacklist=%s", user_id)
+
     return str(reason or "Aucune raison fournie")
 
 
 async def evaluate_interaction_access(bot: commands.Bot, interaction: discord.Interaction) -> AccessDecision:
+    """Meme verrou pour les commandes slash, avec blacklist globale en amont."""
     reason = await _interaction_blacklist_reason(bot, getattr(interaction, "user", None))
     if reason is not None:
-        return AccessDecision(False, f"Tu n'es pas autorisé à utiliser SentriX. Raison : {reason}", "global-blacklist")
+        return AccessDecision(
+            False,
+            f"Vous n'etes pas autorise a utiliser SentriX. Raison : {reason}",
+            "global-blacklist",
+        )
+
     return await evaluate_command_access(
         bot,
         command_name=interaction_root_name(interaction),
@@ -251,37 +311,58 @@ async def evaluate_interaction_access(bot: commands.Bot, interaction: discord.In
 
 
 async def _send_interaction_denial(interaction: discord.Interaction, decision: AccessDecision) -> None:
-    # Remplacé par final_interaction_policy pour obtenir exactement le même style + et /.
-    text = decision.reason or "Tu n'as pas accès à cette commande."
+    embed = discord.Embed(
+        title="SENTRIX / ACCES REFUSE",
+        description=decision.reason or "Vous n'avez pas acces a cette commande.",
+        colour=discord.Colour(0xED4245),
+    )
+    embed.set_footer(text="SentriX | Permissions securisees")
+    kwargs = {
+        "embed": embed,
+        "ephemeral": True,
+        "allowed_mentions": discord.AllowedMentions.none(),
+    }
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(text, ephemeral=True)
+            await interaction.followup.send(**kwargs)
         else:
-            await interaction.response.send_message(text, ephemeral=True)
+            await interaction.response.send_message(**kwargs)
     except (discord.Forbidden, discord.HTTPException, discord.InteractionResponded):
-        logger.debug("Refus slash impossible à envoyer.", exc_info=True)
+        logger.debug("Impossible d'envoyer le refus slash.", exc_info=True)
 
 
 def _force_help_public(bot: commands.Bot) -> None:
+    """Retire uniquement les checks locaux accidentels de ``help``.
+
+    Le cooldown global, la blacklist globale et la matrice centrale restent actifs. Cela
+    garantit qu'un membre normal peut ouvrir l'aide sans transformer une commande sensible
+    en commande publique.
+    """
     command = bot.get_command("help")
     if command is None:
         return
+
     checks_list = getattr(command, "checks", None)
-    if isinstance(checks_list, list):
+    if isinstance(checks_list, list) and checks_list:
         checks_list.clear()
-    app = getattr(command, "app_command", None)
-    app_checks = getattr(app, "checks", None)
-    if isinstance(app_checks, list):
+
+    app_command = getattr(command, "app_command", None)
+    app_checks = getattr(app_command, "checks", None) if app_command is not None else None
+    if isinstance(app_checks, list) and app_checks:
         app_checks.clear()
+
     command._sentrix_help_public = True
+    if app_command is not None:
+        app_command._sentrix_help_public = True
 
 
 def install(bot: commands.Bot) -> None:
+    """Installe une seule fois les verrous prefixe + slash sur une instance de bot."""
     _force_help_public(bot)
     if getattr(bot, "_sentrix_permission_guard_installed", False):
         return
 
-    async def prefix_guard(ctx: commands.Context) -> bool:
+    async def prefix_permission_guard(ctx: commands.Context) -> bool:
         command = getattr(ctx, "command", None)
         if command is None:
             return True
@@ -295,27 +376,29 @@ def install(bot: commands.Bot) -> None:
             return True
         raise BotPermissionError(decision.reason)
 
-    prefix_guard._sentrix_permission_guard = True
-    bot.global_permission_check = prefix_guard
+    prefix_permission_guard._sentrix_permission_guard = True
+    # setup_hook() ajoutera ce callback comme check global apres le chargement des cogs.
+    # En remplacant la methode sur l'instance avant ce moment, prefixe et slash partagent
+    # exactement la meme matrice.
+    bot.global_permission_check = prefix_permission_guard
 
-    previous_tree_check = bot.tree.interaction_check
+    original_tree_check = bot.tree.interaction_check
 
-    async def slash_guard(interaction: discord.Interaction) -> bool:
-        previous = previous_tree_check(interaction)
+    async def slash_permission_guard(interaction: discord.Interaction) -> bool:
+        previous = original_tree_check(interaction)
         if inspect.isawaitable(previous):
             previous = await previous
-        if previous is False or interaction.type != discord.InteractionType.application_command:
-            return previous is not False
+        if previous is False:
+            return False
+        if interaction.type != discord.InteractionType.application_command:
+            return True
+
         decision = await evaluate_interaction_access(bot, interaction)
         if decision.allowed:
             return True
-        try:
-            from .command_hardening_v41 import release_slash
-            release_slash(interaction)
-        except Exception:
-            pass
+
         logger.warning(
-            "Slash refusée command=%s user=%s guild=%s policy=%s",
+            "Commande slash refusee par la matrice centrale (command=%s user=%s guild=%s policy=%s)",
             interaction_root_name(interaction),
             getattr(getattr(interaction, "user", None), "id", None),
             getattr(interaction, "guild_id", None),
@@ -324,15 +407,11 @@ def install(bot: commands.Bot) -> None:
         await _send_interaction_denial(interaction, decision)
         return False
 
-    slash_guard._sentrix_permission_guard = True
-    slash_guard._sentrix_previous_tree_check = previous_tree_check
-    bot.tree.interaction_check = slash_guard
+    slash_permission_guard._sentrix_permission_guard = True
+    slash_permission_guard._sentrix_previous_tree_check = original_tree_check
+    bot.tree.interaction_check = slash_permission_guard
     bot._sentrix_permission_guard_installed = True
-    bot._sentrix_permission_policy_owner = "cogs.permission_guard"
-    logger.info("Matrice de permissions canonique active pour + et / (fail-closed).")
 
-
-__all__ = [
-    "SAFE_MOD_ROLE_PERMISSIONS", "AccessDecision", "command_root_name",
-    "interaction_root_name", "evaluate_command_access", "evaluate_interaction_access", "install",
-]
+    logger.info(
+        "Permissions SentriX renforcees : matrice unique prefixe/slash, fail-closed, blacklist slash et +help public."
+    )

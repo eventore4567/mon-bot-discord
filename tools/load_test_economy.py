@@ -15,8 +15,6 @@ import tempfile
 import time
 from pathlib import Path
 
-# `python tools/load_test_economy.py` places tools/ at sys.path[0]. Add the repository root
-# explicitly so the smoke test behaves the same locally and in GitHub Actions.
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -94,11 +92,7 @@ async def _run(users: int, operations: int, concurrency: int) -> tuple[bool, dic
                 (guild_id,),
             )
             after_total = sum(int(row["cash"] or 0) + int(row["bank"] or 0) for row in after_rows)
-            negatives = [
-                int(row["user_id"])
-                for row in after_rows
-                if int(row["cash"] or 0) < 0 or int(row["bank"] or 0) < 0
-            ]
+            negatives = [int(row["user_id"]) for row in after_rows if int(row["cash"] or 0) < 0 or int(row["bank"] or 0) < 0]
 
             ok = before_total == after_total and not negatives
             details = {

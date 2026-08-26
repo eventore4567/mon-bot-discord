@@ -1,14 +1,9 @@
-"""Journalisation complète des événements Discord.
+"""Listeners Discord officiels des journaux SentriX.
 
-Les salons sont ceux déjà enregistrés par +setup/+create-server dans guild_config :
-log_messages, log_members, log_voice, log_roles, log_server, log_moderation et
-log_automod. Le cog reste silencieux lorsqu'un salon n'est pas configuré ou inaccessible.
-
-Les messages récents sont également conservés dans un cache SentriX persistant afin que
-le journal puisse afficher leur contenu même lorsque Discord les a déjà retirés de son
-cache interne au moment de la suppression.
+Pipeline unique :
+Discord Event -> Audit Log corrélé -> normalisation -> déduplication -> grand log SentriX
+-> allowed mentions sécurisé -> boutons utiles -> envoi unique via utils.log_service.
 """
-
 from __future__ import annotations
 
 import json
@@ -17,8 +12,7 @@ import time
 import discord
 from discord.ext import commands
 
-from utils import log_service
-
+from utils import embeds, log_service
 
 CONFIG_TO_LOG_TYPE = {
     "log_messages": "messages",
@@ -30,18 +24,8 @@ CONFIG_TO_LOG_TYPE = {
     "log_automod": "automod",
 }
 
-COLOURS = {
-    "create": 0x57F287,
-    "update": 0xFEE75C,
-    "delete": 0xED4245,
-    "member": 0x5865F2,
-    "voice": 0x3498DB,
-    "moderation": 0xEB459E,
-}
-
-MESSAGE_CACHE_RETENTION_SECONDS = 86400  # 24 h
+MESSAGE_CACHE_RETENTION_SECONDS = 86400
 MESSAGE_CACHE_CLEANUP_EVERY = 250
-
 MESSAGE_CACHE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS message_log_cache (
     message_id INTEGER PRIMARY KEY,
@@ -57,12 +41,32 @@ CREATE TABLE IF NOT EXISTS message_log_cache (
 
 
 def _short(value: object, limit: int = 1000) -> str:
-    text = str(value) if value not in (None, "") else "Aucun"
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    text = str(value or "").strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _user_ref(user_id: int) -> str:
+    return f"<@{int(user_id)}>"
+
+
+def _role_ref(role_id: int) -> str:
+    return f"<@&{int(role_id)}>"
+
+
+def _channel_ref(channel_id: int) -> str:
+    return f"<#{int(channel_id)}>"
 
 
 def _attachment_urls(message: discord.Message) -> list[str]:
     return [attachment.url for attachment in message.attachments]
+
+
+def _permission_names(perms: discord.Permissions) -> set[str]:
+    return {name for name, enabled in perms if enabled}
+
+
+def _permission_label(name: str) -> str:
+    return name.replace("_", " ").capitalize()
 
 
 class Logs(commands.Cog, name="Logs"):
@@ -70,25 +74,83 @@ class Logs(commands.Cog, name="Logs"):
         self.bot = bot
         self._cache_writes = 0
 
-    async def _send(self, guild: discord.Guild, config_key: str, embed: discord.Embed):
-        """Envoyer chaque événement via la configuration de +logsetup."""
+    async def _send(
+        self,
+        guild: discord.Guild,
+        config_key: str,
+        embed: discord.Embed,
+        *,
+        view: discord.ui.View | None = None,
+        event_key: str | None = None,
+    ) -> bool:
         log_type = CONFIG_TO_LOG_TYPE.get(config_key)
         if log_type is None:
-            return
-        await log_service.send_log(self.bot, guild, log_type, embed)
+            return False
+        return await log_service.send_log(
+            self.bot,
+            guild,
+            log_type,
+            embed,
+            view=view,
+            event_key=event_key,
+        )
 
     @staticmethod
-    def _embed(title: str, colour: int, *, target_id: int | None = None) -> discord.Embed:
-        embed = discord.Embed(title=title, colour=colour, timestamp=discord.utils.utcnow())
-        if target_id:
-            embed.set_footer(text=f"Identifiant : {target_id}")
-        else:
-            embed.set_footer(text="SentriX • Journal du serveur")
-        return embed
+    def _embed(
+        title: str,
+        *,
+        identity=None,
+        fields=(),
+        description: str = "",
+    ) -> discord.Embed:
+        avatar = None
+        identity_text = ""
+        if identity is not None:
+            identity_id = getattr(identity, "id", None)
+            identity_name = (
+                getattr(identity, "display_name", None)
+                or getattr(identity, "name", None)
+                or str(identity)
+            )
+            identity_text = f"**{identity_name}**"
+            if identity_id:
+                identity_text += f"\nID : `{identity_id}`"
+            asset = getattr(identity, "display_avatar", None)
+            if asset is not None:
+                avatar = str(asset.url)
+        body = identity_text
+        if description:
+            body = f"{body}\n\n{description}" if body else description
+        panel = embeds.log_embed(title, fields=fields, description=body)
+        if avatar:
+            panel.set_thumbnail(url=avatar)
+        return panel
+
+    async def _audit_actor(
+        self,
+        guild: discord.Guild,
+        action: discord.AuditLogAction,
+        target_id: int,
+        *,
+        max_age_seconds: int = 10,
+    ) -> tuple[discord.abc.User | None, discord.AuditLogEntry | None]:
+        """Corrèle type + cible + timestamp ; jamais simplement « la dernière entrée »."""
+        if guild.me is None or not guild.me.guild_permissions.view_audit_log:
+            return None, None
+        current = discord.utils.utcnow()
+        try:
+            async for entry in guild.audit_logs(limit=10, action=action):
+                if getattr(entry.target, "id", None) != target_id:
+                    continue
+                if abs((current - entry.created_at).total_seconds()) > max_age_seconds:
+                    continue
+                return entry.user, entry
+        except (discord.Forbidden, discord.HTTPException):
+            return None, None
+        return None, None
 
     async def _cache_message(self, message: discord.Message) -> None:
-        """Mémorise un message avant qu'il puisse être supprimé du cache Discord."""
-        if message.guild is None:
+        if message.guild is None or message.author.bot:
             return
         try:
             await self.bot.db.execute(
@@ -123,8 +185,7 @@ class Logs(commands.Cog, name="Logs"):
                     (int(time.time()) - MESSAGE_CACHE_RETENTION_SECONDS,),
                 )
         except Exception:
-            # Un problème de cache ne doit jamais empêcher les autres fonctions du bot.
-            return
+            pass
 
     async def _cached_message_row(self, guild_id: int, message_id: int):
         try:
@@ -151,42 +212,41 @@ class Logs(commands.Cog, name="Logs"):
         *,
         fallback_channel_id: int | None = None,
     ) -> None:
+        message_id = int(row["message_id"])
         channel_id = int(row["channel_id"] or fallback_channel_id or 0)
-        channel = guild.get_channel(channel_id) if channel_id else None
         author_id = int(row["author_id"])
-        author_name = row["author_name"] or f"Utilisateur {author_id}"
         content = row["content"] or ""
-
         try:
             attachments = json.loads(row["attachments"] or "[]")
         except (TypeError, ValueError, json.JSONDecodeError):
             attachments = []
+        fields = [
+            ("Auteur", _user_ref(author_id), True),
+            ("Salon", _channel_ref(channel_id) if channel_id else None, True),
+            ("Contenu", _short(content, 1024) if content else None, False),
+            (
+                "Pièces jointes",
+                _short("\n".join(map(str, attachments)), 1024) if attachments else None,
+                False,
+            ),
+        ]
+        member = guild.get_member(author_id)
+        panel = self._embed("Message supprimé", identity=member, fields=fields)
+        view = log_service.log_actions(
+            ids=[
+                ("Copier l'ID de l'auteur", author_id),
+                ("Copier l'ID du message", message_id),
+            ]
+        )
+        key = log_service.make_event_key(
+            guild.id,
+            "message_delete",
+            target_id=author_id,
+            message_id=message_id,
+        )
+        await self._send(guild, "log_messages", panel, view=view, event_key=key)
 
-        embed = self._embed("Message supprimé", COLOURS["delete"], target_id=int(row["message_id"]))
-        embed.add_field(
-            name="Auteur",
-            value=f"<@{author_id}>\n`{author_name}`\n`ID: {author_id}`",
-            inline=True,
-        )
-        embed.add_field(
-            name="Salon",
-            value=channel.mention if channel else f"`{channel_id}`",
-            inline=True,
-        )
-        embed.add_field(
-            name="Contenu",
-            value=_short(content, 1024) if content else "*Aucun texte dans ce message.*",
-            inline=False,
-        )
-        if attachments:
-            embed.add_field(
-                name="Pièces jointes",
-                value=_short("\n".join(str(url) for url in attachments), 1024),
-                inline=False,
-            )
-        await self._send(guild, "log_messages", embed)
-
-    # ---------------- Messages ----------------
+    # ---------------------------------------------------------------- MESSAGES
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -194,23 +254,33 @@ class Logs(commands.Cog, name="Logs"):
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
-        if message.guild is None:
+        if message.guild is None or message.author.bot:
             return
-        embed = self._embed("Message supprimé", COLOURS["delete"], target_id=message.id)
-        embed.add_field(name="Auteur", value=f"{message.author.mention}\n`{message.author.id}`", inline=True)
-        embed.add_field(name="Salon", value=message.channel.mention, inline=True)
-        embed.add_field(
-            name="Contenu",
-            value=_short(message.content, 1024) if message.content else "*Aucun texte dans ce message.*",
-            inline=False,
+        fields = [
+            ("Auteur", _user_ref(message.author.id), True),
+            ("Salon", _channel_ref(message.channel.id), True),
+            ("Contenu", _short(message.content, 1024) if message.content else None, False),
+            (
+                "Pièces jointes",
+                _short("\n".join(a.url for a in message.attachments), 1024)
+                if message.attachments else None,
+                False,
+            ),
+        ]
+        panel = self._embed("Message supprimé", identity=message.author, fields=fields)
+        view = log_service.log_actions(
+            ids=[
+                ("Copier l'ID de l'auteur", message.author.id),
+                ("Copier l'ID du message", message.id),
+            ]
         )
-        if message.attachments:
-            embed.add_field(
-                name="Pièces jointes",
-                value=_short("\n".join(attachment.url for attachment in message.attachments), 1024),
-                inline=False,
-            )
-        await self._send(message.guild, "log_messages", embed)
+        key = log_service.make_event_key(
+            message.guild.id,
+            "message_delete",
+            target_id=message.author.id,
+            message_id=message.id,
+        )
+        await self._send(message.guild, "log_messages", panel, view=view, event_key=key)
         await self._forget_cached_message(message.id)
 
     @commands.Cog.listener()
@@ -220,7 +290,6 @@ class Logs(commands.Cog, name="Logs"):
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
-
         row = await self._cached_message_row(payload.guild_id, payload.message_id)
         if row is not None:
             await self._log_deleted_from_row(
@@ -230,15 +299,20 @@ class Logs(commands.Cog, name="Logs"):
             )
             await self._forget_cached_message(payload.message_id)
             return
-
-        channel = guild.get_channel(payload.channel_id)
-        embed = self._embed("Message supprimé", COLOURS["delete"], target_id=payload.message_id)
-        embed.add_field(name="Salon", value=channel.mention if channel else f"`{payload.channel_id}`", inline=False)
-        embed.description = (
-            "Le contenu n'est pas disponible car SentriX n'avait pas vu ce message avant sa suppression "
-            "(par exemple message envoyé avant le dernier redémarrage)."
+        panel = self._embed(
+            "Message supprimé",
+            fields=(("Salon", _channel_ref(payload.channel_id), True),),
+            description="Le contenu n’était pas disponible dans le cache SentriX.",
         )
-        await self._send(guild, "log_messages", embed)
+        view = log_service.log_actions(
+            ids=[("Copier l'ID du message", payload.message_id)]
+        )
+        key = log_service.make_event_key(
+            guild.id,
+            "message_delete",
+            message_id=payload.message_id,
+        )
+        await self._send(guild, "log_messages", panel, view=view, event_key=key)
 
     @commands.Cog.listener()
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent):
@@ -247,99 +321,282 @@ class Logs(commands.Cog, name="Logs"):
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
-
-        # L'événement raw est toujours reçu pour une suppression en masse. On s'appuie
-        # donc sur NOTRE cache persistant pour chaque ID, qu'il soit encore ou non dans
-        # le cache interne de discord.py. Cela évite de perdre les messages lors d'un +clear.
         for message_id in payload.message_ids:
             row = await self._cached_message_row(payload.guild_id, message_id)
-            if row is None:
-                continue
-            await self._log_deleted_from_row(
-                guild,
-                row,
-                fallback_channel_id=payload.channel_id,
-            )
-            await self._forget_cached_message(message_id)
+            if row is not None:
+                await self._log_deleted_from_row(
+                    guild,
+                    row,
+                    fallback_channel_id=payload.channel_id,
+                )
+                await self._forget_cached_message(message_id)
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
         if after.guild is not None:
             await self._cache_message(after)
-        if before.guild is None or before.content == after.content:
+        if (
+            before.guild is None
+            or before.author.bot
+            or before.content == after.content
+        ):
             return
-        embed = self._embed("Message modifié", COLOURS["update"], target_id=after.id)
-        embed.add_field(name="Auteur", value=f"{after.author.mention}\n`{after.author.id}`", inline=True)
-        embed.add_field(name="Salon", value=after.channel.mention, inline=True)
-        embed.add_field(name="Avant", value=_short(before.content, 1024), inline=False)
-        embed.add_field(name="Après", value=_short(after.content, 1024), inline=False)
-        embed.add_field(name="Accès", value=f"[Voir le message]({after.jump_url})", inline=False)
-        await self._send(after.guild, "log_messages", embed)
+        panel = self._embed(
+            "Message modifié",
+            identity=after.author,
+            fields=(
+                ("Auteur", _user_ref(after.author.id), True),
+                ("Salon", _channel_ref(after.channel.id), True),
+                ("Avant", _short(before.content, 1024) or "Contenu vide", False),
+                ("Après", _short(after.content, 1024) or "Contenu vide", False),
+            ),
+        )
+        view = log_service.log_actions(
+            jump_url=after.jump_url,
+            ids=[
+                ("Copier l'ID de l'auteur", after.author.id),
+                ("Copier l'ID du message", after.id),
+            ],
+        )
+        key = log_service.make_event_key(
+            after.guild.id,
+            "message_edit",
+            target_id=after.author.id,
+            message_id=after.id,
+            discriminator=int(after.edited_at.timestamp()) if after.edited_at else time.time_ns(),
+        )
+        await self._send(after.guild, "log_messages", panel, view=view, event_key=key)
 
-    # ---------------- Membres et rôles ----------------
+    # ---------------------------------------------------------------- MEMBRES / MODÉRATION
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        embed = self._embed("Membre arrivé", COLOURS["create"], target_id=member.id)
-        embed.description = member.mention
-        embed.add_field(name="Compte créé", value=discord.utils.format_dt(member.created_at, "F"), inline=False)
-        embed.set_thumbnail(url=member.display_avatar.url)
-        await self._send(member.guild, "log_members", embed)
+        panel = self._embed(
+            "Membre arrivé",
+            identity=member,
+            fields=(
+                ("Membre", _user_ref(member.id), True),
+                ("Compte créé", discord.utils.format_dt(member.created_at, "F"), True),
+                ("Arrivée", discord.utils.format_dt(member.joined_at or discord.utils.utcnow(), "F"), True),
+            ),
+        )
+        view = log_service.log_actions(ids=[("Copier l'ID du membre", member.id)])
+        key = log_service.make_event_key(member.guild.id, "member_join", target_id=member.id)
+        await self._send(member.guild, "log_members", panel, view=view, event_key=key)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
-        embed = self._embed("Membre parti", COLOURS["delete"], target_id=member.id)
-        embed.description = f"{member}"
-        roles = [role.mention for role in member.roles[1:]]
-        if roles:
-            embed.add_field(name="Rôles", value=_short(", ".join(roles), 1024), inline=False)
-        await self._send(member.guild, "log_members", embed)
+        # Un kick déclenche aussi on_member_remove. On le reconnaît par Audit Log afin
+        # d'éviter le doublon « Membre expulsé » + « Membre parti ».
+        actor, audit = await self._audit_actor(
+            member.guild,
+            discord.AuditLogAction.kick,
+            member.id,
+        )
+        if audit is not None:
+            fields = [("Membre", _user_ref(member.id), True)]
+            if actor:
+                fields.append(("Modérateur", _user_ref(actor.id), True))
+            if audit.reason:
+                fields.append(("Raison", _short(audit.reason, 1024), False))
+            panel = self._embed("Membre expulsé", identity=member, fields=fields)
+            ids = [("Copier l'ID du membre", member.id)]
+            if actor:
+                ids.append(("Copier l'ID du modérateur", actor.id))
+            view = log_service.log_actions(ids=ids)
+            key = log_service.make_event_key(
+                member.guild.id,
+                "kick",
+                target_id=member.id,
+                executor_id=getattr(actor, "id", None),
+                audit_log_id=audit.id,
+            )
+            await self._send(
+                member.guild,
+                "log_moderation",
+                panel,
+                view=view,
+                event_key=key,
+            )
+            return
+
+        fields = [("Membre", _user_ref(member.id), True)]
+        if member.joined_at:
+            duration = discord.utils.utcnow() - member.joined_at
+            fields.append(("Présence", f"{max(0, duration.days)} jour(s)", True))
+        panel = self._embed("Membre parti", identity=member, fields=fields)
+        view = log_service.log_actions(ids=[("Copier l'ID du membre", member.id)])
+        key = log_service.make_event_key(member.guild.id, "member_remove", target_id=member.id)
+        await self._send(member.guild, "log_members", panel, view=view, event_key=key)
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         if before.nick != after.nick:
-            embed = self._embed("Surnom modifié", COLOURS["update"], target_id=after.id)
-            embed.description = after.mention
-            embed.add_field(name="Avant", value=_short(before.display_name), inline=True)
-            embed.add_field(name="Après", value=_short(after.display_name), inline=True)
-            await self._send(after.guild, "log_members", embed)
+            actor, audit = await self._audit_actor(
+                after.guild,
+                discord.AuditLogAction.member_update,
+                after.id,
+            )
+            fields = [
+                ("Membre", _user_ref(after.id), True),
+                ("Avant", before.display_name, True),
+                ("Après", after.display_name, True),
+            ]
+            if actor:
+                fields.append(("Responsable", _user_ref(actor.id), True))
+            panel = self._embed("Surnom modifié", identity=after, fields=fields)
+            ids = [("Copier l'ID du membre", after.id)]
+            if actor:
+                ids.append(("Copier l'ID du responsable", actor.id))
+            key = log_service.make_event_key(
+                after.guild.id,
+                "nickname_update",
+                target_id=after.id,
+                executor_id=getattr(actor, "id", None),
+                audit_log_id=getattr(audit, "id", None),
+                discriminator=after.display_name,
+            )
+            await self._send(
+                after.guild,
+                "log_members",
+                panel,
+                view=log_service.log_actions(ids=ids),
+                event_key=key,
+            )
 
         before_roles = {role.id: role for role in before.roles[1:]}
         after_roles = {role.id: role for role in after.roles[1:]}
         added = [role for role_id, role in after_roles.items() if role_id not in before_roles]
         removed = [role for role_id, role in before_roles.items() if role_id not in after_roles]
+        actor, audit = (None, None)
         if added or removed:
-            embed = self._embed("Rôles d'un membre modifiés", COLOURS["update"], target_id=after.id)
-            embed.description = after.mention
-            if added:
-                embed.add_field(name="Ajoutés", value=_short(", ".join(role.mention for role in added), 1024), inline=False)
-            if removed:
-                embed.add_field(name="Retirés", value=_short(", ".join(role.mention for role in removed), 1024), inline=False)
-            await self._send(after.guild, "log_roles", embed)
+            actor, audit = await self._audit_actor(
+                after.guild,
+                discord.AuditLogAction.member_role_update,
+                after.id,
+            )
+
+        for event_name, roles in (("Rôle ajouté", added), ("Rôle retiré", removed)):
+            for role in roles:
+                fields = [
+                    ("Membre", _user_ref(after.id), True),
+                    ("Rôle", _role_ref(role.id), True),
+                ]
+                if actor:
+                    fields.append(("Modérateur", _user_ref(actor.id), True))
+                panel = self._embed(event_name, identity=after, fields=fields)
+                ids = [
+                    ("Copier l'ID du membre", after.id),
+                    ("Copier l'ID du rôle", role.id),
+                ]
+                if actor:
+                    ids.append(("Copier l'ID du modérateur", actor.id))
+                key = log_service.make_event_key(
+                    after.guild.id,
+                    "role_add" if event_name == "Rôle ajouté" else "role_remove",
+                    target_id=after.id,
+                    executor_id=getattr(actor, "id", None),
+                    audit_log_id=getattr(audit, "id", None),
+                    discriminator=role.id,
+                )
+                await self._send(
+                    after.guild,
+                    "log_roles",
+                    panel,
+                    view=log_service.log_actions(ids=ids),
+                    event_key=key,
+                )
 
         if before.timed_out_until != after.timed_out_until:
-            embed = self._embed("Timeout modifié", COLOURS["moderation"], target_id=after.id)
-            embed.description = after.mention
-            embed.add_field(
-                name="Nouvel état",
-                value=discord.utils.format_dt(after.timed_out_until, "F") if after.timed_out_until else "Timeout retiré",
-                inline=False,
+            actor, audit = await self._audit_actor(
+                after.guild,
+                discord.AuditLogAction.member_update,
+                after.id,
             )
-            await self._send(after.guild, "log_moderation", embed)
+            fields = [("Membre", _user_ref(after.id), True)]
+            if actor:
+                fields.append(("Modérateur", _user_ref(actor.id), True))
+            if after.timed_out_until:
+                fields.append(("Fin prévue", discord.utils.format_dt(after.timed_out_until, "F"), True))
+            panel = self._embed(
+                "Timeout appliqué" if after.timed_out_until else "Timeout retiré",
+                identity=after,
+                fields=fields,
+            )
+            ids = [("Copier l'ID du membre", after.id)]
+            if actor:
+                ids.append(("Copier l'ID du modérateur", actor.id))
+            key = log_service.make_event_key(
+                after.guild.id,
+                "timeout",
+                target_id=after.id,
+                executor_id=getattr(actor, "id", None),
+                audit_log_id=getattr(audit, "id", None),
+                discriminator=int(after.timed_out_until.timestamp()) if after.timed_out_until else 0,
+            )
+            await self._send(
+                after.guild,
+                "log_moderation",
+                panel,
+                view=log_service.log_actions(ids=ids),
+                event_key=key,
+            )
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User | discord.Member):
-        embed = self._embed("Membre banni", COLOURS["moderation"], target_id=user.id)
-        embed.description = f"{user}"
-        await self._send(guild, "log_moderation", embed)
+        actor, audit = await self._audit_actor(guild, discord.AuditLogAction.ban, user.id)
+        fields = [("Membre", _user_ref(user.id), True)]
+        if actor:
+            fields.append(("Modérateur", _user_ref(actor.id), True))
+        if audit and audit.reason:
+            fields.append(("Raison", _short(audit.reason, 1024), False))
+        panel = self._embed("Membre banni", identity=user, fields=fields)
+        ids = [("Copier l'ID du membre", user.id)]
+        if actor:
+            ids.append(("Copier l'ID du modérateur", actor.id))
+        key = log_service.make_event_key(
+            guild.id,
+            "ban",
+            target_id=user.id,
+            executor_id=getattr(actor, "id", None),
+            audit_log_id=getattr(audit, "id", None),
+        )
+        await self._send(
+            guild,
+            "log_moderation",
+            panel,
+            view=log_service.log_actions(ids=ids),
+            event_key=key,
+        )
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
-        embed = self._embed("Membre débanni", COLOURS["create"], target_id=user.id)
-        embed.description = f"{user}"
-        await self._send(guild, "log_moderation", embed)
+        actor, audit = await self._audit_actor(guild, discord.AuditLogAction.unban, user.id)
+        fields = [("Utilisateur", _user_ref(user.id), True)]
+        if actor:
+            fields.append(("Modérateur", _user_ref(actor.id), True))
+        if audit and audit.reason:
+            fields.append(("Raison", _short(audit.reason, 1024), False))
+        panel = self._embed("Membre débanni", identity=user, fields=fields)
+        ids = [("Copier l'ID du membre", user.id)]
+        if actor:
+            ids.append(("Copier l'ID du modérateur", actor.id))
+        key = log_service.make_event_key(
+            guild.id,
+            "unban",
+            target_id=user.id,
+            executor_id=getattr(actor, "id", None),
+            audit_log_id=getattr(audit, "id", None),
+        )
+        await self._send(
+            guild,
+            "log_moderation",
+            panel,
+            view=log_service.log_actions(ids=ids),
+            event_key=key,
+        )
 
-    # ---------------- Vocaux ----------------
+    # ---------------------------------------------------------------- VOCAL
 
     @commands.Cog.listener()
     async def on_voice_state_update(
@@ -348,99 +605,333 @@ class Logs(commands.Cog, name="Logs"):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ):
-        if before.channel == after.channel and before.self_mute == after.self_mute and before.self_deaf == after.self_deaf:
+        if (
+            before.channel == after.channel
+            and before.self_mute == after.self_mute
+            and before.self_deaf == after.self_deaf
+        ):
             return
-        embed = self._embed("Activité vocale", COLOURS["voice"], target_id=member.id)
-        embed.description = member.mention
+        fields = [("Membre", _user_ref(member.id), True)]
         if before.channel != after.channel:
-            embed.add_field(name="Avant", value=before.channel.mention if before.channel else "Hors vocal", inline=True)
-            embed.add_field(name="Après", value=after.channel.mention if after.channel else "Hors vocal", inline=True)
+            fields.extend(
+                (
+                    ("Avant", _channel_ref(before.channel.id) if before.channel else "Hors vocal", True),
+                    ("Après", _channel_ref(after.channel.id) if after.channel else "Hors vocal", True),
+                )
+            )
         if before.self_mute != after.self_mute:
-            embed.add_field(name="Micro", value="Coupé" if after.self_mute else "Activé", inline=True)
+            fields.append(("Micro", "Coupé" if after.self_mute else "Activé", True))
         if before.self_deaf != after.self_deaf:
-            embed.add_field(name="Casque", value="Désactivé" if after.self_deaf else "Activé", inline=True)
-        await self._send(member.guild, "log_voice", embed)
+            fields.append(("Casque", "Désactivé" if after.self_deaf else "Activé", True))
+        panel = self._embed("Activité vocale", identity=member, fields=fields)
+        key = log_service.make_event_key(
+            member.guild.id,
+            "voice",
+            target_id=member.id,
+            discriminator=f"{getattr(after.channel, 'id', 0)}:{after.self_mute}:{after.self_deaf}",
+        )
+        await self._send(member.guild, "log_voice", panel, event_key=key)
 
-    # ---------------- Serveur et rôles ----------------
+    # ---------------------------------------------------------------- SALONS
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
-        embed = self._embed("Salon créé", COLOURS["create"], target_id=channel.id)
-        embed.description = f"{channel.mention} — {channel.type}"
-        await self._send(channel.guild, "log_server", embed)
+        actor, audit = await self._audit_actor(
+            channel.guild,
+            discord.AuditLogAction.channel_create,
+            channel.id,
+        )
+        fields = [("Salon", _channel_ref(channel.id), True), ("Type", str(channel.type), True)]
+        if actor:
+            fields.append(("Responsable", _user_ref(actor.id), True))
+        panel = self._embed("Salon créé", fields=fields)
+        ids = [("Copier l'ID du salon", channel.id)]
+        if actor:
+            ids.append(("Copier l'ID du responsable", actor.id))
+        key = log_service.make_event_key(
+            channel.guild.id,
+            "channel_create",
+            target_id=channel.id,
+            executor_id=getattr(actor, "id", None),
+            audit_log_id=getattr(audit, "id", None),
+        )
+        await self._send(
+            channel.guild,
+            "log_server",
+            panel,
+            view=log_service.log_actions(ids=ids),
+            event_key=key,
+        )
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
-        embed = self._embed("Salon supprimé", COLOURS["delete"], target_id=channel.id)
-        embed.description = f"{channel.name} — {channel.type}"
-        await self._send(channel.guild, "log_server", embed)
+        actor, audit = await self._audit_actor(
+            channel.guild,
+            discord.AuditLogAction.channel_delete,
+            channel.id,
+        )
+        fields = [("Salon", f"`{channel.name}`", True), ("ID", f"`{channel.id}`", True)]
+        if actor:
+            fields.append(("Responsable", _user_ref(actor.id), True))
+        panel = self._embed("Salon supprimé", fields=fields)
+        ids = [("Copier l'ID du salon", channel.id)]
+        if actor:
+            ids.append(("Copier l'ID du responsable", actor.id))
+        key = log_service.make_event_key(
+            channel.guild.id,
+            "channel_delete",
+            target_id=channel.id,
+            executor_id=getattr(actor, "id", None),
+            audit_log_id=getattr(audit, "id", None),
+        )
+        await self._send(
+            channel.guild,
+            "log_server",
+            panel,
+            view=log_service.log_actions(ids=ids),
+            event_key=key,
+        )
 
     @commands.Cog.listener()
-    async def on_guild_channel_update(self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
-        changes = []
+    async def on_guild_channel_update(
+        self,
+        before: discord.abc.GuildChannel,
+        after: discord.abc.GuildChannel,
+    ):
+        fields = [("Salon", _channel_ref(after.id), True)]
         if before.name != after.name:
-            changes.append(f"Nom : `{before.name}` → `{after.name}`")
+            fields.append(("Nom", f"`{before.name}` → `{after.name}`", False))
         if before.category_id != after.category_id:
-            changes.append("Catégorie modifiée")
+            before_category = _channel_ref(before.category_id) if before.category_id else "Aucune"
+            after_category = _channel_ref(after.category_id) if after.category_id else "Aucune"
+            fields.append(("Catégorie", f"{before_category} → {after_category}", False))
         if getattr(before, "topic", None) != getattr(after, "topic", None):
-            changes.append("Sujet modifié")
-        if not changes:
+            fields.append(
+                (
+                    "Sujet",
+                    f"`{_short(getattr(before, 'topic', '') or 'Vide', 400)}` → "
+                    f"`{_short(getattr(after, 'topic', '') or 'Vide', 400)}`",
+                    False,
+                )
+            )
+        if getattr(before, "slowmode_delay", None) != getattr(after, "slowmode_delay", None):
+            fields.append(
+                (
+                    "Slowmode",
+                    f"`{getattr(before, 'slowmode_delay', 0)} s` → "
+                    f"`{getattr(after, 'slowmode_delay', 0)} s`",
+                    False,
+                )
+            )
+        if len(fields) == 1:
             return
-        embed = self._embed("Salon modifié", COLOURS["update"], target_id=after.id)
-        embed.description = _short("\n".join(changes), 4000)
-        await self._send(after.guild, "log_server", embed)
+        actor, audit = await self._audit_actor(
+            after.guild,
+            discord.AuditLogAction.channel_update,
+            after.id,
+        )
+        if actor:
+            fields.append(("Responsable", _user_ref(actor.id), True))
+        panel = self._embed("Salon modifié", fields=fields)
+        ids = [("Copier l'ID du salon", after.id)]
+        if actor:
+            ids.append(("Copier l'ID du responsable", actor.id))
+        key = log_service.make_event_key(
+            after.guild.id,
+            "channel_update",
+            target_id=after.id,
+            executor_id=getattr(actor, "id", None),
+            audit_log_id=getattr(audit, "id", None),
+            discriminator=":".join(str(field[1]) for field in fields),
+        )
+        await self._send(
+            after.guild,
+            "log_server",
+            panel,
+            view=log_service.log_actions(ids=ids),
+            event_key=key,
+        )
+
+    # ---------------------------------------------------------------- RÔLES
 
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role):
-        embed = self._embed("Rôle créé", COLOURS["create"], target_id=role.id)
-        embed.description = role.mention
-        await self._send(role.guild, "log_roles", embed)
+        actor, audit = await self._audit_actor(
+            role.guild,
+            discord.AuditLogAction.role_create,
+            role.id,
+        )
+        fields = [("Rôle", _role_ref(role.id), True)]
+        if actor:
+            fields.append(("Responsable", _user_ref(actor.id), True))
+        panel = self._embed("Rôle créé", fields=fields)
+        ids = [("Copier l'ID du rôle", role.id)]
+        if actor:
+            ids.append(("Copier l'ID du responsable", actor.id))
+        key = log_service.make_event_key(
+            role.guild.id,
+            "role_create",
+            target_id=role.id,
+            executor_id=getattr(actor, "id", None),
+            audit_log_id=getattr(audit, "id", None),
+        )
+        await self._send(
+            role.guild,
+            "log_server",
+            panel,
+            view=log_service.log_actions(ids=ids),
+            event_key=key,
+        )
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
-        embed = self._embed("Rôle supprimé", COLOURS["delete"], target_id=role.id)
-        embed.description = role.name
-        await self._send(role.guild, "log_roles", embed)
+        actor, audit = await self._audit_actor(
+            role.guild,
+            discord.AuditLogAction.role_delete,
+            role.id,
+        )
+        fields = [("Rôle", f"`{role.name}`", True), ("ID", f"`{role.id}`", True)]
+        if actor:
+            fields.append(("Responsable", _user_ref(actor.id), True))
+        panel = self._embed("Rôle supprimé", fields=fields)
+        ids = [("Copier l'ID du rôle", role.id)]
+        if actor:
+            ids.append(("Copier l'ID du responsable", actor.id))
+        key = log_service.make_event_key(
+            role.guild.id,
+            "role_delete",
+            target_id=role.id,
+            executor_id=getattr(actor, "id", None),
+            audit_log_id=getattr(audit, "id", None),
+        )
+        await self._send(
+            role.guild,
+            "log_server",
+            panel,
+            view=log_service.log_actions(ids=ids),
+            event_key=key,
+        )
 
     @commands.Cog.listener()
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
-        changes = []
+        fields = [("Rôle", _role_ref(after.id), True)]
         if before.name != after.name:
-            changes.append(f"Nom : `{before.name}` → `{after.name}`")
+            fields.append(("Nom", f"`{before.name}` → `{after.name}`", False))
         if before.colour != after.colour:
-            changes.append(f"Couleur : `{before.colour}` → `{after.colour}`")
-        if before.permissions != after.permissions:
-            changes.append("Permissions modifiées")
-        if before.position != after.position:
-            changes.append(f"Position : `{before.position}` → `{after.position}`")
-        if not changes:
+            fields.append(
+                (
+                    "Couleur",
+                    f"`#{before.colour.value:06X}` → `#{after.colour.value:06X}`",
+                    False,
+                )
+            )
+        before_permissions = _permission_names(before.permissions)
+        after_permissions = _permission_names(after.permissions)
+        added = sorted(after_permissions - before_permissions)
+        removed = sorted(before_permissions - after_permissions)
+        if added:
+            fields.append(
+                (
+                    "Permissions ajoutées",
+                    ", ".join(_permission_label(name) for name in added)[:1024],
+                    False,
+                )
+            )
+        if removed:
+            fields.append(
+                (
+                    "Permissions supprimées",
+                    ", ".join(_permission_label(name) for name in removed)[:1024],
+                    False,
+                )
+            )
+        if len(fields) == 1:
             return
-        embed = self._embed("Rôle modifié", COLOURS["update"], target_id=after.id)
-        embed.description = after.mention + "\n" + _short("\n".join(changes), 3900)
-        await self._send(after.guild, "log_roles", embed)
+        actor, audit = await self._audit_actor(
+            after.guild,
+            discord.AuditLogAction.role_update,
+            after.id,
+        )
+        if actor:
+            fields.append(("Responsable", _user_ref(actor.id), True))
+        panel = self._embed("Rôle modifié", fields=fields)
+        ids = [("Copier l'ID du rôle", after.id)]
+        if actor:
+            ids.append(("Copier l'ID du responsable", actor.id))
+        key = log_service.make_event_key(
+            after.guild.id,
+            "role_update",
+            target_id=after.id,
+            executor_id=getattr(actor, "id", None),
+            audit_log_id=getattr(audit, "id", None),
+            discriminator=":".join(str(field[1]) for field in fields),
+        )
+        await self._send(
+            after.guild,
+            "log_server",
+            panel,
+            view=log_service.log_actions(ids=ids),
+            event_key=key,
+        )
+
+    # ---------------------------------------------------------------- SERVEUR
 
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
-        changes = []
+        fields = []
         if before.name != after.name:
-            changes.append(f"Nom : `{before.name}` → `{after.name}`")
-        if before.icon != after.icon:
-            changes.append("Icône modifiée")
-        if before.banner != after.banner:
-            changes.append("Bannière modifiée")
+            fields.append(("Nom", f"`{before.name}` → `{after.name}`", False))
         if before.verification_level != after.verification_level:
-            changes.append(f"Vérification : `{before.verification_level}` → `{after.verification_level}`")
-        if not changes:
+            fields.append(
+                (
+                    "Niveau de vérification",
+                    f"`{before.verification_level}` → `{after.verification_level}`",
+                    False,
+                )
+            )
+        if before.afk_timeout != after.afk_timeout:
+            fields.append(
+                (
+                    "Délai AFK",
+                    f"`{before.afk_timeout} s` → `{after.afk_timeout} s`",
+                    False,
+                )
+            )
+        if not fields:
             return
-        embed = self._embed("Serveur modifié", COLOURS["update"], target_id=after.id)
-        embed.description = _short("\n".join(changes), 4000)
-        await self._send(after, "log_server", embed)
+        actor, audit = await self._audit_actor(
+            after,
+            discord.AuditLogAction.guild_update,
+            after.id,
+        )
+        if actor:
+            fields.append(("Responsable", _user_ref(actor.id), True))
+        panel = self._embed("Serveur modifié", fields=fields)
+        ids = []
+        if actor:
+            ids.append(("Copier l'ID du responsable", actor.id))
+        key = log_service.make_event_key(
+            after.id,
+            "guild_update",
+            target_id=after.id,
+            executor_id=getattr(actor, "id", None),
+            audit_log_id=getattr(audit, "id", None),
+            discriminator=":".join(str(field[1]) for field in fields),
+        )
+        await self._send(
+            after,
+            "log_server",
+            panel,
+            view=log_service.log_actions(ids=ids),
+            event_key=key,
+        )
 
 
 async def setup(bot: commands.Bot):
     await bot.db.execute(MESSAGE_CACHE_SCHEMA)
     await bot.db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_message_log_cache_stored_at ON message_log_cache(stored_at)"
+        "CREATE INDEX IF NOT EXISTS idx_message_log_cache_stored_at "
+        "ON message_log_cache(stored_at)"
     )
     await bot.db.execute(
         "DELETE FROM message_log_cache WHERE stored_at < ?",

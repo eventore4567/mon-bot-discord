@@ -4,11 +4,10 @@ import logging
 import re
 import discord
 
+from utils import embeds
+
 logger = logging.getLogger("bot")
 
-# Historique (pré-refonte logs indépendants) : colonnes de guild_config pour chaque type
-# de log spécialisé. N'est plus utilisé par send_log() ci-dessous (voir utils/log_service.py
-# et sa migration automatique depuis ces mêmes colonnes) — conservé pour référence/lecture.
 LOG_KIND_COLUMNS = {
     "messages": "log_messages",
     "members": "log_members",
@@ -17,32 +16,124 @@ LOG_KIND_COLUMNS = {
     "server": "log_server",
     "automod": "log_automod",
     "moderation": "log_moderation",
+    "tickets": "ticket_log_channel",
 }
 
+_SNOWFLAKE_RE = re.compile(r"(?<!\d)(\d{15,22})(?!\d)")
+_MESSAGE_URL_RE = re.compile(
+    r"https://(?:canary\.|ptb\.)?discord(?:app)?\.com/channels/\d+/\d+/\d+"
+)
 
-async def send_log(bot, guild: discord.Guild, kind: str, embed: discord.Embed) -> None:
-    """Compatibilité : délègue désormais entièrement à utils/log_service.py (refonte des
-    logs indépendants on/off — voir ce fichier pour la logique réelle). Signature et
-    comportement d'appel INCHANGÉS pour tous les appelants existants (configuration.py,
-    automod.py, moderation.py, events.py, security_tools.py, tickets.py...) : aucun de
-    ces fichiers n'a besoin d'être modifié pour bénéficier du nouveau système on/off,
-    puisque `kind` correspond exactement à un `log_type` de log_service.LOG_TYPES."""
+
+def _first_id(value: object) -> int | None:
+    match = _SNOWFLAKE_RE.search(str(value or ""))
+    return int(match.group(1)) if match else None
+
+
+def _derive_log_view(embed: discord.Embed):
+    """Construit les boutons sûrs pour les anciens logs encore migrés.
+
+    Aucune action administrative n'est créée : uniquement ouverture de message et
+    récupération éphémère d'identifiants.
+    """
     from utils import log_service
-    await log_service.send_log(bot, guild, kind, embed)
+
+    ids: list[tuple[str, int]] = []
+    seen: set[int] = set()
+    jump_url = None
+
+    def add(label: str, entity_id: int | None):
+        if entity_id is None or entity_id in seen or len(ids) >= 4:
+            return
+        seen.add(entity_id)
+        ids.append((label, entity_id))
+
+    all_text = [str(embed.description or "")]
+    for field in embed.fields:
+        name = embeds.clean_ui_text(field.name, 80).casefold()
+        value = str(field.value or "")
+        all_text.append(value)
+        entity_id = _first_id(value)
+        if not entity_id:
+            continue
+        if any(token in name for token in ("modérateur", "moderateur", "responsable", "staff", "acteur", "organisé", "organise")):
+            add("Copier l'ID du modérateur", entity_id)
+        elif "rôle" in name or "role" in name:
+            add("Copier l'ID du rôle", entity_id)
+        elif "message" in name and ("id" in name or "identifiant" in name):
+            add("Copier l'ID du message", entity_id)
+        elif "auteur" in name:
+            add("Copier l'ID de l'auteur", entity_id)
+        elif any(token in name for token in ("membre", "utilisateur", "cible", "créateur", "createur")):
+            add("Copier l'ID du membre", entity_id)
+
+    joined = "\n".join(all_text)
+    url_match = _MESSAGE_URL_RE.search(joined)
+    if url_match:
+        jump_url = url_match.group(0)
+
+    return log_service.log_actions(jump_url=jump_url, ids=ids)
+
+
+def _normalize_log_kind(kind: str, embed: discord.Embed) -> str:
+    """Répare les anciens appelants qui classaient un log ticket en modération.
+
+    Certaines branches historiques de fermeture de ticket appelaient
+    `helpers.send_log(..., "moderation", ticket_embed)`. Le titre métier permet de les
+    router sans ambiguïté vers le logger `tickets`, sans toucher aux vrais logs de modération.
+    """
+    normalized = str(kind or "").strip().casefold()
+    title = embeds.clean_ui_text(embed.title or "", 120).casefold()
+    if normalized == "moderation" and "ticket" in title:
+        return "tickets"
+    return normalized
+
+
+async def send_log(
+    bot,
+    guild: discord.Guild,
+    kind: str,
+    embed: discord.Embed,
+    *,
+    view: discord.ui.View | None = None,
+    event_key: str | None = None,
+) -> None:
+    """Point de compatibilité : tous les anciens appelants passent par le logger officiel."""
+    from utils import log_service
+
+    kind = _normalize_log_kind(kind, embed)
+    if view is None:
+        view = _derive_log_view(embed)
+    await log_service.send_log(
+        bot,
+        guild,
+        kind,
+        embed,
+        view=view,
+        event_key=event_key,
+    )
+
 
 DURATION_RE = re.compile(r"(\d+)\s*(s|sec|m|min|h|heure|heures|j|jour|jours|d|w|sem|semaine)", re.IGNORECASE)
-
 UNIT_SECONDS = {
-    "s": 1, "sec": 1,
-    "m": 60, "min": 60,
-    "h": 3600, "heure": 3600, "heures": 3600,
-    "j": 86400, "jour": 86400, "jours": 86400, "d": 86400,
-    "w": 604800, "sem": 604800, "semaine": 604800,
+    "s": 1,
+    "sec": 1,
+    "m": 60,
+    "min": 60,
+    "h": 3600,
+    "heure": 3600,
+    "heures": 3600,
+    "j": 86400,
+    "jour": 86400,
+    "jours": 86400,
+    "d": 86400,
+    "w": 604800,
+    "sem": 604800,
+    "semaine": 604800,
 }
 
 
 def parse_duration(text: str) -> int | None:
-    """Convertit '10m', '2h', '1j', '30s' en secondes. Retourne None si invalide."""
     text = text.strip().lower()
     total = 0
     matches = DURATION_RE.findall(text)
@@ -54,7 +145,6 @@ def parse_duration(text: str) -> int | None:
 
 
 def format_duration(seconds: int) -> str:
-    """Formate un nombre de secondes en texte lisible en français."""
     if seconds <= 0:
         return "0 seconde"
     units = [("jour", 86400), ("heure", 3600), ("minute", 60), ("seconde", 1)]
@@ -74,8 +164,19 @@ def truncate(text: str, limit: int = 1024) -> str:
     return text[: limit - 3] + "..."
 
 
+def confirm_embed(message: str, *, state: str = "pending") -> discord.Embed:
+    """Petite box SentriX officielle pour confirmations partagées."""
+    if state == "confirmed":
+        return embeds.success(message, title="Action confirmée")
+    if state == "cancelled":
+        return embeds.info(message, title="Action annulée")
+    if state == "expired":
+        return embeds.warning(message, title="Confirmation expirée")
+    return embeds.warning(message, title="Confirmation requise")
+
+
 class ConfirmView(discord.ui.View):
-    """Vue de confirmation générique (bouton Oui / Non) utilisée pour les actions sensibles."""
+    """Confirmation générique sobre, sans emoji décoratif."""
 
     def __init__(self, author_id: int, timeout: float = 30):
         super().__init__(timeout=timeout)
@@ -85,20 +186,19 @@ class ConfirmView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
-                "Seule la personne à l'origine de la commande peut confirmer.", ephemeral=True
+                embed=embeds.error("Seule la personne à l'origine de la commande peut confirmer."),
+                ephemeral=True,
             )
             return False
         return True
 
-    # De vrais emojis Unicode sont obligatoires dans le champ `emoji` d'un composant.
-    # Les anciens glyphes ● / ○ pouvaient être refusés par Discord avec HTTP 400 / 50035.
-    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger, emoji="✅")
+    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = True
         self.stop()
         await interaction.response.defer()
 
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, emoji="❌")
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = False
         self.stop()
@@ -106,7 +206,7 @@ class ConfirmView(discord.ui.View):
 
 
 class PaginatorView(discord.ui.View):
-    """Vue de pagination générique pour les embeds (listes, classements, aide, etc.)."""
+    """Pagination générique qui modifie le message existant."""
 
     def __init__(self, embeds: list[discord.Embed], author_id: int, timeout: float = 90):
         super().__init__(timeout=timeout)
@@ -122,18 +222,19 @@ class PaginatorView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
-                "Seule la personne à l'origine de la commande peut naviguer.", ephemeral=True
+                embed=embeds.error("Seule la personne à l'origine de la commande peut naviguer."),
+                ephemeral=True,
             )
             return False
         return True
 
-    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Précédent", style=discord.ButtonStyle.secondary)
     async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.index = max(0, self.index - 1)
         self._update_buttons()
         await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
 
-    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.index = min(len(self.embeds) - 1, self.index + 1)
         self._update_buttons()

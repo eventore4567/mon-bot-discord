@@ -163,6 +163,35 @@ def repair_wrapped_signatures(bot: commands.Bot) -> int:
                 logger.info("V18 : signature + paramètres discord.py restaurés pour +%s.", key)
             repaired += 1
 
+    # Certaines couches historiques affectent un callback décoré après la réparation et
+    # discord.py peut alors conserver des ``inspect.Parameter`` bruts. Ils n'exposent pas
+    # ``displayed_name`` et font planter +help lors du calcul de ``Command.signature``.
+    for command in list(bot.walk_commands()):
+        normalized = {}
+        changed = False
+        for name, param in dict(getattr(command, "params", {}) or {}).items():
+            if str(name).casefold() in {"self", "ctx", "context", "interaction", "cog", "_ctx"}:
+                changed = True
+                continue
+            if isinstance(param, commands.Parameter):
+                normalized[name] = param
+                continue
+            if isinstance(param, inspect.Parameter):
+                normalized[name] = commands.Parameter(
+                    name=param.name,
+                    kind=param.kind,
+                    default=param.default,
+                    annotation=param.annotation,
+                    description=None,
+                    displayed_default=None,
+                    displayed_name=None,
+                )
+                changed = True
+            else:
+                normalized[name] = param
+        if changed:
+            command.params = normalized
+
     return repaired
 
 

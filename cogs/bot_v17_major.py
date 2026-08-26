@@ -1,8 +1,7 @@
 """Orchestrateur de la mise à jour majeure SentriX V17.
 
-Appelé après chaque extension par stability_runtime. Chaque sous-module est isolé : une
-fonctionnalité optionnelle en erreur ne doit jamais empêcher la modération, les tickets,
-l'IA ou le cœur du bot de démarrer.
+Les fonctions V17 restent actives, mais V17 ne possède plus le transport des logs.
+Le logger unique et autoritaire est ``utils.log_service.send_log``.
 """
 from __future__ import annotations
 
@@ -68,6 +67,30 @@ async def _install_extras_deterministic(bot: commands.Bot, extension_name: str) 
     v17_extras.install_autocomplete(bot)
 
 
+async def _install_tickets_without_log_wrapper(
+    bot: commands.Bot,
+    extension_name: str,
+) -> None:
+    """Conserve les commandes/patches tickets V17 sans monkey-patcher send_log.
+
+    L'ancienne fonction ``v17_tickets_logs.install()`` remplaçait
+    ``utils.log_service.send_log`` puis V24/V25 le remplaçaient encore. C'est cette chaîne
+    qui finissait par exposer ``send_compact_unique_log(..., file=None)`` sans ``view=``.
+    """
+    del extension_name
+    from . import v17_tickets_logs
+
+    await ensure_schema(bot)
+    register_command_policy(
+        configuration={"logevent"},
+        moderation={"logsearch"},
+        tickets={"ticketreopenwindow", "reopenticket", "ticketstaffstats"},
+    )
+    if bot.get_cog("V17TicketsLogs") is None:
+        await bot.add_cog(v17_tickets_logs.V17TicketsLogs(bot))
+    v17_tickets_logs.install_ticket_patches(bot)
+
+
 def _fix_group_invocation(bot: commands.Bot) -> None:
     """Un sous-ordre ne doit pas exécuter aussi la page d'accueil de son groupe."""
     for name in (
@@ -98,7 +121,6 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
         )
 
     from .v17_moderation_security import install as install_moderation_security
-    from .v17_tickets_logs import install as install_tickets_logs
     from .v17_ai_economy_games import install as install_ai_economy_games
     from .v17_health import install as install_health
     from .v17_user_facing_hotfix import install as install_user_facing_hotfix
@@ -109,8 +131,6 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     from .interaction_defer_safety_v21 import install as install_interaction_defer_safety_v21
     from .direct_sentrix_slash_v22 import install as install_direct_sentrix_slash_v22
     from .ai_compatibility_v23 import install as install_ai_compatibility_v23
-    from .log_detail_layout_v24 import install as install_log_detail_layout_v24
-    from .log_rectangle_v25 import install as install_log_rectangle_v25
 
     await _install_one(
         "modération/sécurité",
@@ -119,8 +139,8 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
         extension_name,
     )
     await _install_one(
-        "tickets/logs",
-        install_tickets_logs,
+        "tickets sans transport de logs concurrent",
+        _install_tickets_without_log_wrapper,
         bot,
         extension_name,
     )
@@ -191,25 +211,17 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
         bot,
         extension_name,
     )
-    await _install_one(
-        "grands logs détaillés toutes catégories V24",
-        install_log_detail_layout_v24,
-        bot,
-        extension_name,
-    )
-    await _install_one(
-        "rectangle logs final + anti-doublon sortie V25",
-        install_log_rectangle_v25,
-        bot,
-        extension_name,
-    )
+
+    # IMPORTANT : V24/V25 ne sont plus installés ici. Ces couches remplaçaient
+    # log_service.send_log après le logger officiel et étaient la cause du crash
+    # ``unexpected keyword argument 'view'``. Le layout est maintenant construit par
+    # utils.embeds/cogs.logs et envoyé uniquement par utils.log_service.
 
     runtime = state(bot)
     if not runtime.get("v17_announced"):
         runtime["v17_announced"] = True
         logger.info(
-            "SentriX V17 majeure active : résilience, modération, sécurité, tickets, "
-            "logs, IA, économie, missions, saisons et santé."
+            "SentriX V17 majeure active : fonctionnalités V17 conservées, logger officiel unique."
         )
 
 

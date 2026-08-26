@@ -1,4 +1,4 @@
-"""Centre canonique +giveaway : une seule racine pour toutes les actions courantes."""
+"""Centre canonique +giveaway ; le reroll reste une commande directe séparée."""
 from __future__ import annotations
 
 import logging
@@ -28,7 +28,6 @@ def install(bot: commands.Bot) -> None:
     legacy_create = bot.get_command("giveaway-create")
     legacy_end = bot.get_command("giveaway-end")
     legacy_cancel = bot.get_command("giveaway-cancel")
-    legacy_reroll = bot.get_command("giveaway-reroll")
     legacy_restrict = bot.get_command("giveaway-blacklist")
     legacy_allow = bot.get_command("giveaway-unblacklist")
     if legacy_list is None:
@@ -75,12 +74,6 @@ def install(bot: commands.Bot) -> None:
         async def cancel(ctx: commands.Context, message_id: str):
             await _call(legacy_cancel, ctx, message_id)
 
-    if legacy_reroll is not None:
-        @giveaway.command(name="reroll", description="Relancer le tirage d'un giveaway terminé.")
-        @checks.is_owner_or_admin()
-        async def reroll(ctx: commands.Context, message_id: str):
-            await _call(legacy_reroll, ctx, message_id)
-
     if legacy_restrict is not None:
         @giveaway.command(name="restrict", description="Retirer l'accès aux giveaways à un membre.")
         @checks.is_owner_or_admin()
@@ -97,4 +90,4 @@ def install(bot: commands.Bot) -> None:
     if giveaway.app_command is not None:
         bot.tree.add_command(giveaway.app_command, override=True)
     bot._sentrix_giveaway_center_v3 = True
-    logger.info("Centre +giveaway V3 installé : list/create/end/cancel/reroll/restrict/allow.")
+    logger.info("Centre +giveaway V3 installé ; +giveaway-reroll reste direct.")

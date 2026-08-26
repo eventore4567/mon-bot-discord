@@ -11,9 +11,6 @@ jobs:
   integrity:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      DISCORD_TOKEN: "ci.fake.token"
-      DATABASE_PATH: "/tmp/sentrix-integrity.db"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,28 +29,29 @@ jobs:
       - name: Compile all Python
         run: python -m compileall -q .
 
-      - name: Full unit tests
+      - name: Pure unit tests
         run: python -m unittest discover -s tests -p 'test_*.py'
-
-      - name: Canonical architecture contracts
-        run: python -m unittest tests.test_final_core_contract tests.test_easy_surface_contract -v
 
       - name: Repository audit
         run: python tools/repo_audit.py
 
-      - name: Command error ownership
+      - name: Command runtime audit
+        run: python tools/command_runtime_audit.py
+
+      - name: Command error ownership gate
         run: python tools/command_error_ownership_gate.py
 
-      - name: Permission matrix
+      - name: Integrity gate
+        run: python tools/integrity_gate.py
+
+      - name: V2.5 quality gate
+        run: python tools/v25_quality_gate.py
+
+      - name: Permission matrix gate
         run: python tools/permission_matrix_gate.py
 
-      - name: Natural intent fuzz
+      - name: Natural intent fuzz gate
         run: python tools/ai_intent_fuzz_gate.py
 
-      - name: Deferred/slash lifecycle contracts
-        run: |
-          python tools/slash_error_lifecycle_gate.py
-          python tools/defer_send_audit.py
-
-      - name: Integrity result
-        run: echo "SentriX canonical integrity checks passed for $GITHUB_SHA"
+      - name: Runtime debt gate
+        run: python tools/runtime_debt_gate.py

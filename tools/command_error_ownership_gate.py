@@ -12,7 +12,7 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED_OWNER = pathlib.Path("cogs/command_error_policy.py")
+EXPECTED_OWNER = pathlib.Path("cogs/error_experience_v3.py")
 
 
 def _is_command_not_found_test(node: ast.AST) -> bool:
@@ -75,11 +75,11 @@ def main() -> int:
     canonical_owns = (
         "isinstance(base, commands.CommandNotFound)" in canonical_text
         and "await ctx.send(" in canonical_text
-        and "bot.on_command_error = on_prefix_error" in canonical_text
+        and "bot.on_command_error = MethodType(improved_on_command_error, bot)" in canonical_text
     )
     foreign = [(path, line) for path, line in responders if path != EXPECTED_OWNER]
     if not canonical_owns:
-        errors.append("command_error_policy ne possède pas entièrement la réponse CommandNotFound")
+        errors.append("error_experience_v3 ne possède pas entièrement la réponse CommandNotFound")
     if foreign:
         rendered = ", ".join(f"{path}:{line}" for path, line in foreign)
         errors.append(f"répondant CommandNotFound concurrent détecté: {rendered}")

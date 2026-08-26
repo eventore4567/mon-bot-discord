@@ -1,11 +1,8 @@
-"""Catalogue utilisateur canonique de SentriX.
+"""Surface canonique des commandes SentriX.
 
-Deux objectifs différents sont volontairement séparés :
-- Discord `/` conserve presque toute l'ancienne surface utile, jusqu'au budget de 100 racines ;
-- `+help` reste facile à parcourir et à rechercher sans afficher chaque ancien réglage fusionné.
-
-Les anciennes commandes `+` restent exécutables pour la compatibilité. Seuls les vrais doublons
-et les commandes remplacées par un centre canonique sont masqués de l'aide.
+Les fonctionnalités historiques restent chargées pour compatibilité, mais l'aide et les
+commandes slash n'exposent que la surface directe décidée. Les anciens réglages fusionnés
+restent utilisables en préfixe + par les habitués, tout en étant masqués de +help.
 """
 from __future__ import annotations
 
@@ -26,35 +23,21 @@ GAME_COMMANDS = frozenset({
     "dailygames",
 })
 
-# Surface slash proche de l'ancienne expérience SentriX : on ne réduit PAS Discord à
-# quelques commandes. On retire seulement les réglages/doublons qui ont désormais un
-# meilleur point d'entrée, puis on utilise les places libérées pour des commandes + utiles.
-SLASH_COMMANDS = frozenset({
-    # Aide / informations / utilitaires
-    "help", "setup", "ping", "avatar", "userinfo", "afk", "info", "membercount",
-    "poll", "remind", "translate", "weather",
-    # Modération quotidienne
+NORMAL_DIRECT_COMMANDS = frozenset({
+    "help", "setup", "ping", "avatar", "userinfo", "afk", "setprefix", "setmodrole",
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
     "lock", "unlock", "quarantine", "unquarantine", "nickname", "resetnick",
     "giverole", "removerole",
-    # Centre sécurité : les anciennes racines anti-* restent disponibles en +
-    "security",
-    # IA
+    "security", "antiraid", "antinuke", "blacklist-add", "blacklist-users",
+    "panic", "syncbl",
     "sentrix", "image", "ai-translate", "chat-reset",
-    # Économie / progression
-    "balance", "daily", "work", "pay", "inventory", "banque", "economyleaderboard",
+    "balance", "daily", "work", "pay", "inventory", "banque",
+    "economyleaderboard", "leaderboard-money",
     "me", "level", "set-xp", "add-xp", "set-level-role", "remove-level-role",
-    "reset-levels", "profile", "shop", "deposit", "gamble",
-    # Centres support / événements
-    "ticket", "giveaway",
-    # Musique
+    "reset-levels",
+    "ticket", "giveaway", "giveaway-reroll",
     "play", "pause", "skip", "stop",
 }) | GAME_COMMANDS
-
-# Alias historique utilisé par les anciens audits/runtimes.
-NORMAL_DIRECT_COMMANDS = SLASH_COMMANDS
-EASY_SLASH_COMMANDS = SLASH_COMMANDS
-POPULAR_GAME_COMMANDS = GAME_COMMANDS
 
 ADMIN_DIRECT_COMMANDS = frozenset({
     "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
@@ -64,21 +47,19 @@ ADMIN_DIRECT_COMMANDS = frozenset({
 
 PURE_DUPLICATE_COMMANDS = frozenset({
     "rank", "buyrole", "ask", "chat", "embed-create", "latency", "levelroles",
-    "leaderboard-money",
 })
 
-# Ces commandes existent toujours en + pour les anciens panneaux/scripts, mais l'aide ne
-# les présente plus individuellement : elles sont mieux trouvées depuis leur centre.
 SETUP_MERGED_COMMANDS = frozenset({
     "config-view", "config-reset", "create-logs", "logsetup", "logs-status",
-    "designsetup", "welcome-config", "shopsetup", "aisetup", "setprefix", "setmodrole",
-    "setwelcomechannel", "setwelcomemessage", "setgoodbyechannel", "setgoodbyemessage",
-    "setlogchannel", "setticketlogchannel", "setwarnrole", "setannouncechannel",
-    "setgiveawaychannel", "setsuggestchannel", "setlevelchannel", "setautorole",
-    "createrole", "verify-setup", "verify-panel", "rolepanel", "rolepanel-refresh",
-    "reactionrole-add", "reactionrole-remove", "reactionrole-list", "repconfig",
-    "repadd", "repremove", "represet", "statsconfig", "addbonusinvites",
-    "removebonusinvites", "invitebonushistory", "embedconfig", "set-nickname", "alias",
+    "designsetup", "welcome-config", "shopsetup", "aisetup",
+    "setwelcomechannel", "setwelcomemessage", "setgoodbyechannel",
+    "setgoodbyemessage", "setlogchannel", "setticketlogchannel", "setwarnrole",
+    "setannouncechannel", "setgiveawaychannel", "setsuggestchannel",
+    "setlevelchannel", "setautorole", "createrole", "verify-setup", "verify-panel",
+    "rolepanel", "rolepanel-refresh", "reactionrole-add", "reactionrole-remove",
+    "reactionrole-list", "repconfig", "repadd", "repremove", "represet",
+    "statsconfig", "addbonusinvites", "removebonusinvites", "invitebonushistory",
+    "embedconfig", "set-nickname", "alias",
 })
 
 TICKET_MERGED_COMMANDS = frozenset({
@@ -88,31 +69,37 @@ TICKET_MERGED_COMMANDS = frozenset({
 })
 
 GIVEAWAY_MERGED_COMMANDS = frozenset({
-    "giveaway-create", "giveaway-end", "giveaway-cancel", "giveaway-reroll",
+    "giveaway-create", "giveaway-end", "giveaway-cancel",
     "giveaway-blacklist", "giveaway-unblacklist", "giveaway-list",
 })
 
 SECURITY_MERGED_COMMANDS = frozenset({
-    "antispam", "antilink", "antiinvite", "antimention", "anticaps", "antiemoji",
-    "antiraid", "antibot", "antiaccount", "antiscam", "antinuke", "panic", "syncbl",
-    "antinuke-whitelist-add", "antinuke-whitelist-list", "antinuke-whitelist-remove",
-    "automod-exempt-role-add", "automod-exempt-role-remove", "automod-history",
-    "automod-status", "security-check", "security-level", "security-repair",
-    "whitelist-domain", "unwhitelist-domain", "blacklist-add", "blacklist-list",
-    "blacklist-remove", "blacklist-user", "blacklist-users", "unblacklist-user",
+    "antinuke-whitelist-add", "antinuke-whitelist-list",
+    "antinuke-whitelist-remove", "automod-exempt-role-add",
+    "automod-exempt-role-remove", "automod-history", "automod-status",
+    "security-check", "security-level", "security-repair",
+    "whitelist-domain", "unwhitelist-domain", "blacklist-list",
+    "blacklist-remove", "blacklist-user", "unblacklist-user",
     "permission-audit", "server-backup", "server-restore", "unsyncbl",
     "role-snapshot", "role-restore", "lockdown-server", "unlock-server",
 })
 
+LOW_VALUE_HIDDEN_COMMANDS = frozenset({
+    "aidiag", "diagnostic", "bot-status", "command-stats", "levelcheck",
+    "levelrepair", "weekly", "rewrite", "shop", "resume", "queue", "profile",
+})
+
 MERGED_COMMANDS = (
-    SETUP_MERGED_COMMANDS | TICKET_MERGED_COMMANDS | GIVEAWAY_MERGED_COMMANDS |
-    SECURITY_MERGED_COMMANDS
+    SETUP_MERGED_COMMANDS
+    | TICKET_MERGED_COMMANDS
+    | GIVEAWAY_MERGED_COMMANDS
+    | SECURITY_MERGED_COMMANDS
+    | LOW_VALUE_HIDDEN_COMMANDS
 )
 INTENTIONALLY_REMOVED_COMMANDS = PURE_DUPLICATE_COMMANDS
 CONFIRMED_DUPLICATE_COMMANDS = PURE_DUPLICATE_COMMANDS
-RESTORED_COMMANDS = SLASH_COMMANDS
-LOW_VALUE_REMOVED_COMMANDS = frozenset()
-LOW_VALUE_HIDDEN_COMMANDS = frozenset()
+RESTORED_COMMANDS = NORMAL_DIRECT_COMMANDS
+LOW_VALUE_REMOVED_COMMANDS = LOW_VALUE_HIDDEN_COMMANDS
 
 MERGED_COMMAND_TARGETS: dict[str, str] = {
     **{name: "setup" for name in SETUP_MERGED_COMMANDS},
@@ -122,20 +109,20 @@ MERGED_COMMAND_TARGETS: dict[str, str] = {
 }
 
 SHORT_COMMAND_NAMES: dict[str, str] = {
-    "permission-audit": "perms", "quarantine": "quar", "unquarantine": "unquar",
-    "role-snapshot": "rolesave", "role-restore": "roleload", "server-backup": "backup",
-    "server-restore": "restore", "lockdown-server": "lockdown",
+    "permission-audit": "perms",
+    "quarantine": "quar",
+    "unquarantine": "unquar",
+    "role-snapshot": "rolesave",
+    "role-restore": "roleload",
+    "server-backup": "backup",
+    "server-restore": "restore",
+    "lockdown-server": "lockdown",
     "unlock-server": "unlockdown",
 }
-KEEP_AS_IS = frozenset({"bl", "nick"})
-
-# Ce qui doit disparaître de +help, mais PAS de l'exécution préfixée historique.
-HELP_HIDDEN_COMMANDS = PURE_DUPLICATE_COMMANDS | MERGED_COMMANDS
-
-
-def slash_surface_names() -> frozenset[str]:
-    """Noms racine autorisés dans Discord `/` (nickname est exposé sous `/nick`)."""
-    return frozenset("nick" if name == "nickname" else name for name in SLASH_COMMANDS)
+KEEP_AS_IS = frozenset({
+    "antiaccount", "antibot", "anticaps", "antiemoji", "antiinvite", "antilink",
+    "antimention", "antinuke", "antiraid", "antiscam", "antispam", "bl",
+})
 
 
 def _install_short_command_names() -> None:
@@ -149,17 +136,23 @@ def _install_short_command_names() -> None:
 
 
 def apply_surface(bot: commands.Bot) -> None:
-    """Rend les commandes + faciles à découvrir sans réafficher les anciens doublons."""
+    """Rend visibles uniquement les commandes directes, sans casser les anciennes +."""
+    direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS
     for command in bot.commands:
         name = command.name.casefold()
-        command.hidden = name in HELP_HIDDEN_COMMANDS
+        if name in direct:
+            command.hidden = False
+        elif name in PURE_DUPLICATE_COMMANDS:
+            continue
+        else:
+            command.hidden = True
 
     help_command = bot.get_command("help")
     if help_command is not None:
         help_command.hidden = False
-        checks = getattr(help_command, "checks", None)
-        if isinstance(checks, list):
-            checks.clear()
+        command_checks = getattr(help_command, "checks", None)
+        if isinstance(command_checks, list):
+            command_checks.clear()
         app = getattr(help_command, "app_command", None)
         app_checks = getattr(app, "checks", None)
         if isinstance(app_checks, list):
@@ -167,6 +160,7 @@ def apply_surface(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
+    """Installe la politique puis la réapplique après chaque chargement de cog."""
     global _INSTALLED
     import main
 
@@ -176,17 +170,19 @@ def install(bot: commands.Bot) -> None:
         main.PRUNED_COMMANDS = PURE_DUPLICATE_COMMANDS
         main.PUBLIC_COMMANDS = main.PUBLIC_COMMANDS | {"help", "ticket", "giveaway"}
         main.KNOWN_PERMISSION_COMMANDS = (
-            main.PUBLIC_COMMANDS | main.OWNER_ONLY_COMMANDS | main.CUSTOM_PERMISSION_COMMANDS |
-            frozenset(main.DISCORD_PERMISSION_COMMANDS) |
-            frozenset().union(*main.CATEGORY_COMMANDS.values()) |
-            {"giveaway", "ticket", "security", "panic"}
+            main.PUBLIC_COMMANDS
+            | main.OWNER_ONLY_COMMANDS
+            | main.CUSTOM_PERMISSION_COMMANDS
+            | frozenset(main.DISCORD_PERMISSION_COMMANDS)
+            | frozenset().union(*main.CATEGORY_COMMANDS.values())
+            | {"giveaway", "ticket", "security", "panic"}
         )
         _install_short_command_names()
         _INSTALLED = True
 
     apply_surface(bot)
     logger.info(
-        "Catalogue SentriX : %s racines slash utiles ; anciennes commandes + recherchables, "
-        "doublons/anciens réglages fusionnés masqués de l'aide.",
-        len(slash_surface_names()),
+        "Surface SentriX : %s commandes directes normales, %s admin, %s jeux; "
+        "anciennes commandes fusionnées conservées en + mais masquées.",
+        len(NORMAL_DIRECT_COMMANDS), len(ADMIN_DIRECT_COMMANDS), len(GAME_COMMANDS),
     )

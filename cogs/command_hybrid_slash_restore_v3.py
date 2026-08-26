@@ -4,6 +4,10 @@ Le projet avait mis de nombreuses ``hybrid_command`` en ``with_app_command=False
 rester sous l'ancienne limite. Le budget central sait maintenant sélectionner au plus 100
 racines : on peut donc reconstruire proprement l'Application Command fournie nativement
 par discord.py, sans dupliquer la logique métier ni les paramètres.
+
+Les commandes recréées depuis une commande + sont marquées explicitement. La surface
+finale peut ainsi garder en priorité les vraies anciennes commandes / puis utiliser les
+places restantes pour ces conversions + -> /.
 """
 from __future__ import annotations
 
@@ -35,9 +39,11 @@ def install(bot: commands.Bot) -> None:
             continue
 
         try:
-            if command.app_command is None:
+            created_from_plus = command.app_command is None
+            if created_from_plus:
                 command.with_app_command = True
                 command.app_command = HybridAppCommand(command)
+                command._sentrix_slash_from_plus = True
             bot.tree.add_command(command.app_command, override=True)
             restored += 1
         except (TypeError, ValueError) as exc:

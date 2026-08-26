@@ -15,9 +15,6 @@ jobs:
   preproduction:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      DISCORD_TOKEN: "ci.fake.token"
-      DATABASE_PATH: "/tmp/sentrix-preproduction.db"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,9 +36,6 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tests -p 'test_*.py'
 
-      - name: Canonical core contracts
-        run: python -m unittest tests.test_final_core_contract tests.test_easy_surface_contract -v
-
       - name: Production ops tests
         run: python -m unittest tests.test_production_ops -v
 
@@ -56,6 +50,9 @@ jobs:
 
       - name: Command error ownership
         run: python tools/command_error_ownership_gate.py
+
+      - name: V2.5 regression gate
+        run: python tools/v25_quality_gate.py
 
       - name: Permission matrix
         run: python tools/permission_matrix_gate.py

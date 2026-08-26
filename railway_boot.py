@@ -157,6 +157,33 @@ def _install_discord_readiness_healthcheck() -> None:
     logger.info("Healthcheck Railway lié à l'état réel de la connexion Discord.")
 
 
+def _install_sentrix_asset_route() -> None:
+    """Expose la bannière Ping sur le domaine Railway de SentriX.
+
+    Discord charge plus fiablement une image servie directement par l'application que
+    les URLs GitHub raw/attachment utilisées auparavant dans MediaGallery.
+    """
+    current = dashboard_web.build_app
+    if getattr(current, "_sentrix_asset_route", False):
+        return
+
+    def build_app_with_assets(bot):
+        app = current(bot)
+
+        async def ping_banner(_request):
+            response = aiohttp_web.FileResponse("assets/sentrix-log-header.png")
+            response.headers["Cache-Control"] = "public, max-age=86400"
+            return response
+
+        app.router.add_get("/assets/sentrix-ping-banner.png", ping_banner)
+        return app
+
+    build_app_with_assets._sentrix_asset_route = True
+    build_app_with_assets._sentrix_original = current
+    dashboard_web.build_app = build_app_with_assets
+    logger.info("Bannière Ping SentriX exposée via Railway.")
+
+
 async def _prepare_durable_store(bot) -> DurableDatabaseReplica:
     durable = DurableDatabaseReplica(config.DATABASE_PATH)
     bot.sentrix_durable_store = durable
@@ -189,8 +216,9 @@ async def run() -> None:
     from cogs.live_command_gate_v19 import install as install_live_command_gate_v19
     install_live_command_gate_v19(bot)
 
-    # Le handler doit être remplacé AVANT build_app() / start_dashboard().
+    # Les handlers doivent être remplacés AVANT build_app() / start_dashboard().
     _install_discord_readiness_healthcheck()
+    _install_sentrix_asset_route()
 
     durable = await _prepare_durable_store(bot)
 
