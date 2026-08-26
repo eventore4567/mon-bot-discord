@@ -1,7 +1,10 @@
 """Utilitaires partagés de SentriX.
 
-Les transports Discord ne sont volontairement pas patchés depuis ce package. Le rendu
-des commandes est centralisé par ``cogs.plain_response_policy`` et le thème final par
-``utils.command_style_v2``. Garder ce fichier neutre évite les doubles wrappers et les
-régressions sur les commandes.
+Le renderer V6 est chargé ici une seule fois afin que toutes les commandes et tous les
+journaux utilisent la même largeur et la même compacité, sans ajouter de nouveau
+transport Discord.
 """
+
+from . import wide_compact_v6 as _wide_compact_v6
+
+_wide_compact_v6.install()
