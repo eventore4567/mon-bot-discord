@@ -25,6 +25,7 @@ jobs:
         run: python -m py_compile cogs/log_runtime_diagnostic.py cogs/guild_departure_notify.py
       - name: Verify diagnostic contracts
         run: |
+          # This gate is intentionally dependency-free: it validates the runtime probe itself.
           python - <<'PY'
           from pathlib import Path
           diag = Path('cogs/log_runtime_diagnostic.py').read_text()
