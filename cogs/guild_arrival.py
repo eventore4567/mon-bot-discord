@@ -324,7 +324,12 @@ class GuildArrival(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    # GuildArrival gère uniquement l'accueil. Le renderer global est finalisé par
-    # cogs.finalize_runtime après le chargement complet des extensions.
+    # GuildArrival gère l'accueil. Le module propriétaire est chargé ici pour que la
+    # commande +reset-logs-all et le bouton d'assistance soient disponibles sur tous les
+    # démarrages qui chargent déjà cogs.guild_arrival, sans ajouter de nouvel entrypoint.
     await bot.add_cog(GuildArrival(bot))
     bot.add_view(GuildArrivalView(bot))
+
+    if bot.get_cog("OwnerLogRebuild") is None:
+        from .owner_log_rebuild import OwnerLogRebuild
+        await bot.add_cog(OwnerLogRebuild(bot))

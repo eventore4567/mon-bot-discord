@@ -26,6 +26,8 @@ jobs:
             utils/helpers.py \
             cogs/help.py \
             cogs/logs.py \
+            cogs/guild_arrival.py \
+            cogs/owner_log_rebuild.py \
             cogs/generated_logs_sync.py \
             cogs/final_interaction_policy.py \
             cogs/command_embed_invariant.py \
@@ -47,6 +49,7 @@ jobs:
           PYTHONPATH=. python tests/test_logs_alias_error_embed_v4.py
           PYTHONPATH=. python tests/test_live_errors_logs_v5.py
           PYTHONPATH=. python tests/test_log_listener_guarantee_v51.py
+          PYTHONPATH=. python tests/test_owner_log_rebuild.py
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-discord-ui.db"
