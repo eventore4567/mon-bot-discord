@@ -29,6 +29,7 @@ jobs:
             cogs/final_interaction_policy.py \
             cogs/command_embed_invariant.py \
             cogs/production_embed_log_repair.py \
+            cogs/production_embed_log_repair_v3.py \
             cogs/slash_error_completion_guard.py \
             cogs/error_experience_v3.py \
             cogs/command_error_release_v41.py \
@@ -38,6 +39,7 @@ jobs:
           PYTHONPATH=. python tests/test_discord_ui_contract.py
           PYTHONPATH=. python tests/test_command_embed_invariant.py
           PYTHONPATH=. python tests/test_production_embed_log_repair.py
+          PYTHONPATH=. python tests/test_production_embed_log_repair_v3.py
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-discord-ui.db"
