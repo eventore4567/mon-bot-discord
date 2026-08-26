@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - 'cogs/log_runtime_diagnostic.py'
+      - 'cogs/log_transport_v52.py'
       - 'cogs/guild_departure_notify.py'
       - '.github/workflows/log-runtime-diagnostic.yml'
   pull_request:
     paths:
       - 'cogs/log_runtime_diagnostic.py'
+      - 'cogs/log_transport_v52.py'
       - 'cogs/guild_departure_notify.py'
       - '.github/workflows/log-runtime-diagnostic.yml'
 
@@ -21,14 +23,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Compile diagnostic
-        run: python -m py_compile cogs/log_runtime_diagnostic.py cogs/guild_departure_notify.py
+      - name: Compile diagnostic and canonical transport
+        run: python -m py_compile cogs/log_runtime_diagnostic.py cogs/log_transport_v52.py cogs/guild_departure_notify.py
       - name: Verify diagnostic contracts
         run: |
-          # This gate is intentionally dependency-free: it validates the runtime probe itself.
           python - <<'PY'
           from pathlib import Path
           diag = Path('cogs/log_runtime_diagnostic.py').read_text()
+          transport = Path('cogs/log_transport_v52.py').read_text()
           loader = Path('cogs/guild_departure_notify.py').read_text()
           assert 'name="logs-diag"' in diag
           assert '@checks.is_bot_owner()' in diag
@@ -38,6 +40,12 @@ jobs:
           assert 'RAILWAY_GIT_COMMIT_SHA' in diag
           assert 'gateway_counts' in diag
           assert 'official_attempts' in diag
-          assert 'log_runtime_diagnostic.install(bot)' in loader
-          print('live log diagnostic contracts OK')
+          assert 'async def send_log_v52(' in transport
+          assert '_unwrap_messageable_send' in transport
+          assert 'log_service._is_duplicate' in transport
+          assert 'LOG_ALLOWED_MENTIONS' in transport
+          assert 'log_service.send_log = send_log_v52' in transport
+          assert 'log_transport_v52.install(bot)' in loader
+          assert loader.index('log_transport_v52.install(bot)') < loader.index('log_runtime_diagnostic.install(bot)')
+          print('live log diagnostic + V5.2 canonical transport contracts OK')
           PY
