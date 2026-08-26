@@ -1,9 +1,8 @@
 """Ferme les placeholders slash puis installe les autorités finales du runtime.
 
-Cette extension est la dernière ajoutée par ``railway_boot.py``. V5 est volontairement
-installée tout à la fin : livraison des logs avec auto-réparation au moment de l'événement,
-puis erreurs via le transport Discord brut afin qu'aucune couche suivante ne puisse les
-reconvertir en texte ou modifier leur carte.
+Cette extension est la dernière ajoutée par ``railway_boot.py``. V5/V5.1 sont installées
+tout à la fin : livraison auto-réparée, garantie des listeners Logs indépendamment du
+cache SQLite, puis erreurs via le transport Discord brut.
 """
 from __future__ import annotations
 
@@ -191,17 +190,24 @@ def install(bot: commands.Bot) -> None:
 async def setup(bot: commands.Bot) -> None:
     install(bot)
 
-    # V3 reste utile pour les migrations de démarrage et le contexte des commandes.
     from . import command_embed_invariant
     from . import production_embed_log_repair_v3
 
     command_embed_invariant.install(bot)
     await production_embed_log_repair_v3.setup(bot)
 
-    # V5 DOIT rester la dernière autorité chargée par Railway.
+    # V5 : réparation de route au moment de l'événement.
     from . import live_log_delivery_v5
-    from . import final_error_embed_v5
-
     live_log_delivery_v5.install(bot)
+
+    # V5.1 : même si le setup de cogs.logs s'est interrompu sur SQLite, les listeners
+    # officiels sont enregistrés directement avant que le runtime soit déclaré prêt.
+    from . import log_listener_guarantee_v51
+    await log_listener_guarantee_v51.install(bot)
+
+    # Dernière autorité absolue : erreurs envoyées par transport Discord brut.
+    from . import final_error_embed_v5
     final_error_embed_v5.install(bot)
-    logger.info("Runtime final V5 actif : logs live auto-réparés + erreurs en embed Discord natif.")
+    logger.info(
+        "Runtime final V5.1 actif : routes live + listeners garantis + erreurs en embed Discord natif."
+    )
