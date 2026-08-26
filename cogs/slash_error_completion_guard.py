@@ -12,6 +12,8 @@ import time
 import discord
 from discord.ext import commands
 
+from utils import embeds
+
 logger = logging.getLogger("bot.slash-error-completion")
 _ERROR_FALLBACK = (
     "La commande est terminée, mais SentriX a rencontré une erreur pendant sa finalisation."
@@ -135,16 +137,18 @@ async def _settle_error_defer(
         return
 
     try:
+        # Ne jamais laisser ce chemin de secours en texte brut : c'était le dernier
+        # fallback qui écrivait explicitement ``content=...`` avec ``embeds=[]``.
         await interaction.edit_original_response(
-            content=_ERROR_FALLBACK,
-            embeds=[],
+            content=None,
+            embed=embeds.error(_ERROR_FALLBACK, title="Erreur de commande"),
             attachments=[],
             view=None,
         )
-        state["last_result"] = "error_defer_settled"
+        state["last_result"] = "error_defer_settled_embed"
         state["last_settled_at"] = int(time.time())
         logger.info(
-            "Placeholder slash fermé sur erreur : /%s (%s).",
+            "Placeholder slash fermé en embed sur erreur : /%s (%s).",
             state["last_command_name"],
             state["last_error_type"],
         )
