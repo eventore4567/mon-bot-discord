@@ -1,15 +1,13 @@
 """SentriX V6 — renderer global large et bas.
 
-Cette couche ne change aucune logique métier. Elle ajuste uniquement le rendu final :
-largeur constante, hauteur réduite, champs courts regroupés horizontalement, aucune
-bannière de marque et conservation des vraies images métier (avatar, résultat image...).
-
-Les anciens séparateurs en caractères et les barres de progression textuelles ont été
-supprimés à la source : l'espacement natif de Discord assure désormais la hiérarchie.
+Une seule grande ligne est affichée sous le titre de chaque commande. Sa longueur est
+volontairement fixe et suffisamment courte pour ne jamais se couper sur une seconde ligne.
+Les anciennes lignes décoratives sont supprimées avant rendu afin d'éviter les doublons.
 """
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 import discord
@@ -17,20 +15,22 @@ import discord
 from . import embeds as sx
 
 
-LONG_BAR = ""
+# 42 caractères : grande visuellement, mais sans débordement sur les cartes compactes.
+LONG_BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 _BANNER_URL = str(getattr(sx, "SENTRIX_BANNER_URL", "") or "")
 _INSTALLED = False
 _SEPARATOR_LINE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]+$")
 
 
 def _strip_legacy_separators(value: Any) -> str:
-    """Retire toutes les anciennes lignes décoratives sans toucher au vrai contenu."""
-    lines = []
-    for line in str(value or "").replace("\r", "").splitlines():
+    """Retire toutes les anciennes lignes décoratives, y compris les barres trop longues."""
+    lines: list[str] = []
+    for raw_line in str(value or "").replace("\r", "").splitlines():
+        line = raw_line.rstrip()
         stripped = line.strip()
         if stripped and len(stripped) >= 3 and _SEPARATOR_LINE.fullmatch(stripped):
             continue
-        lines.append(line.rstrip())
+        lines.append(line)
 
     cleaned: list[str] = []
     blank = False
@@ -47,6 +47,12 @@ def _strip_legacy_separators(value: Any) -> str:
     return "\n".join(cleaned).strip()
 
 
+def _with_bar(value: Any, limit: int = 4096) -> str:
+    body = _strip_legacy_separators(value)
+    text = f"{LONG_BAR}\n{body}" if body else LONG_BAR
+    return sx.clip(text, limit)
+
+
 def _one_line(value: Any, limit: int = 150) -> str:
     text = _strip_legacy_separators(value).replace("\n", " · ")
     text = re.sub(r"[ \t]{2,}", " ", text).strip()
@@ -57,9 +63,7 @@ def _can_compact(value: Any, requested: bool | None) -> bool:
     if requested is False:
         return False
     raw = str(value or "").strip()
-    if not raw:
-        return False
-    if raw.count("\n") > 1:
+    if not raw or raw.count("\n") > 1:
         return False
     return len(_one_line(raw, 180)) <= 180
 
@@ -90,7 +94,7 @@ def _append_compact(embed: discord.Embed, items: list[tuple[str, str]]) -> None:
         return
     description = _strip_legacy_separators(embed.description)
     combined = f"{description}\n{block}" if description else block
-    embed.description = sx.clip(combined, 4096)
+    embed.description = _with_bar(combined, 4096)
 
 
 def _base(
@@ -109,12 +113,11 @@ def _base(
     safe_title = sx.clean_ui_text(title, 90, "Information")
     resolved_kind = kind or sx._kind_from_text(safe_title, description)
     body = sx.clean_multiline_ui_text(description, 3960) if clean_description else sx.clip(description, 3960)
-    body = _strip_legacy_separators(body)
     embed = discord.Embed(
         title=safe_title,
-        description=body or None,
+        description=_with_bar(body, 4096),
         colour=discord.Colour(sx._colour(resolved_kind, colour)),
-        timestamp=sx.datetime.now(sx.timezone.utc) if timestamp else None,
+        timestamp=datetime.now(timezone.utc) if timestamp else None,
     )
     if thumbnail:
         embed.set_thumbnail(url=str(thumbnail))
@@ -176,10 +179,7 @@ def _avatar_from_description(embed: discord.Embed, bot: Any) -> str | None:
     if not match:
         return None
     user_id = int(match.group(1))
-    target = None
-    getter = getattr(bot, "get_user", None)
-    if callable(getter):
-        target = getter(user_id)
+    target = getattr(bot, "get_user", lambda _id: None)(user_id)
     if target is None:
         for guild in list(getattr(bot, "guilds", ()) or ()):
             member = guild.get_member(user_id)
@@ -213,7 +213,7 @@ def enrich_ping(embed: discord.Embed, bot: Any) -> discord.Embed:
     quality = _latency_quality(latency_ms)
     guilds = list(getattr(bot, "guilds", ()) or ())
     server_count = len(guilds)
-    member_count = sum(int(guild.member_count or 0) for guild in guilds)
+    member_count = sum(int(getattr(guild, "member_count", 0) or 0) for guild in guilds)
     shard_count = int(getattr(bot, "shard_count", None) or 1)
     is_closed = getattr(bot, "is_closed", None)
     active = not bool(is_closed()) if callable(is_closed) else True
@@ -221,7 +221,7 @@ def enrich_ping(embed: discord.Embed, bot: Any) -> discord.Embed:
     state = "Opérationnel" if active else "Indisponible"
 
     embed.title = "Ping"
-    embed.description = (
+    embed.description = _with_bar(
         f"## Latence : **{latency_ms} ms**\n"
         f"**Qualité :** {quality}\n\n"
         f"**Connexion :** {connection}   •   **État :** {state}\n"
@@ -256,8 +256,7 @@ def style_existing(
 
     root_key = str(root or "").casefold()
     embed.title = sx.clean_ui_text(embed.title, 256, "Information")
-    description = _strip_legacy_separators(embed.description)
-    embed.description = sx.clip(description, 4096) if description else None
+    embed.description = _with_bar(embed.description, 4096)
 
     image_url = str(getattr(getattr(embed, "image", None), "url", "") or "")
     if image_url and _BANNER_URL and image_url == _BANNER_URL:
@@ -301,7 +300,7 @@ def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
-    sx.BAR = ""
+    sx.BAR = LONG_BAR
     sx._base = _base
     sx.add_fields = add_fields
     sx.enrich_ping = enrich_ping
