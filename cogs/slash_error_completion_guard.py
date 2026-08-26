@@ -8,8 +8,8 @@ echouer pendant sa finalisation et laisser le defer ``thinking`` affiche sans fi
 Cette garde est chargee en dernier sur Railway. Elle enveloppe le handler d'erreur existant
 sans le remplacer fonctionnellement et, dans un ``finally``, remplace uniquement une
 reponse originale encore vide et differee. Toute vraie reponse deja envoyee est preservee.
-Elle réinstalle ensuite l'invariant embed final afin qu'aucune couche chargée tardivement ne
-puisse faire repasser une réponse de commande en texte brut.
+Elle installe ensuite le correctif de production embeds/logs en toute dernière position afin
+qu'aucune couche chargée auparavant ne puisse reprendre la main.
 """
 from __future__ import annotations
 
@@ -168,7 +168,6 @@ def install(bot: commands.Bot) -> None:
         try:
             return await current(interaction, error)
         finally:
-            # Le nettoyage doit avoir lieu meme si l'ancien handler d'erreur echoue lui-meme.
             try:
                 await _settle_error_defer(bot, interaction, error)
             except Exception as cleanup_exc:
@@ -191,9 +190,11 @@ def install(bot: commands.Bot) -> None:
 async def setup(bot: commands.Bot) -> None:
     install(bot)
 
-    # Cette extension est la dernière ajoutée par railway_boot.py. On installe donc ici,
-    # après les gardes defer/slash, l'invariant qui force toutes les sorties de commandes
-    # + et / à repasser par le renderer embed SentriX.
+    # Cette extension est la dernière ajoutée par railway_boot.py. L'ancien invariant reste
+    # installé pour compatibilité, puis le correctif V2 protège directement SentriXContext,
+    # enlève l'auto-ping et répare les migrations de logs entièrement désactivées.
     from . import command_embed_invariant
+    from . import production_embed_log_repair
 
     command_embed_invariant.install(bot)
+    await production_embed_log_repair.setup(bot)
