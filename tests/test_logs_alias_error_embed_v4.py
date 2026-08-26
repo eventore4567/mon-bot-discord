@@ -20,7 +20,8 @@ class LogAliasAndErrorEmbedV4Tests(unittest.TestCase):
             ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
     def test_create_logs_names_are_all_recognized(self):
-        # Noms réellement créés par cogs.configuration.LOG_CHANNEL_DEFINITIONS.
+        # Contrat critique : même si SQLite repart vide, les sept salons créés par
+        # Configuration.create_log_channels doivent suffire à reconstruire le routage.
         created_names = {
             "server": "logs-serveur",
             "messages": "logs-messages",
@@ -37,10 +38,13 @@ class LogAliasAndErrorEmbedV4Tests(unittest.TestCase):
         ]
         guild = SimpleNamespace(text_channels=channels)
 
+        recovered = 0
         for log_type, channel_name in created_names.items():
             channel = sync._find_log_channel(guild, log_type)
             self.assertIsNotNone(channel, log_type)
             self.assertEqual(channel.name, channel_name)
+            recovered += 1
+        self.assertEqual(recovered, 7)
 
     def test_historical_accented_plural_names_are_recognized(self):
         category = SimpleNamespace(name="LOGS")
