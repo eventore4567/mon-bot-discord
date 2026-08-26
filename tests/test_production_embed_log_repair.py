@@ -15,16 +15,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ProductionEmbedLogRepairTests(unittest.TestCase):
-    def test_sources_compile_and_last_guard_loads_repair(self):
+    def test_sources_compile_and_last_guard_loads_v3_over_v2(self):
         for rel in (
             "cogs/production_embed_log_repair.py",
+            "cogs/production_embed_log_repair_v3.py",
             "cogs/slash_error_completion_guard.py",
         ):
             path = ROOT / rel
             ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
         guard = (ROOT / "cogs" / "slash_error_completion_guard.py").read_text(encoding="utf-8")
-        self.assertIn("production_embed_log_repair", guard)
-        self.assertIn("await production_embed_log_repair.setup(bot)", guard)
+        v3_source = (ROOT / "cogs" / "production_embed_log_repair_v3.py").read_text(encoding="utf-8")
+        self.assertIn("production_embed_log_repair_v3", guard)
+        self.assertIn("await production_embed_log_repair_v3.setup(bot)", guard)
+        self.assertIn("production_embed_log_repair as v2", v3_source)
 
     def test_mass_recovery_only_for_old_all_disabled_state(self):
         self.assertTrue(repair._should_mass_recover(7, 0, False))
@@ -43,7 +47,6 @@ class ProductionEmbedLogRepairTests(unittest.TestCase):
             self.assertFalse(policy._plain_root("sentrix"))
             self.assertFalse(policy._plain_root("ping"))
         finally:
-            # No network connection is opened; close() is not required for this sync smoke.
             pass
 
     def test_command_payload_is_embed_even_for_sentrix_root(self):
