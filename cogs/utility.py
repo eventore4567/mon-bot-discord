@@ -689,7 +689,17 @@ class Utility(commands.Cog, name="Utility"):
 
     @commands.hybrid_command(name="ping", description="Afficher la latence du bot.")
     async def ping(self, ctx: commands.Context):
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Pong !", description=f"Latence : **{round(self.bot.latency * 1000)}ms**"))
+        latency_ms = max(0, round(self.bot.latency * 1000))
+        guild_id = ctx.guild.id if ctx.guild else None
+        style = design_system.CATEGORY_STYLES["utility"]
+        design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
+        e = design_system.create_embed(
+            title="SentriX — Ping",
+            description=f"Latence : **{latency_ms} ms**",
+            colour=design.get("primary_color", style["colour"]),
+            footer=design.get("footer"),
+        )
+        await ctx.send(embed=e)
 
     @commands.hybrid_command(name="avatar", description="Afficher l'avatar d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
@@ -897,7 +907,6 @@ class Utility(commands.Cog, name="Utility"):
         else:
             joined_value = "Date inconnue"
         e.add_field(name=f"Arrivée de {self.bot.user.name}", value=joined_value, inline=True)
-
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="userinfo", description="Afficher les informations d'un membre.")
@@ -1197,7 +1206,6 @@ class Utility(commands.Cog, name="Utility"):
             return await ctx.send(embed=await self._embed(ctx.guild.id, title="Création refusée", description="Discord refuse la création. Vérifiez la permission et la position du rôle du bot.", kind="danger"))
         except (aiohttp.ClientError, discord.HTTPException) as exc:
             return await ctx.send(embed=await self._embed(ctx.guild.id, title="Création impossible", description=f"Discord ou le serveur de l'image a refusé la demande : {exc}", kind="danger"))
-
         await ctx.send(embed=await self._embed(
             ctx.guild.id,
             title="Emoji ajouté",
