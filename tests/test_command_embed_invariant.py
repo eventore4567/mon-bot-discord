@@ -54,6 +54,41 @@ class CommandEmbedInvariantTests(unittest.TestCase):
         self.assertIsInstance(kwargs.get("embed"), discord.Embed)
         self.assertIn("Une nouvelle annonce est disponible.", str(kwargs["embed"].description))
 
+    def test_content_plus_existing_embed_has_no_plain_text(self):
+        existing = discord.Embed(title="Résultat", description="Détail métier")
+        args, kwargs = invariant._normalize_command_payload(
+            (),
+            {"content": "Texte historique hors embed", "embed": existing},
+            root="test",
+        )
+        self.assertEqual(args, ())
+        self.assertIsNone(kwargs.get("content"))
+        self.assertNotIn("embed", kwargs)
+        self.assertGreaterEqual(len(kwargs.get("embeds", [])), 2)
+        rendered = "\n".join(str(item.description or "") for item in kwargs["embeds"])
+        self.assertIn("Texte historique hors embed", rendered)
+        self.assertIn("Détail métier", rendered)
+
+    def test_ping_plus_existing_embed_keeps_only_mention_in_content(self):
+        role = "<@&1355855757991481476>"
+        existing = discord.Embed(title="Annonce", description="Détail")
+        allowed = discord.AllowedMentions(roles=True)
+        args, kwargs = invariant._normalize_command_payload(
+            (),
+            {
+                "content": f"{role} Nouvelle information importante.",
+                "embed": existing,
+                "allowed_mentions": allowed,
+            },
+            root="notify",
+        )
+        self.assertEqual(args, ())
+        self.assertEqual(kwargs.get("content"), role)
+        self.assertNotIn("embed", kwargs)
+        self.assertGreaterEqual(len(kwargs.get("embeds", [])), 2)
+        rendered = "\n".join(str(item.description or "") for item in kwargs["embeds"])
+        self.assertIn("Nouvelle information importante.", rendered)
+
     def test_ping_stub_deduplicates_mentions(self):
         member = "<@1355855757991481475>"
         role = "<@&1355855757991481476>"
