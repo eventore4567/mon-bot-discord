@@ -3,6 +3,9 @@
 Cette couche ne change aucune logique métier. Elle ajuste uniquement le rendu final :
 largeur constante, hauteur réduite, champs courts regroupés horizontalement, aucune
 bannière de marque et conservation des vraies images métier (avatar, résultat image...).
+
+Les anciens séparateurs en caractères et les barres de progression textuelles ont été
+supprimés à la source : l'espacement natif de Discord assure désormais la hiérarchie.
 """
 from __future__ import annotations
 
@@ -14,13 +17,38 @@ import discord
 from . import embeds as sx
 
 
-LONG_BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+LONG_BAR = ""
 _BANNER_URL = str(getattr(sx, "SENTRIX_BANNER_URL", "") or "")
 _INSTALLED = False
+_SEPARATOR_LINE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]+$")
+
+
+def _strip_legacy_separators(value: Any) -> str:
+    """Retire toutes les anciennes lignes décoratives sans toucher au vrai contenu."""
+    lines = []
+    for line in str(value or "").replace("\r", "").splitlines():
+        stripped = line.strip()
+        if stripped and len(stripped) >= 3 and _SEPARATOR_LINE.fullmatch(stripped):
+            continue
+        lines.append(line.rstrip())
+
+    cleaned: list[str] = []
+    blank = False
+    for line in lines:
+        if not line.strip():
+            if cleaned and not blank:
+                cleaned.append("")
+            blank = True
+            continue
+        cleaned.append(line)
+        blank = False
+    while cleaned and not cleaned[-1].strip():
+        cleaned.pop()
+    return "\n".join(cleaned).strip()
 
 
 def _one_line(value: Any, limit: int = 150) -> str:
-    text = str(value or "").replace("\r", " ").replace("\n", " · ")
+    text = _strip_legacy_separators(value).replace("\n", " · ")
     text = re.sub(r"[ \t]{2,}", " ", text).strip()
     return sx.clip(text, limit)
 
@@ -31,7 +59,6 @@ def _can_compact(value: Any, requested: bool | None) -> bool:
     raw = str(value or "").strip()
     if not raw:
         return False
-    # Deux petites lignes (ex. mention + ID) deviennent une seule ligne compacte.
     if raw.count("\n") > 1:
         return False
     return len(_one_line(raw, 180)) <= 180
@@ -61,12 +88,8 @@ def _append_compact(embed: discord.Embed, items: list[tuple[str, str]]) -> None:
     block = _compact_lines(items)
     if not block:
         return
-    description = str(embed.description or "").strip()
-    if not description:
-        description = LONG_BAR
-    elif not description.startswith(LONG_BAR):
-        description = f"{LONG_BAR}\n{description}"
-    combined = f"{description}\n{block}"
+    description = _strip_legacy_separators(embed.description)
+    combined = f"{description}\n{block}" if description else block
     embed.description = sx.clip(combined, 4096)
 
 
@@ -86,10 +109,10 @@ def _base(
     safe_title = sx.clean_ui_text(title, 90, "Information")
     resolved_kind = kind or sx._kind_from_text(safe_title, description)
     body = sx.clean_multiline_ui_text(description, 3960) if clean_description else sx.clip(description, 3960)
-    panel_description = f"{LONG_BAR}\n{body}" if body else LONG_BAR
+    body = _strip_legacy_separators(body)
     embed = discord.Embed(
         title=safe_title,
-        description=panel_description,
+        description=body or None,
         colour=discord.Colour(sx._colour(resolved_kind, colour)),
         timestamp=sx.datetime.now(sx.timezone.utc) if timestamp else None,
     )
@@ -119,11 +142,11 @@ def add_fields(
             compact.append((safe_name, _one_line(raw_value, 180)))
         else:
             inline = sx._field_inline(safe_name, raw_value, requested)
-            normal.append((safe_name, raw_value, inline))
+            normal.append((safe_name, _strip_legacy_separators(raw_value), inline))
 
     _append_compact(embed, compact)
     for name, value, inline in normal:
-        embed.add_field(name=name, value=value, inline=inline)
+        embed.add_field(name=name, value=value or "—", inline=inline)
     return embed
 
 
@@ -132,11 +155,11 @@ def _compact_existing_fields(embed: discord.Embed) -> None:
     normal: list[tuple[str, str, bool]] = []
     for field in list(embed.fields):
         name = sx.clean_ui_text(field.name, 256, "Information")
-        value = str(field.value or "—")[:1024]
+        value = _strip_legacy_separators(str(field.value or "—")[:1024])
         if bool(field.inline) and _can_compact(value, True) and len(compact) < 9:
             compact.append((name, _one_line(value, 180)))
         else:
-            normal.append((name, value, bool(field.inline)))
+            normal.append((name, value or "—", bool(field.inline)))
 
     if compact:
         embed.clear_fields()
@@ -173,21 +196,21 @@ def _avatar_from_description(embed: discord.Embed, bot: Any) -> str | None:
     return str(getattr(asset, "url", "") or "") or None
 
 
-def _latency_quality(latency_ms: int) -> tuple[str, str]:
+def _latency_quality(latency_ms: int) -> str:
     if latency_ms <= 80:
-        return "Excellente", "██████████"
+        return "Excellente"
     if latency_ms <= 140:
-        return "Très bonne", "█████████░"
+        return "Très bonne"
     if latency_ms <= 220:
-        return "Correcte", "███████░░░"
-    return "Dégradée", "████░░░░░░"
+        return "Correcte"
+    return "Dégradée"
 
 
 def enrich_ping(embed: discord.Embed, bot: Any) -> discord.Embed:
     if bot is None:
         return embed
     latency_ms = max(0, round(float(getattr(bot, "latency", 0.0)) * 1000))
-    quality, quality_bar = _latency_quality(latency_ms)
+    quality = _latency_quality(latency_ms)
     guilds = list(getattr(bot, "guilds", ()) or ())
     server_count = len(guilds)
     member_count = sum(int(guild.member_count or 0) for guild in guilds)
@@ -199,17 +222,25 @@ def enrich_ping(embed: discord.Embed, bot: Any) -> discord.Embed:
 
     embed.title = "Ping"
     embed.description = (
-        f"{LONG_BAR}\n"
-        f"**Latence**  {latency_ms} ms   •   **Qualité**  {quality}   `{quality_bar}`\n"
-        f"**Connexion**  {connection}   •   **État**  {state}   •   "
-        f"**Serveurs**  {server_count:,}   •   **Membres**  {member_count:,}   •   **Shards**  {shard_count}"
+        f"## Latence : **{latency_ms} ms**\n"
+        f"**Qualité :** {quality}\n\n"
+        f"**Connexion :** {connection}   •   **État :** {state}\n"
+        f"**Serveurs :** {server_count:,}   •   **Membres :** {member_count:,}   •   **Shards :** {shard_count}"
     )
     embed.clear_fields()
     try:
         embed.remove_image()
     except Exception:
         pass
-    embed.colour = discord.Colour(sx.COLOR_INFO)
+    if latency_ms <= 80:
+        colour = sx.COLOR_SUCCESS
+    elif latency_ms <= 140:
+        colour = sx.COLOR_INFO
+    elif latency_ms <= 220:
+        colour = sx.COLOR_WARNING
+    else:
+        colour = sx.COLOR_DANGER
+    embed.colour = discord.Colour(colour)
     embed.set_footer(text="SentriX • Mesure en temps réel")
     return embed
 
@@ -225,17 +256,9 @@ def style_existing(
 
     root_key = str(root or "").casefold()
     embed.title = sx.clean_ui_text(embed.title, 256, "Information")
+    description = _strip_legacy_separators(embed.description)
+    embed.description = sx.clip(description, 4096) if description else None
 
-    description = str(embed.description or "").strip()
-    # Convertit aussi l'ancienne barre courte vers la nouvelle barre large.
-    old_bar = str(getattr(sx, "BAR", "") or "")
-    for prefix in (old_bar, LONG_BAR):
-        if prefix and description.startswith(prefix):
-            description = description[len(prefix):].lstrip("\n")
-            break
-    embed.description = f"{LONG_BAR}\n{sx.clip(description, 3970)}" if description else LONG_BAR
-
-    # Une ancienne bannière SentriX ne doit plus survivre dans une commande.
     image_url = str(getattr(getattr(embed, "image", None), "url", "") or "")
     if image_url and _BANNER_URL and image_url == _BANNER_URL:
         try:
@@ -248,8 +271,6 @@ def style_existing(
 
     _compact_existing_fields(embed)
 
-    # +avatar garde sa vraie image. Si l'ancien code n'a rien placé, on récupère
-    # l'utilisateur depuis la mention déjà présente dans la réponse.
     if root_key == "avatar":
         image_url = str(getattr(getattr(embed, "image", None), "url", "") or "")
         if not image_url:
@@ -280,7 +301,7 @@ def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
-    sx.BAR = LONG_BAR
+    sx.BAR = ""
     sx._base = _base
     sx.add_fields = add_fields
     sx.enrich_ping = enrich_ping
