@@ -1,29 +1,24 @@
-"""Régression : une seule réponse IA passive par message Discord."""
+"""Contrats de l'autorité finale des réponses IA passives."""
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 
 from cogs import passive_ai_single_reply_final as guard
 
 
-class FakePool:
-    def __init__(self):
-        self.claims: set[tuple[str, int]] = set()
-        self.created = False
+def _bot(*, user=None):
+    return SimpleNamespace(user=user, prefix_cache={})
 
-    async def execute(self, sql, *args):
-        if "CREATE TABLE" in sql:
-            self.created = True
-        return "OK"
 
-    async def fetchrow(self, sql, *args):
-        instance_key, message_id = str(args[0]), int(args[1])
-        key = (instance_key, message_id)
-        if key in self.claims:
-            return None
-        self.claims.add(key)
-        return {"message_id": message_id}
+def _message(content="sentrix yo", *, guild=True, author_bot=False, mentions=None):
+    author = SimpleNamespace(bot=author_bot)
+    return SimpleNamespace(
+        id=123456789012345678,
+        content=content,
+        guild=SimpleNamespace(id=42) if guild else None,
+        author=author,
+        mentions=list(mentions or []),
+    )
 
 
 def test_primary_service_identity(monkeypatch):
@@ -38,66 +33,55 @@ def test_secondary_service_identity(monkeypatch):
     assert guard._is_primary_service() is False
 
 
-def test_same_message_id_is_claimed_once_locally():
-    guard._RECENT_MESSAGE_IDS.clear()
-    message = SimpleNamespace(id=123456789012345678)
-    assert guard._claim_message(message) is True
-    assert guard._claim_message(message) is False
+def test_identity_detects_all_four_ai_responder_sources():
+    expected = {
+        "cogs.ai": ("on_message", "primary"),
+        "cogs.ai_api_hotfix": ("fallback_on_message", "api_fallback"),
+        "cogs.ai_reply_recovery": ("backup_on_message", "recovery"),
+        "cogs.bot_experience_v5": ("natural_continuation", "experience"),
+    }
+    for module, (name, kind) in expected.items():
+        async def callback(message):
+            return message
+        callback.__module__ = module
+        callback.__name__ = name
+        detected, _, original = guard._identity(callback)
+        assert detected == kind
+        assert original is callback
 
 
-def test_different_message_ids_are_never_rate_limited_locally():
-    guard._RECENT_MESSAGE_IDS.clear()
-    first = SimpleNamespace(id=123456789012345678)
-    second = SimpleNamespace(id=123456789012345679)
-    assert guard._claim_message(first) is True
-    assert guard._claim_message(second) is True
-
-
-def test_same_message_id_has_one_global_postgres_winner():
-    guard._TABLE_READY_POOLS.clear()
-    pool = FakePool()
-    bot = SimpleNamespace(
-        sentrix_durable_store=SimpleNamespace(pool=pool, instance_key="sentrix")
-    )
-    message = SimpleNamespace(id=123456789012345678)
-
-    first = asyncio.run(guard._claim_shared(bot, message))
-    second = asyncio.run(guard._claim_shared(bot, message))
-
-    assert first == (True, "postgres")
-    assert second == (False, "postgres")
-    assert pool.created is True
-
-
-def test_different_message_ids_both_win_postgres_immediately():
-    guard._TABLE_READY_POOLS.clear()
-    pool = FakePool()
-    bot = SimpleNamespace(
-        sentrix_durable_store=SimpleNamespace(pool=pool, instance_key="sentrix")
-    )
-
-    first = asyncio.run(
-        guard._claim_shared(bot, SimpleNamespace(id=123456789012345678))
-    )
-    second = asyncio.run(
-        guard._claim_shared(bot, SimpleNamespace(id=123456789012345679))
-    )
-
-    assert first == (True, "postgres")
-    assert second == (True, "postgres")
-
-
-def test_ai_listener_detection_only_targets_cogs_ai():
-    async def unrelated(message):
+def test_unrelated_on_message_listener_is_never_targeted():
+    async def callback(message):
         return message
+    callback.__module__ = "cogs.logs"
+    callback.__name__ = "on_message"
+    detected, _, _ = guard._identity(callback)
+    assert detected is None
 
-    unrelated.__module__ = "cogs.logs"
-    unrelated.__name__ = "on_message"
-    assert guard._is_ai_on_message(unrelated) is False
 
-    async def ai_listener(message):
-        return message
+def test_primary_coordinates_only_explicit_guild_trigger():
+    bot = _bot()
+    assert guard._should_coordinate(bot, "primary", _message("sentrix yo", guild=True)) is True
+    assert guard._should_coordinate(bot, "primary", _message("bonjour", guild=True)) is False
+    assert guard._should_coordinate(bot, "primary", _message("sentrix yo", guild=False)) is False
 
-    ai_listener.__module__ = "cogs.ai"
-    ai_listener.__name__ = "on_message"
-    assert guard._is_ai_on_message(ai_listener) is True
+
+def test_fallbacks_coordinate_explicit_trigger_in_dm_too():
+    bot = _bot()
+    dm = _message("sentrix yo", guild=False)
+    assert guard._should_coordinate(bot, "api_fallback", dm) is True
+    assert guard._should_coordinate(bot, "recovery", dm) is True
+
+
+def test_experience_coordinates_dm_but_not_guild_wake_word():
+    bot = _bot()
+    assert guard._should_coordinate(bot, "experience", _message("yo", guild=False)) is True
+    assert guard._should_coordinate(bot, "experience", _message("sentrix yo", guild=True)) is False
+
+
+def test_prefixed_commands_are_never_claimed_as_passive_ai(monkeypatch):
+    monkeypatch.setattr(guard.config, "DEFAULT_PREFIX", "+")
+    bot = _bot()
+    command = _message("+help", guild=True)
+    assert guard._should_coordinate(bot, "primary", command) is False
+    assert guard._should_coordinate(bot, "recovery", command) is False
