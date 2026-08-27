@@ -25,9 +25,13 @@ jobs:
             cogs/owner_log_rebuild_v2.py \
             cogs/owner_log_rebuild_v2_health.py \
             cogs/owner_log_rebuild_v2_concurrency.py \
+            cogs/generated_logs_sync.py \
+            cogs/logs_unified_v6.py \
             cogs/slash_error_completion_guard.py
       - name: Run reset logs V2 contracts
-        run: PYTHONPATH=. python tests/test_owner_log_rebuild_v2_resilience.py
+        run: |
+          PYTHONPATH=. python tests/test_owner_log_rebuild_v2_resilience.py
+          PYTHONPATH=. python tests/test_logs_unified_v6.py
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-reset-logs-v2.db"
