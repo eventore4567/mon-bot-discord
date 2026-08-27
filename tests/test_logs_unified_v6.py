@@ -72,11 +72,14 @@ def test_ticket_transcript_is_a_button_not_a_permanent_gray_attachment():
     assert '"tickets",\n            panel,\n            view=_ticket_actions' in close_block
 
 
-def test_reset_moves_all_ticket_types_and_never_targets_moderator_only():
+def test_reset_moves_all_ticket_types_and_preserves_unrelated_staff_channels():
     source = read(V6)
     assert "UPDATE ticket_types SET log_channel_id = ? WHERE guild_id = ?" in source
-    assert "moderator-only" not in source
     assert "_cleanup_obsolete_sentrix_logs" in source
+    names_block = source[source.index("LEGACY_LOG_NAMES = {"):source.index("_CHANNEL_NAMES:")]
+    assert '"moderator-only"' not in names_block
+    assert 'name not in LEGACY_LOG_NAMES' in source
+    assert "sentrix_owned" in source
 
 
 if __name__ == "__main__":
@@ -87,5 +90,5 @@ if __name__ == "__main__":
     test_channel_name_survives_channel_deletion()
     test_deleted_attachments_are_archived_in_logs_dossiers()
     test_ticket_transcript_is_a_button_not_a_permanent_gray_attachment()
-    test_reset_moves_all_ticket_types_and_never_targets_moderator_only()
+    test_reset_moves_all_ticket_types_and_preserves_unrelated_staff_channels()
     print("logs unified v6 contracts: ok")
