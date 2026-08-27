@@ -1,10 +1,19 @@
 import asyncio
+import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 
 import discord
 from discord.ext import commands
 
-from cogs import cooldown_isolation_fix
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "sentrix_cooldown_isolation_runtime",
+    ROOT / "cogs" / "cooldown_isolation_fix.py",
+)
+assert SPEC is not None and SPEC.loader is not None
+cooldown_isolation_fix = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(cooldown_isolation_fix)
 
 
 class FakeDB:
