@@ -1,0 +1,33 @@
+name: SentriX No Cooldown Final
+
+# Final authority: no generic cooldown or command concurrency lock.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cogs/no_cooldown_final.py"
+      - "cogs/slash_error_completion_guard.py"
+      - "tests/test_no_cooldown_final.py"
+      - ".github/workflows/no-cooldown-final.yml"
+  pull_request:
+    paths:
+      - "cogs/no_cooldown_final.py"
+      - "cogs/slash_error_completion_guard.py"
+      - "tests/test_no_cooldown_final.py"
+      - ".github/workflows/no-cooldown-final.yml"
+
+jobs:
+  no-cooldown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install discord.py
+        run: python -m pip install "discord.py>=2.6.3"
+      - name: Compile final runtime
+        run: python -m py_compile cogs/no_cooldown_final.py cogs/slash_error_completion_guard.py
+      - name: Verify zero cooldown behavior
+        run: PYTHONPATH=. python tests/test_no_cooldown_final.py
