@@ -8,6 +8,7 @@ elle branche directement ``Logs._send`` sur le transport canonique.
 from __future__ import annotations
 
 import logging
+import re
 import time
 import types
 from typing import Any
@@ -20,6 +21,7 @@ from . import live_log_delivery_v5
 
 logger = logging.getLogger("bot.log-transport-v53")
 _MARKER = "_sentrix_log_transport_v53"
+_SEPARATOR_LINE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]+$")
 
 
 def _state(bot: commands.Bot) -> dict[str, Any]:
@@ -53,15 +55,37 @@ def _unwrap_messageable_send():
     return current
 
 
+def _force_command_divider(embed: discord.Embed) -> discord.Embed:
+    """Force exactement la grande barre des commandes sous le titre de chaque log."""
+    if not isinstance(embed, discord.Embed):
+        return embed
+
+    lines = str(embed.description or "").replace("\r", "").splitlines()
+    while lines:
+        first = lines[0].strip()
+        if first and len(first) >= 3 and _SEPARATOR_LINE.fullmatch(first):
+            lines.pop(0)
+            continue
+        if not first:
+            lines.pop(0)
+            continue
+        break
+
+    body = "\n".join(lines).strip()
+    embed.description = f"{embeds.BAR}\n{body}" if body else embeds.BAR
+    return embed
+
+
 def _render(embed: discord.Embed) -> discord.Embed:
     if not isinstance(embed, discord.Embed):
         return embed
     try:
-        return embeds.normalize_log(embed)
+        rendered = embeds.normalize_log(embed)
+        return _force_command_divider(rendered)
     except Exception:
         # Un problème purement visuel ne doit jamais empêcher le journal métier de partir.
         logger.exception("V5.3 : normalisation incompatible ; embed original conservé.")
-        return embed
+        return _force_command_divider(embed)
 
 
 async def _resolve_setting(bot, guild: discord.Guild, log_type: str, *, needs_file: bool):
@@ -245,4 +269,4 @@ def install(bot: commands.Bot) -> None:
     )
 
 
-__all__ = ["install", "send_log_v52", "_patch_logs_cog"]
+__all__ = ["install", "send_log_v52", "_patch_logs_cog", "_force_command_divider"]
