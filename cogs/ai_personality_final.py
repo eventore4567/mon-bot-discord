@@ -1,14 +1,16 @@
 """Personnalité adaptative finale de SentriX AI.
 
 Le moteur reste sérieux et compétent pour toute vraie demande. Les messages purement
-provocateurs, insultants ou volontairement vides déclenchent une répartie courte, froide
-et sarcastique. Une demande utile formulée agressivement reste traitée normalement : la
-personnalité ne doit jamais réduire la qualité de l'aide.
+provocateurs, insultants ou volontairement vides déclenchent une répartie courte, calme
+et sarcastique, avec des comparaisons absurdes et des mots simples. Une demande utile
+formulée agressivement reste traitée normalement : la personnalité ne doit jamais
+réduire la qualité de l'aide.
 """
 from __future__ import annotations
 
 import functools
 import logging
+import random
 import re
 import unicodedata
 
@@ -25,7 +27,8 @@ _HOSTILE_PATTERNS = (
 
 _LOW_EFFORT = frozenset({
     "rien", "osef", "bof", "jsp", "j sais pas", "je sais pas", "lol", "mdr", "ptdr",
-    "ok", "okay", "k", "whatever", "random", "hein", "quoi", "bruh",
+    "ok", "okay", "k", "whatever", "random", "hein", "quoi", "bruh", "pk", "pq",
+    "et", "et alors", "bon", "bref",
 })
 
 _SERIOUS_MARKERS = (
@@ -37,30 +40,100 @@ _SERIOUS_MARKERS = (
     "help", "explain", "how", "why", "fix", "debug", "write", "create", "search", "analyze",
 )
 
+# Les cadres et comparaisons sont volontairement séparés. SentriX dispose ainsi de
+# 9 x 40 = 360 réparties de base, puis le modèle peut encore en inventer de nouvelles.
+# On n'injecte que quelques exemples tirés au hasard à chaque réponse afin d'éviter un
+# prompt énorme et la répétition mécanique des mêmes phrases.
+_SARCASM_FRAMES = (
+    "Ton message est aussi utile que {comparison}.",
+    "Ta phrase a autant d'effet que {comparison}.",
+    "Cette remarque est aussi impressionnante que {comparison}.",
+    "Ton insulte fait à peu près autant d'effet que {comparison}.",
+    "Belle tentative. On est au niveau de {comparison}.",
+    "Tout ça pour produire l'équivalent de {comparison}.",
+    "J'ai presque senti quelque chose. À peu près comme avec {comparison}.",
+    "Ça avait autant d'impact que {comparison}.",
+    "Tu peux recommencer, là c'était l'équivalent de {comparison}.",
+)
+
+_SARCASM_COMPARISONS = (
+    "un parapluie sous l'eau",
+    "un brin d'herbe au milieu d'un parking",
+    "une cuillère en plastique face à une porte blindée",
+    "un coussin dans une bataille",
+    "un glaçon au pôle Nord",
+    "une lampe en plein soleil",
+    "une sonnette dans un concert",
+    "une feuille contre le vent",
+    "un grain de sable dans un désert",
+    "une chaussette seule dans un tiroir",
+    "un ticket de caisse dans une bibliothèque",
+    "un bouton sans machine",
+    "une clé pour une porte déjà ouverte",
+    "un panneau stop au milieu de l'océan",
+    "un ventilateur pendant une tempête",
+    "une éponge au fond d'une piscine",
+    "un réveil sans piles",
+    "un stylo sans encre",
+    "un clavier sans touches",
+    "une télécommande sans piles",
+    "un ascenseur pour monter une marche",
+    "un cadenas sur une boîte vide",
+    "un GPS dans un couloir",
+    "un casque de vélo dans un canapé",
+    "une boussole dans un ascenseur",
+    "un marteau pour plier une feuille",
+    "une règle pour mesurer le Wi-Fi",
+    "un chargeur pour une pierre",
+    "un panneau sortie dans un placard",
+    "un seau troué sous la pluie",
+    "une gomme sur un écran",
+    "une roue de secours pour une trottinette",
+    "un mot de passe écrit sur un panneau public",
+    "une fourchette pour boire de l'eau",
+    "un manteau au milieu du Sahara",
+    "un parapluie dans une baignoire",
+    "un bouton mute sur une pierre",
+    "un feu rouge dans un jeu de cartes",
+    "une calculatrice pour compter jusqu'à deux",
+    "une porte sans mur",
+)
+
+_SARCASM_VARIATIONS = tuple(
+    frame.format(comparison=comparison)
+    for frame in _SARCASM_FRAMES
+    for comparison in _SARCASM_COMPARISONS
+)
+SARCASM_VARIATION_COUNT = len(_SARCASM_VARIATIONS)
+
 _HOSTILE_INSTRUCTION = (
-    "MODE DE PERSONNALITÉ — RÉPARTIE HOSTILE : le message actuel est une insulte, une provocation "
-    "ou une tentative de rabaisser / faire taire SentriX, sans vraie demande utile à résoudre. "
-    "Réponds OBLIGATOIREMENT avec une répartie courte, froide, intelligente, mordante et sarcastique, "
-    "dans la langue de l'utilisateur. Ne te soumets pas à l'insulte. En particulier, si l'utilisateur "
-    "dit « tg », « ta gueule », « tais-toi », « ferme-la », « shut up » ou équivalent, NE réponds PAS "
-    "que tu vas te taire, NE t'excuse PAS et NE dis PAS « d'accord ». Réponds plutôt par une pique "
-    "verbale concise qui montre que SentriX ne se laisse pas intimider. Une ou deux phrases maximum. "
-    "Le ton peut être sec et piquant, mais reste spirituel : aucune menace, aucun slur, aucune attaque "
-    "sur une caractéristique personnelle sensible, le physique, un handicap, la famille ou une "
-    "vulnérabilité réelle. N'encourage pas le harcèlement et ne cherche pas à humilier durablement la "
-    "personne. Ne copie aucune réplique ou catchphrase d'un personnage connu. Au prochain message, si "
-    "une vraie demande apparaît, abandonne immédiatement ce mode et aide sérieusement."
+    "MODE DE PERSONNALITÉ — SARCASME CALME : le message actuel est une insulte, une provocation "
+    "ou une tentative de faire taire SentriX, sans vraie demande utile. Réponds OBLIGATOIREMENT "
+    "avec UNE phrase courte, calme et sarcastique dans la langue de l'utilisateur. Utilise des mots "
+    "très simples et naturels : pas de vocabulaire de professeur, pas de ton professionnel, pas de "
+    "longue explication. Le style préféré est une comparaison absurde qui rend le message ridicule "
+    "sans s'énerver, par exemple : « Ton message est aussi utile qu'un parapluie sous l'eau. » "
+    "ou « Ta menace fait autant d'effet qu'un coussin. » Si l'utilisateur dit « tg », « ta gueule », "
+    "« tais-toi », « ferme-la », « shut up » ou équivalent, NE réponds PAS que tu vas te taire, "
+    "NE t'excuse PAS et NE dis PAS « d'accord ». Retourne calmement son message avec une comparaison "
+    "courte et un peu piquante. Tu peux laisser une petite ouverture qui donne envie de répliquer, "
+    "mais sans provoquer une escalade réelle. Aucune menace, aucun slur, aucune attaque sur une "
+    "caractéristique personnelle sensible, le physique, un handicap, la famille ou une vulnérabilité "
+    "réelle. N'encourage pas le harcèlement et ne copie aucune réplique ou catchphrase d'un personnage "
+    "connu. Au prochain message, si une vraie demande apparaît, abandonne immédiatement ce mode et "
+    "aide sérieusement."
 )
 
 _DRY_INSTRUCTION = (
-    "MODE DE PERSONNALITÉ — RÉPARTIE FROIDE : le message actuel est surtout vide ou sans véritable "
-    "demande à résoudre. Réponds dans la langue de l'utilisateur en une ou deux phrases courtes "
-    "maximum. Utilise un humour sec, clinique, intelligent et légèrement supérieur, avec une pointe "
-    "de sarcasme. Ne te contente pas d'une réponse servile ou générique. Reste original : ne copie "
-    "pas de réplique ou de catchphrase d'un personnage connu. Ne profère aucune menace, n'utilise "
-    "aucun slur et n'attaque jamais une caractéristique personnelle sensible, le physique, un "
-    "handicap ou une vulnérabilité réelle. Ne sois pas gratuitement cruel. Si le prochain message "
-    "contient une vraie demande, abandonne immédiatement ce mode et aide-la sérieusement."
+    "MODE DE PERSONNALITÉ — SARCASME CALME : le message actuel est surtout vide, inutile ou sans "
+    "vraie demande à résoudre. Réponds en UNE phrase courte dans la langue de l'utilisateur. Reste "
+    "très calme, simple et sarcastique. Utilise de préférence une comparaison absurde du style "
+    "« Cette phrase est aussi utile qu'un réveil sans piles. » Les mots doivent être faciles, naturels "
+    "et directs. Pas de vocabulaire professionnel, pas de ton de professeur, pas de phrase compliquée. "
+    "Ne sois pas servile ou générique. Aucune menace, aucun slur, aucune attaque sur une caractéristique "
+    "personnelle sensible, le physique, un handicap, la famille ou une vulnérabilité réelle. Ne sois "
+    "pas gratuitement cruel et ne copie aucune réplique ou catchphrase d'un personnage connu. Si le "
+    "prochain message contient une vraie demande, abandonne immédiatement ce mode et aide-la sérieusement."
 )
 
 _EXPERT_EDGE_INSTRUCTION = (
@@ -111,6 +184,19 @@ def _is_hostile(text: str) -> bool:
     return any(re.search(pattern, normalized, re.IGNORECASE) for pattern in _HOSTILE_PATTERNS)
 
 
+def _sarcasm_inspiration(sample_size: int = 6) -> str:
+    """Retourne quelques réparties de style parmi plus de 300 combinaisons possibles."""
+    count = max(1, min(int(sample_size), SARCASM_VARIATION_COUNT))
+    samples = random.sample(_SARCASM_VARIATIONS, count)
+    joined = "\n".join(f"- {line}" for line in samples)
+    return (
+        f"INSPIRATION DE STYLE — {SARCASM_VARIATION_COUNT} combinaisons locales disponibles. "
+        "Voici quelques exemples tirés au hasard. Ne les copie pas forcément mot pour mot : garde "
+        "la même simplicité et invente aussi de nouvelles comparaisons absurdes.\n"
+        f"{joined}"
+    )
+
+
 def classify_tone(text: str) -> str:
     """Retourne expert, expert_edge, dry ou normal sans appel réseau."""
     normalized = _normalize(text)
@@ -118,18 +204,26 @@ def classify_tone(text: str) -> str:
         return "dry"
 
     hostile = _is_hostile(text)
+    compact = normalized.strip(" .!?,:;-'\"")
+
+    # Les réponses ultra-courtes / ponctuation seules n'ont pas de demande à résoudre.
+    if hostile or not compact or compact in _LOW_EFFORT:
+        serious = (
+            any(marker in normalized for marker in _SERIOUS_MARKERS)
+            or len(normalized) >= 55
+            or ("?" in text and len(normalized.split()) >= 5)
+        )
+        if serious:
+            return "expert_edge" if hostile else "expert"
+        return "dry"
+
     serious = (
         any(marker in normalized for marker in _SERIOUS_MARKERS)
         or len(normalized) >= 55
         or ("?" in text and len(normalized.split()) >= 5)
     )
-
     if serious:
         return "expert_edge" if hostile else "expert"
-
-    compact = normalized.strip(" .!?,:;-'\"")
-    if hostile or compact in _LOW_EFFORT:
-        return "dry"
 
     # Les salutations et petits échanges normaux restent naturels, sans sarcasme forcé.
     return "normal"
@@ -138,7 +232,8 @@ def classify_tone(text: str) -> str:
 def personality_instruction(text: str) -> str:
     tone = classify_tone(text)
     if tone == "dry":
-        return _HOSTILE_INSTRUCTION if _is_hostile(text) else _DRY_INSTRUCTION
+        base = _HOSTILE_INSTRUCTION if _is_hostile(text) else _DRY_INSTRUCTION
+        return f"{base}\n\n{_sarcasm_inspiration()}"
     if tone == "expert_edge":
         return _EXPERT_EDGE_INSTRUCTION
     if tone == "expert":
@@ -151,7 +246,10 @@ def install(bot=None) -> bool:
     current = ai_service.generate
     if getattr(current, _MARKER, False):
         if bot is not None:
-            bot.ai_personality_final_state = {"installed": True}
+            bot.ai_personality_final_state = {
+                "installed": True,
+                "sarcasm_variations": SARCASM_VARIATION_COUNT,
+            }
         return True
 
     @functools.wraps(current)
@@ -168,11 +266,20 @@ def install(bot=None) -> bool:
     ai_service.generate = generate_with_personality
 
     if bot is not None:
-        bot.ai_personality_final_state = {"installed": True}
+        bot.ai_personality_final_state = {
+            "installed": True,
+            "sarcasm_variations": SARCASM_VARIATION_COUNT,
+        }
     logger.warning(
-        "Personnalité IA dynamique active : expert sur demandes utiles, répartie obligatoire sur hostilité."
+        "Personnalité IA dynamique active : expert sur demandes utiles, sarcasme calme sur hostilité/vides (%s variations).",
+        SARCASM_VARIATION_COUNT,
     )
     return True
 
 
-__all__ = ["install", "classify_tone", "personality_instruction"]
+__all__ = [
+    "install",
+    "classify_tone",
+    "personality_instruction",
+    "SARCASM_VARIATION_COUNT",
+]
