@@ -1,4 +1,8 @@
-"""Profil SentriX sobre et lisible, inspiré des interfaces compactes de bots premium."""
+"""Profil SentriX lisible et distinct des statistiques personnelles.
+
+`+profile` / `+profil` ouvre le profil communautaire interactif.
+`+me` reste une commande distincte et affiche uniquement les statistiques personnelles.
+"""
 from __future__ import annotations
 
 import functools
@@ -18,6 +22,10 @@ def _fmt(value) -> str:
 
 def _rank(value) -> str:
     return f"#{value}" if value else "Non classé"
+
+
+def _date(value) -> str:
+    return discord.utils.format_dt(value, style="D") if value else "Inconnue"
 
 
 async def _snapshot(bot: commands.Bot, guild: discord.Guild, member: discord.Member):
@@ -67,7 +75,11 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
 
         missions = list(progression.get("missions") or [])[:3]
         done = sum(1 for mission in missions if mission.get("done"))
-        embed.description = f"{done}/{len(missions)} terminées aujourd’hui" if missions else "Aucune mission aujourd’hui."
+        embed.description = (
+            f"**{done}/{len(missions)} missions terminées aujourd’hui.**"
+            if missions
+            else "Aucune mission aujourd’hui."
+        )
         for mission in missions:
             current = int(mission.get("current", 0))
             target = int(mission.get("target", 0))
@@ -76,8 +88,9 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
             embed.add_field(
                 name=str(mission.get("label") or "Mission"),
                 value=(
-                    f"{premium_style.progress_bar(current, target, length=10)}\n"
-                    f"{state} • +{reward} XP saison"
+                    f"{premium_style.progress_bar(current, target, length=10)}\n\n"
+                    f"Progression\n**{state}**\n\n"
+                    f"Récompense\n**+{reward} XP saison**"
                 ),
                 inline=False,
             )
@@ -86,34 +99,36 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
     if page == "season":
         embed = _base(bot, member, "Saison", community_v3.season_label(progression["season_id"]))
         embed.add_field(
-            name="Rang",
-            value=f"{progression['tier']} • {_rank(data['season_rank'])}",
+            name="Position actuelle",
+            value=(
+                f"Palier\n**{progression['tier']}**\n\n"
+                f"Classement saison\n**{_rank(data['season_rank'])}**"
+            ),
             inline=False,
         )
         embed.add_field(
-            name="Progression",
+            name="Progression de saison",
             value=(
-                f"{premium_style.progress_bar(progression['season_level_xp'], progression['season_level_target'])}\n"
-                f"Niveau {progression['season_level']} • "
-                f"{progression['season_level_xp']}/{progression['season_level_target']} XP\n"
-                f"Total saison : {_fmt(progression['season_xp'])} XP"
+                f"{premium_style.progress_bar(progression['season_level_xp'], progression['season_level_target'])}\n\n"
+                f"Niveau de saison\n**{progression['season_level']}**\n\n"
+                f"XP du niveau\n**{_fmt(progression['season_level_xp'])} / {_fmt(progression['season_level_target'])}**\n\n"
+                f"XP totale de saison\n**{_fmt(progression['season_xp'])}**"
             ),
             inline=False,
         )
         top = await community_v31._season_top(bot, guild, str(progression["season_id"]), limit=5)
         if top:
-            # Le classement historique contient des emojis/markdown : on le réécrit sobrement.
             cleaned = []
             for index, line in enumerate(top[:5], start=1):
                 text = str(line).replace("**", "")
                 for token in ("🥇", "🥈", "🥉"):
                     text = text.replace(token, "")
                 cleaned.append(f"{index}. {text.strip().lstrip('1234567890. ')}")
-            embed.add_field(name="Top 5", value="\n".join(cleaned), inline=False)
+            embed.add_field(name="Top 5", value="\n\n".join(cleaned), inline=False)
         badges = _badges(member, stats, progression)
         embed.add_field(
             name="Badges",
-            value=" • ".join(badges) if badges else "Aucun badge débloqué",
+            value="\n".join(f"• {badge}" for badge in badges) if badges else "Aucun badge débloqué",
             inline=False,
         )
         return embed
@@ -122,38 +137,67 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         ranks = data["ranks"]
         embed = _base(bot, member, "Classements", member.display_name)
         embed.colour = discord.Colour(premium_style.COLORS["leaderboard"])
-        lines = [
-            f"Niveau : {_rank(ranks.get('xp_rank'))}",
-            f"Messages : {_rank(ranks.get('message_rank'))}",
-            f"Économie : {_rank(ranks.get('economy_rank'))}",
-            f"Saison : {_rank(data['season_rank'])}",
-        ]
-        embed.description = "\n".join(lines)
+        embed.description = (
+            f"Niveau / XP\n**{_rank(ranks.get('xp_rank'))}**\n\n"
+            f"Messages\n**{_rank(ranks.get('message_rank'))}**\n\n"
+            f"Économie\n**{_rank(ranks.get('economy_rank'))}**\n\n"
+            f"Saison\n**{_rank(data['season_rank'])}**"
+        )
         return embed
 
-    # Vue principale : volontairement courte. Les détails sont dans les boutons.
-    embed = _base(bot, member, f"Profil de {member.display_name}", data.get("bio") or "Carte membre SentriX")
+    # Vue principale volontairement aérée : aucune grille de petits champs collés.
+    bio = str(data.get("bio") or "Aucune bio définie pour le moment.").strip()
+    embed = _base(
+        bot,
+        member,
+        f"Profil de {member.display_name}",
+        f"{member.mention}\n\n{bio}",
+    )
     level_rank = _rank(stats.get("rank")) if stats.get("is_ranked") else "Non classé"
+    wallet = int(stats.get("wallet", 0) or 0)
+    bank = int(stats.get("bank", 0) or 0)
+    total = wallet + bank
+
     embed.add_field(
         name="Progression",
         value=(
-            f"{premium_style.progress_bar(progression['season_level_xp'], progression['season_level_target'])}\n"
-            f"Niveau {stats['current_level']} • Rang {level_rank}"
+            f"Niveau\n**{_fmt(stats.get('current_level'))}**\n\n"
+            f"XP\n**{_fmt(stats.get('xp'))}**\n\n"
+            f"Rang du serveur\n**{level_rank}**"
         ),
         inline=False,
     )
     embed.add_field(
         name="Économie",
-        value=f"{_fmt(stats['wallet'])} portefeuille • {_fmt(stats['bank'])} banque",
+        value=(
+            f"Portefeuille\n**{_fmt(wallet)}**\n\n"
+            f"Banque\n**{_fmt(bank)}**\n\n"
+            f"Total\n**{_fmt(total)}**"
+        ),
         inline=False,
     )
     embed.add_field(
         name="Activité",
         value=(
-            f"{_fmt(stats['message_count'])} messages • "
-            f"{stats_service.format_duration(stats['voice_time'])} vocal • "
-            f"streak {progression['daily_streak']} j"
+            f"Messages\n**{_fmt(stats.get('message_count'))}**\n\n"
+            f"Temps vocal\n**{stats_service.format_duration(int(stats.get('voice_time', 0) or 0))}**\n\n"
+            f"Série d’activité\n**{_fmt(progression.get('daily_streak'))} jours**"
         ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Compte",
+        value=(
+            f"Compte créé\n**{_date(member.created_at)}**\n\n"
+            f"Arrivé sur le serveur\n**{_date(member.joined_at)}**\n\n"
+            f"Réputation\n**{_fmt(stats.get('reputation'))}**"
+        ),
+        inline=False,
+    )
+    badges = _badges(member, stats, progression)
+    embed.add_field(
+        name="Badges",
+        value="\n".join(f"• {badge}" for badge in badges) if badges else "Aucun badge débloqué",
         inline=False,
     )
     return embed
@@ -173,12 +217,16 @@ class CleanProfileView(discord.ui.View):
     def _set_active(self, page: str):
         for child in self.children:
             if isinstance(child, discord.ui.Button):
-                child.style = discord.ButtonStyle.primary if child.custom_id == f"sentrix-clean-profile:{page}" else discord.ButtonStyle.secondary
+                child.style = (
+                    discord.ButtonStyle.primary
+                    if child.custom_id == f"sentrix-clean-profile:{page}"
+                    else discord.ButtonStyle.secondary
+                )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.author_id:
             return True
-        await interaction.response.send_message("Ouvre ton propre profil avec `+profile`.", ephemeral=True)
+        await interaction.response.send_message("Ouvre ton propre profil avec `+profil`.", ephemeral=True)
         return False
 
     async def _show(self, interaction: discord.Interaction, page: str):
@@ -247,7 +295,46 @@ class CleanProfileView(discord.ui.View):
                 pass
 
 
+def _keep_me_in_final_catalog() -> None:
+    """`+me` n'est pas un doublon de profil : il reste dans le catalogue final."""
+    try:
+        import main as bot_main
+
+        duplicates = set(getattr(bot_main, "EXACT_DUPLICATE_COMMANDS", frozenset()))
+        duplicates.discard("me")
+        bot_main.EXACT_DUPLICATE_COMMANDS = frozenset(duplicates)
+        bot_main.PRUNED_COMMANDS = (
+            getattr(bot_main, "COMMANDS_REPLACED_BY_SETUP", frozenset())
+            | bot_main.EXACT_DUPLICATE_COMMANDS
+        )
+    except Exception:
+        # Le module peut aussi être importé dans des tests isolés sans bootstrap principal.
+        pass
+
+
+def _install_me(bot: commands.Bot) -> None:
+    command = bot.get_command("me")
+    if command is None or getattr(command, "_sentrix_personal_stats_v18", False):
+        return
+
+    async def me_callback(cog, ctx: commands.Context, membre: discord.Member = None):
+        if ctx.guild is None:
+            return await ctx.send("Cette commande fonctionne uniquement sur un serveur.")
+        # `+me` signifie volontairement « mes statistiques ». La cible éventuelle est
+        # ignorée afin que cette commande ne redevienne jamais un alias de profil/stats.
+        return await cog._send_stats(ctx, ctx.author)
+
+    params = command.params.copy()
+    me_callback = functools.wraps(command.callback)(me_callback)
+    command.callback = me_callback
+    command.params = params
+    command._sentrix_personal_stats_v18 = True
+
+
 def install(bot: commands.Bot) -> None:
+    _keep_me_in_final_catalog()
+    _install_me(bot)
+
     command = bot.get_command("profile")
     if command is None or getattr(command, "_sentrix_oxyde_profile", False):
         return
@@ -274,3 +361,7 @@ def install(bot: commands.Bot) -> None:
     command.callback = profile_callback
     command.params = params
     command._sentrix_oxyde_profile = True
+
+
+async def setup(bot: commands.Bot) -> None:
+    install(bot)
