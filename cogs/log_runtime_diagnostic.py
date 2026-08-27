@@ -1,8 +1,8 @@
 """Diagnostic propriétaire compact du pipeline de logs SentriX.
 
 Le diagnostic observe le Gateway et teste directement le transport V5.3. Sa réponse
-finale contourne volontairement les renderers globaux de commandes : un diagnostic sain
-ne doit jamais être réécrit en faux embed « Erreur » ni en « Réponse tronquée ».
+finale contourne volontairement les renderers globaux de commandes afin qu'un diagnostic
+sain conserve toujours son embed natif compact.
 """
 from __future__ import annotations
 
