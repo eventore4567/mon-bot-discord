@@ -80,6 +80,9 @@ if "cogs.sentrix_ultimate" not in bot_main.EXTENSIONS:
 # Une seule politique visuelle finale.
 if "cogs.plain_text_all_extension" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.plain_text_all_extension")
+# Profil final : +profil/+profile = carte communautaire aérée ; +me = statistiques perso.
+if "cogs.profile_oxyde_runtime" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.profile_oxyde_runtime")
 if "cogs.deferred_context_response_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.deferred_context_response_guard")
 if "cogs.slash_error_completion_guard" not in bot_main.EXTENSIONS:
