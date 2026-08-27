@@ -3,16 +3,21 @@
 Le message d'aide reste toujours un vrai ``discord.Embed`` : accueil, recherche,
 catégories et pagination modifient uniquement l'embed du même message. Les composants
 (menu/boutons) restent sous la carte, comme l'impose Discord.
+
+La croissance reste volontairement organique : le centre d'aide expose des liens utiles
+pour ajouter SentriX et ouvrir son dashboard, sans message publicitaire automatique.
 """
 from __future__ import annotations
 
 import os
 from collections import OrderedDict
+from urllib.parse import urlparse
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+import config
 from utils import embeds
 
 PAGE_SIZE = 8
@@ -68,6 +73,40 @@ STAFF_COGS = {
     "Moderation", "Automod", "Security", "Configuration", "Logs",
     "ServerBuilder", "Verification", "Owner", "EmbedBuilder",
 }
+
+# Permissions nécessaires aux fonctions réellement proposées par SentriX. Le lien OAuth
+# ne demande PAS Administrateur : un propriétaire de serveur garde un contrôle précis sur
+# les droits du rôle du bot et Discord affiche clairement chaque permission demandée.
+INVITE_PERMISSION_NAMES = (
+    "view_channel",
+    "manage_channels",
+    "manage_roles",
+    "kick_members",
+    "ban_members",
+    "moderate_members",
+    "manage_messages",
+    "read_message_history",
+    "send_messages",
+    "send_messages_in_threads",
+    "embed_links",
+    "attach_files",
+    "add_reactions",
+    "mention_everyone",
+    "manage_nicknames",
+    "change_nickname",
+    "manage_webhooks",
+    "manage_emojis_and_stickers",
+    "connect",
+    "speak",
+    "move_members",
+    "mute_members",
+    "deafen_members",
+    "use_application_commands",
+    "create_public_threads",
+    "create_private_threads",
+    "manage_threads",
+    "manage_events",
+)
 
 
 def _is_staff(member) -> bool:
@@ -249,6 +288,75 @@ def _search(commands_list: list[commands.Command], query: str) -> list[commands.
     return [command for _, command in ranked]
 
 
+def _recommended_invite_permissions() -> discord.Permissions:
+    permissions = discord.Permissions.none()
+    for name in INVITE_PERMISSION_NAMES:
+        if hasattr(permissions, name):
+            setattr(permissions, name, True)
+    return permissions
+
+
+def _invite_url(bot: commands.Bot) -> str | None:
+    client_id = getattr(getattr(bot, "user", None), "id", None)
+    if client_id is None:
+        configured = str(getattr(config, "DISCORD_CLIENT_ID", "") or "").strip()
+        if configured.isdigit():
+            client_id = int(configured)
+    if client_id is None:
+        return None
+    return discord.utils.oauth_url(
+        int(client_id),
+        permissions=_recommended_invite_permissions(),
+        scopes=("bot", "applications.commands"),
+    )
+
+
+def _valid_http_url(value: str) -> str | None:
+    value = str(value or "").strip()
+    if not value:
+        return None
+    parsed = urlparse(value)
+    if parsed.scheme not in {"https", "http"} or not parsed.netloc:
+        return None
+    return value
+
+
+def _dashboard_url() -> str | None:
+    # DASHBOARD_URL reste accepté pour les anciens déploiements ; le réglage officiel
+    # actuel vient de config.py et pointe directement vers /app.
+    legacy = os.getenv("DASHBOARD_URL", "").strip()
+    return _valid_http_url(legacy) or _valid_http_url(getattr(config, "DASHBOARD_APP_URL", ""))
+
+
+def _support_url() -> str | None:
+    # Aucun faux lien : si aucun serveur support n'est configuré, le bouton est simplement
+    # absent. Railway peut définir l'une des deux variables sans toucher au code.
+    for env_name in ("SENTRIX_SUPPORT_URL", "SUPPORT_SERVER_URL"):
+        value = _valid_http_url(os.getenv(env_name, ""))
+        if value:
+            return value
+    return None
+
+
+def _add_growth_links(view: discord.ui.View, bot: commands.Bot) -> None:
+    links = (
+        ("Ajouter SentriX", _invite_url(bot)),
+        ("Dashboard", _dashboard_url()),
+        ("Serveur support", _support_url()),
+    )
+    for label, url in links:
+        if not url:
+            continue
+        view.add_item(
+            discord.ui.Button(
+                label=label,
+                style=discord.ButtonStyle.link,
+                url=url,
+                row=3,
+            )
+        )
+
+
 async def _private_error(interaction: discord.Interaction, text: str) -> None:
     panel = embeds.error(text)
     if interaction.response.is_done():
@@ -344,17 +452,7 @@ class HelpView(discord.ui.View):
         self.index = 0
         self.member = member or bot.get_user(author_id)
         self.add_item(CategorySelect(self))
-
-        dashboard_url = os.getenv("DASHBOARD_URL", "").strip()
-        if dashboard_url.startswith("https://"):
-            self.add_item(
-                discord.ui.Button(
-                    label="Dashboard",
-                    style=discord.ButtonStyle.secondary,
-                    url=dashboard_url,
-                    row=1,
-                )
-            )
+        _add_growth_links(self, bot)
         self._sync()
 
     def _sync(self) -> None:
