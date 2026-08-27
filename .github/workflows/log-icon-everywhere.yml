@@ -1,0 +1,28 @@
+name: SentriX Log Icon Everywhere
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cogs/log_transport_v52.py"
+      - "tests/test_log_icon_everywhere.py"
+      - ".github/workflows/log-icon-everywhere.yml"
+  pull_request:
+    paths:
+      - "cogs/log_transport_v52.py"
+      - "tests/test_log_icon_everywhere.py"
+      - ".github/workflows/log-icon-everywhere.yml"
+
+jobs:
+  log-icon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile log transport
+        run: python -m py_compile cogs/log_transport_v52.py
+      - name: Verify SentriX icon contracts
+        run: python tests/test_log_icon_everywhere.py
