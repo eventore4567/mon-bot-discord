@@ -108,8 +108,8 @@ def test_levels_messages_and_economy_are_database_backed():
     economy = (ROOT / "cogs" / "economy.py").read_text(encoding="utf-8")
     db = (ROOT / "database" / "db.py").read_text(encoding="utf-8")
 
-    assert "UPDATE message_counts SET count = count + 1" in levels
-    assert "UPDATE levels SET xp = ?, level = ?" in levels
+    assert re.search(r"UPDATE\s+message_counts\s+SET\s+count\s*=\s*count\s*\+\s*1", levels, re.I)
+    assert re.search(r"UPDATE\s+levels\s+SET\s+xp\s*=\s*\?,\s*level\s*=\s*\?", levels, re.I)
     assert "await self._conn.commit()" in db
     assert "ensure_economy" in economy
     assert "add_balance" in economy
