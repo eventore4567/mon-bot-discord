@@ -9,8 +9,10 @@ on:
       - "cogs/no_cooldown_final.py"
       - "cogs/logs_unified_v6.py"
       - "cogs/passive_ai_single_reply_final.py"
+      - "cogs/ai_personality_final.py"
       - "tests/test_final_stability_guard.py"
       - "tests/test_passive_ai_single_reply_final.py"
+      - "tests/test_ai_personality_final.py"
       - ".github/workflows/final-stability-guard.yml"
   pull_request:
     paths:
@@ -19,8 +21,10 @@ on:
       - "cogs/no_cooldown_final.py"
       - "cogs/logs_unified_v6.py"
       - "cogs/passive_ai_single_reply_final.py"
+      - "cogs/ai_personality_final.py"
       - "tests/test_final_stability_guard.py"
       - "tests/test_passive_ai_single_reply_final.py"
+      - "tests/test_ai_personality_final.py"
       - ".github/workflows/final-stability-guard.yml"
 
 jobs:
@@ -38,9 +42,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
       - name: Compile guarded runtime
-        run: python -m py_compile railway_boot.py cogs/final_stability_guard.py cogs/no_cooldown_final.py cogs/logs_unified_v6.py cogs/passive_ai_single_reply_final.py
-      - name: Verify final stability and single-reply contracts
+        run: python -m py_compile railway_boot.py cogs/final_stability_guard.py cogs/no_cooldown_final.py cogs/logs_unified_v6.py cogs/passive_ai_single_reply_final.py cogs/ai_personality_final.py
+      - name: Verify final stability, single-reply and personality contracts
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-final-stability.db"
-        run: PYTHONPATH=. pytest -q tests/test_final_stability_guard.py tests/test_passive_ai_single_reply_final.py
+        run: PYTHONPATH=. pytest -q tests/test_final_stability_guard.py tests/test_passive_ai_single_reply_final.py tests/test_ai_personality_final.py
