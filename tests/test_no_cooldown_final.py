@@ -115,7 +115,8 @@ def static_contracts():
     assert "commands.Command._prepare_cooldowns = prepare_no_cooldowns" in source
     assert "_create_cooldown_decorator.<locals>.predicate" in source
     assert "no_cooldown_final.install(bot)" in guard
-    assert guard.index("cooldown_isolation_fix.install(bot)") < guard.index("no_cooldown_final.install(bot)")
+    assert "cooldown_isolation_fix.install(bot)" not in guard
+    assert guard.index("await logs_unified_v6.install(bot)") < guard.index("no_cooldown_final.install(bot)")
 
 
 if __name__ == "__main__":

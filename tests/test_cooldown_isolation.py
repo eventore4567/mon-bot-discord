@@ -53,11 +53,12 @@ def test_owner_bypass_is_preserved():
     assert "await bot.db.is_bot_creator(user_id)" in source
 
 
-def test_fix_is_installed_after_v6_as_final_runtime_authority():
+def test_legacy_fix_is_not_installed_in_final_runtime():
     source = read(GUARD)
     v6 = source.index("await logs_unified_v6.install(bot)")
-    cooldown = source.index("cooldown_isolation_fix.install(bot)")
-    assert cooldown > v6
+    no_cooldown = source.index("no_cooldown_final.install(bot)")
+    assert no_cooldown > v6
+    assert "cooldown_isolation_fix.install(bot)" not in source
 
 
 if __name__ == "__main__":
@@ -67,5 +68,5 @@ if __name__ == "__main__":
     test_each_command_gets_its_own_mapping()
     test_qualified_command_name_is_the_isolation_key()
     test_owner_bypass_is_preserved()
-    test_fix_is_installed_after_v6_as_final_runtime_authority()
-    print("cooldown isolation contracts: ok")
+    test_legacy_fix_is_not_installed_in_final_runtime()
+    print("cooldown isolation contracts: ok (legacy module retained, final runtime disabled)")
