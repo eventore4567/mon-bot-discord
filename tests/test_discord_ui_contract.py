@@ -152,7 +152,7 @@ class DiscordUiContractTests(unittest.TestCase):
         source = (ROOT / "cogs" / "help.py").read_text(encoding="utf-8")
         self.assertIn("bot.walk_commands()", source)
         self.assertIn("bot.tree.get_commands", source)
-        self.assertIn("PAGE_SIZE = 8", source)
+        self.assertIn("PAGE_SIZE = 7", source)
         self.assertIn("member=interaction.user", source)
         self.assertIn("SentriX — Centre d’aide", source)
         self.assertIn("Rechercher", source)
