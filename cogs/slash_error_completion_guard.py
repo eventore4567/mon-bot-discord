@@ -223,6 +223,11 @@ async def setup(bot: commands.Bot) -> None:
     from . import logs_unified_v6
     await logs_unified_v6.install(bot)
 
+    # Le check historique de main.py utilisait un seul CooldownMapping par utilisateur.
+    # Cette dernière couche l'enlève et isole le quota par utilisateur + commande.
+    from . import cooldown_isolation_fix
+    cooldown_isolation_fix.install(bot)
+
     logger.info(
-        "Runtime final V6 actif : transport V5.3 + 9 routes + logs-dossiers + tickets/transcripts unifiés."
+        "Runtime final V6 actif : transport V5.3 + 9 routes + logs-dossiers + tickets/transcripts unifiés + cooldown isolé par commande."
     )
