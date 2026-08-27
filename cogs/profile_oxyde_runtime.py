@@ -162,7 +162,7 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         name="Progression",
         value=(
             f"Niveau\n**{_fmt(stats.get('current_level'))}**\n\n"
-            f"XP\n**{_fmt(stats.get('xp'))}**\n\n"
+            f"XP totale\n**{_fmt(stats.get('total_xp'))}**\n\n"
             f"Rang du serveur\n**{level_rank}**"
         ),
         inline=False,
