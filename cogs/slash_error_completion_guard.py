@@ -229,11 +229,16 @@ async def setup(bot: commands.Bot) -> None:
     from . import cooldown_isolation_fix
     cooldown_isolation_fix.install(bot)
 
-    # DERNIÈRE AUTORITÉ RAILWAY : aucune commande normale ne reste en cooldown et aucun
+    # Autorité Railway : aucune commande normale ne reste en cooldown et aucun
     # max_concurrency discord.py générique ne peut produire « commande déjà en cours ».
     from . import no_cooldown_final
     no_cooldown_final.install(bot)
 
+    # DERNIÈRE autorité pour le chat naturel : un seul service Railway et un seul listener
+    # Ai.on_message peuvent répondre à un message Discord donné. Aucun cooldown n'est créé.
+    from . import passive_ai_single_reply_final
+    passive_ai_single_reply_final.install(bot)
+
     logger.info(
-        "Runtime final V6 actif : logs V5.3/V6 + zéro cooldown et zéro max_concurrency générique."
+        "Runtime final V6 actif : logs V5.3/V6 + zéro cooldown + une seule réponse IA passive."
     )
