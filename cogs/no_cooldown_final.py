@@ -5,10 +5,12 @@ Neutralise les mécanismes génériques discord.py qui ont historiquement bloqu�
 - cooldown isolé par commande de #234 ;
 - décorateurs commands.cooldown / dynamic_cooldown ;
 - commands.max_concurrency ;
-- app_commands.checks.cooldown / dynamic_cooldown pour les vraies commandes slash.
+- app_commands.checks.cooldown / dynamic_cooldown pour les vraies commandes slash ;
+- garde V41 personnalisé (anti-doublon, rate-limit slash, concurrence user/guild/heavy).
 
-Les checks de permissions, rôles, sécurité et les verrous métier explicites internes aux
-opérations destructives restent intacts.
+Les checks de permissions, rôles et sécurité restent intacts. Le garde V41 continue donc
+à chaîner les checks existants et à refuser les appels provenant de bots, mais toutes ses
+fonctions de throttling sont transformées en no-op par cette autorité finale.
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ from discord import app_commands
 from discord.ext import commands
 
 logger = logging.getLogger("bot.no-cooldown-final")
-_MARKER = "_sentrix_no_cooldown_final_v1"
+_MARKER = "_sentrix_no_cooldown_final_v2"
 
 
 def _empty_buckets() -> commands.CooldownMapping:
@@ -82,7 +84,7 @@ def _strip_all_app(bot: commands.Bot) -> int:
 
 
 def _remove_sentrix_global_checks(bot: commands.Bot) -> int:
-    """Retire le vieux check global et le check isolé de #234 s'ils sont présents."""
+    """Retire les anciens checks globaux de cooldown s'ils sont présents."""
     removed = 0
     legacy = getattr(bot, "global_cooldown_check", None)
     isolated = getattr(bot, "_sentrix_isolated_global_cooldown_check", None)
@@ -116,6 +118,69 @@ def _remove_sentrix_global_checks(bot: commands.Bot) -> int:
         state["installed"] = False
         state["disabled_by_no_cooldown_final"] = True
     return removed
+
+
+def _disable_v41_throttling(bot: commands.Bot) -> dict:
+    """Neutralise le vrai garde V41 sans contourner ses checks de sécurité.
+
+    Les fonctions imbriquées ``prefix_guard`` et ``slash_guard`` résolvent ces helpers via
+    les globals du module à chaque invocation. Les remplacer ici suffit donc à désactiver
+    immédiatement les faux cooldowns, la fenêtre anti-doublon et toute concurrence V41,
+    même si les gardes ont déjà été installés plus tôt pendant le bootstrap.
+    """
+    result = {
+        "patched": False,
+        "state_cleared": False,
+        "error": None,
+    }
+    try:
+        from . import command_hardening_v41 as v41
+
+        def no_duplicate_retry(*_args, **_kwargs) -> float:
+            return 0.0
+
+        def no_slash_rate_retry(*_args, **_kwargs) -> float:
+            return 0.0
+
+        def no_acquire(*_args, **_kwargs):
+            return None
+
+        def no_release_prefix(*_args, **_kwargs) -> None:
+            return None
+
+        def no_release_slash(*_args, **_kwargs) -> None:
+            return None
+
+        v41._duplicate_retry = no_duplicate_retry
+        v41._slash_rate_retry = no_slash_rate_retry
+        v41._acquire = no_acquire
+        v41.release_prefix = no_release_prefix
+        v41.release_slash = no_release_slash
+
+        state = getattr(bot, "_sentrix_command_hardening_state", None)
+        if state is not None:
+            for name in (
+                "slash_buckets",
+                "same_command_last",
+                "active_user",
+                "active_guild",
+                "active_heavy_user",
+                "active_heavy_guild",
+                "prefix_tokens",
+                "slash_tokens",
+            ):
+                value = getattr(state, name, None)
+                clear = getattr(value, "clear", None)
+                if callable(clear):
+                    clear()
+            result["state_cleared"] = True
+
+        bot._sentrix_v41_throttling_disabled = True
+        result["patched"] = True
+    except Exception as exc:
+        result["error"] = type(exc).__name__
+        logger.exception("Impossible de neutraliser le throttling V41.")
+    return result
 
 
 def _patch_prepare_globally() -> None:
@@ -175,7 +240,8 @@ def _patch_app_checks_globally() -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    """Désactive les cooldowns/concurrences génériques de toutes les commandes normales."""
+    """Désactive tous les cooldowns/concurrences des commandes + et /."""
+    v41_state = _disable_v41_throttling(bot)
     removed_global = _remove_sentrix_global_checks(bot)
     _strip_all(bot)
     removed_app = _strip_all_app(bot)
@@ -190,10 +256,16 @@ def install(bot: commands.Bot) -> None:
         "removed_global_checks": removed_global,
         "removed_app_cooldown_checks": removed_app,
         "commands_checked": len(list(bot.walk_commands())),
+        "v41_throttling_disabled": bool(v41_state.get("patched")),
+        "v41_state_cleared": bool(v41_state.get("state_cleared")),
+        "v41_error": v41_state.get("error"),
+        "heavy_rate_limit": False,
     }
     setattr(bot, _MARKER, True)
     logger.warning(
-        "SentriX zéro cooldown actif : %s check(s) globaux, %s check(s) slash retirés, %s commandes sans cooldown/max_concurrency.",
+        "SentriX zéro cooldown V2 actif : V41=%s, état V41 vidé=%s, %s check(s) globaux, %s check(s) slash retirés, %s commandes sans cooldown/max_concurrency.",
+        bot.no_cooldown_final_state["v41_throttling_disabled"],
+        bot.no_cooldown_final_state["v41_state_cleared"],
         removed_global,
         removed_app,
         bot.no_cooldown_final_state["commands_checked"],
@@ -206,4 +278,5 @@ __all__ = [
     "_strip_all",
     "_strip_app_command",
     "_is_app_cooldown_check",
+    "_disable_v41_throttling",
 ]
