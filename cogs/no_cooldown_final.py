@@ -1,18 +1,21 @@
 """Autorité runtime finale SentriX : aucune recharge sur les commandes normales.
 
-Le bot a historiquement empilé plusieurs systèmes : CooldownMapping global, cooldown
-isolé par commande, décorateurs commands.cooldown et max_concurrency. Pour l'UX finale,
-les commandes utilisateur ne doivent plus être bloquées par ces mécanismes génériques.
+Neutralise les mécanismes génériques discord.py qui ont historiquement bloqué SentriX :
+- CooldownMapping global ;
+- cooldown isolé par commande de #234 ;
+- décorateurs commands.cooldown / dynamic_cooldown ;
+- commands.max_concurrency ;
+- app_commands.checks.cooldown / dynamic_cooldown pour les vraies commandes slash.
 
-Les verrous métier explicites à l'intérieur d'une commande destructive (par exemple une
-reconstruction globale) ne sont pas touchés : seuls les mécanismes discord.py attachés
-aux Command sont neutralisés.
+Les checks de permissions, rôles, sécurité et les verrous métier explicites internes aux
+opérations destructives restent intacts.
 """
 from __future__ import annotations
 
 import logging
 import types
 
+from discord import app_commands
 from discord.ext import commands
 
 logger = logging.getLogger("bot.no-cooldown-final")
@@ -43,6 +46,41 @@ def _strip_all(bot: commands.Bot) -> None:
         _strip_command(command)
 
 
+def _is_app_cooldown_check(predicate) -> bool:
+    """Reconnaît uniquement les predicates produits par app_commands.checks cooldown."""
+    function = getattr(predicate, "__func__", predicate)
+    module = str(getattr(function, "__module__", ""))
+    qualname = str(getattr(function, "__qualname__", ""))
+    return (
+        module == "discord.app_commands.checks"
+        and "_create_cooldown_decorator.<locals>.predicate" in qualname
+    )
+
+
+def _strip_app_command(command) -> int:
+    removed = 0
+    checks = getattr(command, "checks", None)
+    if isinstance(checks, list):
+        kept = [check for check in checks if not _is_app_cooldown_check(check)]
+        removed += len(checks) - len(kept)
+        if len(kept) != len(checks):
+            command.checks[:] = kept
+    for child in list(getattr(command, "commands", ()) or ()):
+        removed += _strip_app_command(child)
+    return removed
+
+
+def _strip_all_app(bot: commands.Bot) -> int:
+    removed = 0
+    try:
+        roots = list(bot.tree.get_commands())
+    except Exception:
+        roots = []
+    for command in roots:
+        removed += _strip_app_command(command)
+    return removed
+
+
 def _remove_sentrix_global_checks(bot: commands.Bot) -> int:
     """Retire le vieux check global et le check isolé de #234 s'ils sont présents."""
     removed = 0
@@ -68,7 +106,6 @@ def _remove_sentrix_global_checks(bot: commands.Bot) -> int:
         except (ValueError, TypeError):
             pass
 
-    # Jette aussi tout état de l'ancien compteur partagé/isolé.
     try:
         bot._cooldown_bucket = _empty_buckets()
     except Exception:
@@ -82,26 +119,29 @@ def _remove_sentrix_global_checks(bot: commands.Bot) -> int:
 
 
 def _patch_prepare_globally() -> None:
-    """Garantit aussi zéro limite pour les Command créées après le setup.
-
-    Command.prepare est le dernier endroit commun aux commandes préfixées et au côté
-    commands.Command des HybridCommand. Les permissions et checks métier restent intacts.
-    """
+    """Dernier filet pour les commands.Command créées après le setup."""
     current = commands.Command.prepare
-    if getattr(current, _MARKER, False):
-        return
+    if not getattr(current, _MARKER, False):
+        async def prepare_without_limits(self: commands.Command, ctx: commands.Context):
+            _strip_command(self)
+            return await current(self, ctx)
 
-    async def prepare_without_limits(self: commands.Command, ctx: commands.Context):
-        _strip_command(self)
-        return await current(self, ctx)
+        setattr(prepare_without_limits, _MARKER, True)
+        prepare_without_limits._sentrix_original = current
+        commands.Command.prepare = prepare_without_limits
 
-    setattr(prepare_without_limits, _MARKER, True)
-    prepare_without_limits._sentrix_original = current
-    commands.Command.prepare = prepare_without_limits
+    current_cooldowns = commands.Command._prepare_cooldowns
+    if not getattr(current_cooldowns, _MARKER, False):
+        def prepare_no_cooldowns(self: commands.Command, ctx: commands.Context) -> None:
+            # Ne consomme aucun token et ne peut jamais lever CommandOnCooldown.
+            return None
+
+        setattr(prepare_no_cooldowns, _MARKER, True)
+        prepare_no_cooldowns._sentrix_original = current_cooldowns
+        commands.Command._prepare_cooldowns = prepare_no_cooldowns
 
 
 def _patch_add_command(bot: commands.Bot) -> None:
-    """Nettoie immédiatement toute commande ajoutée dynamiquement après le démarrage."""
     current = bot.add_command
     function = getattr(current, "__func__", current)
     if getattr(function, _MARKER, False):
@@ -118,25 +158,52 @@ def _patch_add_command(bot: commands.Bot) -> None:
     bot.add_command = types.MethodType(add_command_without_limits, bot)
 
 
+def _patch_app_checks_globally() -> None:
+    """Retire le cooldown juste avant les checks slash, sans contourner les permissions."""
+    for cls in (app_commands.Command, app_commands.ContextMenu):
+        current = cls._check_can_run
+        if getattr(current, _MARKER, False):
+            continue
+
+        async def check_without_cooldown(self, interaction, _current=current):
+            _strip_app_command(self)
+            return await _current(self, interaction)
+
+        setattr(check_without_cooldown, _MARKER, True)
+        check_without_cooldown._sentrix_original = current
+        cls._check_can_run = check_without_cooldown
+
+
 def install(bot: commands.Bot) -> None:
     """Désactive les cooldowns/concurrences génériques de toutes les commandes normales."""
-    removed = _remove_sentrix_global_checks(bot)
+    removed_global = _remove_sentrix_global_checks(bot)
     _strip_all(bot)
+    removed_app = _strip_all_app(bot)
     _patch_prepare_globally()
     _patch_add_command(bot)
+    _patch_app_checks_globally()
     _strip_all(bot)
+    removed_app += _strip_all_app(bot)
 
     bot.no_cooldown_final_state = {
         "installed": True,
-        "removed_global_checks": removed,
+        "removed_global_checks": removed_global,
+        "removed_app_cooldown_checks": removed_app,
         "commands_checked": len(list(bot.walk_commands())),
     }
     setattr(bot, _MARKER, True)
     logger.warning(
-        "SentriX zéro cooldown actif : %s check(s) globaux retirés, %s commandes sans cooldown/max_concurrency.",
-        removed,
+        "SentriX zéro cooldown actif : %s check(s) globaux, %s check(s) slash retirés, %s commandes sans cooldown/max_concurrency.",
+        removed_global,
+        removed_app,
         bot.no_cooldown_final_state["commands_checked"],
     )
 
 
-__all__ = ["install", "_strip_command", "_strip_all"]
+__all__ = [
+    "install",
+    "_strip_command",
+    "_strip_all",
+    "_strip_app_command",
+    "_is_app_cooldown_check",
+]
