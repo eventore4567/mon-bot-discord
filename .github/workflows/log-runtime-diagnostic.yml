@@ -25,7 +25,7 @@ jobs:
           python-version: '3.11'
       - name: Compile diagnostic and canonical transport
         run: python -m py_compile cogs/log_runtime_diagnostic.py cogs/log_transport_v52.py cogs/guild_departure_notify.py
-      - name: Verify direct V5.3 contracts
+      - name: Verify compact native V5.3 contracts
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -35,12 +35,13 @@ jobs:
           assert 'name="logs-diag"' in diag
           assert '@checks.is_bot_owner()' in diag
           assert 'log_transport_v52.send_log_v52(' in diag
-          assert 'active_name' in diag
-          assert 'last_error_message' in diag
           assert 'async def on_message(' in diag
           assert 'RAILWAY_SERVICE_NAME' in diag
-          assert 'RAILWAY_SERVICE_ID' in diag
           assert 'RAILWAY_GIT_COMMIT_SHA' in diag
+          assert 'async def _native_embed_send(' in diag
+          assert 'log_transport_v52._unwrap_messageable_send()' in diag
+          assert 'Diagnostic logs — OK' in diag
+          assert 'Réponse tronquée' not in diag
           assert 'async def send_log_v52(' in transport
           assert 'def _patch_logs_cog(' in transport
           assert 'cog._send = types.MethodType(direct_logs_send, cog)' in transport
@@ -51,5 +52,5 @@ jobs:
           assert 'LOG_ALLOWED_MENTIONS' in transport
           assert 'log_transport_v52.install(bot)' in loader
           assert loader.index('log_transport_v52.install(bot)') < loader.index('log_runtime_diagnostic.install(bot)')
-          print('live log diagnostic + direct V5.3 listener transport contracts OK')
+          print('compact native diagnostic + direct V5.3 listener transport contracts OK')
           PY
