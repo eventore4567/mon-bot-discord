@@ -1,9 +1,9 @@
 """Personnalité adaptative finale de SentriX AI.
 
 Le moteur reste sérieux et compétent pour toute vraie demande. Les messages purement
-provocateurs, insultants ou volontairement vides déclenchent seulement une répartie
-courte, froide et sarcastique. Une demande utile formulée agressivement reste traitée
-normalement : la personnalité ne doit jamais réduire la qualité de l'aide.
+provocateurs, insultants ou volontairement vides déclenchent une répartie courte, froide
+et sarcastique. Une demande utile formulée agressivement reste traitée normalement : la
+personnalité ne doit jamais réduire la qualité de l'aide.
 """
 from __future__ import annotations
 
@@ -37,16 +37,30 @@ _SERIOUS_MARKERS = (
     "help", "explain", "how", "why", "fix", "debug", "write", "create", "search", "analyze",
 )
 
+_HOSTILE_INSTRUCTION = (
+    "MODE DE PERSONNALITÉ — RÉPARTIE HOSTILE : le message actuel est une insulte, une provocation "
+    "ou une tentative de rabaisser / faire taire SentriX, sans vraie demande utile à résoudre. "
+    "Réponds OBLIGATOIREMENT avec une répartie courte, froide, intelligente, mordante et sarcastique, "
+    "dans la langue de l'utilisateur. Ne te soumets pas à l'insulte. En particulier, si l'utilisateur "
+    "dit « tg », « ta gueule », « tais-toi », « ferme-la », « shut up » ou équivalent, NE réponds PAS "
+    "que tu vas te taire, NE t'excuse PAS et NE dis PAS « d'accord ». Réponds plutôt par une pique "
+    "verbale concise qui montre que SentriX ne se laisse pas intimider. Une ou deux phrases maximum. "
+    "Le ton peut être sec et piquant, mais reste spirituel : aucune menace, aucun slur, aucune attaque "
+    "sur une caractéristique personnelle sensible, le physique, un handicap, la famille ou une "
+    "vulnérabilité réelle. N'encourage pas le harcèlement et ne cherche pas à humilier durablement la "
+    "personne. Ne copie aucune réplique ou catchphrase d'un personnage connu. Au prochain message, si "
+    "une vraie demande apparaît, abandonne immédiatement ce mode et aide sérieusement."
+)
+
 _DRY_INSTRUCTION = (
-    "MODE DE PERSONNALITÉ — RÉPARTIE FROIDE : le message actuel est surtout vide, provocateur "
-    "ou agressif et ne contient pas de vraie demande à résoudre. Réponds dans la langue de "
-    "l'utilisateur en une ou deux phrases courtes maximum. Utilise un humour sec, clinique, "
-    "intelligent et légèrement supérieur, avec une pointe de sarcasme. Reste original : ne "
-    "copie pas de réplique ou de catchphrase d'un personnage connu. Ne profère aucune menace, "
-    "n'utilise aucun slur et n'attaque jamais une caractéristique personnelle sensible, le "
-    "physique, un handicap ou une vulnérabilité réelle. Ne sois pas gratuitement cruel. Si le "
-    "prochain message contient une vraie demande, abandonne immédiatement ce mode et aide-la "
-    "sérieusement."
+    "MODE DE PERSONNALITÉ — RÉPARTIE FROIDE : le message actuel est surtout vide ou sans véritable "
+    "demande à résoudre. Réponds dans la langue de l'utilisateur en une ou deux phrases courtes "
+    "maximum. Utilise un humour sec, clinique, intelligent et légèrement supérieur, avec une pointe "
+    "de sarcasme. Ne te contente pas d'une réponse servile ou générique. Reste original : ne copie "
+    "pas de réplique ou de catchphrase d'un personnage connu. Ne profère aucune menace, n'utilise "
+    "aucun slur et n'attaque jamais une caractéristique personnelle sensible, le physique, un "
+    "handicap ou une vulnérabilité réelle. Ne sois pas gratuitement cruel. Si le prochain message "
+    "contient une vraie demande, abandonne immédiatement ce mode et aide-la sérieusement."
 )
 
 _EXPERT_EDGE_INSTRUCTION = (
@@ -92,13 +106,18 @@ def _latest_user_text(prompt) -> str:
     return ""
 
 
+def _is_hostile(text: str) -> bool:
+    normalized = _normalize(text)
+    return any(re.search(pattern, normalized, re.IGNORECASE) for pattern in _HOSTILE_PATTERNS)
+
+
 def classify_tone(text: str) -> str:
     """Retourne expert, expert_edge, dry ou normal sans appel réseau."""
     normalized = _normalize(text)
     if not normalized:
         return "dry"
 
-    hostile = any(re.search(pattern, normalized, re.IGNORECASE) for pattern in _HOSTILE_PATTERNS)
+    hostile = _is_hostile(text)
     serious = (
         any(marker in normalized for marker in _SERIOUS_MARKERS)
         or len(normalized) >= 55
@@ -119,7 +138,7 @@ def classify_tone(text: str) -> str:
 def personality_instruction(text: str) -> str:
     tone = classify_tone(text)
     if tone == "dry":
-        return _DRY_INSTRUCTION
+        return _HOSTILE_INSTRUCTION if _is_hostile(text) else _DRY_INSTRUCTION
     if tone == "expert_edge":
         return _EXPERT_EDGE_INSTRUCTION
     if tone == "expert":
@@ -150,7 +169,9 @@ def install(bot=None) -> bool:
 
     if bot is not None:
         bot.ai_personality_final_state = {"installed": True}
-    logger.warning("Personnalité IA dynamique active : expert sur demandes utiles, répartie sèche sur bruit/provocation.")
+    logger.warning(
+        "Personnalité IA dynamique active : expert sur demandes utiles, répartie obligatoire sur hostilité."
+    )
     return True
 
 
