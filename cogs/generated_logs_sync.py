@@ -23,13 +23,14 @@ logger = logging.getLogger("bot.generated-logs-sync")
 
 # Toutes les variantes réellement utilisées par SentriX. Les noms de configuration.py
 # (logs-membre, logs-vocal, logs-moderation, logs-securite...) sont inclus en plus des noms
-# historiques de +create-server.
+# historiques de +create-server. V6 ajoute logs-salons et logs-dossiers comme noms officiels.
 LOG_CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
     "messages": ("logs-messages", "logs-message"),
     "members": ("logs-membre", "logs-membres", "logs-member", "logs-members"),
     "voice": ("logs-vocal", "logs-vocaux", "logs-voice"),
     "roles": ("logs-roles", "logs-rôles", "logs-role", "logs-rôle"),
-    "server": ("logs-serveur", "logs-server"),
+    "server": ("logs-salons", "logs-serveur", "logs-server"),
+    "files": ("logs-dossiers", "logs-fichiers", "logs-files"),
     "moderation": ("logs-moderation", "logs-modération", "logs-modo"),
     "tickets": ("logs-tickets", "logs-ticket"),
     "automod": ("logs-securite", "logs-sécurité", "logs-automod", "logs-security"),
