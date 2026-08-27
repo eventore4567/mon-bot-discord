@@ -15,8 +15,8 @@ from . import embeds as sx
 from . import sentrix_runtime as runtime
 
 _INSTALLED = False
-# Même longueur que les commandes : visible, large et sans retour à la ligne.
-PANEL_BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# Exactement la même grande barre que les embeds de commandes.
+PANEL_BAR = sx.BAR
 _SEPARATOR_LINE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]+$")
 
 _ORIGINAL_LOG_EMBED = sx.log_embed
