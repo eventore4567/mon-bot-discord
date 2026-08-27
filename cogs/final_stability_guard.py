@@ -1,13 +1,14 @@
 """Dernière garde de stabilité SentriX.
 
 Cette extension est volontairement petite et non destructive. Elle est chargée après
-``cogs.slash_error_completion_guard`` sur Railway et réaffirme uniquement trois invariants
+``cogs.slash_error_completion_guard`` sur Railway et réaffirme uniquement quatre invariants
 qui avaient encore des chemins historiques concurrents :
 
 - aucune limite locale cooldown/par-minute ne doit bloquer +ai/+chat ;
 - l'autorité ``no_cooldown_final`` doit rester active après tous les cogs ;
 - un archivage de pièces jointes partiellement téléchargé ne doit jamais associer le
-  mauvais fichier à la mauvaise pièce jointe dans les logs.
+  mauvais fichier à la mauvaise pièce jointe dans les logs ;
+- la personnalité IA adaptative doit être installée après tous les wrappers IA historiques.
 
 Les quotas journaliers IA, permissions, modération de contenu et restrictions de salons/
 rôles ne sont pas modifiés. Les réglages cooldown historiques restent en base pour assurer
@@ -110,6 +111,17 @@ def _reassert_zero_cooldown(bot: commands.Bot) -> bool:
         return False
 
 
+def _install_ai_personality(bot: commands.Bot) -> bool:
+    """Installe la personnalité adaptative après les anciens wrappers IA."""
+    try:
+        from . import ai_personality_final
+
+        return bool(ai_personality_final.install(bot))
+    except Exception:
+        logger.exception("Installation de la personnalité IA dynamique impossible.")
+        return False
+
+
 def _state(bot: commands.Bot) -> dict[str, Any]:
     value = getattr(bot, "final_stability_guard_state", None)
     if isinstance(value, dict):
@@ -124,6 +136,7 @@ def install(bot: commands.Bot) -> dict[str, Any]:
     zero_cooldown = _reassert_zero_cooldown(bot)
     ai_throttle_disabled = _disable_ai_local_throttle(bot)
     safe_attachment_archive = _install_safe_attachment_archive()
+    ai_personality = _install_ai_personality(bot)
 
     state = _state(bot)
     state.update(
@@ -132,6 +145,7 @@ def install(bot: commands.Bot) -> dict[str, Any]:
             "zero_cooldown": zero_cooldown,
             "ai_local_throttle_disabled": ai_throttle_disabled,
             "safe_attachment_archive": safe_attachment_archive,
+            "ai_dynamic_personality": ai_personality,
         }
     )
     setattr(bot, _MARKER, True)
@@ -142,12 +156,15 @@ def install(bot: commands.Bot) -> dict[str, Any]:
         logger.warning("Garde finale : cog Ai absent au moment de l'installation.")
     if not safe_attachment_archive:
         logger.warning("Garde finale : protection archive fichiers non installée.")
+    if not ai_personality:
+        logger.warning("Garde finale : personnalité IA dynamique non installée.")
 
     logger.warning(
-        "Garde stabilité finale active : zéro cooldown=%s, throttle IA=%s, fichiers sûrs=%s.",
+        "Garde stabilité finale active : zéro cooldown=%s, throttle IA=%s, fichiers sûrs=%s, personnalité IA=%s.",
         zero_cooldown,
         ai_throttle_disabled,
         safe_attachment_archive,
+        ai_personality,
     )
     return state
 
@@ -161,4 +178,5 @@ __all__ = [
     "_disable_ai_local_throttle",
     "_install_safe_attachment_archive",
     "_reassert_zero_cooldown",
+    "_install_ai_personality",
 ]
