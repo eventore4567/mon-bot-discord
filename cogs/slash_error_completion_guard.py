@@ -223,11 +223,17 @@ async def setup(bot: commands.Bot) -> None:
     from . import logs_unified_v6
     await logs_unified_v6.install(bot)
 
-    # Le check historique de main.py utilisait un seul CooldownMapping par utilisateur.
-    # Cette dernière couche l'enlève et isole le quota par utilisateur + commande.
+    # Compatibilité historique #234 : cette couche peut encore créer son ancien quota,
+    # mais l'autorité juste après le supprime immédiatement et neutralise aussi les
+    # decorators cooldown/max_concurrency attachés aux commandes.
     from . import cooldown_isolation_fix
     cooldown_isolation_fix.install(bot)
 
+    # DERNIÈRE AUTORITÉ RAILWAY : aucune commande normale ne reste en cooldown et aucun
+    # max_concurrency discord.py générique ne peut produire « commande déjà en cours ».
+    from . import no_cooldown_final
+    no_cooldown_final.install(bot)
+
     logger.info(
-        "Runtime final V6 actif : transport V5.3 + 9 routes + logs-dossiers + tickets/transcripts unifiés + cooldown isolé par commande."
+        "Runtime final V6 actif : logs V5.3/V6 + zéro cooldown et zéro max_concurrency générique."
     )
