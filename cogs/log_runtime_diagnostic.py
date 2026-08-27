@@ -1,8 +1,8 @@
-"""Diagnostic live propriétaire du pipeline de logs SentriX.
+"""Diagnostic propriétaire compact du pipeline de logs SentriX.
 
-Il observe le Gateway, les listeners officiels et teste directement le transport V5.3.
-Le diagnostic ne dépend plus de ``log_service.send_log`` car un ancien runtime pouvait
-réécrire ce symbole après l'installation du correctif.
+Le diagnostic observe le Gateway et teste directement le transport V5.3. Sa réponse
+finale contourne volontairement les renderers globaux de commandes : un diagnostic sain
+ne doit jamais être réécrit en faux embed « Erreur » ni en « Réponse tronquée ».
 """
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def _seen(bot: commands.Bot, event: str, *items) -> None:
 
 
 def _patch_logs_send(bot: commands.Bot) -> None:
-    """Ajoute uniquement la télémétrie autour du Logs._send V5.3."""
+    """Ajoute seulement la télémétrie autour du Logs._send V5.3."""
     cog = bot.get_cog("Logs")
     if cog is None:
         return
@@ -104,9 +104,26 @@ def _patch_logs_send(bot: commands.Bot) -> None:
 
 
 def _reassert_transport(bot: commands.Bot) -> None:
-    # Réinstalle d'abord l'autorité V5.3, puis remet uniquement l'enveloppe de diagnostic.
     log_transport_v52.install(bot)
     _patch_logs_send(bot)
+
+
+async def _native_embed_send(ctx: commands.Context, panel: discord.Embed) -> None:
+    """Envoie le diagnostic sans aucun renderer de commande SentriX."""
+    native_send = log_transport_v52._unwrap_messageable_send()
+    kwargs = {
+        "embed": panel,
+        "allowed_mentions": discord.AllowedMentions.none(),
+    }
+    if getattr(ctx, "message", None) is not None:
+        kwargs["reference"] = discord.MessageReference(
+            message_id=ctx.message.id,
+            channel_id=ctx.channel.id,
+            guild_id=ctx.guild.id if ctx.guild else None,
+            fail_if_not_exists=False,
+        )
+        kwargs["mention_author"] = False
+    await native_send(ctx.channel, **kwargs)
 
 
 class LogRuntimeDiagnostic(commands.Cog):
@@ -165,8 +182,9 @@ class LogRuntimeDiagnostic(commands.Cog):
     async def on_voice_state_update(self, member: discord.Member, before, after):
         _seen(self.bot, "voice_state_update", member)
 
-    async def _route_lines(self, guild: discord.Guild) -> list[str]:
+    async def _route_status(self, guild: discord.Guild) -> tuple[list[str], bool]:
         lines: list[str] = []
+        all_ok = True
         for log_type, meta in log_service.LOG_TYPES.items():
             if not meta.get("emits"):
                 continue
@@ -175,21 +193,29 @@ class LogRuntimeDiagnostic(commands.Cog):
                 channel_id = int(setting.get("channel_id") or 0)
                 channel = guild.get_channel(channel_id) if channel_id else None
                 valid, reason = log_service.validate_channel(guild, channel_id)
-                status = "ON" if setting.get("enabled") else "OFF"
+                enabled = bool(setting.get("enabled"))
+                ok = enabled and valid and channel is not None
+                all_ok = all_ok and ok
                 channel_name = getattr(channel, "name", "absent")
                 lines.append(
-                    f"`{log_type:<10}` {status} • {channel_name} • "
-                    f"{'OK' if valid else reason}"
+                    f"`{log_type}` • {'OK' if ok else 'À vérifier'} • {channel_name}"
+                    + (f" ({reason})" if not valid else "")
                 )
             except Exception as exc:
-                lines.append(f"`{log_type:<10}` ERREUR • {type(exc).__name__}")
-        return lines
+                all_ok = False
+                lines.append(f"`{log_type}` • {type(exc).__name__}")
+        return lines, all_ok
 
     @commands.command(name="logs-diag", aliases=("logsdiag",), hidden=True)
     @checks.is_bot_owner()
     async def logs_diag(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.warning("Utilise cette commande dans un serveur."))
+            panel = discord.Embed(
+                title="Diagnostic logs",
+                description="Utilise cette commande dans un serveur.",
+                colour=discord.Colour.orange(),
+            )
+            return await _native_embed_send(ctx, panel)
 
         _reassert_transport(self.bot)
         state = _state(self.bot)
@@ -199,100 +225,77 @@ class LogRuntimeDiagnostic(commands.Cog):
         except Exception:
             listener_count = 0
 
-        transport_embed = embeds.log_embed(
+        probe = embeds.log_embed(
             "Diagnostic live des logs",
             fields=(("Origine", "+logs-diag • transport V5.3 direct", False),),
         )
         transport_ok = False
         transport_exception = None
         try:
-            # Teste exactement la fonction branchée directement sous Logs._send.
             transport_ok = bool(await log_transport_v52.send_log_v52(
                 self.bot,
                 ctx.guild,
                 "messages",
-                transport_embed,
+                probe,
                 event_key=f"diag-v53:{ctx.guild.id}:{time.time_ns()}",
             ))
         except Exception as exc:
             transport_exception = f"{type(exc).__name__}: {exc}"[:300]
 
-        v5 = getattr(self.bot, "live_log_delivery_v5_state", {}) or {}
         v53 = getattr(self.bot, "log_transport_v52_state", {}) or {}
-        counts = state.get("gateway_counts") or {}
-        counts_text = " • ".join(
-            f"{name}:{int(counts.get(name, 0))}" for name in _TRACKED
-            if int(counts.get(name, 0)) > 0
-        ) or "Aucun événement observé depuis ce démarrage"
+        route_lines, routes_ok = await self._route_status(ctx.guild)
+        healthy = bool(
+            transport_ok
+            and logs_cog is not None
+            and listener_count > 0
+            and v53.get("installed")
+            and v53.get("logs_send_patched")
+            and routes_ok
+        )
 
-        active = log_service.send_log
-        active_name = f"{getattr(active, '__module__', '?')}.{getattr(active, '__name__', type(active).__name__)}"
         service_name = os.getenv("RAILWAY_SERVICE_NAME") or "inconnu"
-        service_id = os.getenv("RAILWAY_SERVICE_ID") or "inconnu"
         commit = os.getenv("RAILWAY_GIT_COMMIT_SHA") or "inconnu"
-        bot_user = getattr(self.bot, "user", None)
+        counts = state.get("gateway_counts") or {}
+        event_total = sum(int(counts.get(name, 0)) for name in _TRACKED)
 
-        panel = embeds.brand(
-            "SentriX • Diagnostic live des logs",
-            "Ce diagnostic vérifie le runtime qui répond réellement sur Discord.",
+        panel = discord.Embed(
+            title="Diagnostic logs — OK" if healthy else "Diagnostic logs — Problème détecté",
+            description=(
+                "Le pipeline des logs fonctionne normalement."
+                if healthy
+                else "Un composant du pipeline demande encore une vérification."
+            ),
+            colour=discord.Colour.green() if healthy else discord.Colour.red(),
+        )
+        panel.add_field(
+            name="État",
+            value=(
+                f"Transport V5.3 : **{'OK' if transport_ok else 'ÉCHEC'}**\n"
+                f"Logs._send direct : **{'OK' if v53.get('logs_send_patched') else 'NON'}**\n"
+                f"Listeners : **{listener_count}** • Événements observés : **{event_total}**"
+            ),
+            inline=False,
         )
         panel.add_field(
             name="Instance",
-            value=(
-                f"Service : `{service_name}`\n"
-                f"Service ID : `{service_id}`\n"
-                f"Commit : `{commit[:12]}`\n"
-                f"Bot : `{getattr(bot_user, 'id', 'inconnu')}`"
-            ),
-            inline=False,
-        )
-        intents = self.bot.intents
-        panel.add_field(
-            name="Gateway / listeners",
-            value=(
-                f"Cog Logs : **{'présent' if logs_cog else 'ABSENT'}** • listeners : **{listener_count}**\n"
-                f"Intents : guilds={intents.guilds}, messages={intents.guild_messages}, "
-                f"content={intents.message_content}, members={intents.members}, voice={intents.voice_states}\n"
-                f"Événements vus : {counts_text[:700]}"
-            ),
+            value=f"Service : `{service_name}`\nCommit : `{commit[:12]}`",
             inline=False,
         )
         panel.add_field(
-            name="Transport final",
-            value=(
-                f"Global : `{active_name[:180]}`\n"
-                f"V5.3 installé : `{bool(v53.get('installed'))}` • Logs._send direct : `{bool(v53.get('logs_send_patched'))}`\n"
-                f"Dernier V5.3 : `{v53.get('last_result') or '-'}` • erreur `{v53.get('last_error') or '-'}`\n"
-                f"Message : `{str(v53.get('last_error_message') or '-')[:250]}`"
-            ),
+            name="Routes",
+            value="\n".join(route_lines)[:1024],
             inline=False,
         )
-        panel.add_field(
-            name="Dernier événement réel",
-            value=(
-                f"Gateway : `{state.get('last_gateway_event') or 'aucun'}` • guild `{state.get('last_gateway_guild_id') or '-'}`\n"
-                f"Logs._send : `{state.get('last_official_config_key') or 'aucun'}` • "
-                f"résultat `{state.get('last_official_result')}` • erreur `{state.get('last_official_error') or '-'}`\n"
-                f"Ancien V5 : `{v5.get('last_result') or 'aucune tentative'}`"
-            ),
-            inline=False,
-        )
-        panel.add_field(
-            name="Test pipeline V5.3 direct",
-            value=(
-                f"**{'SUCCÈS' if transport_ok else 'ÉCHEC'}**"
-                + (f" • `{transport_exception}`" if transport_exception else "")
-                + (f"\nInterne : `{v53.get('last_error')}` • `{str(v53.get('last_error_message') or '-')[:300]}`" if not transport_ok else "")
-            )[:1024],
-            inline=False,
-        )
-        panel.add_field(
-            name="Routes de ce serveur",
-            value="\n".join(await self._route_lines(ctx.guild))[:1024],
-            inline=False,
-        )
-        panel.set_footer(text="Modifie/supprime ensuite un message puis relance +logs-diag.")
-        await ctx.send(embed=panel)
+
+        if not healthy:
+            detail = (
+                transport_exception
+                or str(v53.get("last_error_message") or v53.get("last_error") or "Cause non identifiée")
+            )
+            panel.add_field(name="Détail", value=f"`{detail[:900]}`", inline=False)
+
+        panel.set_footer(text="SentriX • Diagnostic propriétaire des logs")
+        await _native_embed_send(ctx, panel)
 
 
 async def install(bot: commands.Bot) -> None:
