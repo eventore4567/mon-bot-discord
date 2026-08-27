@@ -22,6 +22,10 @@ PERMISSION_LABELS = {
 }
 
 OWNER_COGS = {"Owner"}
+ADMIN_COGS = {
+    "Configuration", "Logs", "ServerBuilder", "Automod", "Security", "SecurityTools",
+    "SentriXSetup", "Notifications",
+}
 
 COMMAND_PERMISSION_FALLBACKS = {
     "ban": "ban_members",
@@ -41,6 +45,16 @@ COMMAND_PERMISSION_FALLBACKS = {
     "role": "manage_roles",
     "roleall": "manage_roles",
     "nick": "manage_nicknames",
+    "setup": "administrator",
+    "ticketsetup": "administrator",
+    "logsetup": "administrator",
+    "aisetup": "administrator",
+    "shopsetup": "administrator",
+    "gamesetup": "administrator",
+    "statsconfig": "administrator",
+    "designsetup": "administrator",
+    "notifs-ping": "administrator",
+    "notifs-remove": "administrator",
 }
 
 EXAMPLES = {
@@ -82,9 +96,7 @@ def command_requirement(command: commands.Command) -> str:
     if permission:
         return permission_label(permission)
 
-    if cog_name in {"Configuration", "Logs", "ServerBuilder"}:
-        return "Administrateur"
-    if cog_name in {"Automod", "Security", "SecurityTools"}:
+    if cog_name in ADMIN_COGS:
         return "Administrateur"
     return "Aucune permission spéciale"
 
