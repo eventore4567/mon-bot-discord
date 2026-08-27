@@ -43,10 +43,10 @@ if "cogs.log_access_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.log_access_fix")
 if "cogs.interaction_transport_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.interaction_transport_guard")
-if "cogs.stale_discord_app_detector" not in bot_main.EXTENSIONS:
-    bot_main.EXTENSIONS.append("cogs.stale_discord_app_detector")
-if "cogs.command_error_probe" not in bot_main.EXTENSIONS:
-    bot_main.EXTENSIONS.append("cogs.command_error_probe")
+# Les deux anciens diagnostics ci-dessous ne sont plus chargés en permanence :
+# - stale_discord_app_detector pouvait scanner jusqu'à 250 intégrations au démarrage ;
+# - command_error_probe relisait la base toutes les 5 secondes uniquement pour /health.
+# Les modules restent dans le dépôt pour un diagnostic manuel si le problème revient.
 if "cogs.legacy_observability_conflict_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.legacy_observability_conflict_guard")
 if "cogs.slash_reliability_v7" not in bot_main.EXTENSIONS:
