@@ -1,0 +1,72 @@
+name: SentriX Load Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      command_users:
+        description: "Utilisateurs virtuels — moteur de commandes"
+        required: true
+        default: "2000"
+      command_count:
+        description: "Nombre de commandes simulées"
+        required: true
+        default: "200000"
+      command_profile:
+        description: "Profil commandes: core, fast, mixed ou heavy"
+        required: true
+        default: "core"
+      db_users:
+        description: "Utilisateurs concurrents — vraie SQLite"
+        required: true
+        default: "200"
+      db_operations:
+        description: "Nombre d'opérations SQLite réelles"
+        required: true
+        default: "50000"
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer les dépendances minimales
+        run: python -m pip install --upgrade pip aiosqlite
+
+      - name: Tester le moteur de concurrence des commandes
+        run: |
+          python tools/load_test_sentrix.py \
+            --users "${{ inputs.command_users }}" \
+            --commands "${{ inputs.command_count }}" \
+            --profile "${{ inputs.command_profile }}" | tee command-load.txt
+
+      - name: Tester la vraie couche SQLite
+        run: |
+          python tools/load_test_database.py \
+            --users "${{ inputs.db_users }}" \
+            --operations "${{ inputs.db_operations }}" | tee database-load.txt
+
+      - name: Résumé du benchmark
+        if: always()
+        run: |
+          {
+            echo "# SentriX — Load Test"
+            echo
+            echo "## Moteur de commandes"
+            echo '```text'
+            cat command-load.txt 2>/dev/null || true
+            echo '```'
+            echo
+            echo "## Vraie base SQLite"
+            echo '```text'
+            cat database-load.txt 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

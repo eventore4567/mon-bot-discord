@@ -4,7 +4,7 @@ But : mesurer la capacité de la boucle asyncio et la pression de commandes sans
 une seule requête à Discord, OpenAI, Railway ou un autre service externe.
 
 Exemples :
-    python tools/load_test_sentrix.py --users 2000 --commands 200000
+    python tools/load_test_sentrix.py --users 2000 --commands 200000 --profile core
     python tools/load_test_sentrix.py --users 20000 --commands 200000 --profile heavy
 
 Le résultat est un benchmark SYNTHÉTIQUE. Il ne représente pas les rate limits Discord,
@@ -31,6 +31,18 @@ class CommandKind:
 
 
 PROFILES: dict[str, tuple[CommandKind, ...]] = {
+    # Profil conseillé pour vérifier le moteur interne : même variété que mixed, mais
+    # AUCUNE erreur injectée volontairement. Toute erreur affichée vient donc du test lui-même.
+    "core": (
+        CommandKind("cache/read", 0.35, 0.15, 1.2),
+        CommandKind("utility", 0.20, 0.5, 3.0),
+        CommandKind("db-read", 0.16, 1.0, 6.0),
+        CommandKind("db-write/log", 0.12, 2.0, 10.0),
+        CommandKind("moderation", 0.10, 3.0, 15.0),
+        CommandKind("heavy-local", 0.05, 10.0, 40.0),
+        CommandKind("ai-external-simulated", 0.02, 80.0, 250.0),
+    ),
+    # Profil historique : inclut volontairement un faible taux d'échecs externes simulés.
     "mixed": (
         CommandKind("cache/read", 0.35, 0.15, 1.2),
         CommandKind("utility", 0.20, 0.5, 3.0),
@@ -179,7 +191,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Simulateur de charge interne SentriX")
     parser.add_argument("--users", type=int, default=2000, help="nombre de workers/utilisateurs virtuels")
     parser.add_argument("--commands", type=int, default=200000, help="nombre total de commandes")
-    parser.add_argument("--profile", choices=sorted(PROFILES), default="mixed")
+    parser.add_argument("--profile", choices=sorted(PROFILES), default="core")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     if not 1 <= args.users <= 50000:
