@@ -8,6 +8,7 @@ on:
       - "cogs/cooldown_isolation_fix.py"
       - "cogs/slash_error_completion_guard.py"
       - "tests/test_cooldown_isolation.py"
+      - "tests/test_cooldown_isolation_runtime.py"
       - ".github/workflows/cooldown-isolation.yml"
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - "cogs/cooldown_isolation_fix.py"
       - "cogs/slash_error_completion_guard.py"
       - "tests/test_cooldown_isolation.py"
+      - "tests/test_cooldown_isolation_runtime.py"
       - ".github/workflows/cooldown-isolation.yml"
 
 jobs:
@@ -26,7 +28,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install minimal runtime dependencies
+        run: python -m pip install "discord.py>=2.6.3" "python-dotenv>=1.0.0" "aiosqlite>=0.20.0"
       - name: Compile final runtime files
         run: python -m py_compile cogs/cooldown_isolation_fix.py cogs/slash_error_completion_guard.py
       - name: Verify cooldown isolation contracts
         run: python tests/test_cooldown_isolation.py
+      - name: Verify real discord.py cooldown behavior
+        run: PYTHONPATH=. python tests/test_cooldown_isolation_runtime.py
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
