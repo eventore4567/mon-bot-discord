@@ -19,14 +19,23 @@ def test_low_effort_messages_get_dry_mode():
 
 
 def test_hostility_without_request_gets_dry_mode():
-    assert personality.classify_tone("t'es nul") == "dry"
-    assert personality.classify_tone("ta gueule") == "dry"
-    assert personality.classify_tone("tg") == "dry"
-    assert personality.classify_tone("you are stupid") == "dry"
+    for text in (
+        "t'es nul",
+        "ta gueule",
+        "tg",
+        "you are stupid",
+        "tes trop bette",
+        "t'es trop bête",
+        "fuck you",
+        "fuck u",
+        "fuck off",
+        "stfu",
+    ):
+        assert personality.classify_tone(text) == "dry", text
 
 
 def test_hostile_messages_force_calm_sarcasm_not_submission():
-    for text in ("tg", "ta gueule", "ferme-la", "shut up", "t'es nul"):
+    for text in ("tg", "ta gueule", "ferme-la", "shut up", "t'es nul", "tes trop bette", "fuck you"):
         instruction = personality.personality_instruction(text)
         assert "SARCASME CALME" in instruction, text
         assert "Réponds OBLIGATOIREMENT" in instruction, text
@@ -35,11 +44,12 @@ def test_hostile_messages_force_calm_sarcasm_not_submission():
         assert "comparaison absurde" in instruction, text
         assert "NE réponds PAS" in instruction, text
         assert "NE t'excuse PAS" in instruction, text
-        assert "NE dis PAS « d'accord »" in instruction, text
+        assert "NE propose PAS ton aide" in instruction, text
 
 
 def test_real_request_wins_over_hostility():
     assert personality.classify_tone("t'es nul mais explique moi comment corriger ce bug python") == "expert_edge"
+    assert personality.classify_tone("fuck you mais explique moi pourquoi ce code plante") == "expert_edge"
     instruction = personality.personality_instruction(
         "t'es nul mais explique moi comment corriger ce bug python"
     )
@@ -110,6 +120,48 @@ def test_generate_wrapper_injects_tone_without_changing_prompt():
         ai_service.generate = original
 
 
+def test_hostile_polite_fallback_is_replaced_locally():
+    original = ai_service.generate
+
+    async def fake_generate(prompt, *args, **kwargs):
+        return ai_service.AiResult(
+            text="Je préfère qu'on reste respectueux. Si tu as besoin de quelque chose, je peux t'aider.",
+            model_key=ai_service.MODEL_LUNA,
+        )
+
+    try:
+        ai_service.generate = fake_generate
+        assert personality.install() is True
+        wrapped = ai_service.generate
+        result = asyncio.run(wrapped("fuck you", instructions="BASE"))
+        assert result.ok
+        assert result.text in personality._SARCASM_VARIATIONS
+        assert "respectueux" not in result.text.casefold()
+        assert "je peux t'aider" not in result.text.casefold()
+    finally:
+        ai_service.generate = original
+
+
+def test_useful_hostile_request_is_not_replaced_by_local_fallback():
+    original = ai_service.generate
+
+    async def fake_generate(prompt, *args, **kwargs):
+        return ai_service.AiResult(
+            text="Voici comment corriger ton code étape par étape.",
+            model_key=ai_service.MODEL_TERRA,
+        )
+
+    try:
+        ai_service.generate = fake_generate
+        assert personality.install() is True
+        wrapped = ai_service.generate
+        result = asyncio.run(wrapped("fuck you mais explique moi pourquoi ce code plante", instructions="BASE"))
+        assert result.ok
+        assert result.text == "Voici comment corriger ton code étape par étape."
+    finally:
+        ai_service.generate = original
+
+
 if __name__ == "__main__":
     test_serious_requests_stay_expert()
     test_low_effort_messages_get_dry_mode()
@@ -122,4 +174,6 @@ if __name__ == "__main__":
     test_dry_policy_has_safety_bounds()
     test_inspiration_is_small_even_with_360_plus_variations()
     test_generate_wrapper_injects_tone_without_changing_prompt()
+    test_hostile_polite_fallback_is_replaced_locally()
+    test_useful_hostile_request_is_not_replaced_by_local_fallback()
     print("ai personality final: ok")
