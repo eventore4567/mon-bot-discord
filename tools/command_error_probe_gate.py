@@ -46,7 +46,8 @@ assert "command_kind" not in refresh
 assert "duration_ms" not in refresh
 assert "status='error'" not in refresh
 
-assert '"cogs.command_error_probe" not in bot_main.EXTENSIONS' in boot_text
-assert 'bot_main.EXTENSIONS.append("cogs.command_error_probe")' in boot_text
+# La sonde reste utilisable manuellement, mais ne doit plus tourner toutes les 5 secondes
+# sur chaque instance Railway juste pour compléter /health.
+assert 'bot_main.EXTENSIONS.append("cogs.command_error_probe")' not in boot_text
 
-print("SentriX command error probe gate: OK (real ProductionPhase hourly schema, no PII)")
+print("SentriX command error probe gate: OK (manual diagnostic only, not production-loaded)")
