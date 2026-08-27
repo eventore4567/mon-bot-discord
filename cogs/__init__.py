@@ -1,8 +1,9 @@
 """Chargeur runtime SentriX.
 
 Les correctifs fonctionnels restent ciblés par cog. L'interface, l'aide et les journaux
-ne sont plus monkey-patchés par une succession de versions concurrentes :
+ont un propriétaire unique :
 - embeds : utils.embeds ;
+- setup : cogs.setup_control_center ;
 - help : cogs.help ;
 - logs : cogs.logs -> utils.log_service.
 """
@@ -27,6 +28,7 @@ from .emoji_name_lookup import install as install_emoji_name_lookup
 from .final_interaction_policy import install as install_final_interaction_policy
 from .generated_logs_sync import install as install_generated_logs_sync
 from .giveaway_antialt import install as install_giveaway_antialt
+from .language_official_bridge import install as install_language_official_bridge
 from .language_runtime import install as install_language_runtime
 from .language_setup_finalizer import install as install_language_setup_finalizer
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
@@ -48,6 +50,7 @@ from .server_builder_everyone import install_server_builder_everyone_ping
 from .server_builder_existing_bootstrap import install as install_existing_server_bootstrap
 from .server_builder_ready_setup import install as install_server_builder_ready_setup
 from .server_choice_roles import install as install_server_choice_roles
+from .setup_control_center import install as install_setup_control_center
 from .shop_default_prices import install as install_shop_default_prices
 from .smart_creation_guard_v47 import install as install_smart_creation_guard_v47
 from .slash_reliability_v7 import install as install_slash_reliability_v7
@@ -102,11 +105,14 @@ def _install_embed_component_fix(bot: commands.Bot) -> None:
 async def _install_configuration_critical_patches(bot: commands.Bot) -> None:
     if bot.get_cog("Configuration") is None:
         return
-    # Correctifs fonctionnels uniquement. Aucun renderer/setup visuel parallèle.
     await _run_installer("rôle de ping tickets setup", install_ticket_ping_setup, bot)
     await _run_installer("choix de langue public", install_public_language_choice, bot)
     await _run_installer("moteur de langue setup", install_language_runtime, bot)
     await _run_installer("finaliseur de langue setup", install_language_setup_finalizer, bot)
+    await _run_installer("centre de configuration officiel", install_setup_control_center, bot)
+    # Le nouveau +setup est installé APRES les anciens correctifs de langue : on rebranche
+    # donc explicitement la langue sur son vrai propriétaire, sans restaurer l'ancienne UI.
+    await _run_installer("pont langue setup officiel", install_language_official_bridge, bot)
 
 
 async def _install_common_runtime(bot: commands.Bot) -> None:
@@ -178,7 +184,6 @@ async def _install_release_and_official_server(bot: commands.Bot) -> None:
 
 
 async def _install_error_stack(bot: commands.Bot) -> None:
-    # Un seul handler d'erreurs utilisateur ; il utilise le design system officiel.
     try:
         from .error_experience_v3 import install as install_error_experience_v3
         await _run_installer("erreurs utilisateur", install_error_experience_v3, bot)
@@ -188,24 +193,19 @@ async def _install_error_stack(bot: commands.Bot) -> None:
 
 
 async def _load_official_help(bot: commands.Bot) -> None:
-    """Branche réellement le propriétaire unique de +help et /help.
-
-    `main.py` charge historiquement `cogs.utility`, qui possède encore l'ancien help dans
-    son fichier. Le nouveau `cogs.help` n'était pas dans EXTENSIONS : il existait donc dans
-    le dépôt sans jamais être exécuté, ce qui expliquait la grosse page verticale encore
-    visible sur Discord. On le charge avant tree.sync(); son setup retire alors l'ancien
-    +help et /help du registre et les remplace par l'implémentation officielle.
-    """
     if bot.get_cog("SentriXHelp") is not None:
+        await _run_installer("pont langue help officiel", install_language_official_bridge, bot)
         return
     if _OFFICIAL_HELP_EXTENSION in bot.extensions:
+        await _run_installer("pont langue help officiel", install_language_official_bridge, bot)
         return
     try:
         await _ORIGINAL_LOAD_EXTENSION(bot, _OFFICIAL_HELP_EXTENSION)
         bot._sentrix_help_owner = _OFFICIAL_HELP_EXTENSION
-        # Le nouveau propriétaire est chargé après le garde central ; réappliquer sa
-        # règle publique au nouvel objet +help, et non à l'ancienne commande remplacée.
         install_permission_guard(bot)
+        # Le help officiel vient d'être chargé après l'ancien moteur de langue. Le pont
+        # pose ses marqueurs sur le NOUVEL objet +help au lieu de restaurer son prédécesseur.
+        await _run_installer("pont langue help officiel", install_language_official_bridge, bot)
         logger.info("Help officiel SentriX chargé : ancien +help remplacé.")
     except Exception:
         logger.exception("Impossible de charger le help officiel SentriX.")
@@ -224,15 +224,12 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _run_installer("permissions commandes", install_permission_guard, bot)
     await _run_installer("politique finale interactions", install_final_interaction_policy, bot)
     await _run_installer("libération concurrence slash V41", install_command_error_release_v41, bot)
-    # Important : après tous les cogs métier, mais AVANT main.py -> tree.sync().
     await _load_official_help(bot)
     bot._sentrix_runtime_finalized_clean = True
-    logger.info("Runtime SentriX finalisé : un renderer, un help, un logger.")
+    logger.info("Runtime SentriX finalisé : un setup, un help, un renderer, un logger.")
 
 
 async def _load_extension_with_sentrix_patches(bot: commands.Bot, name: str, *, package: str | None = None):
-    # Installer le plafond avant la toute première extension : discord.py refuse
-    # immédiatement la 101e racine et ne laisse pas le finaliseur la retirer après coup.
     install_slash_command_budget(bot)
     result = await _ORIGINAL_LOAD_EXTENSION(bot, name, package=package)
     await _install_extension_specific(bot, name)

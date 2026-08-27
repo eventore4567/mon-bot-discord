@@ -1,11 +1,7 @@
 """Centre d'aide officiel SentriX.
 
-Le message d'aide reste toujours un vrai ``discord.Embed`` : accueil, recherche,
-catégories et pagination modifient uniquement l'embed du même message. Les composants
-(menu/boutons) restent sous la carte, comme l'impose Discord.
-
-La croissance reste volontairement organique : le centre d'aide expose des liens utiles
-pour ajouter SentriX et ouvrir son dashboard, sans message publicitaire automatique.
++help et /help partagent la même logique. L'accueil reste volontairement léger :
+il sert à trouver une commande, pas à configurer le serveur.
 """
 from __future__ import annotations
 
@@ -19,102 +15,65 @@ from discord.ext import commands
 
 import config
 from utils import embeds
+from utils.command_permissions import command_example, command_requirement
 
-PAGE_SIZE = 8
+PAGE_SIZE = 7
 
 CATEGORY_NAMES = {
-    "Ai": "Intelligence artificielle",
-    "Economy": "Économie et boutique",
-    "Levels": "Niveaux et communauté",
-    "Minigames": "Mini-jeux",
-    "GamesEconomy": "Mini-jeux",
-    "Music": "Musique",
-    "Events": "Événements",
-    "Invites": "Invitations",
-    "Utility": "Utilitaires",
-    "Notifications": "Notifications",
     "Moderation": "Modération",
-    "Automod": "Sécurité",
-    "Security": "Sécurité",
+    "Automod": "Administration",
+    "Security": "Administration",
+    "SecurityTools": "Administration",
+    "Configuration": "Administration",
+    "Logs": "Administration",
+    "ServerBuilder": "Administration",
+    "Verification": "Administration",
+    "Owner": "Administration",
+    "EmbedBuilder": "Administration",
+    "Design": "Administration",
+    "Utility": "Informations",
+    "Stats": "Informations",
+    "Invites": "Informations",
+    "Economy": "Économie",
+    "Levels": "Économie",
+    "GamesEconomy": "Jeux",
+    "Minigames": "Jeux",
+    "Music": "Jeux",
+    "Events": "Jeux",
     "Tickets": "Tickets",
-    "Verification": "Vérification et rôles",
-    "Configuration": "Configuration et logs",
-    "Logs": "Configuration et logs",
-    "ServerBuilder": "Création de serveur",
-    "Stats": "Statistiques",
-    "Owner": "Propriétaire",
-    "EmbedBuilder": "Créateur d'embeds",
-    "Design": "Design et apparence",
+    "Ai": "IA",
+    "Notifications": "Administration",
 }
 
-CATEGORY_ORDER = [
-    "Intelligence artificielle",
-    "Économie et boutique",
-    "Niveaux et communauté",
-    "Mini-jeux",
-    "Musique",
-    "Événements",
-    "Invitations",
-    "Utilitaires",
-    "Notifications",
+CATEGORY_ORDER = (
     "Modération",
-    "Sécurité",
+    "Informations",
+    "Économie",
+    "Jeux",
     "Tickets",
-    "Vérification et rôles",
-    "Configuration et logs",
-    "Création de serveur",
-    "Statistiques",
-    "Créateur d'embeds",
-    "Design et apparence",
-    "Propriétaire",
-]
-
-STAFF_COGS = {
-    "Moderation", "Automod", "Security", "Configuration", "Logs",
-    "ServerBuilder", "Verification", "Owner", "EmbedBuilder",
-}
-
-# Permissions nécessaires aux fonctions réellement proposées par SentriX. Le lien OAuth
-# ne demande PAS Administrateur : un propriétaire de serveur garde un contrôle précis sur
-# les droits du rôle du bot et Discord affiche clairement chaque permission demandée.
-INVITE_PERMISSION_NAMES = (
-    "view_channel",
-    "manage_channels",
-    "manage_roles",
-    "kick_members",
-    "ban_members",
-    "moderate_members",
-    "manage_messages",
-    "read_message_history",
-    "send_messages",
-    "send_messages_in_threads",
-    "embed_links",
-    "attach_files",
-    "add_reactions",
-    "mention_everyone",
-    "manage_nicknames",
-    "change_nickname",
-    "manage_webhooks",
-    "manage_emojis_and_stickers",
-    "connect",
-    "speak",
-    "move_members",
-    "mute_members",
-    "deafen_members",
-    "use_application_commands",
-    "create_public_threads",
-    "create_private_threads",
-    "manage_threads",
-    "manage_events",
+    "IA",
+    "Administration",
 )
 
+CATEGORY_DESCRIPTIONS = {
+    "Modération": "Ban, kick, mute, warn, clear et sanctions.",
+    "Informations": "Serveur, membre, rôle, statistiques et utilitaires.",
+    "Économie": "Balance, banque, boutique, niveaux et progression.",
+    "Jeux": "Mini-jeux, activités et commandes de divertissement.",
+    "Tickets": "Commandes liées aux tickets et au support.",
+    "IA": "Assistant SentriX et génération d’images.",
+    "Administration": "Configuration, sécurité, logs, rôles et gestion du serveur.",
+}
 
-def _is_staff(member) -> bool:
-    return isinstance(member, discord.Member) and (
-        member.guild_permissions.administrator
-        or member.guild_permissions.manage_guild
-        or member.guild_permissions.moderate_members
-    )
+INVITE_PERMISSION_NAMES = (
+    "view_channel", "manage_channels", "manage_roles", "kick_members", "ban_members",
+    "moderate_members", "manage_messages", "read_message_history", "send_messages",
+    "send_messages_in_threads", "embed_links", "attach_files", "add_reactions",
+    "mention_everyone", "manage_nicknames", "change_nickname", "manage_webhooks",
+    "manage_emojis_and_stickers", "connect", "speak", "move_members", "mute_members",
+    "deafen_members", "use_application_commands", "create_public_threads",
+    "create_private_threads", "manage_threads", "manage_events",
+)
 
 
 def _cog_name(command: commands.Command) -> str:
@@ -122,17 +81,15 @@ def _cog_name(command: commands.Command) -> str:
 
 
 def _category(command: commands.Command) -> str:
-    return CATEGORY_NAMES.get(_cog_name(command), _cog_name(command))
+    return CATEGORY_NAMES.get(_cog_name(command), "Informations")
 
 
-def _visible(bot: commands.Bot, member) -> list[commands.Command]:
-    staff = _is_staff(member)
+def _visible(bot: commands.Bot, _member=None) -> list[commands.Command]:
+    """Toutes les commandes réelles sont visibles dans l'aide, permission ou non."""
     rows: list[commands.Command] = []
     seen: set[str] = set()
     for command in bot.walk_commands():
         if command.hidden:
-            continue
-        if not staff and _cog_name(command) in STAFF_COGS:
             continue
         key = command.qualified_name.casefold()
         if key in seen:
@@ -158,7 +115,7 @@ def _slash_map(bot: commands.Bot) -> dict[str, str]:
 
 def _description(command: commands.Command) -> str:
     raw = (command.description or command.help or "Aucune description.").strip()
-    return raw.split("\n", 1)[0][:190]
+    return raw.split("\n", 1)[0][:220]
 
 
 def _usage(command: commands.Command, prefix: str) -> str:
@@ -184,52 +141,58 @@ def _decorate(panel: discord.Embed, bot: commands.Bot) -> discord.Embed:
     return panel
 
 
-def _home(bot: commands.Bot, member) -> discord.Embed:
+def _home(bot: commands.Bot, member=None) -> discord.Embed:
     grouped = _ordered_categories(bot, member)
     panel = embeds.help_embed(
         "SentriX — Centre d’aide",
-        "Choisissez une catégorie avec le menu sous cette carte. Toutes les commandes et toutes les pages restent dans cet embed.",
+        "Retrouvez rapidement les commandes et fonctionnalités de SentriX.",
     )
-    panel.add_field(name="Commandes disponibles", value=str(sum(grouped.values())), inline=True)
-    panel.add_field(name="Catégories", value=str(len(grouped)), inline=True)
+    lines = []
+    for category, count in grouped.items():
+        description = CATEGORY_DESCRIPTIONS.get(category, "Commandes SentriX.")
+        lines.append(f"**{category}** — {description} `{count}`")
+    panel.add_field(name="Catégories", value="\n".join(lines), inline=False)
     panel.add_field(
-        name="Recherche",
-        value="Utilisez le bouton **Rechercher** pour trouver directement une commande.",
+        name="Recherche rapide",
+        value="Tapez `+help ban`, `/help commande:ban` ou utilisez **Rechercher**.",
         inline=False,
     )
-    panel.set_footer(text="SentriX • Aide")
+    panel.add_field(
+        name="Permissions",
+        value="Toutes les commandes sont visibles. La fiche d’une commande indique clairement la permission nécessaire.",
+        inline=False,
+    )
+    panel.set_footer(text="SentriX • Centre d’aide")
     return _decorate(panel, bot)
 
 
 def _detail(bot: commands.Bot, command: commands.Command, prefix: str) -> discord.Embed:
     slash = _slash_map(bot).get(command.qualified_name.casefold())
-    panel = embeds.help_embed(command.qualified_name, _description(command))
-    panel.add_field(name="Utilisation", value=f"`{_usage(command, prefix)}`", inline=False)
+    requirement = command_requirement(command)
+    panel = embeds.help_embed(f"SentriX — {command.qualified_name}", _description(command))
+    panel.add_field(name="Commande", value=f"`{_usage(command, prefix)}`", inline=False)
     if slash:
         panel.add_field(name="Slash", value=f"`/{slash}`", inline=True)
+    panel.add_field(name="Permission nécessaire", value=requirement, inline=True)
+    panel.add_field(name="Catégorie", value=_category(command), inline=True)
+    panel.add_field(name="Exemple", value=f"`{command_example(command, prefix)}`", inline=False)
     if command.aliases:
         panel.add_field(
             name="Alias",
-            value=", ".join(f"`{alias}`" for alias in command.aliases[:8]),
-            inline=True,
+            value=", ".join(f"`{alias}`" for alias in command.aliases[:10]),
+            inline=False,
         )
-    panel.add_field(name="Catégorie", value=_category(command), inline=True)
     panel.set_footer(text="SentriX • Aide commande")
     return _decorate(panel, bot)
 
 
-def _pages(
-    bot: commands.Bot,
-    commands_list: list[commands.Command],
-    prefix: str,
-    title: str,
-) -> list[discord.Embed]:
-    chunks = [commands_list[i:i + PAGE_SIZE] for i in range(0, len(commands_list), PAGE_SIZE)] or [[]]
+def _pages(bot: commands.Bot, command_rows: list[commands.Command], prefix: str, title: str) -> list[discord.Embed]:
+    chunks = [command_rows[i:i + PAGE_SIZE] for i in range(0, len(command_rows), PAGE_SIZE)] or [[]]
     pages: list[discord.Embed] = []
     for page_index, chunk in enumerate(chunks, start=1):
         panel = embeds.help_embed(
-            title,
-            "Les commandes de cette catégorie sont affichées directement dans la carte.",
+            f"SentriX — {title}",
+            "Sélectionnez ou recherchez une commande pour afficher sa fiche complète.",
         )
         if not chunk:
             panel.add_field(name="Aucun résultat", value="Aucune commande trouvée.", inline=False)
@@ -237,7 +200,7 @@ def _pages(
             for command in chunk:
                 panel.add_field(
                     name=_command_label(bot, command, prefix),
-                    value=_description(command),
+                    value=f"{_description(command)}\n**Permission :** {command_requirement(command)}",
                     inline=False,
                 )
         panel.set_footer(text=f"SentriX • Page {page_index}/{len(chunks)}")
@@ -245,11 +208,11 @@ def _pages(
     return pages
 
 
-def _ordered_categories(bot: commands.Bot, member) -> OrderedDict[str, int]:
+def _ordered_categories(bot: commands.Bot, member=None) -> OrderedDict[str, int]:
     counts: dict[str, int] = {}
     for command in _visible(bot, member):
-        name = _category(command)
-        counts[name] = counts.get(name, 0) + 1
+        category = _category(command)
+        counts[category] = counts.get(category, 0) + 1
 
     result: OrderedDict[str, int] = OrderedDict()
     for category in CATEGORY_ORDER:
@@ -260,12 +223,12 @@ def _ordered_categories(bot: commands.Bot, member) -> OrderedDict[str, int]:
     return result
 
 
-def _search(commands_list: list[commands.Command], query: str) -> list[commands.Command]:
-    needle = query.casefold().strip()
+def _search(command_rows: list[commands.Command], query: str) -> list[commands.Command]:
+    needle = query.casefold().strip().lstrip("+/")
     if not needle:
         return []
     ranked: list[tuple[int, commands.Command]] = []
-    for command in commands_list:
+    for command in command_rows:
         aliases = [alias.casefold() for alias in (command.aliases or [])]
         name = command.qualified_name.casefold()
         category = _category(command).casefold()
@@ -305,9 +268,7 @@ def _invite_url(bot: commands.Bot) -> str | None:
     if client_id is None:
         return None
     return discord.utils.oauth_url(
-        int(client_id),
-        permissions=_recommended_invite_permissions(),
-        scopes=("bot", "applications.commands"),
+        int(client_id), permissions=_recommended_invite_permissions(), scopes=("bot", "applications.commands")
     )
 
 
@@ -322,15 +283,11 @@ def _valid_http_url(value: str) -> str | None:
 
 
 def _dashboard_url() -> str | None:
-    # DASHBOARD_URL reste accepté pour les anciens déploiements ; le réglage officiel
-    # actuel vient de config.py et pointe directement vers /app.
     legacy = os.getenv("DASHBOARD_URL", "").strip()
     return _valid_http_url(legacy) or _valid_http_url(getattr(config, "DASHBOARD_APP_URL", ""))
 
 
 def _support_url() -> str | None:
-    # Aucun faux lien : si aucun serveur support n'est configuré, le bouton est simplement
-    # absent. Railway peut définir l'une des deux variables sans toucher au code.
     for env_name in ("SENTRIX_SUPPORT_URL", "SUPPORT_SERVER_URL"):
         value = _valid_http_url(os.getenv(env_name, ""))
         if value:
@@ -339,22 +296,13 @@ def _support_url() -> str | None:
 
 
 def _add_growth_links(view: discord.ui.View, bot: commands.Bot) -> None:
-    links = (
+    for label, url in (
         ("Ajouter SentriX", _invite_url(bot)),
         ("Dashboard", _dashboard_url()),
         ("Serveur support", _support_url()),
-    )
-    for label, url in links:
-        if not url:
-            continue
-        view.add_item(
-            discord.ui.Button(
-                label=label,
-                style=discord.ButtonStyle.link,
-                url=url,
-                row=3,
-            )
-        )
+    ):
+        if url:
+            view.add_item(discord.ui.Button(label=label, style=discord.ButtonStyle.link, url=url, row=3))
 
 
 async def _private_error(interaction: discord.Interaction, text: str) -> None:
@@ -365,12 +313,22 @@ async def _private_error(interaction: discord.Interaction, text: str) -> None:
         await interaction.response.send_message(embed=panel, ephemeral=True)
 
 
-class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
-    query = discord.ui.TextInput(
-        label="Nom ou mot-clé",
-        max_length=60,
-        placeholder="ban, ticket, image, logs...",
+def _exact_match(rows: list[commands.Command], query: str) -> commands.Command | None:
+    needle = query.casefold().strip().lstrip("+/")
+    return next(
+        (
+            command for command in rows
+            if needle in {
+                command.name.casefold(), command.qualified_name.casefold(),
+                *(alias.casefold() for alias in command.aliases),
+            }
+        ),
+        None,
     )
+
+
+class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
+    query = discord.ui.TextInput(label="Nom ou mot-clé", max_length=60, placeholder="ban, ticket, image, logs...")
 
     def __init__(self, view: "HelpView"):
         super().__init__()
@@ -378,19 +336,14 @@ class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
 
     async def on_submit(self, interaction: discord.Interaction):
         rows = _search(_visible(self.help_view.bot, interaction.user), str(self.query.value))
-        pages = _pages(
-            self.help_view.bot,
-            rows,
-            self.help_view.prefix,
-            f"Recherche : {str(self.query.value)[:40]}",
-        )
-        view = HelpView(
-            self.help_view.bot,
-            self.help_view.prefix,
-            interaction.user.id,
-            pages=pages,
-            member=interaction.user,
-        )
+        exact = _exact_match(rows, str(self.query.value))
+        if exact:
+            view = HelpView(self.help_view.bot, self.help_view.prefix, interaction.user.id, member=interaction.user)
+            return await interaction.response.edit_message(
+                content=None, embed=_detail(self.help_view.bot, exact, self.help_view.prefix), view=view,
+            )
+        pages = _pages(self.help_view.bot, rows, self.help_view.prefix, f"Recherche : {str(self.query.value)[:40]}")
+        view = HelpView(self.help_view.bot, self.help_view.prefix, interaction.user.id, pages=pages, member=interaction.user)
         await interaction.response.edit_message(content=None, embed=pages[0], view=view)
 
 
@@ -399,51 +352,27 @@ class CategorySelect(discord.ui.Select):
         self.owner = owner
         options = [
             discord.SelectOption(
-                label=name[:100],
-                value=name,
-                description=f"{count} commande(s)",
+                label=name[:100], value=name,
+                description=CATEGORY_DESCRIPTIONS.get(name, f"{count} commande(s)")[:100],
             )
             for name, count in _ordered_categories(owner.bot, owner.member).items()
         ]
         if not options:
             options = [discord.SelectOption(label="Aucune catégorie", value="__empty__")]
-        super().__init__(
-            placeholder="Sélectionnez une catégorie",
-            options=options[:25],
-            row=0,
-        )
+        super().__init__(placeholder="Choisir une catégorie", options=options[:25], row=0)
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.owner.author_id:
-            return await _private_error(interaction, "Ce panneau appartient à une autre personne.")
         category = self.values[0]
         if category == "__empty__":
             return await _private_error(interaction, "Aucune catégorie disponible.")
-        rows = [
-            command for command in _visible(self.owner.bot, interaction.user)
-            if _category(command) == category
-        ]
+        rows = [command for command in _visible(self.owner.bot, interaction.user) if _category(command) == category]
         pages = _pages(self.owner.bot, rows, self.owner.prefix, category)
-        view = HelpView(
-            self.owner.bot,
-            self.owner.prefix,
-            interaction.user.id,
-            pages=pages,
-            member=interaction.user,
-        )
+        view = HelpView(self.owner.bot, self.owner.prefix, interaction.user.id, pages=pages, member=interaction.user)
         await interaction.response.edit_message(content=None, embed=pages[0], view=view)
 
 
 class HelpView(discord.ui.View):
-    def __init__(
-        self,
-        bot: commands.Bot,
-        prefix: str,
-        author_id: int,
-        *,
-        pages: list[discord.Embed] | None = None,
-        member=None,
-    ):
+    def __init__(self, bot: commands.Bot, prefix: str, author_id: int, *, pages=None, member=None):
         super().__init__(timeout=180)
         self.bot = bot
         self.prefix = prefix
@@ -462,7 +391,7 @@ class HelpView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.author_id:
             return True
-        await _private_error(interaction, "Ce panneau appartient à une autre personne.")
+        await _private_error(interaction, "Ce panneau d’aide appartient à une autre personne.")
         return False
 
     @discord.ui.button(label="Rechercher", style=discord.ButtonStyle.secondary, row=1)
@@ -474,25 +403,19 @@ class HelpView(discord.ui.View):
         if not self.pages:
             return
         self.index = max(0, self.index - 1)
-        self.member = interaction.user
         self._sync()
         await interaction.response.edit_message(content=None, embed=self.pages[self.index], view=self)
 
     @discord.ui.button(label="Accueil", style=discord.ButtonStyle.secondary, row=2)
     async def home(self, interaction: discord.Interaction, _button: discord.ui.Button):
         view = HelpView(self.bot, self.prefix, self.author_id, member=interaction.user)
-        await interaction.response.edit_message(
-            content=None,
-            embed=_home(self.bot, interaction.user),
-            view=view,
-        )
+        await interaction.response.edit_message(content=None, embed=_home(self.bot, interaction.user), view=view)
 
     @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary, row=2)
     async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if not self.pages:
             return
         self.index = min(len(self.pages) - 1, self.index + 1)
-        self.member = interaction.user
         self._sync()
         await interaction.response.edit_message(content=None, embed=self.pages[self.index], view=self)
 
@@ -509,17 +432,7 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
 
         if query:
             rows = _search(_visible(self.bot, member), query)
-            exact = next(
-                (
-                    command for command in rows
-                    if query.casefold() in {
-                        command.name.casefold(),
-                        command.qualified_name.casefold(),
-                        *(alias.casefold() for alias in command.aliases),
-                    }
-                ),
-                None,
-            )
+            exact = _exact_match(rows, query)
             if exact:
                 panel = _detail(self.bot, exact, prefix)
                 if isinstance(target, commands.Context):
