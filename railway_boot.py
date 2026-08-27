@@ -55,8 +55,12 @@ if "cogs.automod_enable_all" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.automod_enable_all")
 if "cogs.setup_auto_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.setup_auto_fix")
+if "cogs.setup_experience_v2" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.setup_experience_v2")
 if "cogs.emoji_name_lookup" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.emoji_name_lookup")
+if "cogs.emoji_unicode_asset_fix" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.emoji_unicode_asset_fix")
 # Ancienne V2 chargée d'abord pour la compatibilité avec les données déjà présentes.
 if "cogs.create_sentrix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.create_sentrix")
