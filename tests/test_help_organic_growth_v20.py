@@ -62,8 +62,9 @@ def test_dashboard_has_production_config_fallback():
 def test_support_button_requires_a_configured_url():
     assert '"SENTRIX_SUPPORT_URL"' in HELP_SOURCE
     assert '"SUPPORT_SERVER_URL"' in HELP_SOURCE
-    assert "if not url:" in HELP_SOURCE
-    assert "continue" in HELP_SOURCE
+    # Les liens ne sont créés que lorsqu'une URL valide a réellement été résolue.
+    assert "if url:" in HELP_SOURCE
+    assert "view.add_item" in HELP_SOURCE
 
 
 def test_growth_feature_does_not_add_advertising_listeners():
