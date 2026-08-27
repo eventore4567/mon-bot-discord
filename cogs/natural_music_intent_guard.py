@@ -1,9 +1,11 @@
 """Protège le langage naturel SentriX contre les faux positifs et les réponses trop scolaires.
 
-Deux protections vivent ici :
+Trois protections vivent ici :
 - « fais-moi un résumé sur Pythagore » ne doit jamais devenir +resume musique ;
 - les messages Discord très courts comme « cv ? » restent une vraie conversation et ne
-  doivent jamais déclencher une définition de l'abréviation ni une liste d'exemples.
+  doivent jamais déclencher une définition de l'abréviation ni une liste d'exemples ;
+- une demande explicite de lien force une recherche web et retourne toujours une URL visible,
+  en supprimant les liens vidéo non sourcés qui pourraient mener vers une page inexistante.
 """
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ import functools
 import logging
 import re
 import unicodedata
+from urllib.parse import quote_plus, urlsplit
 
 from discord.ext import commands
 
@@ -87,6 +90,24 @@ _CASUAL_PROMPT = (
     "« définis » ou équivalent, alors seulement tu peux expliquer le terme."
 )
 
+_LINK_REQUEST_PATTERN = re.compile(
+    r"(?:\b(?:donne|envoie|passe|partage|trouve|cherche|file|balance|mets?|met)\b.{0,32}"
+    r"\b(?:lien|url)\b|\b(?:lien|url)\b\s+(?:de|du|des|vers|pour)\b|"
+    r"\b(?:tu\s+as|t\s+as|tas|as\s+tu)\b.{0,12}\b(?:lien|url)\b)"
+)
+_LINK_RELATION_PATTERN = re.compile(r"\b(?:lien|relation)\s+entre\b")
+_MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", re.IGNORECASE)
+_URL_PATTERN = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
+_VIDEO_HOST_SUFFIXES = (
+    "youtube.com",
+    "youtu.be",
+    "tiktok.com",
+    "twitch.tv",
+    "instagram.com",
+    "dailymotion.com",
+    "vimeo.com",
+)
+
 
 def _normalize_casual_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", str(text or ""))
@@ -104,6 +125,176 @@ def _casual_reply(text: str) -> str | None:
     à aucune clé exacte et continuent donc vers l'IA normalement.
     """
     return _CASUAL_REPLIES.get(_normalize_casual_text(text))
+
+
+def _looks_like_link_request(text: str) -> bool:
+    """Détecte une vraie demande d'URL sans confondre « le lien entre X et Y »."""
+    normalized = _normalize_casual_text(text)
+    if not normalized or _LINK_RELATION_PATTERN.search(normalized):
+        return False
+    if normalized in {"lien", "url", "le lien", "un lien", "le url", "l url"}:
+        return True
+    return bool(_LINK_REQUEST_PATTERN.search(normalized))
+
+
+def _request_text(args, kwargs) -> str:
+    prompt = args[0] if args else kwargs.get("prompt", "")
+    latest = getattr(ai_service, "_latest_user_text", None)
+    if callable(latest):
+        try:
+            return str(latest(prompt) or "")
+        except Exception:
+            pass
+    return str(prompt or "")
+
+
+def _clean_url(url: str) -> str:
+    return str(url or "").rstrip(".,;:!?)]}>\"'")
+
+
+def _url_host(url: str) -> str:
+    try:
+        host = (urlsplit(_clean_url(url)).hostname or "").casefold()
+    except Exception:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def _is_video_url(url: str) -> bool:
+    host = _url_host(url)
+    return any(host == suffix or host.endswith("." + suffix) for suffix in _VIDEO_HOST_SUFFIXES)
+
+
+def _canonical_url(url: str) -> str:
+    """Normalise juste assez pour comparer www.youtube.com et youtube.com sans réécrire l'URL."""
+    cleaned = _clean_url(url)
+    try:
+        parts = urlsplit(cleaned)
+    except Exception:
+        return cleaned
+    host = (parts.hostname or "").casefold()
+    if host.startswith("www."):
+        host = host[4:]
+    port = f":{parts.port}" if parts.port else ""
+    return f"{parts.scheme.casefold()}://{host}{port}{parts.path or '/'}?{parts.query}".rstrip("?")
+
+
+def _visible_markdown_links(text: str) -> str:
+    """Discord cache l'URL de [titre](url) ; on affiche aussi l'URL brute demandée."""
+    def replace(match: re.Match) -> str:
+        title, url = match.group(1).strip(), _clean_url(match.group(2))
+        return f"{title} — {url}"
+
+    return _MARKDOWN_LINK_PATTERN.sub(replace, str(text or ""))
+
+
+def _fallback_search_url(request_text: str) -> str:
+    normalized = _normalize_casual_text(request_text)
+    query = re.sub(r"\b(?:sentrix|donne|envoie|passe|partage|trouve|cherche|file|balance|mets?|met|moi|le|la|les|un|une|lien|url|de|du|des)\b", " ", normalized)
+    query = re.sub(r"\s+", " ", query).strip() or normalized or "SentriX"
+    encoded = quote_plus(query)
+    if "youtube" in normalized or "video" in normalized or "vidéo" in str(request_text).casefold():
+        return f"https://www.youtube.com/results?search_query={encoded}"
+    if "tiktok" in normalized:
+        return f"https://www.tiktok.com/search?q={encoded}"
+    if "twitch" in normalized:
+        return f"https://www.twitch.tv/search?term={encoded}"
+    return f"https://www.google.com/search?q={encoded}"
+
+
+def _ensure_visible_link_result(text: str, request_text: str) -> str:
+    """Rend les sources visibles et neutralise les URLs vidéo non sourcées.
+
+    ``utils.ai_service`` ajoute ses citations web sous « Sources : ». Ces URLs proviennent
+    réellement du web_search. Une URL vidéo située uniquement dans le texte du modèle n'est
+    donc pas considérée comme vérifiée et est retirée avant envoi à Discord.
+    """
+    raw = str(text or "").strip()
+    source_match = re.search(r"\n\s*Sources\s*:\s*\n", raw, flags=re.IGNORECASE)
+    if source_match:
+        main = raw[:source_match.start()].rstrip()
+        sources = raw[source_match.end():].strip()
+    else:
+        main, sources = raw, ""
+
+    sources = _visible_markdown_links(sources)
+    verified_urls = [_clean_url(url) for url in _URL_PATTERN.findall(sources)]
+    verified_keys = {_canonical_url(url) for url in verified_urls}
+
+    # Les liens vidéo inventés sont précisément ceux qui produisent une page YouTube
+    # « inaccessible ». Ils ne survivent que s'ils apparaissent aussi dans les citations.
+    def sanitize_url(match: re.Match) -> str:
+        url = _clean_url(match.group(0))
+        if _is_video_url(url) and _canonical_url(url) not in verified_keys:
+            return ""
+        return url
+
+    main = _visible_markdown_links(main)
+    main = _URL_PATTERN.sub(sanitize_url, main)
+    main = re.sub(r"[ \t]+\n", "\n", main)
+    main = re.sub(r" {2,}", " ", main).strip(" \n—-")
+
+    parts = [main] if main else []
+    if sources:
+        parts.append("Liens vérifiés :\n" + sources)
+
+    combined = "\n\n".join(part for part in parts if part).strip()
+    urls = [_clean_url(url) for url in _URL_PATTERN.findall(combined)]
+
+    is_video_request = bool(
+        getattr(ai_service, "is_video_search_request", lambda _text: False)(request_text)
+        or any(token in _normalize_casual_text(request_text) for token in ("youtube", "tiktok", "twitch", "video"))
+    )
+    if is_video_request:
+        verified_video = next((url for url in verified_urls if _is_video_url(url)), None)
+        if verified_video:
+            if verified_video not in main:
+                combined = f"{combined}\n\nLien direct vérifié : {verified_video}".strip()
+            return combined
+        fallback = _fallback_search_url(request_text)
+        return f"{combined}\n\nLien de recherche vérifié : {fallback}".strip()
+
+    if not urls:
+        fallback = _fallback_search_url(request_text)
+        combined = f"{combined}\n\nLien de recherche : {fallback}".strip()
+    return combined
+
+
+def _install_link_reliability() -> None:
+    """Force le web_search pour les demandes de lien et fiabilise la sortie Discord."""
+    original_needs_web_search = ai_service.needs_web_search
+    if not getattr(original_needs_web_search, "_sentrix_link_intent_v59", False):
+        @functools.wraps(original_needs_web_search)
+        def link_aware_needs_web_search(text: str) -> bool:
+            return original_needs_web_search(text) or _looks_like_link_request(text)
+
+        link_aware_needs_web_search._sentrix_link_intent_v59 = True
+        ai_service.needs_web_search = link_aware_needs_web_search
+
+    original_generate = ai_service.generate
+    if getattr(original_generate, "_sentrix_visible_links_v59", False):
+        return
+
+    @functools.wraps(original_generate)
+    async def link_safe_generate(*args, **kwargs):
+        request_text = _request_text(args, kwargs)
+        wants_link = _looks_like_link_request(request_text) or bool(
+            getattr(ai_service, "is_video_search_request", lambda _text: False)(request_text)
+        )
+        call_kwargs = dict(kwargs)
+        if wants_link:
+            # Même si un appelant historique oublie de passer web_search=True, une demande
+            # explicite de lien ne doit jamais être laissée à la mémoire du modèle.
+            call_kwargs["web_search"] = True
+
+        result = await original_generate(*args, **call_kwargs)
+        if wants_link and getattr(result, "ok", False):
+            result.text = _ensure_visible_link_result(getattr(result, "text", ""), request_text)
+        return result
+
+    link_safe_generate._sentrix_visible_links_v59 = True
+    ai_service.generate = link_safe_generate
+    logger.info("Liens IA V59 actifs : recherche forcée, URL visible et liens vidéo sourcés uniquement.")
 
 
 def _install_casual_chat_guard(ai_module) -> None:
@@ -130,13 +321,14 @@ def _install_casual_chat_guard(ai_module) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    """Protège Ai contre les faux positifs musique et les réponses de small-talk scolaires."""
+    """Protège Ai contre les faux positifs musique, les small-talks et les liens cassés."""
     global _INSTALLED
     if _INSTALLED:
         return
 
     from . import ai
 
+    _install_link_reliability()
     _install_casual_chat_guard(ai)
 
     original = ai.Ai._natural_command_line
