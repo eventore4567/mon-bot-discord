@@ -80,6 +80,10 @@ if "cogs.deferred_context_response_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.deferred_context_response_guard")
 if "cogs.slash_error_completion_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.slash_error_completion_guard")
+# Toute dernière garde non destructive : réaffirme zéro cooldown, neutralise le throttle
+# local IA restant et sécurise l'archivage partiel des pièces jointes.
+if "cogs.final_stability_guard" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.final_stability_guard")
 
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
