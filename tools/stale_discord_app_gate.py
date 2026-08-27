@@ -42,7 +42,8 @@ for forbidden in ('"guild_id"', '"integration_id"', '"candidate_targets"'):
 assert 'Route("DELETE"' not in text
 assert 'bot.http.request(Route("DELETE"' not in text
 
-assert '"cogs.stale_discord_app_detector" not in bot_main.EXTENSIONS' in boot_text
-assert 'bot_main.EXTENSIONS.append("cogs.stale_discord_app_detector")' in boot_text
+# Le détecteur reste disponible pour un diagnostic manuel, mais ne doit plus être chargé
+# à chaque démarrage de production : il peut faire jusqu'à 250 appels REST Discord.
+assert 'bot_main.EXTENSIONS.append("cogs.stale_discord_app_detector")' not in boot_text
 
-print("SentriX stale Discord app detector gate: OK (read-only, brand-matched, no guild IDs exposed)")
+print("SentriX stale Discord app detector gate: OK (manual diagnostic only, not production-loaded)")
