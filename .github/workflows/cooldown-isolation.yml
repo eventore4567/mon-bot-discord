@@ -1,0 +1,32 @@
+name: SentriX Cooldown Isolation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "main.py"
+      - "cogs/cooldown_isolation_fix.py"
+      - "cogs/slash_error_completion_guard.py"
+      - "tests/test_cooldown_isolation.py"
+      - ".github/workflows/cooldown-isolation.yml"
+  pull_request:
+    paths:
+      - "main.py"
+      - "cogs/cooldown_isolation_fix.py"
+      - "cogs/slash_error_completion_guard.py"
+      - "tests/test_cooldown_isolation.py"
+      - ".github/workflows/cooldown-isolation.yml"
+
+jobs:
+  cooldown-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile final runtime files
+        run: python -m py_compile cogs/cooldown_isolation_fix.py cogs/slash_error_completion_guard.py
+      - name: Verify cooldown isolation contracts
+        run: python tests/test_cooldown_isolation.py
