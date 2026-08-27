@@ -81,9 +81,13 @@ COLOR_INFO = 0x5865F2
 COLOR_NEUTRAL = 0x5847EB
 COLOR_BRAND = 0x5847EB
 
-# Cooldown anti-spam global (par utilisateur, par commande) en secondes
+# Valeurs historiques conservées pour compatibilité avec les anciens modules.
 GLOBAL_COOLDOWN_RATE = 3
 GLOBAL_COOLDOWN_PER = 5.0
+
+# Zéro limite de débit pour les commandes IA/lourdes. L'autorité runtime finale neutralise
+# également les anciens cooldowns, anti-doublons et compteurs de concurrence V41.
+HEAVY_COMMAND_RATE_LIMIT = False
 
 # ID du/des propriétaire(s) du bot pour les commandes développeur (/developer-panel, etc.)
 OWNER_IDS = [int(x) for x in os.getenv("OWNER_IDS", "").split(",") if x.strip().isdigit()]
