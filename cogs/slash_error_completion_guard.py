@@ -202,9 +202,8 @@ async def setup(bot: commands.Bot) -> None:
     from . import log_listener_guarantee_v51
     await log_listener_guarantee_v51.install(bot)
 
-    # Le critère strict est installé avant la commande V2 : seuls les 8 salons issus du
-    # rebuild officiel peuvent être considérés comme "déjà sains". Les deux rollback de
-    # la capture sont donc réellement retentés.
+    # Le critère strict est installé avant la commande V2 : seuls les salons issus du
+    # rebuild officiel peuvent être considérés comme déjà sains.
     from . import owner_log_rebuild_v2_health
     owner_log_rebuild_v2_health.install()
 
@@ -218,6 +217,12 @@ async def setup(bot: commands.Bot) -> None:
 
     from . import final_error_embed_v5
     final_error_embed_v5.install(bot)
+
+    # Autorité finale V6 : conserve le transport V5.3 qui fonctionne et unifie uniquement
+    # la structure, les tickets, les références de salons et la neuvième route fichiers.
+    from . import logs_unified_v6
+    await logs_unified_v6.install(bot)
+
     logger.info(
-        "Runtime final V5.1 + reset logs V2 actif : routes live + listeners garantis + reconstruction résiliente + notifications départ serveur."
+        "Runtime final V6 actif : transport V5.3 + 9 routes + logs-dossiers + tickets/transcripts unifiés."
     )
