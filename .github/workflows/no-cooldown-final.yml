@@ -1,5 +1,6 @@
 name: SentriX No Cooldown Final
 
+# Final authority: no generic cooldown or command concurrency lock.
 on:
   push:
     branches: [main]
