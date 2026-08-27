@@ -22,6 +22,11 @@ from . import live_log_delivery_v5
 logger = logging.getLogger("bot.log-transport-v53")
 _MARKER = "_sentrix_log_transport_v53"
 _SEPARATOR_LINE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]+$")
+_SENTRIX_LOG_ICON_FALLBACK = (
+    "https://raw.githubusercontent.com/eventore4567/mon-bot-discord/"
+    "main/assets/sentrix/logs.png"
+)
+_BOT: commands.Bot | None = None
 
 
 def _state(bot: commands.Bot) -> dict[str, Any]:
@@ -55,6 +60,28 @@ def _unwrap_messageable_send():
     return current
 
 
+def _sentrix_log_icon_url() -> str:
+    """Retourne l'avatar public actuel de SentriX, avec un asset stable en secours."""
+    bot = _BOT
+    user = getattr(bot, "user", None) if bot is not None else None
+    avatar = getattr(user, "display_avatar", None)
+    url = getattr(avatar, "url", None)
+    return str(url or _SENTRIX_LOG_ICON_FALLBACK)
+
+
+def _force_sentrix_log_icon(embed: discord.Embed) -> discord.Embed:
+    """Tous les logs portent la même petite icône SentriX en haut à droite.
+
+    Les anciens producteurs utilisaient parfois l'avatar de la cible comme miniature,
+    parfois aucune miniature. Le branding est désormais appliqué ici, au dernier point
+    commun avant l'envoi Discord, afin que messages, rôles, salons, membres, modération,
+    vocal, tickets, sécurité et fichiers restent visuellement cohérents.
+    """
+    if isinstance(embed, discord.Embed):
+        embed.set_thumbnail(url=_sentrix_log_icon_url())
+    return embed
+
+
 def _force_command_divider(embed: discord.Embed) -> discord.Embed:
     """Force exactement la grande barre des commandes sous le titre de chaque log."""
     if not isinstance(embed, discord.Embed):
@@ -81,11 +108,13 @@ def _render(embed: discord.Embed) -> discord.Embed:
         return embed
     try:
         rendered = embeds.normalize_log(embed)
-        return _force_command_divider(rendered)
+        rendered = _force_command_divider(rendered)
+        return _force_sentrix_log_icon(rendered)
     except Exception:
         # Un problème purement visuel ne doit jamais empêcher le journal métier de partir.
         logger.exception("V5.3 : normalisation incompatible ; embed original conservé.")
-        return _force_command_divider(embed)
+        rendered = _force_command_divider(embed)
+        return _force_sentrix_log_icon(rendered)
 
 
 async def _resolve_setting(bot, guild: discord.Guild, log_type: str, *, needs_file: bool):
@@ -257,6 +286,8 @@ def _patch_logs_cog(bot: commands.Bot) -> bool:
 
 
 def install(bot: commands.Bot) -> None:
+    global _BOT
+    _BOT = bot
     # Compatibilité : les producteurs qui appellent encore log_service passent aussi par V5.3.
     setattr(send_log_v52, _MARKER, True)
     log_service.send_log = send_log_v52
@@ -264,9 +295,15 @@ def install(bot: commands.Bot) -> None:
     state["installed"] = True
     _patch_logs_cog(bot)
     logger.info(
-        "V5.3 actif : transport canonique + branchement direct des listeners Logs=%s.",
+        "V5.3 actif : transport canonique + branchement direct des listeners Logs=%s + icône SentriX forcée.",
         state.get("logs_send_patched"),
     )
 
 
-__all__ = ["install", "send_log_v52", "_patch_logs_cog", "_force_command_divider"]
+__all__ = [
+    "install",
+    "send_log_v52",
+    "_patch_logs_cog",
+    "_force_command_divider",
+    "_force_sentrix_log_icon",
+]
