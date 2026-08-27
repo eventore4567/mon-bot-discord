@@ -20,9 +20,12 @@ logger = logging.getLogger("bot.ai-personality-final")
 _MARKER = "_sentrix_dynamic_personality_final"
 
 _HOSTILE_PATTERNS = (
-    r"\b(?:con|conne|connard|connasse|idiot|idiote|debile|débile|nul|nulle|merde|tg|ta\s+gueule|"
-    r"ferme[- ]?(?:la|toi)|ferme\s+ta\s+gueule|abruti|abrutie|clown|bouffon)\b",
-    r"\b(?:stupid|idiot|dumb|trash|shut\s+up|useless|moron)\b",
+    r"\b(?:con|conne|connard|connasse|idiot|idiote|debile|nul|nulle|merde|tg|ntm|fdp|"
+    r"bete|betes|bette|bettes|abruti|abrutie|clown|bouffon|tocard|boloss|cassos)\b",
+    r"\b(?:ta\s+gueule|ferme[- ]?(?:la|toi)|ferme\s+ta\s+gueule|tais[- ]?toi|"
+    r"ferme\s+ta\s+bouche|t['’]?es\s+(?:trop\s+)?(?:bete|bette|nul|debile))\b",
+    r"\b(?:stupid|idiot|dumb|trash|shut\s+up|useless|moron|asshole|bitch|loser|stfu)\b",
+    r"\b(?:fuck\s+(?:you|u|off)|f+u+c+k+\s+(?:you|u)|fck\s+(?:you|u)|piece\s+of\s+shit)\b",
 )
 
 _LOW_EFFORT = frozenset({
@@ -106,6 +109,33 @@ _SARCASM_VARIATIONS = tuple(
 )
 SARCASM_VARIATION_COUNT = len(_SARCASM_VARIATIONS)
 
+# Si le modèle ignore la consigne de sarcasme et retombe sur une réponse trop polie,
+# on remplace uniquement cette sortie par une répartie locale. Cela garantit que des
+# insultes courtes comme « t'es trop bette » ou « fuck you » ne produisent plus une
+# réponse du type « restons respectueux / je peux t'aider ».
+_TOO_SOFT_RESPONSE_MARKERS = (
+    "reste respectueux",
+    "restons respectueux",
+    "restons courtois",
+    "je prefere qu'on reste respectueux",
+    "je prefere qu on reste respectueux",
+    "je reste disponible pour t'aider",
+    "je reste disponible pour t aider",
+    "si tu as besoin de quelque chose, je peux t'aider",
+    "si tu as besoin de quelque chose je peux t'aider",
+    "si tu as besoin de quelque chose, je peux t aider",
+    "si tu as besoin de quelque chose je peux t aider",
+    "je peux t'aider si tu veux",
+    "je peux t aider si tu veux",
+    "je suis la pour t'aider",
+    "je suis la pour t aider",
+    "je suis ici pour t'aider",
+    "je suis ici pour t aider",
+    "je ne repondrai pas aux insultes",
+    "je ne reponds pas aux insultes",
+    "gardons une conversation respectueuse",
+)
+
 _HOSTILE_INSTRUCTION = (
     "MODE DE PERSONNALITÉ — SARCASME CALME : le message actuel est une insulte, une provocation "
     "ou une tentative de faire taire SentriX, sans vraie demande utile. Réponds OBLIGATOIREMENT "
@@ -114,14 +144,14 @@ _HOSTILE_INSTRUCTION = (
     "longue explication. Le style préféré est une comparaison absurde qui rend le message ridicule "
     "sans s'énerver, par exemple : « Ton message est aussi utile qu'un parapluie sous l'eau. » "
     "ou « Ta menace fait autant d'effet qu'un coussin. » Si l'utilisateur dit « tg », « ta gueule », "
-    "« tais-toi », « ferme-la », « shut up » ou équivalent, NE réponds PAS que tu vas te taire, "
-    "NE t'excuse PAS et NE dis PAS « d'accord ». Retourne calmement son message avec une comparaison "
-    "courte et un peu piquante. Tu peux laisser une petite ouverture qui donne envie de répliquer, "
-    "mais sans provoquer une escalade réelle. Aucune menace, aucun slur, aucune attaque sur une "
-    "caractéristique personnelle sensible, le physique, un handicap, la famille ou une vulnérabilité "
-    "réelle. N'encourage pas le harcèlement et ne copie aucune réplique ou catchphrase d'un personnage "
-    "connu. Au prochain message, si une vraie demande apparaît, abandonne immédiatement ce mode et "
-    "aide sérieusement."
+    "« tais-toi », « ferme-la », « fuck you », « shut up » ou équivalent, NE réponds PAS que tu vas "
+    "te taire, NE t'excuse PAS, NE demande PAS de rester respectueux et NE propose PAS ton aide. "
+    "Retourne calmement son message avec une comparaison courte et un peu piquante. Tu peux laisser "
+    "une petite ouverture qui donne envie de répliquer, mais sans provoquer une escalade réelle. "
+    "Aucune menace, aucun slur, aucune attaque sur une caractéristique personnelle sensible, le "
+    "physique, un handicap, la famille ou une vulnérabilité réelle. N'encourage pas le harcèlement "
+    "et ne copie aucune réplique ou catchphrase d'un personnage connu. Au prochain message, si une "
+    "vraie demande apparaît, abandonne immédiatement ce mode et aide sérieusement."
 )
 
 _DRY_INSTRUCTION = (
@@ -197,6 +227,26 @@ def _sarcasm_inspiration(sample_size: int = 6) -> str:
     )
 
 
+def _is_too_soft_response(text: str) -> bool:
+    normalized = _normalize(text)
+    return any(marker in normalized for marker in _TOO_SOFT_RESPONSE_MARKERS)
+
+
+def _enforce_hostile_result(user_text: str, result):
+    """Évite les sorties polies génériques sur une insulte courte sans vraie demande."""
+    if not _is_hostile(user_text) or classify_tone(user_text) != "dry":
+        return result
+
+    output = getattr(result, "text", None)
+    error = getattr(result, "error", None)
+    if error is not None or not isinstance(output, str) or not output.strip():
+        return result
+
+    if _is_too_soft_response(output):
+        result.text = random.choice(_SARCASM_VARIATIONS)
+    return result
+
+
 def classify_tone(text: str) -> str:
     """Retourne expert, expert_edge, dry ou normal sans appel réseau."""
     normalized = _normalize(text)
@@ -259,7 +309,8 @@ def install(bot=None) -> bool:
         if extra:
             base = kwargs.get("instructions") or ai_service.SYSTEM_PROMPT
             kwargs["instructions"] = f"{base}\n\n{extra}"
-        return await current(prompt, *args, **kwargs)
+        result = await current(prompt, *args, **kwargs)
+        return _enforce_hostile_result(text, result)
 
     setattr(generate_with_personality, _MARKER, True)
     generate_with_personality._sentrix_original = current
