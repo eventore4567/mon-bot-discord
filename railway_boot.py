@@ -88,6 +88,10 @@ if "cogs.slash_error_completion_guard" not in bot_main.EXTENSIONS:
 # local IA restant et sécurise l'archivage partiel des pièces jointes.
 if "cogs.final_stability_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.final_stability_guard")
+# Dernier verrou runtime : un départ/kick/ban ne doit jamais devenir une suppression de
+# progression. Chargé après les autres cogs pour entourer les commandes de reset finales.
+if "cogs.member_data_retention_v17" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.member_data_retention_v17")
 
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
