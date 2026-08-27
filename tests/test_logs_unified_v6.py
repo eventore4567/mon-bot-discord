@@ -6,6 +6,7 @@ V6 = ROOT / "cogs" / "logs_unified_v6.py"
 GUARD = ROOT / "cogs" / "slash_error_completion_guard.py"
 SYNC = ROOT / "cogs" / "generated_logs_sync.py"
 
+# Ce gate protège les contrats visuels et de routage de la couche V6 finale.
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
