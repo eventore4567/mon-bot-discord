@@ -317,7 +317,9 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="ban", description="Bannir définitivement un membre du serveur.")
     @app_commands.describe(membre="Le membre à bannir", raison="La raison du bannissement")
-    @checks.has_permission_or_modrole("ban_members")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
     async def ban(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
@@ -348,7 +350,9 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="unban", description="Débannir un utilisateur via son identifiant Discord.")
     @app_commands.describe(user_id="L'identifiant Discord de l'utilisateur", raison="La raison")
-    @checks.has_permission_or_modrole("ban_members")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("ban_members",), target="external_user")
     async def unban(self, ctx: commands.Context, user_id: str, *, raison: str = "Aucune raison fournie"):
         await self._ack(ctx)
         try:
@@ -368,7 +372,9 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="kick", description="Expulser un membre du serveur.")
     @app_commands.describe(membre="Le membre à expulser", raison="La raison de l'expulsion")
-    @checks.has_permission_or_modrole("kick_members")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("kick_members",), target="member_moderation")
     async def kick(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
@@ -390,7 +396,9 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="mute", description="Rendre muet un membre (timeout Discord natif).")
     @app_commands.describe(membre="Le membre à rendre muet", duree="Durée (ex: 10m, 1h)", raison="La raison")
-    @checks.has_permission_or_modrole("moderate_members")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
     async def mute(self, ctx: commands.Context, membre: discord.Member, duree: str = "10m", *, raison: str = "Aucune raison fournie"):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
@@ -406,9 +414,13 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="unmute", description="Retirer le mute (timeout) d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à démuter", raison="La raison")
-    @checks.has_permission_or_modrole("moderate_members")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
     async def unmute(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
         await self._ack(ctx)
+        if not await self.check_targetable(ctx, membre):
+            return
         await membre.timeout(None, reason=f"{ctx.author} : {raison}")
         await self._send_sanction_dm(ctx, membre, "unmute", raison)
         e = await self.log_sanction(ctx, "unmute", membre, raison)
@@ -418,7 +430,9 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="warn", description="Avertir un membre (enregistré en base de données).")
     @app_commands.describe(membre="Le membre à avertir", raison="La raison de l'avertissement")
-    @checks.has_permission_or_modrole("moderate_members")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
     async def warn(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
@@ -588,7 +602,9 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="clear", description="Supprimer un nombre de messages dans le salon.")
     @app_commands.describe(nombre="Nombre de messages à supprimer (1-100)")
-    @checks.has_permission_or_modrole("manage_messages")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("manage_messages",), target="channel_target")
     async def clear(self, ctx: commands.Context, nombre: app_commands.Range[int, 1, 100]):
         await ctx.defer(ephemeral=True) if ctx.interaction else None
         deleted = await ctx.channel.purge(limit=nombre)
@@ -612,7 +628,7 @@ class Moderation(commands.Cog):
                 return await ctx.send(embed=embeds.error(
                     "Durée invalide. Exemples valides : `5s`, `30s`, `1m`, `10m`, `1h`, ou `0` / `off` pour désactiver."
                 ))
-        secondes = max(0, min(21600, secondes))  # limite Discord : 6 heures maximum
+        secondes = max(0, min(21600, secondes))
         await ctx.channel.edit(slowmode_delay=secondes)
         if secondes == 0:
             await ctx.send(embed=embeds.success("⏱️ Le mode lent a été désactivé."))
@@ -620,18 +636,28 @@ class Moderation(commands.Cog):
             await ctx.send(embed=embeds.success(f"⏱️ Mode lent activé — {helpers.format_duration(secondes)} entre chaque message."))
 
     @commands.hybrid_command(name="lock", description="Verrouiller le salon (empêche @everyone d'écrire).", with_app_command=False)
-    @checks.has_permission_or_modrole("manage_channels")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("manage_channels",), target="channel_target")
     async def lock(self, ctx: commands.Context, raison: str = "Aucune raison fournie"):
         await self._ack(ctx)
+        error = checks.check_channel_target(ctx.author, ctx.channel)
+        if error:
+            return await ctx.send(embed=embeds.error(error))
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = False
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=raison)
         await ctx.send(embed=embeds.warning(f"🔒 Salon verrouillé.\nRaison : {raison}"))
 
     @commands.hybrid_command(name="unlock", description="Déverrouiller le salon.", with_app_command=False)
-    @checks.has_permission_or_modrole("manage_channels")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("manage_channels",), target="channel_target")
     async def unlock(self, ctx: commands.Context):
         await self._ack(ctx)
+        error = checks.check_channel_target(ctx.author, ctx.channel)
+        if error:
+            return await ctx.send(embed=embeds.error(error))
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = None
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
@@ -659,7 +685,9 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="nickname", description="Changer le pseudo d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre concerné", pseudo="Le nouveau pseudo")
-    @checks.has_permission_or_modrole("manage_nicknames")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("manage_nicknames",), target="member_moderation")
     async def nickname(self, ctx: commands.Context, membre: discord.Member, *, pseudo: str):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
@@ -669,9 +697,13 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="resetnick", description="Réinitialiser le pseudo d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre concerné")
-    @checks.has_permission_or_modrole("manage_nicknames")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("manage_nicknames",), target="member_moderation")
     async def resetnick(self, ctx: commands.Context, membre: discord.Member):
         await self._ack(ctx)
+        if not await self.check_targetable(ctx, membre):
+            return
         await membre.edit(nick=None)
         await ctx.send(embed=embeds.success(f"Le pseudo de {membre.mention} a été réinitialisé."))
 
