@@ -23,9 +23,98 @@ class BotBlacklistedError(commands.CheckFailure):
         super().__init__(reason)
 
 
+CHECK_KIND_AUTHORIZATION = "authorization"
+CHECK_KIND_ACTION_VALIDATION = "action_validation"
+
+
 def _mark(predicate, label: str):
+    """Marque un check d'AUTORISATION.
+
+    Autorisation = « qui a le droit d'invoquer cette commande ? ». Cette
+    décision appartient désormais à utils/access_matrix.py, donc ces checks
+    sont redondants et permission_guard les retire.
+    """
     predicate._sentrix_permission_label = label
+    predicate._sentrix_check_kind = CHECK_KIND_AUTHORIZATION
     return predicate
+
+
+def action_validation(*, bot_permissions: tuple[str, ...] = (), target: str = ""):
+    """Déclare une VALIDATION MÉTIER, exécutable avant le parsing des arguments.
+
+    Important : discord.py exécute can_run() -- donc les checks -- AVANT
+    _parse_arguments(). La cible n'est donc pas disponible ici. Les validations
+    qui dépendent d'un argument (hiérarchie auteur/cible, self-target, rôle géré
+    par intégration) restent obligatoirement dans le corps de la commande, via
+    check_targetable / check_role_target / check_channel_target.
+
+    Ce décorateur couvre ce qui est vérifiable sans argument :
+    - l'action exige un serveur ;
+    - le bot possède réellement la permission Discord nécessaire pour agir.
+
+    `target` nomme la validation de cible que le corps DOIT effectuer. Cette
+    métadonnée est lue par tools/permission_matrix_gate.py et par les tests de
+    non-régression, afin de distinguer une vraie validation métier d'un ancien
+    check d'autorisation resté en place.
+    """
+
+    async def predicate(ctx: commands.Context) -> bool:
+        if ctx.guild is None:
+            raise BotPermissionError(
+                "Cette action nécessite un serveur et ne peut pas être "
+                "effectuée en message privé."
+            )
+        me = ctx.guild.me
+        if me is None:
+            raise BotPermissionError(
+                "SentriX ne peut pas vérifier ses propres permissions pour le "
+                "moment. Réessaie dans quelques secondes."
+            )
+        granted = me.guild_permissions
+        missing = [p for p in bot_permissions if not getattr(granted, p, False)]
+        if missing:
+            labels = ", ".join(permission_label(p) for p in missing)
+            raise BotPermissionError(
+                "SentriX ne possède pas la permission nécessaire pour "
+                f"effectuer cette action.\n\n**Manquant :** {labels}"
+            )
+        return True
+
+    predicate._sentrix_check_kind = CHECK_KIND_ACTION_VALIDATION
+    predicate._sentrix_action_target = target
+    predicate._sentrix_bot_permissions = tuple(bot_permissions)
+    predicate._sentrix_keep = True
+    return commands.check(predicate)
+
+
+def check_role_target(author: discord.Member, role: discord.Role) -> str | None:
+    """Validation métier partagée par giverole et removerole."""
+    guild = author.guild
+    me = guild.me
+    if role.is_default():
+        return "Le rôle @everyone ne peut pas être attribué ou retiré."
+    if getattr(role, "managed", False):
+        return "Ce rôle est géré par une intégration et ne peut pas être modifié."
+    if me is not None and role >= me.top_role:
+        return "Mon rôle est trop bas dans la hiérarchie pour gérer ce rôle."
+    if author.id == guild.owner_id:
+        return None
+    if role >= author.top_role:
+        return "Vous ne pouvez pas gérer un rôle supérieur ou égal au vôtre."
+    return None
+
+
+def check_channel_target(author: discord.Member, channel) -> str | None:
+    """Validation métier partagée par lock et unlock."""
+    guild = author.guild
+    me = guild.me
+    if me is not None and not channel.permissions_for(me).manage_channels:
+        return "Je ne peux pas modifier les permissions de ce salon."
+    if author.id == guild.owner_id:
+        return None
+    if not channel.permissions_for(author).manage_channels:
+        return "Vous ne pouvez pas modifier les permissions de ce salon."
+    return None
 
 
 async def is_verified_bot_owner(ctx: commands.Context) -> bool:
