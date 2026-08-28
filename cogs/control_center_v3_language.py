@@ -1,8 +1,7 @@
-"""Pont FR/EN final pour le Control Center V3.
+"""Pont FR/EN final pour le Control Center V3/V4.
 
-Le Control Center V3 remplace le renderer du Setup officiel après l'installation du
-pont historique. Cette couche légère rebranche donc la langue sur le renderer final,
-sans restaurer l'ancienne interface ni ajouter une catégorie de configuration.
+V4 est installé juste avant la traduction finale afin que le pont de langue enveloppe
+le vrai renderer final sans restaurer une ancienne interface.
 """
 from __future__ import annotations
 
@@ -10,9 +9,8 @@ import logging
 
 from discord.ext import commands
 
+from . import control_center_v4
 from . import setup_control_center
-from .control_center_v3_ui_fix import install as install_control_center_v3_ui_fix
-from .voice_logs_v2 import install as install_voice_logs_v2
 from .language_official_bridge import (
     OfficialLanguageSelect,
     _english,
@@ -23,14 +21,12 @@ from .language_official_bridge import (
 logger = logging.getLogger("bot.control-center-v3-language")
 
 
-def install(bot: commands.Bot) -> None:
+async def install(bot: commands.Bot) -> None:
+    # V4 devient l'autorité métier/UI après V3, puis la langue enveloppe le résultat final.
+    await control_center_v4.install(bot)
+
     view_cls = setup_control_center.SetupView
     if getattr(view_cls, "_sentrix_control_center_v3_language", False):
-        # Le pont peut déjà être en place lors d'une seconde finalisation runtime. La
-        # finition UI doit quand même rester la couche la plus externe afin de retirer
-        # les composants legacy éventuellement réinjectés entre-temps.
-        install_control_center_v3_ui_fix(bot)
-        install_voice_logs_v2(bot)
         return
 
     current_render = view_cls.render
@@ -38,8 +34,6 @@ def install(bot: commands.Bot) -> None:
 
     def render(self) -> None:
         current_render(self)
-        # Le pont historique peut déjà avoir ajouté ce sélecteur avant que V3 devienne
-        # l'autorité finale. On le réutilise au lieu d'en créer un second.
         if getattr(self, "category", None) is None:
             has_language_select = any(
                 isinstance(item, OfficialLanguageSelect) for item in self.children
@@ -48,8 +42,6 @@ def install(bot: commands.Bot) -> None:
                 try:
                     self.add_item(OfficialLanguageSelect(self))
                 except ValueError:
-                    # Discord limite les composants à cinq lignes. La langue ne doit
-                    # jamais casser le Setup si une couche externe occupe déjà la ligne.
                     pass
         if _is_english(self):
             for item in self.children:
@@ -80,17 +72,11 @@ def install(bot: commands.Bot) -> None:
     view_cls.render = render
     view_cls.build_embed = build_embed
     view_cls._sentrix_control_center_v3_language = True
-    # Les audits historiques utilisent ces marqueurs comme contrat de compatibilité.
     view_cls._sentrix_official_language_bridge = True
     view_cls._sentrix_language_payload_guard = True
     bot._sentrix_control_center_v3_language = True
-
-    # Toujours en dernier : retire le double bouton legacy, déduplique l'état du module
-    # et remet les sélecteurs Tickets/Notifications après le renderer V3.
-    install_control_center_v3_ui_fix(bot)
-    # Le logger vocal officiel est lui aussi remplacé après le chargement de tous les cogs.
-    install_voice_logs_v2(bot)
-    logger.info("FR/EN rebranché sur le renderer final Control Center V3.")
+    bot._sentrix_control_center_v4_language = True
+    logger.info("FR/EN rebranché sur le renderer final Control Center V4.")
 
 
 __all__ = ["install"]
