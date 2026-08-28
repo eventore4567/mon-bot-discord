@@ -31,9 +31,19 @@ def install(bot: commands.Bot) -> None:
 
     def render(self) -> None:
         current_render(self)
-        # La langue reste un réglage transversal : elle n'occupe aucune page/module.
+        # Le pont historique peut déjà avoir ajouté ce sélecteur avant que V3 devienne
+        # l'autorité finale. On le réutilise au lieu d'en créer un second.
         if getattr(self, "category", None) is None:
-            self.add_item(OfficialLanguageSelect(self))
+            has_language_select = any(
+                isinstance(item, OfficialLanguageSelect) for item in self.children
+            )
+            if not has_language_select:
+                try:
+                    self.add_item(OfficialLanguageSelect(self))
+                except ValueError:
+                    # Discord limite les composants à cinq lignes. La langue ne doit
+                    # jamais casser le Setup si une couche externe occupe déjà la ligne.
+                    pass
         if _is_english(self):
             for item in self.children:
                 _translate_component(item)
