@@ -165,6 +165,10 @@ def _install_mute_duration_compat(bot: commands.Bot) -> None:
     if not callable(original) or getattr(original, "_sentrix_v57_duration", False):
         return
 
+    # discord.py recalcule Command.params quand callback est remplacé. On garde le cache
+    # déjà réparé par V18 pour ne pas réintroduire des inspect.Parameter sans displayed_name.
+    cached_params = dict(getattr(command, "params", {}) or {})
+
     @functools.wraps(original)
     async def mute_with_human_duration(cog, ctx, membre, duree, *, raison="Aucune raison"):
         if getattr(ctx, "interaction", None) is None:
@@ -177,6 +181,8 @@ def _install_mute_duration_compat(bot: commands.Bot) -> None:
     mute_with_human_duration._sentrix_v57_duration = True
     mute_with_human_duration._sentrix_previous = original
     command.callback = mute_with_human_duration
+    if cached_params:
+        command.params = cached_params
     logger.info("V57 : +mute accepte aussi les durées naturelles comme « 10 minutes ».")
 
 
