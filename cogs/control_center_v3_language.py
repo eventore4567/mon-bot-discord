@@ -5,7 +5,8 @@ Ordre déterministe :
 2. V5 remplace le moteur de vérification par les 40 signaux adaptatifs ;
 3. la calibration collecte jusqu'à 1 000 vraies évaluations ;
 4. la langue enveloppe le renderer final ;
-5. la finition UI reste la toute dernière couche (toggle unique + tickets dynamiques).
+5. la finition UI reste la toute dernière couche (toggle unique + tickets dynamiques) ;
+6. les logs vocaux V2 propres restent réinstallés en dernier.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ from .language_official_bridge import (
     _is_english,
     _translate_component,
 )
+from .voice_logs_v2 import install as install_voice_logs_v2
 
 logger = logging.getLogger("bot.control-center-v3-language")
 
@@ -36,8 +38,10 @@ async def install(bot: commands.Bot) -> None:
 
     view_cls = setup_control_center.SetupView
     if getattr(view_cls, "_sentrix_control_center_v3_language", False):
-        # Même lors d'une réinstallation runtime, la finition doit rester extérieure.
+        # Même lors d'une réinstallation runtime, les deux finitions doivent rester
+        # extérieures : Setup propre + listener vocal V2 propre.
         install_control_center_v3_ui_fix(bot)
+        install_voice_logs_v2(bot)
         return
 
     current_render = view_cls.render
@@ -88,11 +92,12 @@ async def install(bot: commands.Bot) -> None:
     bot._sentrix_control_center_v3_language = True
     bot._sentrix_control_center_v4_language = True
 
-    # Dernière autorité visuelle : évite de réintroduire le gros toggle historique et
-    # restaure les contrôles dynamiques Tickets/Notifications après les wrappers V4/V5.
+    # Dernières autorités runtime : évitent de réintroduire le gros toggle historique
+    # et le listener vocal générique après les wrappers V4/V5/langue.
     install_control_center_v3_ui_fix(bot)
+    install_voice_logs_v2(bot)
     logger.info(
-        "FR/EN rebranché sur Control Center V4 + V5 ; calibration 1000 + finition UI finales."
+        "FR/EN rebranché sur Control Center V4 + V5 ; calibration 1000 + finition UI + logs vocaux V2 actifs."
     )
 
 
