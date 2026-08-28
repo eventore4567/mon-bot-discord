@@ -11,10 +11,16 @@ from discord.ext import commands
 logger = logging.getLogger("bot.slash-budget")
 GLOBAL_CHAT_INPUT_BUDGET = 100
 
+# Le catalogue historique occupe déjà la limite Discord. Quatre racines directes sont
+# actuellement indisponibles à cause de collisions/anciens groupes ; on réserve ces
+# emplacements aux quatre entrées réellement utiles du nouveau système de preuve. Les
+# actions secondaires restent accessibles en + et via le panneau interactif.
+PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofexample", "proofstatus"})
+
 
 def _preferred_names() -> set[str]:
     from .command_catalog_cleanup import NORMAL_DIRECT_COMMANDS
-    return {("nick" if name == "nickname" else name) for name in NORMAL_DIRECT_COMMANDS}
+    return {("nick" if name == "nickname" else name) for name in NORMAL_DIRECT_COMMANDS} | set(PROOF_SLASH_PREFERRED)
 
 
 def _excluded_names() -> set[str]:
@@ -137,4 +143,8 @@ def install(bot: commands.Bot) -> None:
 
     tree.add_command = MethodType(budgeted_add, tree)
     finalize(bot)
-    logger.info("Budget slash SentriX actif : maximum %s racines.", GLOBAL_CHAT_INPUT_BUDGET)
+    logger.info(
+        "Budget slash SentriX actif : maximum %s racines, proof essentiel réservé=%s.",
+        GLOBAL_CHAT_INPUT_BUDGET,
+        ",".join(sorted(PROOF_SLASH_PREFERRED)),
+    )
