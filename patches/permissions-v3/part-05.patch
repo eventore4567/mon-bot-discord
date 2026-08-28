@@ -1,0 +1,314 @@
++        "nukewhitelist", "serversnapshot",
++    }),
++    "economie": frozenset({
++        "shopsetup", "shoppanel", "shoprole", "give-money", "reset-economy",
++        "gamesetup", "economy-system", "economy-audit", "shoppromo",
++        "shopstock", "shopwindowclear",
++    }),
++    "ai": frozenset({
++        "aisetup", "aidiag", "aicenter", "aicontext", "aimemorychannel",
++        "airolequota",
++    }),
++    "logs": frozenset({"createalllogs", "testlogs", "logevent", "logsearch"}),
++    "complete": frozenset({"wipe-server", "roleall", "massrole"}),
++}
++
++PERMISSION_LABELS = {
++    "administrator": "Administrateur",
++    "manage_guild": "Gérer le serveur",
++    "manage_channels": "Gérer les salons",
++    "manage_roles": "Gérer les rôles",
++    "manage_messages": "Gérer les messages",
++    "manage_nicknames": "Gérer les pseudos",
++    "moderate_members": "Exclure temporairement des membres",
++    "kick_members": "Expulser des membres",
++    "ban_members": "Bannir des membres",
++    "move_members": "Déplacer des membres",
++    "manage_emojis_and_stickers": "Gérer les émojis et autocollants",
++    "manage_webhooks": "Gérer les webhooks",
++    "view_audit_log": "Voir les logs d'audit",
++}
++
++KNOWN_COMMANDS = (
++    PUBLIC_COMMANDS
++    | OWNER_ONLY_COMMANDS
++    | CUSTOM_PERMISSION_COMMANDS
++    | frozenset(DISCORD_PERMISSION_COMMANDS)
++    | frozenset().union(*CATEGORY_COMMANDS.values())
++)
++
++# Rattachement commande -> module désactivable dans Setup.
++CATEGORY_TO_MODULE = {
++    "moderation": "moderation",
++    "securite": "security",
++    "tickets": "tickets",
++    "economie": "economy",
++    "ai": "ai",
++    "logs": "logs",
++}
++
++_MODULE_BY_COMMAND: dict[str, str] = {}
++for _cat, _names in CATEGORY_COMMANDS.items():
++    _module = CATEGORY_TO_MODULE.get(_cat)
++    if _module:
++        for _n in _names:
++            _MODULE_BY_COMMAND[_n] = _module
++
++# Les commandes à permission Discord appartiennent aussi à un module : sans ce
++# rattachement, couper « Modération » ne coupait ni +ban ni +mute.
++_MODULE_BY_PERMISSION_COMMAND = {
++    "moderation": {
++        "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
++        "warnings", "clearwarnings", "case", "casefull", "caseproof",
++        "modhistory", "modundo", "modcenter", "userhistory", "staffnote",
++        "suspiciouslist", "quarantine", "unquarantine", "clear", "say",
++        "slowmode", "lock", "unlock", "hide", "show", "smartlockdown",
++        "nickname", "nick", "resetnick", "move", "disconnect",
++    },
++    "tickets": {
++        "ticket-reopen", "reopenticket", "tickettranscript", "ticketstats",
++        "ticketstaffstats",
++    },
++    "roles": {
++        "role-snapshot", "role-restore", "giverole", "removerole",
++        "protectmember",
++    },
++}
++for _module, _names in _MODULE_BY_PERMISSION_COMMAND.items():
++    for _n in _names:
++        _MODULE_BY_COMMAND.setdefault(_n, _module)
++
++# Repli historique : le rôle configuré via ``setmodrole`` remplace la permission
++# Discord pour les actions courantes UNIQUEMENT. Il n'accorde jamais le
++# bannissement ni la gestion du serveur : ces droits passent obligatoirement par
++# une permission Discord réelle ou par une règle explicite dans Setup, sans quoi
++# « Ban OFF » pour un modérateur serait impossible à exprimer.
++STAFF_ROLE_FALLBACK_PERMISSIONS = frozenset({
++    "moderate_members", "kick_members", "manage_messages",
++    "manage_nicknames", "move_members", "manage_channels",
++})
++
++MODULE_LABELS = {
++    "moderation": "Modération",
++    "security": "Sécurité",
++    "logs": "Logs",
++    "tickets": "Tickets",
++    "welcome": "Bienvenue & départ",
++    "roles": "Rôles",
++    "levels": "Niveaux",
++    "economy": "Économie",
++    "notifications": "Notifications",
++    "ai": "IA",
++}
++
++AI_IMAGE_COMMANDS = frozenset({"image", "image-prompt"})
++AI_ALWAYS_ALLOWED = frozenset({"aisetup", "aidiag"})
++
++
++def normalise(value: Any) -> str:
++    """Normalisation UNIQUE. Les deux transports doivent utiliser celle-ci."""
++    return str(value or "").strip().casefold().lstrip("+/")
++
++
++def module_for_command(name: str) -> str | None:
++    name = normalise(name)
++    if name in _MODULE_BY_COMMAND:
++        return _MODULE_BY_COMMAND[name]
++    if name in PUBLIC_COMMANDS:
++        if name in {"balance", "daily", "weekly", "work", "rob", "pay", "shop",
++                    "buy", "buyrole", "inventory", "sell", "gamble", "deposit",
++                    "withdraw", "banque", "economy", "economyleaderboard",
++                    "leaderboard-money", "market", "market-buy", "market-sell",
++                    "market-cancel", "market-find", "market-history",
++                    "market-my", "transactions", "shopwindow", "economyhub"}:
++            return "economy"
++        if name in {"stats", "me", "level", "rank", "leaderboard-levels",
++                    "level-roles", "profile", "set-bio", "rep", "reputation",
++                    "repleaderboard", "voice-time", "progress", "achievements",
++                    "profilecard"}:
++            return "levels"
++        if name in {"sentrix", "ask", "chat", "chat-reset", "summarize",
++                    "image", "image-prompt", "explain", "rewrite", "fact-check",
++                    "ai", "improve", "correct", "ai-translate", "code"}:
++            return "ai"
++        if name in {"ticket", "ticketcenter"}:
++            return "tickets"
++    return None
++
++
++def permission_label(permission: str) -> str:
++    return PERMISSION_LABELS.get(permission, permission)
++
++
++def access_tier(name: str) -> str:
++    """Niveau théorique, sans état serveur. Utilisé par +help et /help."""
++    name = normalise(name)
++    if name in OWNER_ONLY_COMMANDS:
++        return "owner-global"
++    if name in PUBLIC_COMMANDS:
++        return "public"
++    if name in CUSTOM_PERMISSION_COMMANDS:
++        return "embed-staff"
++    if name in DISCORD_PERMISSION_COMMANDS:
++        return "discord:" + DISCORD_PERMISSION_COMMANDS[name]
++    for category, names in CATEGORY_COMMANDS.items():
++        if name in names:
++            return "categorie:" + category
++    return "fail-closed"
++
++
++def help_requirement(name: str) -> str:
++    """Libellé de permission affiché par +help ET /help. Jamais masqué."""
++    tier = access_tier(name)
++    if tier == "public":
++        return "Tout le monde"
++    if tier == "owner-global":
++        return "Propriétaire global SentriX"
++    if tier == "embed-staff":
++        return "Gérer les messages / Gérer le serveur / rôle +embed"
++    if tier.startswith("discord:"):
++        return permission_label(tier.split(":", 1)[1]) + " (ou rôle autorisé dans Setup)"
++    if tier.startswith("categorie:"):
++        return "Administrateur (ou rôle autorisé dans Setup)"
++    return "Administrateur (commande non classée)"
++
++
++# ---------------------------------------------------------------------------
++# 2. DÉCISION
++# ---------------------------------------------------------------------------
++
++DENIAL_HEADER = "Vous n'avez pas accès à cette commande."
++
++
++@dataclass(frozen=True, slots=True)
++class AccessDecision:
++    allowed: bool
++    reason: str = ""
++    policy: str = ""
++
++    @property
++    def message(self) -> str:
++        if self.allowed:
++            return ""
++        if not self.reason:
++            return DENIAL_HEADER
++        return f"{DENIAL_HEADER}\n\n{self.reason}"
++
++
++def _deny(reason: str, policy: str) -> AccessDecision:
++    return AccessDecision(False, reason, policy)
++
++
++def _permissions(author: Any):
++    return getattr(author, "guild_permissions", None)
++
++
++def _is_administrator(author: Any) -> bool:
++    perms = _permissions(author)
++    return bool(perms is not None and getattr(perms, "administrator", False))
++
++
++def _has_discord_permission(author: Any, permission: str) -> bool:
++    perms = _permissions(author)
++    return bool(perms is not None and getattr(perms, permission, False))
++
++
++def _role_ids(author: Any) -> set[int]:
++    out: set[int] = set()
++    for role in (getattr(author, "roles", ()) or ()):
++        try:
++            rid = int(getattr(role, "id", 0) or 0)
++        except (TypeError, ValueError):
++            continue
++        if rid:
++            out.add(rid)
++    return out
++
++
++def _is_guild_owner(author: Any, guild: Any) -> bool:
++    """Strict : deux identifiants réels et égaux. None == None ne passe pas."""
++    author_id = getattr(author, "id", None)
++    owner_id = getattr(guild, "owner_id", None)
++    if author_id is None or owner_id is None:
++        return False
++    try:
++        return int(author_id) == int(owner_id)
++    except (TypeError, ValueError):
++        return False
++
++
++class Backend:
++    """Accès base de données. Toutes les méthodes échouent en refus (fail-closed).
++
++    Les instances de bot fournissent leur propre backend via
++    ``bot.sentrix_access_backend``. Les tests injectent un backend factice.
++    """
++
++    def __init__(self, bot):
++        self.bot = bot
++
++    async def is_global_owner(self, user_id: int) -> bool:
++        import config
++        from database.db import PRIMARY_CREATOR_ID
++        if user_id == PRIMARY_CREATOR_ID or user_id in config.OWNER_IDS:
++            return True
++        try:
++            return bool(await self.bot.db.is_bot_creator(user_id))
++        except Exception:
++            logger.exception("Vérification owner global impossible user=%s", user_id)
++            return False
++
++    async def blacklist_reason(self, user_id: int) -> str | None:
++        cache = getattr(self.bot, "blacklist_cache", None)
++        if not isinstance(cache, dict):
++            return None
++        reason = cache.get(user_id)
++        if reason is None:
++            return None
++        return str(reason or "Aucune raison fournie")
++
++    async def module_enabled(self, guild_id: int, module: str) -> bool:
++        try:
++            row = await self.bot.db.fetchone(
++                "SELECT enabled FROM module_settings WHERE guild_id=? AND module=?",
++                (int(guild_id), str(module)),
++            )
++        except Exception:
++            return True  # table absente : ne casse pas un serveur existant
++        return True if row is None else bool(row["enabled"])
++
++    async def explicit_rule(self, guild_id: int, author: Any, name: str):
++        """Retourne (True|False|None, source). Un deny sur un rôle l'emporte."""
++        user_id = getattr(author, "id", None)
++        try:
++            if user_id is not None:
++                row = await self.bot.db.fetchone(
++                    "SELECT allowed FROM command_access_rules WHERE guild_id=? "
++                    "AND subject_type='user' AND subject_id=? AND command_name=?",
++                    (int(guild_id), int(user_id), name),
++                )
++                if row is not None:
++                    return bool(row["allowed"]), "user"
++
++            role_ids = sorted(_role_ids(author))
++            if role_ids:
++                marks = ",".join("?" for _ in role_ids)
++                rows = await self.bot.db.fetchall(
++                    "SELECT allowed FROM command_access_rules WHERE guild_id=? "
++                    f"AND subject_type='role' AND subject_id IN ({marks}) "
++                    "AND command_name=?",
++                    (int(guild_id), *role_ids, name),
++                )
++                if rows:
++                    values = [bool(r["allowed"]) for r in rows]
++                    return (False not in values), "role"
++
++            row = await self.bot.db.fetchone(
++                "SELECT allowed FROM command_access_rules WHERE guild_id=? "
++                "AND subject_type='everyone' AND subject_id=0 AND command_name=?",
++                (int(guild_id), name),
++            )
++            if row is not None:
++                return bool(row["allowed"]), "everyone"
++        except Exception:
++            logger.exception("Lecture des règles Setup impossible guild=%s", guild_id)
