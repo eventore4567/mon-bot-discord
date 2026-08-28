@@ -11,6 +11,7 @@ import logging
 from discord.ext import commands
 
 from . import setup_control_center
+from .control_center_v3_ui_fix import install as install_control_center_v3_ui_fix
 from .language_official_bridge import (
     OfficialLanguageSelect,
     _english,
@@ -24,6 +25,10 @@ logger = logging.getLogger("bot.control-center-v3-language")
 def install(bot: commands.Bot) -> None:
     view_cls = setup_control_center.SetupView
     if getattr(view_cls, "_sentrix_control_center_v3_language", False):
+        # Le pont peut déjà être en place lors d'une seconde finalisation runtime. La
+        # finition UI doit quand même rester la couche la plus externe afin de retirer
+        # les composants legacy éventuellement réinjectés entre-temps.
+        install_control_center_v3_ui_fix(bot)
         return
 
     current_render = view_cls.render
@@ -77,6 +82,10 @@ def install(bot: commands.Bot) -> None:
     view_cls._sentrix_official_language_bridge = True
     view_cls._sentrix_language_payload_guard = True
     bot._sentrix_control_center_v3_language = True
+
+    # Toujours en dernier : retire le double bouton legacy, déduplique l'état du module
+    # et remet les sélecteurs Tickets/Notifications après le renderer V3.
+    install_control_center_v3_ui_fix(bot)
     logger.info("FR/EN rebranché sur le renderer final Control Center V3.")
 
 
