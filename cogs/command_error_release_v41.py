@@ -9,6 +9,7 @@ from discord.ext import commands
 
 from .command_hardening_v41 import release_slash
 from .runtime_consistency_v57 import install as install_runtime_consistency_v57
+from .setup_v2_runtime import install as install_setup_v2_runtime
 
 logger = logging.getLogger("bot.command-error-release-v41")
 
@@ -80,6 +81,9 @@ def install(bot: commands.Bot) -> None:
     # Cette couche doit être posée même si le wrapper slash V41 l'était déjà : un reload
     # partiel ne doit pas laisser les permissions/logs/durées dans un état incohérent.
     install_runtime_consistency_v57(bot)
+    # La V2 se pose après V57 afin que la matrice +/slash, les modules et la whitelist
+    # deviennent la dernière source de vérité sans supprimer les protections existantes.
+    install_setup_v2_runtime(bot)
 
     current = bot.tree.on_error
     if getattr(current, "_sentrix_v41_release", False):
