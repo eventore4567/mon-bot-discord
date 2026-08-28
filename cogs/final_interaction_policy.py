@@ -3,8 +3,8 @@
 Règles finales :
 - toutes les réponses de commandes + et / utilisent le design SentriX officiel ;
 - les anciennes réponses texte sont converties en cartes ;
+- les réponses longues sont paginées sur plusieurs messages sans troncature ;
 - les embeds historiques sont normalisés au dernier moment ;
-- boutons et menus de commandes perdent leurs emojis décoratifs ;
 - les pings explicitement autorisés restent intacts ;
 - seule la conversation directe ``sentrix`` reste en texte Discord normal.
 """
@@ -27,11 +27,20 @@ logger = logging.getLogger("bot.final-interaction-policy")
 _COMMAND_ROOT: contextvars.ContextVar[str] = contextvars.ContextVar(
     "sentrix_command_root", default=""
 )
+_COMMAND_CONTEXT: contextvars.ContextVar[commands.Context | None] = contextvars.ContextVar(
+    "sentrix_command_context", default=None
+)
 _PLAIN_WEBHOOK_TOKENS: dict[str, float] = {}
 _URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
 _IMAGE_URL_RE = re.compile(
     r"^https?://\S+\.(?:png|jpe?g|gif|webp)(?:\?\S*)?$", re.IGNORECASE
 )
+_MENTION_RE = re.compile(r"<@!?\d{15,22}>|<@&\d{15,22}>|@everyone|@here", re.IGNORECASE)
+_CARD_TEXT_LIMIT = 3400
+_SECONDARY_DROP_KEYS = {
+    "view", "file", "files", "stickers", "poll", "nonce", "reference",
+    "mention_author", "delete_after",
+}
 
 
 def _unwrap(callable_obj):
@@ -69,7 +78,6 @@ def _root_from_interaction(interaction: discord.Interaction | None) -> str:
 
 
 def _plain_root(root: str) -> bool:
-    # Le dialogue naturel avec SentriX doit rester du vrai texte Discord, sans carte.
     return str(root or "").casefold() == "sentrix"
 
 
@@ -117,6 +125,31 @@ def _title_for_text(text: str) -> str:
     return "Information"
 
 
+def _split_text(value: Any, limit: int = _CARD_TEXT_LIMIT) -> list[str]:
+    """Découpe sans perte en privilégiant les sauts de ligne puis les espaces."""
+    text = str(value or "").strip()
+    if not text:
+        return []
+    chunks: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= limit:
+            chunks.append(remaining)
+            break
+        cut = remaining.rfind("\n", 0, limit + 1)
+        if cut < max(400, limit // 4):
+            cut = remaining.rfind(" ", 0, limit + 1)
+        if cut < max(400, limit // 4):
+            cut = limit
+        chunk = remaining[:cut].rstrip()
+        if not chunk:
+            chunk = remaining[:limit]
+            cut = len(chunk)
+        chunks.append(chunk)
+        remaining = remaining[cut:].lstrip()
+    return chunks
+
+
 def _cards_from_text(value: Any) -> list[discord.Embed]:
     text = str(value or "").strip()
     if not text:
@@ -129,24 +162,9 @@ def _cards_from_text(value: Any) -> list[discord.Embed]:
     if _URL_RE.match(text):
         return [sentrix_embeds.standard("Lien", f"[Ouvrir le lien]({text})")]
 
-    chunks: list[str] = []
-    remaining = text
-    while remaining and len(chunks) < 10:
-        if len(remaining) <= 3850:
-            chunks.append(remaining)
-            break
-        cut = remaining.rfind("\n", 0, 3850)
-        if cut < 800:
-            cut = remaining.rfind(" ", 0, 3850)
-        if cut < 800:
-            cut = 3850
-        chunks.append(remaining[:cut].rstrip())
-        remaining = remaining[cut:].lstrip()
-    if remaining and chunks:
-        chunks[-1] = (chunks[-1][:3650] + "\n\nRéponse tronquée.")[:3850]
-
+    chunks = _split_text(text)
     total = len(chunks)
-    cards = []
+    cards: list[discord.Embed] = []
     for index, chunk in enumerate(chunks, start=1):
         title = _title_for_text(chunk) if total == 1 else f"Réponse {index}/{total}"
         cards.append(sentrix_embeds.standard(title, chunk))
@@ -164,6 +182,172 @@ def _explicit_ping_requested(kwargs: dict) -> bool:
     return False
 
 
+def _ping_stub(value: Any) -> str | None:
+    seen: set[str] = set()
+    tokens: list[str] = []
+    for match in _MENTION_RE.findall(str(value or "")):
+        key = match.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        tokens.append(match)
+    text = " ".join(tokens).strip()
+    return text[:1900] or None
+
+
+def _readable_without_mentions(value: Any) -> str:
+    return _MENTION_RE.sub("", str(value or "")).strip(" \n\t,;:|•-—–")
+
+
+def _content_from(args: tuple, kwargs: dict) -> tuple[Any, bool]:
+    if kwargs.get("content") is not None:
+        return kwargs.get("content"), False
+    if args:
+        return args[0], True
+    return None, False
+
+
+def _set_content(
+    args: tuple,
+    kwargs: dict,
+    *,
+    positional: bool,
+    value: Any,
+) -> tuple[tuple, dict]:
+    mutable = list(args)
+    if positional and mutable:
+        mutable[0] = value
+        kwargs.pop("content", None)
+    else:
+        kwargs["content"] = value
+    return tuple(mutable), kwargs
+
+
+def _normalize_existing(
+    args: tuple,
+    kwargs: dict,
+    *,
+    editing: bool,
+    root: str,
+    bot: Any,
+) -> tuple[tuple, dict]:
+    new_kwargs = dict(kwargs)
+    if isinstance(new_kwargs.get("embed"), discord.Embed):
+        new_kwargs["embed"] = _clean_embed(new_kwargs["embed"], root=root, bot=bot)
+    if new_kwargs.get("embeds"):
+        new_kwargs["embeds"] = [
+            _clean_embed(item, root=root, bot=bot) if isinstance(item, discord.Embed) else item
+            for item in list(new_kwargs["embeds"])
+        ][:10]
+    if new_kwargs.get("view") is not None:
+        new_kwargs["view"] = sentrix_embeds.clean_view(new_kwargs["view"])
+    if editing and (new_kwargs.get("embed") is not None or new_kwargs.get("embeds")):
+        new_kwargs["content"] = None
+    return tuple(args), new_kwargs
+
+
+def _secondary_kwargs(kwargs: dict) -> dict:
+    result = dict(kwargs)
+    for key in _SECONDARY_DROP_KEYS:
+        result.pop(key, None)
+    result.pop("content", None)
+    result.pop("embed", None)
+    result.pop("embeds", None)
+    return result
+
+
+def _embed_chars(embed: discord.Embed) -> int:
+    try:
+        return int(len(embed))
+    except Exception:
+        return len(str(embed.title or "")) + len(str(embed.description or ""))
+
+
+def _payload_pages(
+    args: tuple,
+    kwargs: dict,
+    *,
+    editing: bool = False,
+    force_embed: bool = True,
+    root: str = "",
+    bot: Any = None,
+) -> list[tuple[tuple, dict]]:
+    """Construit des payloads Discord valides sans jamais perdre le texte utilisateur."""
+    base_args, base_kwargs = _normalize_existing(
+        args, kwargs, editing=editing, root=root, bot=bot
+    )
+    content, positional = _content_from(base_args, base_kwargs)
+    if not force_embed or content is None or not str(content).strip():
+        return [(base_args, base_kwargs)]
+
+    ping_requested = _explicit_ping_requested(base_kwargs)
+    ping_content = _ping_stub(content) if ping_requested else None
+    readable = _readable_without_mentions(content) if ping_requested else str(content).strip()
+
+    existing: list[discord.Embed] = []
+    single = base_kwargs.get("embed")
+    if isinstance(single, discord.Embed):
+        existing.append(single)
+    existing.extend(
+        item for item in list(base_kwargs.get("embeds") or [])
+        if isinstance(item, discord.Embed)
+    )
+
+    if not readable:
+        normalized_args, normalized_kwargs = _set_content(
+            base_args, base_kwargs, positional=positional, value=ping_content
+        )
+        return [(normalized_args, normalized_kwargs)]
+
+    cards = [
+        _clean_embed(card, root=root, bot=bot)
+        for card in _cards_from_text(readable)
+    ]
+    cards = [card for card in cards if isinstance(card, discord.Embed)]
+    if not cards:
+        return [(base_args, base_kwargs)]
+
+    if existing:
+        total_chars = sum(_embed_chars(item) for item in [*cards, *existing])
+        if len(cards) + len(existing) <= 10 and total_chars <= 5800:
+            merged = dict(base_kwargs)
+            merged.pop("embed", None)
+            merged["embeds"] = [*cards, *existing]
+            normalized_args, merged = _set_content(
+                base_args, merged, positional=positional, value=ping_content
+            )
+            return [(normalized_args, merged)]
+
+        first_kwargs = dict(base_kwargs)
+        first_args, first_kwargs = _set_content(
+            base_args, first_kwargs, positional=positional, value=ping_content
+        )
+        pages: list[tuple[tuple, dict]] = [(first_args, first_kwargs)]
+        secondary = _secondary_kwargs(base_kwargs)
+        for card in cards:
+            page_kwargs = dict(secondary)
+            page_kwargs["embed"] = card
+            pages.append(((), page_kwargs))
+        return pages
+
+    first_base = dict(base_kwargs)
+    first_base.pop("embed", None)
+    first_base.pop("embeds", None)
+    pages = []
+    for index, card in enumerate(cards):
+        page_kwargs = dict(first_base if index == 0 else _secondary_kwargs(first_base))
+        page_kwargs["embed"] = card
+        page_args = base_args if index == 0 else ()
+        page_args, page_kwargs = _set_content(
+            page_args,
+            page_kwargs,
+            positional=(positional and index == 0),
+            value=(ping_content if index == 0 else None),
+        )
+        pages.append((page_args, page_kwargs))
+    return pages
+
+
 def _normalize_payload(
     args: tuple,
     kwargs: dict,
@@ -173,53 +357,32 @@ def _normalize_payload(
     root: str = "",
     bot: Any = None,
 ):
-    new_args = list(args)
-    new_kwargs = dict(kwargs)
+    """Compatibilité : retourne le premier payload d'un envoi."""
+    return _payload_pages(
+        args,
+        kwargs,
+        editing=editing,
+        force_embed=force_embed,
+        root=root,
+        bot=bot,
+    )[0]
 
-    if isinstance(new_kwargs.get("embed"), discord.Embed):
-        new_kwargs["embed"] = _clean_embed(new_kwargs["embed"], root=root, bot=bot)
-    if new_kwargs.get("embeds"):
-        new_kwargs["embeds"] = [
-            _clean_embed(item, root=root, bot=bot) if isinstance(item, discord.Embed) else item
-            for item in list(new_kwargs["embeds"])
-        ]
 
-    if new_kwargs.get("view") is not None:
-        new_kwargs["view"] = sentrix_embeds.clean_view(new_kwargs["view"])
+def _mark_context_response(ctx: commands.Context | None, result: Any) -> None:
+    if ctx is None:
+        return
+    ctx._sentrix_response_sent = True
+    if result is not None:
+        ctx._sentrix_last_response = result
 
-    content = new_kwargs.get("content")
-    positional = False
-    if content is None and new_args:
-        content = new_args[0]
-        positional = True
 
-    has_embed = new_kwargs.get("embed") is not None or bool(new_kwargs.get("embeds"))
-    if (
-        force_embed
-        and content is not None
-        and str(content).strip()
-        and not has_embed
-        and not _explicit_ping_requested(new_kwargs)
-    ):
-        cards = _cards_from_text(content)
-        cards = [
-            _clean_embed(card, root=root, bot=bot)
-            for card in cards
-        ]
-        if len(cards) == 1:
-            new_kwargs["embed"] = cards[0]
-        else:
-            new_kwargs["embeds"] = cards
-        if positional and new_args:
-            new_args[0] = None
-            new_kwargs.pop("content", None)
-        else:
-            new_kwargs["content"] = None
-
-    if editing and (new_kwargs.get("embed") is not None or new_kwargs.get("embeds")):
-        new_kwargs["content"] = None
-
-    return tuple(new_args), new_kwargs
+async def _send_pages_with_callable(sender, target, pages):
+    first = None
+    for page_args, page_kwargs in pages:
+        result = await sender(target, *page_args, **page_kwargs)
+        if first is None:
+            first = result
+    return first
 
 
 def _install_bot_invoke_context() -> None:
@@ -230,11 +393,13 @@ def _install_bot_invoke_context() -> None:
 
     async def invoke_with_root(self: commands.Bot, ctx: commands.Context):
         root = _root_name(getattr(ctx, "command", None))
-        token = _COMMAND_ROOT.set(root)
+        root_token = _COMMAND_ROOT.set(root)
+        context_token = _COMMAND_CONTEXT.set(ctx)
         try:
             return await base(self, ctx)
         finally:
-            _COMMAND_ROOT.reset(token)
+            _COMMAND_CONTEXT.reset(context_token)
+            _COMMAND_ROOT.reset(root_token)
 
     invoke_with_root._sentrix_embed_context = True
     invoke_with_root._sentrix_original = base
@@ -250,9 +415,19 @@ def _install_context_send() -> None:
     async def context_send(self: commands.Context, *args, **kwargs):
         root = _root_name(getattr(self, "command", None)) or _COMMAND_ROOT.get()
         if _plain_root(root):
-            return await base(self, *args, **kwargs)
-        args, kwargs = _normalize_payload(args, kwargs, root=root, bot=getattr(self, "bot", None))
-        return await base(self, *args, **kwargs)
+            result = await base(self, *args, **kwargs)
+            _mark_context_response(self, result)
+            return result
+        pages = _payload_pages(
+            args, kwargs, root=root, bot=getattr(self, "bot", None)
+        )
+        first = None
+        for page_args, page_kwargs in pages:
+            result = await base(self, *page_args, **page_kwargs)
+            if first is None:
+                first = result
+        _mark_context_response(self, first)
+        return first
 
     context_send._sentrix_official_embed = True
     context_send._sentrix_original = base
@@ -267,13 +442,20 @@ def _install_messageable_send() -> None:
 
     async def messageable_send(self, *args, **kwargs):
         root = _COMMAND_ROOT.get()
+        ctx = _COMMAND_CONTEXT.get()
         if root and not _plain_root(root):
-            args, kwargs = _normalize_payload(args, kwargs, root=root)
-        elif isinstance(kwargs.get("embed"), discord.Embed):
+            pages = _payload_pages(args, kwargs, root=root)
+            first = await _send_pages_with_callable(base, self, pages)
+            _mark_context_response(ctx, first)
+            return first
+        if isinstance(kwargs.get("embed"), discord.Embed):
             kwargs["embed"] = _clean_embed(kwargs["embed"])
             if kwargs.get("view") is not None:
                 kwargs["view"] = sentrix_embeds.clean_view(kwargs["view"])
-        return await base(self, *args, **kwargs)
+        result = await base(self, *args, **kwargs)
+        if root:
+            _mark_context_response(ctx, result)
+        return result
 
     messageable_send._sentrix_official_command_embed = True
     messageable_send._sentrix_original = base
@@ -288,13 +470,34 @@ def _install_message_edit() -> None:
 
     async def message_edit(self: discord.Message, *args, **kwargs):
         root = _COMMAND_ROOT.get()
-        if root and not _plain_root(root):
-            args, kwargs = _normalize_payload(args, kwargs, editing=True, root=root)
-        return await base(self, *args, **kwargs)
+        if not root or _plain_root(root):
+            return await base(self, *args, **kwargs)
+        pages = _payload_pages(args, kwargs, editing=True, root=root)
+        first_args, first_kwargs = pages[0]
+        result = await base(self, *first_args, **first_kwargs)
+        if len(pages) > 1:
+            raw_send = _unwrap(discord.abc.Messageable.send)
+            for page_args, page_kwargs in pages[1:]:
+                await raw_send(self.channel, *page_args, **page_kwargs)
+        return result
 
     message_edit._sentrix_official_command_embed = True
     message_edit._sentrix_original = base
     discord.Message.edit = message_edit
+
+
+async def _send_interaction_pages(
+    interaction: discord.Interaction | None,
+    base_send,
+    response,
+    pages: list[tuple[tuple, dict]],
+):
+    first_args, first_kwargs = pages[0]
+    result = await base_send(response, *first_args, **first_kwargs)
+    if interaction is not None:
+        for page_args, page_kwargs in pages[1:]:
+            await interaction.followup.send(*page_args, **page_kwargs)
+    return result
 
 
 def _install_interactions() -> None:
@@ -304,17 +507,19 @@ def _install_interactions() -> None:
 
         async def response_send(self, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
-            root = _root_from_interaction(interaction)
+            root = _root_from_interaction(interaction) or _COMMAND_ROOT.get()
             if _plain_root(root):
                 _remember_plain_interaction(interaction)
                 return await base_send(self, *args, **kwargs)
-            args, kwargs = _normalize_payload(
+            pages = _payload_pages(
                 args,
                 kwargs,
                 root=root,
                 bot=getattr(interaction, "client", None),
             )
-            return await base_send(self, *args, **kwargs)
+            return await _send_interaction_pages(
+                interaction, base_send, self, pages
+            )
 
         response_send._sentrix_official_embed = True
         response_send._sentrix_original = base_send
@@ -340,18 +545,23 @@ def _install_interactions() -> None:
 
         async def response_edit(self, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
-            root = _root_from_interaction(interaction)
+            root = _root_from_interaction(interaction) or _COMMAND_ROOT.get()
             if _plain_root(root):
                 _remember_plain_interaction(interaction)
                 return await base_edit(self, *args, **kwargs)
-            args, kwargs = _normalize_payload(
+            pages = _payload_pages(
                 args,
                 kwargs,
                 editing=True,
                 root=root,
                 bot=getattr(interaction, "client", None),
             )
-            return await base_edit(self, *args, **kwargs)
+            first_args, first_kwargs = pages[0]
+            result = await base_edit(self, *first_args, **first_kwargs)
+            if interaction is not None:
+                for page_args, page_kwargs in pages[1:]:
+                    await interaction.followup.send(*page_args, **page_kwargs)
+            return result
 
         response_edit._sentrix_official_embed = True
         response_edit._sentrix_original = base_edit
@@ -362,18 +572,22 @@ def _install_interactions() -> None:
         base_original = _unwrap(current_original)
 
         async def edit_original(self: discord.Interaction, *args, **kwargs):
-            root = _root_from_interaction(self)
+            root = _root_from_interaction(self) or _COMMAND_ROOT.get()
             if _plain_root(root):
                 _remember_plain_interaction(self)
                 return await base_original(self, *args, **kwargs)
-            args, kwargs = _normalize_payload(
+            pages = _payload_pages(
                 args,
                 kwargs,
                 editing=True,
                 root=root,
                 bot=getattr(self, "client", None),
             )
-            return await base_original(self, *args, **kwargs)
+            first_args, first_kwargs = pages[0]
+            result = await base_original(self, *first_args, **first_kwargs)
+            for page_args, page_kwargs in pages[1:]:
+                await self.followup.send(*page_args, **page_kwargs)
+            return result
 
         edit_original._sentrix_official_embed = True
         edit_original._sentrix_original = base_original
@@ -392,8 +606,9 @@ def _install_followups() -> None:
         token = str(getattr(self, "token", "") or "")
         if token and token in _PLAIN_WEBHOOK_TOKENS:
             return await base(self, *args, **kwargs)
-        args, kwargs = _normalize_payload(args, kwargs)
-        return await base(self, *args, **kwargs)
+        root = _COMMAND_ROOT.get()
+        pages = _payload_pages(args, kwargs, root=root)
+        return await _send_pages_with_callable(base, self, pages)
 
     webhook_send._sentrix_official_embed = True
     webhook_send._sentrix_original = base
@@ -405,7 +620,11 @@ async def _permission_denial(interaction: discord.Interaction, decision) -> None
     panel = sentrix_embeds.error(text)
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(embed=panel, ephemeral=True)
+            response_type = getattr(interaction.response, "type", None)
+            if response_type == discord.InteractionResponseType.deferred_channel_message:
+                await interaction.edit_original_response(content=None, embed=panel)
+            else:
+                await interaction.followup.send(embed=panel, ephemeral=True)
         else:
             await interaction.response.send_message(embed=panel, ephemeral=True)
     except (discord.Forbidden, discord.HTTPException, discord.InteractionResponded):
@@ -435,13 +654,21 @@ def _install_errors(bot: commands.Bot) -> None:
     async def tree_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
         panel = _slash_error_embed(error)
         try:
-            if interaction.response.is_done():
-                await interaction.followup.send(embed=panel, ephemeral=True)
-            else:
+            if not interaction.response.is_done():
                 await interaction.response.send_message(embed=panel, ephemeral=True)
+                return
+            response_type = getattr(interaction.response, "type", None)
+            if response_type in {
+                discord.InteractionResponseType.deferred_channel_message,
+                discord.InteractionResponseType.deferred_message_update,
+            }:
+                await interaction.edit_original_response(content=None, embed=panel, view=None)
+                return
+            await interaction.edit_original_response(content=None, embed=panel)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.InteractionResponded):
             logger.warning("Impossible d'envoyer l'erreur slash finale.")
 
+    tree_error._sentrix_official_error_owner = True
     bot.tree.on_error = tree_error
 
 
@@ -457,8 +684,21 @@ def install(bot: commands.Bot) -> None:
     _install_errors(bot)
     bot._sentrix_official_embed_transport = True
     logger.info(
-        "Transport officiel actif : cartes larges SentriX sur toutes les commandes ; conversation sentrix en texte normal."
+        "Transport officiel actif : cartes SentriX sans troncature, pagination longue et réponse unique."
     )
 
 
-__all__ = ["install", "_normalize_payload"]
+__all__ = [
+    "install",
+    "_normalize_payload",
+    "_payload_pages",
+    "_cards_from_text",
+    "_clean_embed",
+    "_explicit_ping_requested",
+    "_root_from_interaction",
+    "_root_name",
+    "_plain_root",
+    "_COMMAND_ROOT",
+    "_COMMAND_CONTEXT",
+    "_unwrap",
+]
