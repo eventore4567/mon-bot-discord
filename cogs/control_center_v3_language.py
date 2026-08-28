@@ -32,30 +32,60 @@ from .voice_logs_v2 import install as install_voice_logs_v2
 logger = logging.getLogger("bot.control-center-v3-language")
 
 
-class _V4CategorySelectCompat(control_center_v4.V4CategorySelect, control_center_v3.V3CategorySelect):
-    """Menu V4 qui reste volontairement compatible avec le contrat public V3.
+class _V4CategorySelectCompat(control_center_v3.V3CategorySelect):
+    """Navigation V4 qui étend réellement le contrat public V3.
 
-    Les audits, wrappers de langue et anciennes vues peuvent continuer à reconnaître
-    ``V3CategorySelect`` tandis que les pages supplémentaires V4 restent disponibles.
+    On hérite uniquement de ``V3CategorySelect``. L'ancien héritage multiple
+    V4+V3 faisait suivre le ``super()`` du constructeur V4 vers le constructeur
+    V3 avec des arguments incompatibles. Cette version conserve donc le type V3,
+    ses valeurs publiques historiques et ajoute seulement les sous-pages V4.
     """
 
     def __init__(self, owner):
         super().__init__(owner)
-        # ``security_verification`` est la valeur publique historique. V4 conserve
-        # sa nouvelle page auto derrière cette valeur au lieu de casser les vues/tests.
+        self.placeholder = "Choisir une page du Control Center"
+
+        # La valeur publique historique reste stable pour les vues persistantes,
+        # les audits et le pont de langue. Seul son libellé décrit le moteur actuel.
         for option in self.options:
-            if str(option.value) == "security_auto":
-                option.value = "security_verification"
+            if str(option.value) == "security_verification":
+                option.label = "Sécurité — Vérification auto"
+                option.description = "40 signaux adaptatifs, seuil calibré et honeypot"
                 break
+
+        extras = (
+            ("tickets_center", "Tickets — Ticket Center", "Panels, types, formulaires, boutons staff et transcripts"),
+            ("welcome_messages", "Accueil — Messages", "Textes, variables et image de bienvenue/départ"),
+            ("levels_economy", "Niveaux — Économie", "Monnaie et paramètres économie"),
+            ("ai_natural", "IA — Conversation naturelle", "Déclencheur sentrix ..., limites et mémoire"),
+        )
+        existing = {str(option.value) for option in self.options}
+        for value, label, description in extras:
+            if value not in existing and len(self.options) < 25:
+                self.options.append(
+                    discord.SelectOption(label=label, value=value, description=description[:100])
+                )
 
     async def callback(self, interaction: discord.Interaction):
         value = self.values[0]
-        if value != "security_verification":
-            return await super().callback(interaction)
-
         self.owner._v3_subpage = None
-        self.owner._v4_subpage = "auto_verification"
-        self.owner.category = "security"
+        self.owner._v4_subpage = None
+        mapping = {
+            "security_verification": ("security", "auto_verification"),
+            "tickets_center": ("tickets", "ticket_center"),
+            "welcome_messages": ("welcome", "messages"),
+            "roles_panel": ("roles", "panel"),
+            "levels_economy": ("levels", "economy"),
+            "ai_natural": ("ai", "natural"),
+        }
+        if value == "__home__":
+            self.owner.category = None
+        elif value in mapping:
+            self.owner.category, self.owner._v4_subpage = mapping[value]
+            if value == "roles_panel":
+                self.owner._v3_subpage = "panel"
+        else:
+            self.owner.category = value
         self.owner.selected_log = None
         self.owner.selected_ticket = None
         self.owner.selected_notification = None
