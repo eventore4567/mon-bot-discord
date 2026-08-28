@@ -3,8 +3,9 @@
 Ordre déterministe :
 1. V4 enrichit les pages métier du Setup ;
 2. V5 remplace le moteur de vérification par les 40 signaux adaptatifs ;
-3. la langue enveloppe le renderer final ;
-4. la finition UI reste la toute dernière couche (toggle unique + tickets dynamiques).
+3. la calibration collecte jusqu'à 1 000 vraies évaluations ;
+4. la langue enveloppe le renderer final ;
+5. la finition UI reste la toute dernière couche (toggle unique + tickets dynamiques).
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from discord.ext import commands
 from . import automatic_verification_v5
 from . import control_center_v4
 from . import setup_control_center
+from . import verification_calibration_v5
 from .control_center_v3_ui_fix import install as install_control_center_v3_ui_fix
 from .language_official_bridge import (
     OfficialLanguageSelect,
@@ -30,6 +32,7 @@ async def install(bot: commands.Bot) -> None:
     # V4 garde les pages métier ; V5 remplace uniquement le moteur de vérification.
     await control_center_v4.install(bot)
     await automatic_verification_v5.install(bot)
+    await verification_calibration_v5.install(bot)
 
     view_cls = setup_control_center.SetupView
     if getattr(view_cls, "_sentrix_control_center_v3_language", False):
@@ -89,7 +92,7 @@ async def install(bot: commands.Bot) -> None:
     # restaure les contrôles dynamiques Tickets/Notifications après les wrappers V4/V5.
     install_control_center_v3_ui_fix(bot)
     logger.info(
-        "FR/EN rebranché sur Control Center V4 + V5 ; finition UI finale restaurée."
+        "FR/EN rebranché sur Control Center V4 + V5 ; calibration 1000 + finition UI finales."
     )
 
 
