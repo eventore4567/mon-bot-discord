@@ -7,9 +7,17 @@ Ce module ne DÉCIDE rien. Il se contente de :
 
 Toute règle d'accès vit dans ``utils/access_matrix.py``. Ne pas rajouter de
 condition ici : ce serait recréer la divergence que cette refonte supprime.
+
+Contrat fail-closed
+-------------------
+Une commande inconnue de la matrice est REFUSÉE, jamais autorisée par défaut.
+``install()`` le vérifie réellement au démarrage via
+``_assert_fail_closed_contract()`` : si une commande inventée obtenait un accès,
+l'installation échoue bruyamment au lieu d'ouvrir silencieusement le bot.
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from typing import Any
@@ -18,6 +26,7 @@ import discord
 from discord.ext import commands
 
 from utils import access_matrix
+from utils import checks as checks_module
 from utils.access_matrix import AccessDecision, evaluate, normalise
 from utils.checks import BotPermissionError
 
@@ -104,25 +113,38 @@ def _force_help_public(bot: commands.Bot) -> None:
 
 
 def _is_redundant_authorization_check(predicate: Any) -> bool:
+    """Vrai UNIQUEMENT si le check est explicitement un ancien check d'autorisation.
+
+    Politique fail-safe : en cas de doute, on CONSERVE le check. Un check non
+    marqué est traité comme une validation métier, jamais comme du bruit.
+    Retirer par erreur une validation de cible est un problème de sécurité ;
+    conserver par erreur un check d'autorisation ne l'est pas, puisque la
+    matrice rend la même décision et ne peut donc pas créer de divergence +//.
+    """
     if getattr(predicate, "_sentrix_keep", False):
         return False
 
-    label = str(getattr(predicate, "_sentrix_permission_label", "") or "")
-    if label:
-        # Keep the explicit global-owner check as a defence in depth. The matrix
-        # returns the same decision, so it cannot create +// divergence.
-        if "Propriétaire global SentriX" in label:
-            return False
-        return True
+    kind = str(getattr(predicate, "_sentrix_check_kind", "") or "")
+    if kind == checks_module.CHECK_KIND_ACTION_VALIDATION:
+        return False
+    if kind != checks_module.CHECK_KIND_AUTHORIZATION:
+        # Non marqué : on ne sait pas ce que fait ce check -> on le garde.
+        module = str(getattr(predicate, "__module__", "") or "")
+        qualname = str(getattr(predicate, "__qualname__", "") or "")
+        if module.startswith("discord.ext.commands"):
+            # Seuls ces deux-là sont, par construction, de l'autorisation pure.
+            return (
+                "has_permissions.<locals>.predicate" in qualname
+                or "has_guild_permissions.<locals>.predicate" in qualname
+            )
+        return False
 
-    module = str(getattr(predicate, "__module__", "") or "")
-    qualname = str(getattr(predicate, "__qualname__", "") or "")
-    if module.startswith("discord.ext.commands"):
-        return (
-            "has_permissions.<locals>.predicate" in qualname
-            or "has_guild_permissions.<locals>.predicate" in qualname
-        )
-    return False
+    label = str(getattr(predicate, "_sentrix_permission_label", "") or "")
+    # Défense en profondeur : le verrou owner global reste en place. La matrice
+    # rend la même décision, donc aucune divergence + // n'est possible.
+    if "Proprietaire global SentriX" in label or "Propriétaire global SentriX" in label:
+        return False
+    return True
 
 
 def _strip_redundant_local_checks(bot: commands.Bot) -> int:
@@ -147,6 +169,34 @@ def _strip_redundant_local_checks(bot: commands.Bot) -> int:
             removed += len(checks_list) - len(keep)
             checks_list[:] = keep
     return removed
+
+
+async def _assert_fail_closed_contract(bot: commands.Bot) -> None:
+    """Vérifie que la matrice refuse bien une commande inconnue (fail-closed).
+
+    Ce n'est pas une formalité : une régression qui rendrait la matrice
+    permissive par défaut ouvrirait d'un coup toutes les commandes non classées.
+    On teste donc le comportement, pas une chaîne de caractères.
+    """
+    probe = "__sentrix_probe_commande_inexistante__"
+
+    class _Member:
+        id = 0
+        roles = ()
+        guild_permissions = discord.Permissions.none()
+
+    class _Guild:
+        id = 0
+        owner_id = None
+
+    decision = await evaluate(
+        bot, command_name=probe, author=_Member(), guild=_Guild()
+    )
+    if decision.allowed:
+        raise RuntimeError(
+            "Contrat fail-closed rompu : une commande inconnue a été autorisée "
+            f"(policy={decision.policy!r}). Installation interrompue."
+        )
 
 
 def install(bot: commands.Bot) -> None:
@@ -200,6 +250,15 @@ def install(bot: commands.Bot) -> None:
     slash_permission_guard._sentrix_previous_tree_check = original_tree_check
     bot.tree.interaction_check = slash_permission_guard
     bot._sentrix_permission_guard_installed = True
+
+    # Contrat fail-closed vérifié pour de vrai, pas seulement documenté.
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None:
+        loop.create_task(_assert_fail_closed_contract(bot))
+
     logger.info(
         "Permissions SentriX : matrice unique active (%s commandes classées, "
         "%s check(s) local(aux) redondant(s) retiré(s)).",
