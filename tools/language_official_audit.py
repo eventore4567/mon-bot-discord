@@ -83,8 +83,13 @@ async def run() -> int:
         if not getattr(setup_control_center.SetupView, "_sentrix_language_payload_guard", False):
             errors.append("le nouveau SetupView n'est pas marque comme compatible langue")
 
-        # La langue est un réglage transversal : elle ne devient PAS une catégorie.
-        fake_guild = SimpleNamespace(id=123456789, owner_id=1)
+        # Setup V2 initialise la cible @everyone via guild.default_role. Le faux serveur
+        # de l'audit doit donc fournir ce contrat minimal, comme un vrai discord.Guild.
+        fake_guild = SimpleNamespace(
+            id=123456789,
+            owner_id=1,
+            default_role=SimpleNamespace(id=1234567890),
+        )
         await language_runtime.set_language(bot, fake_guild.id, language_runtime.LANG_EN)
         view = setup_control_center.SetupView(bot, fake_guild, 1)
         view.render()
