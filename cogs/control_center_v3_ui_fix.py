@@ -5,7 +5,8 @@ Cette couche est volontairement la dernière autorité visuelle du Setup officie
 - un seul état du module dans l'embed ;
 - suppression des anciennes lignes télémétriques Etat/Configuration/Module ;
 - restauration des contrôles dynamiques Tickets et Notifications ;
-- informations Tickets utiles directement dans la page.
+- informations Tickets utiles directement dans la page ;
+- accusé de réception immédiat des interactions avant les requêtes/rendus lourds.
 
 Le nettoyage s'applique après ``render`` ET après ``build_embed`` afin qu'une couche
 historique chargée plus tôt ne puisse pas réinjecter le gros bouton bleu observé en
@@ -54,6 +55,7 @@ _CONFIG_FIELD_NAMES = {
     "current configuration",
 }
 _STATUS_WORDS = {"actif", "inactif", "active", "inactive", "on", "off"}
+_CALLBACK_ACK_MARKER = "_sentrix_setup_ack_before_work"
 
 
 def _plain(value: object) -> str:
@@ -67,8 +69,6 @@ def _looks_like_legacy_module_toggle(child: discord.ui.Item) -> bool:
     label = _plain(getattr(child, "label", ""))
     if label in _LEGACY_TOGGLE_LABELS:
         return True
-    # Les anciennes versions n'ont pas toutes exactement le même libellé. On retire
-    # donc sémantiquement tout bouton qui promet à la fois activer ET désactiver le module.
     french = "module" in label and "activer" in label and "desactiver" in label
     english = "module" in label and "enable" in label and "disable" in label
     return french or english
@@ -88,7 +88,6 @@ def _normalize_module_toggles(view: discord.ui.View) -> int:
         if _plain(getattr(child, "label", "")) in _COMPACT_TOGGLE_LABELS:
             compact.append(child)
 
-    # Sur une page module, plusieurs petits toggles identiques sont aussi un bug.
     if getattr(view, "category", None) is not None and len(compact) > 1:
         for duplicate in compact[1:]:
             view.remove_item(duplicate)
@@ -145,8 +144,6 @@ def _tidy_module_header(embed: discord.Embed) -> discord.Embed:
             english = True
         if key in _STATE_FIELD_NAMES:
             value = str(field.value or "").strip()
-            # Le champ `Module` représente l'état réel du toggle et a priorité sur
-            # l'ancien champ `Etat` qui pouvait être CONFIGURE/ERREUR.
             if key in {"module", "module state", "etat du module"} and value:
                 state_value = value
             elif state_value is None and value:
@@ -164,8 +161,6 @@ def _tidy_module_header(embed: discord.Embed) -> discord.Embed:
             inline=False,
         )
 
-    # Une configuration courte reste sur sa propre ligne : elle ne fusionne plus avec
-    # l'état et les permissions sur mobile.
     config_seen = False
     for index in reversed(range(len(embed.fields))):
         field = embed.fields[index]
@@ -182,7 +177,6 @@ def _tidy_module_header(embed: discord.Embed) -> discord.Embed:
         )
         config_seen = True
 
-    # Permissions toujours sur une ligne complète.
     for index, field in enumerate(list(embed.fields)):
         key = _plain(field.name)
         if key in {"permissions", "permissions du bot", "bot permissions"}:
@@ -305,6 +299,79 @@ async def _enrich_ticket_page(view, embed: discord.Embed) -> None:
             )
 
 
+async def _ack_interaction(interaction: discord.Interaction) -> None:
+    """Accuse le clic avant toute I/O afin de rester sous la fenêtre Discord de 3 s."""
+    if interaction.response.is_done():
+        return
+    try:
+        await interaction.response.defer()
+    except discord.InteractionResponded:
+        pass
+
+
+def _install_safe_refresh(view_cls) -> None:
+    current = view_cls.refresh
+    if getattr(current, "_sentrix_setup_safe_refresh", False):
+        return
+
+    async def refresh(self, interaction: discord.Interaction):
+        # Important : le defer vient AVANT build_embed(). Cette méthode effectue de
+        # nombreuses lectures DB (modules, tickets, niveaux, notifications, IA).
+        await _ack_interaction(interaction)
+        self.render()
+        embed = await self.build_embed()
+        return await interaction.edit_original_response(embed=embed, view=self)
+
+    refresh._sentrix_setup_safe_refresh = True
+    refresh._sentrix_original = current
+    view_cls.refresh = refresh
+
+
+def _defer_before_callback(component_cls) -> None:
+    """Pré-acquitte les callbacks dont le premier travail est uniquement DB/rôle/salon."""
+    current = getattr(component_cls, "callback", None)
+    if current is None or getattr(current, _CALLBACK_ACK_MARKER, False):
+        return
+
+    async def callback(self, interaction: discord.Interaction):
+        await _ack_interaction(interaction)
+        return await current(self, interaction)
+
+    setattr(callback, _CALLBACK_ACK_MARKER, True)
+    callback._sentrix_original = current
+    component_cls.callback = callback
+
+
+def _install_callback_ack_guards() -> None:
+    # Ces callbacks ne tentent pas d'ouvrir un modal ni d'envoyer une réponse initiale
+    # avant leur refresh : ils sont donc sûrs à defer immédiatement.
+    base_components = (
+        setup_ui.FieldRoleSelect,
+        setup_ui.FieldChannelSelect,
+        setup_ui.AutomodSelect,
+        setup_ui.LogChannelSelect,
+        setup_ui.TicketCategorySelect,
+        setup_ui.TicketRoleSelect,
+        setup_ui.NotificationChannelSelect,
+        setup_ui.NotificationRoleSelect,
+    )
+    for component_cls in base_components:
+        _defer_before_callback(component_cls)
+
+    # Imports locaux pour éviter une dépendance circulaire lors du bootstrap V3.
+    try:
+        from . import control_center_v3
+
+        for component_cls in (
+            control_center_v3.ModuleToggle,
+            control_center_v3.RolePanelChannelSelect,
+            control_center_v3.RolePanelRolesSelect,
+        ):
+            _defer_before_callback(component_cls)
+    except Exception:
+        logger.exception("Impossible d'installer les accusés de réception V3 du Setup.")
+
+
 def install(bot: commands.Bot) -> None:
     """Pose/répare la finition sur les méthodes actuellement finales du Setup."""
     view_cls = setup_ui.SetupView
@@ -338,10 +405,14 @@ def install(bot: commands.Bot) -> None:
         build_embed._sentrix_original = current_build
         view_cls.build_embed = build_embed
 
+    _install_safe_refresh(view_cls)
+    _install_callback_ack_guards()
+
     bot._sentrix_control_center_v3_ui_fix = True
+    bot._sentrix_setup_interaction_ack_guard = True
     logger.info(
-        "Finition Setup active : 1 état, 1 toggle compact, télémétrie legacy retirée, Tickets/Notifications restaurés."
+        "Finition Setup active : 1 état, 1 toggle, contrôles dynamiques et ACK Discord avant I/O."
     )
 
 
-__all__ = ["install"]
+__all__ = ["install", "_ack_interaction"]
