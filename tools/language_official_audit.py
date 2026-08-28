@@ -15,6 +15,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+EXPECTED_SETUP_CATEGORIES = 10
+
+
 async def run() -> int:
     errors: list[str] = []
     with tempfile.TemporaryDirectory(prefix="sentrix-language-official-") as temp_dir:
@@ -65,14 +68,22 @@ async def run() -> int:
         elif getattr(setup_command, "cog", None) is not setup_cog:
             errors.append("+setup n'est pas rattache au Cog SentriXSetup")
 
-        if len(setup_control_center.CATEGORIES) != 9:
-            errors.append(f"le setup officiel doit garder exactement 9 categories: {len(setup_control_center.CATEGORIES)}")
+        # Setup V2 ajoute volontairement « Permissions / Accès aux commandes » aux neuf
+        # catégories historiques. La langue reste transversale et ne devient pas une
+        # onzième catégorie.
+        if len(setup_control_center.CATEGORIES) != EXPECTED_SETUP_CATEGORIES:
+            errors.append(
+                f"le setup officiel doit garder exactement {EXPECTED_SETUP_CATEGORIES} categories: "
+                f"{len(setup_control_center.CATEGORIES)}"
+            )
+        if "permissions" not in setup_control_center.CATEGORIES:
+            errors.append("la categorie Permissions / Acces aux commandes manque dans Setup V2")
         if not getattr(setup_control_center.SetupView, "_sentrix_official_language_bridge", False):
             errors.append("le pont FR/EN n'est pas branche sur le nouveau SetupView")
         if not getattr(setup_control_center.SetupView, "_sentrix_language_payload_guard", False):
             errors.append("le nouveau SetupView n'est pas marque comme compatible langue")
 
-        # La langue est un réglage transversal : elle ne devient PAS une dixième catégorie.
+        # La langue est un réglage transversal : elle ne devient PAS une catégorie.
         fake_guild = SimpleNamespace(id=123456789, owner_id=1)
         await language_runtime.set_language(bot, fake_guild.id, language_runtime.LANG_EN)
         view = setup_control_center.SetupView(bot, fake_guild, 1)
@@ -90,8 +101,12 @@ async def run() -> int:
             if getattr(item, "custom_id", None) != "sentrix:setup:official:language"
             and getattr(item, "options", None)
         ]
-        if not category_selects or len(category_selects[0].options) != 9:
-            errors.append("le menu principal ne contient plus exactement les 9 categories officielles")
+        if not category_selects or len(category_selects[0].options) != EXPECTED_SETUP_CATEGORIES:
+            errors.append(
+                f"le menu principal ne contient plus exactement les {EXPECTED_SETUP_CATEGORIES} categories officielles"
+            )
+        elif "Permissions" not in {str(option.label) for option in category_selects[0].options}:
+            errors.append("l'option Permissions manque dans le menu principal traduit")
 
         help_command = bot.get_command("help")
         help_cog = bot.get_cog("SentriXHelp")
@@ -127,7 +142,10 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
-    print("OK: FR/EN persistant, 9 categories setup, propriétaires officiels setup/help et aucun doublon")
+    print(
+        "OK: FR/EN persistant, 10 categories setup dont Permissions, "
+        "propriétaires officiels setup/help et aucun doublon"
+    )
     return 0
 
 
