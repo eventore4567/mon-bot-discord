@@ -245,7 +245,9 @@ def _context_block(guild: discord.Guild, embed: discord.Embed) -> str:
             second = f"**Serveur**  {_display_server(guild)}"
         text = first + "\n" + second
 
-    return fixed_v50._pad_rows(text, fixed_v50.CONTEXT_ROWS)
+    # _pad_rows / CONTEXT_ROWS n'existent pas dans V50 : l'appel levait une
+    # AttributeError a CHAQUE rendu de log, V60 ayant remplace _context_block.
+    return text
 
 
 def _replace_dead_mentions(guild: discord.Guild, value: object) -> str:

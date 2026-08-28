@@ -309,38 +309,13 @@ def _operation_module(command_name: str) -> str | None:
 
 
 def _patch_permission_guard(bot: commands.Bot) -> None:
-    current = permission_guard.evaluate_command_access
-    if getattr(current, "_sentrix_setup_v2", False):
-        return
+    """Neutralisé : la décision d'accès vit dans utils/access_matrix.py.
 
-    async def evaluate_v2(target_bot, *, command_name, author, guild):
-        decision = await current(target_bot, command_name=command_name, author=author, guild=guild)
-        name = str(command_name or "").casefold()
-        if decision.policy == "owner" and not decision.allowed:
-            return decision
-        module = _operation_module(name)
-        if guild is not None and module and not await module_enabled(target_bot, guild.id, module):
-            return permission_guard.AccessDecision(
-                False,
-                f"Le module **{module}** est désactivé sur ce serveur. Réactivez-le dans `+setup`.",
-                f"module:{module}:disabled",
-            )
-        if guild is not None and getattr(author, "id", None) == getattr(guild, "owner_id", None):
-            return permission_guard.AccessDecision(True, policy="guild-owner")
-        explicit = await get_role_command_decision(target_bot, guild, author, name)
-        if explicit == "deny":
-            return permission_guard.AccessDecision(
-                False,
-                "Votre rôle possède une règle SentriX qui refuse cette commande.",
-                "role-rule:deny",
-            )
-        if explicit == "allow":
-            return permission_guard.AccessDecision(True, policy="role-rule:allow")
-        return decision
-
-    evaluate_v2._sentrix_setup_v2 = True
-    evaluate_v2._sentrix_previous = current
-    permission_guard.evaluate_command_access = evaluate_v2
+    Ce wrapper enveloppait evaluate_command_access et pouvait contredire la
+    matrice (module coupé pour l'owner global, None == None ouvrant l'accès).
+    Les modules et les règles de rôle sont désormais lus par la matrice.
+    """
+    return
 
 
 def _patch_local_checks(bot: commands.Bot) -> None:

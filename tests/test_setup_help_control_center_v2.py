@@ -61,11 +61,16 @@ def test_help_supports_prefix_and_slash_direct_search():
 def test_server_managers_do_not_bypass_admin_permissions_anymore():
     checks_source = _source("utils/checks.py")
     guard_source = _source("cogs/permission_guard.py")
+    # La décision d'accès vit désormais dans utils/access_matrix.py ; le guard
+    # se contente de brancher les deux transports dessus.
+    matrix_source = _source("utils/access_matrix.py")
     assert "is_bot_manager" not in checks_source
     assert "has_manager_permission" not in checks_source
     assert "is_bot_manager" not in guard_source
     assert "has_manager_permission" not in guard_source
-    assert "Administrateur" in guard_source
+    assert "is_bot_manager" not in matrix_source
+    assert "has_manager_permission" not in matrix_source
+    assert "Administrateur" in matrix_source
 
 
 def test_permission_metadata_is_shared_with_help():

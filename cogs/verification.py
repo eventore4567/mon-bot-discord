@@ -665,7 +665,9 @@ class Verification(commands.Cog, name="Verification"):
 
     @commands.hybrid_command(name="giverole", aliases=["addrole"], description="Donner un rôle à un membre.")
     @app_commands.describe(membre="Le membre visé", role="Le rôle à donner")
-    @checks.has_permission_or_modrole("manage_roles")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("manage_roles",), target="role_target")
     async def giverole(self, ctx: commands.Context, membre: discord.Member, role: discord.Role):
         # check_hierarchy bloque toute action "sur soi-même" — pertinent pour une sanction
         # (on ne se bannit pas soi-même), mais pas pour un rôle : un membre autorisé à gérer
@@ -675,6 +677,9 @@ class Verification(commands.Cog, name="Verification"):
         error = None
         if membre.id != ctx.author.id and isinstance(ctx.author, discord.Member):
             error = checks.check_hierarchy(ctx.author, membre)
+        # VALIDATION METIER : le rôle lui-même est-il gérable ?
+        if not error and isinstance(ctx.author, discord.Member):
+            error = checks.check_role_target(ctx.author, role)
         if error and ctx.author.id != ctx.guild.owner_id:
             return await ctx.send(embed=await self._embed(ctx.guild.id, title="Action refusée", description=error, kind="danger"))
         try:
@@ -685,8 +690,19 @@ class Verification(commands.Cog, name="Verification"):
 
     @commands.hybrid_command(name="removerole", aliases=["delrole"], description="Retirer un rôle à un membre.")
     @app_commands.describe(membre="Le membre visé", role="Le rôle à retirer")
-    @checks.has_permission_or_modrole("manage_roles")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("manage_roles",), target="role_target")
     async def removerole(self, ctx: commands.Context, membre: discord.Member, role: discord.Role):
+        # VALIDATION METIER : hiérarchie sur la cible puis sur le rôle visé.
+        error = None
+        if membre.id != ctx.author.id and isinstance(ctx.author, discord.Member):
+            error = checks.check_hierarchy(ctx.author, membre)
+        if not error and isinstance(ctx.author, discord.Member):
+            error = checks.check_role_target(ctx.author, role)
+        if error and ctx.author.id != ctx.guild.owner_id:
+            return await ctx.send(embed=await self._embed(
+                ctx.guild.id, title="Action refusée", description=error, kind="danger"))
         try:
             await membre.remove_roles(role, reason=f"Retiré par {ctx.author}")
         except discord.Forbidden:

@@ -25,6 +25,7 @@ from utils.checks import (
     is_mod_or_permission,
     is_verified_bot_owner,
 )
+from utils import access_matrix
 from web.dashboard import start_dashboard
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -496,7 +497,7 @@ class BotAllInOne(commands.Bot):
         soit ajoutée silencieusement sans décision explicite sur son niveau d'accès.
         """
         registered = {command.name.lower() for command in self.commands}
-        unknown = sorted(registered - KNOWN_PERMISSION_COMMANDS)
+        unknown = sorted(registered - access_matrix.KNOWN_COMMANDS)
         if unknown:
             logger.warning(
                 "Sécurité : %s commande(s) non classée(s), accès administrateur appliqué "
@@ -523,61 +524,26 @@ class BotAllInOne(commands.Bot):
         return await self.db.has_manager_permission(ctx.guild.id, ctx.author.id, category)
 
     async def global_permission_check(self, ctx: commands.Context) -> bool:
-        """Second verrou obligatoire pour toutes les commandes, préfixées et slash.
+        """Délégation stricte à la matrice unique (utils/access_matrix.py).
 
-        Les checks locaux des cogs continuent de contrôler la hiérarchie et les détails.
-        Ici, une commande inconnue est refusée aux membres par défaut : la sécurité ne
-        dépend donc plus d'un décorateur qui pourrait être oublié.
+        Ce check est enregistré par add_check() APRÈS le chargement des cogs.
+        permission_guard.install() a alors déjà remplacé cet attribut par sa
+        propre fonction ; ce corps ne sert que si le guard n'a pas pu
+        s'installer. Il doit donc rendre EXACTEMENT la même décision.
         """
         command = ctx.command
         if command is None:
             return True
         root = command.root_parent or command
-        name = root.name.lower()
-
-        if name in PUBLIC_COMMANDS:
-            return True
-
-        if name in OWNER_ONLY_COMMANDS:
-            if await is_verified_bot_owner(ctx):
-                return True
-            raise BotPermissionError(
-                "Cette commande est réservée au propriétaire vérifié du bot."
-            )
-
-        if name in CUSTOM_PERMISSION_COMMANDS:
-            if await can_use_embed_builder(ctx):
-                return True
-            raise BotPermissionError(
-                "Cette commande est réservée au staff autorisé à créer des embeds."
-            )
-
-        required_permission = DISCORD_PERMISSION_COMMANDS.get(name)
-        if required_permission is not None:
-            if await is_mod_or_permission(ctx, required_permission):
-                return True
-            raise BotPermissionError(
-                "Cette commande est réservée au staff autorisé. "
-                f"Permission requise : `{required_permission}` ou rôle de modération configuré."
-            )
-
-        for category, names in CATEGORY_COMMANDS.items():
-            if name not in names:
-                continue
-            if await self._has_manager_access(ctx, category):
-                return True
-            raise BotPermissionError(
-                "Cette commande de gestion est réservée aux administrateurs ou à un "
-                f"gestionnaire autorisé pour la catégorie `{category}`."
-            )
-
-        # Fail-closed : toute future commande oubliée dans la politique est protégée.
-        if await self._has_manager_access(ctx, "complete"):
-            return True
-        raise BotPermissionError(
-            "Cette commande n'a pas encore de niveau d'accès public validé. "
-            "Elle est réservée aux administrateurs par sécurité."
+        decision = await access_matrix.evaluate(
+            self,
+            command_name=root.name,
+            author=ctx.author,
+            guild=ctx.guild,
         )
+        if decision.allowed:
+            return True
+        raise BotPermissionError(decision.message)
 
     async def global_blacklist_check(self, ctx: commands.Context) -> bool:
         """Bloque tout utilisateur inscrit sur la liste noire GLOBALE d'utilisation du bot
