@@ -26,7 +26,11 @@ LOG_CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
     "voice": ("logs-vocal", "logs-vocaux", "logs-voice"),
     "roles": ("logs-roles", "logs-rôles", "logs-role", "logs-rôle"),
     "server": ("logs-salons", "logs-serveur", "logs-server"),
-    "resources": ("logs-dossiers", "logs-ressources", "logs-fichiers", "logs-files"),
+    # Compatibilité V6 : les anciens salons logs-dossiers/logs-fichiers restent rattachés
+    # à la clé historique ``files``. Le nouveau salon ``logs-ressources`` utilise la clé
+    # V2 ``resources`` afin de ne casser ni les anciens resets ni les nouveaux événements.
+    "files": ("logs-dossiers", "logs-fichiers", "logs-files"),
+    "resources": ("logs-ressources",),
     "moderation": ("logs-moderation", "logs-modération", "logs-modo"),
     "tickets": ("logs-tickets", "logs-ticket"),
     "automod": ("logs-securite", "logs-sécurité", "logs-automod", "logs-security"),
@@ -111,7 +115,8 @@ async def sync_generated_logs(bot: commands.Bot, guild: discord.Guild) -> int:
     for log_type, channel in found.items():
         meta = log_service.LOG_TYPES.get(log_type, {})
         if not meta:
-            # Une ancienne version peut ne pas connaître Ressources avant que V2 soit posé.
+            # Une ancienne couche chargée avant Setup V2 peut ne pas encore connaître
+            # ``resources``. On attend simplement que la couche V2 soit installée.
             if log_type == "resources":
                 continue
         try:
