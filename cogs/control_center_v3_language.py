@@ -12,6 +12,7 @@ from discord.ext import commands
 
 from . import setup_control_center
 from .control_center_v3_ui_fix import install as install_control_center_v3_ui_fix
+from .voice_logs_v2 import install as install_voice_logs_v2
 from .language_official_bridge import (
     OfficialLanguageSelect,
     _english,
@@ -29,6 +30,7 @@ def install(bot: commands.Bot) -> None:
         # finition UI doit quand même rester la couche la plus externe afin de retirer
         # les composants legacy éventuellement réinjectés entre-temps.
         install_control_center_v3_ui_fix(bot)
+        install_voice_logs_v2(bot)
         return
 
     current_render = view_cls.render
@@ -86,6 +88,8 @@ def install(bot: commands.Bot) -> None:
     # Toujours en dernier : retire le double bouton legacy, déduplique l'état du module
     # et remet les sélecteurs Tickets/Notifications après le renderer V3.
     install_control_center_v3_ui_fix(bot)
+    # Le logger vocal officiel est lui aussi remplacé après le chargement de tous les cogs.
+    install_voice_logs_v2(bot)
     logger.info("FR/EN rebranché sur le renderer final Control Center V3.")
 
 
