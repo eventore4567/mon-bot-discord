@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit FR/EN adapté aux propriétaires officiels setup/help de SentriX."""
+"""Audit FR/EN du Setup/Help officiels après installation du Control Center V3."""
 from __future__ import annotations
 
 import asyncio
@@ -14,18 +14,18 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-
 EXPECTED_SETUP_CATEGORIES = 10
 
 
 async def run() -> int:
     errors: list[str] = []
+    visible = []
     with tempfile.TemporaryDirectory(prefix="sentrix-language-official-") as temp_dir:
         os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-language.db")
 
         import main
-        from cogs import language_runtime, setup_control_center
+        from cogs import control_center_v3, language_runtime, setup_control_center
         from cogs.language_official_bridge import OfficialLanguageSelect
 
         bot = main.BotAllInOne()
@@ -43,7 +43,7 @@ async def run() -> int:
 
         bot._prune_redundant_commands()
 
-        # La préférence de langue reste persistante dans la même table historique.
+        # La préférence de langue reste persistante dans la table historique.
         await language_runtime.set_language(bot, 123456789, language_runtime.LANG_EN)
         if await language_runtime.get_language(bot, 123456789) != language_runtime.LANG_EN:
             errors.append("la preference English n'est pas persistante")
@@ -51,78 +51,82 @@ async def run() -> int:
         if await language_runtime.get_language(bot, 123456789) != language_runtime.LANG_FR:
             errors.append("la preference Francais n'est pas persistante")
 
-        # Les alias FR/EN restent deux noms du MEME objet commande, jamais des doublons.
+        # Les alias FR/EN doivent rester des alias du même objet commande.
         for canonical, french in (("ban", "bannir"), ("help", "aide"), ("setup", "configurer"), ("balance", "solde")):
             base = bot.get_command(canonical)
             if base is None:
                 errors.append(f"commande canonique absente: {canonical}")
                 continue
-            translated = bot.get_command(french)
-            if translated is not base:
+            if bot.get_command(french) is not base:
                 errors.append(f"alias FR {french} ne pointe pas vers {canonical}")
 
         setup_command = bot.get_command("setup")
         setup_cog = bot.get_cog("SentriXSetup")
         if setup_command is None or setup_cog is None:
-            errors.append("le nouveau propriétaire SentriXSetup n'est pas charge")
+            errors.append("le propriétaire SentriXSetup n'est pas charge")
         elif getattr(setup_command, "cog", None) is not setup_cog:
             errors.append("+setup n'est pas rattache au Cog SentriXSetup")
 
-        # Setup V2 ajoute volontairement « Permissions / Accès aux commandes » aux neuf
-        # catégories historiques. La langue reste transversale et ne devient pas une
-        # onzième catégorie.
         if len(setup_control_center.CATEGORIES) != EXPECTED_SETUP_CATEGORIES:
             errors.append(
-                f"le setup officiel doit garder exactement {EXPECTED_SETUP_CATEGORIES} categories: "
+                f"le setup officiel doit garder {EXPECTED_SETUP_CATEGORIES} categories: "
                 f"{len(setup_control_center.CATEGORIES)}"
             )
         if "permissions" not in setup_control_center.CATEGORIES:
-            errors.append("la categorie Permissions / Acces aux commandes manque dans Setup V2")
-        if not getattr(setup_control_center.SetupView, "_sentrix_official_language_bridge", False):
-            errors.append("le pont FR/EN n'est pas branche sur le nouveau SetupView")
-        if not getattr(setup_control_center.SetupView, "_sentrix_language_payload_guard", False):
-            errors.append("le nouveau SetupView n'est pas marque comme compatible langue")
+            errors.append("la categorie Permissions / Acces aux commandes manque")
 
-        # Setup V2 initialise la cible @everyone via guild.default_role. Le faux serveur
-        # de l'audit doit donc fournir ce contrat minimal, comme un vrai discord.Guild.
+        view_cls = setup_control_center.SetupView
+        if not getattr(view_cls, "_sentrix_control_center_v3", False):
+            errors.append("le renderer final Control Center V3 n'est pas installe")
+        if not getattr(view_cls, "_sentrix_control_center_v3_language", False):
+            errors.append("le pont FR/EN final du Control Center V3 n'est pas installe")
+        if not getattr(view_cls, "_sentrix_language_payload_guard", False):
+            errors.append("le SetupView final n'est pas marque compatible langue")
+
         fake_guild = SimpleNamespace(
             id=123456789,
             owner_id=1,
             default_role=SimpleNamespace(id=1234567890),
         )
         await language_runtime.set_language(bot, fake_guild.id, language_runtime.LANG_EN)
-        view = setup_control_center.SetupView(bot, fake_guild, 1)
+        view = view_cls(bot, fake_guild, 1)
         view.render()
+
         language_selects = [item for item in view.children if isinstance(item, OfficialLanguageSelect)]
         if len(language_selects) != 1:
-            errors.append(f"selecteur de langue officiel inattendu: {len(language_selects)}")
-        labels = {str(getattr(item, "label", "")) for item in view.children}
-        for expected in ("Home", "Refresh", "Close"):
-            if expected not in labels:
-                errors.append(f"bouton anglais absent du nouveau setup: {expected}")
+            errors.append(f"selecteur de langue final inattendu: {len(language_selects)}")
 
-        category_selects = [
-            item for item in view.children
-            if getattr(item, "custom_id", None) != "sentrix:setup:official:language"
-            and getattr(item, "options", None)
-        ]
-        if not category_selects or len(category_selects[0].options) != EXPECTED_SETUP_CATEGORIES:
-            errors.append(
-                f"le menu principal ne contient plus exactement les {EXPECTED_SETUP_CATEGORIES} categories officielles"
-            )
-        elif "Permissions" not in {str(option.label) for option in category_selects[0].options}:
-            errors.append("l'option Permissions manque dans le menu principal traduit")
+        # V3 supprime volontairement l'ancienne rangée Accueil/Actualiser/Fermer.
+        button_labels = {str(getattr(item, "label", "")) for item in view.children if hasattr(item, "style")}
+        for forbidden in ("Home", "Refresh", "Close", "Accueil", "Actualiser", "Fermer"):
+            if forbidden in button_labels:
+                errors.append(f"ancien bouton de navigation encore present: {forbidden}")
+
+        category_selects = [item for item in view.children if isinstance(item, control_center_v3.V3CategorySelect)]
+        if len(category_selects) != 1:
+            errors.append(f"menu V3 inattendu: {len(category_selects)}")
+        else:
+            select = category_selects[0]
+            values = {str(option.value) for option in select.options}
+            expected_values = set(setup_control_center.CATEGORY_ORDER) | {
+                "__home__", "security_verification", "roles_panel",
+            }
+            missing = sorted(expected_values - values)
+            if missing:
+                errors.append("pages manquantes dans le menu V3: " + ", ".join(missing))
+            labels = {str(option.label) for option in select.options}
+            if "Permissions" not in labels:
+                errors.append("l'option Permissions manque dans le menu V3 traduit")
 
         help_command = bot.get_command("help")
         help_cog = bot.get_cog("SentriXHelp")
         if help_command is None or help_cog is None:
-            errors.append("le nouveau propriétaire SentriXHelp n'est pas charge")
+            errors.append("le propriétaire SentriXHelp n'est pas charge")
         elif getattr(help_command, "cog", None) is not help_cog:
             errors.append("+help n'est pas rattache au Cog SentriXHelp")
         if help_command is not None and not getattr(help_command, "_sentrix_language_help", False):
             errors.append("le help officiel n'est pas reconnu par le moteur de langue")
 
-        # Toutes les commandes visibles restent uniques malgré les alias linguistiques.
         visible = [command for command in bot.walk_commands() if not getattr(command, "hidden", False)]
         object_ids = [id(command) for command in visible]
         if len(object_ids) != len(set(object_ids)):
@@ -141,15 +145,15 @@ async def run() -> int:
             if inspect.isawaitable(result):
                 await result
 
-    print(f"Language official audit: {len(visible) if 'visible' in locals() else 0} commande(s) verifiee(s)")
+    print(f"Language official audit: {len(visible)} commande(s) verifiee(s)")
     for error in errors:
         print(f"[ERROR] {error}")
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
     print(
-        "OK: FR/EN persistant, 10 categories setup dont Permissions, "
-        "propriétaires officiels setup/help et aucun doublon"
+        "OK: FR/EN persistant, 10 categories, Control Center V3 final, "
+        "langue transversale, help officiel et aucun doublon"
     )
     return 0
 
