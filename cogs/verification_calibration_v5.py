@@ -246,7 +246,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
         )
         embed.add_field(
             name="Vérité terrain",
-            value=f"Revenus par le staff : **{data['reviewed']}**\nPrécision mesurée : **{accuracy}**",
+            value=f"Revus par le staff : **{data['reviewed']}**\nPrécision mesurée : **{accuracy}**",
             inline=True,
         )
         embed.add_field(
