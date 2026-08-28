@@ -29,7 +29,10 @@ jobs:
           git apply /tmp/sentrix-permissions-v3.patch
 
       - name: Apply review corrections
-        run: python patches/permissions-v3/hotfix.py
+        shell: bash
+        run: |
+          python patches/permissions-v3/hotfix.py
+          python patches/permissions-v3/hotfix_test_import.py
 
       - name: Compile modified Python files
         shell: bash
