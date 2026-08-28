@@ -76,11 +76,6 @@ async def install(bot: commands.Bot) -> None:
     await install_feature_systems(bot)
     install_wipe_owner_only(bot)
 
-    # Couches V3 : conversation naturelle et sécurité configurables depuis Setup.
-    from . import ai_bare_chat_v3, security_verification_v3
-    await security_verification_v3.install(bot)
-    await ai_bare_chat_v3.install(bot)
-
     _patch_create_server_defaults()
     if getattr(bot, "_sentrix_shop_default_prices_installed", False):
         return
