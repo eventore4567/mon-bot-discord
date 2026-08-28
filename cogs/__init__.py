@@ -24,6 +24,8 @@ from .command_hardening_v41 import install as install_command_hardening_v41
 from .command_runtime_hardening_v18 import repair_wrapped_signatures
 from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
+from .control_center_v3 import install as install_control_center_v3
+from .control_center_v3_language import install as install_control_center_v3_language
 from .emoji_name_lookup import install as install_emoji_name_lookup
 from .final_interaction_policy import install as install_final_interaction_policy
 from .generated_logs_sync import install as install_generated_logs_sync
@@ -239,8 +241,13 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _run_installer("politique finale interactions", install_final_interaction_policy, bot)
     await _run_installer("libération concurrence slash V41", install_command_error_release_v41, bot)
     await _load_official_help(bot)
+    # Dernière autorité Setup/UX : elle s'installe après toutes les couches historiques.
+    await _run_installer("Control Center V3", install_control_center_v3, bot)
+    await _run_installer("langue Control Center V3", install_control_center_v3_language, bot)
     bot._sentrix_runtime_finalized_clean = True
-    logger.info("Runtime SentriX finalisé : un setup, un help, un renderer, un logger et la vérification par preuve.")
+    logger.info(
+        "Runtime SentriX finalisé : Control Center V3, un help, un renderer, un logger et la vérification renforcée."
+    )
 
 
 async def _load_extension_with_sentrix_patches(bot: commands.Bot, name: str, *, package: str | None = None):

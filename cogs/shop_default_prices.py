@@ -75,6 +75,7 @@ async def install(bot: commands.Bot) -> None:
     install_security_owner_immunity_final(bot)
     await install_feature_systems(bot)
     install_wipe_owner_only(bot)
+
     _patch_create_server_defaults()
     if getattr(bot, "_sentrix_shop_default_prices_installed", False):
         return

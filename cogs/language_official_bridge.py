@@ -20,8 +20,10 @@ EN_REPLACEMENTS = (
     ("Bienvenue & départ", "Welcome & goodbye"),
     ("Niveaux & économie", "Levels & economy"),
     ("Centre de configuration", "Configuration center"),
+    ("Control Center", "Control Center"),
     ("Choisissez une catégorie", "Choose a category"),
     ("Choisir une catégorie", "Choose a category"),
+    ("Choisir une page du Control Center", "Choose a Control Center page"),
     ("Modération", "Moderation"),
     ("Sécurité", "Security"),
     ("Rôles", "Roles"),
@@ -32,7 +34,9 @@ EN_REPLACEMENTS = (
     ("Départ", "Goodbye"),
     ("Configuration", "Configuration"),
     ("État", "Status"),
+    ("État général", "Overall status"),
     ("Permissions SentriX", "SentriX permissions"),
+    ("Permissions du bot", "Bot permissions"),
     ("Problèmes détectés", "Detected problems"),
     ("À corriger", "To fix"),
     ("Fonctions", "Features"),
@@ -47,11 +51,14 @@ EN_REPLACEMENTS = (
     ("Accueil", "Home"),
     ("Actualiser", "Refresh"),
     ("Fermer", "Close"),
+    ("Activer", "Enable"),
+    ("Désactiver", "Disable"),
     ("Rôle staff", "Staff role"),
     ("Rôle mute", "Mute role"),
     ("Rôle warn", "Warn role"),
     ("Rôle automatique", "Automatic role"),
     ("Rôle vérifié", "Verified role"),
+    ("Rôle membre principal", "Main member role"),
     ("Salon de bienvenue", "Welcome channel"),
     ("Salon de départ", "Goodbye channel"),
     ("Salon level-up", "Level-up channel"),
@@ -78,7 +85,6 @@ def _english(text: object | None) -> str | None:
     if text is None:
         return None
     value = str(text)
-    # Réutilise aussi les remplacements du moteur historique pour les mots génériques.
     try:
         translated = language_runtime._english_setup_text(value)
         value = str(translated if translated is not None else value)
@@ -151,10 +157,12 @@ def _translate_component(item) -> None:
                 option.description = _english(option.description)
 
 
-def _patch_setup() -> None:
+def _patch_setup(*, force: bool = False) -> None:
     from . import setup_control_center
 
     view_cls = setup_control_center.SetupView
+    if force:
+        view_cls._sentrix_official_language_bridge = False
     if getattr(view_cls, "_sentrix_official_language_bridge", False):
         return
 
@@ -163,9 +171,14 @@ def _patch_setup() -> None:
 
     def render(self) -> None:
         original_render(self)
-        # La langue reste un réglage transversal et ne devient pas une dixième catégorie.
+        # La langue reste transversale. Sur le Control Center V3 le menu principal occupe
+        # déjà la première ligne ; le sélecteur de langue n'est ajouté à l'accueil que si
+        # une ligne Discord reste disponible.
         if getattr(self, "category", None) is None:
-            self.add_item(OfficialLanguageSelect(self))
+            try:
+                self.add_item(OfficialLanguageSelect(self))
+            except ValueError:
+                pass
         if _is_english(self):
             for item in self.children:
                 _translate_component(item)
@@ -195,15 +208,10 @@ def _patch_setup() -> None:
     view_cls._sentrix_official_language_bridge = True
     view_cls._sentrix_native_language = True
     view_cls._sentrix_language_payload_guard = True
-    logger.info("Langue FR/EN branchée sur le nouveau centre +setup.")
+    logger.info("Langue FR/EN branchée sur le centre +setup.")
 
 
 def _mark_official_help(bot: commands.Bot) -> None:
-    """Le nouveau help reste propriétaire de son rendu; on marque seulement sa commande.
-
-    Les alias FR/EN continuent d'être fournis par language_runtime. On évite surtout de
-    remettre l'ancien callback help par-dessus le nouveau centre d'aide.
-    """
     command = bot.get_command("help")
     if command is None:
         return
@@ -217,7 +225,16 @@ def _mark_official_help(bot: commands.Bot) -> None:
         app_command._sentrix_language_help = True
 
 
-def install(bot: commands.Bot) -> None:
+async def install(bot: commands.Bot) -> None:
     _patch_setup()
     _mark_official_help(bot)
+
+    # +help est volontairement chargé à la fin du runtime. C'est donc le point stable où
+    # le Control Center V3 peut devenir la dernière autorité Setup, après permissions V3
+    # et les anciens correctifs. On réapplique ensuite le pont FR/EN par-dessus V3.
+    if bot.get_cog("SentriXHelp") is not None:
+        from .control_center_v3 import install as install_control_center_v3
+        await install_control_center_v3(bot)
+        _patch_setup(force=True)
+
     bot._sentrix_official_language_bridge = True
