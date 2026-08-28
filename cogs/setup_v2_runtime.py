@@ -12,6 +12,7 @@ from . import permission_guard
 from . import setup_v2_core as core
 from . import setup_v2_ui as ui
 from . import setup_v2_completion as completion
+from . import setup_v2_resource_events as resource_events
 
 logger = logging.getLogger("bot.setup-v2-runtime")
 
@@ -32,7 +33,6 @@ def _patch_ai_features(bot) -> None:
             if name == "image" and not features["image_generation_enabled"]:
                 return permission_guard.AccessDecision(False, "La **génération d’images IA** est désactivée sur ce serveur.", "ai-feature:image-generation-disabled")
             return decision
-
         evaluate_ai_features._sentrix_ai_features_v2 = True
         evaluate_ai_features._sentrix_previous = current
         permission_guard.evaluate_command_access = evaluate_ai_features
@@ -40,14 +40,12 @@ def _patch_ai_features(bot) -> None:
     ai_cog = bot.get_cog("Ai")
     if ai_cog is not None and not getattr(ai_cog, "_sentrix_ai_features_v2", False):
         original_reply = ai_cog.send_sentrix_reply
-
         async def send_sentrix_reply_v2(_self, destination, author, question, *, reply_to=None):
             if reply_to is not None and reply_to.guild is not None:
                 features = await ui.get_ai_features(bot, reply_to.guild.id)
                 if not features["natural_enabled"]:
                     return None
             return await original_reply(destination, author, question, reply_to=reply_to)
-
         ai_cog.send_sentrix_reply = MethodType(send_sentrix_reply_v2, ai_cog)
         ai_cog._sentrix_ai_features_v2 = True
 
@@ -103,16 +101,12 @@ def _finalize_log_runtime(bot) -> None:
         log_service.LOG_TYPES["members"]["label"] = "Membres (arrivées/départs/pseudo/rôles attribués)"
     if "roles" in log_service.LOG_TYPES:
         log_service.LOG_TYPES["roles"]["label"] = "Rôles (création/suppression/modification/permissions)"
-
     logs_cog = bot.get_cog("Logs")
     if logs_cog is None or getattr(logs_cog, "_sentrix_setup_v2_cache_final", False):
         return
     current_cache = logs_cog._cache_message
-
     async def cache_only_when_needed(_self, message):
-        if message.guild is None:
-            return
-        if not await core.module_enabled(bot, message.guild.id, "logs"):
+        if message.guild is None or not await core.module_enabled(bot, message.guild.id, "logs"):
             return
         setting = await log_service.get_log_setting(bot, message.guild.id, "messages")
         if not setting.get("enabled"):
@@ -123,7 +117,6 @@ def _finalize_log_runtime(bot) -> None:
             await bot.db.execute("DELETE FROM message_attachment_cache_v2 WHERE stored_at < ?", (int(time.time()) - 86400,))
         except Exception:
             pass
-
     logs_cog._cache_message = MethodType(cache_only_when_needed, logs_cog)
     logs_cog._sentrix_setup_v2_cache_final = True
 
@@ -135,9 +128,8 @@ def install(bot) -> None:
     ui.install(bot)
     _patch_ai_features(bot)
     _replace_resource_listeners(bot)
+    resource_events.install(bot)
     _finalize_log_runtime(bot)
-    # Completion se pose en dernier : elle valide l'activation, ajoute le reset,
-    # la pagination, le test de bienvenue et coupe toute maintenance serveur implicite.
     completion.install(bot)
     bot._sentrix_setup_v2_runtime = True
     logger.info("SentriX Setup V2 final installé.")
