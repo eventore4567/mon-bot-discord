@@ -1,7 +1,7 @@
 """Classification runtime des commandes transversales SentriX.
 
 Certaines commandes sont ajoutées dynamiquement et n'appartiennent donc pas directement à
-un Cog Discord. Cette couche les rattache explicitement aux catégories de +help et à la
+un Cog historique. Cette couche les rattache explicitement aux catégories de +help et à la
 politique fail-closed de main.py, sans modifier leur callback ni leur sécurité réelle.
 """
 from __future__ import annotations
@@ -15,18 +15,26 @@ from . import help_complete
 logger = logging.getLogger("bot.command-policy-expansion")
 _INSTALLED = False
 
+PROOF_PUBLIC = {"proof", "proofstatus"}
+PROOF_ADMIN = {
+    "proofsetup", "proofexample", "proofexample-remove", "proofexamples", "proofpanel", "proofreset",
+}
+
 ROOTS_BY_CATEGORY = {
     "economy": {"economy-system"},
     "levels": {"level-system"},
     "security": {"security", "antigif", "panic", "security-repair"},
     "stats": {"health"},
-    "configuration": {"suivi-bot"},
+    "configuration": {"suivi-bot", *PROOF_PUBLIC, *PROOF_ADMIN},
 }
 
 MAIN_CATEGORY_ADDITIONS = {
     "securite": {"security", "antigif", "panic", "security-repair", "health"},
     "economie": {"economy-system", "level-system"},
-    "configuration": {"suivi-bot"},
+    # Les commandes proof de gestion restent administrateur. proof/proofstatus sont
+    # ajoutées séparément à PUBLIC_COMMANDS ci-dessous et ne doivent jamais être
+    # transformées en commandes administrateur par la catégorie configuration.
+    "configuration": {"suivi-bot", *PROOF_ADMIN},
 }
 
 
@@ -56,9 +64,14 @@ def _patch_main_module(module) -> None:
         existing = set(categories.get(category, frozenset()))
         categories[category] = frozenset(existing | names)
 
+    public = getattr(module, "PUBLIC_COMMANDS", frozenset())
+    module.PUBLIC_COMMANDS = frozenset(set(public) | PROOF_PUBLIC)
+
     known = getattr(module, "KNOWN_PERMISSION_COMMANDS", frozenset())
     module.KNOWN_PERMISSION_COMMANDS = frozenset(
-        set(known) | set().union(*MAIN_CATEGORY_ADDITIONS.values())
+        set(known)
+        | PROOF_PUBLIC
+        | set().union(*MAIN_CATEGORY_ADDITIONS.values())
     )
 
 
@@ -78,4 +91,4 @@ def install() -> None:
         module = sys.modules.get(name)
         if module is not None:
             _patch_main_module(module)
-    logger.info("Classification SentriX étendue : systèmes, Security V2, health et suivi classés.")
+    logger.info("Classification SentriX étendue : systèmes, Security V2, proof, health et suivi classés.")
