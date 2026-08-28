@@ -24,6 +24,7 @@ from .command_hardening_v41 import install as install_command_hardening_v41
 from .command_runtime_hardening_v18 import repair_wrapped_signatures
 from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
+from .control_center_v3 import _install_setup_v3 as install_control_center_v3_setup_ui
 from .control_center_v3 import install as install_control_center_v3
 from .control_center_v3_language import install as install_control_center_v3_language
 from .emoji_name_lookup import install as install_emoji_name_lookup
@@ -113,6 +114,10 @@ async def _install_configuration_critical_patches(bot: commands.Bot) -> None:
     await _run_installer("moteur de langue setup", install_language_runtime, bot)
     await _run_installer("finaliseur de langue setup", install_language_setup_finalizer, bot)
     await _run_installer("centre de configuration officiel", install_setup_control_center, bot)
+    # Verrouille immédiatement le renderer V3 sur la classe réellement instanciée par
+    # +setup et /setup. La finalisation complète V3 (sécurité, rôles, honeypot...) reste
+    # exécutée plus bas, mais son UI ne dépend plus du succès des sous-systèmes optionnels.
+    await _run_installer("renderer Control Center V3", install_control_center_v3_setup_ui, bot)
     # Le nouveau +setup est installé APRES les anciens correctifs de langue : on rebranche
     # donc explicitement la langue sur son vrai propriétaire, sans restaurer l'ancienne UI.
     await _run_installer("pont langue setup officiel", install_language_official_bridge, bot)
