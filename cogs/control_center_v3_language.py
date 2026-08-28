@@ -1,7 +1,10 @@
-"""Pont FR/EN final pour le Control Center V3/V4.
+"""Pont FR/EN final pour le Control Center V3/V4 + vérification V5.
 
-V4 est installé juste avant la traduction finale afin que le pont de langue enveloppe
-le vrai renderer final sans restaurer une ancienne interface.
+Ordre déterministe :
+1. V4 enrichit les pages métier du Setup ;
+2. V5 remplace le moteur de vérification par les 40 signaux adaptatifs ;
+3. la langue enveloppe le renderer final ;
+4. la finition UI reste la toute dernière couche (toggle unique + tickets dynamiques).
 """
 from __future__ import annotations
 
@@ -9,8 +12,10 @@ import logging
 
 from discord.ext import commands
 
+from . import automatic_verification_v5
 from . import control_center_v4
 from . import setup_control_center
+from .control_center_v3_ui_fix import install as install_control_center_v3_ui_fix
 from .language_official_bridge import (
     OfficialLanguageSelect,
     _english,
@@ -22,11 +27,14 @@ logger = logging.getLogger("bot.control-center-v3-language")
 
 
 async def install(bot: commands.Bot) -> None:
-    # V4 devient l'autorité métier/UI après V3, puis la langue enveloppe le résultat final.
+    # V4 garde les pages métier ; V5 remplace uniquement le moteur de vérification.
     await control_center_v4.install(bot)
+    await automatic_verification_v5.install(bot)
 
     view_cls = setup_control_center.SetupView
     if getattr(view_cls, "_sentrix_control_center_v3_language", False):
+        # Même lors d'une réinstallation runtime, la finition doit rester extérieure.
+        install_control_center_v3_ui_fix(bot)
         return
 
     current_render = view_cls.render
@@ -76,7 +84,13 @@ async def install(bot: commands.Bot) -> None:
     view_cls._sentrix_language_payload_guard = True
     bot._sentrix_control_center_v3_language = True
     bot._sentrix_control_center_v4_language = True
-    logger.info("FR/EN rebranché sur le renderer final Control Center V4.")
+
+    # Dernière autorité visuelle : évite de réintroduire le gros toggle historique et
+    # restaure les contrôles dynamiques Tickets/Notifications après les wrappers V4/V5.
+    install_control_center_v3_ui_fix(bot)
+    logger.info(
+        "FR/EN rebranché sur Control Center V4 + V5 ; finition UI finale restaurée."
+    )
 
 
 __all__ = ["install"]
