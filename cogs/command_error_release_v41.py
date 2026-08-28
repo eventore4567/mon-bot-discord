@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 
 from .command_hardening_v41 import release_slash
+from .runtime_consistency_v57 import install as install_runtime_consistency_v57
 
 logger = logging.getLogger("bot.command-error-release-v41")
 
@@ -30,11 +31,12 @@ def _force_final_renderer() -> None:
 
 
 def _dedupe_prefix_error_listeners(bot: commands.Bot) -> int:
-    """Supprime les anciens listeners qui répondent encore aux erreurs.
+    """Supprime uniquement les anciens listeners qui répondent encore aux erreurs.
 
     Le message utilisateur appartient exclusivement à ``error_experience_v3`` via
-    ``bot.on_command_error``. On conserve uniquement les deux listeners connus qui ne
-    répondent jamais dans Discord : observabilité et métriques production.
+    ``bot.on_command_error``. Les listeners d'observabilité sont conservés, ainsi que
+    ``command_hardening_v41.prefix_failed`` : ce dernier ne répond jamais dans Discord,
+    il libère le verrou de concurrence d'une commande qui vient d'échouer.
     """
     listeners = list(getattr(bot, "extra_events", {}).get("on_command_error", ()) or ())
     if not listeners:
@@ -52,6 +54,9 @@ def _dedupe_prefix_error_listeners(bot: commands.Bot) -> int:
         ) or (
             module.endswith("production_phase_runtime")
             and name == "on_command_error"
+        ) or (
+            module.endswith("command_hardening_v41")
+            and name == "prefix_failed"
         )
         if safe_observer:
             kept.append(listener)
@@ -66,11 +71,15 @@ def _dedupe_prefix_error_listeners(bot: commands.Bot) -> int:
 
 
 def install(bot: commands.Bot) -> None:
-    """Installe les derniers garde-fous sans modifier la logique des commandes."""
+    """Installe les derniers garde-fous sans modifier la logique métier des commandes."""
     _force_final_renderer()
     removed = _dedupe_prefix_error_listeners(bot)
     if removed:
         logger.info("Erreurs préfixées : %s ancien(s) listener(s) concurrent(s) retiré(s).", removed)
+
+    # Cette couche doit être posée même si le wrapper slash V41 l'était déjà : un reload
+    # partiel ne doit pas laisser les permissions/logs/durées dans un état incohérent.
+    install_runtime_consistency_v57(bot)
 
     current = bot.tree.on_error
     if getattr(current, "_sentrix_v41_release", False):
