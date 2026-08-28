@@ -12,7 +12,6 @@ import asyncio
 import io
 import json
 import logging
-from typing import Iterable
 
 import discord
 from discord import app_commands
@@ -464,7 +463,8 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
                     return await target.followup.send(embed=panel, ephemeral=True)
                 return await target.response.send_message(embed=panel, ephemeral=True)
             return await target.send(embed=panel)
-        await proof_service.update_settings(self.bot, guild.id, getattr(target, "user", getattr(target, "author", None)).id, panel_message_id=message.id)
+        actor = getattr(target, "user", None) or getattr(target, "author", None)
+        await proof_service.update_settings(self.bot, guild.id, actor.id, panel_message_id=message.id)
         panel = embeds.success(f"Panel publié dans {channel.mention}.")
         if isinstance(target, discord.Interaction):
             if target.response.is_done():
@@ -604,9 +604,9 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
             matched.extend(item.matched[:3])
             missing.extend(item.missing[:3])
         panel = embeds.warning(
-            "SentriX — Vérification manuelle",
             f"**Membre :** {message.author.mention}\n**Score automatique :** {decision.score} %\n"
             f"**Décision :** {decision.reason}",
+            title="SentriX — Vérification manuelle",
         )
         if matched:
             panel.add_field(name="Éléments reconnus", value="\n".join(f"- {x}" for x in matched)[:1024], inline=False)
@@ -649,21 +649,27 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
             await _send_short(
                 message.channel,
                 embeds.warning(
-                    "SentriX — Preuve insuffisante",
                     f"Cette vérification nécessite **{required} image(s) dans un même message**. Aucun rôle n'a été donné.",
+                    title="SentriX — Preuve insuffisante",
                 ),
             )
             return
         references = await proof_service.list_references(self.bot, message.guild.id)
         if not references:
             asyncio.create_task(_delete_later(message))
-            await _send_short(message.channel, embeds.error("SentriX — ERREUR DE CONFIGURATION\nAucune image exemple n'est enregistrée."))
+            await _send_short(
+                message.channel,
+                embeds.error("Aucune image exemple n'est enregistrée.", title="SentriX — Erreur de configuration"),
+            )
             return
         role = message.guild.get_role(int(_get(settings, "role_id", 0) or 0))
         role_problem = self.role_error(message.guild, role)
         if role_problem:
             asyncio.create_task(_delete_later(message))
-            await _send_short(message.channel, embeds.error("SentriX — ERREUR DE CONFIGURATION\n" + role_problem))
+            await _send_short(
+                message.channel,
+                embeds.error(role_problem, title="SentriX — Erreur de configuration"),
+            )
             return
         if role in getattr(message.author, "roles", ()):
             asyncio.create_task(_delete_later(message))
@@ -694,7 +700,10 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
                         duplicate = True
         except (ValueError, discord.HTTPException):
             asyncio.create_task(_delete_later(message))
-            await _send_short(message.channel, embeds.warning("SentriX — Preuve insuffisante", "Une des images est invalide, trop petite ou trop lourde."))
+            await _send_short(
+                message.channel,
+                embeds.warning("Une des images est invalide, trop petite ou trop lourde.", title="SentriX — Preuve insuffisante"),
+            )
             return
         except Exception:
             logger.exception("Erreur pipeline preuve guild=%s user=%s", message.guild.id, message.author.id)
@@ -713,18 +722,30 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
         details = {"decision": decision.reason, "analyses": [item.to_dict() for item in analyses]}
 
         if decision.status == "accepted":
+            try:
+                await message.author.add_roles(role, reason="Preuve validée automatiquement par SentriX")
+            except discord.HTTPException:
+                queued = await self._queue_manual(
+                    message,
+                    settings,
+                    proof_service.Decision("manual", decision.score, "Discord a refusé l'ajout automatique du rôle."),
+                    analyses,
+                    blobs,
+                    hashes,
+                )
+                asyncio.create_task(_delete_later(message))
+                await _send_short(
+                    message.channel,
+                    embeds.warning(
+                        "La preuve a été transmise au staff." if queued else "Impossible de terminer la vérification.",
+                        title="SentriX — Vérification manuelle",
+                    ),
+                )
+                return
             verification_id = await proof_service.create_verification(
                 self.bot, message.guild.id, message.author.id, message.id,
                 status="accepted", score=decision.score, details=details, hashes=hashes,
             )
-            try:
-                await message.author.add_roles(role, reason="Preuve validée automatiquement par SentriX")
-            except discord.HTTPException:
-                await proof_service.finish_verification(self.bot, verification_id, "manual_pending")
-                queued = await self._queue_manual(message, settings, proof_service.Decision("manual", decision.score, "Discord a refusé l'ajout automatique du rôle."), analyses, blobs, hashes)
-                asyncio.create_task(_delete_later(message))
-                await _send_short(message.channel, embeds.warning("SentriX — Vérification manuelle", "La preuve a été transmise au staff." if queued else "Impossible de terminer la vérification."))
-                return
             await proof_service.record_fingerprints(self.bot, message.guild.id, message.author.id, verification_id, hashes)
             asyncio.create_task(_delete_later(message, 0.5))
             await _send_short(
@@ -738,9 +759,19 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
             queued = await self._queue_manual(message, settings, decision, analyses, blobs, hashes)
             asyncio.create_task(_delete_later(message, 0.5))
             if queued:
-                await _send_short(message.channel, embeds.warning("SentriX — Vérification manuelle", "La preuve n'est pas assez certaine pour être validée automatiquement. Le staff va la vérifier."), delay=10)
+                await _send_short(
+                    message.channel,
+                    embeds.warning(
+                        "La preuve n'est pas assez certaine pour être validée automatiquement. Le staff va la vérifier.",
+                        title="SentriX — Vérification manuelle",
+                    ),
+                    delay=10,
+                )
             else:
-                await _send_short(message.channel, embeds.error("SentriX — ERREUR DE CONFIGURATION\nLe salon de vérification staff n'est pas disponible."))
+                await _send_short(
+                    message.channel,
+                    embeds.error("Le salon de vérification staff n'est pas disponible.", title="SentriX — Erreur de configuration"),
+                )
             return
 
         await proof_service.create_verification(
@@ -751,8 +782,8 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
         await _send_short(
             message.channel,
             embeds.warning(
-                "SentriX — Preuve insuffisante",
                 f"La preuve envoyée ne contient pas assez d'éléments pour être validée.\n**Score :** {decision.score} %\nVous pouvez envoyer une nouvelle preuve conforme aux exemples.",
+                title="SentriX — Preuve insuffisante",
             ),
             delay=10,
         )
