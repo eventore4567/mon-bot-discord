@@ -59,53 +59,12 @@ async def _has_configured_staff_role(bot: commands.Bot, guild: Any, author: Any)
 
 
 def _install_permission_consistency(bot: commands.Bot) -> None:
-    if getattr(permission_guard.evaluate_command_access, "_sentrix_v57_consistency", False):
-        return
+    """Neutralise : owner serveur et role staff configure sont dans la matrice.
 
-    original = permission_guard.evaluate_command_access
-
-    async def evaluate_with_consistency(
-        target_bot: commands.Bot,
-        *,
-        command_name: str,
-        author: Any,
-        guild: Any,
-    ) -> permission_guard.AccessDecision:
-        decision = await original(
-            target_bot,
-            command_name=command_name,
-            author=author,
-            guild=guild,
-        )
-        if decision.allowed:
-            return decision
-
-        # Le propriétaire DU SERVEUR a toujours le niveau administrateur sur son propre
-        # serveur. Cela ne donne jamais accès aux commandes owner-only globales SentriX.
-        guild_owner_id = getattr(guild, "owner_id", None)
-        author_id = getattr(author, "id", None)
-        if (
-            decision.policy != "owner"
-            and guild_owner_id is not None
-            and author_id is not None
-            and int(author_id) == int(guild_owner_id)
-        ):
-            return permission_guard.AccessDecision(True, policy="guild-owner-bypass")
-
-        # Le vieux verrou de main.py et les checks locaux utilisent déjà setmodrole pour
-        # les commandes à permission Discord. La nouvelle matrice globale l'avait oublié,
-        # ce qui créait un refus contradictoire avant même l'exécution de la commande.
-        if decision.policy.startswith("discord:") and await _has_configured_staff_role(
-            target_bot, guild, author
-        ):
-            return permission_guard.AccessDecision(True, policy="configured-staff-role")
-
-        return decision
-
-    evaluate_with_consistency._sentrix_v57_consistency = True
-    evaluate_with_consistency._sentrix_previous = original
-    permission_guard.evaluate_command_access = evaluate_with_consistency
-    logger.info("V57 : permissions globales alignées sur propriétaire serveur + rôle staff configuré.")
+    Ce wrapper accordait un bypass owner-serveur APRES coup, ce qui pouvait
+    annuler un refus explicite enregistre dans Setup.
+    """
+    return
 
 
 def _install_prefix_error_detail(bot: commands.Bot) -> None:

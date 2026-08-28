@@ -121,8 +121,10 @@ def _patch_permission_helpers() -> None:
         _safe_is_mod_or_permission._sentrix_v38_safe = True
         checks.is_mod_or_permission = _safe_is_mod_or_permission
 
-    current = permission_guard._has_discord_or_modrole_permission
-    if not getattr(current, "_sentrix_v38_safe", False):
+    # _has_discord_or_modrole_permission n'a jamais existe dans permission_guard :
+    # cette ligne levait une AttributeError et annulait TOUT le reste de install().
+    current = getattr(permission_guard, "_has_discord_or_modrole_permission", None)
+    if current is None or not getattr(current, "_sentrix_v38_safe", False):
         _safe_transversal_mod_permission._sentrix_v38_safe = True
         permission_guard._has_discord_or_modrole_permission = _safe_transversal_mod_permission
 
@@ -159,28 +161,8 @@ def _patch_permission_helpers() -> None:
 
 
 def _patch_permission_decision_message() -> None:
-    current = permission_guard.evaluate_command_access
-    if getattr(current, "_sentrix_v38_permission_copy", False):
-        return
-
-    async def evaluate_with_precise_copy(*args, **kwargs):
-        decision = await current(*args, **kwargs)
-        policy = str(getattr(decision, "policy", "") or "")
-        if decision.allowed or not policy.startswith("discord:"):
-            return decision
-        permission = policy.split(":", 1)[1]
-        if mod_role_fallback_allowed(permission):
-            return decision
-        return permission_guard.AccessDecision(
-            False,
-            "Cette commande nécessite directement la permission Discord "
-            f"`{permission}`. Le rôle modérateur configuré ne suffit pas pour cette action sensible.",
-            policy,
-        )
-
-    evaluate_with_precise_copy._sentrix_v38_permission_copy = True
-    evaluate_with_precise_copy._sentrix_original = current
-    permission_guard.evaluate_command_access = evaluate_with_precise_copy
+    """Neutralise : le libelle de refus est produit par utils/access_matrix.py."""
+    return
 
 
 def _patch_permission_denial_release() -> None:
