@@ -109,6 +109,19 @@ async def run() -> int:
         if missing_admin:
             errors.append("commandes admin directes absentes: " + ", ".join(missing_admin))
 
+        missing_proof = sorted(
+            name for name in command_catalog_cleanup.PROOF_VISIBLE_COMMANDS
+            if bot.get_command(name) is None
+        )
+        hidden_proof = sorted(
+            name for name in command_catalog_cleanup.PROOF_VISIBLE_COMMANDS
+            if (command := bot.get_command(name)) is not None and command.hidden
+        )
+        if missing_proof:
+            errors.append("commandes proof absentes: " + ", ".join(missing_proof))
+        if hidden_proof:
+            errors.append("commandes proof masquées dans +help: " + ", ".join(hidden_proof))
+
         removed_still_present = sorted(
             name for name in command_catalog_cleanup.PURE_DUPLICATE_COMMANDS
             if bot.get_command(name) is not None
@@ -135,6 +148,12 @@ async def run() -> int:
                 errors.append("+help possède encore un check local staff")
         if "help" not in main.PUBLIC_COMMANDS:
             errors.append("+help n'est pas classé PUBLIC_COMMANDS")
+
+        if not {"proof", "proofstatus"} <= set(main.PUBLIC_COMMANDS):
+            errors.append("proof/proofstatus doivent être publics dans la politique centrale")
+        proof_admin = command_catalog_cleanup.PROOF_VISIBLE_COMMANDS - {"proof", "proofstatus"}
+        if not proof_admin <= set(main.CATEGORY_COMMANDS.get("configuration", ())):
+            errors.append("les commandes proof de gestion doivent rester dans configuration/admin")
 
         owner_expected = {
             "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
@@ -174,9 +193,13 @@ async def run() -> int:
         if "nick" not in app_root_names:
             errors.append("/nick est absent")
 
+        missing_proof_slash = sorted(set(slash_command_budget.PROOF_SLASH_PREFERRED) - app_root_names)
+        if missing_proof_slash:
+            errors.append("slash proof essentiels absents: " + ", ".join(missing_proof_slash))
+
         admin_slash = sorted(app_root_names & set(command_catalog_cleanup.ADMIN_DIRECT_COMMANDS))
         if admin_slash:
-            errors.append("commandes admin présentes en slash: " + ", ".join(admin_slash))
+            errors.append("commandes admin historiques présentes en slash: " + ", ".join(admin_slash))
 
         merged_slash = sorted(app_root_names & set(command_catalog_cleanup.MERGED_COMMANDS))
         if merged_slash:
@@ -217,9 +240,11 @@ async def run() -> int:
         print(f"SentriX audit: {len(app_roots)}/100 racines slash enregistrées")
         print(f"SentriX audit: {len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)} commandes normales directes")
         print(f"SentriX audit: {len(command_catalog_cleanup.ADMIN_DIRECT_COMMANDS)} commandes admin directes + uniquement")
+        print(f"SentriX audit: {len(command_catalog_cleanup.PROOF_VISIBLE_COMMANDS)} commandes proof visibles")
         print(f"SentriX audit: {len(command_catalog_cleanup.GAME_COMMANDS)} jeux directs")
         if missing_slash_direct:
             print("Slash directs absents: " + ", ".join(missing_slash_direct))
+        print("Slash proof essentiels: " + ", ".join(sorted(set(slash_command_budget.PROOF_SLASH_PREFERRED) & app_root_names)))
         print(f"Extensions: {len(loaded)}/{len(main.EXTENSIONS)} chargées")
         print("Catégories visibles +help:")
         for category in help_complete.CATEGORIES:
@@ -249,7 +274,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} problème(s) détecté(s)")
         return 1
-    print("OK: catalogue, +help et permissions préfixe/slash conformes")
+    print("OK: catalogue, +help, proof et permissions préfixe/slash conformes")
     return 0
 
 

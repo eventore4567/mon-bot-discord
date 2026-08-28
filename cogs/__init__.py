@@ -64,6 +64,7 @@ logger = logging.getLogger("bot.cogs")
 _ORIGINAL_LOAD_EXTENSION = commands.Bot.load_extension
 _FINAL_EXTENSION = "cogs.visual_experience_v5"
 _OFFICIAL_HELP_EXTENSION = "cogs.help"
+_PROOF_EXTENSION = "cogs.proof_verification"
 
 
 def _matches(name: str, extension: str) -> bool:
@@ -192,6 +193,18 @@ async def _install_error_stack(bot: commands.Bot) -> None:
     await _run_installer("observabilité réponses commandes", install_command_response_guard, bot)
 
 
+async def _load_proof_verification(bot: commands.Bot) -> None:
+    if bot.get_cog("ProofVerification") is not None or _PROOF_EXTENSION in bot.extensions:
+        return
+    try:
+        await _ORIGINAL_LOAD_EXTENSION(bot, _PROOF_EXTENSION)
+        repair_wrapped_signatures(bot)
+        logger.info("Vérification par preuve SentriX chargée.")
+    except Exception:
+        logger.exception("Impossible de charger la vérification par preuve SentriX.")
+        raise
+
+
 async def _load_official_help(bot: commands.Bot) -> None:
     if bot.get_cog("SentriXHelp") is not None:
         await _run_installer("pont langue help officiel", install_language_official_bridge, bot)
@@ -219,6 +232,7 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _install_configuration_critical_patches(bot)
     await _install_release_and_official_server(bot)
     await _install_error_stack(bot)
+    await _load_proof_verification(bot)
     await _run_installer("renforcement commandes V41", install_command_hardening_v41, bot)
     await _run_installer("opérations production", install_production_ops, bot)
     await _run_installer("permissions commandes", install_permission_guard, bot)
@@ -226,7 +240,7 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _run_installer("libération concurrence slash V41", install_command_error_release_v41, bot)
     await _load_official_help(bot)
     bot._sentrix_runtime_finalized_clean = True
-    logger.info("Runtime SentriX finalisé : un setup, un help, un renderer, un logger.")
+    logger.info("Runtime SentriX finalisé : un setup, un help, un renderer, un logger et la vérification par preuve.")
 
 
 async def _load_extension_with_sentrix_patches(bot: commands.Bot, name: str, *, package: str | None = None):

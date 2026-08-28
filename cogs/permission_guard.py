@@ -25,6 +25,14 @@ from utils.command_permissions import permission_label
 
 logger = logging.getLogger("bot.permission-guard")
 
+# Le module de preuve est chargé dynamiquement après les extensions historiques. Sa
+# politique reste néanmoins centralisée ici afin que les commandes préfixées et slash
+# reçoivent exactement le même niveau d'accès.
+PROOF_PUBLIC_COMMANDS = frozenset({"proof", "proofstatus"})
+PROOF_ADMIN_COMMANDS = frozenset({
+    "proofsetup", "proofexample", "proofexample-remove", "proofexamples", "proofpanel", "proofreset",
+})
+
 
 @dataclass(frozen=True, slots=True)
 class AccessDecision:
@@ -130,7 +138,7 @@ async def evaluate_command_access(bot: commands.Bot, *, command_name: str, autho
 
     public, owner_only, custom, discord_permissions, categories = _policy_sets(bot)
 
-    if name in public:
+    if name in public or name in PROOF_PUBLIC_COMMANDS:
         return AccessDecision(True, policy="public")
 
     user_id = getattr(author, "id", None)
@@ -143,6 +151,15 @@ async def evaluate_command_access(bot: commands.Bot, *, command_name: str, autho
 
     if owner:
         return AccessDecision(True, policy="owner-bypass")
+
+    if name in PROOF_ADMIN_COMMANDS:
+        if _is_administrator(author):
+            return AccessDecision(True, policy="admin:proof")
+        return AccessDecision(
+            False,
+            "Vous ne pouvez pas utiliser cette commande.\n\n**Permission requise :** Administrateur",
+            "admin:proof",
+        )
 
     if name in custom:
         if await _can_use_embed_builder(bot, guild, author):

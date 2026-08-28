@@ -45,6 +45,14 @@ ADMIN_DIRECT_COMMANDS = frozenset({
     "wipe-server", "roleall", "massrole",
 })
 
+# Nouveau système transverse : visible dans +help sans le classer dans les anciennes
+# commandes admin « + uniquement ». Le budget slash décide séparément quelles racines
+# peuvent être publiées sans dépasser la limite Discord de 100 commandes globales.
+PROOF_VISIBLE_COMMANDS = frozenset({
+    "proof", "proofstatus", "proofsetup", "proofexample", "proofexample-remove",
+    "proofexamples", "proofpanel", "proofreset",
+})
+
 PURE_DUPLICATE_COMMANDS = frozenset({
     "rank", "buyrole", "ask", "chat", "embed-create", "latency", "levelroles",
 })
@@ -98,7 +106,7 @@ MERGED_COMMANDS = (
 )
 INTENTIONALLY_REMOVED_COMMANDS = PURE_DUPLICATE_COMMANDS
 CONFIRMED_DUPLICATE_COMMANDS = PURE_DUPLICATE_COMMANDS
-RESTORED_COMMANDS = NORMAL_DIRECT_COMMANDS
+RESTORED_COMMANDS = NORMAL_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS
 LOW_VALUE_REMOVED_COMMANDS = LOW_VALUE_HIDDEN_COMMANDS
 
 MERGED_COMMAND_TARGETS: dict[str, str] = {
@@ -137,7 +145,7 @@ def _install_short_command_names() -> None:
 
 def apply_surface(bot: commands.Bot) -> None:
     """Rend visibles uniquement les commandes directes, sans casser les anciennes +."""
-    direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS
+    direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS
     for command in bot.commands:
         name = command.name.casefold()
         if name in direct:
@@ -182,7 +190,7 @@ def install(bot: commands.Bot) -> None:
 
     apply_surface(bot)
     logger.info(
-        "Surface SentriX : %s commandes directes normales, %s admin, %s jeux; "
+        "Surface SentriX : %s commandes directes normales, %s admin, %s proof, %s jeux; "
         "anciennes commandes fusionnées conservées en + mais masquées.",
-        len(NORMAL_DIRECT_COMMANDS), len(ADMIN_DIRECT_COMMANDS), len(GAME_COMMANDS),
+        len(NORMAL_DIRECT_COMMANDS), len(ADMIN_DIRECT_COMMANDS), len(PROOF_VISIBLE_COMMANDS), len(GAME_COMMANDS),
     )
