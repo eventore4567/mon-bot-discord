@@ -1,8 +1,14 @@
-"""Maintient la structure SentriX existante sans republier les annonces au redémarrage."""
+"""Maintenance optionnelle des structures créées par SentriX.
+
+Aucun serveur n'est désormais modifié au redémarrage simplement parce que des salons
+portent des noms ressemblant à une ancienne structure SentriX. La maintenance continue
+est strictement opt-in via ``server_builder_managed_v2``.
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import discord
 from discord.ext import commands
@@ -10,14 +16,52 @@ from discord.ext import commands
 logger = logging.getLogger("bot.server-builder.bootstrap")
 
 
+async def ensure_managed_schema(bot: commands.Bot) -> None:
+    await bot.db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS server_builder_managed_v2 (
+            guild_id INTEGER PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            profile TEXT,
+            updated_by INTEGER,
+            updated_at INTEGER NOT NULL
+        )
+        """
+    )
+
+
+async def is_managed(bot: commands.Bot, guild_id: int) -> bool:
+    await ensure_managed_schema(bot)
+    row = await bot.db.fetchone(
+        "SELECT enabled FROM server_builder_managed_v2 WHERE guild_id=?",
+        (int(guild_id),),
+    )
+    return bool(row and row["enabled"])
+
+
+async def set_managed(
+    bot: commands.Bot,
+    guild_id: int,
+    enabled: bool,
+    *,
+    actor_id: int | None = None,
+    profile: str | None = None,
+) -> None:
+    await ensure_managed_schema(bot)
+    await bot.db.execute(
+        "INSERT INTO server_builder_managed_v2 (guild_id,enabled,profile,updated_by,updated_at) "
+        "VALUES (?,?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET "
+        "enabled=excluded.enabled, profile=COALESCE(excluded.profile,server_builder_managed_v2.profile), "
+        "updated_by=excluded.updated_by, updated_at=excluded.updated_at",
+        (int(guild_id), 1 if enabled else 0, profile, actor_id, int(time.time())),
+    )
+
+
 async def _bootstrap(bot: commands.Bot) -> None:
     try:
         await bot.wait_until_ready()
     except RuntimeError:
-        # Les audits chargent les extensions sans login Discord ; aucune guilde distante
-        # n'est alors disponible et le bootstrap doit se terminer silencieusement.
         return
-    # Laisse les derniers cogs (économie, stats, etc.) terminer leur chargement.
     await asyncio.sleep(3)
 
     from . import server_builder
@@ -28,13 +72,21 @@ async def _bootstrap(bot: commands.Bot) -> None:
     if builder is None:
         return
 
+    await ensure_managed_schema(bot)
     for guild in list(bot.guilds):
+        # CRITIQUE : aucune détection par nom de salon. Seul un opt-in enregistré autorise
+        # une mutation automatique au redémarrage.
+        if not await is_managed(bot, guild.id):
+            continue
+
         choice = ready._find_text_channel(server_builder, guild, "ACCUEIL", "choix-des-rôles")
         shop = ready._find_text_channel(server_builder, guild, "ÉCONOMIE", "boutique")
         announcements = ready._find_text_channel(server_builder, guild, "ACCUEIL", "annonces")
-        # Ne modifie pas un serveur quelconque : il faut reconnaître les trois salons
-        # principaux de la structure générée par +create-server.
         if choice is None or shop is None or announcements is None:
+            logger.warning(
+                "Mode géré actif sur %s mais structure incomplète : aucune reconstruction automatique.",
+                guild.id,
+            )
             continue
 
         try:
@@ -47,7 +99,7 @@ async def _bootstrap(bot: commands.Bot) -> None:
             await choice.set_permissions(
                 guild.default_role,
                 overwrite=current,
-                reason="SentriX : salon choix-des-rôles en lecture seule",
+                reason="SentriX : maintenance explicite du salon choix-des-rôles",
             )
         except (discord.Forbidden, discord.HTTPException):
             logger.warning("Impossible de verrouiller choix-des-rôles sur %s", guild.id)
@@ -61,28 +113,25 @@ async def _bootstrap(bot: commands.Bot) -> None:
         if author is None:
             continue
 
-        # Au redémarrage, on entretient uniquement la configuration technique.
-        # IMPORTANT : on ne republie plus l'annonce ni le panneau +suivi-bot. Ceux-ci
-        # ne sont créés que lors du premier +create-server ou sur demande explicite.
         try:
             await ready._ensure_role_panels(bot, guild, choice, author.id)
         except Exception:
-            logger.exception("Migration des panneaux de rôles impossible sur %s", guild.id)
+            logger.exception("Maintenance des panneaux de rôles impossible sur %s", guild.id)
         try:
             await ready._ensure_shop(bot, guild, shop, author.id)
         except Exception:
-            logger.exception("Migration de la boutique impossible sur %s", guild.id)
+            logger.exception("Maintenance de la boutique impossible sur %s", guild.id)
         try:
             await apply_recommended_security(bot, guild)
         except Exception:
-            logger.exception("Migration de la sécurité impossible sur %s", guild.id)
+            logger.exception("Maintenance de la sécurité impossible sur %s", guild.id)
         try:
             await ready._cleanup_old_generated_channels(server_builder, guild)
         except Exception:
-            logger.exception("Nettoyage de structure impossible sur %s", guild.id)
+            logger.exception("Nettoyage de structure gérée impossible sur %s", guild.id)
 
         logger.info(
-            "Structure SentriX entretenue sur %s (%s), sans republication annonce/suivi.",
+            "Structure SentriX gérée explicitement sur %s (%s), sans republication annonce/suivi.",
             guild.name,
             guild.id,
         )
@@ -93,3 +142,6 @@ def install(bot: commands.Bot) -> None:
         return
     bot._sentrix_existing_server_bootstrap_installed = True
     asyncio.create_task(_bootstrap(bot), name="sentrix-existing-server-bootstrap")
+
+
+__all__ = ["ensure_managed_schema", "is_managed", "set_managed", "install"]

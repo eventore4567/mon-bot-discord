@@ -1,169 +1,134 @@
-# Bot Discord Tout-en-un
+# SentriX — Bot Discord tout-en-un
 
-Bot Discord complet en Python (discord.py), avec commandes slash (`/`) **et** commandes textuelles avec préfixe (`+` par défaut). Base de données SQLite, embeds propres, boutons/menus, tout en français.
+SentriX est un bot Discord en Python (`discord.py`) avec commandes slash (`/`) et commandes préfixées (`+` par défaut). Il regroupe modération, sécurité, logs, tickets, rôles, niveaux, économie, notifications sociales, IA et outils de gestion de serveur.
 
-## Installation rapide (Mac)
-
-1. Double-cliquez sur `installer.command` (clic droit > Ouvrir si macOS bloque).
-2. Le script installe automatiquement Homebrew, ffmpeg, les dépendances Python, crée le fichier `.env` avec votre token, puis lance le bot.
-3. Gardez la fenêtre de terminal ouverte : le bot reste en ligne tant qu'elle est ouverte.
-
-## Installation manuelle
+## Installation
 
 ```bash
 cd discord-bot
 cp .env.example .env
-# Ouvrez .env et remplissez DISCORD_TOKEN=votre_token
 pip3 install -r requirements.txt
 python3 main.py
 ```
 
-## Configuration requise sur le Discord Developer Portal
+Les secrets (`DISCORD_TOKEN`, clés API, secret OAuth) restent dans `.env` ou dans les variables Railway et ne doivent jamais être commit sur GitHub.
 
-Sur https://discord.com/developers/applications, sélectionnez votre application > **Bot** :
-- Activez **SERVER MEMBERS INTENT**
-- Activez **MESSAGE CONTENT INTENT**
+Dans le Discord Developer Portal, activez au minimum **SERVER MEMBERS INTENT** et **MESSAGE CONTENT INTENT**. Pour toutes les fonctions de gestion, invitez le bot avec les scopes `bot` et `applications.commands` et accordez-lui les permissions réellement nécessaires aux modules utilisés.
 
-Sans ces deux options, le bot plantera au démarrage.
+## `+setup` / `/setup` — centre de configuration V2
 
-## Inviter le bot sur votre serveur
+`+setup` est le centre principal de configuration. Il affiche l’état réel des modules et sépare clairement deux choses différentes :
 
-Utilisez l'**OAuth2 URL Generator** (onglet OAuth2 > URL Generator) :
-- Scopes : `bot`, `applications.commands`
-- Permissions : `Administrator` (recommandé pour un fonctionnement complet)
+- **Permissions du bot** : permissions Discord possédées par SentriX lui-même ;
+- **Accès aux commandes** : permissions des membres, modérateurs, administrateurs et rôles personnalisés.
 
-## Application dashboard
+Les catégories principales sont : Modération, Permissions, Sécurité, Logs, Tickets, Bienvenue & départ, Rôles, Niveaux/économie, Notifications et IA.
 
-SentriX possède une application web intégrée au bot. Après avoir généré un domaine public
-dans Railway (**Settings → Networking → Generate Domain**), elle permet :
+Chaque module peut être **ACTIF** ou **INACTIF**. Désactiver un module ne supprime pas sa configuration ni ses données. Lors d’une réactivation depuis le setup, SentriX vérifie les salons/rôles et les permissions du bot nécessaires ; s’il manque quelque chose, l’activation est refusée avec la correction à effectuer.
 
-- de se connecter avec Discord et de choisir un serveur géré ;
-- d'inviter SentriX sur un serveur où il n'est pas encore installé ;
-- de modifier le préfixe, la sécurité, l'AutoMod, les logs, l'accueil, les niveaux,
-  les tickets, les rôles et les salons ;
-- de consulter les membres, commandes récentes, tickets ouverts et avertissements.
+Le bouton **Réinitialiser configuration** est volontairement séparé de la désactivation et exige de taper `RESET`. Une réinitialisation de configuration conserve les données utilisateur comme les XP, niveaux, soldes, banques et historiques.
 
-La configuration est protégée : la personne doit avoir **Gérer le serveur** ou
-**Administrateur**, et les permissions sont revérifiées par le bot avant chaque action.
+## Accès aux commandes
 
-Variables Railway à ajouter :
+La même règle d’accès est appliquée aux commandes `+` et `/`.
+
+- les commandes publiques restent utilisables par les membres ;
+- les rôles de modération peuvent recevoir l’accès aux commandes de modération nécessaires ;
+- les administrateurs et le propriétaire du serveur conservent les fonctions de gestion du serveur ;
+- un rôle personnalisé peut recevoir une autorisation ou un refus sur une commande précise ;
+- les commandes réservées au propriétaire global de SentriX restent réservées au propriétaire global ;
+- les règles SentriX ne contournent pas la hiérarchie Discord ni les limites du rôle du bot.
+
+La whitelist globale de sécurité accepte des membres, modérateurs, administrateurs ou bots de confiance. Elle est utilisée par les protections automatiques concernées, notamment AutoMod/anti-raid/anti-nuke. Elle peut être gérée dans le setup ou avec `+whitelist` / `/whitelist` et `+unwhitelist` / `/unwhitelist` lorsque le rôle possède l’accès requis.
+
+## Logs V2
+
+Les routes de logs sont indépendantes. Le module Logs possède un interrupteur global, puis chaque type possède son propre état, son salon et un bouton de test.
+
+- **Messages** : messages supprimés/modifiés et pièces jointes. Les images récemment supprimées peuvent être jointes au log grâce au cache binaire temporaire.
+- **Membres** : arrivées, départs, pseudonymes et rôles ajoutés/retirés à un membre.
+- **Modération** : warns, mutes/timeouts, kicks, bans, unbans et actions de modération.
+- **Rôles** : création, suppression et modification des objets rôle/permissions.
+- **Salons** : création, suppression et modification des salons.
+- **Vocal** : connexions, déconnexions et changements vocaux.
+- **Tickets** : cycle de vie des tickets.
+- **Sécurité** : AutoMod, anti-spam, anti-raid et anti-nuke.
+- **Ressources serveur** : emojis, stickers, invitations et modifications de webhooks.
+
+Un type de log explicitement désactivé dans `+setup` reste désactivé après redémarrage. La récupération automatique des anciens salons `logs-*` n’a plus le droit de réactiver une route configurée puis coupée.
+
+## Bienvenue & départ
+
+Quand le module Bienvenue est actif et qu’aucun texte personnalisé n’est défini, SentriX utilise un modèle propre par défaut avec la mention, le pseudo et le nom du serveur. Le setup permet de régler :
+
+- le salon de bienvenue et le salon de départ ;
+- le titre et le texte ;
+- une image/bannière par URL ;
+- l’affichage de l’avatar ;
+- l’affichage du nombre de membres ;
+- l’autorôle ;
+- un test de bienvenue sans ping.
+
+Si aucun salon de bienvenue n’est choisi, SentriX utilise le salon système uniquement s’il existe et s’il est accessible. **SentriX ne crée jamais automatiquement un salon de bienvenue.**
+
+## Notifications sociales
+
+Les notifications sont stockées comme des sources indépendantes. Ajouter une nouvelle chaîne TikTok, YouTube, Twitch ou autre source prise en charge ne remplace pas les autres sources du serveur.
+
+Le setup permet de sélectionner une source par son identifiant, modifier son lien/texte/image, choisir son salon et son rôle, l’activer/désactiver, la tester ou la supprimer. La liste est paginée : les serveurs ayant plus de 25 sources peuvent accéder à toutes leurs entrées.
+
+Le moniteur vérifie les sources actives périodiquement. Chaque notification utilise le salon et le rôle enregistrés pour cette source précise.
+
+## IA
+
+Le module IA possède un interrupteur principal et des sous-fonctions indépendantes : conversation naturelle, commandes IA, analyse d’images et génération d’images. Couper l’une de ces sous-fonctions ne réinitialise pas les autres réglages IA.
+
+## Niveaux & économie
+
+Les niveaux et l’économie peuvent être coupés sans effacer les données des membres. Les récompenses de niveaux peuvent être ajoutées/modifiées dans le setup. La monnaie de l’économie peut avoir un nom singulier, un nom pluriel et un symbole personnalisés.
+
+## `+create-server` / `/create-server`
+
+`create-server` configure **le serveur Discord actuel** ; un bot Discord ne peut pas créer un nouveau serveur à la place de l’utilisateur.
+
+La commande affiche toujours un aperçu puis demande une confirmation avant de créer/modifier des éléments. Le profil **Essentiel / Minimal** est proposé en premier : il crée une structure courte avec seulement les rôles et salons utiles. Les anciens profils Communauté, Professionnel et Support restent disponibles lorsqu’une structure plus grande est réellement souhaitée.
+
+Une création explicite peut configurer les éléments du modèle sélectionné, mais un simple redémarrage de SentriX ne doit pas modifier un serveur. La maintenance automatique est donc **INACTIVE par défaut** et ne peut être activée qu’explicitement avec :
+
+```text
++server-managed on
++server-managed off
++server-managed status
+```
+
+La présence de salons nommés `choix-des-rôles`, `boutique`, `annonces`, etc. n’est plus considérée comme une autorisation de modifier automatiquement le serveur.
+
+## Tickets
+
+Les tickets conservent leurs panels, types, rôles support, catégories, logs et historiques. Couper le module empêche les nouvelles ouvertures sans supprimer les tickets/configurations existants. Pour les réglages avancés des formulaires et panels, utilisez `+ticketsetup` ou `/ticketsetup` lorsqu’il est disponible dans la synchronisation slash.
+
+## Dashboard
+
+Le dashboard web intégré peut utiliser :
 
 ```env
 DISCORD_CLIENT_SECRET=secret_oauth_de_l_application
 DASHBOARD_PUBLIC_URL=https://votre-domaine.up.railway.app
-# Facultatif : l'ID du bot est détecté automatiquement
 DISCORD_CLIENT_ID=
 ```
 
-Dans le [Discord Developer Portal](https://discord.com/developers/applications), ajoutez
-exactement cette redirection dans **OAuth2 → Redirects** :
+La redirection OAuth configurée dans Discord doit correspondre exactement à :
 
 ```text
 https://votre-domaine.up.railway.app/oauth/callback
 ```
 
-Le secret OAuth, le token Discord et les clés API ne doivent jamais être écrits dans GitHub.
+## Données et persistance
 
-## Identité visuelle
+SentriX utilise SQLite avec WAL. Les niveaux, nombres de messages, économie, banques, achats et historiques sont stockés par serveur/membre et ne doivent pas être supprimés simplement parce qu’un module est désactivé ou qu’un membre est sanctionné/banni.
 
-Tous les embeds partagent désormais un style cohérent : violet électrique de marque, avatar du bot dans le footer, et des jauges visuelles (🟪) pour l'XP ou l'indice de confiance de l'IA.
+## Aide et dépannage
 
-- **`/sentrix <question>`** : posez n'importe quelle question à l'IA du bot ; elle répond en français avec un indice de confiance affiché sous forme de jauge (1 à 10).
-- **Panneau de tickets amélioré** : cliquer sur "Créer un ticket" ouvre un formulaire (catégorie, priorité, description) au lieu d'un simple bouton, pour que le staff ait tout de suite le contexte.
-- **Fermeture de ticket** : le bouton "Fermer" suffit, aucune commande requise ; le salon se supprime automatiquement 20 secondes après (annulable avec `+ticket-reopen`).
-- **`/create-logs`** : crée et configure automatiquement un salon de logs privé en une seule commande, sans réglage manuel.
+Utilisez `+help` ou `/help` pour consulter les commandes disponibles. Si une commande est refusée, vérifiez dans cet ordre : état du module dans `+setup`, **Accès aux commandes**, permissions Discord du membre, permissions Discord du bot, puis hiérarchie des rôles.
 
-## Configuration en un clic
-
-Plutôt que de taper une dizaine de commandes une par une, lancez simplement :
-
-```
-/setup
-```
-
-Un message avec des menus déroulants apparaît pour choisir votre rôle staff, votre salon de logs, votre salon de bienvenue et votre rôle automatique — tout en un seul endroit. C'est la façon la plus rapide de démarrer.
-
-## Commandes
-
-- Toutes les commandes fonctionnent avec `/` (slash) **ou** avec le préfixe `+` (ex: `+ban @membre`).
-- Discord limite les bots à 100 commandes slash globales. SentriX ne synchronise que les commandes utiles : les réglages disponibles dans `+setup`, `+ticketsetup` ou `+logsetup`, ainsi que les anciens doublons, ne sont plus enregistrés séparément.
-- Utilisez `/help` ou `+help` pour voir la liste complète par catégorie.
-- Les commandes gadgets peu utiles (QR code, calculatrice, boule magique, etc.) ont été retirées pour garder le bot simple et rapide ; les commandes de blacklist/whitelist ont toutes été conservées.
-
-Catégories : Modération, Sécurité/AutoMod, Tickets, Configuration, Utilitaires, Intelligence Artificielle, Économie, Niveaux/Communauté, Mini-jeux, Musique, Giveaways/Événements, Vérification/Rôles, Statistiques/Développement.
-
-## Sécurité renforcée
-
-- **`/antinuke`** : protège contre un compte compromis (staff, ou même un rôle piraté) qui tenterait de détruire le serveur. Si quelqu'un supprime plusieurs salons/rôles ou bannit plusieurs membres en moins de 30 secondes, le bot lui retire immédiatement ses rôles à risque, l'expulse si possible, et alerte le propriétaire du serveur en message privé. Activé par défaut avec `/security-level`.
-- **`/antinuke-whitelist-add`** : exempte un membre de confiance (vous-même, un co-admin) de cette protection.
-- **`/antiraid`** : en plus de l'alerte, relève automatiquement le niveau de vérification du serveur dès qu'un afflux massif de nouveaux membres est détecté, ce qui bloque immédiatement les faux comptes.
-- **`/lockdown-server`** et **`/unlock-server`** : verrouillent/déverrouillent tous les salons textuels en une commande, pour une réaction manuelle immédiate en cas d'urgence.
-
-Pour un serveur sensible, activez `/security-level` sur **Élevé** et ajoutez tous vos administrateurs de confiance à la liste blanche anti-nuke avec `/antinuke-whitelist-add`.
-
-## Tenir sur un gros serveur (20 000+ membres)
-
-Le bot a été optimisé pour les grosses communautés :
-- Base de données en mode **WAL** (lectures/écritures simultanées sans blocage).
-- Index sur toutes les colonnes fréquemment interrogées (tickets, giveaways, avertissements...).
-- Le préfixe de chaque serveur est mis en cache en mémoire pour ne pas interroger la base à chaque message.
-- `/roleall` traite les membres progressivement (impossible d'attribuer un rôle à 20 000 personnes instantanément à cause des limites de débit de Discord — comptez quelques minutes).
-
-Pour un serveur de cette taille, un hébergement 24/7 (voir section Hébergement) est fortement recommandé plutôt qu'un Mac personnel.
-
-## Sécurité
-
-- Le token et les clés API sont lus depuis `.env` (jamais écrits en dur dans le code, jamais commit).
-- `.env` est dans `.gitignore`.
-- Le bot ne collecte jamais d'adresses IP. Les listes noires utilisent uniquement les identifiants Discord (IDs).
-- Toutes les commandes de modération vérifient la hiérarchie des rôles : impossible de sanctionner un membre de rang égal ou supérieur.
-- Toutes les sanctions sont journalisées dans le salon de logs configuré (`/setlogchannel`).
-
-## Hébergement
-
-Pour que le bot reste en ligne 24h/24 sans garder votre Mac allumé, plusieurs options :
-
-- **Railway** (https://railway.app) : connectez le dépôt, ajoutez la variable `DISCORD_TOKEN` dans les settings, déploiement automatique.
-- **Render** (https://render.com) : créez un "Background Worker", même principe.
-- **VPS + systemd** : hébergement le plus fiable pour un usage sérieux, nécessite des connaissances serveur.
-- **Docker** : `docker build -t mon-bot .` puis `docker run -d --env-file .env mon-bot`.
-
-## Structure du projet
-
-```
-discord-bot/
-├── main.py                 # Point d'entrée
-├── config.py                # Lecture des variables d'environnement
-├── requirements.txt
-├── .env                      # Vos secrets (ne pas partager)
-├── database/
-│   └── db.py                 # Base SQLite et schéma
-├── utils/
-│   ├── embeds.py             # Embeds réutilisables
-│   ├── checks.py              # Permissions et hiérarchie
-│   └── helpers.py             # Fonctions utilitaires, vues UI
-└── cogs/                      # Un module par catégorie de commandes
-    ├── moderation.py
-    ├── automod.py
-    ├── tickets.py
-    ├── configuration.py
-    ├── utility.py
-    ├── ai.py
-    ├── economy.py
-    ├── levels.py
-    ├── minigames.py
-    ├── music.py
-    ├── events.py
-    ├── verification.py
-    └── stats.py
-```
-
-## Dépannage
-
-| Problème | Solution |
-|---|---|
-| `PrivilegedIntentsRequired` | Activez les deux intents dans le Developer Portal (voir ci-dessus). |
-| Erreur de certificat SSL au démarrage | Sur Mac, lancez `/Applications/Python 3.x/Install Certificates.command`. |
-| Une commande `/` n'apparaît pas | Attendez quelques minutes (synchronisation Discord) ou utilisez-la avec `+`. |
-| Le bot ne répond à rien | Vérifiez que le terminal est toujours ouvert et qu'aucune erreur n'apparaît au démarrage. |
-| Le bot semble lent (délai à l'envoi d'un message) | Si le dossier `discord-bot` se trouve dans **Documents** ou **Bureau** avec l'option "Synchronisation iCloud Drive du Bureau et Documents" activée sur le Mac, chaque écriture dans la base de données passe par iCloud et devient très lente. Déplacez le dossier ailleurs (par ex. `~/discord-bot`, en dehors de Documents/Bureau) pour un fonctionnement normal. |
+Pour Railway, le dépôt peut être déployé automatiquement après merge. Vérifiez toujours les GitHub Actions et l’état du déploiement avant de considérer une version comme publiée.
