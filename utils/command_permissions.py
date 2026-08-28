@@ -24,8 +24,10 @@ PERMISSION_LABELS = {
 OWNER_COGS = {"Owner"}
 ADMIN_COGS = {
     "Configuration", "Logs", "ServerBuilder", "Automod", "Security", "SecurityTools",
-    "SentriXSetup", "Notifications",
+    "SentriXSetup", "Notifications", "ProofVerification",
 }
+
+PUBLIC_COMMAND_FALLBACKS = {"proof", "proofstatus"}
 
 COMMAND_PERMISSION_FALLBACKS = {
     "ban": "ban_members",
@@ -55,6 +57,12 @@ COMMAND_PERMISSION_FALLBACKS = {
     "designsetup": "administrator",
     "notifs-ping": "administrator",
     "notifs-remove": "administrator",
+    "proofsetup": "administrator",
+    "proofexample": "administrator",
+    "proofexample-remove": "administrator",
+    "proofexamples": "administrator",
+    "proofpanel": "administrator",
+    "proofreset": "administrator",
 }
 
 EXAMPLES = {
@@ -70,6 +78,11 @@ EXAMPLES = {
     "me": "{prefix}me",
     "setup": "{prefix}setup",
     "help": "{prefix}help ban",
+    "proof": "{prefix}proof",
+    "proofstatus": "{prefix}proofstatus",
+    "proofsetup": "{prefix}proofsetup",
+    "proofexample": "{prefix}proofexample Confirmation",
+    "proofpanel": "{prefix}proofpanel",
 }
 
 
@@ -92,6 +105,9 @@ def command_requirement(command: commands.Command) -> str:
         return " ou ".join(labels)
 
     name = command.qualified_name.casefold().split()[0]
+    if name in PUBLIC_COMMAND_FALLBACKS:
+        return "Aucune permission spéciale"
+
     permission = COMMAND_PERMISSION_FALLBACKS.get(name)
     if permission:
         return permission_label(permission)
