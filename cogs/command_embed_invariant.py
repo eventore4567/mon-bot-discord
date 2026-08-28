@@ -1,10 +1,13 @@
-"""Invariant final : toute réponse de commande SentriX est rendue en embed.
+"""Invariant de contexte pour les réponses de commandes SentriX.
 
-Cette garde est installée APRES les autres transports Railway. Elle ne transforme pas les
-messages ordinaires du bot hors commande. Pendant une commande préfixée ou slash, elle
-couvre Context.send, les envois directs de salon, les réponses/follow-ups d'interaction et
-les éditions. Si une commande doit réellement ping, seul le marqueur de mention reste en
-contenu ; le texte lisible est déplacé dans l'embed.
+Le transport et la pagination appartiennent uniquement à ``final_interaction_policy``.
+Cette garde, chargée très tard sur Railway, ne ré-emballe plus Context.send, Messageable,
+les interactions et les webhooks : ces wrappers en double pouvaient reconvertir une même
+réponse et regrouper plusieurs gros embeds dans un payload Discord invalide.
+
+Elle conserve :
+- le contexte de racine pour les app_commands qui envoient directement dans un salon ;
+- les helpers de normalisation utilisés par les tests et les anciennes intégrations.
 """
 from __future__ import annotations
 
@@ -20,7 +23,7 @@ from . import final_interaction_policy as policy
 
 logger = logging.getLogger("bot.command-embed-invariant")
 
-_MARKER = "_sentrix_command_embed_invariant_v1"
+_MARKER = "_sentrix_command_embed_invariant_v2"
 _MENTION_RE = re.compile(r"<@!?\d{15,22}>|<@&\d{15,22}>|@everyone|@here", re.IGNORECASE)
 
 
@@ -58,7 +61,12 @@ def _move_content_next_to_existing_embeds(
     root: str,
     bot: Any,
 ) -> dict:
-    """Déplace un ancien ``content + embed`` dans une carte sans perdre l'embed métier."""
+    """Compatibilité helper : déplace un ancien content + embed dans des cartes.
+
+    Le runtime n'utilise plus cette fonction pour envoyer : la vraie pagination sûre est
+    effectuée par ``final_interaction_policy._payload_pages``. Elle reste ici pour les
+    intégrations/tests qui inspectent un payload normalisé sans l'expédier.
+    """
     text = str(content or "").strip()
     if not text:
         return kwargs
@@ -76,23 +84,11 @@ def _move_content_next_to_existing_embeds(
         for card in policy._cards_from_text(text)
     ]
     cards = [card for card in cards if isinstance(card, discord.Embed)]
-
-    available = max(0, 10 - len(existing))
-    if available:
-        kwargs["embeds"] = cards[:available] + existing
-    elif existing:
-        # Cas extrême : Discord autorise déjà 10 embeds. Ne pas en supprimer un ; ajoute
-        # le texte à la première carte dans la limite Discord.
-        first = existing[0]
-        description = str(first.description or "").strip()
-        combined = f"{description}\n\n{text}" if description else text
-        first.description = combined[:4096]
-        kwargs["embeds"] = existing[:10]
-    elif cards:
-        if len(cards) == 1:
-            kwargs["embed"] = cards[0]
-        else:
-            kwargs["embeds"] = cards[:10]
+    combined = cards + existing
+    if len(combined) == 1:
+        kwargs["embed"] = combined[0]
+    elif combined:
+        kwargs["embeds"] = combined[:10]
     return kwargs
 
 
@@ -120,7 +116,11 @@ def _normalize_command_payload(
     root: str = "",
     bot: Any = None,
 ):
-    """Force l'embed même lorsque allowed_mentions demandait auparavant un bypass."""
+    """Normalise un payload unique pour compatibilité et tests.
+
+    L'envoi réel ne passe plus ici : il utilise ``policy._payload_pages`` afin qu'une
+    longue réponse produise plusieurs messages valides au lieu d'être tronquée.
+    """
     original_kwargs = dict(kwargs)
     original_content, positional = _content_from(args, original_kwargs)
     allowed_mentions = original_kwargs.get("allowed_mentions")
@@ -132,8 +132,6 @@ def _normalize_command_payload(
 
     work_kwargs = dict(original_kwargs)
     if ping_requested:
-        # Le renderer officiel ne convertit volontairement pas les pings. On retire donc
-        # temporairement le transport de mention, puis on le remet après conversion.
         work_kwargs.pop("allowed_mentions", None)
 
     new_args, new_kwargs = policy._normalize_payload(
@@ -149,12 +147,15 @@ def _normalize_command_payload(
         new_kwargs["allowed_mentions"] = allowed_mentions
 
     if original_content is not None and str(original_content).strip():
-        # Le renderer officiel transforme déjà le texte lorsqu'il n'y avait PAS d'embed.
-        # Le cas historique ``content + embed`` doit être traité ici explicitement.
         if original_had_embed and (not ping_requested or _has_non_ping_text(original_content)):
+            readable = (
+                _MENTION_RE.sub("", str(original_content)).strip(" \n\t,;:|•-—–")
+                if ping_requested
+                else original_content
+            )
             new_kwargs = _move_content_next_to_existing_embeds(
                 new_kwargs,
-                original_content,
+                readable,
                 root=root,
                 bot=bot,
             )
@@ -167,18 +168,11 @@ def _normalize_command_payload(
             value=remaining,
         )
 
-    # Résultat : tout texte lisible d'une commande est dans un embed. Le seul ``content``
-    # encore permis est une suite de mentions lorsqu'un vrai ping a été demandé.
     return new_args, new_kwargs
 
 
-def _root_from_context(ctx: commands.Context | None) -> str:
-    if ctx is None:
-        return policy._COMMAND_ROOT.get()
-    return policy._root_name(getattr(ctx, "command", None)) or policy._COMMAND_ROOT.get()
-
-
 def _install_app_command_context() -> None:
+    """Donne une racine aux envois directs effectués pendant une commande slash."""
     current = getattr(app_commands.Command, "_invoke_with_namespace", None)
     if current is None or getattr(current, _MARKER, False):
         return
@@ -196,148 +190,15 @@ def _install_app_command_context() -> None:
     app_commands.Command._invoke_with_namespace = invoke_with_embed_context
 
 
-def _install_context_send() -> None:
-    current = commands.Context.send
-    if getattr(current, _MARKER, False):
-        return
-
-    async def context_send(self: commands.Context, *args, **kwargs):
-        root = _root_from_context(self)
-        if policy._plain_root(root):
-            return await current(self, *args, **kwargs)
-        args, kwargs = _normalize_command_payload(
-            args, kwargs, root=root, bot=getattr(self, "bot", None)
-        )
-        return await current(self, *args, **kwargs)
-
-    setattr(context_send, _MARKER, True)
-    context_send._sentrix_original = current
-    commands.Context.send = context_send
-
-
-def _install_messageable_send() -> None:
-    current = discord.abc.Messageable.send
-    if getattr(current, _MARKER, False):
-        return
-
-    async def messageable_send(self, *args, **kwargs):
-        root = policy._COMMAND_ROOT.get()
-        if root and not policy._plain_root(root):
-            args, kwargs = _normalize_command_payload(args, kwargs, root=root)
-        return await current(self, *args, **kwargs)
-
-    setattr(messageable_send, _MARKER, True)
-    messageable_send._sentrix_original = current
-    discord.abc.Messageable.send = messageable_send
-
-
-def _install_message_edit() -> None:
-    current = discord.Message.edit
-    if getattr(current, _MARKER, False):
-        return
-
-    async def message_edit(self: discord.Message, *args, **kwargs):
-        root = policy._COMMAND_ROOT.get()
-        if root and not policy._plain_root(root):
-            args, kwargs = _normalize_command_payload(args, kwargs, editing=True, root=root)
-        return await current(self, *args, **kwargs)
-
-    setattr(message_edit, _MARKER, True)
-    message_edit._sentrix_original = current
-    discord.Message.edit = message_edit
-
-
-def _install_interaction_responses() -> None:
-    current_send = discord.InteractionResponse.send_message
-    if not getattr(current_send, _MARKER, False):
-        async def response_send(self, *args, **kwargs):
-            interaction = getattr(self, "_parent", None)
-            root = policy._root_from_interaction(interaction) or policy._COMMAND_ROOT.get()
-            if policy._plain_root(root):
-                return await current_send(self, *args, **kwargs)
-            args, kwargs = _normalize_command_payload(
-                args, kwargs, root=root, bot=getattr(interaction, "client", None)
-            )
-            return await current_send(self, *args, **kwargs)
-
-        setattr(response_send, _MARKER, True)
-        response_send._sentrix_original = current_send
-        discord.InteractionResponse.send_message = response_send
-
-    current_edit = discord.InteractionResponse.edit_message
-    if not getattr(current_edit, _MARKER, False):
-        async def response_edit(self, *args, **kwargs):
-            interaction = getattr(self, "_parent", None)
-            root = policy._root_from_interaction(interaction) or policy._COMMAND_ROOT.get()
-            if policy._plain_root(root):
-                return await current_edit(self, *args, **kwargs)
-            args, kwargs = _normalize_command_payload(
-                args,
-                kwargs,
-                editing=True,
-                root=root,
-                bot=getattr(interaction, "client", None),
-            )
-            return await current_edit(self, *args, **kwargs)
-
-        setattr(response_edit, _MARKER, True)
-        response_edit._sentrix_original = current_edit
-        discord.InteractionResponse.edit_message = response_edit
-
-    current_original = discord.Interaction.edit_original_response
-    if not getattr(current_original, _MARKER, False):
-        async def edit_original(self: discord.Interaction, *args, **kwargs):
-            root = policy._root_from_interaction(self) or policy._COMMAND_ROOT.get()
-            if policy._plain_root(root):
-                return await current_original(self, *args, **kwargs)
-            args, kwargs = _normalize_command_payload(
-                args,
-                kwargs,
-                editing=True,
-                root=root,
-                bot=getattr(self, "client", None),
-            )
-            return await current_original(self, *args, **kwargs)
-
-        setattr(edit_original, _MARKER, True)
-        edit_original._sentrix_original = current_original
-        discord.Interaction.edit_original_response = edit_original
-
-
-def _install_followups() -> None:
-    current = discord.Webhook.send
-    if getattr(current, _MARKER, False):
-        return
-
-    async def webhook_send(self: discord.Webhook, *args, **kwargs):
-        root = policy._COMMAND_ROOT.get()
-        if (
-            getattr(self, "type", None) == discord.WebhookType.application
-            and root
-            and not policy._plain_root(root)
-        ):
-            args, kwargs = _normalize_command_payload(args, kwargs, root=root)
-        return await current(self, *args, **kwargs)
-
-    setattr(webhook_send, _MARKER, True)
-    webhook_send._sentrix_original = current
-    discord.Webhook.send = webhook_send
-
-
 def install(bot: commands.Bot) -> None:
-    if getattr(bot, "_sentrix_command_embed_invariant_v1", False):
+    if getattr(bot, "_sentrix_command_embed_invariant_v2", False):
         return
-
     _install_app_command_context()
-    _install_context_send()
-    _install_messageable_send()
-    _install_message_edit()
-    _install_interaction_responses()
-    _install_followups()
-
+    bot._sentrix_command_embed_invariant_v2 = True
+    # Ancien marqueur gardé pour les diagnostics/healthchecks historiques.
     bot._sentrix_command_embed_invariant_v1 = True
     logger.info(
-        "Invariant embed V1 actif : toutes les sorties de commandes +/slash sont converties en cartes SentriX."
+        "Invariant embed V2 actif : contexte slash conservé, transport unique délégué à final_interaction_policy."
     )
 
 
