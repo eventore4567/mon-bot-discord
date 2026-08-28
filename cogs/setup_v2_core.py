@@ -1,9 +1,4 @@
-"""Runtime V2 de SentriX : permissions uniques +/slash, modules et sécurité.
-
-Cette couche consolide les réglages qui étaient auparavant dispersés. Elle ne supprime
-aucune donnée historique : les modules désactivés gardent leur configuration et les
-anciennes entrées de whitelist anti-nuke sont considérées comme des membres de confiance.
-"""
+"""Runtime V2 SentriX: permissions +/slash, modules, whitelist, logs et économie."""
 from __future__ import annotations
 
 import asyncio
@@ -40,9 +35,7 @@ ECONOMY_COMMANDS = frozenset({
     "sell", "gamble", "deposit", "withdraw", "banque", "slots", "blackjack",
     "coinflip", "dice", "luckyroll", "highlow",
 })
-LEVEL_COMMANDS = frozenset({
-    "level", "rank", "leaderboard-levels", "voice-time", "stats", "me",
-})
+LEVEL_COMMANDS = frozenset({"level", "rank", "leaderboard-levels", "voice-time", "stats", "me"})
 AI_COMMANDS = frozenset({
     "sentrix", "ask", "chat", "chat-reset", "summarize", "image-prompt", "image",
     "explain", "rewrite", "fact-check", "ai", "improve", "correct", "ai-translate", "code",
@@ -50,7 +43,6 @@ AI_COMMANDS = frozenset({
 TICKET_OPERATION_COMMANDS = frozenset({"ticket", "ticket-reopen", "tickettranscript"})
 SECURITY_OPERATION_COMMANDS = frozenset({"panic", "lockdown-server", "unlock-server"})
 NOTIFICATION_COMMANDS = frozenset({"notifs-ping", "notifs-list", "notifs-remove"})
-
 CURRENCY_DISPLAY_COMMANDS = ECONOMY_COMMANDS | frozenset({"stats", "profile", "level", "rank"})
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 MAX_CACHED_IMAGE_BYTES = 8_000_000
@@ -128,7 +120,7 @@ async def ensure_schema(bot: commands.Bot) -> None:
             "SELECT guild_id, user_id, NULL, strftime('%s','now') FROM antinuke_whitelist"
         )
         bot._sentrix_v2_schema_ready = True
-        logger.info("SentriX V2 : schéma modules/permissions/whitelist/économie prêt.")
+        logger.info("SentriX V2: schéma prêt.")
 
 
 async def module_enabled(bot: commands.Bot, guild_id: int, module: str) -> bool:
@@ -136,12 +128,12 @@ async def module_enabled(bot: commands.Bot, guild_id: int, module: str) -> bool:
         return True
     await ensure_schema(bot)
     row = await bot.db.fetchone(
-        "SELECT enabled FROM module_settings WHERE guild_id = ? AND module = ?",
+        "SELECT enabled FROM module_settings WHERE guild_id=? AND module=?",
         (int(guild_id), module),
     )
     if row is None:
         if module == "ai":
-            ai = await bot.db.fetchone("SELECT enabled FROM ai_settings WHERE guild_id = ?", (int(guild_id),))
+            ai = await bot.db.fetchone("SELECT enabled FROM ai_settings WHERE guild_id=?", (int(guild_id),))
             if ai is not None:
                 return bool(ai["enabled"])
         return True
@@ -159,25 +151,24 @@ async def set_module_enabled(
     if module not in MODULES:
         raise ValueError(f"module inconnu: {module}")
     await ensure_schema(bot)
-    now = int(time.time())
+    now_ts = int(time.time())
     await bot.db.execute(
-        "INSERT INTO module_settings (guild_id, module, enabled, updated_by, updated_at) "
-        "VALUES (?, ?, ?, ?, ?) "
-        "ON CONFLICT(guild_id, module) DO UPDATE SET enabled=excluded.enabled, "
+        "INSERT INTO module_settings (guild_id,module,enabled,updated_by,updated_at) VALUES (?,?,?,?,?) "
+        "ON CONFLICT(guild_id,module) DO UPDATE SET enabled=excluded.enabled, "
         "updated_by=excluded.updated_by, updated_at=excluded.updated_at",
-        (int(guild_id), module, 1 if enabled else 0, actor_id, now),
+        (int(guild_id), module, 1 if enabled else 0, actor_id, now_ts),
     )
     if module == "ai":
         await bot.db.execute(
-            "INSERT INTO ai_settings (guild_id, enabled, updated_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(guild_id) DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at",
-            (int(guild_id), 1 if enabled else 0, now),
+            "INSERT INTO ai_settings (guild_id,enabled,updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(guild_id) DO UPDATE SET enabled=excluded.enabled,updated_at=excluded.updated_at",
+            (int(guild_id), 1 if enabled else 0, now_ts),
         )
 
 
 async def economy_settings(bot: commands.Bot, guild_id: int) -> dict[str, Any]:
     await ensure_schema(bot)
-    row = await bot.db.fetchone("SELECT * FROM economy_settings_v2 WHERE guild_id = ?", (int(guild_id),))
+    row = await bot.db.fetchone("SELECT * FROM economy_settings_v2 WHERE guild_id=?", (int(guild_id),))
     if row is None:
         return {"currency_singular": "Pièce", "currency_plural": "Pièces", "currency_symbol": "🪙"}
     return {
@@ -202,11 +193,10 @@ async def set_currency(
     symbol = str(symbol or "🪙").strip()[:16] or "🪙"
     await bot.db.execute(
         "INSERT INTO economy_settings_v2 "
-        "(guild_id, currency_singular, currency_plural, currency_symbol, updated_by, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(guild_id) DO UPDATE SET currency_singular=excluded.currency_singular, "
-        "currency_plural=excluded.currency_plural, currency_symbol=excluded.currency_symbol, "
-        "updated_by=excluded.updated_by, updated_at=excluded.updated_at",
+        "(guild_id,currency_singular,currency_plural,currency_symbol,updated_by,updated_at) "
+        "VALUES (?,?,?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET "
+        "currency_singular=excluded.currency_singular,currency_plural=excluded.currency_plural,"
+        "currency_symbol=excluded.currency_symbol,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
         (int(guild_id), singular, plural, symbol, actor_id, int(time.time())),
     )
 
@@ -225,7 +215,7 @@ async def get_role_command_decision(
         return None
     placeholders = ",".join("?" for _ in role_ids)
     rows = await bot.db.fetchall(
-        f"SELECT decision FROM command_role_permissions WHERE guild_id = ? AND command_name = ? "
+        f"SELECT decision FROM command_role_permissions WHERE guild_id=? AND command_name=? "
         f"AND role_id IN ({placeholders})",
         (guild.id, command_name.casefold(), *role_ids),
     )
@@ -261,9 +251,9 @@ async def set_role_command_decision(
         raise ValueError("decision invalide")
     await bot.db.execute(
         "INSERT INTO command_role_permissions "
-        "(guild_id, role_id, command_name, decision, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(guild_id, role_id, command_name) DO UPDATE SET decision=excluded.decision, "
-        "updated_by=excluded.updated_by, updated_at=excluded.updated_at",
+        "(guild_id,role_id,command_name,decision,updated_by,updated_at) VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT(guild_id,role_id,command_name) DO UPDATE SET decision=excluded.decision,"
+        "updated_by=excluded.updated_by,updated_at=excluded.updated_at",
         (int(guild_id), int(role_id), command_name, decision, actor_id, int(time.time())),
     )
 
@@ -286,11 +276,11 @@ async def is_trusted(bot: commands.Bot, guild_id: int, user_id: int) -> bool:
 async def add_trusted(bot: commands.Bot, guild_id: int, user_id: int, actor_id: int | None) -> None:
     await ensure_schema(bot)
     await bot.db.execute(
-        "INSERT OR REPLACE INTO trusted_members (guild_id, user_id, added_by, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO trusted_members (guild_id,user_id,added_by,added_at) VALUES (?,?,?,?)",
         (int(guild_id), int(user_id), actor_id, int(time.time())),
     )
     await bot.db.execute(
-        "INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)",
+        "INSERT OR IGNORE INTO antinuke_whitelist (guild_id,user_id) VALUES (?,?)",
         (int(guild_id), int(user_id)),
     )
 
@@ -324,17 +314,10 @@ def _patch_permission_guard(bot: commands.Bot) -> None:
         return
 
     async def evaluate_v2(target_bot, *, command_name, author, guild):
-        decision = await current(
-            target_bot,
-            command_name=command_name,
-            author=author,
-            guild=guild,
-        )
+        decision = await current(target_bot, command_name=command_name, author=author, guild=guild)
         name = str(command_name or "").casefold()
-        # Les commandes owner-only globales ne peuvent jamais être élargies par un rôle serveur.
         if decision.policy == "owner" and not decision.allowed:
             return decision
-
         module = _operation_module(name)
         if guild is not None and module and not await module_enabled(target_bot, guild.id, module):
             return permission_guard.AccessDecision(
@@ -342,10 +325,8 @@ def _patch_permission_guard(bot: commands.Bot) -> None:
                 f"Le module **{module}** est désactivé sur ce serveur. Réactivez-le dans `+setup`.",
                 f"module:{module}:disabled",
             )
-
         if guild is not None and getattr(author, "id", None) == getattr(guild, "owner_id", None):
             return permission_guard.AccessDecision(True, policy="guild-owner")
-
         explicit = await get_role_command_decision(target_bot, guild, author, name)
         if explicit == "deny":
             return permission_guard.AccessDecision(
@@ -360,15 +341,9 @@ def _patch_permission_guard(bot: commands.Bot) -> None:
     evaluate_v2._sentrix_setup_v2 = True
     evaluate_v2._sentrix_previous = current
     permission_guard.evaluate_command_access = evaluate_v2
-    logger.info("SentriX V2 : matrice de rôles appliquée à la garde unique +/slash.")
 
 
 def _patch_local_checks(bot: commands.Bot) -> None:
-    """Aligne les anciens décorateurs locaux sur la décision centrale V2.
-
-    Seuls les checks portant la métadonnée SentriX sont enveloppés. Les vérifications de
-    hiérarchie, de cible, de cooldown et les owner-only globaux restent intactes.
-    """
     for command in bot.walk_commands():
         checks_list = getattr(command, "checks", None)
         if not isinstance(checks_list, list):
@@ -392,10 +367,9 @@ def _patch_local_checks(bot: commands.Bot) -> None:
                     pass
                 command_obj = getattr(ctx, "command", None)
                 root = getattr(command_obj, "root_parent", None) or command_obj
-                name = getattr(root, "name", "")
                 decision = await permission_guard.evaluate_command_access(
                     ctx.bot,
-                    command_name=name,
+                    command_name=getattr(root, "name", ""),
                     author=ctx.author,
                     guild=ctx.guild,
                 )
@@ -414,20 +388,25 @@ def _patch_security(bot: commands.Bot) -> None:
         return
 
     original_exempt = automod.is_automod_exempt
+
     async def automod_exempt_v2(_self, member):
         if isinstance(member, discord.Member) and await is_trusted(bot, member.guild.id, member.id):
             return True
         return await original_exempt(member)
+
     automod.is_automod_exempt = MethodType(automod_exempt_v2, automod)
 
     original_nuke_exempt = automod.is_antinuke_exempt
+
     async def nuke_exempt_v2(_self, guild, actor):
         if actor is not None and await is_trusted(bot, guild.id, actor.id):
             return True
         return await original_nuke_exempt(guild, actor)
+
     automod.is_antinuke_exempt = MethodType(nuke_exempt_v2, automod)
 
     original_cached = automod.get_automod_cached
+
     async def automod_cached_v2(_self, guild_id):
         conf = await original_cached(guild_id)
         if await module_enabled(bot, guild_id, "security"):
@@ -439,9 +418,9 @@ def _patch_security(bot: commands.Bot) -> None:
         ):
             muted[key] = 0
         return muted
+
     automod.get_automod_cached = MethodType(automod_cached_v2, automod)
     automod._sentrix_setup_v2_security = True
-    logger.info("SentriX V2 : whitelist globale branchée sur AutoMod et anti-nuke.")
 
 
 async def _cache_message_images(bot: commands.Bot, message: discord.Message) -> None:
@@ -466,8 +445,16 @@ async def _cache_message_images(bot: commands.Bot, message: discord.Message) -> 
             continue
         await bot.db.execute(
             "INSERT OR REPLACE INTO message_attachment_cache_v2 "
-            "(message_id, position, guild_id, filename, content_type, data, stored_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (message.id, saved, message.guild.id, attachment.filename, attachment.content_type, data, int(time.time())),
+            "(message_id,position,guild_id,filename,content_type,data,stored_at) VALUES (?,?,?,?,?,?,?)",
+            (
+                message.id,
+                saved,
+                message.guild.id,
+                attachment.filename,
+                attachment.content_type,
+                data,
+                int(time.time()),
+            ),
         )
         saved += 1
 
@@ -512,143 +499,99 @@ def _patch_logs(bot: commands.Bot) -> None:
 
     current_send_log = log_service.send_log
     if not getattr(current_send_log, "_sentrix_setup_v2", False):
+
         async def send_log_v2(target_bot, guild, log_type, embed, file=None, *, view=None, event_key=None):
             if not await module_enabled(target_bot, guild.id, "logs"):
                 return False
             return await current_send_log(
-                target_bot, guild, log_type, embed, file,
-                view=view, event_key=event_key,
+                target_bot,
+                guild,
+                log_type,
+                embed,
+                file,
+                view=view,
+                event_key=event_key,
             )
+
         send_log_v2._sentrix_setup_v2 = True
         send_log_v2._sentrix_previous = current_send_log
         log_service.send_log = send_log_v2
 
     logs_cog = bot.get_cog("Logs")
-    if logs_cog is not None and not getattr(logs_cog, "_sentrix_setup_v2", False):
-        original_send = logs_cog._send
-        async def logs_send_v2(_self, guild, config_key, embed, *, view=None, event_key=None):
-            title = str(getattr(embed, "title", "") or "")
-            # Attribution/retrait d'un rôle à une PERSONNE = Logs Membres.
-            if config_key == "log_roles" and title in {"Rôle ajouté", "Rôle retiré"}:
-                config_key = "log_members"
-            # Création/suppression/modification du RÔLE lui-même = Logs Rôles.
-            if config_key == "log_server" and title.startswith("Rôle "):
-                config_key = "log_roles"
+    if logs_cog is None or getattr(logs_cog, "_sentrix_setup_v2", False):
+        return
 
-            if config_key == "log_messages" and title == "Message supprimé":
-                message_id = _message_id_from_event_key(event_key)
-                if message_id:
-                    cached = await _first_cached_image(bot, guild.id, message_id)
-                    if cached is not None:
-                        filename = str(cached["filename"] or "image.png")
-                        data = bytes(cached["data"])
-                        file = discord.File(io.BytesIO(data), filename=filename)
-                        embed.set_image(url=f"attachment://{filename}")
-                        return await log_service.send_log(
-                            bot, guild, "messages", embed, file,
-                            view=view, event_key=event_key,
-                        )
-            return await original_send(guild, config_key, embed, view=view, event_key=event_key)
-        logs_cog._send = MethodType(logs_send_v2, logs_cog)
+    original_send = logs_cog._send
 
-        original_cache = logs_cog._cache_message
-        async def cache_v2(_self, message):
-            await original_cache(message)
-            await _cache_message_images(bot, message)
-        logs_cog._cache_message = MethodType(cache_v2, logs_cog)
+    async def logs_send_v2(_self, guild, config_key, embed, *, view=None, event_key=None):
+        title = str(getattr(embed, "title", "") or "")
+        if config_key == "log_roles" and title in {"Rôle ajouté", "Rôle retiré"}:
+            config_key = "log_members"
+        if config_key == "log_server" and title.startswith("Rôle "):
+            config_key = "log_roles"
+        if config_key == "log_messages" and title == "Message supprimé":
+            message_id = _message_id_from_event_key(event_key)
+            if message_id:
+                cached = await _first_cached_image(bot, guild.id, message_id)
+                if cached is not None:
+                    filename = str(cached["filename"] or "image.png")
+                    data = bytes(cached["data"])
+                    file = discord.File(io.BytesIO(data), filename=filename)
+                    embed.set_image(url=f"attachment://{filename}")
+                    return await log_service.send_log(
+                        bot,
+                        guild,
+                        "messages",
+                        embed,
+                        file,
+                        view=view,
+                        event_key=event_key,
+                    )
+        return await original_send(guild, config_key, embed, view=view, event_key=event_key)
 
-        original_forget = logs_cog._forget_cached_message
-        async def forget_v2(_self, message_id):
-            await original_forget(message_id)
-            try:
-                await bot.db.execute("DELETE FROM message_attachment_cache_v2 WHERE message_id=?", (int(message_id),))
-            except Exception:
-                pass
-        logs_cog._forget_cached_message = MethodType(forget_v2, logs_cog)
-        logs_cog._sentrix_setup_v2 = True
+    logs_cog._send = MethodType(logs_send_v2, logs_cog)
 
-    async def resource_log(guild: discord.Guild, title: str, fields: list[tuple[str, str, bool]], event: str):
-        panel = embeds.log_embed(title, fields=fields)
-        await log_service.send_log(
-            bot, guild, "resources", panel,
-            event_key=log_service.make_event_key(guild.id, event, discriminator=time.time_ns()),
-        )
+    original_cache = logs_cog._cache_message
 
-    async def on_guild_emojis_update(before, after):
-        guild = getattr(after, "guild", None) or getattr(before, "guild", None)
-        if guild is None:
-            return
-        before_by_id = {emoji.id: emoji for emoji in before}
-        after_by_id = {emoji.id: emoji for emoji in after}
-        for emoji_id, emoji in after_by_id.items():
-            if emoji_id not in before_by_id:
-                await resource_log(guild, "Emoji créé", [("Emoji", str(emoji), True), ("Nom", emoji.name, True)], "emoji_create")
-            elif before_by_id[emoji_id].name != emoji.name:
-                await resource_log(guild, "Emoji modifié", [("Avant", before_by_id[emoji_id].name, True), ("Après", emoji.name, True)], "emoji_update")
-        for emoji_id, emoji in before_by_id.items():
-            if emoji_id not in after_by_id:
-                await resource_log(guild, "Emoji supprimé", [("Nom", emoji.name, True), ("ID", f"`{emoji_id}`", True)], "emoji_delete")
+    async def cache_v2(_self, message):
+        await original_cache(message)
+        await _cache_message_images(bot, message)
 
-    async def on_guild_stickers_update(before, after):
-        guild = getattr(after, "guild", None) or getattr(before, "guild", None)
-        if guild is None:
-            return
-        before_ids = {sticker.id: sticker for sticker in before}
-        after_ids = {sticker.id: sticker for sticker in after}
-        for sid, sticker in after_ids.items():
-            if sid not in before_ids:
-                await resource_log(guild, "Sticker créé", [("Nom", sticker.name, True)], "sticker_create")
-        for sid, sticker in before_ids.items():
-            if sid not in after_ids:
-                await resource_log(guild, "Sticker supprimé", [("Nom", sticker.name, True)], "sticker_delete")
+    logs_cog._cache_message = MethodType(cache_v2, logs_cog)
 
-    async def on_invite_create(invite: discord.Invite):
-        if invite.guild is None:
-            return
-        await resource_log(
-            invite.guild,
-            "Invitation créée",
-            [("Code", f"`{invite.code}`", True), ("Salon", getattr(invite.channel, "mention", "Inconnu"), True)],
-            "invite_create",
-        )
+    original_forget = logs_cog._forget_cached_message
 
-    async def on_invite_delete(invite: discord.Invite):
-        if invite.guild is None:
-            return
-        await resource_log(invite.guild, "Invitation supprimée", [("Code", f"`{invite.code}`", True)], "invite_delete")
+    async def forget_v2(_self, message_id):
+        await original_forget(message_id)
+        try:
+            await bot.db.execute(
+                "DELETE FROM message_attachment_cache_v2 WHERE message_id=?",
+                (int(message_id),),
+            )
+        except Exception:
+            pass
 
-    async def on_webhooks_update(channel: discord.abc.GuildChannel):
-        await resource_log(channel.guild, "Webhooks modifiés", [("Salon", channel.mention, True)], "webhooks_update")
-
-    listeners = {
-        "on_guild_emojis_update": on_guild_emojis_update,
-        "on_guild_stickers_update": on_guild_stickers_update,
-        "on_invite_create": on_invite_create,
-        "on_invite_delete": on_invite_delete,
-        "on_webhooks_update": on_webhooks_update,
-    }
-    for name, listener in listeners.items():
-        marker = f"_sentrix_v2_listener_{name}"
-        if not getattr(bot, marker, False):
-            bot.add_listener(listener, name)
-            setattr(bot, marker, True)
-    logger.info("SentriX V2 : routage logs + ressources + cache images activés.")
+    logs_cog._forget_cached_message = MethodType(forget_v2, logs_cog)
+    logs_cog._sentrix_setup_v2 = True
 
 
 def _patch_feature_runtimes(bot: commands.Bot) -> None:
     levels = bot.get_cog("Levels")
     if levels is not None and not getattr(levels, "_sentrix_setup_v2", False):
         original_process = levels._process_xp
+
         async def process_xp_v2(_self, message, settings, conf):
             if not await module_enabled(bot, message.guild.id, "levels"):
-                return
+                return None
             return await original_process(message, settings, conf)
+
         levels._process_xp = MethodType(process_xp_v2, levels)
         levels._sentrix_setup_v2 = True
 
     tickets = bot.get_cog("Tickets")
     if tickets is not None and not getattr(tickets, "_sentrix_setup_v2", False):
         original_create = tickets.create_ticket
+
         async def create_ticket_v2(_self, interaction, ticket_type, answers):
             if not await module_enabled(bot, interaction.guild.id, "tickets"):
                 return await interaction.followup.send(
@@ -656,16 +599,19 @@ def _patch_feature_runtimes(bot: commands.Bot) -> None:
                     ephemeral=True,
                 )
             return await original_create(interaction, ticket_type, answers)
+
         tickets.create_ticket = MethodType(create_ticket_v2, tickets)
         tickets._sentrix_setup_v2 = True
 
     notifications = bot.get_cog("Notifications")
     if notifications is not None and not getattr(notifications, "_sentrix_setup_v2", False):
         original_check = notifications._check_subscription
+
         async def check_subscription_v2(_self, row):
             if not await module_enabled(bot, int(row["guild_id"]), "notifications"):
-                return
+                return None
             return await original_check(row)
+
         notifications._check_subscription = MethodType(check_subscription_v2, notifications)
         notifications._sentrix_setup_v2 = True
 
@@ -673,8 +619,7 @@ def _patch_feature_runtimes(bot: commands.Bot) -> None:
 def _replace_currency_text(text: str | None, settings: dict[str, Any]) -> str | None:
     if text is None:
         return None
-    value = str(text)
-    value = value.replace("🪙", settings["currency_symbol"])
+    value = str(text).replace("🪙", settings["currency_symbol"])
     value = re.sub(r"\bPièces\b", settings["currency_plural"], value)
     value = re.sub(r"\bpièces\b", settings["currency_plural"].lower(), value)
     value = re.sub(r"\bPièce\b", settings["currency_singular"], value)
@@ -689,7 +634,12 @@ def _embed_mentions_currency(embed: discord.Embed | None) -> bool:
         [str(embed.title or ""), str(embed.description or "")]
         + [f"{field.name} {field.value}" for field in embed.fields]
     )
-    return "🪙" in blob or "Portefeuille" in blob or "Boutique" in blob or "Classement économique" in blob
+    return (
+        "🪙" in blob
+        or "Portefeuille" in blob
+        or "Boutique" in blob
+        or "Classement économique" in blob
+    )
 
 
 def _apply_currency_to_embed(embed: discord.Embed, settings: dict[str, Any]) -> None:
@@ -705,7 +655,10 @@ def _apply_currency_to_embed(embed: discord.Embed, settings: dict[str, Any]) -> 
             inline=field.inline,
         )
     if embed.footer and embed.footer.text:
-        embed.set_footer(text=_replace_currency_text(embed.footer.text, settings), icon_url=embed.footer.icon_url)
+        embed.set_footer(
+            text=_replace_currency_text(embed.footer.text, settings),
+            icon_url=embed.footer.icon_url,
+        )
 
 
 def _root_name(command: Any) -> str:
@@ -718,27 +671,29 @@ def _root_name(command: Any) -> str:
 def _patch_currency_transport(bot: commands.Bot) -> None:
     current_ctx_send = commands.Context.send
     if not getattr(current_ctx_send, "_sentrix_currency_v2", False):
+
         async def ctx_send_v2(self, *args, **kwargs):
             guild = getattr(self, "guild", None)
             root = _root_name(getattr(self, "command", None))
-            if guild is not None:
-                candidate = kwargs.get("embed")
-                should = root in CURRENCY_DISPLAY_COMMANDS or _embed_mentions_currency(candidate)
-                if should:
-                    settings = await economy_settings(self.bot, guild.id)
-                    if isinstance(candidate, discord.Embed):
-                        _apply_currency_to_embed(candidate, settings)
-                    if kwargs.get("embeds"):
-                        for item in kwargs["embeds"]:
-                            if isinstance(item, discord.Embed) and _embed_mentions_currency(item):
-                                _apply_currency_to_embed(item, settings)
+            candidate = kwargs.get("embed")
+            if guild is not None and (
+                root in CURRENCY_DISPLAY_COMMANDS or _embed_mentions_currency(candidate)
+            ):
+                settings = await economy_settings(self.bot, guild.id)
+                if isinstance(candidate, discord.Embed):
+                    _apply_currency_to_embed(candidate, settings)
+                for item in kwargs.get("embeds") or ():
+                    if isinstance(item, discord.Embed) and _embed_mentions_currency(item):
+                        _apply_currency_to_embed(item, settings)
             return await current_ctx_send(self, *args, **kwargs)
+
         ctx_send_v2._sentrix_currency_v2 = True
         ctx_send_v2._sentrix_previous = current_ctx_send
         commands.Context.send = ctx_send_v2
 
     current_response = discord.InteractionResponse.send_message
     if not getattr(current_response, "_sentrix_currency_v2", False):
+
         async def response_v2(self, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
             guild = getattr(interaction, "guild", None)
@@ -748,6 +703,7 @@ def _patch_currency_transport(bot: commands.Bot) -> None:
                 settings = await economy_settings(client, guild.id)
                 _apply_currency_to_embed(candidate, settings)
             return await current_response(self, *args, **kwargs)
+
         response_v2._sentrix_currency_v2 = True
         response_v2._sentrix_previous = current_response
         discord.InteractionResponse.send_message = response_v2
@@ -760,8 +716,8 @@ def _install_welcome_listeners(bot: commands.Bot) -> None:
     async def on_member_join_v2(member: discord.Member):
         guild = member.guild
         conf = await bot.db.get_guild_config(guild.id)
+
         if await module_enabled(bot, guild.id, "roles"):
-            role_id = None
             try:
                 role_id = conf["autorole"] if conf else None
             except (KeyError, IndexError, TypeError):
@@ -775,12 +731,14 @@ def _install_welcome_listeners(bot: commands.Bot) -> None:
 
         if not await module_enabled(bot, guild.id, "welcome"):
             return
+
         def cv(key, default=None):
             try:
                 value = conf[key] if conf else None
             except (KeyError, IndexError, TypeError):
                 value = None
             return default if value is None else value
+
         channel_id = cv("welcome_channel")
         channel = guild.get_channel(int(channel_id)) if channel_id else guild.system_channel
         if not isinstance(channel, (discord.TextChannel, discord.Thread)):
@@ -806,7 +764,11 @@ def _install_welcome_listeners(bot: commands.Bot) -> None:
             await channel.send(
                 content=member.mention,
                 embed=panel,
-                allowed_mentions=discord.AllowedMentions(users=[member], roles=False, everyone=False),
+                allowed_mentions=discord.AllowedMentions(
+                    users=[member],
+                    roles=False,
+                    everyone=False,
+                ),
             )
         except discord.HTTPException:
             pass
@@ -816,12 +778,14 @@ def _install_welcome_listeners(bot: commands.Bot) -> None:
         if not await module_enabled(bot, guild.id, "welcome"):
             return
         conf = await bot.db.get_guild_config(guild.id)
+
         def cv(key, default=None):
             try:
                 value = conf[key] if conf else None
             except (KeyError, IndexError, TypeError):
                 value = None
             return default if value is None else value
+
         channel_id = cv("goodbye_channel")
         if not channel_id:
             return
@@ -845,13 +809,18 @@ def _install_welcome_listeners(bot: commands.Bot) -> None:
 
 def _install_whitelist_commands(bot: commands.Bot) -> None:
     if bot.get_command("whitelist") is None:
-        async def whitelist_callback(ctx: commands.Context, membre: discord.Member | None = None, action: str = "add"):
+
+        async def whitelist_callback(
+            ctx: commands.Context,
+            membre: discord.Member | None = None,
+            action: str = "add",
+        ):
             if ctx.guild is None:
                 return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
             await ensure_schema(bot)
             if membre is None:
                 rows = await bot.db.fetchall(
-                    "SELECT user_id, added_by, added_at FROM trusted_members WHERE guild_id=? ORDER BY added_at",
+                    "SELECT user_id,added_by,added_at FROM trusted_members WHERE guild_id=? ORDER BY added_at",
                     (ctx.guild.id,),
                 )
                 if not rows:
@@ -866,26 +835,33 @@ def _install_whitelist_commands(bot: commands.Bot) -> None:
                 await remove_trusted(bot, ctx.guild.id, membre.id)
                 return await ctx.send(embed=embeds.success(f"{membre.mention} a été retiré de la whitelist globale SentriX."))
             await add_trusted(bot, ctx.guild.id, membre.id, ctx.author.id)
-            await ctx.send(embed=embeds.success(
+            return await ctx.send(embed=embeds.success(
                 f"{membre.mention} est maintenant whitelisté pour les protections automatiques SentriX."
             ))
 
         whitelist_callback = checks.is_owner_or_admin_for("securite")(whitelist_callback)
-        command = commands.hybrid_command(
+        whitelist_command = commands.hybrid_command(
             name="whitelist",
             description="Ajouter, retirer ou afficher la whitelist globale SentriX.",
         )(whitelist_callback)
-        bot.add_command(command)
+        bot.add_command(whitelist_command)
 
     if bot.get_command("unwhitelist") is None:
+
         async def unwhitelist_callback(ctx: commands.Context, membre: discord.Member):
             if ctx.guild is None:
                 return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
             await remove_trusted(bot, ctx.guild.id, membre.id)
-            await ctx.send(embed=embeds.success(f"{membre.mention} a été retiré de la whitelist globale SentriX."))
+            return await ctx.send(embed=embeds.success(
+                f"{membre.mention} a été retiré de la whitelist globale SentriX."
+            ))
+
         unwhitelist_callback = checks.is_owner_or_admin_for("securite")(unwhitelist_callback)
-        command = commands.command(name="unwhitelist")(unwhitelist_callback)
-        bot.add_command(command)
+        unwhitelist_command = commands.hybrid_command(
+            name="unwhitelist",
+            description="Retirer un membre ou bot de la whitelist globale SentriX.",
+        )(unwhitelist_callback)
+        bot.add_command(unwhitelist_command)
 
 
 def permission_scope_for_command(bot: commands.Bot, command_name: str) -> str:
@@ -898,16 +874,16 @@ def permission_scope_for_command(bot: commands.Bot, command_name: str) -> str:
         return "levels"
     if name in AI_COMMANDS:
         return "ai"
-    if name.startswith("ticket") or name in {"ticket"}:
+    if name.startswith("ticket") or name == "ticket":
         return "tickets"
     if name.startswith("notif"):
         return "notifications"
-    module = __import__(bot.__class__.__module__, fromlist=["CATEGORY_COMMANDS"])
-    categories = getattr(module, "CATEGORY_COMMANDS", {})
+    policy_module = __import__(bot.__class__.__module__, fromlist=["CATEGORY_COMMANDS"])
+    categories = getattr(policy_module, "CATEGORY_COMMANDS", {})
     for category, names in categories.items():
         if name in names:
             return str(category)
-    public = set(getattr(module, "PUBLIC_COMMANDS", ()))
+    public = set(getattr(policy_module, "PUBLIC_COMMANDS", ()))
     if name in public:
         return "public"
     return "other"
@@ -918,9 +894,7 @@ def commands_for_scope(bot: commands.Bot, scope: str) -> list[str]:
     for command in bot.walk_commands():
         root = getattr(command, "root_parent", None) or command
         name = str(getattr(root, "name", "") or "").casefold()
-        if not name:
-            continue
-        if permission_scope_for_command(bot, name) == scope:
+        if name and permission_scope_for_command(bot, name) == scope:
             names.add(name)
     return sorted(names)
 
@@ -937,11 +911,12 @@ def install(bot: commands.Bot) -> None:
     _install_welcome_listeners(bot)
     _patch_currency_transport(bot)
     bot._sentrix_setup_v2_core = True
-    logger.info("SentriX V2 core installé : permissions, modules, logs, whitelist, bienvenue et économie.")
+    logger.info("SentriX V2 core installé.")
 
 
 __all__ = [
-    "MODULES", "ensure_schema", "module_enabled", "set_module_enabled",
+    "MODULES", "MODERATION_COMMANDS", "ECONOMY_COMMANDS", "LEVEL_COMMANDS",
+    "AI_COMMANDS", "ensure_schema", "module_enabled", "set_module_enabled",
     "economy_settings", "set_currency", "get_role_command_decision",
     "set_role_command_decision", "is_trusted", "add_trusted", "remove_trusted",
     "permission_scope_for_command", "commands_for_scope", "install",
