@@ -110,3 +110,6 @@ def test_language_bridge_targets_final_v3_renderer():
     assert "_sentrix_control_center_v3_language" in source
     assert "current_render(self)" in source
     assert "current_build_embed(self)" in source
+    # Le pont historique peut déjà avoir posé le sélecteur : V3 doit le réutiliser.
+    assert "has_language_select = any(" in source
+    assert "if not has_language_select:" in source
