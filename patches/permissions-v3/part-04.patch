@@ -1,0 +1,246 @@
++    def test_blacklisted_user_is_refused_everywhere(self):
++        b = FakeBackend(blacklist={10: "spam"})
++        d = decide(b, member(), "ping")
++        self.assertFalse(d.allowed)
++        self.assertEqual(d.policy, "global-blacklist")
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)
+diff --git a/tests/test_setup_help_control_center_v2.py b/tests/test_setup_help_control_center_v2.py
+index 09bbdcd..f151207 100644
+--- a/tests/test_setup_help_control_center_v2.py
++++ b/tests/test_setup_help_control_center_v2.py
+@@ -61,11 +61,16 @@ def test_help_supports_prefix_and_slash_direct_search():
+ def test_server_managers_do_not_bypass_admin_permissions_anymore():
+     checks_source = _source("utils/checks.py")
+     guard_source = _source("cogs/permission_guard.py")
++    # La décision d'accès vit désormais dans utils/access_matrix.py ; le guard
++    # se contente de brancher les deux transports dessus.
++    matrix_source = _source("utils/access_matrix.py")
+     assert "is_bot_manager" not in checks_source
+     assert "has_manager_permission" not in checks_source
+     assert "is_bot_manager" not in guard_source
+     assert "has_manager_permission" not in guard_source
+-    assert "Administrateur" in guard_source
++    assert "is_bot_manager" not in matrix_source
++    assert "has_manager_permission" not in matrix_source
++    assert "Administrateur" in matrix_source
+ 
+ 
+ def test_permission_metadata_is_shared_with_help():
+diff --git a/utils/access_matrix.py b/utils/access_matrix.py
+new file mode 100644
+index 0000000..821263d
+--- /dev/null
++++ b/utils/access_matrix.py
+@@ -0,0 +1,725 @@
++"""SentriX — source de vérité UNIQUE des permissions de commandes.
++
++Ce module est le seul endroit du dépôt qui décide si une personne peut exécuter
++une commande. ``+commande`` et ``/commande`` appellent tous les deux
++``evaluate()`` : par construction, ils ne peuvent pas diverger.
++
++ORDRE DE PRIORITÉ (identique pour les deux transports)
++------------------------------------------------------
++ 1. blacklist globale SentriX
++ 2. commande owner-only globale        -> seul l'owner global passe
++ 3. owner global SentriX               -> passe partout ailleurs
++ 4. module désactivé sur le serveur    -> refus, même pour l'owner du serveur
++ 5. deny explicite Setup               -> refus
++ 6. allow explicite Setup              -> accès, sans exiger Administrateur
++ 7. owner du serveur Discord           -> accès aux fonctions de SON serveur
++ 8. Administrateur Discord             -> accès serveur, jamais owner global
++ 9. permission Discord requise / rôle staff configuré
++10. commande publique
++11. fail-closed                        -> Administrateur requis
++
++Pourquoi le deny explicite (5) passe AVANT l'owner du serveur (7) : sinon un
++propriétaire ne peut pas se retirer volontairement une commande dangereuse, et
++un compte propriétaire compromis contourne toute la configuration. Le
++propriétaire garde ``setup``, qui est owner-serveur par nature, donc il peut
++toujours se ré-accorder la règle.
++
++Pourquoi le module désactivé (4) passe avant tout sauf l'owner global : couper
++un module doit couper le module, sans quoi « désactivé » ne veut rien dire.
++"""
++from __future__ import annotations
++
++import logging
++from dataclasses import dataclass
++from typing import Any
++
++logger = logging.getLogger("bot.access-matrix")
++
++# ---------------------------------------------------------------------------
++# 1. NIVEAUX D'ACCÈS
++# ---------------------------------------------------------------------------
++
++PUBLIC_COMMANDS = frozenset({
++    # Aide et utilitaires
++    "help", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
++    "channelinfo", "membercount", "emoji-list", "poll", "remind",
++    "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
++    "report-bug", "afk", "roll", "choose", "privacy-policy",
++    # Preuve
++    "proof", "proofstatus",
++    # IA (soumises aux sous-interrupteurs IA du serveur)
++    "sentrix", "ask", "chat-reset", "summarize", "image-prompt", "image",
++    "explain", "rewrite", "fact-check", "ai", "chat", "improve", "correct",
++    "ai-translate", "code",
++    # Économie et niveaux
++    "balance", "economy", "daily", "weekly", "work", "rob", "pay",
++    "economyleaderboard", "leaderboard-money", "shop", "buy", "buyrole",
++    "inventory", "sell", "gamble", "deposit", "withdraw", "banque",
++    "stats", "me", "level", "rank", "leaderboard-levels", "level-roles",
++    "profile", "set-bio", "rep", "reputation", "repleaderboard", "voice-time",
++    # Tickets, événements, invitations
++    "ticket", "ticketcenter", "giveaway-list", "event-join", "event-leave",
++    "event-list", "tournament-join", "tournament-list", "invites",
++    "invite-leaderboard", "invited-by",
++    # Statistiques publiques
++    "bot-status", "server-growth", "command-stats", "latency", "changelog",
++    "feedback", "botinfo",
++    # Mini-jeux
++    "rps", "guess-number", "trivia", "tictactoe", "hangman", "math-quiz",
++    "blackjack", "slots", "coinflip", "dice", "luckyroll", "highlow", "memory",
++    "reaction", "scramble", "wordgame", "emojiquiz", "colorquiz", "fasttype",
++    "duel", "connect4", "numberduel", "reactionduel", "quizduel", "triviastart",
++    "wordrace", "reactionevent", "guessrace", "mathrace", "lastmessage",
++    "emoji-race", "adventure", "dungeon", "mining", "fishing", "treasure",
++    "hunt", "explore", "gamehistory", "gameprofile", "gamestats", "gametop",
++    "dailygames", "drop", "season",
++    # Musique
++    "join", "leave", "play", "pause", "resume", "skip", "stop", "queue",
++    "nowplaying", "volume", "loop", "shuffle", "remove-from-queue",
++    "clear-queue", "playlist-save", "playlist-load",
++    # Hubs et profils membre (anciennement fail-closed par oubli)
++    "home", "gamehub", "economyhub", "checkin", "progress", "profilecard",
++    "achievements", "challenges", "missions", "gamelobby", "matchmake",
++    "market", "market-buy", "market-sell", "market-cancel", "market-find",
++    "market-history", "market-my", "transactions", "shopwindow",
++    "sentrix-plus", "sentrixpro",
++    # Salons vocaux temporaires : le membre pilote SON salon
++    "voice-limit", "voice-lock", "voice-name", "voice-transfer", "voice-unlock",
++})
++
++OWNER_ONLY_COMMANDS = frozenset({
++    "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
++    "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
++    # Diagnostics globaux (checks.is_bot_owner dans les cogs d'origine)
++    "logs-diag", "reset-logs-all",
++})
++
++CUSTOM_PERMISSION_COMMANDS = frozenset({"embed"})
++
++DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
++    "ban": "ban_members",
++    "tempban": "ban_members",
++    "unban": "ban_members",
++    "kick": "kick_members",
++    "mute": "moderate_members",
++    "unmute": "moderate_members",
++    "warn": "moderate_members",
++    "unwarn": "moderate_members",
++    "warnings": "moderate_members",
++    "clearwarnings": "moderate_members",
++    "case": "moderate_members",
++    "casefull": "moderate_members",
++    "caseproof": "moderate_members",
++    "modhistory": "moderate_members",
++    "modundo": "moderate_members",
++    "modcenter": "moderate_members",
++    "userhistory": "moderate_members",
++    "staffnote": "moderate_members",
++    "suspiciouslist": "moderate_members",
++    "quarantine": "moderate_members",
++    "unquarantine": "moderate_members",
++    "clear": "manage_messages",
++    "say": "manage_messages",
++    "embed-create": "manage_messages",
++    "schedule-send": "manage_messages",
++    "schedule-list": "manage_messages",
++    "schedule-cancel": "manage_messages",
++    "sticky-set": "manage_messages",
++    "sticky-every": "manage_messages",
++    "sticky-off": "manage_messages",
++    "slowmode": "manage_channels",
++    "lock": "manage_channels",
++    "unlock": "manage_channels",
++    "hide": "manage_channels",
++    "show": "manage_channels",
++    "smartlockdown": "manage_channels",
++    "ticket-reopen": "manage_channels",
++    "reopenticket": "manage_channels",
++    "tickettranscript": "manage_channels",
++    "ticketstats": "manage_channels",
++    "ticketstaffstats": "manage_channels",
++    "nickname": "manage_nicknames",
++    "nick": "manage_nicknames",
++    "resetnick": "manage_nicknames",
++    "move": "move_members",
++    "disconnect": "move_members",
++    "role-snapshot": "manage_roles",
++    "role-restore": "manage_roles",
++    "giverole": "manage_roles",
++    "removerole": "manage_roles",
++    "protectmember": "manage_roles",
++    "addemoji": "manage_emojis_and_stickers",
++    "deleteemoji": "manage_emojis_and_stickers",
++    "server-health": "manage_guild",
++    "systemstatus": "manage_guild",
++    "starboard-setup": "manage_guild",
++    "starboard-off": "manage_guild",
++    "voicehub-setup": "manage_guild",
++    "voicehub-off": "manage_guild",
++}
++
++CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
++    "configuration": frozenset({
++        "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs-status",
++        "logsetup", "logs", "setwelcomechannel", "setgoodbyechannel",
++        "setwelcomemessage", "setgoodbyemessage", "setticketlogchannel",
++        "setautorole", "createrole", "setwarnrole", "setwarnbanthreshold",
++        "disablecommand", "enablecommand", "ignorechannel", "unignorechannel",
++        "setlevelchannel", "setsuggestchannel", "setannouncechannel",
++        "setgiveawaychannel", "config-view", "config-reset", "setup",
++        "create-server", "delete-channel", "verify-setup", "verify-panel",
++        "rolepanel", "rolepanel-refresh", "reactionrole-add",
++        "reactionrole-remove", "reactionrole-list", "set-level-role",
++        "remove-level-role", "set-xp", "add-xp", "reset-levels", "levelcheck",
++        "levelrepair", "repconfig", "repadd", "repremove", "represet",
++        "rephistory", "statsconfig", "levelroles", "addbonusinvites",
++        "removebonusinvites", "invitebonushistory", "designsetup",
++        "design-theme", "iconsetup", "embedconfig", "giveaway", "giveaway-create",
++        "giveaway-end", "giveaway-reroll", "giveaway-cancel",
++        "giveaway-blacklist", "giveaway-unblacklist", "event-create",
++        "event-cancel", "tournament-create", "tournament-start", "announce",
++        "notifs-ping", "notifs-list", "notifs-remove", "welcome-config",
++        "set-nickname", "alias", "diagnostic",
++        # Anciennement fail-closed par oubli
++        "suivi-bot", "setup-auto", "server-audit", "health", "healthcheck",
++        "create", "level-system", "security-repair",
++        # Vérification par preuve (administration)
++        "proofsetup", "proofexample", "proofexample-remove", "proofexamples",
++        "proofpanel", "proofreset",
++    }),
++    "tickets": frozenset({
++        "ticketsetup", "ticketpanel", "ticketpanel-toggle", "tickettype",
++        "ticketform", "ticketconfig", "ticketlogs", "ticketlimit",
++        "ticketautoclose", "ticketreopenwindow",
++    }),
++    "moderation": frozenset({"sanctiondm", "sanctionpolicy"}),
++    "securite": frozenset({
++        "antispam", "antilink", "antiinvite", "antimention", "anticaps",
++        "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
++        "antinuke", "antinuke-whitelist-add", "antinuke-whitelist-remove",
++        "antinuke-whitelist-list", "lockdown-server", "unlock-server",
++        "automod-status", "security-check", "automod-escalation",
++        "automod-exempt-role-add", "automod-exempt-role-remove",
++        "automod-history", "security-level", "blacklist-add",
++        "blacklist-remove", "blacklist-list", "blacklist-user",
++        "unblacklist-user", "blacklist-users", "panic", "whitelist-domain",
++        "unwhitelist-domain", "permission-audit", "server-backup",
++        "server-restore", "syncbl", "unsyncbl",
++        # Anciennement fail-closed par oubli
++        "security", "antigif", "antinuke-config", "backup-now", "incidents",
