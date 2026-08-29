@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit FR/EN du Setup/Help officiels après installation du Control Center V3."""
+"""Audit FR/EN du Setup/Help officiels sur l'interface finale V70-V72."""
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +25,11 @@ async def run() -> int:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-language.db")
 
         import main
-        from cogs import control_center_v3, language_runtime, setup_control_center
+        from cogs import (
+            language_runtime,
+            setup_control_center,
+            setup_polish_v70,
+        )
         from cogs.language_official_bridge import OfficialLanguageSelect
 
         bot = main.BotAllInOne()
@@ -52,7 +56,12 @@ async def run() -> int:
             errors.append("la preference Francais n'est pas persistante")
 
         # Les alias FR/EN doivent rester des alias du même objet commande.
-        for canonical, french in (("ban", "bannir"), ("help", "aide"), ("setup", "configurer"), ("balance", "solde")):
+        for canonical, french in (
+            ("ban", "bannir"),
+            ("help", "aide"),
+            ("setup", "configurer"),
+            ("balance", "solde"),
+        ):
             base = bot.get_command(canonical)
             if base is None:
                 errors.append(f"commande canonique absente: {canonical}")
@@ -76,12 +85,18 @@ async def run() -> int:
             errors.append("la categorie Permissions / Acces aux commandes manque")
 
         view_cls = setup_control_center.SetupView
+        # Les marqueurs V3/langue restent le contrat backend. V70 est le propriétaire
+        # visuel actuel et V72 ajoute uniquement états propres + Tickets auto-configurables.
         if not getattr(view_cls, "_sentrix_control_center_v3", False):
-            errors.append("le renderer final Control Center V3 n'est pas installe")
+            errors.append("le backend Control Center V3 n'est pas installe")
         if not getattr(view_cls, "_sentrix_control_center_v3_language", False):
-            errors.append("le pont FR/EN final du Control Center V3 n'est pas installe")
+            errors.append("le pont FR/EN final du Control Center n'est pas installe")
         if not getattr(view_cls, "_sentrix_language_payload_guard", False):
             errors.append("le SetupView final n'est pas marque compatible langue")
+        if not getattr(view_cls.render, "_sentrix_setup_ticket_v72", False):
+            errors.append("le renderer final Tickets/Setup V72 n'est pas installe")
+        if not getattr(bot, "_sentrix_setup_ticket_autoconfig_v72", False):
+            errors.append("le runtime Tickets auto-configurable V72 n'est pas actif")
 
         fake_guild = SimpleNamespace(
             id=123456789,
@@ -92,31 +107,44 @@ async def run() -> int:
         view = view_cls(bot, fake_guild, 1)
         view.render()
 
-        language_selects = [item for item in view.children if isinstance(item, OfficialLanguageSelect)]
+        language_selects = [
+            item for item in view.children if isinstance(item, OfficialLanguageSelect)
+        ]
         if len(language_selects) != 1:
             errors.append(f"selecteur de langue final inattendu: {len(language_selects)}")
 
-        # V3 supprime volontairement l'ancienne rangée Accueil/Actualiser/Fermer.
-        button_labels = {str(getattr(item, "label", "")) for item in view.children if hasattr(item, "style")}
+        # Les vieux boutons Home/Refresh/Close sont toujours interdits.
+        button_labels = {
+            str(getattr(item, "label", ""))
+            for item in view.children
+            if hasattr(item, "style")
+        }
         for forbidden in ("Home", "Refresh", "Close", "Accueil", "Actualiser", "Fermer"):
             if forbidden in button_labels:
                 errors.append(f"ancien bouton de navigation encore present: {forbidden}")
 
-        category_selects = [item for item in view.children if isinstance(item, control_center_v3.V3CategorySelect)]
-        if len(category_selects) != 1:
-            errors.append(f"menu V3 inattendu: {len(category_selects)}")
+        # Depuis V70, le menu final est volontairement simple : Accueil + les dix pages
+        # officielles. Les anciennes sous-pages techniques V3 ne sont plus des options du
+        # menu principal ; V71 les ouvre depuis les contrôles de la page Sécurité.
+        page_selects = [
+            item for item in view.children
+            if isinstance(item, setup_polish_v70.V70PageSelect)
+        ]
+        if len(page_selects) != 1:
+            errors.append(f"menu final V70/V72 inattendu: {len(page_selects)}")
         else:
-            select = category_selects[0]
+            select = page_selects[0]
             values = {str(option.value) for option in select.options}
-            expected_values = set(setup_control_center.CATEGORY_ORDER) | {
-                "__home__", "security_verification", "roles_panel",
-            }
+            expected_values = set(setup_control_center.CATEGORY_ORDER) | {"__home__"}
             missing = sorted(expected_values - values)
+            unexpected = sorted(values - expected_values)
             if missing:
-                errors.append("pages manquantes dans le menu V3: " + ", ".join(missing))
+                errors.append("pages manquantes dans le menu final: " + ", ".join(missing))
+            if unexpected:
+                errors.append("pages inattendues dans le menu final: " + ", ".join(unexpected))
             labels = {str(option.label) for option in select.options}
             if "Permissions" not in labels:
-                errors.append("l'option Permissions manque dans le menu V3 traduit")
+                errors.append("l'option Permissions manque dans le menu final traduit")
 
         help_command = bot.get_command("help")
         help_cog = bot.get_cog("SentriXHelp")
@@ -127,13 +155,19 @@ async def run() -> int:
         if help_command is not None and not getattr(help_command, "_sentrix_language_help", False):
             errors.append("le help officiel n'est pas reconnu par le moteur de langue")
 
-        visible = [command for command in bot.walk_commands() if not getattr(command, "hidden", False)]
+        visible = [
+            command for command in bot.walk_commands()
+            if not getattr(command, "hidden", False)
+        ]
         object_ids = [id(command) for command in visible]
         if len(object_ids) != len(set(object_ids)):
             errors.append("walk_commands contient des objets commandes dupliques")
 
         current = asyncio.current_task()
-        pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
+        pending = [
+            task for task in asyncio.all_tasks()
+            if task is not current and not task.done()
+        ]
         for task in pending:
             task.cancel()
         if pending:
@@ -152,8 +186,8 @@ async def run() -> int:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
     print(
-        "OK: FR/EN persistant, 10 categories, Control Center V3 final, "
-        "langue transversale, help officiel et aucun doublon"
+        "OK: FR/EN persistant, 10 categories, navigation V70/V72, "
+        "Tickets V72, help officiel et aucun doublon"
     )
     return 0
 
