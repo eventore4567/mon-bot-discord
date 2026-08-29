@@ -55,6 +55,7 @@ from .server_builder_existing_bootstrap import install as install_existing_serve
 from .server_builder_ready_setup import install as install_server_builder_ready_setup
 from .server_choice_roles import install as install_server_choice_roles
 from .setup_control_center import install as install_setup_control_center
+from .setup_simple_v68 import install as install_setup_simple_v68
 from .shop_default_prices import install as install_shop_default_prices
 from .smart_creation_guard_v47 import install as install_smart_creation_guard_v47
 from .slash_reliability_v7 import install as install_slash_reliability_v7
@@ -256,9 +257,12 @@ async def finalize_runtime(bot: commands.Bot) -> None:
         install_permission_setup_hardening_v65,
         bot,
     )
+    # V68 est la dernière autorité visuelle : Permissions devient un bouton unique,
+    # toutes les pages Setup gagnent en largeur et le help officiel est remis au goût du jour.
+    await _run_installer("Setup simple et help V68", install_setup_simple_v68, bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
-        "Runtime SentriX finalisé : Control Center V3, permissions V65, un help, un renderer, un logger et la vérification renforcée."
+        "Runtime SentriX finalisé : Control Center V3, Setup V68, permissions Discord natives, un help, un renderer, un logger et la vérification renforcée."
     )
 
 
