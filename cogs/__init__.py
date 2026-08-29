@@ -59,6 +59,7 @@ from .setup_control_center import install as install_setup_control_center
 from .setup_simple_v68 import install as install_setup_simple_v68
 from .setup_oxyde_v69 import install as install_setup_oxyde_v69
 from .setup_polish_v70 import install as install_setup_polish_v70
+from .setup_ticket_autoconfig_v72 import install as install_setup_ticket_autoconfig_v72
 from .shop_default_prices import install as install_shop_default_prices
 from .smart_creation_guard_v47 import install as install_smart_creation_guard_v47
 from .slash_reliability_v7 import install as install_slash_reliability_v7
@@ -254,12 +255,13 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _run_installer("Setup simple et help V68", install_setup_simple_v68, bot)
     await _run_installer("Control Center visuel V69", install_setup_oxyde_v69, bot)
     await _run_installer("Finition Control Center V70", install_setup_polish_v70, bot)
-    # V71 est volontairement la dernière autorité Sécurité/Setup : elle restaure les
-    # réglages avancés tout en conservant le design V70 et les permissions V68.
+    # V71 conserve la dernière autorité de la page Sécurité. V72 s'installe après pour
+    # corriger uniquement l'accueil et le système Tickets sans remplacer ses contrôles.
     await _run_installer("Sécurité avancée et vérification V71", install_security_verification_v71, bot)
+    await _run_installer("Tickets auto-configurables et états Setup V72", install_setup_ticket_autoconfig_v72, bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
-        "Runtime SentriX finalisé : Control Center V70 + Sécurité V71, permissions Discord natives, honeypot configurable et vérification renforcée."
+        "Runtime SentriX finalisé : Control Center V72 + Sécurité V71, Tickets auto-configurables et permissions Discord natives."
     )
 
 
