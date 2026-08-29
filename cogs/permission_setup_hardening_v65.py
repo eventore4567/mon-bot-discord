@@ -1,18 +1,18 @@
-"""SentriX V65 — permissions Discord natives + Setup ACL restrictif.
+"""SentriX V66 — verrou runtime des permissions et Setup simplifié.
 
-Cette couche est installée en dernier, après les anciennes surfaces Setup. Elle ne crée
-pas un second système d'autorisation : elle remplace la décision runtime utilisée par
-``permission_guard`` et ``utils.access_matrix`` par une politique plus stricte.
+Cette couche conserve le nom de module V65 pour compatibilité avec le chargeur existant,
+mais corrige le problème observé en production : une migration SQL ne doit jamais pouvoir
+empêcher l'installation de l'interface sécurisée.
 
-Principes :
-- +commande et /commande passent par la même fonction ``secure_evaluate`` ;
-- les permissions Discord natives restent obligatoires pour toute action privilégiée ;
-- Setup > Permissions peut uniquement BLOQUER une commande, jamais accorder un droit ;
-- les anciennes règles ``allow`` sont supprimées et traitées comme « hériter » ;
-- le rôle staff configuré ne remplace jamais kick/ban/moderate/manage_* ;
-- les commandes owner-global restent impossibles à déléguer ;
-- les commandes membres restent publiques, sauf arrêt explicite de leur module ;
-- les pages Permissions et Sécurité du Setup sont simplifiées et plus explicites.
+Garanties :
+- +commande et /commande utilisent la même décision ;
+- une règle Setup peut uniquement BLOQUER, jamais accorder une permission ;
+- les permissions Discord natives restent obligatoires pour les actions staff ;
+- les commandes owner-global ne sont jamais délégables ;
+- les commandes publiques restent publiques ;
+- Sécurité est préconfigurée et pilotée par un seul bouton Activer / Désactiver ;
+- le constructeur de Setup réapplique ce verrou si une ancienne couche UI a été chargée
+  après lui.
 """
 from __future__ import annotations
 
@@ -28,11 +28,8 @@ from . import permission_guard
 from . import setup_control_center as setup_ui
 from . import setup_v2_core as core
 
-logger = logging.getLogger("bot.permission-setup-v65")
+logger = logging.getLogger("bot.permission-setup-v66")
 
-# Les commandes déjà classées dans DISCORD_PERMISSION_COMMANDS gardent leur permission
-# exacte. Les centres de configuration restants demandent Gérer le serveur ; les
-# opérations « complete » restent Administrateur uniquement.
 CATEGORY_REQUIRED_PERMISSION: dict[str, str] = {
     "configuration": "manage_guild",
     "tickets": "manage_guild",
@@ -48,9 +45,7 @@ SAFE_SCOPES = (
     "moderation",
     "securite",
     "tickets",
-    "economy",
     "economie",
-    "levels",
     "ai",
     "notifications",
     "configuration",
@@ -62,15 +57,15 @@ SCOPE_LABELS = {
     "moderation": "Modération",
     "securite": "Sécurité",
     "tickets": "Tickets",
-    "economy": "Économie membres",
     "economie": "Économie / gestion",
-    "levels": "Niveaux",
     "ai": "IA",
     "notifications": "Notifications",
     "configuration": "Configuration",
     "complete": "Administration avancée",
     "other": "Autres commandes staff",
 }
+
+RUNTIME_MARKER = "Permissions sécurisées V66"
 
 
 def _permissions(author: Any):
@@ -94,7 +89,6 @@ def _is_guild_owner(author: Any, guild: Any) -> bool:
 
 
 def _has_native_permission(author: Any, guild: Any, permission: str) -> bool:
-    """Permission effective Discord, avec owner/admin comme super-utilisateurs natifs."""
     if _is_guild_owner(author, guild) or _is_admin(author):
         return True
     perms = _permissions(author)
@@ -102,8 +96,8 @@ def _has_native_permission(author: Any, guild: Any, permission: str) -> bool:
 
 
 def _category_for(name: str) -> str | None:
-    for category, commands_in_category in matrix.CATEGORY_COMMANDS.items():
-        if name in commands_in_category:
+    for category, names in matrix.CATEGORY_COMMANDS.items():
+        if name in names:
             return category
     return None
 
@@ -113,7 +107,7 @@ def _deny(reason: str, policy: str) -> matrix.AccessDecision:
 
 
 async def secure_evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> matrix.AccessDecision:
-    """Décision finale V65, commune aux commandes préfixées et slash."""
+    """Décision finale commune aux commandes + et /."""
     name = matrix.normalise(command_name)
     if not name:
         return _deny("Commande impossible à identifier.", "invalid")
@@ -125,7 +119,6 @@ async def secure_evaluate(bot, *, command_name: Any, author: Any, guild: Any) ->
     except (TypeError, ValueError):
         user_id = None
 
-    # Blacklist globale. Le propriétaire global conserve le chemin de récupération.
     if user_id is not None:
         reason = await backend.blacklist_reason(user_id)
         if reason is not None and not await backend.is_global_owner(user_id):
@@ -136,8 +129,6 @@ async def secure_evaluate(bot, *, command_name: Any, author: Any, guild: Any) ->
 
     global_owner = user_id is not None and await backend.is_global_owner(user_id)
 
-    # Aucun rôle de serveur, Administrateur Discord ou règle Setup ne peut ouvrir ces
-    # commandes. C'est le verrou le plus important de la matrice.
     if name in matrix.OWNER_ONLY_COMMANDS:
         if global_owner:
             return matrix.AccessDecision(True, policy="owner-global")
@@ -156,7 +147,6 @@ async def secure_evaluate(bot, *, command_name: Any, author: Any, guild: Any) ->
         return _deny("Cette commande doit être utilisée dans un serveur.", "guild-required")
     guild_id = int(guild_id)
 
-    # Un module coupé coupe ses commandes, y compris les commandes publiques du module.
     module = matrix.module_for_command(name)
     if module and not await backend.module_enabled(guild_id, module):
         label = matrix.MODULE_LABELS.get(module, module)
@@ -179,39 +169,31 @@ async def secure_evaluate(bot, *, command_name: Any, author: Any, guild: Any) ->
                 "ai:commands-off",
             )
 
-    # Le propriétaire du serveur ne peut jamais se verrouiller hors du Setup.
     if name == "setup" and _is_guild_owner(author, guild):
         return matrix.AccessDecision(True, policy="guild-owner:setup-recovery")
 
-    # Les commandes membres ne deviennent pas privées à cause d'une règle de rôle.
-    # Les modules (IA, économie, tickets...) restent toutefois désactivables plus haut.
+    # Les ACL de rôle ne peuvent jamais couper les fonctions membre publiques.
     if name in matrix.PUBLIC_COMMANDS:
         return matrix.AccessDecision(True, policy="public")
 
-    # Setup est désormais une ACL de RESTRICTION uniquement. Une ancienne règle allow
-    # est volontairement ignorée : elle ne peut plus créer une permission inexistante.
+    # Seul deny est pris en compte. Un ancien allow est volontairement ignoré.
     explicit, source = await backend.explicit_rule(guild_id, author, name)
     if explicit is False:
         return _deny(
-            "Cette commande a été **bloquée pour votre rôle** dans "
-            "`Setup > Permissions`.",
+            "Cette commande a été **bloquée pour votre rôle** dans `Setup > Permissions`.",
             f"setup:{source}:deny",
         )
 
-    # Commandes qui possèdent une permission Discord précise.
     required = matrix.DISCORD_PERMISSION_COMMANDS.get(name)
     if required is not None:
         if _has_native_permission(author, guild, required):
             return matrix.AccessDecision(True, policy=f"discord:{required}")
         return _deny(
             f"**Permission Discord requise :** {matrix.permission_label(required)}.\n"
-            "Les rôles configurés dans SentriX peuvent bloquer cette commande, "
-            "mais ils ne peuvent pas accorder cette permission Discord.",
+            "Une règle SentriX peut retirer cet accès, mais ne peut jamais créer cette permission.",
             f"discord:{required}",
         )
 
-    # +embed conserve deux permissions natives possibles, mais aucune whitelist interne
-    # ne peut désormais remplacer ces permissions.
     if name in matrix.CUSTOM_PERMISSION_COMMANDS:
         if (
             _has_native_permission(author, guild, "manage_messages")
@@ -234,8 +216,6 @@ async def secure_evaluate(bot, *, command_name: Any, author: Any, guild: Any) ->
             f"categorie:{category}",
         )
 
-    # Toute nouvelle commande non classée reste fermée aux membres. Un administrateur
-    # Discord peut l'utiliser, ce qui garde le comportement fail-closed historique.
     if _has_native_permission(author, guild, "administrator"):
         return matrix.AccessDecision(True, policy="fail-closed:administrator")
     return _deny(
@@ -245,8 +225,10 @@ async def secure_evaluate(bot, *, command_name: Any, author: Any, guild: Any) ->
     )
 
 
-def secure_help_requirement(name: str) -> str:
+def secure_help_requirement(name: str | None) -> str:
     name = matrix.normalise(name)
+    if not name:
+        return "Sélectionnez une commande"
     if name in matrix.PUBLIC_COMMANDS:
         return "Tout le monde"
     if name in matrix.OWNER_ONLY_COMMANDS:
@@ -264,30 +246,34 @@ def secure_help_requirement(name: str) -> str:
 
 def _commands_for_scope(bot, scope: str) -> list[str]:
     names = list(core.commands_for_scope(bot, scope))
-    return sorted(
-        {
-            matrix.normalise(name)
-            for name in names
-            if matrix.normalise(name)
-            and matrix.normalise(name) not in matrix.PUBLIC_COMMANDS
-            and matrix.normalise(name) not in matrix.OWNER_ONLY_COMMANDS
-        }
-    )
+    return sorted({
+        matrix.normalise(name)
+        for name in names
+        if matrix.normalise(name)
+        and matrix.normalise(name) not in matrix.PUBLIC_COMMANDS
+        and matrix.normalise(name) not in matrix.OWNER_ONLY_COMMANDS
+    })
+
+
+def _first_valid_scope(bot) -> str:
+    for scope in SAFE_SCOPES:
+        if _commands_for_scope(bot, scope):
+            return scope
+    return "moderation"
 
 
 class SafePermissionRoleSelect(discord.ui.RoleSelect):
     def __init__(self, owner):
         self.owner = owner
         super().__init__(
-            placeholder="1. Choisir le rôle à restreindre",
+            placeholder="1. Rôle à restreindre",
             min_values=1,
             max_values=1,
             row=2,
         )
 
     async def callback(self, interaction: discord.Interaction):
-        role = self.values[0]
-        self.owner.selected_permission_role = role.id
+        self.owner.selected_permission_role = self.values[0].id
         self.owner.selected_permission_command = None
         self.owner.permission_page = 0
         await self.owner.refresh(interaction)
@@ -296,25 +282,24 @@ class SafePermissionRoleSelect(discord.ui.RoleSelect):
 class SafePermissionScopeSelect(discord.ui.Select):
     def __init__(self, owner):
         self.owner = owner
-        options = []
-        for scope in SAFE_SCOPES:
-            if _commands_for_scope(owner.bot, scope):
-                options.append(
-                    discord.SelectOption(
-                        label=SCOPE_LABELS.get(scope, scope.title()),
-                        value=scope,
-                    )
-                )
+        options = [
+            discord.SelectOption(label=SCOPE_LABELS.get(scope, scope.title()), value=scope)
+            for scope in SAFE_SCOPES
+            if _commands_for_scope(owner.bot, scope)
+        ]
+        if not options:
+            options = [discord.SelectOption(label="Aucune commande staff", value="__none__")]
         super().__init__(
-            placeholder="2. Choisir un groupe de commandes",
+            placeholder="2. Groupe de commandes",
             options=options[:25],
             row=3,
         )
 
     async def callback(self, interaction: discord.Interaction):
-        self.owner.selected_permission_scope = self.values[0]
-        self.owner.selected_permission_command = None
-        self.owner.permission_page = 0
+        if self.values[0] != "__none__":
+            self.owner.selected_permission_scope = self.values[0]
+            self.owner.selected_permission_command = None
+            self.owner.permission_page = 0
         await self.owner.refresh(interaction)
 
 
@@ -323,7 +308,7 @@ class SafePermissionCommandSelect(discord.ui.Select):
 
     def __init__(self, owner):
         self.owner = owner
-        scope = getattr(owner, "selected_permission_scope", "moderation")
+        scope = getattr(owner, "selected_permission_scope", _first_valid_scope(owner.bot))
         commands_list = _commands_for_scope(owner.bot, scope)
         page_count = max(1, (len(commands_list) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
         page = max(0, int(getattr(owner, "permission_page", 0))) % page_count
@@ -332,7 +317,7 @@ class SafePermissionCommandSelect(discord.ui.Select):
         chunk = commands_list[start:start + self.PAGE_SIZE]
         options = [
             discord.SelectOption(
-                label=f"{name}",
+                label=name[:100],
                 value=name,
                 description=secure_help_requirement(name)[:100],
             )
@@ -348,7 +333,7 @@ class SafePermissionCommandSelect(discord.ui.Select):
         if not options:
             options = [discord.SelectOption(label="Aucune commande staff", value="__none__")]
         super().__init__(
-            placeholder="3. Choisir la commande",
+            placeholder="3. Commande à restreindre",
             options=options[:25],
             row=4,
         )
@@ -364,16 +349,15 @@ class SafePermissionCommandSelect(discord.ui.Select):
 
 
 async def _permission_decision(view) -> str | None:
-    command_name = getattr(view, "selected_permission_command", None)
-    if not command_name:
+    name = matrix.normalise(getattr(view, "selected_permission_command", None))
+    if not name:
         return None
     role_id = int(getattr(view, "selected_permission_role", view.guild.default_role.id))
     row = await view.bot.db.fetchone(
         "SELECT decision FROM command_role_permissions "
         "WHERE guild_id=? AND role_id=? AND command_name=?",
-        (view.guild.id, role_id, matrix.normalise(command_name)),
+        (view.guild.id, role_id, name),
     )
-    # « allow » n'est plus un état de sécurité valide : il équivaut à hériter.
     return "deny" if row and str(row["decision"]).casefold() == "deny" else None
 
 
@@ -386,23 +370,21 @@ async def _set_restrictive_decision(
     *,
     actor_id: int | None = None,
 ) -> None:
-    """Écriture ACL V65 : uniquement deny ou héritage.
-
-    ``allow`` est accepté en entrée pour la compatibilité avec un ancien callback mais
-    converti en héritage. Ainsi aucun ancien chemin UI ne peut réintroduire l'élévation.
-    """
     await core.ensure_schema(bot)
     name = matrix.normalise(command_name)
     if not name:
         raise ValueError("command_name vide")
-    if decision is None or str(decision).casefold() in {"default", "allow", "inherit"}:
+
+    value = None if decision is None else str(decision).casefold()
+    if value in {None, "default", "allow", "inherit"}:
         await bot.db.execute(
             "DELETE FROM command_role_permissions WHERE guild_id=? AND role_id=? AND command_name=?",
             (int(guild_id), int(role_id), name),
         )
         return
-    if str(decision).casefold() != "deny":
-        raise ValueError("V65 accepte uniquement deny ou héritage")
+    if value != "deny":
+        raise ValueError("Seuls deny et héritage sont autorisés")
+
     await bot.db.execute(
         "INSERT INTO command_role_permissions "
         "(guild_id,role_id,command_name,decision,updated_by,updated_at) "
@@ -421,243 +403,315 @@ def _category_select(owner):
         return setup_ui.CategorySelect(owner)
 
 
+def _remove_all_but_navigation(view) -> None:
+    for child in list(view.children):
+        row = getattr(child, "row", None)
+        if row is None or row != 0:
+            view.remove_item(child)
+
+
+async def _apply_recommended_security(view, *, enabled: bool, actor_id: int) -> None:
+    """Le profil est fixe : à l'activation, toutes les protections supportées sont ON.
+
+    À la désactivation on coupe le module sans effacer les réglages, afin qu'une
+    réactivation retrouve immédiatement le profil SentriX.
+    """
+    if enabled:
+        await view.bot.db.execute(
+            "INSERT INTO automod_settings (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING",
+            (view.guild.id,),
+        )
+        fields = [field for field, _label in setup_ui.AUTOMOD]
+        if fields:
+            assignments = ", ".join(f"{field}=?" for field in fields)
+            await view.bot.db.execute(
+                f"UPDATE automod_settings SET {assignments} WHERE guild_id=?",
+                (*([1] * len(fields)), view.guild.id),
+            )
+    await core.set_module_enabled(
+        view.bot,
+        view.guild.id,
+        "security",
+        enabled,
+        actor_id=actor_id,
+    )
+
+
 def _patch_setup_surface() -> None:
+    """Pose V66 sur la méthode actuellement finale.
+
+    On vérifie le marqueur de LA MÉTHODE et non un marqueur de classe. Si V2/V3 a
+    remplacé render après nous, la prochaine construction de Setup repose V66.
+    """
     cls = setup_ui.SetupView
-    if getattr(cls, "_sentrix_permissions_v65", False):
+    if (
+        getattr(cls.render, "_sentrix_permissions_v66", False)
+        and getattr(cls.build_embed, "_sentrix_permissions_v66", False)
+    ):
         return
 
     previous_render = cls.render
     previous_build_embed = cls.build_embed
 
-    def render_v65(self) -> None:
-        if self.category != "permissions":
-            previous_render(self)
-            if self.category == "security":
-                # Une sélection détaillée reste disponible, plus deux raccourcis ON/OFF.
-                for child in self.children:
-                    if isinstance(child, setup_ui.AutomodSelect):
-                        child.placeholder = "Choisir les protections actives (sélection = ON)"
+    def render_v66(self) -> None:
+        if self.category == "permissions":
+            self.clear_items()
+            self.add_item(_category_select(self))
 
-                all_on = discord.ui.Button(
-                    label="Tout activer",
-                    style=discord.ButtonStyle.success,
-                    row=3,
+            if not hasattr(self, "selected_permission_role"):
+                self.selected_permission_role = self.guild.default_role.id
+            scope = getattr(self, "selected_permission_scope", None)
+            if scope not in SAFE_SCOPES or not _commands_for_scope(self.bot, scope):
+                self.selected_permission_scope = _first_valid_scope(self.bot)
+                self.selected_permission_command = None
+            if not hasattr(self, "permission_page"):
+                self.permission_page = 0
+            if not hasattr(self, "selected_permission_command"):
+                self.selected_permission_command = None
+
+            everyone = discord.ui.Button(
+                label="Cible : @everyone",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
+            restrict = discord.ui.Button(
+                label="Bloquer / rétablir",
+                style=discord.ButtonStyle.danger,
+                row=1,
+            )
+
+            async def everyone_cb(interaction: discord.Interaction):
+                self.selected_permission_role = self.guild.default_role.id
+                self.selected_permission_command = None
+                self.permission_page = 0
+                await self.refresh(interaction)
+
+            async def restrict_cb(interaction: discord.Interaction):
+                name = getattr(self, "selected_permission_command", None)
+                if not name:
+                    return await interaction.response.send_message(
+                        "Choisissez d'abord une commande.", ephemeral=True
+                    )
+                current = await _permission_decision(self)
+                next_value = None if current == "deny" else "deny"
+                await _set_restrictive_decision(
+                    self.bot,
+                    self.guild.id,
+                    int(self.selected_permission_role),
+                    name,
+                    next_value,
+                    actor_id=interaction.user.id,
                 )
-                all_off = discord.ui.Button(
-                    label="Tout désactiver",
-                    style=discord.ButtonStyle.secondary,
-                    row=3,
+                await self.audit(
+                    interaction.user.id,
+                    f"permission:{matrix.normalise(name)}",
+                    "inherit" if next_value is None else "deny",
                 )
+                await self.refresh(interaction)
 
-                async def set_all(interaction: discord.Interaction, enabled: bool):
-                    await self.bot.db.execute(
-                        "INSERT INTO automod_settings (guild_id) VALUES (?) "
-                        "ON CONFLICT(guild_id) DO NOTHING",
-                        (self.guild.id,),
-                    )
-                    columns = ", ".join(f"{field}=?" for field, _ in setup_ui.AUTOMOD)
-                    values = tuple(1 if enabled else 0 for _ in setup_ui.AUTOMOD)
-                    await self.bot.db.execute(
-                        f"UPDATE automod_settings SET {columns} WHERE guild_id=?",
-                        (*values, self.guild.id),
-                    )
-                    await self.audit(
-                        interaction.user.id,
-                        "protections",
-                        "all_on" if enabled else "all_off",
-                    )
-                    await self.refresh(interaction)
-
-                async def on_cb(interaction: discord.Interaction):
-                    await set_all(interaction, True)
-
-                async def off_cb(interaction: discord.Interaction):
-                    await set_all(interaction, False)
-
-                all_on.callback = on_cb
-                all_off.callback = off_cb
-                # Discord limite une vue à 5 lignes ; row=3 reste libre dans la page
-                # sécurité V3 standard.
-                self.add_item(all_on)
-                self.add_item(all_off)
+            everyone.callback = everyone_cb
+            restrict.callback = restrict_cb
+            self.add_item(everyone)
+            self.add_item(restrict)
+            self.add_item(SafePermissionRoleSelect(self))
+            self.add_item(SafePermissionScopeSelect(self))
+            self.add_item(SafePermissionCommandSelect(self))
             return
 
-        self.clear_items()
-        self.add_item(_category_select(self))
-        if not hasattr(self, "selected_permission_role"):
-            self.selected_permission_role = self.guild.default_role.id
-        if getattr(self, "selected_permission_scope", "public") not in SAFE_SCOPES:
-            self.selected_permission_scope = "moderation"
-        if not hasattr(self, "permission_page"):
-            self.permission_page = 0
-        if not hasattr(self, "selected_permission_command"):
-            self.selected_permission_command = None
-
-        everyone = discord.ui.Button(
-            label="Cible : @everyone",
-            style=discord.ButtonStyle.secondary,
-            row=1,
-        )
-        restrict = discord.ui.Button(
-            label="Bloquer / rétablir la commande",
-            style=discord.ButtonStyle.danger,
-            row=1,
-        )
-
-        async def everyone_cb(interaction: discord.Interaction):
-            self.selected_permission_role = self.guild.default_role.id
-            self.selected_permission_command = None
-            self.permission_page = 0
-            await self.refresh(interaction)
-
-        async def restrict_cb(interaction: discord.Interaction):
-            name = getattr(self, "selected_permission_command", None)
-            if not name:
-                return await interaction.response.send_message(
-                    "Choisissez d'abord une commande.", ephemeral=True
-                )
-            current = await _permission_decision(self)
-            next_value = None if current == "deny" else "deny"
-            await _set_restrictive_decision(
-                self.bot,
-                self.guild.id,
-                int(self.selected_permission_role),
-                name,
-                next_value,
-                actor_id=interaction.user.id,
+        if self.category == "security":
+            # On laisse les anciennes couches préparer leur état interne puis on retire
+            # tous leurs contrôles détaillés. L'utilisateur n'a plus qu'un seul bouton.
+            previous_render(self)
+            _remove_all_but_navigation(self)
+            toggle = discord.ui.Button(
+                label="Activer / Désactiver",
+                style=discord.ButtonStyle.primary,
+                row=1,
             )
-            await self.audit(
-                interaction.user.id,
-                f"permission:{matrix.normalise(name)}",
-                "inherit" if next_value is None else "deny",
+
+            async def security_toggle_cb(interaction: discord.Interaction):
+                current = await core.module_enabled(self.bot, self.guild.id, "security")
+                new_value = not current
+                await _apply_recommended_security(
+                    self,
+                    enabled=new_value,
+                    actor_id=interaction.user.id,
+                )
+                await self.audit(
+                    interaction.user.id,
+                    "module:security",
+                    "on" if new_value else "off",
+                )
+                await self.refresh(interaction)
+
+            toggle.callback = security_toggle_cb
+            self.add_item(toggle)
+            return
+
+        previous_render(self)
+
+    async def build_embed_v66(self) -> discord.Embed:
+        if self.category == "permissions":
+            try:
+                await core.ensure_schema(self.bot)
+            except Exception:
+                logger.exception("Schéma permissions indisponible pendant le rendu ; affichage conservé.")
+
+            role_id = int(getattr(self, "selected_permission_role", self.guild.default_role.id))
+            role = self.guild.get_role(role_id)
+            name = matrix.normalise(getattr(self, "selected_permission_command", None)) or None
+            scope = getattr(self, "selected_permission_scope", _first_valid_scope(self.bot))
+            try:
+                decision = await _permission_decision(self)
+            except Exception:
+                decision = None
+
+            target = "`@everyone` — membres du serveur" if role_id == self.guild.default_role.id else (
+                role.mention if role else f"Rôle introuvable `{role_id}`"
             )
-            await self.refresh(interaction)
-
-        everyone.callback = everyone_cb
-        restrict.callback = restrict_cb
-        self.add_item(everyone)
-        self.add_item(restrict)
-        self.add_item(SafePermissionRoleSelect(self))
-        self.add_item(SafePermissionScopeSelect(self))
-        self.add_item(SafePermissionCommandSelect(self))
-
-    async def build_embed_v65(self) -> discord.Embed:
-        if self.category != "permissions":
-            panel = await previous_build_embed(self)
-            if self.category is None and len(panel.fields) < 24:
-                panel.add_field(
-                    name="Permissions sûres",
-                    value=(
-                        "Les droits sensibles utilisent les permissions Discord natives. "
-                        "La page **Permissions** sert uniquement à retirer un accès."
-                    ),
-                    inline=False,
+            count = 0
+            try:
+                row = await self.bot.db.fetchone(
+                    "SELECT COUNT(*) AS n FROM command_role_permissions "
+                    "WHERE guild_id=? AND decision='deny'",
+                    (self.guild.id,),
                 )
-            if self.category == "security" and len(panel.fields) < 24:
-                panel.add_field(
-                    name="Utilisation rapide",
-                    value=(
-                        "Dans le menu, une protection sélectionnée = **ON**. "
-                        "Utilisez **Tout activer** ou **Tout désactiver** pour appliquer "
-                        "un profil complet en un clic."
-                    ),
-                    inline=False,
-                )
+                count = int(row["n"] if row else 0)
+            except Exception:
+                pass
+
+            panel = embeds.brand(
+                "SentriX — Permissions",
+                "Permissions simples et sûres : SentriX peut **retirer** un accès, jamais créer un droit Discord.",
+            )
+            panel.add_field(name="Mode", value=f"**{RUNTIME_MARKER}**", inline=False)
+            panel.add_field(name="Cible", value=target, inline=True)
+            panel.add_field(name="Groupe", value=SCOPE_LABELS.get(scope, scope.title()), inline=True)
+            panel.add_field(
+                name="Commande",
+                value=f"`+{name}` / `/{name}`" if name else "Choisissez une commande",
+                inline=True,
+            )
+            panel.add_field(
+                name="Accès SentriX",
+                value="**BLOQUÉ**" if decision == "deny" else "**HÉRITÉ DE DISCORD**",
+                inline=True,
+            )
+            panel.add_field(
+                name="Permission Discord requise",
+                value=secure_help_requirement(name),
+                inline=True,
+            )
+            panel.add_field(name="Blocages personnalisés", value=str(count), inline=True)
+            panel.add_field(
+                name="Fonctionnement",
+                value=(
+                    "**1.** Choisis un rôle.\n"
+                    "**2.** Choisis le groupe puis la commande.\n"
+                    "**3.** Utilise **Bloquer / rétablir**.\n\n"
+                    "Les commandes `+` et `/` partagent exactement la même règle."
+                ),
+                inline=False,
+            )
+            panel.add_field(
+                name="Sécurité",
+                value=(
+                    "`Ban`, `Kick`, `Mute`, `Clear`, gestion des rôles/salons et autres actions staff "
+                    "exigent toujours la **permission Discord réelle** correspondante.\n"
+                    "Les commandes Owner ne sont jamais configurables ici. Les commandes membre "
+                    "(jeux, argent, classements, invitations, niveaux...) restent publiques."
+                ),
+                inline=False,
+            )
             return panel
 
-        await core.ensure_schema(self.bot)
-        role_id = int(getattr(self, "selected_permission_role", self.guild.default_role.id))
-        role = self.guild.get_role(role_id)
-        target = role.mention if role else "@everyone"
-        scope = getattr(self, "selected_permission_scope", "moderation")
-        name = getattr(self, "selected_permission_command", None)
-        decision = await _permission_decision(self)
-        row = await self.bot.db.fetchone(
-            "SELECT COUNT(*) AS n FROM command_role_permissions "
-            "WHERE guild_id=? AND decision='deny'",
-            (self.guild.id,),
-        )
-        count = int(row["n"] if row else 0)
+        if self.category == "security":
+            enabled = await core.module_enabled(self.bot, self.guild.id, "security")
+            protection_names = [str(label) for _field, label in setup_ui.AUTOMOD]
+            preview = " • ".join(protection_names[:10])
+            if len(protection_names) > 10:
+                preview += f" • +{len(protection_names) - 10} autres"
+            panel = embeds.brand(
+                "SentriX — Sécurité",
+                "Protection automatique préconfigurée par SentriX. Aucun réglage compliqué à faire.",
+            )
+            panel.add_field(
+                name="État",
+                value="**ACTIF**" if enabled else "**INACTIF**",
+                inline=True,
+            )
+            panel.add_field(
+                name="Profil",
+                value=f"**{len(protection_names)} protections** configurées automatiquement",
+                inline=True,
+            )
+            panel.add_field(
+                name="Protections",
+                value=preview or "Profil automatique SentriX",
+                inline=False,
+            )
+            panel.add_field(
+                name="Utilisation",
+                value=(
+                    "Utilise uniquement **Activer / Désactiver**. À l'activation, SentriX applique "
+                    "son profil recommandé. À la désactivation, les réglages sont conservés."
+                ),
+                inline=False,
+            )
+            panel.add_field(
+                name="Permissions des commandes",
+                value=(
+                    "Ce bouton ne donne **aucun droit** aux membres. Les commandes de modération, "
+                    "administration et Owner restent protégées même si Sécurité est désactivée. "
+                    "Les commandes publiques restent utilisables normalement."
+                ),
+                inline=False,
+            )
+            panel.add_field(name="Version du panneau", value=f"**{RUNTIME_MARKER}**", inline=False)
+            return panel
 
-        panel = embeds.brand(
-            "SentriX — Permissions",
-            "Contrôlez les commandes staff sans pouvoir contourner les permissions Discord.",
-        )
-        panel.add_field(name="Cible", value=target, inline=True)
-        panel.add_field(
-            name="Groupe",
-            value=SCOPE_LABELS.get(scope, scope.title()),
-            inline=True,
-        )
-        panel.add_field(
-            name="Commande",
-            value=f"`+{name}` / `/{name}`" if name else "Aucune sélectionnée",
-            inline=True,
-        )
-        panel.add_field(
-            name="Accès SentriX",
-            value="**BLOQUÉ**" if decision == "deny" else "**HÉRITÉ DE DISCORD**",
-            inline=True,
-        )
-        panel.add_field(
-            name="Permission Discord requise",
-            value=secure_help_requirement(name) if name else "Sélectionnez une commande",
-            inline=True,
-        )
-        panel.add_field(
-            name="Règles personnalisées",
-            value=f"**{count}** blocage(s) configuré(s)",
-            inline=True,
-        )
-        panel.add_field(
-            name="Règle de sécurité",
-            value=(
-                "Un rôle SentriX peut **retirer** l'accès à une commande, mais ne peut jamais "
-                "donner `Ban`, `Kick`, `Modérer`, `Gérer les messages`, `Gérer les rôles`, "
-                "`Gérer le serveur` ou `Administrateur` si Discord ne les accorde pas déjà.\n"
-                "Les commandes réservées au propriétaire global ne sont jamais configurables ici."
-            ),
-            inline=False,
-        )
-        panel.add_field(
-            name="Comment l'utiliser",
-            value=(
-                "**1.** Choisissez le rôle à restreindre.\n"
-                "**2.** Choisissez le groupe.\n"
-                "**3.** Choisissez la commande.\n"
-                "**4.** Cliquez sur **Bloquer / rétablir la commande**.\n\n"
-                "La même règle s'applique automatiquement à `+commande` et `/commande`."
-            ),
-            inline=False,
-        )
-        return panel
+        return await previous_build_embed(self)
 
-    cls.render = render_v65
-    cls.build_embed = build_embed_v65
+    render_v66._sentrix_permissions_v66 = True
+    render_v66._sentrix_previous = previous_render
+    build_embed_v66._sentrix_permissions_v66 = True
+    build_embed_v66._sentrix_previous = previous_build_embed
+    cls.render = render_v66
+    cls.build_embed = build_embed_v66
     cls._sentrix_permissions_v65 = True
+    cls._sentrix_permissions_v66 = True
 
 
-async def install(bot: commands.Bot) -> None:
-    if getattr(bot, "_sentrix_permission_setup_v65", False):
+def _install_setup_constructor_guard() -> None:
+    """Réapplique V66 juste avant chaque nouvelle vue Setup.
+
+    C'est le filet de sécurité contre une ancienne couche chargée après ce module.
+    """
+    cls = setup_ui.SetupView
+    current = cls.__init__
+    if getattr(current, "_sentrix_permissions_v66_constructor", False):
         return
 
-    await core.ensure_schema(bot)
+    def guarded_init(self, *args, **kwargs):
+        _patch_setup_surface()
+        return current(self, *args, **kwargs)
 
-    # Migration sûre et idempotente : une ancienne autorisation explicite redevient
-    # l'héritage Discord. Les refus existants sont conservés.
-    await bot.db.execute("DELETE FROM command_role_permissions WHERE decision='allow'")
+    guarded_init._sentrix_permissions_v66_constructor = True
+    guarded_init._sentrix_previous = current
+    cls.__init__ = guarded_init
 
-    # Même fonction pour les imports historiques et pour les deux transports actifs.
+
+def _apply_runtime_patches() -> None:
+    # Toujours poser la sécurité AVANT toute migration/lecture de base susceptible d'échouer.
     matrix.evaluate = secure_evaluate
     matrix.help_requirement = secure_help_requirement
     permission_guard.evaluate = secure_evaluate
     permission_guard.access_matrix.evaluate = secure_evaluate
     core.set_role_command_decision = _set_restrictive_decision
 
-    # La page existe même si une ancienne couche Setup n'a pas été chargée.
     setup_ui.CATEGORIES["permissions"] = (
         "Permissions",
-        "Restreindre les commandes staff par rôle sans contourner les droits Discord.",
+        "Bloquer des commandes staff par rôle sans contourner les permissions Discord.",
     )
     order = list(setup_ui.CATEGORY_ORDER)
     if "permissions" not in order:
@@ -666,17 +720,40 @@ async def install(bot: commands.Bot) -> None:
         setup_ui.CATEGORY_ORDER = tuple(order)
 
     _patch_setup_surface()
+    _install_setup_constructor_guard()
+
+
+async def install(bot: commands.Bot) -> None:
+    # IMPORTANT : ne jamais mettre une requête SQL avant ces patches.
+    _apply_runtime_patches()
+
+    # La migration est utile mais non bloquante. Même avec SQLite verrouillée ou une
+    # migration incomplète, l'UI et la décision runtime sont déjà sécurisées.
+    try:
+        await core.ensure_schema(bot)
+        await bot.db.execute("DELETE FROM command_role_permissions WHERE decision='allow'")
+    except Exception:
+        logger.exception(
+            "Migration des anciennes règles allow impossible ; elles restent ignorées par V66."
+        )
 
     bot._sentrix_permission_setup_v65 = True
+    bot._sentrix_permission_setup_v66 = True
     logger.info(
-        "Permissions V65 actives : droits Discord obligatoires, ACL Setup deny-only, "
-        "owner-global non délégable et UI Permissions/Sécurité simplifiée."
+        "Permissions V66 actives : UI verrouillée, ACL deny-only, permissions Discord natives "
+        "et sécurité préconfigurée à bouton unique."
     )
+
+
+# Le constructeur est protégé dès l'import. Cela ne change pas la matrice globale pendant
+# les tests unitaires ; secure_evaluate n'est branchée qu'au moment de install(bot).
+_install_setup_constructor_guard()
 
 
 __all__ = [
     "CATEGORY_REQUIRED_PERMISSION",
     "SAFE_SCOPES",
+    "RUNTIME_MARKER",
     "secure_evaluate",
     "secure_help_requirement",
     "install",
