@@ -10,6 +10,7 @@ V72 reste une finition ciblée au-dessus de V70/V71 :
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 from typing import Any
 
@@ -21,7 +22,6 @@ from . import control_center_v3
 from . import setup_control_center as setup_ui
 from . import setup_polish_v70 as v70
 from . import setup_v2_core as core
-from . import tickets as ticket_runtime
 
 logger = logging.getLogger("bot.setup-ticket-autoconfig-v72")
 
@@ -33,6 +33,17 @@ _LOCKS: dict[int, asyncio.Lock] = {}
 
 class TicketBootstrapError(RuntimeError):
     pass
+
+
+def _tickets_module():
+    """Retourne le module Tickets réellement chargé par discord.py.
+
+    ``cogs.__init__`` est exécuté avant ``bot.load_extension('cogs.tickets')``. Importer
+    Tickets au niveau module ici conserverait donc une ancienne classe si discord.py
+    réexécute ensuite l'extension. La résolution tardive garantit que V72 patche et utilise
+    toujours le Cog réellement enregistré dans le bot.
+    """
+    return importlib.import_module(f"{__package__}.tickets")
 
 
 def _lock(guild_id: int) -> asyncio.Lock:
@@ -96,8 +107,6 @@ async def _effective_states(view) -> tuple[dict[str, str], dict[str, tuple]]:
             continue
         effective[key] = state_text(state)
 
-    # V68 expose Permissions comme dixième page. Le core historique renvoie True pour
-    # une clé non métier, ce qui conserve le comportement sûr/actif déjà en production.
     permissions_enabled = await core.module_enabled(view.bot, view.guild.id, "permissions")
     effective["permissions"] = "● ACTIF" if permissions_enabled else "○ INACTIF"
     return effective, statuses
@@ -381,10 +390,11 @@ async def _ensure_log_channel(
 
 async def _publish_panel(
     bot: commands.Bot,
-    cog: ticket_runtime.Tickets,
+    cog: Any,
     panel_id: int,
     channel: discord.TextChannel,
 ) -> discord.Message:
+    ticket_runtime = _tickets_module()
     panel = await cog.get_panel(panel_id)
     types = await cog.get_panel_types(panel_id)
     if panel is None or not types:
@@ -418,7 +428,8 @@ async def ensure_ticket_configuration(
     """Crée/répare le minimum utilisable, puis active Tickets seulement à la fin."""
     async with _lock(guild.id):
         cog = bot.get_cog("Tickets")
-        if not isinstance(cog, ticket_runtime.Tickets):
+        required = ("create_panel", "add_type", "get_panel", "get_panel_types", "build_panel_embed")
+        if cog is None or not all(callable(getattr(cog, name, None)) for name in required):
             raise TicketBootstrapError("Le moteur Tickets n'est pas chargé.")
 
         conf = await bot.db.get_guild_config(guild.id)
@@ -461,8 +472,6 @@ async def ensure_ticket_configuration(
                 "UPDATE ticket_panels_v2 SET channel_id=?,enabled=1 WHERE id=?",
                 (panel_channel.id, panel_id),
             )
-            # Tous les types du panel deviennent fonctionnels, mais les choix existants
-            # gagnent toujours grâce à COALESCE.
             await bot.db.execute(
                 "UPDATE ticket_types SET "
                 "staff_role_id=COALESCE(staff_role_id,?),"
@@ -616,6 +625,7 @@ def _install_setup_render() -> None:
 
 
 def _install_ticket_runtime_guard() -> None:
+    ticket_runtime = _tickets_module()
     current = ticket_runtime.Tickets.start_ticket_flow
     if getattr(current, "_sentrix_ticket_module_guard_v72", False):
         return
@@ -638,8 +648,6 @@ def install(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_setup_ticket_autoconfig_v72", False):
         return
 
-    # V70 appelle ces symboles globalement au rendu : pas besoin d'empiler un nouveau
-    # build_embed. V71 garde intégralement ses contrôles Sécurité.
     v70._state = state_text
     v70._home = _home
     v70._footer = _footer
