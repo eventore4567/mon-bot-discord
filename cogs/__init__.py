@@ -49,6 +49,7 @@ from .rolepanel_more_notifications import install as install_more_notification_r
 from .rolepanel_notifications import install as install_notification_rolepanel
 from .security_command_center import install as install_security_command_center
 from .security_runtime_hardening import install as install_security_hardening
+from .security_verification_v71 import install as install_security_verification_v71
 from .server_builder_channel_guides import install as install_server_builder_channel_guides
 from .server_builder_everyone import install_server_builder_everyone_ping
 from .server_builder_existing_bootstrap import install as install_existing_server_bootstrap
@@ -118,12 +119,7 @@ async def _install_configuration_critical_patches(bot: commands.Bot) -> None:
     await _run_installer("moteur de langue setup", install_language_runtime, bot)
     await _run_installer("finaliseur de langue setup", install_language_setup_finalizer, bot)
     await _run_installer("centre de configuration officiel", install_setup_control_center, bot)
-    # Verrouille immédiatement le renderer V3 sur la classe réellement instanciée par
-    # +setup et /setup. La finalisation complète V3 (sécurité, rôles, honeypot...) reste
-    # exécutée plus bas, mais son UI ne dépend plus du succès des sous-systèmes optionnels.
     await _run_installer("renderer Control Center V3", install_control_center_v3_setup_ui, bot)
-    # Le nouveau +setup est installé APRES les anciens correctifs de langue : on rebranche
-    # donc explicitement la langue sur son vrai propriétaire, sans restaurer l'ancienne UI.
     await _run_installer("pont langue setup officiel", install_language_official_bridge, bot)
 
 
@@ -227,8 +223,6 @@ async def _load_official_help(bot: commands.Bot) -> None:
         await _ORIGINAL_LOAD_EXTENSION(bot, _OFFICIAL_HELP_EXTENSION)
         bot._sentrix_help_owner = _OFFICIAL_HELP_EXTENSION
         install_permission_guard(bot)
-        # Le help officiel vient d'être chargé après l'ancien moteur de langue. Le pont
-        # pose ses marqueurs sur le NOUVEL objet +help au lieu de restaurer son prédécesseur.
         await _run_installer("pont langue help officiel", install_language_official_bridge, bot)
         logger.info("Help officiel SentriX chargé : ancien +help remplacé.")
     except Exception:
@@ -250,23 +244,22 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _run_installer("politique finale interactions", install_final_interaction_policy, bot)
     await _run_installer("libération concurrence slash V41", install_command_error_release_v41, bot)
     await _load_official_help(bot)
-    # Dernière autorité Setup/UX : elle s'installe après toutes les couches historiques.
     await _run_installer("Control Center V3", install_control_center_v3, bot)
     await _run_installer("langue Control Center V3", install_control_center_v3_language, bot)
-    # Dernier verrou de sécurité : il ne peut plus être écrasé par une ancienne UI Setup.
     await _run_installer(
         "permissions Discord natives et Setup restrictif V65",
         install_permission_setup_hardening_v65,
         bot,
     )
-    # V68 conserve la sécurité simple. V69 remplace la présentation, puis V70 applique
-    # uniquement la finition visuelle finale sans toucher aux décisions de permission.
     await _run_installer("Setup simple et help V68", install_setup_simple_v68, bot)
     await _run_installer("Control Center visuel V69", install_setup_oxyde_v69, bot)
     await _run_installer("Finition Control Center V70", install_setup_polish_v70, bot)
+    # V71 est volontairement la dernière autorité Sécurité/Setup : elle restaure les
+    # réglages avancés tout en conservant le design V70 et les permissions V68.
+    await _run_installer("Sécurité avancée et vérification V71", install_security_verification_v71, bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
-        "Runtime SentriX finalisé : Control Center V70, sécurité V68, permissions Discord natives, un help, un renderer, un logger et la vérification renforcée."
+        "Runtime SentriX finalisé : Control Center V70 + Sécurité V71, permissions Discord natives, honeypot configurable et vérification renforcée."
     )
 
 
