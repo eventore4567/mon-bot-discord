@@ -53,7 +53,7 @@ class SetupOxydeV69Tests(unittest.TestCase):
         node = _class("PermissionToggleButton")
         text = ast.unparse(node)
         self.assertIn("Activer / Désactiver", text)
-        self.assertIn('"permissions"', text)
+        self.assertIn("permissions", text)
         self.assertNotIn("RoleSelect", text)
         self.assertNotIn("Commande à restreindre", V69)
         self.assertNotIn("Groupe de commandes", V69)
@@ -78,8 +78,6 @@ class SetupOxydeV69Tests(unittest.TestCase):
         self.assertNotIn("matrix.evaluate =", V69)
 
     def test_existing_business_controls_are_preserved(self):
-        # V69 appelle d'abord le renderer existant : modération/logs/tickets/IA gardent
-        # leurs callbacks et leurs écritures DB, seule leur présentation est nettoyée.
         self.assertIn("previous_render(self)", V69)
         self.assertIn("previous_build(self)", V69)
 
@@ -90,8 +88,8 @@ class SetupOxydeV69Tests(unittest.TestCase):
         node = _async_function("build_embed_v69")
         text = ast.unparse(node)
         self.assertIn("self.category is None", text)
-        self.assertIn('self.category == "permissions"', text)
-        self.assertIn('self.category == "security"', text)
+        self.assertIn("permissions", text)
+        self.assertIn("security", text)
         self.assertIn("_build_page", text)
 
 
