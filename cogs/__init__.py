@@ -38,6 +38,7 @@ from .natural_music_intent_guard import install as install_natural_music_intent_
 from .no_auto_tracker import install as install_no_auto_tracker
 from .owner_sanction_immunity import install as install_owner_sanction_immunity
 from .permission_guard import install as install_permission_guard
+from .permission_setup_hardening_v65 import install as install_permission_setup_hardening_v65
 from .poll_ui import install_poll_ui
 from .production_ops import install as install_production_ops
 from .public_language_choice import install as install_public_language_choice
@@ -249,9 +250,15 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     # Dernière autorité Setup/UX : elle s'installe après toutes les couches historiques.
     await _run_installer("Control Center V3", install_control_center_v3, bot)
     await _run_installer("langue Control Center V3", install_control_center_v3_language, bot)
+    # Dernier verrou de sécurité : il ne peut plus être écrasé par une ancienne UI Setup.
+    await _run_installer(
+        "permissions Discord natives et Setup restrictif V65",
+        install_permission_setup_hardening_v65,
+        bot,
+    )
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
-        "Runtime SentriX finalisé : Control Center V3, un help, un renderer, un logger et la vérification renforcée."
+        "Runtime SentriX finalisé : Control Center V3, permissions V65, un help, un renderer, un logger et la vérification renforcée."
     )
 
 
