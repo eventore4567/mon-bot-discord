@@ -322,6 +322,10 @@ def install(bot: commands.Bot) -> None:
         "Choisissez individuellement les protections anti ; les permissions Discord sont automatiques.",
     )
 
+    # V76 ne remplace que la page Modération : la sécurité V75 reste l'autorité finale ici.
+    from . import setup_moderation_clear_v76 as moderation_v76
+    moderation_v76.install(bot)
+
     bot._sentrix_setup_security_choice_v75 = True
     logger.info(
         "%s installé : protections anti sélectionnables, permissions Kick/Ban/etc. automatiques.",
