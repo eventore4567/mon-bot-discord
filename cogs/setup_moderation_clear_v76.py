@@ -1,8 +1,14 @@
-"""SentriX V76 — page Modération plus simple à comprendre.
+"""SentriX V76 — page Modération utile et sans configuration de rôles.
 
-Cette couche ne change pas la logique de permissions de V74/V75. Elle clarifie seulement
-l'interface : on choisit un rôle Discord existant, le niveau de droits à lui ajouter et,
-facultativement, un membre qui recevra ce rôle immédiatement.
+Cette couche remplace l'ancien bloc « créer/préparer un rôle de modération » par des
+réglages qui agissent réellement sur le comportement de la modération :
+- activation/désactivation du module ;
+- seuil de bannissement automatique après avertissements ;
+- messages privés envoyés pour chaque type de sanction, avec texte par défaut,
+  désactivation ou personnalisation.
+
+Les permissions restent entièrement basées sur les permissions Discord réelles et la
+hiérarchie des rôles. Aucun rôle de modération n'est créé ou modifié ici.
 """
 from __future__ import annotations
 
@@ -12,22 +18,117 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
-from . import setup_control_center as setup_ui
 from . import setup_experience_v74 as v74
+from . import setup_control_center as setup_ui
 from . import setup_v2_core as core
 
-logger = logging.getLogger("bot.setup-moderation-clear-v76")
-RUNTIME_MARKER = "Setup Moderation Clear V76"
+logger = logging.getLogger("bot.setup-moderation-useful-v76")
+RUNTIME_MARKER = "Setup Moderation Useful V76"
+
+DM_ACTIONS: tuple[tuple[str, str], ...] = (
+    ("ban", "Bannissement"),
+    ("tempban", "Bannissement temporaire"),
+    ("kick", "Expulsion"),
+    ("mute", "Mute / timeout"),
+    ("warn", "Avertissement"),
+    ("unban", "Débannissement"),
+    ("unmute", "Retrait du mute"),
+)
+
+FALLBACK_DM_TEMPLATES = {
+    "ban": "Vous avez été banni de {serveur}.\nRaison : {raison}",
+    "tempban": "Vous avez été banni temporairement de {serveur} pendant {duree}.\nRaison : {raison}",
+    "kick": "Vous avez été expulsé de {serveur}.\nRaison : {raison}",
+    "mute": "Vous avez été rendu muet sur {serveur} pendant {duree}.\nRaison : {raison}",
+    "warn": "Vous avez reçu un avertissement sur {serveur}.\nRaison : {raison}",
+    "unban": "Votre bannissement de {serveur} a été retiré.\nRaison : {raison}",
+    "unmute": "Votre mute sur {serveur} a été retiré.\nRaison : {raison}",
+}
+
+
+def _row_value(row, key: str, default=None):
+    if row is None:
+        return default
+    try:
+        value = row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if value is None else value
+
+
+def _dm_label(action: str) -> str:
+    return dict(DM_ACTIONS).get(action, action)
+
+
+def _default_dm_template(view: v74.SentriXSetupV74, action: str) -> str:
+    cog = view.bot.get_cog("Moderation")
+    templates = getattr(cog, "DEFAULT_DM_TEMPLATES", None) if cog is not None else None
+    if isinstance(templates, dict) and action in templates:
+        return str(templates[action])
+    return FALLBACK_DM_TEMPLATES[action]
+
+
+async def _dm_settings(view: v74.SentriXSetupV74) -> dict[str, object]:
+    rows = await view.bot.db.fetchall(
+        "SELECT action, message, enabled FROM sanction_dm_templates WHERE guild_id = ?",
+        (view.guild.id,),
+    )
+    return {str(_row_value(row, "action", "")): row for row in rows}
+
+
+async def _set_dm_default(view: v74.SentriXSetupV74, action: str) -> None:
+    await view.bot.db.execute(
+        "DELETE FROM sanction_dm_templates WHERE guild_id = ? AND action = ?",
+        (view.guild.id, action),
+    )
+
+
+async def _set_dm_disabled(view: v74.SentriXSetupV74, action: str) -> None:
+    await view.bot.db.execute(
+        """
+        INSERT INTO sanction_dm_templates (guild_id, action, message, enabled)
+        VALUES (?, ?, '', 0)
+        ON CONFLICT(guild_id, action)
+        DO UPDATE SET message = '', enabled = 0
+        """,
+        (view.guild.id, action),
+    )
+
+
+async def _set_dm_custom(view: v74.SentriXSetupV74, action: str, message: str) -> None:
+    await view.bot.db.execute(
+        """
+        INSERT INTO sanction_dm_templates (guild_id, action, message, enabled)
+        VALUES (?, ?, ?, 1)
+        ON CONFLICT(guild_id, action)
+        DO UPDATE SET message = excluded.message, enabled = 1
+        """,
+        (view.guild.id, action, message),
+    )
 
 
 async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
     enabled = await core.module_enabled(self.bot, self.guild.id, "moderation")
     conf = await self.bot.db.get_guild_config(self.guild.id)
-    mute_role = v74._role_from_config(self.guild, setup_ui._get(conf, "mute_role"))
-    warn_role = v74._role_from_config(self.guild, setup_ui._get(conf, "warn_role"))
+    try:
+        warn_threshold = int(setup_ui._get(conf, "warn_ban_threshold") or 0)
+    except (TypeError, ValueError):
+        warn_threshold = 0
+
+    dm_rows = await _dm_settings(self)
+    active_dm_count = sum(
+        1
+        for action, _label in DM_ACTIONS
+        if action not in dm_rows or bool(_row_value(dm_rows.get(action), "enabled", 1))
+    )
+    custom_dm_count = sum(
+        1
+        for action, _label in DM_ACTIONS
+        if action in dm_rows and bool(_row_value(dm_rows.get(action), "enabled", 0))
+    )
 
     status = discord.ui.Button(
-        label="Activé" if enabled else "Désactivé",
+        label="Activée" if enabled else "Désactivée",
         style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary,
         disabled=True,
     )
@@ -37,23 +138,28 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
         discord.ui.Section(
             discord.ui.TextDisplay(
                 "# 🛡️ Modération\n"
-                "SentriX utilise les **permissions Discord du rôle** pour savoir ce qu'un membre "
-                "a le droit de faire. Vous n'avez donc pas besoin de configurer chaque commande "
-                "une par une.\n\n"
-                "La partie ci-dessous sert simplement à **ajouter automatiquement les bonnes "
-                "permissions à un rôle Discord existant**."
+                "Ici, **aucun rôle de modération n'est à créer ou à préparer**. SentriX utilise "
+                "directement les permissions Discord de chaque membre et respecte la hiérarchie "
+                "des rôles.\n\n"
+                "Cette page sert uniquement à régler le **comportement des sanctions**."
             ),
             accessory=v74.v73._thumbnail(self.bot),
         )
     )
     container.add_item(discord.ui.Separator())
 
-    state_text = (
-        "### État\n"
-        f"Modération SentriX : **{'active' if enabled else 'désactivée'}**\n"
-        "Les permissions réelles restent contrôlées par Discord et par la hiérarchie des rôles."
+    threshold_text = (
+        f"Ban automatique après **{warn_threshold} avertissements**"
+        if warn_threshold > 0
+        else "Ban automatique après avertissements : **désactivé**"
     )
-    container.add_item(discord.ui.Section(discord.ui.TextDisplay(state_text), accessory=status))
+    summary = (
+        "### État actuel\n"
+        f"{threshold_text}\n"
+        f"MP de sanctions : **{active_dm_count}/{len(DM_ACTIONS)} actifs**"
+        + (f" · **{custom_dm_count} personnalisés**" if custom_dm_count else "")
+    )
+    container.add_item(discord.ui.Section(discord.ui.TextDisplay(summary), accessory=status))
 
     toggle = discord.ui.Button(
         label="Désactiver la modération" if enabled else "Activer la modération",
@@ -78,224 +184,218 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
 
     container.add_item(
         discord.ui.TextDisplay(
-            "### Donner des droits de modération à un rôle\n"
-            "Vous avez déjà un rôle comme **@Modérateur** ? Choisissez-le ici et SentriX ajoute "
-            "les permissions correspondant au niveau choisi.\n\n"
-            "**1. Choisissez le rôle** qui doit pouvoir modérer.\n"
-            "**2. Choisissez ce qu'il pourra faire.**\n"
-            "**3. Facultatif : choisissez un membre** si vous voulez lui donner ce rôle tout de suite."
+            "### Bannissement automatique après avertissements\n"
+            "Choisissez combien d'avertissements un membre peut recevoir avant que SentriX le "
+            "bannisse automatiquement. **Désactivé** signifie qu'un warn ne déclenche jamais de ban."
         )
     )
 
-    role_select = discord.ui.RoleSelect(
-        placeholder="1. Choisir le rôle (ex. Modérateur)",
+    threshold_options = [
+        discord.SelectOption(
+            label="Désactivé",
+            value="0",
+            description="Les avertissements ne bannissent jamais automatiquement.",
+            default=warn_threshold == 0,
+        ),
+        discord.SelectOption(
+            label="2 avertissements",
+            value="2",
+            description="Ban automatique au deuxième avertissement.",
+            default=warn_threshold == 2,
+        ),
+        discord.SelectOption(
+            label="3 avertissements",
+            value="3",
+            description="Réglage recommandé pour la plupart des serveurs.",
+            default=warn_threshold == 3,
+        ),
+        discord.SelectOption(
+            label="4 avertissements",
+            value="4",
+            description="Tolérance plus élevée avant le bannissement.",
+            default=warn_threshold == 4,
+        ),
+        discord.SelectOption(
+            label="5 avertissements",
+            value="5",
+            description="Tolérance maximale proposée dans le Setup.",
+            default=warn_threshold == 5,
+        ),
+    ]
+    warn_select = discord.ui.Select(
+        placeholder="Choisir le seuil d'avertissements",
         min_values=1,
         max_values=1,
+        options=threshold_options,
     )
-    profile_select = discord.ui.Select(
-        placeholder="2. Choisir les droits de ce rôle",
+
+    async def set_warn_threshold(interaction: discord.Interaction):
+        new_threshold = int(warn_select.values[0])
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await self.bot.db.set_guild_config(
+            self.guild.id,
+            "warn_ban_threshold",
+            new_threshold,
+        )
+        await self.refresh(interaction)
+
+    warn_select.callback = set_warn_threshold
+    container.add_item(discord.ui.ActionRow(warn_select))
+    container.add_item(discord.ui.Separator())
+
+    container.add_item(
+        discord.ui.TextDisplay(
+            "### Messages privés envoyés lors des sanctions\n"
+            "Choisissez une sanction, puis décidez si le membre reçoit le **message SentriX par "
+            "défaut**, **aucun MP**, ou votre **propre texte**.\n"
+            "Variables disponibles : `{membre}` `{serveur}` `{raison}` `{duree}` `{moderateur}` `{action}`"
+        )
+    )
+
+    selected_action = getattr(self, "moderation_dm_action", "ban")
+    if selected_action not in dict(DM_ACTIONS):
+        selected_action = "ban"
+        self.moderation_dm_action = selected_action
+
+    action_select = discord.ui.Select(
+        placeholder="Choisir la sanction à configurer",
         min_values=1,
         max_values=1,
         options=[
             discord.SelectOption(
-                label="Modération légère",
-                value="helper",
-                description="Gérer les messages et les pseudos.",
-            ),
-            discord.SelectOption(
-                label="Modération standard",
-                value="moderator",
-                description="Messages, pseudos, timeout, kick et vocal.",
-            ),
-            discord.SelectOption(
-                label="Modération avancée",
-                value="senior",
-                description="Standard + ban et gestion des salons, sans Administrateur.",
-            ),
+                label=label,
+                value=action,
+                default=action == selected_action,
+            )
+            for action, label in DM_ACTIONS
         ],
     )
-    member_select = discord.ui.UserSelect(
-        placeholder="3. Donner ce rôle à un membre (facultatif)",
-        min_values=0,
-        max_values=1,
-    )
 
-    async def pick_role(interaction: discord.Interaction):
-        self.moderation_role_id = role_select.values[0].id
-        await interaction.response.defer()
-
-    async def pick_profile(interaction: discord.Interaction):
-        self.moderation_profile = profile_select.values[0]
-        await interaction.response.defer()
-
-    async def pick_member(interaction: discord.Interaction):
-        self.moderation_member_id = member_select.values[0].id if member_select.values else None
-        await interaction.response.defer()
-
-    role_select.callback = pick_role
-    profile_select.callback = pick_profile
-    member_select.callback = pick_member
-    container.add_item(discord.ui.ActionRow(role_select))
-    container.add_item(discord.ui.ActionRow(profile_select))
-    container.add_item(discord.ui.ActionRow(member_select))
-
-    apply_profile = discord.ui.Button(
-        label="Enregistrer les permissions",
-        style=discord.ButtonStyle.success,
-    )
-
-    async def apply_moderation_profile(interaction: discord.Interaction):
-        role = self.guild.get_role(self.moderation_role_id) if self.moderation_role_id else None
-        if role is None or role.is_default() or role.managed:
-            return await interaction.response.send_message(
-                embed=embeds.error("Choisissez d'abord un rôle Discord que SentriX peut modifier."),
-                ephemeral=True,
-            )
-
-        me = self.guild.me
-        if me is None or not me.guild_permissions.manage_roles:
-            return await interaction.response.send_message(
-                embed=embeds.error(
-                    "SentriX a besoin de la permission **Gérer les rôles** pour modifier ce rôle."
-                ),
-                ephemeral=True,
-            )
-        if role >= me.top_role:
-            return await interaction.response.send_message(
-                embed=embeds.error(
-                    "Le rôle choisi est placé trop haut. Placez le rôle **SentriX** au-dessus de celui-ci."
-                ),
-                ephemeral=True,
-            )
-
-        profile_key = self.moderation_profile or "moderator"
-        profile_label, flags = v74.MODERATION_PROFILES.get(
-            profile_key,
-            v74.MODERATION_PROFILES["moderator"],
-        )
-        missing_for_bot = [
-            flag for flag in flags if not getattr(me.guild_permissions, flag, False)
-        ]
-        if missing_for_bot:
-            return await interaction.response.send_message(
-                embed=embeds.error(
-                    "SentriX ne possède pas encore toutes les permissions nécessaires pour "
-                    "appliquer ce niveau. Vérifiez les permissions de son rôle Discord."
-                ),
-                ephemeral=True,
-            )
-
+    async def choose_action(interaction: discord.Interaction):
+        self.moderation_dm_action = action_select.values[0]
         if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
+            await interaction.response.defer()
+        await self.refresh(interaction)
 
-        permissions = role.permissions
-        permissions.update(**{flag: True for flag in flags})
-        try:
-            await role.edit(
-                permissions=permissions,
-                reason=f"SentriX V76 : niveau de modération {profile_key}",
-            )
-            await self.bot.db.set_guild_config(self.guild.id, "mod_role", role.id)
+    action_select.callback = choose_action
+    container.add_item(discord.ui.ActionRow(action_select))
 
-            assigned = False
-            if self.moderation_member_id:
-                member = self.guild.get_member(self.moderation_member_id)
-                if member is not None and role not in member.roles:
-                    await member.add_roles(
-                        role,
-                        reason="SentriX V76 : attribution du rôle de modération",
-                    )
-                    assigned = True
+    row = dm_rows.get(selected_action)
+    if row is None:
+        dm_state = "Texte SentriX par défaut"
+    elif not bool(_row_value(row, "enabled", 0)):
+        dm_state = "MP désactivé"
+    else:
+        dm_state = "Texte personnalisé"
 
-            message = (
-                f"Le rôle **{role.name}** est maintenant configuré en **{profile_label}**."
-            )
-            if assigned:
-                message += " Le rôle a aussi été donné au membre choisi."
-            elif self.moderation_member_id is None:
-                message += " Aucun membre n'a été choisi : seul le rôle a été configuré."
+    state_button = discord.ui.Button(
+        label=f"{_dm_label(selected_action)} : {dm_state}"[:80],
+        style=(
+            discord.ButtonStyle.danger
+            if dm_state == "MP désactivé"
+            else discord.ButtonStyle.success
+        ),
+        disabled=True,
+    )
+    container.add_item(discord.ui.ActionRow(state_button))
 
-            await interaction.followup.send(
-                embed=embeds.success(message),
-                ephemeral=True,
-            )
-        except discord.HTTPException:
-            await interaction.followup.send(
-                embed=embeds.error(
-                    "Discord a refusé la modification. Vérifiez que le rôle SentriX est au-dessus "
-                    "du rôle choisi et qu'il possède les permissions nécessaires."
-                ),
-                ephemeral=True,
-            )
+    use_default = discord.ui.Button(
+        label="Texte par défaut",
+        style=discord.ButtonStyle.secondary,
+    )
+    customize = discord.ui.Button(
+        label="Personnaliser le MP",
+        style=discord.ButtonStyle.primary,
+    )
+    disable_dm = discord.ui.Button(
+        label="Désactiver le MP",
+        style=discord.ButtonStyle.danger,
+    )
 
-    apply_profile.callback = apply_moderation_profile
-    container.add_item(discord.ui.ActionRow(apply_profile))
+    async def use_default_dm(interaction: discord.Interaction):
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await _set_dm_default(self, selected_action)
+        await self.refresh(interaction)
 
-    container.add_item(discord.ui.Separator())
-    container.add_item(
-        discord.ui.TextDisplay(
-            "### Rôles ajoutés automatiquement après une sanction (facultatif)\n"
-            "Ces rôles **ne donnent pas accès aux commandes de modération**. Ils servent seulement "
-            "de badge automatique : SentriX peut en ajouter un pendant un mute ou après un warn."
+    async def disable_selected_dm(interaction: discord.Interaction):
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await _set_dm_disabled(self, selected_action)
+        await self.refresh(interaction)
+
+    async def customize_dm(interaction: discord.Interaction):
+        current_row = dm_rows.get(selected_action)
+        current_text = (
+            str(_row_value(current_row, "message", ""))
+            if current_row is not None and bool(_row_value(current_row, "enabled", 0))
+            else _default_dm_template(self, selected_action)
         )
-    )
+        action = selected_action
+        label = _dm_label(action)
 
-    mute_select = discord.ui.RoleSelect(
-        placeholder="Badge temporaire donné pendant un mute",
-        min_values=0,
-        max_values=1,
-    )
-    warn_select = discord.ui.RoleSelect(
-        placeholder="Badge donné automatiquement après un warn",
-        min_values=0,
-        max_values=1,
-    )
+        class SanctionDMModal(discord.ui.Modal):
+            def __init__(modal_self):
+                super().__init__(title=f"MP — {label}"[:45])
+                modal_self.message_input = discord.ui.TextInput(
+                    label="Message envoyé au membre",
+                    style=discord.TextStyle.paragraph,
+                    default=current_text[:1900],
+                    max_length=1900,
+                    required=True,
+                )
+                modal_self.add_item(modal_self.message_input)
 
-    async def set_mute_role(interaction: discord.Interaction):
-        role = mute_select.values[0] if mute_select.values else None
-        await v74._set_optional_role(self, "mute_role", role)
-        await self.refresh(interaction)
+            async def on_submit(modal_self, modal_interaction: discord.Interaction):
+                text = str(modal_self.message_input.value).strip()
+                if not text:
+                    return await modal_interaction.response.send_message(
+                        embed=embeds.error("Le message ne peut pas être vide."),
+                        ephemeral=True,
+                    )
+                await _set_dm_custom(self, action, text)
+                await modal_interaction.response.send_message(
+                    embed=embeds.success(
+                        f"Le MP de **{label}** est maintenant personnalisé. "
+                        "Le nouveau texte sera utilisé dès la prochaine sanction."
+                    ),
+                    ephemeral=True,
+                )
 
-    async def set_warn_role(interaction: discord.Interaction):
-        role = warn_select.values[0] if warn_select.values else None
-        await v74._set_optional_role(self, "warn_role", role)
-        await self.refresh(interaction)
+        await interaction.response.send_modal(SanctionDMModal())
 
-    mute_select.callback = set_mute_role
-    warn_select.callback = set_warn_role
-    container.add_item(discord.ui.ActionRow(mute_select))
-    container.add_item(discord.ui.ActionRow(warn_select))
-
-    current_badges = (
-        "**Actuellement :** "
-        f"mute → **{mute_role.name if mute_role else 'aucun badge'}** · "
-        f"warn → **{warn_role.name if warn_role else 'aucun badge'}**"
-    )
-    container.add_item(discord.ui.TextDisplay(current_badges))
+    use_default.callback = use_default_dm
+    customize.callback = customize_dm
+    disable_dm.callback = disable_selected_dm
+    container.add_item(discord.ui.ActionRow(use_default, customize, disable_dm))
 
     self._add_navigation(container)
     self.add_item(container)
 
 
 def install(bot: commands.Bot) -> None:
-    if getattr(bot, "_sentrix_setup_moderation_clear_v76", False):
+    if getattr(bot, "_sentrix_setup_moderation_useful_v76", False):
         return
 
     cls = v74.SentriXSetupV74
     current = cls._build_moderation
-    if not getattr(current, "_sentrix_moderation_clear_v76", False):
-        _build_moderation_v76._sentrix_moderation_clear_v76 = True
+    if not getattr(current, "_sentrix_moderation_useful_v76", False):
+        _build_moderation_v76._sentrix_moderation_useful_v76 = True
         _build_moderation_v76._sentrix_previous = current
         cls._build_moderation = _build_moderation_v76
 
     v74.CATEGORY_META["moderation"] = (
         "🛡️",
         "Modération",
-        "Choisissez un rôle et son niveau de droits ; SentriX applique les permissions Discord.",
+        "Sanctions, avertissements automatiques et messages privés — sans rôle à configurer.",
     )
 
-    bot._sentrix_setup_moderation_clear_v76 = True
-    logger.info("%s installé : page Modération simplifiée et explicitée.", RUNTIME_MARKER)
+    bot._sentrix_setup_moderation_useful_v76 = True
+    logger.info(
+        "%s installé : rôle builder supprimé, seuil de warns et MP de sanctions ajoutés.",
+        RUNTIME_MARKER,
+    )
 
 
 __all__ = ["install"]
