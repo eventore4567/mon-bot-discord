@@ -57,6 +57,7 @@ from .server_choice_roles import install as install_server_choice_roles
 from .setup_control_center import install as install_setup_control_center
 from .setup_simple_v68 import install as install_setup_simple_v68
 from .setup_oxyde_v69 import install as install_setup_oxyde_v69
+from .setup_polish_v70 import install as install_setup_polish_v70
 from .shop_default_prices import install as install_shop_default_prices
 from .smart_creation_guard_v47 import install as install_smart_creation_guard_v47
 from .slash_reliability_v7 import install as install_slash_reliability_v7
@@ -258,13 +259,14 @@ async def finalize_runtime(bot: commands.Bot) -> None:
         install_permission_setup_hardening_v65,
         bot,
     )
-    # V68 conserve la sécurité simple. V69, chargée juste après, remplace entièrement
-    # la présentation du Setup sans toucher aux décisions de permission.
+    # V68 conserve la sécurité simple. V69 remplace la présentation, puis V70 applique
+    # uniquement la finition visuelle finale sans toucher aux décisions de permission.
     await _run_installer("Setup simple et help V68", install_setup_simple_v68, bot)
     await _run_installer("Control Center visuel V69", install_setup_oxyde_v69, bot)
+    await _run_installer("Finition Control Center V70", install_setup_polish_v70, bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
-        "Runtime SentriX finalisé : Control Center V69, sécurité V68, permissions Discord natives, un help, un renderer, un logger et la vérification renforcée."
+        "Runtime SentriX finalisé : Control Center V70, sécurité V68, permissions Discord natives, un help, un renderer, un logger et la vérification renforcée."
     )
 
 
