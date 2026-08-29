@@ -57,6 +57,7 @@ from .server_builder_ready_setup import install as install_server_builder_ready_
 from .server_choice_roles import install as install_server_choice_roles
 from .setup_components_v73 import install as install_setup_components_v73
 from .setup_experience_v74 import install as install_setup_experience_v74
+from .setup_security_choice_v75 import install as install_setup_security_choice_v75
 from .setup_control_center import install as install_setup_control_center
 from .setup_simple_v68 import install as install_setup_simple_v68
 from .setup_oxyde_v69 import install as install_setup_oxyde_v69
@@ -261,13 +262,14 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     # corriger uniquement l'accueil et le système Tickets sans remplacer ses contrôles.
     await _run_installer("Sécurité avancée et vérification V71", install_security_verification_v71, bot)
     await _run_installer("Tickets auto-configurables et états Setup V72", install_setup_ticket_autoconfig_v72, bot)
-    # V73 garde le style Components V2. V74 est la dernière autorité UX :
-    # sécurité en un clic, permissions Discord natives, tickets complets et modération claire.
+    # V73 garde le style Components V2. V74 construit l'expérience finale, puis V75
+    # rend toutes les protections anti sélectionnables sans réintroduire de permissions manuelles.
     await _run_installer("Control Center Components V2 V73", install_setup_components_v73, bot)
     await _run_installer("Setup Experience V74", install_setup_experience_v74, bot)
+    await _run_installer("Setup Security Choice V75", install_setup_security_choice_v75, bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
-        "Runtime SentriX finalisé : Setup V74 + Components V2 V73 + Sécurité V71 + Tickets V72."
+        "Runtime SentriX finalisé : Setup V75/V74 + Components V2 V73 + Sécurité V71 + Tickets V72."
     )
 
 
