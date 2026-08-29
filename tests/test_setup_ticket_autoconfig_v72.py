@@ -85,7 +85,7 @@ class SetupTicketAutoconfigV72Tests(unittest.TestCase):
         ticket_source = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
         self.assertIn("class TicketPanelView(discord.ui.View):", ticket_source)
         self.assertIn("super().__init__(timeout=None)", ticket_source)
-        self.assertIn('custom_id=f"ticket_open_btn:{ticket_type[\'id\']}"', ticket_source)
+        self.assertIn("custom_id=f\"ticket_open_btn:{ticket_type['id']}\"", ticket_source)
 
 
 if __name__ == "__main__":
