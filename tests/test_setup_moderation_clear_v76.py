@@ -6,31 +6,37 @@ V76 = ROOT / "cogs" / "setup_moderation_clear_v76.py"
 V75 = ROOT / "cogs" / "setup_security_choice_v75.py"
 
 
-def test_moderation_setup_explains_the_three_steps_clearly():
+def test_role_builder_is_removed_from_moderation_setup():
     source = V76.read_text(encoding="utf-8")
 
-    assert "Donner des droits de modération à un rôle" in source
-    assert "1. Choisir le rôle (ex. Modérateur)" in source
-    assert "2. Choisir les droits de ce rôle" in source
-    assert "3. Donner ce rôle à un membre (facultatif)" in source
-    assert "Enregistrer les permissions" in source
+    assert "Rôle Discord à configurer" not in source
+    assert "Choisir les droits de ce rôle" not in source
+    assert "Donner ce rôle à un membre" not in source
+    assert "Enregistrer les permissions" not in source
+    assert "aucun rôle de modération n'est à créer ou à préparer" in source
 
 
-def test_moderation_profiles_are_named_by_user_intent():
+def test_warn_auto_ban_is_configurable_from_setup():
     source = V76.read_text(encoding="utf-8")
 
-    assert "Modération légère" in source
-    assert "Modération standard" in source
-    assert "Modération avancée" in source
-    assert "sans Administrateur" in source
+    assert "Bannissement automatique après avertissements" in source
+    assert "warn_ban_threshold" in source
+    assert "2 avertissements" in source
+    assert "3 avertissements" in source
+    assert "5 avertissements" in source
 
 
-def test_sanction_roles_are_explained_as_optional_badges():
+def test_sanction_dm_configuration_is_available_from_setup():
     source = V76.read_text(encoding="utf-8")
 
-    assert "ne donnent pas accès aux commandes de modération" in source
-    assert "Badge temporaire donné pendant un mute" in source
-    assert "Badge donné automatiquement après un warn" in source
+    assert "Messages privés envoyés lors des sanctions" in source
+    assert "sanction_dm_templates" in source
+    assert "Texte par défaut" in source
+    assert "Personnaliser le MP" in source
+    assert "Désactiver le MP" in source
+    assert "{membre}" in source
+    assert "{serveur}" in source
+    assert "{raison}" in source
 
 
 def test_v76_is_loaded_after_v75_security_patch():
