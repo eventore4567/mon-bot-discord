@@ -1,9 +1,8 @@
 """V5 — autorité finale des erreurs utilisateur SentriX.
 
-Les erreurs ne passent plus par les monkey-patches visuels successifs. On construit un vrai
-``discord.Embed`` et on appelle le transport discord.py d'origine. Cela garantit le bloc
-embed Discord (barre colorée + carte) même si une ancienne couche de rendu est encore
-chargée ailleurs dans le runtime.
+Une commande qui a déjà produit une réponse ne doit pas recevoir une deuxième carte
+d'erreur. Les erreurs remplacent donc la réponse existante lorsque c'est possible ; un
+follow-up n'est utilisé que lorsqu'aucune réponse originale exploitable n'existe.
 """
 from __future__ import annotations
 
@@ -32,8 +31,6 @@ def _clip(value: object, limit: int = 3900) -> str:
 
 
 def _panel(title: str, description: str, *, warning: bool = False) -> discord.Embed:
-    # Ne PAS utiliser utils.embeds ici : le but de cette couche est précisément de sortir
-    # du pipeline de renderers et d'envoyer une carte Discord native, sans transformation.
     embed = discord.Embed(
         title=_clip(title, 256) or "Erreur de commande",
         description=f"{BAR}\n{_clip(description)}",
@@ -109,7 +106,6 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
     if cls == "BotPermissionError" or isinstance(base, commands.CheckFailure):
         message = str(getattr(base, "message", "") or "Vous n’êtes pas autorisé à utiliser cette commande.")
         return _panel("Accès refusé", message)
-
     if isinstance(base, discord.Forbidden):
         return _panel(
             "Permission du bot insuffisante",
@@ -169,22 +165,39 @@ async def _raw_prefix_send(ctx: commands.Context, panel: discord.Embed) -> None:
         )
         kwargs["mention_author"] = False
     try:
-        await raw_send(ctx.channel, **kwargs)
+        sent = await raw_send(ctx.channel, **kwargs)
     except discord.HTTPException:
         kwargs.pop("reference", None)
         kwargs.pop("mention_author", None)
-        await raw_send(ctx.channel, **kwargs)
+        sent = await raw_send(ctx.channel, **kwargs)
+    ctx._sentrix_response_sent = True
+    if sent is not None:
+        ctx._sentrix_last_response = sent
+
+
+async def _replace_prefix_response(ctx: commands.Context, panel: discord.Embed) -> bool:
+    """Remplace la dernière réponse d'une commande au lieu d'en créer une deuxième."""
+    message = getattr(ctx, "_sentrix_last_response", None)
+    if not isinstance(message, discord.Message):
+        return False
+    raw_edit = policy._unwrap(discord.Message.edit)
+    try:
+        await raw_edit(message, content=None, embed=panel, attachments=[])
+        return True
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        logger.debug("Impossible de remplacer la réponse préfixée existante.", exc_info=True)
+        return False
 
 
 async def _raw_slash_send(interaction: discord.Interaction, panel: discord.Embed) -> None:
-    # Un slash différé possède déjà un message original vide : le remplir en embed natif.
     response_type = getattr(interaction.response, "type", None)
     deferred = response_type in {
         discord.InteractionResponseType.deferred_channel_message,
         discord.InteractionResponseType.deferred_message_update,
     }
+    raw_edit = policy._unwrap(discord.Interaction.edit_original_response)
+
     if interaction.response.is_done() and deferred:
-        raw_edit = policy._unwrap(discord.Interaction.edit_original_response)
         await raw_edit(interaction, content=None, embed=panel, attachments=[], view=None)
         return
 
@@ -193,20 +206,35 @@ async def _raw_slash_send(interaction: discord.Interaction, panel: discord.Embed
         await raw_response(interaction.response, embed=panel, ephemeral=True, allowed_mentions=_ALLOWED)
         return
 
-    raw_webhook = policy._unwrap(discord.Webhook.send)
-    await raw_webhook(
-        interaction.followup,
-        embed=panel,
-        ephemeral=True,
-        allowed_mentions=_ALLOWED,
-        wait=True,
-    )
+    # Une réponse normale existe déjà. La remplacer évite le couple « résultat + erreur »
+    # qui faisait croire à une double réponse de SentriX.
+    try:
+        await raw_edit(interaction, content=None, embed=panel, attachments=[])
+        return
+    except discord.NotFound:
+        # Pas de message original : dans ce cas seulement, un follow-up ne duplique rien.
+        raw_webhook = policy._unwrap(discord.Webhook.send)
+        await raw_webhook(
+            interaction.followup,
+            embed=panel,
+            ephemeral=True,
+            allowed_mentions=_ALLOWED,
+            wait=True,
+        )
 
 
 def install(bot: commands.Bot) -> None:
     async def prefix_error(self: commands.Bot, ctx: commands.Context, error: commands.CommandError):
         panel = _prefix_error_panel(ctx, error)
         try:
+            if getattr(ctx, "_sentrix_response_sent", False):
+                replaced = await _replace_prefix_response(ctx, panel)
+                if not replaced:
+                    logger.warning(
+                        "Erreur après réponse pour +%s : deuxième message supprimé pour éviter un doublon.",
+                        getattr(getattr(ctx, "command", None), "qualified_name", "commande"),
+                    )
+                return
             await _raw_prefix_send(ctx, panel)
         except Exception:
             logger.exception("V5 : impossible d’envoyer l’erreur préfixée en embed natif.")
@@ -223,7 +251,13 @@ def install(bot: commands.Bot) -> None:
 
     slash_error._sentrix_final_error_embed_v5 = True
     bot.tree.on_error = slash_error
-    logger.info("V5 erreurs actif : transport Discord brut, embed natif obligatoire.")
+    logger.info("V5 erreurs actif : réponse existante remplacée, aucune carte d'erreur en doublon.")
 
 
-__all__ = ["install", "_panel", "_prefix_error_panel", "_slash_error_panel"]
+__all__ = [
+    "install",
+    "_panel",
+    "_prefix_error_panel",
+    "_slash_error_panel",
+    "_replace_prefix_response",
+]
