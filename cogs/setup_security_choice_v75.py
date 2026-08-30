@@ -134,7 +134,6 @@ async def _save_protections(
         actor_id,
     )
 
-    # La table historique reste synchronisée avec le réglage V71.
     await view.bot.db.execute(
         "INSERT INTO honeypot_verification(guild_id,enabled,created_at) "
         "VALUES(?,?,strftime('%s','now')) "
@@ -142,7 +141,6 @@ async def _save_protections(
         (view.guild.id, honeypot_enabled),
     )
 
-    # Le module global est actif dès qu'au moins une protection est choisie.
     await core.set_module_enabled(
         view.bot,
         view.guild.id,
@@ -251,14 +249,8 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     protection_select.callback = save_selection
     container.add_item(discord.ui.ActionRow(protection_select))
 
-    all_on = discord.ui.Button(
-        label="Tout activer",
-        style=discord.ButtonStyle.success,
-    )
-    all_off = discord.ui.Button(
-        label="Tout désactiver",
-        style=discord.ButtonStyle.danger,
-    )
+    all_on = discord.ui.Button(label="Tout activer", style=discord.ButtonStyle.success)
+    all_off = discord.ui.Button(label="Tout désactiver", style=discord.ButtonStyle.danger)
 
     async def enable_all(interaction: discord.Interaction):
         if not interaction.response.is_done():
@@ -273,11 +265,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     async def disable_all(interaction: discord.Interaction):
         if not interaction.response.is_done():
             await interaction.response.defer()
-        await _save_protections(
-            self,
-            set(),
-            actor_id=interaction.user.id,
-        )
+        await _save_protections(self, set(), actor_id=interaction.user.id)
         await self.refresh(interaction)
 
     all_on.callback = enable_all
@@ -286,11 +274,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
 
     active_labels = [label for key, label, _description in option_specs if key in selected]
     if active_labels:
-        container.add_item(
-            discord.ui.TextDisplay(
-                "**Actuellement :** " + " · ".join(active_labels)
-            )
-        )
+        container.add_item(discord.ui.TextDisplay("**Actuellement :** " + " · ".join(active_labels)))
     else:
         container.add_item(discord.ui.TextDisplay("**Actuellement :** aucune protection active."))
 
@@ -322,9 +306,13 @@ def install(bot: commands.Bot) -> None:
         "Choisissez individuellement les protections anti ; les permissions Discord sont automatiques.",
     )
 
-    # V76 ne remplace que la page Modération : la sécurité V75 reste l'autorité finale ici.
     from . import setup_moderation_clear_v76 as moderation_v76
     moderation_v76.install(bot)
+
+    # Le help officiel est déjà chargé à ce stade du finaliseur runtime. V77 peut donc
+    # remplacer uniquement son rendu sans toucher aux commandes +help et /help elles-mêmes.
+    from . import help_components_v77 as help_v77
+    help_v77.install(bot)
 
     bot._sentrix_setup_security_choice_v75 = True
     logger.info(
