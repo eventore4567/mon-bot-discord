@@ -34,11 +34,9 @@ NO_PINGS = discord.AllowedMentions(
 FALLBACK_ENABLED = False
 _RUNTIME_CHECKED = False
 
-# Braille blanc : visuellement neutre, mais conserve une largeur utile au conteneur.
-WIDE_FILLER = "\u2800" * 70
-
 _MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
 _SNOWFLAKE_RE = re.compile(r"(?<!\d)(\d{15,22})(?!\d)")
+_CHANNEL_MENTION_RE = re.compile(r"<#\d{15,22}>")
 _DB_READY = False
 
 _TARGET_LABELS = (
@@ -134,6 +132,13 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
         if not name or not value:
             continue
 
+        # Les anciens renderers ajoutaient parfois « #nom » après la mention du salon.
+        # Le panneau V2 conserve uniquement la mention native, sans doublon visuel.
+        if name.casefold() in {"salon", "channel"}:
+            channel_mention = _CHANNEL_MENTION_RE.search(value)
+            if channel_mention is not None:
+                value = channel_mention.group(0)
+
         if len(value) <= 90 and "\n" not in value and len(name) <= 35:
             small.append(f"**{name} :** {value}")
             if len(small) == 3:
@@ -213,11 +218,9 @@ class WideLogView(discord.ui.LayoutView):
 
         # La documentation discord.py 2.6 autorise explicitement attachment:// dans
         # MediaGallery.add_item(media=...), y compris à l'intérieur d'un Container.
+        # Pas de description : Discord n'affiche donc pas le badge ALT sur la bannière.
         gallery = discord.ui.MediaGallery()
-        gallery.add_item(
-            media=f"attachment://{banner_filename}",
-            description="SentriX Logs",
-        )
+        gallery.add_item(media=f"attachment://{banner_filename}")
         container.add_item(gallery)
 
         title = safe_text(embed.title or "Journal SentriX")[:256]
@@ -244,8 +247,6 @@ class WideLogView(discord.ui.LayoutView):
         if fields:
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(fields))
-
-        container.add_item(discord.ui.TextDisplay(WIDE_FILLER))
 
         footer = getattr(embed.footer, "text", None)
         if footer:
@@ -579,7 +580,6 @@ async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> l
 __all__ = [
     "FALLBACK_ENABLED",
     "NO_PINGS",
-    "WIDE_FILLER",
     "WideLogView",
     "compact_fields",
     "ensure_log_storage",

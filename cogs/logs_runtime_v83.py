@@ -16,7 +16,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, log_service
-from utils.log_banners import banner_kind, get_banner
+from utils.log_banners import banner_kind, ensure_banners, get_banner
 from utils.wide_logs import (
     NO_PINGS,
     WideLogView,
@@ -58,6 +58,57 @@ async def _deny(interaction: discord.Interaction) -> None:
         ephemeral=True,
         allowed_mentions=NO_PINGS,
     )
+
+
+async def _canonical_logs_send_v83(
+    self,
+    guild: discord.Guild,
+    config_key: str,
+    embed: discord.Embed,
+    *,
+    view: discord.ui.View | None = None,
+    event_key: str | None = None,
+) -> bool:
+    """Force le Cog Logs officiel à passer par le transport canonique V2."""
+    from . import logs as logs_cog
+
+    log_type = logs_cog.CONFIG_TO_LOG_TYPE.get(config_key)
+    if log_type is None:
+        return False
+    return await _CANONICAL_SEND_LOG(
+        self.bot,
+        guild,
+        log_type,
+        embed,
+        view=view,
+        event_key=event_key,
+    )
+
+
+def _restore_unique_log_transport() -> None:
+    """Retire les anciens transports globaux et restaure un seul pipeline de logs."""
+    log_service.send_log = _CANONICAL_SEND_LOG
+
+    # embeds.py avait un ancien filet global Messageable.send destiné aux vieux logs
+    # directs. Il laissait justement passer des embeds classiques. V83 le retire : le
+    # Cog Logs officiel doit désormais passer uniquement par log_service -> wide_logs.
+    current_send = discord.abc.Messageable.send
+    if getattr(current_send, "_sentrix_log_transport_guard", False):
+        original_send = getattr(current_send, "_sentrix_original_send", None)
+        if original_send is not None:
+            discord.abc.Messageable.send = original_send
+            logger.info("V83: ancien guard global Messageable.send retiré.")
+
+    try:
+        from . import logs as logs_cog
+
+        logs_cog.Logs._send = _canonical_logs_send_v83
+        logger.info(
+            "V83: Cog Logs verrouillé sur log_service.send_log -> send_wide_log "
+            "(Message supprimé inclus)."
+        )
+    except Exception:
+        logger.exception("V83: impossible de verrouiller le Cog Logs sur le transport canonique.")
 
 
 async def _send_test_log_v83(
@@ -268,10 +319,14 @@ def install(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_logs_runtime_v83", False):
         return
 
+    # Force une régénération unique au démarrage afin que les anciens PNG avec trou
+    # transparent soient remplacés, même s'ils existent déjà sur le disque Railway.
+    ensure_banners(force=True)
+
     # V81/V82 viennent d'être installées juste avant. On restaure volontairement la
     # fonction canonique modifiée dans utils/log_service.py pour que config et dédup restent
     # exactement celles du service officiel avant de déléguer à send_wide_log().
-    log_service.send_log = _CANONICAL_SEND_LOG
+    _restore_unique_log_transport()
     log_service.send_test_log = _send_test_log_v83
 
     _install_slash_group(bot)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 BANNER_DIR = ROOT / "assets" / "log_banners"
@@ -65,15 +65,7 @@ def ensure_banners(force: bool = False) -> None:
                     255,
                 )
 
-        # Ouverture transparente centrale prévue pour le logo SentriX.
-        draw = ImageDraw.Draw(image)
-        center_x = WIDTH // 2
-        draw.rounded_rectangle(
-            (center_x - 75, 15, center_x + 75, HEIGHT - 15),
-            radius=32,
-            fill=(0, 0, 0, 0),
-        )
-
+        # La bannière V2 reste entièrement opaque : aucun trou central artificiel.
         image.save(path, "PNG")
 
     _READY = True
