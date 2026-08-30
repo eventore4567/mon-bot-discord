@@ -1,9 +1,11 @@
 """Utilitaires partagés de SentriX.
 
-Les modules de logs sont chargés explicitement par leurs consommateurs.
-
-Pendant le diagnostic Components V2, aucun monkey-patch global de
-``discord.TextChannel.send`` n'est installé ici : il masquait l'origine exacte des
-échecs en pouvant retomber sur un ancien embed. Le pipeline officiel reste
-``utils.log_service`` -> ``utils.wide_logs``.
+Le pipeline officiel des logs reste ``utils.log_service`` -> ``utils.wide_logs``.
+Aucun monkey-patch de ``discord.TextChannel.send`` n'est installé : le vieux fallback
+legacy est interdit. Seul le constructeur Components V2 est durci afin qu'une vignette
+ou un bouton défectueux ne puisse jamais faire disparaître la bannière.
 """
+
+from .log_v2_hardening import install as _install_log_v2_hardening
+
+_install_log_v2_hardening()
