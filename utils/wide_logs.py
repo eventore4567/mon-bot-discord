@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 import traceback
@@ -29,14 +30,14 @@ NO_PINGS = discord.AllowedMentions(
     replied_user=False,
 )
 
-# Pendant le diagnostic, un échec V2 ne doit JAMAIS être caché par un vieil embed.
-# Remettre True seulement après avoir identifié et corrigé la cause exacte.
+# Conservé pour compatibilité d'import. Il n'existe plus aucun fallback embed classique.
 FALLBACK_ENABLED = False
 _RUNTIME_CHECKED = False
 
 _MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
 _SNOWFLAKE_RE = re.compile(r"(?<!\d)(\d{15,22})(?!\d)")
 _CHANNEL_MENTION_RE = re.compile(r"<#\d{15,22}>")
+_DECORATIVE_LINE_RE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]{8,}$")
 _DB_READY = False
 
 _TARGET_LABELS = (
@@ -84,9 +85,16 @@ def log_runtime_capabilities() -> None:
         return
     _RUNTIME_CHECKED = True
 
+    logger.warning("RAILWAY GIT SHA = %s", os.getenv("RAILWAY_GIT_COMMIT_SHA") or "?")
     logger.warning("DISCORD.PY RUNTIME VERSION = %s", getattr(discord, "__version__", "?"))
     logger.warning("DISCORD.PY VERSION_INFO = %s", getattr(discord, "version_info", "?"))
     logger.warning("DISCORD.PY FILE = %s", getattr(discord, "__file__", "?"))
+    logger.warning(
+        "SEND PATCHED = %s | qualname=%s | module=%s",
+        discord.TextChannel.send is not discord.abc.Messageable.send,
+        getattr(discord.TextChannel.send, "__qualname__", "?"),
+        getattr(discord.TextChannel.send, "__module__", "?"),
+    )
 
     for name in (
         "LayoutView",
@@ -100,7 +108,6 @@ def log_runtime_capabilities() -> None:
     ):
         logger.warning("discord.ui.%-14s = %s", name, hasattr(discord.ui, name))
 
-    # MediaGalleryItem est exposé sur `discord`, pas sur `discord.ui`.
     logger.warning("discord.MediaGalleryItem = %s", hasattr(discord, "MediaGalleryItem"))
     logger.warning(
         "MessageFlags.components_v2 = %s (bit attendu=32768)",
@@ -112,6 +119,17 @@ def safe_text(value: object) -> str:
     """Neutralise @everyone/@here tout en gardant les mentions ID lisibles."""
     text = str(value or "").strip()
     return _MENTION_RE.sub(lambda match: "@\u200b" + match.group(1), text)
+
+
+def _clean_description(value: object) -> str:
+    """Retire les anciennes barres décoratives injectées dans les embeds legacy."""
+    lines: list[str] = []
+    for raw in str(value or "").replace("\r", "").splitlines():
+        stripped = raw.strip()
+        if stripped and _DECORATIVE_LINE_RE.fullmatch(stripped):
+            continue
+        lines.append(raw)
+    return "\n".join(lines).strip()
 
 
 def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
@@ -132,8 +150,6 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
         if not name or not value:
             continue
 
-        # Les anciens renderers ajoutaient parfois « #nom » après la mention du salon.
-        # Le panneau V2 conserve uniquement la mention native, sans doublon visuel.
         if name.casefold() in {"salon", "channel"}:
             channel_mention = _CHANNEL_MENTION_RE.search(value)
             if channel_mention is not None:
@@ -176,13 +192,14 @@ def _clone_button(item: discord.ui.Button) -> discord.ui.Button | None:
             button.callback = item.callback
         return button
     except Exception:
-        logger.debug("Impossible de recopier un bouton de log legacy.", exc_info=True)
+        logger.exception("SENTRIX V2 PHASE C clone_button=failed")
         return None
 
 
 def copy_buttons(container: discord.ui.Container, old_view: discord.ui.View | None) -> None:
-    """Recopie les boutons de l'ancienne vue dans le conteneur Components V2."""
+    """Recopie les boutons sans qu'un bouton invalide puisse annuler tout le panneau."""
     if old_view is None:
+        logger.warning("SENTRIX V2 PHASE C buttons=none")
         return
 
     buttons: list[discord.ui.Button] = []
@@ -194,11 +211,32 @@ def copy_buttons(container: discord.ui.Container, old_view: discord.ui.View | No
             buttons.append(button)
 
     if not buttons:
+        logger.warning("SENTRIX V2 PHASE C buttons=none_after_clone")
         return
 
-    container.add_item(discord.ui.Separator())
+    rows: list[discord.ui.ActionRow] = []
     for start in range(0, len(buttons), 5):
-        container.add_item(discord.ui.ActionRow(*buttons[start:start + 5]))
+        chunk = buttons[start:start + 5]
+        try:
+            rows.append(discord.ui.ActionRow(*chunk))
+        except Exception:
+            logger.exception(
+                "SENTRIX V2 PHASE C action_row=failed start=%s count=%s",
+                start,
+                len(chunk),
+            )
+
+    if not rows:
+        logger.warning("SENTRIX V2 PHASE C buttons=degraded_all_rows_failed")
+        return
+
+    try:
+        container.add_item(discord.ui.Separator())
+        for row in rows:
+            container.add_item(row)
+        logger.warning("SENTRIX V2 PHASE C buttons=ok rows=%s", len(rows))
+    except Exception:
+        logger.exception("SENTRIX V2 PHASE C container_add=failed")
 
 
 class WideLogView(discord.ui.LayoutView):
@@ -216,30 +254,34 @@ class WideLogView(discord.ui.LayoutView):
         accent_colour = discord.Colour(accent) if accent is not None else None
         container = discord.ui.Container(accent_colour=accent_colour)
 
-        # La documentation discord.py 2.6 autorise explicitement attachment:// dans
-        # MediaGallery.add_item(media=...), y compris à l'intérieur d'un Container.
-        # Pas de description : Discord n'affiche donc pas le badge ALT sur la bannière.
         gallery = discord.ui.MediaGallery()
         gallery.add_item(media=f"attachment://{banner_filename}")
         container.add_item(gallery)
+        logger.warning("SENTRIX V2 PHASE A banner=ok filename=%s", banner_filename)
 
         title = safe_text(embed.title or "Journal SentriX")[:256]
         thumbnail = getattr(embed.thumbnail, "url", None)
 
+        section_ok = False
         if thumbnail:
-            container.add_item(
-                discord.ui.Section(
-                    discord.ui.TextDisplay(f"## {title}"),
-                    accessory=discord.ui.Thumbnail(
-                        str(thumbnail),
-                        description="SentriX",
-                    ),
+            try:
+                container.add_item(
+                    discord.ui.Section(
+                        discord.ui.TextDisplay(f"## {title}"),
+                        accessory=discord.ui.Thumbnail(str(thumbnail)),
+                    )
                 )
-            )
-        else:
-            container.add_item(discord.ui.TextDisplay(f"## {title}"))
+                section_ok = True
+                logger.warning("SENTRIX V2 PHASE B thumbnail=ok")
+            except Exception:
+                logger.exception("SENTRIX V2 PHASE B thumbnail=failed; title_only=1")
 
-        description = safe_text(embed.description)[:900]
+        if not section_ok:
+            container.add_item(discord.ui.TextDisplay(f"## {title}"))
+            if not thumbnail:
+                logger.warning("SENTRIX V2 PHASE B thumbnail=none")
+
+        description = _clean_description(safe_text(embed.description))[:900]
         if description:
             container.add_item(discord.ui.TextDisplay(description))
 
@@ -410,7 +452,7 @@ async def send_wide_log(
     old_view: discord.ui.View | None = None,
     extra_file: discord.File | None = None,
 ) -> bool:
-    """Envoie le vrai log Components V2 et expose toute erreur au lieu de la masquer."""
+    """Envoie le vrai log Components V2 ; aucun échec ne retombe sur un embed classique."""
     log_runtime_capabilities()
 
     title = embed.title or ""
@@ -455,7 +497,6 @@ async def send_wide_log(
         )
         return False
 
-    # Un discord.File est consommé/fermé après l'envoi : toujours le créer ici.
     try:
         banner_file = discord.File(str(banner_path), filename=banner_filename)
     except Exception as exc:
@@ -469,6 +510,7 @@ async def send_wide_log(
 
     files: list[discord.File] = [banner_file]
     if extra_file is not None:
+        _rewind_file(extra_file)
         files.append(extra_file)
 
     try:
@@ -507,36 +549,8 @@ async def send_wide_log(
             traceback.format_exc(),
         )
 
-    if not FALLBACK_ENABLED:
-        logger.error("SENTRIX LOG V2 FALLBACK DÉSACTIVÉ — aucun ancien embed ne sera envoyé.")
-        return False
-
-    # Réactivable après diagnostic seulement. Le fallback conserve lui aussi la bannière.
-    try:
-        fallback_banner = discord.File(str(banner_path), filename=banner_filename)
-        fallback_embed = embed.copy()
-        fallback_embed.set_image(url=f"attachment://{banner_filename}")
-
-        _rewind_file(extra_file)
-        fallback_files: list[discord.File] = [fallback_banner]
-        if extra_file is not None:
-            fallback_files.append(extra_file)
-
-        kwargs: dict[str, Any] = {
-            "embed": fallback_embed,
-            "files": fallback_files,
-            "allowed_mentions": NO_PINGS,
-        }
-        if old_view is not None:
-            kwargs["view"] = old_view
-
-        await channel.send(**kwargs)
-        logger.warning("SENTRIX LOG V2 FALLBACK utilisé")
-        _schedule_history(channel, embed, log_type, kind)
-        return True
-    except Exception:
-        logger.error("SENTRIX LOG V2 FALLBACK échoué\n%s", traceback.format_exc())
-        return False
+    logger.error("SENTRIX LOG V2 ABORT — aucun fallback embed classique n'existe.")
+    return False
 
 
 async def upsert_log_config(

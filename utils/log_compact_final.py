@@ -1,8 +1,7 @@
-"""Rendu final compact des logs SentriX.
+"""Compatibilité visuelle des anciens producteurs de logs SentriX.
 
-Tous les logs passent par ce renderer : une seule grande ligne sous le titre, métadonnées
-compactes et aucune ancienne barre répétée. Le transport historique est également
-normalisé ici pour éviter qu'un ancien embed contourne le style final.
+Ce module ne s'installe plus à l'import et ne modifie plus ``log_service.send_log``.
+Le transport officiel est exclusivement géré par ``utils.wide_logs``.
 """
 from __future__ import annotations
 
@@ -15,7 +14,6 @@ from . import embeds as sx
 from . import sentrix_runtime as runtime
 
 _INSTALLED = False
-# Exactement la même grande barre que les embeds de commandes.
 PANEL_BAR = sx.BAR
 _SEPARATOR_LINE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]+$")
 
@@ -47,7 +45,6 @@ def _clean_description(value: object) -> str:
         compact.pop()
 
     body = "\n".join(compact).strip()
-    # Membre / Rôle / Modérateur / Salon restent proches : une ligne chacun.
     body = re.sub(
         r"(?m)(\*\*[^\n:]{1,60}\s*:\*\*[^\n]*)\n\n(?=\*\*[^\n:]{1,60}\s*:\*\*)",
         r"\1\n",
@@ -92,6 +89,7 @@ def normalize_log(
 
 
 def install() -> None:
+    """Compatibilité explicite uniquement ; aucun transport n'est enveloppé."""
     global _INSTALLED
     if _INSTALLED:
         return
@@ -100,43 +98,7 @@ def install() -> None:
     sx.normalize_log = normalize_log
     runtime._log_embed = log_embed
     runtime._normalize_log = normalize_log
-
-    # Certains anciens logs pouvaient contourner normalize_log lorsque leur embed
-    # contenait encore l'ancienne bannière SentriX. On normalise avant le transport :
-    # le send_log historique reçoit donc toujours un log déjà compact et avec la barre.
-    try:
-        from . import log_service
-
-        original_send_log = log_service.send_log
-        if not getattr(original_send_log, "_sentrix_compact_bar", False):
-            async def send_log(
-                bot,
-                guild,
-                log_type,
-                embed,
-                file=None,
-                *,
-                view=None,
-                event_key=None,
-            ):
-                rendered = normalize_log(embed) if isinstance(embed, discord.Embed) else embed
-                return await original_send_log(
-                    bot,
-                    guild,
-                    log_type,
-                    rendered,
-                    file,
-                    view=view,
-                    event_key=event_key,
-                )
-
-            send_log._sentrix_compact_bar = True
-            log_service.send_log = send_log
-    except Exception:
-        # Le renderer reste fonctionnel même si le transport n'est pas encore importé.
-        pass
-
     _INSTALLED = True
 
 
-install()
+__all__ = ["PANEL_BAR", "install", "log_embed", "normalize_log"]

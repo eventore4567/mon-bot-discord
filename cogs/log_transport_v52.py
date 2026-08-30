@@ -1,31 +1,24 @@
-"""V5.3 — transport canonique final des logs SentriX.
+"""Compatibilité V5.3 — aucun transport legacy n'est encore autorisé.
 
-Le diagnostic live a prouvé que les routes, intents et listeners étaient sains, mais qu'un
-ancien wrapper pouvait encore remplacer ``log_service.send_log`` après l'installation de
-V5.2. Cette version ne dépend donc plus de ce symbole global pour les vrais événements :
-elle branche directement ``Logs._send`` sur le transport canonique.
+Ce module reste importable parce que quelques outils historiques le référencent encore.
+Il ne monkey-patch plus ``log_service.send_log`` ni ``Logs._send`` et n'envoie plus
+``embed=...`` pour les journaux. Toute émission passe par ``utils.wide_logs``.
 """
 from __future__ import annotations
 
 import logging
-import re
 import time
-import types
 from typing import Any
 
 import discord
 from discord.ext import commands
 
 from utils import embeds, log_service
+from utils.wide_logs import send_wide_log
 from . import live_log_delivery_v5
 
-logger = logging.getLogger("bot.log-transport-v53")
+logger = logging.getLogger("bot.log-transport-v53-compat")
 _MARKER = "_sentrix_log_transport_v53"
-_SEPARATOR_LINE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]+$")
-_SENTRIX_LOG_ICON_FALLBACK = (
-    "https://raw.githubusercontent.com/eventore4567/mon-bot-discord/"
-    "main/assets/sentrix/logs.png"
-)
 _BOT: commands.Bot | None = None
 
 
@@ -47,59 +40,30 @@ def _state(bot: commands.Bot) -> dict[str, Any]:
             "last_at": None,
         }
         bot.log_transport_v52_state = state
-    state.setdefault("logs_send_patched", False)
+    state["logs_send_patched"] = False
     return state
 
 
 def _unwrap_messageable_send():
     current = discord.abc.Messageable.send
     seen: set[int] = set()
-    while hasattr(current, "_sentrix_original") and id(current) not in seen:
+    while callable(current) and id(current) not in seen:
         seen.add(id(current))
-        current = getattr(current, "_sentrix_original")
+        original = (
+            getattr(current, "_sentrix_original_send", None)
+            or getattr(current, "_sentrix_original", None)
+        )
+        if not callable(original):
+            break
+        current = original
     return current
 
 
-def _sentrix_log_icon_url() -> str:
-    """Retourne l'avatar public actuel de SentriX, avec un asset stable en secours."""
-    bot = _BOT
-    user = getattr(bot, "user", None) if bot is not None else None
-    avatar = getattr(user, "display_avatar", None)
-    url = getattr(avatar, "url", None)
-    return str(url or _SENTRIX_LOG_ICON_FALLBACK)
-
-
 def _force_sentrix_log_icon(embed: discord.Embed) -> discord.Embed:
-    """Tous les logs portent la même petite icône SentriX en haut à droite.
-
-    Les anciens producteurs utilisaient parfois l'avatar de la cible comme miniature,
-    parfois aucune miniature. Le branding est désormais appliqué ici, au dernier point
-    commun avant l'envoi Discord, afin que messages, rôles, salons, membres, modération,
-    vocal, tickets, sécurité et fichiers restent visuellement cohérents.
-    """
-    if isinstance(embed, discord.Embed):
-        embed.set_thumbnail(url=_sentrix_log_icon_url())
     return embed
 
 
 def _force_command_divider(embed: discord.Embed) -> discord.Embed:
-    """Force exactement la grande barre des commandes sous le titre de chaque log."""
-    if not isinstance(embed, discord.Embed):
-        return embed
-
-    lines = str(embed.description or "").replace("\r", "").splitlines()
-    while lines:
-        first = lines[0].strip()
-        if first and len(first) >= 3 and _SEPARATOR_LINE.fullmatch(first):
-            lines.pop(0)
-            continue
-        if not first:
-            lines.pop(0)
-            continue
-        break
-
-    body = "\n".join(lines).strip()
-    embed.description = f"{embeds.BAR}\n{body}" if body else embeds.BAR
     return embed
 
 
@@ -107,14 +71,10 @@ def _render(embed: discord.Embed) -> discord.Embed:
     if not isinstance(embed, discord.Embed):
         return embed
     try:
-        rendered = embeds.normalize_log(embed)
-        rendered = _force_command_divider(rendered)
-        return _force_sentrix_log_icon(rendered)
+        return embeds.normalize_log(embed)
     except Exception:
-        # Un problème purement visuel ne doit jamais empêcher le journal métier de partir.
-        logger.exception("V5.3 : normalisation incompatible ; embed original conservé.")
-        rendered = _force_command_divider(embed)
-        return _force_sentrix_log_icon(rendered)
+        logger.exception("V5.3 compat : normalisation impossible ; embed original conservé.")
+        return embed
 
 
 async def _resolve_setting(bot, guild: discord.Guild, log_type: str, *, needs_file: bool):
@@ -128,7 +88,6 @@ async def _resolve_setting(bot, guild: discord.Guild, log_type: str, *, needs_fi
         if valid:
             return setting, False
 
-    # Une route valide mais explicitement désactivée reste volontairement désactivée.
     if setting and not bool(setting.get("enabled")) and setting.get("channel_id"):
         valid, _reason = log_service.validate_channel(
             guild,
@@ -157,7 +116,7 @@ async def send_log_v52(
     view: discord.ui.View | None = None,
     event_key: str | None = None,
 ) -> bool:
-    """Envoie un log sans repasser par la chaîne historique de wrappers send_log."""
+    """Compatibilité V5.3 : délègue directement au renderer Components V2."""
     state = _state(bot)
     state["attempts"] = int(state.get("attempts") or 0) + 1
     state.update({
@@ -199,104 +158,57 @@ async def send_log_v52(
             state["last_result"] = "duplicate"
             return False
 
-        kwargs: dict[str, Any] = {
-            "embed": rendered,
-            "allowed_mentions": log_service.LOG_ALLOWED_MENTIONS,
-        }
-        if view is not None:
-            kwargs["view"] = view
-        if file is not None:
-            kwargs["file"] = file
-
-        # Appel au Messageable.send natif déballé : aucun wrapper SentriX de commande/log.
-        native_send = _unwrap_messageable_send()
-        await native_send(channel, **kwargs)
-
-        state["last_channel_id"] = channel_id
-        state["last_result"] = "sent_after_recovery" if recovered else "sent"
-        state["sent"] = int(state.get("sent") or 0) + 1
-        if recovered:
-            state["recovered"] = int(state.get("recovered") or 0) + 1
-        logger.info(
-            "V5.3 log envoyé guild=%s type=%s channel=%s recovered=%s",
-            guild.id,
-            log_type,
-            channel_id,
-            recovered,
+        sent = await send_wide_log(
+            channel,
+            rendered,
+            log_type=log_type,
+            old_view=view,
+            extra_file=file,
         )
-        return True
+        state["last_channel_id"] = channel_id
+        state["last_result"] = "sent_v2" if sent else "v2_failed"
+        if sent:
+            state["sent"] = int(state.get("sent") or 0) + 1
+            if recovered:
+                state["recovered"] = int(state.get("recovered") or 0) + 1
+        return bool(sent)
     except Exception as exc:
         state["last_result"] = "exception"
         state["last_error"] = type(exc).__name__
         state["last_error_message"] = str(exc)[:300]
-        logger.exception("V5.3 : échec transport log guild=%s type=%s", guild.id, log_type)
+        logger.exception("V5.3 compat : échec Components V2 guild=%s type=%s", guild.id, log_type)
         return False
 
 
 def _patch_logs_cog(bot: commands.Bot) -> bool:
-    """Branche les 18 vrais listeners directement sur le transport canonique."""
+    """Retire un ancien override d'instance au lieu d'en poser un nouveau."""
     cog = bot.get_cog("Logs")
     if cog is None:
         _state(bot)["logs_send_patched"] = False
         return False
 
-    current = getattr(cog, "_send", None)
-    function = getattr(current, "__func__", current)
-    if getattr(function, _MARKER, False):
-        _state(bot)["logs_send_patched"] = True
-        return True
+    if "_send" in vars(cog):
+        stale = vars(cog).get("_send")
+        function = getattr(stale, "__func__", stale)
+        logger.warning(
+            "V5.3 compat : ancien override Logs._send retiré | qualname=%s | module=%s",
+            getattr(function, "__qualname__", "?"),
+            getattr(function, "__module__", "?"),
+        )
+        delattr(cog, "_send")
 
-    try:
-        from .logs import CONFIG_TO_LOG_TYPE
-
-        async def direct_logs_send(
-            _self,
-            guild: discord.Guild,
-            config_key: str,
-            embed: discord.Embed,
-            *,
-            view: discord.ui.View | None = None,
-            event_key: str | None = None,
-        ) -> bool:
-            log_type = CONFIG_TO_LOG_TYPE.get(str(config_key))
-            if log_type is None:
-                return False
-            return await send_log_v52(
-                bot,
-                guild,
-                log_type,
-                embed,
-                view=view,
-                event_key=event_key,
-            )
-
-        setattr(direct_logs_send, _MARKER, True)
-        direct_logs_send._sentrix_original = function
-        cog._send = types.MethodType(direct_logs_send, cog)
-        _state(bot)["logs_send_patched"] = True
-        logger.warning("V5.3 : Logs._send branché directement sur le transport canonique.")
-        return True
-    except Exception as exc:
-        state = _state(bot)
-        state["logs_send_patched"] = False
-        state["last_error"] = type(exc).__name__
-        state["last_error_message"] = str(exc)[:300]
-        logger.exception("V5.3 : impossible de patcher Logs._send.")
-        return False
+    _state(bot)["logs_send_patched"] = False
+    return True
 
 
 def install(bot: commands.Bot) -> None:
     global _BOT
     _BOT = bot
-    # Compatibilité : les producteurs qui appellent encore log_service passent aussi par V5.3.
-    setattr(send_log_v52, _MARKER, True)
-    log_service.send_log = send_log_v52
     state = _state(bot)
     state["installed"] = True
     _patch_logs_cog(bot)
-    logger.info(
-        "V5.3 actif : transport canonique + branchement direct des listeners Logs=%s + icône SentriX forcée.",
-        state.get("logs_send_patched"),
+    logger.warning(
+        "V5.3 compat chargé sans patch : transport officiel = log_service -> wide_logs."
     )
 
 
@@ -304,6 +216,9 @@ __all__ = [
     "install",
     "send_log_v52",
     "_patch_logs_cog",
+    "_resolve_setting",
+    "_render",
+    "_unwrap_messageable_send",
     "_force_command_divider",
     "_force_sentrix_log_icon",
 ]

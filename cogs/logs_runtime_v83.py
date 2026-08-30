@@ -1,9 +1,8 @@
 """SentriX V83 — autorité finale des logs larges et commandes slash /logs.
 
-V81/V82 restent chargées pour leurs autres interfaces, mais ne doivent plus remplacer le
-transport canonique de ``utils.log_service``. V83 restaure donc le ``send_log`` canonique,
-qui route maintenant vers ``utils.wide_logs.send_wide_log`` après la configuration et la
-déduplication existantes.
+V83 impose un transport unique : ``cogs.logs`` -> ``utils.log_service`` ->
+``utils.wide_logs``. Les anciens overrides d'instance et monkey-patches de send sont
+activement retirés au démarrage avant le premier vrai événement.
 """
 from __future__ import annotations
 
@@ -29,7 +28,6 @@ from utils.wide_logs import (
 logger = logging.getLogger("bot.logs-runtime-v83")
 RUNTIME_MARKER = "Wide Logs Runtime V83"
 
-# Capturé au moment de l'import, avant premium_ui_v81/v82.install().
 _CANONICAL_SEND_LOG = log_service.send_log
 
 _LOG_CHOICES = [
@@ -61,7 +59,6 @@ async def _deny(interaction: discord.Interaction) -> None:
 
 
 async def _traced_canonical_send_log(*args, **kwargs):
-    """Point unique visible dans Railway avant le renderer V2 officiel."""
     guild = args[1] if len(args) > 1 else kwargs.get("guild")
     log_type = args[2] if len(args) > 2 else kwargs.get("log_type")
     event_key = kwargs.get("event_key")
@@ -86,7 +83,6 @@ async def _canonical_logs_send_v83(
     view: discord.ui.View | None = None,
     event_key: str | None = None,
 ) -> bool:
-    """Force le Cog Logs officiel à passer par le transport canonique V2."""
     from . import logs as logs_cog
 
     log_type = logs_cog.CONFIG_TO_LOG_TYPE.get(config_key)
@@ -102,84 +98,83 @@ async def _canonical_logs_send_v83(
     )
 
 
-def _restore_unique_log_transport() -> None:
-    """Retire les anciens transports globaux et restaure un seul pipeline de logs."""
-    log_service.send_log = _traced_canonical_send_log
+def _unwrap_send(function):
+    current = function
+    seen: set[int] = set()
+    while callable(current) and id(current) not in seen:
+        seen.add(id(current))
+        original = (
+            getattr(current, "_sentrix_original_send", None)
+            or getattr(current, "_sentrix_original", None)
+        )
+        if not callable(original):
+            break
+        current = original
+    return current
 
-    # embeds.py avait un ancien filet global Messageable.send destiné aux vieux logs
-    # directs. Il laissait justement passer des embeds classiques. V83 le retire : le
-    # Cog Logs officiel doit désormais passer uniquement par log_service -> wide_logs.
-    current_send = discord.abc.Messageable.send
-    if getattr(current_send, "_sentrix_log_transport_guard", False):
-        original_send = getattr(current_send, "_sentrix_original_send", None)
-        if original_send is not None:
-            discord.abc.Messageable.send = original_send
-            logger.info("V83: ancien guard global Messageable.send retiré.")
+
+def _restore_native_sends() -> None:
+    logger.warning(
+        "SEND PATCHED BEFORE RESTORE = %s | qualname=%s | module=%s",
+        discord.TextChannel.send is not discord.abc.Messageable.send,
+        getattr(discord.TextChannel.send, "__qualname__", "?"),
+        getattr(discord.TextChannel.send, "__module__", "?"),
+    )
+
+    native_messageable_send = _unwrap_send(discord.abc.Messageable.send)
+    native_text_send = _unwrap_send(discord.TextChannel.send)
+
+    if callable(native_messageable_send):
+        discord.abc.Messageable.send = native_messageable_send
+
+    if callable(native_messageable_send):
+        discord.TextChannel.send = native_messageable_send
+    elif callable(native_text_send):
+        discord.TextChannel.send = native_text_send
+
+    logger.warning(
+        "SEND PATCHED = %s | qualname=%s | module=%s",
+        discord.TextChannel.send is not discord.abc.Messageable.send,
+        getattr(discord.TextChannel.send, "__qualname__", "?"),
+        getattr(discord.TextChannel.send, "__module__", "?"),
+    )
+
+
+def _restore_unique_log_transport(bot: commands.Bot) -> None:
+    _restore_native_sends()
+    log_service.send_log = _traced_canonical_send_log
 
     try:
         from . import logs as logs_cog
 
+        active_cog = bot.get_cog("Logs")
+        if active_cog is not None and "_send" in vars(active_cog):
+            stale = vars(active_cog).get("_send")
+            stale_func = getattr(stale, "__func__", stale)
+            logger.warning(
+                "SENTRIX ROUTE stale Logs._send instance override removed | qualname=%s | module=%s",
+                getattr(stale_func, "__qualname__", "?"),
+                getattr(stale_func, "__module__", "?"),
+            )
+            delattr(active_cog, "_send")
+
         logs_cog.Logs._send = _canonical_logs_send_v83
-        logger.info(
-            "V83: Cog Logs verrouillé sur log_service.send_log -> send_wide_log "
-            "(Message supprimé inclus)."
+
+        active_cog = bot.get_cog("Logs")
+        resolved = getattr(active_cog, "_send", None) if active_cog is not None else None
+        resolved_func = getattr(resolved, "__func__", resolved)
+        logger.warning(
+            "SENTRIX ROUTE Logs._send canonical=%s | instance_override=%s | qualname=%s | module=%s",
+            bool(resolved_func is _canonical_logs_send_v83),
+            bool(active_cog is not None and "_send" in vars(active_cog)),
+            getattr(resolved_func, "__qualname__", "?"),
+            getattr(resolved_func, "__module__", "?"),
         )
     except Exception:
         logger.exception("V83: impossible de verrouiller le Cog Logs sur le transport canonique.")
 
 
-def _legacy_member_template(embed: discord.Embed | None, content: object) -> bool:
-    """Reconnaît uniquement les vieux panneaux membre réellement cassés.
-
-    Ils sont la source du second message Bienvenue/Départ visible avec ``{mention}`` ou
-    ``{user}``. On ne bloque jamais un panneau configuré valide.
-    """
-    if not isinstance(embed, discord.Embed):
-        return False
-    parts = [str(content or ""), str(embed.title or ""), str(embed.description or "")]
-    for field in embed.fields:
-        parts.extend((str(field.name or ""), str(field.value or "")))
-    blob = "\n".join(parts)
-    if "{mention}" not in blob and "{user}" not in blob:
-        return False
-    title = str(embed.title or "").casefold()
-    return title.startswith("bienvenue sur") or "départ d’un membre" in title or "depart d'un membre" in title
-
-
-def _install_legacy_member_panel_guard() -> None:
-    """Supprime le second panneau legacy sans toucher au vrai système bienvenue/départ."""
-    current_send = discord.TextChannel.send
-    if getattr(current_send, "_sentrix_v83_member_panel_guard", False):
-        return
-
-    async def guarded_send(channel: discord.TextChannel, *args, **kwargs):
-        embed = kwargs.get("embed")
-        content = kwargs.get("content")
-        if content is None and args:
-            content = args[0]
-        if _legacy_member_template(embed, content):
-            logger.warning(
-                "SENTRIX DUPLICATE blocked=legacy_member_panel guild=%s channel=%s title=%r",
-                getattr(getattr(channel, "guild", None), "id", None),
-                getattr(channel, "id", None),
-                getattr(embed, "title", None),
-            )
-            return None
-        return await current_send(channel, *args, **kwargs)
-
-    guarded_send._sentrix_v83_member_panel_guard = True
-    guarded_send._sentrix_original_send = current_send
-    discord.TextChannel.send = guarded_send
-    logger.info("V83: panneaux Bienvenue/Départ legacy avec placeholders bloqués.")
-
-
 def _install_ticket_reassignment_race_fix() -> None:
-    """Empêche une ancienne copie du cache de déclaim un ticket déjà repris.
-
-    Mastery gardait un snapshot jusqu'à 45 s. Un claim récent pouvait donc être écrasé par
-    la passe de réattribution. La décision est maintenant recalculée sur la ligne DB fraîche,
-    puis le déclaim utilise un UPDATE conditionnel sur le même claimant + last_activity_at.
-    """
     try:
         from . import bot_mastery_runtime as mastery
     except Exception:
@@ -215,8 +210,6 @@ def _install_ticket_reassignment_race_fix() -> None:
                 last_seen = self._member_activity.get((guild.id, int(claimed_by)), 0.0)
                 last_activity = int(ticket.get("last_activity_at") or 0)
 
-                # IMPORTANT : un cache Discord froid (member is None) ne suffit jamais à
-                # abandonner un claim. Le claim doit d'abord être réellement ancien.
                 stale_claim = bool(
                     last_activity
                     and ts - last_activity >= mastery.TICKET_REASSIGN_SECONDS
@@ -244,8 +237,6 @@ def _install_ticket_reassignment_race_fix() -> None:
                     (ticket["id"], int(claimed_by), last_activity),
                 )
                 if reservation.rowcount < 1:
-                    # Un claim ou une activité vient d'arriver entre la lecture et l'UPDATE.
-                    # On laisse strictement le nouvel état intact.
                     newest = await self.bot.db.fetchone(
                         "SELECT id,guild_id,channel_id,user_id,priority,claimed_by,last_activity_at,status "
                         "FROM tickets WHERE id=?",
@@ -476,9 +467,9 @@ class LogsSlashGroup(app_commands.Group):
                 allowed_mentions=NO_PINGS,
             )
         except (discord.Forbidden, discord.HTTPException, OSError):
-            logger.warning("Fallback historique classique après échec Components V2.", exc_info=True)
+            logger.exception("Historique Components V2 impossible ; aucun fallback embed n'est autorisé.")
             await interaction.followup.send(
-                embed=history_embed,
+                "Impossible d'afficher cet historique en Components V2 pour le moment.",
                 ephemeral=True,
                 allowed_mentions=NO_PINGS,
             )
@@ -503,20 +494,11 @@ def install(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_logs_runtime_v83", False):
         return
 
-    # Force une régénération unique au démarrage afin que les anciens PNG avec trou
-    # transparent soient remplacés, même s'ils existent déjà sur le disque Railway.
     ensure_banners(force=True)
-
-    # V81/V82 viennent d'être installées juste avant. On restaure volontairement la
-    # fonction canonique modifiée dans utils/log_service.py pour que config et dédup restent
-    # exactement celles du service officiel avant de déléguer à send_wide_log().
-    _restore_unique_log_transport()
+    _restore_unique_log_transport(bot)
     log_service.send_test_log = _send_test_log_v83
 
-    # Correctifs finaux des chemins legacy encore observés en production.
-    _install_legacy_member_panel_guard()
     _install_ticket_reassignment_race_fix()
-
     _install_slash_group(bot)
     try:
         asyncio.create_task(ensure_log_storage())
@@ -525,7 +507,7 @@ def install(bot: commands.Bot) -> None:
 
     bot._sentrix_logs_runtime_v83 = True
     logger.info(
-        "%s installé : logger canonique restauré, Components V2 larges et commandes /logs actives.",
+        "%s installé : logger canonique restauré, send natif, Components V2 larges et /logs actifs.",
         RUNTIME_MARKER,
     )
 
