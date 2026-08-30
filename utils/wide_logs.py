@@ -10,6 +10,7 @@ import asyncio
 import logging
 import re
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,11 @@ NO_PINGS = discord.AllowedMentions(
     roles=False,
     replied_user=False,
 )
+
+# Pendant le diagnostic, un échec V2 ne doit JAMAIS être caché par un vieil embed.
+# Remettre True seulement après avoir identifié et corrigé la cause exacte.
+FALLBACK_ENABLED = False
+_RUNTIME_CHECKED = False
 
 # Braille blanc : visuellement neutre, mais conserve une largeur utile au conteneur.
 WIDE_FILLER = "\u2800" * 70
@@ -71,6 +77,37 @@ CREATE TABLE IF NOT EXISTS log_config (
     PRIMARY KEY(guild_id, log_type)
 );
 """
+
+
+def log_runtime_capabilities() -> None:
+    """Affiche une seule fois les capacités Components V2 réellement chargées sur Railway."""
+    global _RUNTIME_CHECKED
+    if _RUNTIME_CHECKED:
+        return
+    _RUNTIME_CHECKED = True
+
+    logger.warning("DISCORD.PY RUNTIME VERSION = %s", getattr(discord, "__version__", "?"))
+    logger.warning("DISCORD.PY VERSION_INFO = %s", getattr(discord, "version_info", "?"))
+    logger.warning("DISCORD.PY FILE = %s", getattr(discord, "__file__", "?"))
+
+    for name in (
+        "LayoutView",
+        "Container",
+        "MediaGallery",
+        "Section",
+        "TextDisplay",
+        "Thumbnail",
+        "Separator",
+        "ActionRow",
+    ):
+        logger.warning("discord.ui.%-14s = %s", name, hasattr(discord.ui, name))
+
+    # MediaGalleryItem est exposé sur `discord`, pas sur `discord.ui`.
+    logger.warning("discord.MediaGalleryItem = %s", hasattr(discord, "MediaGalleryItem"))
+    logger.warning(
+        "MessageFlags.components_v2 = %s (bit attendu=32768)",
+        hasattr(discord.MessageFlags, "components_v2"),
+    )
 
 
 def safe_text(value: object) -> str:
@@ -169,14 +206,13 @@ class WideLogView(discord.ui.LayoutView):
         old_view: discord.ui.View | None = None,
         accent: int | None = None,
     ) -> None:
-        # timeout=None évite l'expiration au bout de cinq minutes pendant la vie du
-        # processus. Cela ne rend pas, à lui seul, les callbacks persistants après restart.
         super().__init__(timeout=None)
 
         accent_colour = discord.Colour(accent) if accent is not None else None
         container = discord.ui.Container(accent_colour=accent_colour)
 
-        # 1. La bannière est volontairement le PREMIER composant du conteneur.
+        # La documentation discord.py 2.6 autorise explicitement attachment:// dans
+        # MediaGallery.add_item(media=...), y compris à l'intérieur d'un Container.
         gallery = discord.ui.MediaGallery()
         gallery.add_item(
             media=f"attachment://{banner_filename}",
@@ -184,7 +220,6 @@ class WideLogView(discord.ui.LayoutView):
         )
         container.add_item(gallery)
 
-        # 2. Titre et miniature.
         title = safe_text(embed.title or "Journal SentriX")[:256]
         thumbnail = getattr(embed.thumbnail, "url", None)
 
@@ -201,27 +236,22 @@ class WideLogView(discord.ui.LayoutView):
         else:
             container.add_item(discord.ui.TextDisplay(f"## {title}"))
 
-        # 3. Description. Le budget protège la limite globale de 4000 caractères V2.
         description = safe_text(embed.description)[:900]
         if description:
             container.add_item(discord.ui.TextDisplay(description))
 
-        # 4. Champs compactés.
         fields = compact_fields(embed, limit=2200)
         if fields:
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(fields))
 
-        # 5. Largeur constante, même pour un log très court.
         container.add_item(discord.ui.TextDisplay(WIDE_FILLER))
 
-        # 6. Footer.
         footer = getattr(embed.footer, "text", None)
         if footer:
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(f"-# {safe_text(footer)[:300]}"))
 
-        # 7. Boutons existants : copier ID, voir le message, etc.
         copy_buttons(container, old_view)
         self.add_item(container)
 
@@ -271,9 +301,6 @@ def extract_history_ids(embed: discord.Embed) -> tuple[int | None, int | None]:
     target_id = _field_id(embed, _TARGET_LABELS)
     moderator_id = _field_id(embed, _MODERATOR_LABELS)
 
-    # cogs/logs.py place l'identité au début de la description sous la forme
-    # « Nom\nID : `123...` ». Ce premier snowflake est donc la cible si aucun champ
-    # explicite ne l'a déjà fournie.
     if target_id is None:
         target_id = _first_snowflake(embed.description)
 
@@ -340,7 +367,6 @@ async def _record_log_safe(
             embed=embed,
         )
     except Exception:
-        # L'historique est auxiliaire : ne jamais transformer son échec en échec du log.
         logger.exception(
             "Historique SQLite du log ignoré après échec guild=%s type=%s",
             guild_id,
@@ -383,52 +409,110 @@ async def send_wide_log(
     old_view: discord.ui.View | None = None,
     extra_file: discord.File | None = None,
 ) -> bool:
-    """Envoie un log Components V2 ; tout fallback conserve obligatoirement la bannière."""
+    """Envoie le vrai log Components V2 et expose toute erreur au lieu de la masquer."""
+    log_runtime_capabilities()
+
     title = embed.title or ""
     description = embed.description or ""
-
     kind = banner_kind(log_type, title, description)
     banner_path = get_banner(log_type, title, description)
     banner_filename = f"sentrix_log_{kind}.png"
 
+    exists = banner_path.exists()
+    try:
+        size = banner_path.stat().st_size if exists else -1
+    except OSError:
+        size = -1
+
+    channel_id = getattr(channel, "id", "?")
+    logger.warning(
+        "SENTRIX LOG V2 START channel_id=%s log_type=%s kind=%s "
+        "banner_path=%s banner_exists=%s banner_size=%s discordpy=%s using_layoutview=%s",
+        channel_id,
+        log_type,
+        kind,
+        banner_path,
+        exists,
+        size,
+        getattr(discord, "__version__", "?"),
+        hasattr(discord.ui, "LayoutView"),
+    )
+
+    if not exists:
+        logger.error("SENTRIX LOG V2 FAILED banner introuvable: %s", banner_path)
+        return False
+
+    accent = embed.colour.value if embed.colour else None
+    try:
+        view = WideLogView(embed, banner_filename, old_view, accent)
+    except Exception as exc:
+        logger.error(
+            "SENTRIX LOG V2 FAILED construction view type=%s message=%s\n%s",
+            type(exc).__name__,
+            exc,
+            traceback.format_exc(),
+        )
+        return False
+
+    # Un discord.File est consommé/fermé après l'envoi : toujours le créer ici.
     try:
         banner_file = discord.File(str(banner_path), filename=banner_filename)
-    except (OSError, FileNotFoundError):
-        # Le fichier peut avoir été supprimé entre get_banner() et discord.File().
-        banner_path = get_banner(log_type, title, description)
-        banner_file = discord.File(str(banner_path), filename=banner_filename)
+    except Exception as exc:
+        logger.error(
+            "SENTRIX LOG V2 FAILED création discord.File type=%s message=%s\n%s",
+            type(exc).__name__,
+            exc,
+            traceback.format_exc(),
+        )
+        return False
 
     files: list[discord.File] = [banner_file]
     if extra_file is not None:
         files.append(extra_file)
 
-    accent = embed.colour.value if embed.colour else None
-    view = WideLogView(embed, banner_filename, old_view, accent)
-
     try:
-        await channel.send(
+        message = await channel.send(
             view=view,
             files=files,
             allowed_mentions=NO_PINGS,
         )
+        flags_value = int(getattr(getattr(message, "flags", None), "value", 0) or 0)
+        logger.warning(
+            "SENTRIX LOG V2 SUCCESS message_id=%s flags=%s components_v2_bit=%s",
+            getattr(message, "id", "?"),
+            flags_value,
+            bool(flags_value & 32768),
+        )
         _schedule_history(channel, embed, log_type, kind)
         return True
 
-    except (discord.Forbidden, discord.HTTPException, FileNotFoundError, OSError):
-        logger.warning(
-            "Envoi Components V2 impossible pour le log %s ; fallback embed AVEC bannière.",
-            log_type,
-            exc_info=True,
+    except discord.HTTPException as exc:
+        logger.error(
+            "SENTRIX LOG V2 FAILED HTTPException type=%s status=%s code=%s text=%r "
+            "channel_id=%s\n%s",
+            type(exc).__name__,
+            getattr(exc, "status", None),
+            getattr(exc, "code", None),
+            getattr(exc, "text", None),
+            channel_id,
+            traceback.format_exc(),
+        )
+    except Exception as exc:
+        logger.error(
+            "SENTRIX LOG V2 FAILED type=%s message=%s channel_id=%s\n%s",
+            type(exc).__name__,
+            exc,
+            channel_id,
+            traceback.format_exc(),
         )
 
-        # Le fallback ne doit plus jamais faire disparaître la bannière : on recrée
-        # le fichier car discord.py peut fermer le File de la première tentative.
-        try:
-            fallback_banner = discord.File(str(banner_path), filename=banner_filename)
-        except (OSError, FileNotFoundError):
-            banner_path = get_banner(log_type, title, description)
-            fallback_banner = discord.File(str(banner_path), filename=banner_filename)
+    if not FALLBACK_ENABLED:
+        logger.error("SENTRIX LOG V2 FALLBACK DÉSACTIVÉ — aucun ancien embed ne sera envoyé.")
+        return False
 
+    # Réactivable après diagnostic seulement. Le fallback conserve lui aussi la bannière.
+    try:
+        fallback_banner = discord.File(str(banner_path), filename=banner_filename)
         fallback_embed = embed.copy()
         fallback_embed.set_image(url=f"attachment://{banner_filename}")
 
@@ -445,16 +529,13 @@ async def send_wide_log(
         if old_view is not None:
             kwargs["view"] = old_view
 
-        try:
-            await channel.send(**kwargs)
-            _schedule_history(channel, embed, log_type, kind)
-            return True
-        except (discord.Forbidden, discord.HTTPException, OSError):
-            logger.exception(
-                "Fallback du log %s impossible : la bannière est obligatoire.",
-                log_type,
-            )
-            return False
+        await channel.send(**kwargs)
+        logger.warning("SENTRIX LOG V2 FALLBACK utilisé")
+        _schedule_history(channel, embed, log_type, kind)
+        return True
+    except Exception:
+        logger.error("SENTRIX LOG V2 FALLBACK échoué\n%s", traceback.format_exc())
+        return False
 
 
 async def upsert_log_config(
@@ -496,6 +577,7 @@ async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> l
 
 
 __all__ = [
+    "FALLBACK_ENABLED",
     "NO_PINGS",
     "WIDE_FILLER",
     "WideLogView",
@@ -503,6 +585,7 @@ __all__ = [
     "ensure_log_storage",
     "extract_history_ids",
     "fetch_log_history",
+    "log_runtime_capabilities",
     "safe_text",
     "send_wide_log",
     "upsert_log_config",
