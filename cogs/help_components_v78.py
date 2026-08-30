@@ -145,9 +145,14 @@ def install(bot: commands.Bot) -> None:
     from . import help_complete_v79 as help_v79
     help_v79.install(bot)
 
+    # V80 finalise le Help et la commande clear : aucun faux @everyone/@here dans l'aide,
+    # et les purges produisent un seul log récapitulatif avec transcription complète.
+    from . import help_clear_fix_v80 as help_clear_v80
+    help_clear_v80.install(bot)
+
     bot._sentrix_help_components_v78 = True
     logger.info(
-        "%s installé : accueil paginé et catalogue complet V79 actif.",
+        "%s installé : accueil paginé, catalogue V79 et correctifs V80 actifs.",
         RUNTIME_MARKER,
     )
 
