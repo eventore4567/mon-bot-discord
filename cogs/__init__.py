@@ -34,6 +34,7 @@ from .giveaway_antialt import install as install_giveaway_antialt
 from .language_official_bridge import install as install_language_official_bridge
 from .language_runtime import install as install_language_runtime
 from .language_setup_finalizer import install as install_language_setup_finalizer
+from .logs_runtime_v83 import install as install_logs_runtime_v83
 from .natural_music_intent_guard import install as install_natural_music_intent_guard
 from .no_auto_tracker import install as install_no_auto_tracker
 from .owner_sanction_immunity import install as install_owner_sanction_immunity
@@ -267,9 +268,12 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _run_installer("Control Center Components V2 V73", install_setup_components_v73, bot)
     await _run_installer("Setup Experience V74", install_setup_experience_v74, bot)
     await _run_installer("Setup Security Choice V75", install_setup_security_choice_v75, bot)
+    # V75 déclenche la chaîne Help/Moderation qui installe encore les couches Premium V81/V82.
+    # V83 passe donc EN DERNIER et restaure le logger canonique maintenant branché sur wide_logs.
+    await _run_installer("Logs larges Components V2 V83", install_logs_runtime_v83, bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
-        "Runtime SentriX finalisé : Setup V75/V74 + Components V2 V73 + Sécurité V71 + Tickets V72."
+        "Runtime SentriX finalisé : Setup V75/V74 + Components V2 V73 + Sécurité V71 + Tickets V72 + Logs V83."
     )
 
 
