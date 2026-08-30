@@ -383,7 +383,7 @@ async def send_wide_log(
     old_view: discord.ui.View | None = None,
     extra_file: discord.File | None = None,
 ) -> bool:
-    """Envoie un log Components V2, puis retombe sur l'embed classique si nécessaire."""
+    """Envoie un log Components V2 ; tout fallback conserve obligatoirement la bannière."""
     title = embed.title or ""
     description = embed.description or ""
 
@@ -416,28 +416,44 @@ async def send_wide_log(
 
     except (discord.Forbidden, discord.HTTPException, FileNotFoundError, OSError):
         logger.warning(
-            "Envoi Components V2 impossible pour le log %s ; fallback embed classique.",
+            "Envoi Components V2 impossible pour le log %s ; fallback embed AVEC bannière.",
             log_type,
             exc_info=True,
         )
 
-        # Repli classique : notamment si le rôle SentriX n'a pas « Joindre des fichiers ».
+        # Le fallback ne doit plus jamais faire disparaître la bannière : on recrée
+        # le fichier car discord.py peut fermer le File de la première tentative.
+        try:
+            fallback_banner = discord.File(str(banner_path), filename=banner_filename)
+        except (OSError, FileNotFoundError):
+            banner_path = get_banner(log_type, title, description)
+            fallback_banner = discord.File(str(banner_path), filename=banner_filename)
+
+        fallback_embed = embed.copy()
+        fallback_embed.set_image(url=f"attachment://{banner_filename}")
+
         _rewind_file(extra_file)
+        fallback_files: list[discord.File] = [fallback_banner]
+        if extra_file is not None:
+            fallback_files.append(extra_file)
+
         kwargs: dict[str, Any] = {
-            "embed": embed,
+            "embed": fallback_embed,
+            "files": fallback_files,
             "allowed_mentions": NO_PINGS,
         }
         if old_view is not None:
             kwargs["view"] = old_view
-        if extra_file is not None:
-            kwargs["file"] = extra_file
 
         try:
             await channel.send(**kwargs)
             _schedule_history(channel, embed, log_type, kind)
             return True
         except (discord.Forbidden, discord.HTTPException, OSError):
-            logger.exception("Fallback embed du log %s impossible.", log_type)
+            logger.exception(
+                "Fallback du log %s impossible : la bannière est obligatoire.",
+                log_type,
+            )
             return False
 
 
