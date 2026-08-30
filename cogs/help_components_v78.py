@@ -140,11 +140,15 @@ def install(bot: commands.Bot) -> None:
         _show_home_v78._sentrix_previous = current_show_home
         cls.show_home = _show_home_v78
 
+    # V79 remplace ensuite la source du catalogue : il fusionne les commandes + et /
+    # et ajoute les commandes slash-only qui n'étaient jamais visibles dans V77/V78.
+    from . import help_complete_v79 as help_v79
+    help_v79.install(bot)
+
     bot._sentrix_help_components_v78 = True
     logger.info(
-        "%s installé : accueil du Help paginé à %s catégories pour respecter la limite Components V2.",
+        "%s installé : accueil paginé et catalogue complet V79 actif.",
         RUNTIME_MARKER,
-        HOME_PAGE_SIZE,
     )
 
 
