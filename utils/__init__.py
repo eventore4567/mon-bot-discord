@@ -6,7 +6,10 @@ y compris les anciens appelants, utilisent les mêmes bannières SentriX 1024 px
 """
 
 from .log_banners import install as _install_log_banners
+from .log_banner_assets import install as _install_log_banner_assets
 
+_install_log_banner_assets()
 _install_log_banners()
 
+del _install_log_banner_assets
 del _install_log_banners
