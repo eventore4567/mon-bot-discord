@@ -1,406 +1,150 @@
-"""Bannières premium pour les journaux SentriX.
+"""Génération et sélection des bannières de logs SentriX.
 
-Les cinq bandes sont générées en mémoire avec Pillow (1024 px) puis jointes au message
-Discord. Aucun fichier PNG statique ni URL externe n'est requis.
-
-Palette :
-- error   : erreur, suppression, départ, sanction forte ;
-- success : restauration, unban, unmute, action réussie ;
-- warning : avertissement, mute, permission/sécurité ;
-- info    : modification et information courante ;
-- special : arrivée et événement spécial.
+Les cinq bannières sont stockées dans ``assets/log_banners`` afin que le renderer
+Components V2 puisse les joindre comme premier média du message. La génération est
+mise en cache en mémoire et un fichier supprimé à chaud est recréé automatiquement.
 """
 from __future__ import annotations
 
-import io
-import logging
-import time
-from functools import lru_cache
+from pathlib import Path
 
-import discord
+from PIL import Image, ImageDraw
 
-try:
-    from PIL import Image, ImageDraw, ImageFilter
-except ImportError:  # pragma: no cover - Pillow est une dépendance SentriX.
-    Image = ImageDraw = ImageFilter = None
+ROOT = Path(__file__).resolve().parents[1]
+BANNER_DIR = ROOT / "assets" / "log_banners"
 
-from utils import embeds as embeds_mod
-from utils import log_service
+WIDTH = 1024
+HEIGHT = 110
 
-logger = logging.getLogger("bot")
-
-BANNER_WIDTH = 1024
-BANNER_HEIGHT = 150
-BANNER_BG = (7, 9, 15)
-
-STYLE_PALETTE: dict[str, tuple[int, int, int]] = {
-    "error": (255, 45, 45),
-    "success": (45, 255, 136),
-    "warning": (255, 181, 45),
-    "info": (45, 154, 255),
-    "special": (155, 77, 255),
-}
-STYLE_COLOURS = {
-    name: (rgb[0] << 16) | (rgb[1] << 8) | rgb[2]
-    for name, rgb in STYLE_PALETTE.items()
+COLORS: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
+    "error": ((255, 65, 85), (125, 20, 45)),
+    "success": ((45, 220, 110), (15, 105, 60)),
+    "warning": ((255, 185, 55), (180, 80, 20)),
+    "info": ((55, 145, 255), (45, 70, 200)),
+    "special": ((165, 95, 255), (75, 40, 185)),
 }
 
-_SPECIAL_WORDS = (
-    "membre arrivé",
-    "membre arrive",
-    "arrivée",
-    "arrivee",
-    "bienvenue",
-    "boost",
-    "anniversaire",
-    "événement spécial",
-    "evenement special",
-)
-_SUCCESS_WORDS = (
-    "débann",
-    "debann",
-    "unban",
-    "unmute",
-    "démute",
-    "demute",
-    "restaur",
-    "réactiv",
-    "reactiv",
-    "succès",
-    "succes",
-    "réussi",
-    "reussi",
-)
-_WARNING_WORDS = (
-    "avert",
-    "warn",
-    "mute",
-    "timeout",
-    "permission",
-    "vérification",
-    "verification",
-    "anti-spam",
-    "antispam",
-    "automod",
-)
-_ERROR_WORDS = (
-    "supprim",
-    "bann",
-    "ban ",
-    "kick",
-    "expuls",
-    "membre parti",
-    "quitt",
-    "erreur",
-    "échec",
-    "echec",
-    "sanction",
-    "nuke",
+_READY = False
+
+
+def _mix(a: int, b: int, t: float) -> int:
+    return round(a + (b - a) * t)
+
+
+def ensure_banners(force: bool = False) -> None:
+    """Génère les cinq bannières si elles n'existent pas déjà."""
+    global _READY
+
+    if _READY and not force:
+        return
+
+    BANNER_DIR.mkdir(parents=True, exist_ok=True)
+
+    for kind, (left, right) in COLORS.items():
+        path = BANNER_DIR / f"banner_{kind}.png"
+
+        if path.exists() and not force:
+            continue
+
+        image = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+        pixels = image.load()
+
+        for x in range(WIDTH):
+            t = x / max(1, WIDTH - 1)
+            r = _mix(left[0], right[0], t)
+            g = _mix(left[1], right[1], t)
+            b = _mix(left[2], right[2], t)
+
+            for y in range(HEIGHT):
+                center_light = 1 - abs((y / max(1, HEIGHT - 1)) * 2 - 1)
+                brightness = 0.86 + center_light * 0.14
+                pixels[x, y] = (
+                    min(255, round(r * brightness)),
+                    min(255, round(g * brightness)),
+                    min(255, round(b * brightness)),
+                    255,
+                )
+
+        # Ouverture transparente centrale prévue pour le logo SentriX.
+        draw = ImageDraw.Draw(image)
+        center_x = WIDTH // 2
+        draw.rounded_rectangle(
+            (center_x - 75, 15, center_x + 75, HEIGHT - 15),
+            radius=32,
+            fill=(0, 0, 0, 0),
+        )
+
+        image.save(path, "PNG")
+
+    _READY = True
+
+
+# Ordre de priorité : les actions spécifiques sont évaluées avant les mots génériques.
+# Ainsi « unban » est vert avant que « ban » puisse être détecté en rouge.
+_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "success",
+        (
+            "unban", "déban", "deban", "unmute", "untimeout",
+            "restaur", "réussi", "reussi", "succès", "succes",
+            "activé", "active", "ajouté", "ajoute", "levé", "leve",
+        ),
+    ),
+    (
+        "special",
+        (
+            "arrivée", "arrivee", "rejoint", "bienvenue", "welcome",
+            "boost", "special", "spécial", "anniversaire", "niveau",
+        ),
+    ),
+    (
+        "warning",
+        (
+            "warn", "avert", "mute", "timeout", "permission",
+            "automod", "anti-spam", "antispam", "attention",
+            "manquant", "échec", "echec", "refus",
+        ),
+    ),
+    (
+        "error",
+        (
+            "supprim", "delete", "ban", "kick", "expuls",
+            "sanction", "erreur", "error", "départ", "depart",
+            "quitté", "quitte", "blacklist", "purge",
+        ),
+    ),
 )
 
 
-def resolve_log_style(log_type: str, embed: discord.Embed) -> str:
-    """Retourne un des cinq styles à partir de l'action réellement journalisée."""
-    title = str(embed.title or "").casefold()
+def banner_kind(log_type: str, title: str = "", description: str = "") -> str:
+    """Retourne ``error/success/warning/info/special`` pour un événement de log."""
+    text = f"{log_type} {title} {description}".casefold()
 
-    if any(word in title for word in _SPECIAL_WORDS):
-        return "special"
-    # Important : succès avant danger, car « débannissement » contient « bannissement ».
-    if any(word in title for word in _SUCCESS_WORDS):
-        return "success"
-    # Important : avertissement avant le fallback modération rouge.
-    if any(word in title for word in _WARNING_WORDS):
-        return "warning"
-    if any(word in title for word in _ERROR_WORDS):
-        return "error"
+    for kind, words in _RULES:
+        if any(word in text for word in words):
+            return kind
 
-    normalized_type = str(log_type or "").strip().casefold()
-    if normalized_type == "moderation":
-        return "error"
-    if normalized_type == "automod":
-        return "warning"
-    if normalized_type == "members" and "arriv" in title:
-        return "special"
     return "info"
 
 
-@lru_cache(maxsize=len(STYLE_PALETTE))
-def _banner_png(style: str) -> bytes:
-    """Construit la bande 1024 px et met en cache les octets PNG."""
-    if Image is None or ImageDraw is None or ImageFilter is None:
-        return b""
+def get_banner(log_type: str, title: str = "", description: str = "") -> Path:
+    """Retourne la bannière voulue et la recrée si elle a été supprimée à chaud."""
+    ensure_banners()
+    kind = banner_kind(log_type, title, description)
+    path = BANNER_DIR / f"banner_{kind}.png"
 
-    style = style if style in STYLE_PALETTE else "info"
-    accent = STYLE_PALETTE[style]
-    width, height = BANNER_WIDTH, BANNER_HEIGHT
-    center_x = width // 2
-    center_y = height // 2
-    gap_half = 108
+    if not path.exists():
+        ensure_banners(force=True)
 
-    base = Image.new("RGBA", (width, height), (*BANNER_BG, 255))
-    glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    glow_draw = ImageDraw.Draw(glow, "RGBA")
-
-    # Deux faisceaux larges qui convergent vers le trou central.
-    glow_draw.polygon(
-        [(0, 11), (center_x - gap_half, 47), (center_x - gap_half, height - 47), (0, height - 11)],
-        fill=(*accent, 175),
-    )
-    glow_draw.polygon(
-        [(width, 11), (center_x + gap_half, 47), (center_x + gap_half, height - 47), (width, height - 11)],
-        fill=(*accent, 175),
-    )
-    glow = glow.filter(ImageFilter.GaussianBlur(radius=22))
-    base = Image.alpha_composite(base, glow)
-
-    # Dégradé horizontal plus précis : fort aux extrémités, sombre près du centre.
-    pixels = base.load()
-    max_distance = max(1, center_x - gap_half)
-    for x in range(width):
-        distance_from_hole = abs(x - center_x) - gap_half
-        if distance_from_hole <= 0:
-            continue
-        strength = min(1.0, distance_from_hole / max_distance) ** 0.62
-        for y in range(height):
-            vertical = 0.48 + 0.52 * (1.0 - abs(y - center_y) / max(1, center_y))
-            mix = 0.58 * strength * vertical
-            old = pixels[x, y]
-            pixels[x, y] = (
-                round(old[0] * (1 - mix) + accent[0] * mix),
-                round(old[1] * (1 - mix) + accent[1] * mix),
-                round(old[2] * (1 - mix) + accent[2] * mix),
-                255,
-            )
-
-    draw = ImageDraw.Draw(base, "RGBA")
-
-    # Rails lumineux haut/bas, comme une vraie bande de statut.
-    for offset, alpha in ((0, 210), (1, 130), (2, 70)):
-        draw.line(
-            [(0, 8 + offset), (center_x - gap_half - 12, 41 + offset)],
-            fill=(*accent, alpha),
-            width=2,
-        )
-        draw.line(
-            [(center_x + gap_half + 12, 41 + offset), (width, 8 + offset)],
-            fill=(*accent, alpha),
-            width=2,
-        )
-        draw.line(
-            [(0, height - 9 - offset), (center_x - gap_half - 12, height - 42 - offset)],
-            fill=(*accent, alpha),
-            width=2,
-        )
-        draw.line(
-            [(center_x + gap_half + 12, height - 42 - offset), (width, height - 9 - offset)],
-            fill=(*accent, alpha),
-            width=2,
-        )
-
-    # Trou central sombre, volontairement vide : il peut recevoir le logo SentriX plus tard.
-    hole = [
-        (center_x - 72, 16),
-        (center_x + 72, 16),
-        (center_x + 112, center_y),
-        (center_x + 72, height - 16),
-        (center_x - 72, height - 16),
-        (center_x - 112, center_y),
-    ]
-    draw.polygon(hole, fill=(4, 5, 10, 255))
-    draw.line(hole + [hole[0]], fill=(*accent, 70), width=2)
-
-    # Assombrit les bords du trou pour que le centre reste propre même sans logo.
-    inner = [
-        (center_x - 58, 28),
-        (center_x + 58, 28),
-        (center_x + 91, center_y),
-        (center_x + 58, height - 28),
-        (center_x - 58, height - 28),
-        (center_x - 91, center_y),
-    ]
-    draw.polygon(inner, fill=(6, 7, 12, 255))
-
-    output = io.BytesIO()
-    base.convert("RGB").save(output, format="PNG", optimize=True)
-    return output.getvalue()
+    return path
 
 
-def make_banner_file(style: str) -> discord.File | None:
-    png = _banner_png(style)
-    if not png:
-        return None
-    safe_style = style if style in STYLE_PALETTE else "info"
-    return discord.File(io.BytesIO(png), filename=f"banner_{safe_style}.png")
-
-
-def _render_embed(log_type: str, source: discord.Embed) -> tuple[discord.Embed, str]:
-    """Normalise le log puis applique la couleur correspondant à la bannière."""
-    rendered = (
-        source
-        if getattr(getattr(source, "image", None), "url", None) == embeds_mod.SENTRIX_BANNER_URL
-        else embeds_mod.normalize_log(source)
-    )
-    style = resolve_log_style(log_type, rendered)
-    rendered.colour = discord.Colour(STYLE_COLOURS[style])
-    return rendered, style
-
-
-async def send_log_v81(
-    bot,
-    guild: discord.Guild,
-    log_type: str,
-    embed: discord.Embed,
-    file: discord.File | None = None,
-    *,
-    view: discord.ui.View | None = None,
-    event_key: str | None = None,
-) -> bool:
-    """Transport V81 : bannière 1024 px + couleur sémantique + zéro ping."""
-    if not log_service.is_primary_process():
-        logger.info(
-            "Log volontairement désactivé par SENTRIX_LOG_PRODUCER guild=%s type=%s",
-            guild.id,
-            log_type,
-        )
-        return False
-
-    rendered, style = _render_embed(log_type, embed)
-
-    semantic_key = log_service.semantic_event_key(guild.id, log_type, rendered)
-    if log_service._is_duplicate(event_key) or log_service._is_duplicate(semantic_key):
-        logger.debug(
-            "Log dupliqué ignoré guild=%s type=%s key=%s",
-            guild.id,
-            log_type,
-            event_key or semantic_key,
-        )
-        return False
-
-    try:
-        setting = await log_service.get_log_setting(bot, guild.id, log_type)
-    except Exception:
-        logger.exception(
-            "Impossible de lire/réparer la configuration du log %s sur %s.",
-            log_type,
-            guild.id,
-        )
-        return False
-
-    if not setting["enabled"]:
-        logger.info("Log désactivé guild=%s type=%s", guild.id, log_type)
-        return False
-
-    # Un transcript existant reste obligatoire s'il a été fourni. La bannière, elle,
-    # se dégrade proprement si le salon n'autorise pas les pièces jointes.
-    ok, reason = log_service.validate_channel(
-        guild,
-        setting["channel_id"],
-        needs_file=file is not None,
-    )
-    if not ok:
-        logger.warning(
-            "Log %s non envoyé sur guild=%s : %s",
-            log_type,
-            guild.id,
-            reason,
-        )
-        return False
-
-    channel = guild.get_channel(setting["channel_id"])
-    me = guild.me
-    can_attach_banner = bool(
-        me is not None and channel.permissions_for(me).attach_files
-    )
-
-    banner_file = make_banner_file(style) if can_attach_banner else None
-    attachments: list[discord.File] = []
-    if banner_file is not None:
-        rendered.set_image(url=f"attachment://{banner_file.filename}")
-        attachments.append(banner_file)
-    else:
-        # Évite de laisser l'ancienne URL de bannière si Attach Files est refusé.
-        rendered.remove_image()
-
-    if file is not None:
-        attachments.append(file)
-
-    kwargs = {
-        "embed": rendered,
-        "allowed_mentions": log_service.LOG_ALLOWED_MENTIONS,
-    }
-    if view is not None:
-        kwargs["view"] = view
-    if len(attachments) == 1:
-        kwargs["file"] = attachments[0]
-    elif attachments:
-        kwargs["files"] = attachments
-
-    try:
-        await channel.send(**kwargs)
-        logger.info(
-            "Log V81 envoyé guild=%s type=%s style=%s channel=%s banner=%s",
-            guild.id,
-            log_type,
-            style,
-            channel.id,
-            banner_file is not None,
-        )
-        return True
-    except (discord.Forbidden, discord.HTTPException):
-        logger.exception(
-            "Échec d'envoi du log V81 %s dans %s.",
-            log_type,
-            setting["channel_id"],
-        )
-        return False
-
-
-async def send_test_log_v81(
-    bot,
-    guild: discord.Guild,
-    log_type: str,
-    author: discord.abc.User,
-) -> tuple[bool, str]:
-    """Le bouton de test passe par exactement le même renderer que les vrais logs."""
-    setting = await log_service.get_log_setting(bot, guild.id, log_type)
-    if not setting["enabled"]:
-        return False, "Ce type de log est désactivé. Activez-le avant le test."
-
-    ok, reason = log_service.validate_channel(guild, setting["channel_id"])
-    if not ok:
-        return False, f"Impossible d'envoyer un test : {reason}."
-
-    label = log_service.LOG_TYPES.get(log_type, {}).get("label", log_type)
-    test_embed = embeds_mod.log_embed(
-        f"Test de log — {label}",
-        fields=(
-            ("Catégorie", label, False),
-            ("Déclenché par", f"<@{author.id}>", True),
-        ),
-        banner=False,
-    )
-    sent = await send_log_v81(
-        bot,
-        guild,
-        log_type,
-        test_embed,
-        event_key=log_service.make_event_key(
-            guild.id,
-            "log_test",
-            executor_id=author.id,
-            discriminator=time.time_ns(),
-        ),
-    )
-    channel = guild.get_channel(setting["channel_id"])
-    if sent:
-        return True, f"Test envoyé dans {channel.mention}."
-    return False, "Le test n'a pas pu être envoyé dans le salon de logs."
-
-
-def install() -> None:
-    """Installe une seule fois le transport visuel V81 sur le logger canonique."""
-    if getattr(log_service, "_sentrix_log_banners_v81", False):
-        return
-    log_service.send_log = send_log_v81
-    log_service.send_test_log = send_test_log_v81
-    log_service._sentrix_log_banners_v81 = True
+__all__ = [
+    "BANNER_DIR",
+    "COLORS",
+    "HEIGHT",
+    "WIDTH",
+    "banner_kind",
+    "ensure_banners",
+    "get_banner",
+]
