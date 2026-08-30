@@ -11,11 +11,14 @@ def _embed(title: str) -> discord.Embed:
 
 
 def test_banner_png_dimensions_and_palette_variants():
+    payloads = []
     for style in ("error", "success", "warning", "info", "special"):
         payload = log_banners._banner_png(style)
+        payloads.append(payload)
         assert payload.startswith(b"\x89PNG\r\n\x1a\n")
         with Image.open(BytesIO(payload)) as image:
-            assert image.size == (1024, 150)
+            assert image.size == (1024, 14)
+    assert len(set(payloads)) == 5
 
 
 def test_semantic_styles_cover_the_five_sentrix_states():
