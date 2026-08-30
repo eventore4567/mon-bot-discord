@@ -79,7 +79,7 @@ def safe_text(value: object) -> str:
     return _MENTION_RE.sub(lambda match: "@\u200b" + match.group(1), text)
 
 
-def compact_fields(embed: discord.Embed) -> str:
+def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
     """Regroupe les petits champs sur une même ligne pour garder le log horizontal."""
     blocks: list[str] = []
     small: list[str] = []
@@ -109,7 +109,9 @@ def compact_fields(embed: discord.Embed) -> str:
     flush()
 
     result = "\n\n".join(blocks)
-    return result[:3797] + "..." if len(result) > 3800 else result
+    if len(result) > limit:
+        return result[: max(1, limit - 1)].rstrip() + "…"
+    return result
 
 
 def _clone_button(item: discord.ui.Button) -> discord.ui.Button | None:
@@ -167,9 +169,8 @@ class WideLogView(discord.ui.LayoutView):
         old_view: discord.ui.View | None = None,
         accent: int | None = None,
     ) -> None:
-        # timeout=None évite que les boutons meurent au bout de cinq minutes tant que
-        # le processus reste actif. La persistance après redémarrage reste gérée par
-        # l'enregistrement des vues persistantes de discord.py, pas par ce timeout seul.
+        # timeout=None évite l'expiration au bout de cinq minutes pendant la vie du
+        # processus. Cela ne rend pas, à lui seul, les callbacks persistants après restart.
         super().__init__(timeout=None)
 
         accent_colour = discord.Colour(accent) if accent is not None else None
@@ -184,7 +185,7 @@ class WideLogView(discord.ui.LayoutView):
         container.add_item(gallery)
 
         # 2. Titre et miniature.
-        title = safe_text(embed.title or "Journal SentriX")
+        title = safe_text(embed.title or "Journal SentriX")[:256]
         thumbnail = getattr(embed.thumbnail, "url", None)
 
         if thumbnail:
@@ -200,13 +201,13 @@ class WideLogView(discord.ui.LayoutView):
         else:
             container.add_item(discord.ui.TextDisplay(f"## {title}"))
 
-        # 3. Description.
-        description = safe_text(embed.description)
+        # 3. Description. Le budget protège la limite globale de 4000 caractères V2.
+        description = safe_text(embed.description)[:900]
         if description:
-            container.add_item(discord.ui.TextDisplay(description[:1500]))
+            container.add_item(discord.ui.TextDisplay(description))
 
         # 4. Champs compactés.
-        fields = compact_fields(embed)
+        fields = compact_fields(embed, limit=2200)
         if fields:
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(fields))
@@ -218,7 +219,7 @@ class WideLogView(discord.ui.LayoutView):
         footer = getattr(embed.footer, "text", None)
         if footer:
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay(f"-# {safe_text(footer)[:500]}"))
+            container.add_item(discord.ui.TextDisplay(f"-# {safe_text(footer)[:300]}"))
 
         # 7. Boutons existants : copier ID, voir le message, etc.
         copy_buttons(container, old_view)
@@ -266,9 +267,16 @@ def _field_id(embed: discord.Embed, labels: tuple[str, ...]) -> int | None:
 
 
 def extract_history_ids(embed: discord.Embed) -> tuple[int | None, int | None]:
-    """Extrait prudemment la cible et le modérateur depuis les champs du log."""
+    """Extrait prudemment la cible et le modérateur depuis le log normalisé."""
     target_id = _field_id(embed, _TARGET_LABELS)
     moderator_id = _field_id(embed, _MODERATOR_LABELS)
+
+    # cogs/logs.py place l'identité au début de la description sous la forme
+    # « Nom\nID : `123...` ». Ce premier snowflake est donc la cible si aucun champ
+    # explicite ne l'a déjà fournie.
+    if target_id is None:
+        target_id = _first_snowflake(embed.description)
+
     return target_id, moderator_id
 
 
