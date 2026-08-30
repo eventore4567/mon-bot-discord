@@ -19,6 +19,7 @@ from discord.ext import commands
 from utils import embeds, log_service
 from . import help_complete_v79 as help_v79
 from . import premium_ui_v81 as premium_v81
+from . import premium_ui_v82 as premium_v82
 
 logger = logging.getLogger("bot.help-clear-fix-v80")
 RUNTIME_MARKER = "Help/Clear Fix V80"
@@ -293,9 +294,10 @@ def install(bot: commands.Bot) -> None:
     _install_clear_event_filter(bot)
     _install_clear_command(bot)
     premium_v81.install(bot)
+    premium_v82.install(bot)
     bot._sentrix_help_clear_fix_v80 = True
     logger.info(
-        "%s installé : mentions du Help neutralisées, clear complet et Premium UI V81 chargée.",
+        "%s installé : mentions du Help neutralisées, clear complet et Premium UI V82 chargée.",
         RUNTIME_MARKER,
     )
 
