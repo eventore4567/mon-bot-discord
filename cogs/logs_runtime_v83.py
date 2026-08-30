@@ -60,6 +60,23 @@ async def _deny(interaction: discord.Interaction) -> None:
     )
 
 
+async def _traced_canonical_send_log(*args, **kwargs):
+    """Point unique visible dans Railway avant le renderer V2 officiel."""
+    guild = args[1] if len(args) > 1 else kwargs.get("guild")
+    log_type = args[2] if len(args) > 2 else kwargs.get("log_type")
+    event_key = kwargs.get("event_key")
+    logger.warning(
+        "SENTRIX ROUTE log_type=%s renderer=wide_logs guild=%s event_key=%s",
+        log_type,
+        getattr(guild, "id", None),
+        event_key,
+    )
+    return await _CANONICAL_SEND_LOG(*args, **kwargs)
+
+
+_traced_canonical_send_log._sentrix_v83_trace = True
+
+
 async def _canonical_logs_send_v83(
     self,
     guild: discord.Guild,
@@ -75,7 +92,7 @@ async def _canonical_logs_send_v83(
     log_type = logs_cog.CONFIG_TO_LOG_TYPE.get(config_key)
     if log_type is None:
         return False
-    return await _CANONICAL_SEND_LOG(
+    return await log_service.send_log(
         self.bot,
         guild,
         log_type,
@@ -87,7 +104,7 @@ async def _canonical_logs_send_v83(
 
 def _restore_unique_log_transport() -> None:
     """Retire les anciens transports globaux et restaure un seul pipeline de logs."""
-    log_service.send_log = _CANONICAL_SEND_LOG
+    log_service.send_log = _traced_canonical_send_log
 
     # embeds.py avait un ancien filet global Messageable.send destiné aux vieux logs
     # directs. Il laissait justement passer des embeds classiques. V83 le retire : le
@@ -109,6 +126,168 @@ def _restore_unique_log_transport() -> None:
         )
     except Exception:
         logger.exception("V83: impossible de verrouiller le Cog Logs sur le transport canonique.")
+
+
+def _legacy_member_template(embed: discord.Embed | None, content: object) -> bool:
+    """Reconnaît uniquement les vieux panneaux membre réellement cassés.
+
+    Ils sont la source du second message Bienvenue/Départ visible avec ``{mention}`` ou
+    ``{user}``. On ne bloque jamais un panneau configuré valide.
+    """
+    if not isinstance(embed, discord.Embed):
+        return False
+    parts = [str(content or ""), str(embed.title or ""), str(embed.description or "")]
+    for field in embed.fields:
+        parts.extend((str(field.name or ""), str(field.value or "")))
+    blob = "\n".join(parts)
+    if "{mention}" not in blob and "{user}" not in blob:
+        return False
+    title = str(embed.title or "").casefold()
+    return title.startswith("bienvenue sur") or "départ d’un membre" in title or "depart d'un membre" in title
+
+
+def _install_legacy_member_panel_guard() -> None:
+    """Supprime le second panneau legacy sans toucher au vrai système bienvenue/départ."""
+    current_send = discord.TextChannel.send
+    if getattr(current_send, "_sentrix_v83_member_panel_guard", False):
+        return
+
+    async def guarded_send(channel: discord.TextChannel, *args, **kwargs):
+        embed = kwargs.get("embed")
+        content = kwargs.get("content")
+        if content is None and args:
+            content = args[0]
+        if _legacy_member_template(embed, content):
+            logger.warning(
+                "SENTRIX DUPLICATE blocked=legacy_member_panel guild=%s channel=%s title=%r",
+                getattr(getattr(channel, "guild", None), "id", None),
+                getattr(channel, "id", None),
+                getattr(embed, "title", None),
+            )
+            return None
+        return await current_send(channel, *args, **kwargs)
+
+    guarded_send._sentrix_v83_member_panel_guard = True
+    guarded_send._sentrix_original_send = current_send
+    discord.TextChannel.send = guarded_send
+    logger.info("V83: panneaux Bienvenue/Départ legacy avec placeholders bloqués.")
+
+
+def _install_ticket_reassignment_race_fix() -> None:
+    """Empêche une ancienne copie du cache de déclaim un ticket déjà repris.
+
+    Mastery gardait un snapshot jusqu'à 45 s. Un claim récent pouvait donc être écrasé par
+    la passe de réattribution. La décision est maintenant recalculée sur la ligne DB fraîche,
+    puis le déclaim utilise un UPDATE conditionnel sur le même claimant + last_activity_at.
+    """
+    try:
+        from . import bot_mastery_runtime as mastery
+    except Exception:
+        logger.exception("V83: runtime Mastery indisponible pour le correctif ticket.")
+        return
+
+    cls = mastery.BotMasteryRuntime
+    current = cls._ticket_reassignment_pass
+    if getattr(current, "_sentrix_v83_fresh_claim_guard", False):
+        return
+
+    async def safe_ticket_reassignment(self):
+        ts = int(time.time())
+        for channel_id, cached in list(self._ticket_channels.items()):
+            try:
+                fresh_row = await self.bot.db.fetchone(
+                    "SELECT id,guild_id,channel_id,user_id,priority,claimed_by,last_activity_at,status "
+                    "FROM tickets WHERE id=?",
+                    (cached["id"],),
+                )
+                if not fresh_row or fresh_row["status"] != "ouvert":
+                    continue
+                ticket = dict(fresh_row)
+                self._ticket_channels[int(channel_id)] = ticket
+                claimed_by = ticket.get("claimed_by")
+                if not claimed_by:
+                    continue
+
+                guild = self.bot.get_guild(int(ticket["guild_id"]))
+                if guild is None:
+                    continue
+                member = guild.get_member(int(claimed_by))
+                last_seen = self._member_activity.get((guild.id, int(claimed_by)), 0.0)
+                last_activity = int(ticket.get("last_activity_at") or 0)
+                abandoned = member is None or (
+                    last_activity
+                    and ts - last_activity >= mastery.TICKET_REASSIGN_SECONDS
+                    and (
+                        not last_seen
+                        or time.monotonic() - last_seen >= mastery.TICKET_REASSIGN_SECONDS
+                    )
+                )
+                if not abandoned:
+                    continue
+
+                state_row = await self.bot.db.fetchone(
+                    "SELECT reassigned_count FROM ticket_mastery_state WHERE ticket_id=?",
+                    (ticket["id"],),
+                )
+                if state_row and int(state_row["reassigned_count"] or 0) >= 2:
+                    continue
+
+                reservation = await self.bot.db.execute(
+                    "UPDATE tickets SET claimed_by=NULL "
+                    "WHERE id=? AND status='ouvert' AND claimed_by=? "
+                    "AND COALESCE(last_activity_at,0)=?",
+                    (ticket["id"], int(claimed_by), last_activity),
+                )
+                if reservation.rowcount < 1:
+                    # Un claim ou une activité vient d'arriver entre la lecture et l'UPDATE.
+                    # On laisse strictement le nouvel état intact.
+                    newest = await self.bot.db.fetchone(
+                        "SELECT id,guild_id,channel_id,user_id,priority,claimed_by,last_activity_at,status "
+                        "FROM tickets WHERE id=?",
+                        (ticket["id"],),
+                    )
+                    if newest:
+                        self._ticket_channels[int(channel_id)] = dict(newest)
+                    logger.info(
+                        "Ticket %s : réattribution annulée car le claim a changé entre-temps.",
+                        ticket["id"],
+                    )
+                    continue
+
+                await self.bot.db.execute(
+                    "INSERT INTO ticket_mastery_state "
+                    "(ticket_id,priority,last_claimed_by,claim_last_seen,reassigned_count,updated_at) "
+                    "VALUES (?,?,?,?,1,?) ON CONFLICT(ticket_id) DO UPDATE SET "
+                    "last_claimed_by=excluded.last_claimed_by, "
+                    "reassigned_count=reassigned_count+1, updated_at=excluded.updated_at",
+                    (
+                        ticket["id"],
+                        ticket.get("priority") or "normale",
+                        int(claimed_by),
+                        int(last_seen or 0),
+                        ts,
+                    ),
+                )
+                channel = guild.get_channel(int(channel_id))
+                if isinstance(channel, discord.TextChannel):
+                    try:
+                        await channel.send(
+                            "Ce ticket a été remis dans la file staff car sa prise en charge était inactive."
+                        )
+                    except discord.HTTPException:
+                        pass
+                ticket["claimed_by"] = None
+                self._ticket_channels[int(channel_id)] = ticket
+            except Exception:
+                logger.exception(
+                    "V83: échec isolé du contrôle de réattribution ticket id=%s",
+                    cached.get("id") if isinstance(cached, dict) else None,
+                )
+
+    safe_ticket_reassignment._sentrix_v83_fresh_claim_guard = True
+    safe_ticket_reassignment._sentrix_original = current
+    cls._ticket_reassignment_pass = safe_ticket_reassignment
+    logger.info("V83: course claim/réattribution tickets corrigée par relecture DB atomique.")
 
 
 async def _send_test_log_v83(
@@ -328,6 +507,10 @@ def install(bot: commands.Bot) -> None:
     # exactement celles du service officiel avant de déléguer à send_wide_log().
     _restore_unique_log_transport()
     log_service.send_test_log = _send_test_log_v83
+
+    # Correctifs finaux des chemins legacy encore observés en production.
+    _install_legacy_member_panel_guard()
+    _install_ticket_reassignment_race_fix()
 
     _install_slash_group(bot)
     try:
