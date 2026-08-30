@@ -1,6 +1,12 @@
 """Utilitaires partagés de SentriX.
 
-Les modules historiques restent importables pour compatibilité, mais aucun renderer n'est
-installé implicitement à l'import du package. ``utils.embeds`` et ``utils.log_service``
-sont les deux sources canoniques ; le bootstrap Discord installe explicitement le transport.
+``utils.embeds`` reste le renderer canonique et ``utils.log_service`` le transport officiel.
+Le transport visuel des journaux est installé ici une seule fois afin que tous les cogs,
+y compris les anciens appelants, utilisent les mêmes bannières SentriX 1024 px.
 """
+
+from .log_banners import install as _install_log_banners
+
+_install_log_banners()
+
+del _install_log_banners
