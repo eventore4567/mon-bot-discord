@@ -1,13 +1,13 @@
 """Utilitaires partagés de SentriX.
 
-Les modules de logs sont chargés explicitement par leurs consommateurs.
-
-Important : ce package ne doit exécuter aucun ancien installateur de renderer à
-l'import. Le système Components V2 actuel passe par ``utils.log_service`` puis
-``utils.wide_logs`` ; ``utils.log_banners`` ne fournit volontairement plus de
-fonction ``install()``.
-
-Garder ``utils`` sans effet de bord évite aussi qu'un simple import de
-``utils.durable_database`` fasse démarrer d'anciens patches de logs incompatibles
-avec le renderer V83.
+Le renderer officiel des logs reste ``utils.log_service`` -> ``utils.wide_logs``.
+Une garde de compatibilité est installée ici afin que les très anciens appelants qui
+font encore directement ``TextChannel.send(embed=...)`` dans un salon de logs ne puissent
+plus contourner la bannière SentriX.
 """
+
+from utils.log_channel_guard import install as _install_log_channel_guard
+
+_install_log_channel_guard()
+
+del _install_log_channel_guard
