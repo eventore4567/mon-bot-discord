@@ -214,14 +214,19 @@ def _install_ticket_reassignment_race_fix() -> None:
                 member = guild.get_member(int(claimed_by))
                 last_seen = self._member_activity.get((guild.id, int(claimed_by)), 0.0)
                 last_activity = int(ticket.get("last_activity_at") or 0)
-                abandoned = member is None or (
+
+                # IMPORTANT : un cache Discord froid (member is None) ne suffit jamais à
+                # abandonner un claim. Le claim doit d'abord être réellement ancien.
+                stale_claim = bool(
                     last_activity
                     and ts - last_activity >= mastery.TICKET_REASSIGN_SECONDS
-                    and (
-                        not last_seen
-                        or time.monotonic() - last_seen >= mastery.TICKET_REASSIGN_SECONDS
-                    )
                 )
+                staff_inactive = bool(
+                    member is None
+                    or not last_seen
+                    or time.monotonic() - last_seen >= mastery.TICKET_REASSIGN_SECONDS
+                )
+                abandoned = stale_claim and staff_inactive
                 if not abandoned:
                     continue
 
