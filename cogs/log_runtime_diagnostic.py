@@ -1,7 +1,8 @@
 """Diagnostic propriétaire du pipeline de logs SentriX.
 
-Ce module observe les événements Gateway et l'état du transport, mais ne monkey-patch
-aucune méthode Discord ni ``Logs._send``. La sonde passe par le pipeline officiel V2.
+Ce module observe les événements Gateway et l'état du transport, sans monkey-patch.
+``+logs-diag`` répond volontairement avec un vrai ``discord.Embed`` natif et sa sonde
+passe directement par le transport V83, sans renderer de réponses de commandes.
 """
 from __future__ import annotations
 
@@ -12,7 +13,8 @@ from collections import Counter
 import discord
 from discord.ext import commands
 
-from utils import checks, embeds, log_service
+from utils import checks, log_service
+from . import logs_runtime_v83
 
 _TRACKED = (
     "message",
@@ -63,6 +65,31 @@ def _seen(bot: commands.Bot, event: str, *items) -> None:
     state["last_gateway_event"] = event
     state["last_gateway_guild_id"] = _guild_id_from_args(*items)
     state["last_gateway_at"] = int(time.time())
+
+
+def _unwrap_send(function):
+    current = function
+    seen: set[int] = set()
+    while callable(current) and id(current) not in seen:
+        seen.add(id(current))
+        original = (
+            getattr(current, "_sentrix_original_send", None)
+            or getattr(current, "_sentrix_original", None)
+        )
+        if not callable(original):
+            break
+        current = original
+    return current
+
+
+async def _native_embed_send(ctx: commands.Context, panel: discord.Embed) -> None:
+    """Envoie un embed Discord classique sans passer par ctx.send ni un renderer UI."""
+    native_send = _unwrap_send(discord.abc.Messageable.send)
+    await native_send(
+        ctx.channel,
+        embed=panel,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
 
 
 class LogRuntimeDiagnostic(commands.Cog):
@@ -124,8 +151,18 @@ class LogRuntimeDiagnostic(commands.Cog):
                 setting = await log_service.get_log_setting(self.bot, guild.id, log_type)
                 channel_id = int(setting.get("channel_id") or 0)
                 channel = guild.get_channel(channel_id) if channel_id else None
-                valid, reason = log_service.validate_channel(guild, channel_id)
                 enabled = bool(setting.get("enabled"))
+
+                # Une route volontairement non configurée n'est pas une panne du transport.
+                if not enabled and not channel_id:
+                    lines.append(f"`{log_type}` • Non configuré")
+                    continue
+
+                valid, reason = log_service.validate_channel(
+                    guild,
+                    channel_id,
+                    needs_file=True,
+                )
                 ok = enabled and valid and channel is not None
                 all_ok = all_ok and ok
                 channel_name = getattr(channel, "name", "absent")
@@ -142,9 +179,13 @@ class LogRuntimeDiagnostic(commands.Cog):
     @checks.is_bot_owner()
     async def logs_diag(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(
-                embed=embeds.error("Utilise cette commande dans un serveur.", title="Diagnostic logs")
+            panel = discord.Embed(
+                title="Diagnostic logs",
+                description="Utilise cette commande dans un serveur.",
+                colour=discord.Colour.orange(),
             )
+            panel.set_footer(text="SentriX • Diagnostic logs")
+            return await _native_embed_send(ctx, panel)
 
         state = _state(self.bot)
         logs_cog = self.bot.get_cog("Logs")
@@ -157,14 +198,28 @@ class LogRuntimeDiagnostic(commands.Cog):
         resolved_send = getattr(logs_cog, "_send", None) if logs_cog is not None else None
         resolved_func = getattr(resolved_send, "__func__", resolved_send)
 
-        probe = embeds.log_embed(
-            "Diagnostic live des logs",
-            fields=(("Origine", "+logs-diag • pipeline officiel Components V2", False),),
+        active_global = log_service.send_log
+        global_is_v83 = active_global is logs_runtime_v83._traced_canonical_send_log
+        global_name = (
+            f"{getattr(active_global, '__module__', '?')}."
+            f"{getattr(active_global, '__qualname__', '?')}"
         )
+
+        # Embed métier minimal : la sonde doit tester le même V83 que les vrais listeners.
+        probe = discord.Embed(
+            title="Diagnostic live des logs",
+            colour=discord.Colour.blurple(),
+        )
+        probe.add_field(
+            name="Origine",
+            value="+logs-diag • pipeline officiel Components V2",
+            inline=False,
+        )
+
         transport_ok = False
         transport_exception = None
         try:
-            transport_ok = bool(await log_service.send_log(
+            transport_ok = bool(await logs_runtime_v83._traced_canonical_send_log(
                 self.bot,
                 ctx.guild,
                 "messages",
@@ -172,7 +227,7 @@ class LogRuntimeDiagnostic(commands.Cog):
                 event_key=f"diag-v2:{ctx.guild.id}:{time.time_ns()}",
             ))
         except Exception as exc:
-            transport_exception = f"{type(exc).__name__}: {exc}"[:300]
+            transport_exception = f"{type(exc).__name__}: {exc}"[:700]
 
         route_lines, routes_ok = await self._route_status(ctx.guild)
         send_patched = discord.TextChannel.send is not discord.abc.Messageable.send
@@ -182,6 +237,7 @@ class LogRuntimeDiagnostic(commands.Cog):
             and listener_count > 0
             and not instance_override
             and not send_patched
+            and global_is_v83
             and routes_ok
         )
 
@@ -195,41 +251,57 @@ class LogRuntimeDiagnostic(commands.Cog):
             description=(
                 "Le pipeline Components V2 est l'unique transport actif."
                 if healthy
-                else "Une ancienne couche ou une route invalide est encore détectée."
+                else "Au moins un contrôle du pipeline des logs a échoué."
             ),
             colour=discord.Colour.green() if healthy else discord.Colour.red(),
         )
+
+        bot_user = getattr(self.bot, "user", None)
+        avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
+        if avatar:
+            panel.set_thumbnail(url=str(avatar))
+
         panel.add_field(
-            name="Transport",
-            value=(
-                f"Probe V2 : **{'OK' if transport_ok else 'ÉCHEC'}**\n"
-                f"SEND PATCHED : **{send_patched}**\n"
-                f"Logs._send instance override : **{instance_override}**\n"
-                f"Résolu : `{getattr(resolved_func, '__module__', '?')}.{getattr(resolved_func, '__qualname__', '?')}`"
-            ),
-            inline=False,
+            name="Transport V2",
+            value=f"**{'OK' if transport_ok else 'ÉCHEC'}**",
+            inline=True,
         )
         panel.add_field(
             name="Gateway",
-            value=f"Listeners Logs : **{listener_count}** • Événements observés : **{event_total}**",
-            inline=False,
+            value=f"**{listener_count}** listeners\n**{event_total}** événements",
+            inline=True,
         )
         panel.add_field(
-            name="Instance Railway",
+            name="Railway",
             value=f"Service : `{service_name}`\nCommit : `{commit[:12]}`",
             inline=False,
         )
         panel.add_field(
+            name="Pipeline",
+            value=(
+                f"SEND PATCHED : **{send_patched}**\n"
+                f"Logs._send instance override : **{instance_override}**\n"
+                f"Logs._send : `{getattr(resolved_func, '__module__', '?')}.{getattr(resolved_func, '__qualname__', '?')}`\n"
+                f"log_service.send_log V83 : **{global_is_v83}**\n"
+                f"Global : `{global_name}`"
+            )[:1024],
+            inline=False,
+        )
+        panel.add_field(
             name="Routes",
-            value="\n".join(route_lines)[:1024],
+            value="\n".join(route_lines)[:1024] or "Aucune route détectée.",
             inline=False,
         )
 
         if transport_exception:
-            panel.add_field(name="Erreur transport", value=f"`{transport_exception}`", inline=False)
+            panel.add_field(
+                name="Erreur transport",
+                value=f"```py\n{transport_exception[:900]}\n```",
+                inline=False,
+            )
 
         panel.set_footer(text="SentriX • Diagnostic Components V2")
-        await ctx.send(embed=panel, allowed_mentions=discord.AllowedMentions.none())
+        await _native_embed_send(ctx, panel)
 
 
 async def install(bot: commands.Bot) -> None:

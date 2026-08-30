@@ -28,8 +28,6 @@ from utils.wide_logs import (
 logger = logging.getLogger("bot.logs-runtime-v83")
 RUNTIME_MARKER = "Wide Logs Runtime V83"
 
-_CANONICAL_SEND_LOG = log_service.send_log
-
 _LOG_CHOICES = [
     app_commands.Choice(name="Messages", value="messages"),
     app_commands.Choice(name="Membres", value="members"),
@@ -58,17 +56,111 @@ async def _deny(interaction: discord.Interaction) -> None:
     )
 
 
-async def _traced_canonical_send_log(*args, **kwargs):
-    guild = args[1] if len(args) > 1 else kwargs.get("guild")
-    log_type = args[2] if len(args) > 2 else kwargs.get("log_type")
-    event_key = kwargs.get("event_key")
+async def _traced_canonical_send_log(
+    bot,
+    guild: discord.Guild,
+    log_type: str,
+    embed: discord.Embed,
+    file: discord.File | None = None,
+    *,
+    view: discord.ui.View | None = None,
+    event_key: str | None = None,
+) -> bool:
+    """Transport V83 autonome.
+
+    Important : cette fonction ne délègue jamais à ``log_service.send_log``. Une ancienne
+    couche V33 pouvait remplacer ce symbole avant l'import de V83 ; capturer ce wrapper
+    rendait ensuite ``event_key`` incompatible. V83 utilise directement les primitives
+    stables de ``log_service`` et le renderer ``send_wide_log``.
+    """
     logger.warning(
         "SENTRIX ROUTE log_type=%s renderer=wide_logs guild=%s event_key=%s",
         log_type,
         getattr(guild, "id", None),
         event_key,
     )
-    return await _CANONICAL_SEND_LOG(*args, **kwargs)
+
+    if log_type not in log_service.LOG_TYPES:
+        logger.error("SENTRIX ROUTE type inconnu=%s", log_type)
+        return False
+
+    if not log_service.is_primary_process():
+        logger.info(
+            "Log volontairement désactivé par SENTRIX_LOG_PRODUCER guild=%s type=%s",
+            guild.id,
+            log_type,
+        )
+        return False
+
+    rendered = (
+        embed
+        if getattr(getattr(embed, "image", None), "url", None) == embeds.SENTRIX_BANNER_URL
+        else embeds.normalize_log(embed)
+    )
+
+    semantic_key = log_service.semantic_event_key(guild.id, log_type, rendered)
+    if log_service._is_duplicate(event_key) or log_service._is_duplicate(semantic_key):
+        logger.debug(
+            "Log dupliqué ignoré guild=%s type=%s key=%s",
+            guild.id,
+            log_type,
+            event_key or semantic_key,
+        )
+        return False
+
+    try:
+        setting = await log_service.get_log_setting(bot, guild.id, log_type)
+    except Exception:
+        logger.exception(
+            "SENTRIX ROUTE configuration illisible guild=%s type=%s",
+            guild.id,
+            log_type,
+        )
+        return False
+
+    if not setting.get("enabled"):
+        logger.info("Log désactivé guild=%s type=%s", guild.id, log_type)
+        return False
+
+    ok, reason = log_service.validate_channel(
+        guild,
+        setting.get("channel_id"),
+        needs_file=True,
+    )
+    if not ok:
+        logger.warning(
+            "SENTRIX ROUTE invalide guild=%s type=%s reason=%s",
+            guild.id,
+            log_type,
+            reason,
+        )
+        return False
+
+    channel = guild.get_channel(int(setting.get("channel_id") or 0))
+    if not isinstance(channel, discord.TextChannel):
+        logger.warning(
+            "SENTRIX ROUTE salon absent guild=%s type=%s channel=%s",
+            guild.id,
+            log_type,
+            setting.get("channel_id"),
+        )
+        return False
+
+    try:
+        return bool(await send_wide_log(
+            channel,
+            rendered,
+            log_type=log_type,
+            old_view=view,
+            extra_file=file,
+        ))
+    except Exception:
+        logger.exception(
+            "SENTRIX ROUTE V2 échouée guild=%s type=%s",
+            guild.id,
+            log_type,
+        )
+        return False
 
 
 _traced_canonical_send_log._sentrix_v83_trace = True
@@ -88,7 +180,9 @@ async def _canonical_logs_send_v83(
     log_type = logs_cog.CONFIG_TO_LOG_TYPE.get(config_key)
     if log_type is None:
         return False
-    return await log_service.send_log(
+    # Appel DIRECT : même si une vieille couche réécrit log_service.send_log plus tard,
+    # les 18 listeners officiels restent verrouillés sur V83.
+    return await _traced_canonical_send_log(
         self.bot,
         guild,
         log_type,
@@ -142,7 +236,20 @@ def _restore_native_sends() -> None:
 
 def _restore_unique_log_transport(bot: commands.Bot) -> None:
     _restore_native_sends()
+
+    stale_global = log_service.send_log
+    logger.warning(
+        "SENTRIX ROUTE previous log_service.send_log=%s.%s",
+        getattr(stale_global, "__module__", "?"),
+        getattr(stale_global, "__qualname__", "?"),
+    )
     log_service.send_log = _traced_canonical_send_log
+    logger.warning(
+        "SENTRIX ROUTE log_service.send_log canonical=%s | qualname=%s.%s",
+        log_service.send_log is _traced_canonical_send_log,
+        getattr(log_service.send_log, "__module__", "?"),
+        getattr(log_service.send_log, "__qualname__", "?"),
+    )
 
     try:
         from . import logs as logs_cog
@@ -296,7 +403,7 @@ async def _send_test_log_v83(
     if not setting["enabled"]:
         return False, "Ce type de log est désactivé. Activez-le avant le test."
 
-    ok, reason = log_service.validate_channel(guild, setting["channel_id"])
+    ok, reason = log_service.validate_channel(guild, setting["channel_id"], needs_file=True)
     if not ok:
         return False, f"Impossible d'envoyer un test : {reason}."
 
@@ -307,15 +414,17 @@ async def _send_test_log_v83(
             ("Déclenché par", f"<@{author.id}>", True),
         ),
     )
-    channel = guild.get_channel(setting["channel_id"])
-    sent = await send_wide_log(
-        channel,
+    sent = await _traced_canonical_send_log(
+        bot,
+        guild,
+        log_type,
         test_embed,
-        log_type=log_type,
+        event_key=f"manual-test:{guild.id}:{log_type}:{time.time_ns()}",
     )
+    channel = guild.get_channel(setting["channel_id"])
     return (
         (True, f"Test envoyé dans {channel.mention}.")
-        if sent
+        if sent and channel is not None
         else (False, "Le test n'a pas pu être envoyé dans le salon de logs.")
     )
 
@@ -512,4 +621,8 @@ def install(bot: commands.Bot) -> None:
     )
 
 
-__all__ = ["LogsSlashGroup", "install"]
+__all__ = [
+    "LogsSlashGroup",
+    "install",
+    "_traced_canonical_send_log",
+]
