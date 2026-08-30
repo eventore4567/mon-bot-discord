@@ -416,10 +416,12 @@ async def send_log(
         logger.info("Log désactivé guild=%s type=%s", guild.id, log_type)
         return False
 
+    # La bannière SentriX est toujours une pièce jointe, même sans fichier métier.
+    # On refuse donc de prétendre que le renderer V2 est prêt si Attach Files manque.
     ok, reason = validate_channel(
         guild,
         setting["channel_id"],
-        needs_file=file is not None,
+        needs_file=True,
     )
     if not ok:
         logger.warning(
@@ -446,13 +448,18 @@ async def send_test_log(
     log_type: str,
     author: discord.abc.User,
 ) -> tuple[bool, str]:
+    """Teste le vrai renderer Components V2, bannière comprise."""
     setting = await get_log_setting(bot, guild.id, log_type)
     if not setting["enabled"]:
         return False, "Ce type de log est désactivé. Activez-le avant le test."
 
-    ok, reason = validate_channel(guild, setting["channel_id"])
+    ok, reason = validate_channel(
+        guild,
+        setting["channel_id"],
+        needs_file=True,
+    )
     if not ok:
-        return False, f"Impossible d'envoyer un test : {reason}."
+        return False, f"Impossible d'envoyer le test avec bannière : {reason}."
 
     from utils import embeds as embeds_mod
 
@@ -464,11 +471,11 @@ async def send_test_log(
         ),
     )
     channel = guild.get_channel(setting["channel_id"])
-    try:
-        await channel.send(
-            embed=test_embed,
-            allowed_mentions=LOG_ALLOWED_MENTIONS,
-        )
-        return True, f"Test envoyé dans {channel.mention}."
-    except discord.HTTPException as exc:
-        return False, f"Échec de l'envoi du test : {exc}."
+    sent = await send_wide_log(
+        channel,
+        test_embed,
+        log_type=log_type,
+    )
+    if sent:
+        return True, f"Test avec bannière envoyé dans {channel.mention}."
+    return False, "Échec du renderer de logs avec bannière. Vérifiez les logs Railway."
