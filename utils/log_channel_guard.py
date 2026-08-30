@@ -68,9 +68,74 @@ def _rewind(file: discord.File) -> None:
         pass
 
 
+async def _ensure_banner_permissions(channel: discord.TextChannel) -> bool:
+    """Garantit les permissions nécessaires aux bannières quand SentriX peut réparer le salon.
+
+    Les anciennes catégories de logs ont souvent été créées avant que les bannières ne
+    deviennent obligatoires et leur overwrite ne contenait donc pas ``attach_files``.
+    Dans ce cas Discord accepte encore l'embed classique mais refuse silencieusement notre
+    rendu avec fichier. Si le bot possède ``manage_channels``, on répare son overwrite une
+    seule fois directement sur le salon.
+    """
+    guild = channel.guild
+    me = guild.me
+    if me is None:
+        return False
+
+    perms = channel.permissions_for(me)
+    if (
+        perms.view_channel
+        and perms.send_messages
+        and perms.embed_links
+        and perms.attach_files
+    ):
+        return True
+
+    if not perms.manage_channels:
+        logger.warning(
+            "Permissions V2 manquantes et impossibles à réparer channel=%s "
+            "view=%s send=%s embeds=%s files=%s manage_channels=%s",
+            channel.id,
+            perms.view_channel,
+            perms.send_messages,
+            perms.embed_links,
+            perms.attach_files,
+            perms.manage_channels,
+        )
+        return False
+
+    try:
+        await channel.set_permissions(
+            me,
+            view_channel=True,
+            send_messages=True,
+            embed_links=True,
+            attach_files=True,
+            reason="SentriX : réparation automatique des permissions des logs V2",
+        )
+    except (discord.Forbidden, discord.HTTPException):
+        logger.exception("Impossible de réparer les permissions V2 du salon %s.", channel.id)
+        return False
+
+    repaired = channel.permissions_for(me)
+    ok = bool(
+        repaired.view_channel
+        and repaired.send_messages
+        and repaired.embed_links
+        and repaired.attach_files
+    )
+    if ok:
+        logger.warning("Permissions du salon de logs %s réparées pour les bannières V2.", channel.id)
+    return ok
+
+
 async def _guarded_send(self: discord.TextChannel, *args: Any, **kwargs: Any):
     """Convertit un ancien embed de log en panneau V2 avec bannière, au dernier moment."""
     assert _ORIGINAL_SEND is not None
+
+    # Conserver une copie AVANT toute mutation : si Discord refuse V2 puis la bannière,
+    # le dernier fallback doit pouvoir renvoyer exactement l'ancien embed et ses boutons.
+    original_kwargs = dict(kwargs)
 
     # Le renderer officiel est déjà passé : surtout ne pas l'intercepter une seconde fois.
     view = kwargs.get("view")
@@ -82,8 +147,12 @@ async def _guarded_send(self: discord.TextChannel, *args: Any, **kwargs: Any):
         return await _ORIGINAL_SEND(self, *args, **kwargs)
 
     try:
+        # Les bannières sont des pièces jointes. Répare les anciens salons dont l'overwrite
+        # du bot autorisait les embeds mais pas "Joindre des fichiers".
+        await _ensure_banner_permissions(self)
+
         # Import tardif : évite tout cycle au démarrage du package utils.
-        from utils.wide_logs import NO_PINGS, WideLogView
+        from utils.wide_logs import WideLogView
 
         log_type = _infer_log_type(self, embed)
         kind = banner_kind(log_type, embed.title or "", embed.description or "")
@@ -125,9 +194,10 @@ async def _guarded_send(self: discord.TextChannel, *args: Any, **kwargs: Any):
 
     except Exception:
         # Dernier filet : même si Components V2 est refusé, la bannière reste visible dans
-        # l'embed classique. On ne revient jamais silencieusement à un log sans bannière.
+        # l'embed classique. On repart de la copie ORIGINALE, pas des kwargs V2 mutés.
         logger.exception("Conversion V2 d'un ancien log impossible ; tentative embed avec bannière.")
         try:
+            await _ensure_banner_permissions(self)
             log_type = _infer_log_type(self, embed)
             kind = banner_kind(log_type, embed.title or "", embed.description or "")
             banner_path = get_banner(log_type, embed.title or "", embed.description or "")
@@ -136,14 +206,19 @@ async def _guarded_send(self: discord.TextChannel, *args: Any, **kwargs: Any):
             fallback_embed = embed.copy()
             fallback_embed.set_image(url=f"attachment://{banner_filename}")
 
-            fallback_kwargs = dict(kwargs)
+            fallback_kwargs = dict(original_kwargs)
             fallback_kwargs["embed"] = fallback_embed
             fallback_kwargs.pop("embeds", None)
-            fallback_kwargs.pop("file", None)
-            previous_files = fallback_kwargs.pop("files", None) or []
-            usable_files = [file for file in previous_files if isinstance(file, discord.File)]
+
+            usable_files: list[discord.File] = []
+            original_file = fallback_kwargs.pop("file", None)
+            if isinstance(original_file, discord.File):
+                usable_files.append(original_file)
+            original_files = fallback_kwargs.pop("files", None) or []
+            usable_files.extend(file for file in original_files if isinstance(file, discord.File))
             for file in usable_files:
                 _rewind(file)
+
             fallback_kwargs["files"] = [fallback_banner, *usable_files]
             fallback_kwargs["allowed_mentions"] = discord.AllowedMentions(
                 everyone=False,
@@ -154,7 +229,7 @@ async def _guarded_send(self: discord.TextChannel, *args: Any, **kwargs: Any):
             return await _ORIGINAL_SEND(self, *args, **fallback_kwargs)
         except Exception:
             logger.exception("Même le fallback avec bannière a échoué ; envoi legacy conservé.")
-            return await _ORIGINAL_SEND(self, *args, **kwargs)
+            return await _ORIGINAL_SEND(self, *args, **original_kwargs)
 
 
 def install() -> None:
