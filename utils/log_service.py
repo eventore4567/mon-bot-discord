@@ -17,6 +17,8 @@ from collections import OrderedDict
 
 import discord
 
+from utils.wide_logs import send_wide_log
+
 logger = logging.getLogger("bot")
 
 LOG_TYPES = {
@@ -429,31 +431,13 @@ async def send_log(
         return False
 
     channel = guild.get_channel(setting["channel_id"])
-    kwargs = {
-        "embed": rendered,
-        "allowed_mentions": LOG_ALLOWED_MENTIONS,
-    }
-    if view is not None:
-        kwargs["view"] = view
-    if file is not None:
-        kwargs["file"] = file
-
-    try:
-        await channel.send(**kwargs)
-        logger.info(
-            "Log envoyé guild=%s type=%s channel=%s",
-            guild.id,
-            log_type,
-            channel.id,
-        )
-        return True
-    except (discord.Forbidden, discord.HTTPException):
-        logger.exception(
-            "Échec d'envoi du log %s dans %s.",
-            log_type,
-            setting["channel_id"],
-        )
-        return False
+    return await send_wide_log(
+        channel,
+        rendered,
+        log_type=log_type,
+        old_view=view,
+        extra_file=file,
+    )
 
 
 async def send_test_log(
