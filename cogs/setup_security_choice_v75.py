@@ -309,10 +309,13 @@ def install(bot: commands.Bot) -> None:
     from . import setup_moderation_clear_v76 as moderation_v76
     moderation_v76.install(bot)
 
-    # Le help officiel est déjà chargé à ce stade du finaliseur runtime. V77 peut donc
-    # remplacer uniquement son rendu sans toucher aux commandes +help et /help elles-mêmes.
+    # Le help officiel est déjà chargé à ce stade du finaliseur runtime. V77 remplace
+    # son rendu, puis V78 garde le même style tout en respectant la limite Discord de
+    # composants sur la page d'accueil.
     from . import help_components_v77 as help_v77
     help_v77.install(bot)
+    from . import help_components_v78 as help_v78
+    help_v78.install(bot)
 
     bot._sentrix_setup_security_choice_v75 = True
     logger.info(
