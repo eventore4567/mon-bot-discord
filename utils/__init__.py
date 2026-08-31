@@ -45,15 +45,23 @@ def install_me_single_panel():
     return _install()
 
 
+def install_unified_command_panels():
+    from .unified_command_panels import install_unified_command_panels as _install
+
+    return _install()
+
+
 # En production, discord.py est déjà présent avant les imports de ``utils`` : on garde
-# donc les mêmes patches visuels automatiques qu'avant. Dans les tests/gates "purs",
-# l'absence volontaire de discord.py n'empêche plus d'importer les utilitaires indépendants.
+# les compatibilités historiques puis on installe EN DERNIER l'invariant visuel final.
+# Les réponses simples deviennent un seul grand panneau Components V2 ; les anciennes
+# vues interactives restent un seul embed classique afin de ne casser aucun bouton.
 if importlib.util.find_spec("discord") is not None:
     install_command_visuals()
     install_top_command_banners()
     install_top_banner_guard()
     install_profile_embed_guard()
     install_me_single_panel()
+    install_unified_command_panels()
 
 
 __all__ = [
@@ -62,4 +70,5 @@ __all__ = [
     "install_top_banner_guard",
     "install_profile_embed_guard",
     "install_me_single_panel",
+    "install_unified_command_panels",
 ]
