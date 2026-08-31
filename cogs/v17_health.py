@@ -40,6 +40,23 @@ def _technical_error(error: commands.CommandError) -> bool:
     return not isinstance(raw, expected)
 
 
+def _loop_has_active_error(loop: tasks.Loop) -> bool:
+    """Retourne True uniquement si l'exécution actuelle de la boucle a réellement échoué."""
+    task = loop.get_task()
+    if task is None or task.cancelled():
+        return False
+
+    # Une boucle en cours d'exécution est considérée comme récupérée/active.
+    # Une ancienne exception ne doit jamais gonfler l'état live du diagnostic.
+    if loop.is_running() or not task.done():
+        return False
+
+    try:
+        return task.exception() is not None
+    except (asyncio.CancelledError, asyncio.InvalidStateError):
+        return False
+
+
 async def _background_loops(bot: commands.Bot) -> tuple[int, int]:
     total = 0
     failed = 0
@@ -51,13 +68,8 @@ async def _background_loops(bot: commands.Bot) -> tuple[int, int]:
                 continue
             if isinstance(value, tasks.Loop):
                 total += 1
-                task = value.get_task()
-                if task is not None and task.done() and not task.cancelled():
-                    try:
-                        if task.exception() is not None:
-                            failed += 1
-                    except Exception:
-                        failed += 1
+                if _loop_has_active_error(value):
+                    failed += 1
     return total, failed
 
 
