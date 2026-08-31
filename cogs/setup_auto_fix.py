@@ -5,19 +5,53 @@ mots supplémentaires d'une commande préfixée par défaut : ``+setup auto comm
 ouvrait simplement le panneau interactif. Ce correctif intercepte uniquement la forme
 préfixée ``setup auto`` avant ``Command.prepare()`` ; ``+setup`` et ``/setup`` gardent
 strictement leur comportement historique.
+
+Ce module répare aussi les doublons exacts des salons de logs SentriX au démarrage. La
+réparation est volontairement non destructive : le salon configuré est conservé, la base
+est rattachée à un salon existant quand son ID a disparu, et les doublons sont renommés en
+archives au lieu d'être supprimés avec leur historique.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import unicodedata
 from types import MethodType
 
+import discord
 from discord.ext import commands
 
 from utils import embeds
 
 logger = logging.getLogger("bot.setup-auto-fix")
 VALID_PROFILES = frozenset({"community", "gaming", "support", "creator"})
+
+# Même mapping que cogs.configuration.LOG_CHANNEL_DEFINITIONS, dupliqué ici afin que ce
+# garde-fou reste petit et indépendant de l'énorme UI /setup.
+_LOG_CHANNELS = (
+    ("log_server", "logs-serveur"),
+    ("log_messages", "logs-messages"),
+    ("log_members", "logs-membre"),
+    ("log_voice", "logs-vocal"),
+    ("log_roles", "logs-roles"),
+    ("log_moderation", "logs-moderation"),
+    ("log_automod", "logs-securite"),
+)
+
+
+def _normalise_channel_name(value: str) -> str:
+    """Compare aussi les anciens noms accentués : modération/sécurité, etc."""
+    folded = unicodedata.normalize("NFKD", str(value or "").casefold())
+    ascii_name = "".join(char for char in folded if not unicodedata.combining(char))
+    return ascii_name.replace("_", "-").strip("- ")
+
+
+def _is_sentrix_log_category(channel: discord.TextChannel) -> bool:
+    category = channel.category
+    if category is None:
+        return False
+    name = _normalise_channel_name(category.name)
+    return "sentrix" in name and "log" in name
 
 
 def parse_setup_auto_profile(content: str, prefix: str = "+", invoked_with: str = "setup") -> str | None:
@@ -91,6 +125,85 @@ async def _run_auto_setup(bot: commands.Bot, ctx: commands.Context, profile: str
     await _fallback_auto_setup(bot, ctx, profile)
 
 
+async def _repair_log_channels(bot: commands.Bot, guild: discord.Guild) -> tuple[int, int]:
+    """Réconcilie la config et les noms de logs sans effacer aucun historique.
+
+    Retourne ``(configs_repaired, duplicates_archived)``.
+    """
+    try:
+        conf = await bot.db.get_guild_config(guild.id)
+    except Exception:
+        logger.exception("Impossible de lire la configuration logs de %s", guild.id)
+        return 0, 0
+
+    configs_repaired = 0
+    duplicates_archived = 0
+    me = guild.me
+    can_manage = bool(me and me.guild_permissions.manage_channels)
+
+    for db_column, canonical_name in _LOG_CHANNELS:
+        wanted = _normalise_channel_name(canonical_name)
+        candidates = [
+            channel
+            for channel in guild.text_channels
+            if _normalise_channel_name(channel.name) == wanted
+        ]
+        if not candidates:
+            continue
+
+        configured_id = None
+        try:
+            configured_id = int(conf[db_column] or 0) if conf is not None else 0
+        except (KeyError, TypeError, ValueError, IndexError):
+            configured_id = 0
+
+        configured = guild.get_channel(configured_id) if configured_id else None
+        if isinstance(configured, discord.TextChannel) and configured in candidates:
+            winner = configured
+        else:
+            # Priorité au vrai bloc SentriX — Logs, puis au salon le plus ancien afin de
+            # préserver l'historique si l'ID de base a été perdu.
+            winner = min(
+                candidates,
+                key=lambda channel: (0 if _is_sentrix_log_category(channel) else 1, channel.id),
+            )
+
+        if configured_id != winner.id:
+            try:
+                await bot.db.set_guild_config(guild.id, db_column, winner.id)
+                configs_repaired += 1
+            except Exception:
+                logger.exception(
+                    "Impossible de rattacher %s au salon %s sur %s",
+                    db_column,
+                    winner.id,
+                    guild.id,
+                )
+
+        if len(candidates) <= 1 or not can_manage:
+            continue
+
+        for duplicate in candidates:
+            if duplicate.id == winner.id:
+                continue
+            archive_name = f"{canonical_name}-archive-{str(duplicate.id)[-4:]}"[:100]
+            try:
+                if duplicate.name != archive_name:
+                    await duplicate.edit(
+                        name=archive_name,
+                        reason="SentriX : archivage non destructif d'un doublon de salon de logs",
+                    )
+                    duplicates_archived += 1
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Doublon logs non renommé faute de permission/API : guild=%s channel=%s",
+                    guild.id,
+                    duplicate.id,
+                )
+
+    return configs_repaired, duplicates_archived
+
+
 def install(bot: commands.Bot) -> bool:
     """Intercepte l'invocation de +setup avant que discord.py n'ignore ses arguments."""
     command = bot.get_command("setup")
@@ -135,9 +248,28 @@ def install(bot: commands.Bot) -> bool:
 class SetupAutoFix(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._repaired_guilds: set[int] = set()
 
     async def cog_load(self):
         install(self.bot)
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        total_configs = 0
+        total_archived = 0
+        for guild in self.bot.guilds:
+            if guild.id in self._repaired_guilds:
+                continue
+            configs, archived = await _repair_log_channels(self.bot, guild)
+            total_configs += configs
+            total_archived += archived
+            self._repaired_guilds.add(guild.id)
+        if total_configs or total_archived:
+            logger.info(
+                "Réparation logs terminée : %s configuration(s) rattachée(s), %s doublon(s) archivé(s).",
+                total_configs,
+                total_archived,
+            )
 
 
 async def setup(bot: commands.Bot) -> None:
