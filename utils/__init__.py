@@ -11,14 +11,23 @@ Les panneaux classiques interactifs utilisent en complément ``top_command_banne
 pour garder la bannière SentriX au-dessus du contenu pendant toutes leurs éditions.
 ``top_banner_guard`` couvre enfin les réponses d'interactions/followups qui contiennent
 déjà une bannière SentriX sans modifier les logs ni les images métier.
+``profile_embed_guard`` garde /profile en vrai embed Discord afin que ses statistiques
+inline restent compactes et s'affichent sur plusieurs colonnes.
 """
 
 from .command_visuals import install_command_visuals
 from .top_command_banners import install_top_command_banners
 from .top_banner_guard import install_top_banner_guard
+from .profile_embed_guard import install_profile_embed_guard
 
 install_command_visuals()
 install_top_command_banners()
 install_top_banner_guard()
+install_profile_embed_guard()
 
-__all__ = ["install_command_visuals", "install_top_command_banners", "install_top_banner_guard"]
+__all__ = [
+    "install_command_visuals",
+    "install_top_command_banners",
+    "install_top_banner_guard",
+    "install_profile_embed_guard",
+]
