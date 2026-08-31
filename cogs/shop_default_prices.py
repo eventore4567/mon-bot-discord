@@ -12,7 +12,7 @@ from .command_policy_expansion import install as install_command_policy_expansio
 from .content_filter_policy import install as install_content_filter_policy
 from .feature_systems import install as install_feature_systems
 from .help_v8_final_guard import install as install_help_v8_final_guard
-from .runtime_finish_v87 import install as install_runtime_finish_v87
+from .runtime_finish_v88 import install as install_runtime_finish_v88
 from .security_owner_immunity_final import install as install_security_owner_immunity_final
 from .security_v2_backup_schema_fix import install as install_security_v2_backup_schema_fix
 from .security_v2_runtime import install as install_security_v2_runtime
@@ -76,7 +76,7 @@ async def install(bot: commands.Bot) -> None:
     install_security_owner_immunity_final(bot)
     await install_feature_systems(bot)
     install_wipe_owner_only(bot)
-    await install_runtime_finish_v87(bot)
+    await install_runtime_finish_v88(bot)
 
     _patch_create_server_defaults()
     if getattr(bot, "_sentrix_shop_default_prices_installed", False):
