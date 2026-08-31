@@ -133,36 +133,58 @@ def _clean_description(value: object) -> str:
 
 
 def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
-    """Regroupe les petits champs sur une même ligne pour garder le log horizontal."""
+    """Compacte les métadonnées et transforme les champs longs en blocs cités."""
     blocks: list[str] = []
     small: list[str] = []
 
     def flush() -> None:
         nonlocal small
         if small:
-            blocks.append("\u3000•\u3000".join(small))
+            blocks.append("  ·  ".join(small))
             small = []
 
     for field in embed.fields:
         name = safe_text(field.name)
-        value = safe_text(field.value)
+        raw_value = safe_text(field.value)
 
-        if not name or not value:
+        if not name or not raw_value:
             continue
 
+        # Supprime les résidus visuels des anciens renderers dans les valeurs de champs.
+        value_lines: list[str] = []
+        for raw_line in raw_value.replace("\r", "").splitlines():
+            stripped = raw_line.strip()
+            if stripped and re.fullmatch(r"[─━—\-]+", stripped):
+                continue
+            value_lines.append(raw_line.rstrip())
+        value = "\n".join(value_lines).strip()
+        if not value:
+            continue
+
+        # Un ancien renderer pouvait produire « <#id> • #nom ». La mention suffit.
         if name.casefold() in {"salon", "channel"}:
             channel_mention = _CHANNEL_MENTION_RE.search(value)
             if channel_mention is not None:
                 value = channel_mention.group(0)
 
-        if len(value) <= 90 and "\n" not in value and len(name) <= 35:
+        normalized_name = name.casefold().strip()
+        force_content_block = normalized_name in {"contenu", "content"}
+        is_small = (
+            not force_content_block
+            and len(value) <= 60
+            and "\n" not in value
+            and len(name) <= 35
+        )
+
+        if is_small:
             small.append(f"**{name} :** {value}")
-            if len(small) == 3:
+            if len(small) == 4:
                 flush()
             continue
 
         flush()
-        blocks.append(f"**{name}**\n{value}")
+        quoted = value.replace("\n", "\n> ")
+        blocks.append(f"**{name}**\n>>> {quoted}")
 
     flush()
 
@@ -240,7 +262,7 @@ def copy_buttons(container: discord.ui.Container, old_view: discord.ui.View | No
 
 
 class WideLogView(discord.ui.LayoutView):
-    """Panneau de log SentriX : bannière, contenu compact puis actions."""
+    """Panneau V2 dense : bannière, identité, contenu, footer puis actions."""
 
     def __init__(
         self,
@@ -254,6 +276,16 @@ class WideLogView(discord.ui.LayoutView):
         accent_colour = discord.Colour(accent) if accent is not None else None
         container = discord.ui.Container(accent_colour=accent_colour)
 
+        def small_separator() -> discord.ui.Separator:
+            spacing_enum = getattr(discord, "SeparatorSpacing", None)
+            small = getattr(spacing_enum, "small", None) if spacing_enum is not None else None
+            if small is not None:
+                try:
+                    return discord.ui.Separator(spacing=small)
+                except (TypeError, ValueError):
+                    pass
+            return discord.ui.Separator()
+
         gallery = discord.ui.MediaGallery()
         gallery.add_item(media=f"attachment://{banner_filename}")
         container.add_item(gallery)
@@ -262,40 +294,103 @@ class WideLogView(discord.ui.LayoutView):
         title = safe_text(embed.title or "Journal SentriX")[:256]
         thumbnail = getattr(embed.thumbnail, "url", None)
 
+        fields_text = compact_fields(embed, limit=2200)
+        metadata_blocks: list[str] = []
+        body_field_blocks: list[str] = []
+        body_started = False
+        for block in (part for part in fields_text.split("\n\n") if part.strip()):
+            is_long = "\n>>> " in block
+            if is_long:
+                body_started = True
+            if body_started:
+                body_field_blocks.append(block)
+            else:
+                metadata_blocks.append(block)
+
+        metadata = "\n".join(metadata_blocks).strip()
+        section_text = f"## {title}"
+        if metadata:
+            section_text += f"\n{metadata}"
+
         section_ok = False
         if thumbnail:
             try:
                 container.add_item(
                     discord.ui.Section(
-                        discord.ui.TextDisplay(f"## {title}"),
+                        discord.ui.TextDisplay(section_text),
                         accessory=discord.ui.Thumbnail(str(thumbnail)),
                     )
                 )
                 section_ok = True
                 logger.warning("SENTRIX V2 PHASE B thumbnail=ok")
             except Exception:
-                logger.exception("SENTRIX V2 PHASE B thumbnail=failed; title_only=1")
+                logger.exception("SENTRIX V2 PHASE B thumbnail=failed; title_metadata_only=1")
 
         if not section_ok:
-            container.add_item(discord.ui.TextDisplay(f"## {title}"))
+            container.add_item(discord.ui.TextDisplay(section_text))
             if not thumbnail:
                 logger.warning("SENTRIX V2 PHASE B thumbnail=none")
 
         description = _clean_description(safe_text(embed.description))[:900]
+        body_parts: list[str] = []
         if description:
-            container.add_item(discord.ui.TextDisplay(description))
+            body_parts.append(description)
+        if body_field_blocks:
+            body_parts.append("\n\n".join(body_field_blocks))
+        body = "\n\n".join(part for part in body_parts if part.strip()).strip()
 
-        fields = compact_fields(embed, limit=2200)
-        if fields:
-            container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay(fields))
+        separator_count = 0
+        if body:
+            container.add_item(small_separator())
+            separator_count += 1
+            container.add_item(discord.ui.TextDisplay(body[:3000]))
 
-        footer = getattr(embed.footer, "text", None)
+        footer = safe_text(getattr(embed.footer, "text", None))[:300]
         if footer:
-            container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay(f"-# {safe_text(footer)[:300]}"))
+            if separator_count < 2:
+                container.add_item(small_separator())
+                separator_count += 1
+            container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
 
-        copy_buttons(container, old_view)
+        # Les actions restent dans le Container. Les boutons interactifs sont uniformisés
+        # en secondary ; les vrais liens conservent ButtonStyle.link pour ne pas casser l'URL.
+        buttons: list[discord.ui.Button] = []
+        if old_view is not None:
+            for item in old_view.children:
+                if not isinstance(item, discord.ui.Button):
+                    continue
+                button = _clone_button(item)
+                if button is None:
+                    continue
+                if button.style is not discord.ButtonStyle.link and not getattr(button, "sku_id", None):
+                    button.style = discord.ButtonStyle.secondary
+                buttons.append(button)
+
+        rows: list[discord.ui.ActionRow] = []
+        for start in range(0, len(buttons), 5):
+            chunk = buttons[start:start + 5]
+            try:
+                rows.append(discord.ui.ActionRow(*chunk))
+            except Exception:
+                logger.exception(
+                    "SENTRIX V2 PHASE C action_row=failed start=%s count=%s",
+                    start,
+                    len(chunk),
+                )
+
+        if rows:
+            # Pas de troisième séparateur : deux maximum par panneau.
+            if separator_count < 2 and not footer:
+                container.add_item(small_separator())
+                separator_count += 1
+            for row in rows:
+                container.add_item(row)
+            logger.warning("SENTRIX V2 PHASE C buttons=ok rows=%s", len(rows))
+        elif old_view is None:
+            logger.warning("SENTRIX V2 PHASE C buttons=none")
+        else:
+            logger.warning("SENTRIX V2 PHASE C buttons=none_after_clone")
+
         self.add_item(container)
 
 
