@@ -9,7 +9,9 @@ strictement leur comportement historique.
 Ce module répare aussi les doublons exacts des salons de logs SentriX au démarrage. La
 réparation est volontairement non destructive : le salon configuré est conservé, la base
 est rattachée à un salon existant quand son ID a disparu, et les doublons sont renommés en
-archives au lieu d'être supprimés avec leur historique.
+archives au lieu d'être supprimés avec leur historique. Le créateur de salons de logs est
+également entouré par ce garde-fou afin qu'une perte d'ID en base ne recrée plus de doublon
+pendant que le bot tourne.
 """
 from __future__ import annotations
 
@@ -204,6 +206,31 @@ async def _repair_log_channels(bot: commands.Bot, guild: discord.Guild) -> tuple
     return configs_repaired, duplicates_archived
 
 
+def _install_log_creation_guard(bot: commands.Bot) -> bool:
+    """Répare les IDs juste avant /create-logs ou la page Logs de /setup.
+
+    Ainsi, même après un reset partiel de configuration pendant que le bot reste en ligne,
+    un salon existant est réutilisé au lieu d'en créer un deuxième.
+    """
+    configuration = bot.get_cog("Configuration")
+    if configuration is None or not hasattr(configuration, "create_log_channels"):
+        logger.warning("Cog Configuration introuvable : garde anti-doublon logs non installé.")
+        return False
+    if getattr(configuration, "_sentrix_log_creation_guard", False):
+        return True
+
+    original_create = configuration.create_log_channels
+
+    async def guarded_create(_self, guild: discord.Guild, author: discord.Member):
+        await _repair_log_channels(bot, guild)
+        return await original_create(guild, author)
+
+    configuration.create_log_channels = MethodType(guarded_create, configuration)
+    configuration._sentrix_log_creation_guard = True
+    logger.info("Garde anti-doublon installée sur create_log_channels.")
+    return True
+
+
 def install(bot: commands.Bot) -> bool:
     """Intercepte l'invocation de +setup avant que discord.py n'ignore ses arguments."""
     command = bot.get_command("setup")
@@ -211,6 +238,7 @@ def install(bot: commands.Bot) -> bool:
         logger.warning("Commande setup introuvable : routeur auto non installé.")
         return False
     if getattr(command, "_sentrix_setup_auto_invoke_fix", False):
+        _install_log_creation_guard(bot)
         return True
 
     original_invoke = command.invoke
@@ -241,6 +269,7 @@ def install(bot: commands.Bot) -> bool:
 
     command.invoke = MethodType(invoke_with_auto, command)
     command._sentrix_setup_auto_invoke_fix = True
+    _install_log_creation_guard(bot)
     logger.info("Routeur +setup auto installé sur la commande setup.")
     return True
 
