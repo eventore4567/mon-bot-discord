@@ -1,32 +1,30 @@
 """Dernière garde de stabilité SentriX.
 
-Cette extension reste volontairement petite et non destructive. Elle est chargée après
-``cogs.slash_error_completion_guard`` sur Railway et réaffirme quatre invariants qui avaient
-encore des chemins historiques concurrents :
+Cette extension est chargée en fin de démarrage Railway. Elle réaffirme les protections
+runtime qui doivent rester autoritaires après tous les anciens wrappers et corrige les
+conflits qui ne doivent jamais atteindre l'utilisateur.
 
-- aucune limite locale cooldown/par-minute ne doit bloquer +ai/+chat ;
-- l'autorité ``no_cooldown_final`` doit rester active après tous les cogs ;
-- un archivage de pièces jointes partiellement téléchargé ne doit jamais associer le
-  mauvais fichier à la mauvaise pièce jointe dans les logs ;
-- la personnalité IA adaptative doit être installée après tous les wrappers IA historiques.
+Principes :
+- aucune limite locale cooldown/par-minute ne bloque +ai/+chat ;
+- ``no_cooldown_final`` reste l'autorité finale ;
+- les pièces jointes de logs restent correctement associées ;
+- la personnalité IA adaptative est réinstallée après les wrappers historiques ;
+- ``+diagnostic`` ne produit qu'un seul rapport lorsque V17 est disponible ;
+- le superviseur de boucles ne redémarre que les tâches réellement en échec, jamais une
+  boucle annulée proprement.
 
-Elle expose aussi ``+diagnostic`` / ``+diag`` aux administrateurs afin de contrôler en
-lecture seule l'état Discord, la base, le stockage durable, les protections finales et les
-permissions du bot. Aucune donnée sensible n'est affichée.
-
-Les quotas journaliers IA, permissions, modération de contenu et restrictions de salons/
-rôles ne sont pas modifiés. Les réglages cooldown historiques restent en base pour assurer
-la compatibilité avec les configurations existantes, mais ils ne throttlent plus le runtime.
+Les quotas journaliers, permissions, règles AutoMod et données métier ne sont pas modifiés.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import types
 from typing import Any
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from utils import checks
 
@@ -78,15 +76,7 @@ def _disable_ai_local_throttle(bot: commands.Bot) -> bool:
 
 
 def _install_safe_attachment_archive() -> bool:
-    """Évite le décalage attachment/file lorsqu'un téléchargement Discord échoue.
-
-    ``logs_unified_v6`` construit ensuite sa preview avec ``zip(attachments, files)``. Si
-    Discord refuse uniquement le premier fichier, une liste compacte des seuls succès
-    décalerait toutes les associations. Le comportement sûr est donc tout-ou-rien : si un
-    seul des fichiers demandés manque, le log textuel est conservé mais aucun binaire n'est
-    joint. Cela préfère une archive partielle sans fichier à une archive factuellement
-    fausse.
-    """
+    """Évite le décalage attachment/file lorsqu'un téléchargement Discord échoue."""
     try:
         from . import logs_unified_v6 as logs_v6
     except Exception:
@@ -146,6 +136,131 @@ def _install_ai_personality(bot: commands.Bot) -> bool:
         return False
 
 
+def _loop_really_failed(loop: Any, task: Any) -> bool:
+    """Vrai uniquement lorsqu'une Loop s'est terminée à cause d'une erreur.
+
+    ``task.done()`` seul n'est pas suffisant : une tâche annulée lors d'un unload/reload est
+    aussi ``done`` et ne doit surtout pas être ressuscitée par le superviseur global.
+    """
+    if task is None or not task.done() or task.cancelled():
+        return False
+    try:
+        return bool(loop.failed())
+    except Exception:
+        try:
+            return task.exception() is not None
+        except Exception:
+            return False
+
+
+def _install_failed_loop_only_supervisor() -> bool:
+    """Corrige le superviseur Excellence qui redémarrait aussi les boucles annulées."""
+    try:
+        from . import bot_excellence_runtime as excellence
+    except Exception:
+        logger.exception("Superviseur Excellence indisponible pour le correctif final.")
+        return False
+
+    current = getattr(excellence, "_restart_failed_loops", None)
+    if not callable(current):
+        return False
+    if getattr(current, "_sentrix_failed_loop_only", False):
+        return True
+
+    async def restart_failed_loops(bot: commands.Bot) -> int:
+        restarted = 0
+        for cog_name, cog in list(bot.cogs.items()):
+            for attr_name in dir(cog):
+                try:
+                    value = getattr(cog, attr_name)
+                except Exception:
+                    continue
+                if not isinstance(value, tasks.Loop):
+                    continue
+                task = value.get_task()
+                if bot.is_closed() or not _loop_really_failed(value, task):
+                    continue
+
+                # BotV12Machine possède déjà sa propre maintenance de reprise. Le laisser
+                # au superviseur générique créait deux autorités concurrentes.
+                if cog_name == "BotV12Machine" and attr_name == "ticket_watch_loop":
+                    continue
+
+                try:
+                    value.start()
+                    restarted += 1
+                    record = getattr(excellence, "_record_incident", None)
+                    if callable(record):
+                        await record(
+                            bot,
+                            "background_loop_restart",
+                            f"{cog_name}.{attr_name} redémarrée après une erreur réelle",
+                        )
+                except Exception as exc:
+                    record = getattr(excellence, "_record_incident", None)
+                    if callable(record):
+                        await record(
+                            bot,
+                            "background_loop_restart_failed",
+                            f"{cog_name}.{attr_name}: {type(exc).__name__}: {exc}",
+                        )
+        return restarted
+
+    restart_failed_loops._sentrix_failed_loop_only = True
+    restart_failed_loops._sentrix_original = current
+    excellence._restart_failed_loops = restart_failed_loops
+    return True
+
+
+def _install_single_v17_diagnostic(bot: commands.Bot) -> bool:
+    """Remplace la chaîne ancien diagnostic -> V17 par un unique rapport V17."""
+    command = (
+        bot.get_command("diagnostic")
+        or bot.get_command("diagnose")
+        or bot.get_command("diag")
+    )
+    health = bot.get_cog("V17Health")
+    if command is None or health is None:
+        return False
+
+    current = command.callback
+    if getattr(current, "_sentrix_single_diagnostic", False):
+        return True
+
+    async def diagnostic_single(*args, **kwargs):
+        ctx = next(
+            (value for value in args if isinstance(value, commands.Context)),
+            kwargs.get("ctx"),
+        )
+        cog = bot.get_cog("V17Health")
+        if isinstance(ctx, commands.Context) and cog is not None and ctx.guild is not None:
+            return await cog.send_report(ctx)
+        return await current(*args, **kwargs)
+
+    diagnostic_single._sentrix_single_diagnostic = True
+    # Empêche v17_health de remettre ensuite son ancien wrapper "original + V17".
+    diagnostic_single._sentrix_v17_diagnostic = True
+    diagnostic_single._sentrix_original = current
+    command.callback = diagnostic_single
+    return True
+
+
+async def _clear_false_ticket_restart_incidents(bot: commands.Bot) -> None:
+    """Retire uniquement les faux positifs générés par l'ancien superviseur."""
+    db = getattr(bot, "db", None)
+    if db is None:
+        return
+    try:
+        await db.execute(
+            "DELETE FROM runtime_incidents "
+            "WHERE source='background_loop_restart' "
+            "AND detail LIKE 'BotV12Machine.ticket_watch_loop redémarrée automatiquement%'"
+        )
+    except Exception:
+        # La table n'existe pas sur tous les runtimes/tests et ce nettoyage n'est pas vital.
+        logger.debug("Nettoyage des faux incidents V12 indisponible.", exc_info=True)
+
+
 def _state(bot: commands.Bot) -> dict[str, Any]:
     value = getattr(bot, "final_stability_guard_state", None)
     if isinstance(value, dict):
@@ -201,6 +316,8 @@ def _guard_detail(state: dict[str, Any]) -> str:
         ("Throttle IA local neutralisé", "ai_local_throttle_disabled"),
         ("Archives pièces jointes sûres", "safe_attachment_archive"),
         ("Personnalité IA dynamique", "ai_dynamic_personality"),
+        ("Superviseur boucles", "failed_loop_only_supervisor"),
+        ("Diagnostic unique", "single_v17_diagnostic"),
     )
     return "\n".join(
         f"{'✅' if bool(state.get(key)) else '⚠️'} {label}"
@@ -219,7 +336,7 @@ def _latency_text(bot: commands.Bot) -> str:
 
 
 class StabilityDiagnostic(commands.Cog, name="StabilityDiagnostic"):
-    """Diagnostic runtime staff, volontairement en lecture seule."""
+    """Diagnostic runtime staff de secours si aucun diagnostic canonique n'existe."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -256,7 +373,6 @@ class StabilityDiagnostic(commands.Cog, name="StabilityDiagnostic"):
             else 0xF0B232 if core_ok
             else 0xED4245
         )
-
         embed = discord.Embed(
             title="🩺 Diagnostic SentriX",
             description="Contrôle en direct des éléments essentiels de ce serveur.",
@@ -282,33 +398,24 @@ class StabilityDiagnostic(commands.Cog, name="StabilityDiagnostic"):
             inline=True,
         )
         embed.add_field(name="Protections finales", value=_guard_detail(state), inline=False)
-
-        if essential_missing:
-            embed.add_field(
-                name=f"❌ Permissions essentielles manquantes ({len(essential_missing)})",
-                value="\n".join(f"• {label}" for label in essential_missing)[:1024],
-                inline=False,
-            )
-        else:
-            embed.add_field(
-                name="Permissions essentielles",
-                value="✅ Toutes disponibles dans ce salon.",
-                inline=False,
-            )
-
-        if module_missing:
-            embed.add_field(
-                name=f"⚠️ Permissions modules non disponibles ({len(module_missing)})",
-                value="\n".join(f"• {label}" for label in module_missing)[:1024],
-                inline=False,
-            )
-        else:
-            embed.add_field(
-                name="Permissions modules",
-                value="✅ Toutes disponibles.",
-                inline=False,
-            )
-
+        embed.add_field(
+            name="Permissions essentielles",
+            value=(
+                "✅ Toutes disponibles dans ce salon."
+                if not essential_missing
+                else "❌ " + "\n• ".join(essential_missing)
+            )[:1024],
+            inline=False,
+        )
+        embed.add_field(
+            name="Permissions modules",
+            value=(
+                "✅ Toutes disponibles."
+                if not module_missing
+                else "⚠️ " + "\n• ".join(module_missing)
+            )[:1024],
+            inline=False,
+        )
         if core_ok and not module_missing:
             summary = "✅ Aucun problème détecté."
         elif core_ok:
@@ -321,11 +428,13 @@ class StabilityDiagnostic(commands.Cog, name="StabilityDiagnostic"):
 
 
 def install(bot: commands.Bot) -> dict[str, Any]:
-    """Applique les réparations idempotentes et expose leur état pour le diagnostic."""
+    """Applique les réparations idempotentes et expose leur état."""
     zero_cooldown = _reassert_zero_cooldown(bot)
     ai_throttle_disabled = _disable_ai_local_throttle(bot)
     safe_attachment_archive = _install_safe_attachment_archive()
     ai_personality = _install_ai_personality(bot)
+    failed_loop_only = _install_failed_loop_only_supervisor()
+    single_diagnostic = _install_single_v17_diagnostic(bot)
 
     state = _state(bot)
     state.update(
@@ -335,6 +444,8 @@ def install(bot: commands.Bot) -> dict[str, Any]:
             "ai_local_throttle_disabled": ai_throttle_disabled,
             "safe_attachment_archive": safe_attachment_archive,
             "ai_dynamic_personality": ai_personality,
+            "failed_loop_only_supervisor": failed_loop_only,
+            "single_v17_diagnostic": single_diagnostic,
         }
     )
     setattr(bot, _MARKER, True)
@@ -347,27 +458,37 @@ def install(bot: commands.Bot) -> dict[str, Any]:
         logger.warning("Garde finale : protection archive fichiers non installée.")
     if not ai_personality:
         logger.warning("Garde finale : personnalité IA dynamique non installée.")
+    if not failed_loop_only:
+        logger.warning("Garde finale : superviseur de boucles non corrigé.")
 
     logger.warning(
-        "Garde stabilité finale active : zéro cooldown=%s, throttle IA=%s, fichiers sûrs=%s, personnalité IA=%s.",
+        "Garde stabilité finale active : zéro cooldown=%s, throttle IA=%s, fichiers sûrs=%s, "
+        "personnalité IA=%s, boucles failed-only=%s, diagnostic unique=%s.",
         zero_cooldown,
         ai_throttle_disabled,
         safe_attachment_archive,
         ai_personality,
+        failed_loop_only,
+        single_diagnostic,
     )
     return state
 
 
 async def setup(bot: commands.Bot) -> None:
     install(bot)
-    command_conflict = bot.get_command("diagnostic") or bot.get_command("diag")
+
+    command_conflict = (
+        bot.get_command("diagnostic")
+        or bot.get_command("diagnose")
+        or bot.get_command("diag")
+    )
     if bot.get_cog("StabilityDiagnostic") is None and command_conflict is None:
         await bot.add_cog(StabilityDiagnostic(bot))
-    elif command_conflict is not None:
-        logger.warning(
-            "Diagnostic runtime non enregistré : la commande %s existe déjà.",
-            command_conflict.qualified_name,
-        )
+
+    # Repasser après l'éventuel fallback garantit que V17 reste l'unique sortie.
+    state = _state(bot)
+    state["single_v17_diagnostic"] = _install_single_v17_diagnostic(bot)
+    await _clear_false_ticket_restart_incidents(bot)
 
 
 __all__ = [
@@ -377,6 +498,10 @@ __all__ = [
     "_install_safe_attachment_archive",
     "_reassert_zero_cooldown",
     "_install_ai_personality",
+    "_loop_really_failed",
+    "_install_failed_loop_only_supervisor",
+    "_install_single_v17_diagnostic",
+    "_clear_false_ticket_restart_incidents",
     "_missing_permissions",
     "_database_ok",
     "_durable_status",
