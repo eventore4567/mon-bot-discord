@@ -9,12 +9,16 @@ La présentation des réponses de commandes est centralisée séparément dans
 ``Messageable.send`` et ne peut donc pas intercepter les journaux Components V2.
 Les panneaux classiques interactifs utilisent en complément ``top_command_banners``
 pour garder la bannière SentriX au-dessus du contenu pendant toutes leurs éditions.
+``top_banner_guard`` couvre enfin les réponses d'interactions/followups qui contiennent
+déjà une bannière SentriX sans modifier les logs ni les images métier.
 """
 
 from .command_visuals import install_command_visuals
 from .top_command_banners import install_top_command_banners
+from .top_banner_guard import install_top_banner_guard
 
 install_command_visuals()
 install_top_command_banners()
+install_top_banner_guard()
 
-__all__ = ["install_command_visuals", "install_top_command_banners"]
+__all__ = ["install_command_visuals", "install_top_command_banners", "install_top_banner_guard"]
