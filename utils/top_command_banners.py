@@ -41,7 +41,13 @@ def _is_banner_header(embed: discord.Embed | None) -> bool:
     """Return True only for the dedicated image-only SentriX header embed."""
     if not isinstance(embed, discord.Embed) or not visuals._is_command_banner(_image_url(embed)):
         return False
-    return not any((embed.title, embed.description, embed.fields, embed.author.name, embed.footer.text))
+    return not any((
+        embed.title,
+        embed.description,
+        embed.fields,
+        getattr(getattr(embed, "author", None), "name", None),
+        getattr(getattr(embed, "footer", None), "text", None),
+    ))
 
 
 def _without_bottom_command_banner(embed: discord.Embed) -> discord.Embed:
@@ -206,6 +212,7 @@ def install_top_command_banners() -> None:
     if not getattr(original_response_edit, "_sentrix_top_banner", False):
         _ORIGINAL_INTERACTION_RESPONSE_EDIT = original_response_edit
         _interaction_response_edit._sentrix_top_banner = True
+        _interaction_response_edit._sentrix_original_edit = original_response_edit
         discord.InteractionResponse.edit_message = _interaction_response_edit
     else:
         _ORIGINAL_INTERACTION_RESPONSE_EDIT = getattr(
@@ -231,10 +238,6 @@ def install_top_command_banners() -> None:
         discord.Message.edit = _message_edit
     else:
         _ORIGINAL_MESSAGE_EDIT = getattr(original_message_edit, "_sentrix_original_edit", original_message_edit)
-
-    # Keep the original callable reachable for a second import/reload as well.
-    if not hasattr(_interaction_response_edit, "_sentrix_original_edit"):
-        _interaction_response_edit._sentrix_original_edit = _ORIGINAL_INTERACTION_RESPONSE_EDIT
 
     logger.info("Command top banners installed: classic interactive panels keep banner first")
 
