@@ -1,10 +1,4 @@
-"""Génération et sélection des bannières de logs SentriX.
-
-Les cinq visuels approuvés sont livrés en WebP dans ``assets/log_banners`` puis
-convertis en PNG 1024x110 au démarrage. Le renderer Components V2 continue donc
-à recevoir exactement les mêmes chemins ``banner_<kind>.png`` et son transport
-n'est pas modifié. Si un visuel source manque, un fallback procédural est généré.
-"""
+"""Génération et sélection des bannières de logs SentriX."""
 from __future__ import annotations
 
 import math
@@ -15,7 +9,6 @@ from PIL import Image, ImageDraw, ImageFilter, ImageOps
 ROOT = Path(__file__).resolve().parents[1]
 BANNER_DIR = ROOT / "assets" / "log_banners"
 LOGO_PATH = ROOT / "assets" / "sentrix_logo.png"
-
 WIDTH = 1024
 HEIGHT = 110
 
@@ -26,12 +19,9 @@ COLORS: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
     "info": ((55, 151, 255), (51, 67, 198)),
     "special": ((174, 97, 255), (76, 38, 180)),
 }
-
 SOURCE_BANNERS: dict[str, Path] = {
-    kind: BANNER_DIR / f"banner_source_{kind}.webp"
-    for kind in COLORS
+    kind: BANNER_DIR / f"banner_source_{kind}.webp" for kind in COLORS
 }
-
 _READY = False
 
 
@@ -44,16 +34,13 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 
 def _load_approved_banner(kind: str) -> Image.Image | None:
-    """Charge le visuel approuvé et l'ajuste exactement à 1024x110."""
     source = SOURCE_BANNERS.get(kind)
     if source is None or not source.exists():
         return None
-
     try:
         with Image.open(source) as opened:
-            image = opened.convert("RGBA")
             return ImageOps.fit(
-                image,
+                opened.convert("RGBA"),
                 (WIDTH, HEIGHT),
                 method=Image.Resampling.LANCZOS,
                 centering=(0.5, 0.5),
@@ -62,19 +49,11 @@ def _load_approved_banner(kind: str) -> Image.Image | None:
         return None
 
 
-def _build_background(
-    left: tuple[int, int, int],
-    right: tuple[int, int, int],
-) -> Image.Image:
-    """Fallback procédural utilisé uniquement si un visuel approuvé manque."""
+def _build_background(left: tuple[int, int, int], right: tuple[int, int, int]) -> Image.Image:
     image = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 255))
     pixels = image.load()
-
-    halo_x = WIDTH * 0.34
-    halo_y = HEIGHT * 0.42
-    halo_rx = WIDTH * 0.54
-    halo_ry = HEIGHT * 1.65
-
+    halo_x, halo_y = WIDTH * 0.34, HEIGHT * 0.42
+    halo_rx, halo_ry = WIDTH * 0.54, HEIGHT * 1.65
     for y in range(HEIGHT):
         yn = y / max(1, HEIGHT - 1)
         vertical_bend = math.sin(yn * math.pi) * 0.055
@@ -82,160 +61,66 @@ def _build_background(
             xn = x / max(1, WIDTH - 1)
             curved_t = _clamp(xn + vertical_bend * (0.55 - xn))
             curved_t = curved_t * curved_t * (3.0 - 2.0 * curved_t)
-
-            r = _mix(left[0], right[0], curved_t)
-            g = _mix(left[1], right[1], curved_t)
-            b = _mix(left[2], right[2], curved_t)
-
-            dx = (x - halo_x) / halo_rx
-            dy = (y - halo_y) / halo_ry
+            r, g, b = (_mix(left[i], right[i], curved_t) for i in range(3))
+            dx, dy = (x - halo_x) / halo_rx, (y - halo_y) / halo_ry
             radial = _clamp(1.0 - math.sqrt(dx * dx + dy * dy)) ** 2
             center_light = 1.0 - abs(yn * 2.0 - 1.0)
             lift = 0.88 + center_light * 0.08 + radial * 0.20
             vignette = _clamp((xn - 0.62) / 0.38)
-            vignette_factor = 1.0 - vignette * vignette * 0.28
-
-            pixels[x, y] = (
-                min(255, round(r * lift * vignette_factor)),
-                min(255, round(g * lift * vignette_factor)),
-                min(255, round(b * lift * vignette_factor)),
-                255,
-            )
-
+            vf = 1.0 - vignette * vignette * 0.28
+            pixels[x, y] = tuple(min(255, round(v * lift * vf)) for v in (r, g, b)) + (255,)
     stripes = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(stripes)
     for start in range(-HEIGHT * 2, WIDTH + HEIGHT * 2, 138):
-        draw.polygon(
-            [
-                (start, HEIGHT),
-                (start + 88, HEIGHT),
-                (start + 180, 0),
-                (start + 92, 0),
-            ],
-            fill=(255, 255, 255, 12),
-        )
-    stripes = stripes.filter(ImageFilter.GaussianBlur(1.5))
-    image = Image.alpha_composite(image, stripes)
-
-    top_glow = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-    glow_draw = ImageDraw.Draw(top_glow)
-    glow_draw.rectangle((0, 0, WIDTH, 2), fill=(*left, 180))
-    glow_draw.rectangle((0, 2, WIDTH, 4), fill=(255, 255, 255, 36))
-    top_glow = top_glow.filter(ImageFilter.GaussianBlur(2.0))
-    return Image.alpha_composite(image, top_glow)
+        draw.polygon([(start, HEIGHT), (start + 88, HEIGHT), (start + 180, 0), (start + 92, 0)], fill=(255, 255, 255, 12))
+    return Image.alpha_composite(image, stripes.filter(ImageFilter.GaussianBlur(1.5)))
 
 
 def _composite_logo(image: Image.Image, accent: tuple[int, int, int]) -> Image.Image:
-    """Fallback : centre l'ancien logo si le visuel source approuvé est absent."""
     if not LOGO_PATH.exists():
         return image
-
     try:
-        logo = Image.open(LOGO_PATH).convert("RGBA")
+        with Image.open(LOGO_PATH) as opened:
+            logo = opened.convert("RGBA")
     except (OSError, ValueError):
         return image
-
-    max_w = 210
-    max_h = 86
-    scale = min(max_w / max(1, logo.width), max_h / max(1, logo.height), 1.0)
-    size = (
-        max(1, round(logo.width * scale)),
-        max(1, round(logo.height * scale)),
-    )
+    scale = min(210 / max(1, logo.width), 86 / max(1, logo.height), 1.0)
+    size = (max(1, round(logo.width * scale)), max(1, round(logo.height * scale)))
     if size != logo.size:
         logo = logo.resize(size, Image.Resampling.LANCZOS)
-
-    x = (WIDTH - logo.width) // 2
-    y = (HEIGHT - logo.height) // 2
+    x, y = (WIDTH - logo.width) // 2, (HEIGHT - logo.height) // 2
     alpha = logo.getchannel("A")
-
     halo_mask = Image.new("L", (WIDTH, HEIGHT), 0)
     halo_mask.paste(alpha, (x, y))
     halo_mask = halo_mask.filter(ImageFilter.GaussianBlur(13))
     halo = Image.new("RGBA", (WIDTH, HEIGHT), (*accent, 0))
     halo.putalpha(halo_mask.point(lambda value: min(125, round(value * 0.50))))
     image = Image.alpha_composite(image, halo)
-
-    shadow_mask = Image.new("L", (WIDTH, HEIGHT), 0)
-    shadow_mask.paste(alpha, (x, y + 2))
-    shadow_mask = shadow_mask.filter(ImageFilter.GaussianBlur(4))
-    shadow = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-    shadow.putalpha(shadow_mask.point(lambda value: min(115, round(value * 0.45))))
-    image = Image.alpha_composite(image, shadow)
     image.alpha_composite(logo, (x, y))
     return image
 
 
 def ensure_banners(force: bool = False) -> None:
-    """Matérialise les cinq PNG utilisés par Components V2."""
     global _READY
-
     if _READY and not force:
         return
-
     BANNER_DIR.mkdir(parents=True, exist_ok=True)
-
     for kind, (left, right) in COLORS.items():
         path = BANNER_DIR / f"banner_{kind}.png"
         if path.exists() and not force:
             continue
-
-        image = _load_approved_banner(kind)
-        if image is None:
-            image = _build_background(left, right)
-            image = _composite_logo(image, left)
-
+        image = _load_approved_banner(kind) or _composite_logo(_build_background(left, right), left)
         image.save(path, "PNG", optimize=True)
-
     _READY = True
 
 
-_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    (
-        "success",
-        (
-            "unban", "déban", "deban", "unmute", "untimeout",
-            "restaur", "réussi", "reussi", "succès", "succes",
-            "activé", "active", "ajouté", "ajoute", "levé", "leve",
-        ),
-    ),
-    (
-        "special",
-        (
-            "arrivée", "arrivee", "rejoint", "bienvenue", "welcome",
-            "boost", "special", "spécial", "anniversaire", "niveau",
-        ),
-    ),
-    (
-        "warning",
-        (
-            "warn", "avert", "mute", "timeout", "permission",
-            "automod", "anti-spam", "antispam", "attention",
-            "manquant", "échec", "echec", "refus",
-        ),
-    ),
-    (
-        "error",
-        (
-            "supprim", "delete", "ban", "kick", "expuls",
-            "sanction", "erreur", "error", "départ", "depart",
-            "quitté", "quitte", "blacklist", "purge",
-        ),
-    ),
-)
-
-
 def banner_kind(log_type: str, title: str = "", description: str = "") -> str:
-    """Retourne ``error/success/warning/info/special`` pour un événement de log."""
-    text = f"{log_type} {title} {description}".casefold()
-    for kind, words in _RULES:
-        if any(word in text for word in words):
-            return kind
-    return "info"
+    """Le registre événementiel est prioritaire ; le texte n'est qu'un repli legacy."""
+    from utils.log_categories import resolve
+    return resolve(log_type, title, description)[2]
 
 
 def get_banner(log_type: str, title: str = "", description: str = "") -> Path:
-    """Retourne le PNG matérialisé pour le type de journal demandé."""
     ensure_banners()
     kind = banner_kind(log_type, title, description)
     path = BANNER_DIR / f"banner_{kind}.png"
@@ -244,18 +129,9 @@ def get_banner(log_type: str, title: str = "", description: str = "") -> Path:
     return path
 
 
-# Les visuels approuvés remplacent les anciens PNG à chaque nouveau démarrage.
 ensure_banners(force=True)
 
-
 __all__ = [
-    "BANNER_DIR",
-    "COLORS",
-    "HEIGHT",
-    "LOGO_PATH",
-    "SOURCE_BANNERS",
-    "WIDTH",
-    "banner_kind",
-    "ensure_banners",
-    "get_banner",
+    "BANNER_DIR", "COLORS", "HEIGHT", "LOGO_PATH", "SOURCE_BANNERS", "WIDTH",
+    "banner_kind", "ensure_banners", "get_banner",
 ]

@@ -5,7 +5,6 @@ import asyncio
 import logging
 import os
 import time
-from types import MethodType
 
 import discord
 from discord.ext import commands, tasks
@@ -18,6 +17,7 @@ from .v17_shared import ensure_schema, register_command_policy, state
 logger = logging.getLogger("bot.v17-health")
 SLOW_COMMAND_SECONDS = 3.0
 ALERT_COOLDOWN_SECONDS = 600.0
+INCIDENT_WINDOW_SECONDS = 1800
 
 
 def _ctx_key(ctx: commands.Context) -> int:
@@ -40,37 +40,116 @@ def _technical_error(error: commands.CommandError) -> bool:
     return not isinstance(raw, expected)
 
 
-def _loop_has_active_error(loop: tasks.Loop) -> bool:
-    """Retourne True uniquement si l'exécution actuelle de la boucle a réellement échoué."""
-    task = loop.get_task()
-    if task is None or task.cancelled():
-        return False
-
-    # Une boucle en cours d'exécution est considérée comme récupérée/active.
-    # Une ancienne exception ne doit jamais gonfler l'état live du diagnostic.
-    if loop.is_running() or not task.done():
-        return False
-
-    try:
-        return task.exception() is not None
-    except (asyncio.CancelledError, asyncio.InvalidStateError):
-        return False
-
-
-async def _background_loops(bot: commands.Bot) -> tuple[int, int]:
-    total = 0
-    failed = 0
+def _iter_background_loops(bot: commands.Bot):
+    seen: set[int] = set()
     for cog in bot.cogs.values():
         for name in dir(cog):
             try:
                 value = getattr(cog, name)
             except Exception:
                 continue
-            if isinstance(value, tasks.Loop):
-                total += 1
-                if _loop_has_active_error(value):
-                    failed += 1
+            if not isinstance(value, tasks.Loop) or id(value) in seen:
+                continue
+            seen.add(id(value))
+            yield cog, name, value
+
+
+def _loop_exception(loop: tasks.Loop) -> BaseException | None:
+    task = loop.get_task()
+    if task is None or task.cancelled() or loop.is_running() or not task.done():
+        return None
+    try:
+        return task.exception()
+    except (asyncio.CancelledError, asyncio.InvalidStateError):
+        return None
+    except Exception as exc:
+        return exc
+
+
+async def _background_loops(bot: commands.Bot) -> tuple[int, int]:
+    total = 0
+    failed = 0
+    for _cog, _name, loop in _iter_background_loops(bot):
+        total += 1
+        if _loop_exception(loop) is not None:
+            failed += 1
     return total, failed
+
+
+def _startup_initialisation_error(exc: BaseException | None) -> bool:
+    if exc is None:
+        return False
+    text = f"{type(exc).__name__}: {exc}".casefold()
+    return "client has not been properly initialised" in text or "please use the login method" in text
+
+
+async def _recover_startup_tasks(bot: commands.Bot) -> list[str]:
+    """Redémarre après READY les tâches lancées trop tôt pendant le chargement des cogs."""
+    if not bot.is_ready():
+        return []
+
+    recovered: list[str] = []
+    for cog, name, loop in _iter_background_loops(bot):
+        exc = _loop_exception(loop)
+        if not _startup_initialisation_error(exc):
+            continue
+        try:
+            loop.start()
+            recovered.append(f"{cog.__class__.__name__}.{name}")
+        except RuntimeError:
+            if loop.is_running():
+                recovered.append(f"{cog.__class__.__name__}.{name}")
+            else:
+                logger.exception("Impossible de relancer la boucle %s.%s", cog.__class__.__name__, name)
+        except Exception:
+            logger.exception("Impossible de relancer la boucle %s.%s", cog.__class__.__name__, name)
+
+    platform = bot.get_cog("PlatformV4")
+    if platform is not None and not bool(getattr(platform, "_ready_views", False)):
+        restore_task = getattr(platform, "_restore_task", None)
+        restore_exc = None
+        if isinstance(restore_task, asyncio.Task) and restore_task.done() and not restore_task.cancelled():
+            try:
+                restore_exc = restore_task.exception()
+            except (asyncio.CancelledError, asyncio.InvalidStateError):
+                restore_exc = None
+        if restore_task is None or restore_task.done():
+            if restore_task is None or _startup_initialisation_error(restore_exc):
+                method = getattr(platform, "_restore_persistent_views", None)
+                if callable(method):
+                    try:
+                        platform._restore_task = asyncio.create_task(
+                            method(), name="sentrix-platform-v4-restore-ready"
+                        )
+                        recovered.append("PlatformV4._restore_persistent_views")
+                    except Exception:
+                        logger.exception("Impossible de relancer la restauration PlatformV4")
+
+    if recovered:
+        logger.warning("Tâches de fond récupérées après READY : %s", ", ".join(recovered))
+    return recovered
+
+
+async def _live_incidents(bot: commands.Bot, guild_id: int, loops_failed: int):
+    rows = await bot.db.fetchall(
+        "SELECT source,detail,created_at FROM runtime_incidents "
+        "WHERE (guild_id=? OR guild_id IS NULL) AND created_at>=? "
+        "ORDER BY created_at DESC LIMIT 20",
+        (guild_id, int(now()) - INCIDENT_WINDOW_SECONDS),
+    )
+    result = []
+    for row in rows:
+        detail = str(row["detail"] or "")
+        source = str(row["source"] or "")
+        if loops_failed == 0 and (
+            "Client has not been properly initialised" in detail
+            or source == "background_loop_restart"
+        ):
+            continue
+        result.append(row)
+        if len(result) >= 5:
+            break
+    return result
 
 
 async def build_health_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embed:
@@ -102,9 +181,13 @@ async def build_health_embed(bot: commands.Bot, guild: discord.Guild) -> discord
     }
     missing = [label for label, ok in required.items() if not ok]
 
-    open_tickets = await bot.db.fetchone("SELECT COUNT(*) c FROM tickets WHERE guild_id=? AND status='ouvert'", (guild.id,))
+    open_tickets = await bot.db.fetchone(
+        "SELECT COUNT(*) c FROM tickets WHERE guild_id=? AND status='ouvert'", (guild.id,)
+    )
     invalid_tickets = 0
-    rows = await bot.db.fetchall("SELECT channel_id FROM tickets WHERE guild_id=? AND status='ouvert' LIMIT 500", (guild.id,))
+    rows = await bot.db.fetchall(
+        "SELECT channel_id FROM tickets WHERE guild_id=? AND status='ouvert' LIMIT 500", (guild.id,)
+    )
     for row in rows:
         if guild.get_channel(int(row["channel_id"])) is None:
             invalid_tickets += 1
@@ -119,11 +202,11 @@ async def build_health_embed(bot: commands.Bot, guild: discord.Guild) -> discord
     log_settings = await log_service.get_all_log_settings(bot, guild.id)
     enabled_logs = 0
     invalid_logs = 0
-    for log_type, setting in log_settings.items():
+    for _category, setting in log_settings.items():
         if not setting.get("enabled"):
             continue
         enabled_logs += 1
-        ok, _reason = log_service.validate_channel(guild, setting.get("channel_id"))
+        ok, _reason = log_service.validate_channel(guild, setting.get("channel_id"), needs_file=True)
         if not ok:
             invalid_logs += 1
 
@@ -149,10 +232,7 @@ async def build_health_embed(bot: commands.Bot, guild: discord.Guild) -> discord
         "ORDER BY errors DESC,max_ms DESC LIMIT 8",
         (guild.id, int(now() // 3600 * 3600) - 3600),
     )
-    incidents = await bot.db.fetchall(
-        "SELECT source,detail,created_at FROM runtime_incidents WHERE guild_id=? OR guild_id IS NULL ORDER BY created_at DESC LIMIT 5",
-        (guild.id,),
-    )
+    incidents = await _live_incidents(bot, guild.id, loops_failed)
 
     e = embeds.neutral("Diagnostic SentriX V17")
     e.add_field(name="Discord", value=f"Latence : **{latency_ms:.0f} ms**\nBot : {'● connecté' if bot.is_ready() else '○ non prêt'}", inline=True)
@@ -172,9 +252,13 @@ async def build_health_embed(bot: commands.Bot, guild: discord.Guild) -> discord
             lines.append(f"• `{row['command_name']}` — {calls} appel(s), {errors} erreur(s), max {float(row['max_ms'] or 0):.0f} ms")
         e.add_field(name="Commandes à surveiller (2h)", value="\n".join(lines)[:1024], inline=False)
     if incidents:
-        e.add_field(name="Incidents runtime récents", value="\n".join(
-            f"• `{r['source']}` — {str(r['detail'])[:120]} — <t:{r['created_at']}:R>" for r in incidents
-        )[:1024], inline=False)
+        e.add_field(
+            name="Incidents runtime récents",
+            value="\n".join(
+                f"• `{r['source']}` — {str(r['detail'])[:120]} — <t:{r['created_at']}:R>" for r in incidents
+            )[:1024],
+            inline=False,
+        )
     total_ms = (time.perf_counter() - started) * 1000.0
     e.set_footer(text=f"SentriX V17 • diagnostic généré en {total_ms:.0f} ms")
     return e
@@ -186,6 +270,11 @@ class V17Health(commands.Cog, name="V17Health"):
 
     async def cog_load(self):
         await ensure_schema(self.bot)
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        await asyncio.sleep(0)
+        await _recover_startup_tasks(self.bot)
 
     async def send_report(self, ctx: commands.Context):
         if ctx.guild is None:
