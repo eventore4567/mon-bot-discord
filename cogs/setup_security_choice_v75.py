@@ -6,6 +6,11 @@ Cette couche corrige la page Sécurité de V74 :
 - SentriX s'appuie sur les permissions Discord réelles et la hiérarchie au moment de l'action ;
 - les permissions propres au bot sont seulement auditées, car Discord interdit à un bot de
   modifier lui-même son rôle d'intégration géré.
+
+Elle possède aussi la page Logs finale. Cette page n'utilise plus les anciens Select du
+backend V69/V70 déplacés dans Components V2 : catégorie et salon sont des composants natifs
+de la façade finale, ce qui évite les erreurs de parent/rebuild et rend le choix du salon
+visible immédiatement.
 """
 from __future__ import annotations
 
@@ -15,6 +20,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from utils import log_service
 from . import security_verification_v71 as security_v71
 from . import setup_control_center as setup_ui
 from . import setup_experience_v74 as v74
@@ -282,6 +288,340 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     self.add_item(container)
 
 
+def _log_options() -> list[discord.SelectOption]:
+    """Construit les catégories au moment du rendu afin d'inclure les extensions runtime."""
+    return [
+        discord.SelectOption(
+            label=str(meta.get("label") or meta.get("category") or key).strip()[:100],
+            value=key,
+            description=(
+                f"Choisir le salon pour {str(meta.get('label') or key).strip()}"
+            )[:100],
+        )
+        for key, meta in log_service.LOG_TYPES.items()
+        if meta.get("emits", True)
+    ][:25]
+
+
+async def _audit_log_choice(
+    view: v74.SentriXSetupV74,
+    actor_id: int,
+    log_type: str,
+    value: object,
+) -> None:
+    try:
+        await view.backend.audit(actor_id, f"log:{log_type}", value)
+    except Exception:
+        logger.debug("Audit du choix de salon de logs indisponible", exc_info=True)
+
+
+async def _safe_log_refresh(
+    view: v74.SentriXSetupV74,
+    interaction: discord.Interaction,
+) -> None:
+    """ACK puis refresh du message Components V2 sans réutiliser la vue legacy."""
+    if not interaction.response.is_done():
+        await interaction.response.defer()
+    await view.refresh(interaction)
+
+
+async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
+    """Page Logs native Components V2 : catégorie ET salon sont toujours accessibles."""
+    self.backend.category = "logs"
+
+    options = _log_options()
+    available = [option.value for option in options]
+    if not available:
+        container = discord.ui.Container(accent_colour=v74.v73.ACCENT)
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "# 📜 Logs du serveur\nAucune catégorie de logs n'est disponible dans ce runtime."
+                ),
+                accessory=v74.v73._thumbnail(self.bot),
+            )
+        )
+        self._add_navigation(container)
+        self.add_item(container)
+        return
+
+    selected = getattr(self.backend, "selected_log", None)
+    if selected not in available:
+        selected = "moderation" if "moderation" in available else available[0]
+        self.backend.selected_log = selected
+
+    # Statut complet du routage. Le salon dédié est affiché en priorité ; sinon on montre
+    # le fallback général afin que l'administrateur voie immédiatement pourquoi un log est
+    # envoyé dans un autre salon.
+    route_lines: list[str] = []
+    all_settings: dict[str, dict] = {}
+    for key in available:
+        meta = log_service.LOG_TYPES.get(key, {})
+        setting = await log_service.get_log_setting(self.bot, self.guild.id, key)
+        all_settings[key] = setting
+        enabled = bool(setting.get("enabled"))
+        dedicated = setting.get("dedicated_channel_id")
+        fallback = setting.get("fallback_channel_id")
+        effective = setting.get("channel_id")
+        channel_id = dedicated or effective
+        channel = self.guild.get_channel(int(channel_id)) if channel_id else None
+        if channel is not None:
+            destination = channel.mention
+            if not dedicated and fallback:
+                destination += " *(repli général)*"
+        elif channel_id:
+            destination = f"`{channel_id}` *(salon introuvable)*"
+        else:
+            destination = "*aucun salon*"
+        label = str(meta.get("label") or meta.get("category") or key)
+        route_lines.append(
+            f"**{label}** — {'ACTIF' if enabled else 'INACTIF'} — {destination}"
+        )
+
+    selected_meta = log_service.LOG_TYPES.get(selected, {})
+    selected_label = str(
+        selected_meta.get("label") or selected_meta.get("category") or selected
+    )
+    selected_setting = all_settings[selected]
+    selected_channel_id = (
+        selected_setting.get("dedicated_channel_id")
+        or selected_setting.get("channel_id")
+    )
+    selected_channel = (
+        self.guild.get_channel(int(selected_channel_id)) if selected_channel_id else None
+    )
+
+    if selected_channel is not None:
+        valid, detail = log_service.validate_channel(
+            self.guild,
+            selected_channel.id,
+            needs_file=(selected == "tickets"),
+        )
+        selected_route = selected_channel.mention
+        permission_line = "● TOUT EST PRÊT" if valid else f"⚠️ {detail}"
+    else:
+        selected_route = "aucun salon choisi"
+        permission_line = "⚠️ Choisissez un salon ci-dessous."
+
+    status = discord.ui.Button(
+        label="Actif" if bool(selected_setting.get("enabled")) else "Inactif",
+        style=(
+            discord.ButtonStyle.success
+            if bool(selected_setting.get("enabled"))
+            else discord.ButtonStyle.secondary
+        ),
+        disabled=True,
+    )
+
+    container = discord.ui.Container(accent_colour=v74.v73.ACCENT)
+    container.add_item(
+        discord.ui.Section(
+            discord.ui.TextDisplay(
+                "# 📜 Logs du serveur\n"
+                "Choisissez une catégorie puis **le salon exact** où SentriX doit envoyer ces logs.\n"
+                "Les deux menus restent visibles en permanence : aucun ancien panneau caché n'est utilisé."
+            ),
+            accessory=v74.v73._thumbnail(self.bot),
+        )
+    )
+    container.add_item(discord.ui.Separator())
+    container.add_item(
+        discord.ui.Section(
+            discord.ui.TextDisplay(
+                "### ROUTAGE\n"
+                + "\n".join(route_lines)[:3000]
+                + "\n\n### PERMISSIONS DU BOT\n"
+                + permission_line
+            ),
+            accessory=status,
+        )
+    )
+
+    container.add_item(discord.ui.Separator())
+    container.add_item(
+        discord.ui.TextDisplay(
+            f"### Réglages\n**Catégorie sélectionnée : {selected_label}**\n"
+            f"Salon actuel : {selected_route}"
+        )
+    )
+
+    category_select = discord.ui.Select(
+        placeholder="1. Choisir la catégorie de logs",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(
+                label=option.label,
+                value=option.value,
+                description=option.description,
+                default=option.value == selected,
+            )
+            for option in options
+        ],
+    )
+
+    async def choose_category(interaction: discord.Interaction):
+        try:
+            self.backend.selected_log = category_select.values[0]
+            await _safe_log_refresh(self, interaction)
+        except Exception as exc:
+            logger.error(
+                "Erreur choix catégorie logs Setup guild=%s user=%s",
+                self.guild.id,
+                interaction.user.id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="Action impossible",
+                        description="Impossible de charger cette catégorie de logs. Réessayez après un instant.",
+                        colour=discord.Colour.red(),
+                    ),
+                    ephemeral=True,
+                )
+
+    category_select.callback = choose_category
+    container.add_item(discord.ui.ActionRow(category_select))
+
+    channel_select = discord.ui.ChannelSelect(
+        placeholder=f"2. Choisir le salon pour {selected_label}"[:150],
+        min_values=0,
+        max_values=1,
+        channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+    )
+
+    async def choose_channel(interaction: discord.Interaction):
+        log_type = getattr(self.backend, "selected_log", None) or selected
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            channel = channel_select.values[0] if channel_select.values else None
+            channel_id = int(channel.id) if channel is not None else None
+
+            await log_service.set_log_channel(
+                self.bot,
+                self.guild.id,
+                log_type,
+                channel_id,
+            )
+            await log_service.set_log_enabled(
+                self.bot,
+                self.guild.id,
+                log_type,
+                channel_id is not None,
+            )
+            await _audit_log_choice(
+                self,
+                interaction.user.id,
+                log_type,
+                channel_id,
+            )
+            await self.refresh(interaction)
+        except Exception as exc:
+            logger.error(
+                "Erreur choix salon logs Setup guild=%s type=%s user=%s",
+                self.guild.id,
+                log_type,
+                interaction.user.id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            message = (
+                "Impossible d'enregistrer ce salon. Vérifiez que SentriX peut le voir et y envoyer des messages."
+            )
+            try:
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        title="Salon non enregistré",
+                        description=message,
+                        colour=discord.Colour.red(),
+                    ),
+                    ephemeral=True,
+                )
+            except discord.HTTPException:
+                pass
+
+    channel_select.callback = choose_channel
+    container.add_item(discord.ui.ActionRow(channel_select))
+
+    toggle = discord.ui.Button(
+        label=(
+            "Désactiver cette catégorie"
+            if bool(selected_setting.get("enabled"))
+            else "Activer cette catégorie"
+        ),
+        style=(
+            discord.ButtonStyle.danger
+            if bool(selected_setting.get("enabled"))
+            else discord.ButtonStyle.success
+        ),
+    )
+
+    async def toggle_category(interaction: discord.Interaction):
+        log_type = getattr(self.backend, "selected_log", None) or selected
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            current = await log_service.get_log_setting(self.bot, self.guild.id, log_type)
+            new_enabled = not bool(current.get("enabled"))
+            if new_enabled and not current.get("channel_id"):
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        title="Choisissez d'abord un salon",
+                        description="Sélectionnez le salon de cette catégorie avec le deuxième menu, puis activez-la.",
+                        colour=discord.Colour.orange(),
+                    ),
+                    ephemeral=True,
+                )
+                return
+            await log_service.set_log_enabled(
+                self.bot,
+                self.guild.id,
+                log_type,
+                new_enabled,
+            )
+            await _audit_log_choice(
+                self,
+                interaction.user.id,
+                log_type,
+                "enabled" if new_enabled else "disabled",
+            )
+            await self.refresh(interaction)
+        except Exception as exc:
+            logger.error(
+                "Erreur toggle logs Setup guild=%s type=%s user=%s",
+                self.guild.id,
+                log_type,
+                interaction.user.id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            try:
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        title="Action impossible",
+                        description="Impossible de modifier l'état de cette catégorie de logs.",
+                        colour=discord.Colour.red(),
+                    ),
+                    ephemeral=True,
+                )
+            except discord.HTTPException:
+                pass
+
+    toggle.callback = toggle_category
+    container.add_item(discord.ui.ActionRow(toggle))
+
+    self._add_navigation(container)
+    self.add_item(container)
+
+
+async def _build_page_v75(self: v74.SentriXSetupV74, page: str) -> None:
+    """Intercepte uniquement Logs ; toutes les autres pages gardent V74/V75."""
+    if page == "logs":
+        return await _build_logs_v75(self)
+    previous = getattr(_build_page_v75, "_sentrix_previous")
+    return await previous(self, page)
+
+
 def install(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_setup_security_choice_v75", False):
         return
@@ -300,10 +640,21 @@ def install(bot: commands.Bot) -> None:
         _effective_states_v75._sentrix_previous = current_states
         cls._effective_states = _effective_states_v75
 
+    current_page = cls._build_page
+    if not getattr(current_page, "_sentrix_native_logs_v75", False):
+        _build_page_v75._sentrix_native_logs_v75 = True
+        _build_page_v75._sentrix_previous = current_page
+        cls._build_page = _build_page_v75
+
     v74.CATEGORY_META["security"] = (
         "🔒",
         "Sécurité",
         "Choisissez individuellement les protections anti ; les permissions Discord sont automatiques.",
+    )
+    v74.CATEGORY_META["logs"] = (
+        "📜",
+        "Logs du serveur",
+        "Choisissez chaque catégorie et son salon de destination directement dans le panneau.",
     )
 
     from . import setup_moderation_clear_v76 as moderation_v76
@@ -319,7 +670,7 @@ def install(bot: commands.Bot) -> None:
 
     bot._sentrix_setup_security_choice_v75 = True
     logger.info(
-        "%s installé : protections anti sélectionnables, permissions Kick/Ban/etc. automatiques.",
+        "%s installé : protections anti sélectionnables + page Logs native avec choix de salon.",
         RUNTIME_MARKER,
     )
 
