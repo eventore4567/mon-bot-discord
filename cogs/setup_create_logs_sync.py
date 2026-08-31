@@ -11,6 +11,7 @@ import asyncio
 import html
 import io
 import logging
+import re
 
 import discord
 from discord.ext import commands
@@ -101,12 +102,7 @@ async def sync_setup_created_logs(
                     channel.id,
                 )
             await log_service.set_log_channel(bot, guild.id, category, channel.id)
-
-            # Un clic explicite sur Create Logs active les routes. Pour un bootstrap, on
-            # réactive uniquement une route absente/croisée issue des salons générés ; une
-            # désactivation volontaire avec un salon personnalisé valide reste intacte.
-            if force_enable or missing_or_invalid or crossed_route:
-                await log_service.set_log_enabled(bot, guild.id, category, True)
+            await log_service.set_log_enabled(bot, guild.id, category, True)
             synced += 1
 
     # Le salon de modération reste le repli général historique uniquement si aucun repli
@@ -127,6 +123,107 @@ async def sync_setup_created_logs(
             synced,
         )
     return synced
+
+
+def _field_value(embed: discord.Embed, *names: str) -> str:
+    wanted = {name.casefold() for name in names}
+    for field in embed.fields:
+        if str(field.name or "").strip().casefold() in wanted:
+            return str(field.value or "").strip()
+    return ""
+
+
+def _snowflake(value: object) -> int | None:
+    match = re.search(r"(?<!\d)(\d{15,22})(?!\d)", str(value or ""))
+    return int(match.group(1)) if match else None
+
+
+def _install_listener_routing_patch() -> bool:
+    """Force les événements salon/rôle legacy vers leur événement explicite.
+
+    ``cogs.logs`` utilisait encore ``log_server`` pour ces événements. Le registre moderne
+    sait les reconnaître, mais un event explicite est plus sûr et permet aussi de fournir
+    le nom d'un salon supprimé, qui n'existe déjà plus dans le cache Discord.
+    """
+    try:
+        from . import logs as logs_mod
+    except Exception:
+        logger.exception("Impossible d'importer cogs.logs pour le routage explicite.")
+        return False
+
+    current = logs_mod.Logs._send
+    if getattr(current, "_sentrix_explicit_entity_route", False):
+        return True
+
+    async def send_explicit(
+        self,
+        guild: discord.Guild,
+        config_key: str,
+        embed: discord.Embed,
+        *,
+        view: discord.ui.View | None = None,
+        event_key: str | None = None,
+    ) -> bool:
+        if config_key != "log_server":
+            return await current(self, guild, config_key, embed, view=view, event_key=event_key)
+
+        title = str(embed.title or "").casefold()
+        event_type = None
+        identity_name = None
+        identity_id = None
+
+        if "salon" in title:
+            if "supprim" in title:
+                event_type = "channel_delete"
+            elif "cré" in title or "cree" in title:
+                event_type = "channel_create"
+            else:
+                event_type = "channel_update"
+
+            identity_id = _snowflake(_field_value(embed, "ID", "Salon"))
+            cached = guild.get_channel(identity_id) if identity_id else None
+            if cached is not None:
+                identity_name = getattr(cached, "name", None)
+            if not identity_name:
+                raw_name = _field_value(embed, "Salon")
+                if raw_name and not raw_name.startswith("<#"):
+                    identity_name = raw_name.strip("`* #")
+
+        elif "rôle" in title or "role" in title:
+            if "supprim" in title:
+                event_type = "role_delete"
+            elif "cré" in title or "cree" in title:
+                event_type = "role_create"
+            else:
+                event_type = "role_update"
+            identity_id = _snowflake(_field_value(embed, "ID", "Rôle", "Role"))
+            role = guild.get_role(identity_id) if identity_id else None
+            if role is not None:
+                identity_name = role.name
+            if not identity_name:
+                raw_name = _field_value(embed, "Rôle", "Role")
+                if raw_name and not raw_name.startswith("<@&"):
+                    identity_name = raw_name.strip("`* @")
+
+        if event_type is None:
+            return await current(self, guild, config_key, embed, view=view, event_key=event_key)
+
+        return await log_service.send_log(
+            self.bot,
+            guild,
+            event_type,
+            embed,
+            view=view,
+            event_key=event_key,
+            identity_name=identity_name,
+            identity_id=identity_id,
+        )
+
+    send_explicit._sentrix_explicit_entity_route = True
+    send_explicit._sentrix_original = current
+    logs_mod.Logs._send = send_explicit
+    logger.info("Routage explicite salons/rôles -> catégories dédiées activé.")
+    return True
 
 
 def _ticket_html_file(filename: str, transcript_text: str) -> discord.File:
@@ -189,8 +286,6 @@ def _install_ticket_log_patch(bot: commands.Bot) -> bool:
     if tickets_cls is None:
         return False
 
-    # Les ouvertures et fermetures automatiques utilisaient encore un envoi embed direct
-    # lorsqu'un salon par type était configuré. Le renderer officiel devient l'unique sortie.
     current_log_action = tickets_cls.log_action
     if not getattr(current_log_action, "_sentrix_category_log_action", False):
         async def log_action_category(self, guild, embed, log_channel_id=None):
@@ -264,9 +359,7 @@ def _install_ticket_log_patch(bot: commands.Bot) -> bool:
         )
         log_embed.set_footer(text="SentriX")
 
-        identity_name = (
-            owner.display_name if owner else f"Membre {int(ticket['user_id'])}"
-        )
+        identity_name = owner.display_name if owner else f"Membre {int(ticket['user_id'])}"
         identity_icon = str(owner.display_avatar.url) if owner else None
         event_key = log_service.make_event_key(
             interaction.guild.id,
@@ -296,10 +389,12 @@ def _install_ticket_log_patch(bot: commands.Bot) -> bool:
         asyncio.create_task(self._auto_delete(channel, ticket_id, delay))
 
         try:
+            from utils import embeds as embeds_mod
+            from utils import helpers as helpers_mod
             await channel.send(
-                embed=__import__("utils.embeds", fromlist=["warning"]).warning(
+                embed=embeds_mod.warning(
                     f"🔒 Ticket fermé par {interaction.user.mention}.\nRaison : {reason_text}\n\n"
-                    f"Suppression automatique dans **{__import__('utils.helpers', fromlist=['format_duration']).format_duration(delay)}**."
+                    f"Suppression automatique dans **{helpers_mod.format_duration(delay)}**."
                 ),
                 file=_ticket_html_file(filename, transcript_text),
                 allowed_mentions=discord.AllowedMentions.none(),
@@ -348,7 +443,7 @@ async def _bootstrap(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
-    """Installe la synchro de catégories et le correctif ticket une seule fois."""
+    """Installe la synchro de catégories et les correctifs d'événements une seule fois."""
     from . import configuration
 
     original = configuration.Configuration.create_log_channels
@@ -361,10 +456,11 @@ def install(bot: commands.Bot) -> None:
         create_log_channels_synced._sentrix_log_settings_sync = True
         configuration.Configuration.create_log_channels = create_log_channels_synced
 
+    _install_listener_routing_patch()
     _install_ticket_log_patch(bot)
 
     if getattr(bot, "_sentrix_setup_create_logs_sync_installed", False):
         return
     bot._sentrix_setup_create_logs_sync_installed = True
     asyncio.create_task(_bootstrap(bot), name="sentrix-setup-create-logs-sync")
-    logger.info("Synchronisation Create Logs + logs tickets V2 activée.")
+    logger.info("Synchronisation Create Logs + routage salons/tickets V2 activée.")
