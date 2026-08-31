@@ -108,12 +108,21 @@ def _norm(value: object) -> str:
 
 
 def category_for(log_type: str) -> str:
+    """Catégorie d'un événement, avec priorité aux anciennes clés pour les migrations.
+
+    ``server`` était historiquement le groupe des logs de salons. Les nouvelles lectures
+    de configuration passent par :func:`resolve`, qui sait distinguer la nouvelle
+    catégorie Serveur. Garder ici le sens historique évite de déplacer les anciens salons
+    configurés vers la mauvaise catégorie pendant la migration SQLite.
+    """
     key = _norm(log_type)
     if key in LOG_REGISTRY:
         return LOG_REGISTRY[key][0]
+    if key in LEGACY_CATEGORY_KEYS:
+        return LEGACY_CATEGORY_KEYS[key]
     if key in CATEGORIES:
         return key
-    return LEGACY_CATEGORY_KEYS.get(key, "server")
+    return "server"
 
 
 def _contains(text: str, *words: str) -> bool:
@@ -127,7 +136,18 @@ def canonical_event_type(log_type: str, title: str = "", description: str = "") 
         return key
 
     text = f" {key} {title} {description} ".casefold()
-    category = category_for(key)
+
+    # Compatibilité critique : les anciens listeners utilisent ``server`` pour les
+    # créations/suppressions/modifications de salons. On les reconnaît par leur texte
+    # métier avant d'interpréter ``server`` comme la nouvelle catégorie Serveur.
+    if key == "server" and _contains(text, "salon", "channel"):
+        if _contains(text, "supprim", "delete"):
+            return "channel_delete"
+        if _contains(text, "cré", "cree", "create"):
+            return "channel_create"
+        return "channel_update"
+
+    category = "server" if key == "server" else category_for(key)
 
     # Ordre important : unban/untimeout avant ban/timeout.
     if category == "moderation":
@@ -225,12 +245,20 @@ def _fallback_kind(text: str) -> str:
 
 def resolve(log_type: str, title: str = "", description: str = "") -> tuple[str, str, str]:
     """Retourne ``(catégorie, emoji, kind de bannière)``."""
+    key = _norm(log_type)
+
+    # Une clé de catégorie utilisée sans contexte vient du nouvel écran de configuration.
+    # Elle doit garder son sens moderne, notamment ``server`` = Serveur.
+    if key in CATEGORIES and not title and not description:
+        emoji, kind = _CATEGORY_DEFAULTS.get(key, ("📋", "info"))
+        return key, emoji, kind
+
     event_type = canonical_event_type(log_type, title, description)
     explicit = LOG_REGISTRY.get(event_type)
     if explicit is not None:
         return explicit
 
-    category = category_for(log_type)
+    category = "server" if key == "server" else category_for(log_type)
     emoji, default_kind = _CATEGORY_DEFAULTS.get(category, ("📋", "info"))
     kind = _fallback_kind(f"{log_type} {title} {description}") or default_kind
     return category, emoji, kind
