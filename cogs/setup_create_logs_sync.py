@@ -1,14 +1,9 @@
-"""Répare la liaison entre +setup -> Create Logs et le moteur log_settings.
+"""Répare la liaison entre +setup -> Create Logs et le moteur de logs par catégorie.
 
-Le bouton/commande historique crée les 7 salons puis écrit leurs IDs dans guild_config.
-Depuis la refonte des logs indépendants, les listeners envoient via log_settings. Si une
-ligne log_settings avait déjà été créée avant les salons, elle pouvait rester désactivée
-ou sans channel_id : les salons existaient donc visuellement mais ne recevaient rien.
-
-Ce patch garde les deux sources en phase sans casser les désactivations volontaires :
-- après un clic explicite sur Create Logs, les 7 salons générés sont liés ET activés ;
-- au démarrage, on répare seulement les lignes absentes/incomplètes (ou les routes actives
-  devenues invalides), sans réactiver une catégorie que l'admin a volontairement coupée.
+Le bouton/commande historique crée 7 salons puis écrit leurs IDs dans guild_config.
+La nouvelle architecture route désormais les événements vers des catégories. Ce module
+maintient la compatibilité avec les salons historiques sans confondre l'ancienne clé
+``server`` (qui signifiait Salons) avec la nouvelle catégorie Serveur.
 """
 from __future__ import annotations
 
@@ -22,15 +17,16 @@ from utils import log_service
 
 logger = logging.getLogger("bot.setup-create-logs-sync")
 
-# Colonnes écrites par Configuration.create_log_channels -> types lus par log_service.
+# Colonnes écrites par Configuration.create_log_channels -> catégories modernes.
+# Important : ``log_server`` désigne historiquement les événements de SALONS.
 COLUMN_TO_LOG_TYPE = {
-    "log_server": "server",
+    "log_server": "channels",
     "log_messages": "messages",
     "log_members": "members",
     "log_voice": "voice",
     "log_roles": "roles",
     "log_moderation": "moderation",
-    "log_automod": "automod",
+    "log_automod": "protection",
 }
 
 
@@ -56,7 +52,7 @@ async def sync_setup_created_logs(
     *,
     force_enable: bool,
 ) -> int:
-    """Synchronise les 7 salons créés par +setup/+create-logs avec log_settings."""
+    """Synchronise les 7 salons historiques avec les catégories de logs actuelles."""
     conf = await bot.db.get_guild_config(guild.id)
     if not conf:
         return 0
@@ -72,21 +68,27 @@ async def sync_setup_created_logs(
         if log_type == "moderation":
             moderation_channel_id = channel.id
 
+        # On lit l'ancien miroir uniquement pour décider si une préférence existait.
+        legacy_keys = {
+            "channels": ("server", "channels"),
+            "protection": ("automod", "protection"),
+        }.get(log_type, (log_type,))
+        placeholders = ",".join("?" for _ in legacy_keys)
         row = await bot.db.fetchone(
-            "SELECT enabled, channel_id FROM log_settings WHERE guild_id = ? AND log_type = ?",
-            (guild.id, log_type),
+            f"SELECT enabled, channel_id FROM log_settings WHERE guild_id = ? AND log_type IN ({placeholders}) "
+            "ORDER BY CASE WHEN channel_id IS NOT NULL THEN 0 ELSE 1 END LIMIT 1",
+            (guild.id, *legacy_keys),
         )
 
         if force_enable:
-            # Un clic sur "Create Logs" signifie explicitement : créer/configurer un système
-            # de logs fonctionnel. Le salon généré devient donc la route de cette catégorie.
+            # Un clic sur Create Logs signifie explicitement que les salons générés doivent
+            # devenir les routes actives de leurs catégories correspondantes.
             await log_service.set_log_channel(bot, guild.id, log_type, channel.id)
             await log_service.set_log_enabled(bot, guild.id, log_type, True)
             synced += 1
             continue
 
         if row is None:
-            # Aucune préférence moderne n'existe encore : reprendre le salon généré.
             await log_service.get_log_setting(bot, guild.id, log_type)
             await log_service.set_log_channel(bot, guild.id, log_type, channel.id)
             await log_service.set_log_enabled(bot, guild.id, log_type, True)
@@ -102,18 +104,17 @@ async def sync_setup_created_logs(
                 current_channel = None
 
         if not current_id:
-            # Cas exact du bug : ligne déjà créée, mais aucun salon relié. On la répare et
-            # on l'active puisque l'ancien système possède bien un salon Create Logs.
             await log_service.set_log_channel(bot, guild.id, log_type, channel.id)
             await log_service.set_log_enabled(bot, guild.id, log_type, True)
             synced += 1
         elif bool(row["enabled"]) and not isinstance(current_channel, discord.TextChannel):
-            # Route active cassée (salon supprimé/recréé) : utiliser le salon historique.
             await log_service.set_log_channel(bot, guild.id, log_type, channel.id)
             synced += 1
-        # Si enabled=0 ET qu'un channel_id valide existe, ne rien toucher : OFF volontaire.
+        # enabled=0 + salon valide = désactivation volontaire, on ne réactive pas.
 
-    # Compatibilité avec les anciens modules qui cherchent encore un salon général.
+    # Compatibilité : le salon de modération reste aussi le repli général si aucun salon
+    # général valide n'existe encore. La catégorie Serveur peut donc fonctionner sans
+    # inventer un huitième salon lors d'une migration historique.
     if moderation_channel_id:
         try:
             current_general = conf["log_channel"]
@@ -158,8 +159,6 @@ def install(bot: commands.Bot) -> None:
     if not getattr(original, "_sentrix_log_settings_sync", False):
         async def create_log_channels_synced(self, guild, author):
             created = await original(self, guild, author)
-            # Important : exécuté même si `created == []`. Ainsi un serveur où les 7 salons
-            # existent déjà mais sont déliés de log_settings est réparé immédiatement.
             await sync_setup_created_logs(self.bot, guild, force_enable=True)
             return created
 
@@ -170,4 +169,4 @@ def install(bot: commands.Bot) -> None:
         return
     bot._sentrix_setup_create_logs_sync_installed = True
     asyncio.create_task(_bootstrap(bot), name="sentrix-setup-create-logs-sync")
-    logger.info("Synchronisation +setup -> Create Logs avec log_settings activée.")
+    logger.info("Synchronisation +setup -> Create Logs avec les catégories de logs activée.")
