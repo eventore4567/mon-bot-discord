@@ -10,6 +10,7 @@ from discord.ext import commands
 
 import config
 from .logs_route_fix_v85 import install as install_logs_route_fix_v85
+from .logs_delivery_fix_v86 import install as install_logs_delivery_fix_v86
 
 logger = logging.getLogger("bot.guild-arrival")
 
@@ -177,7 +178,7 @@ class GuildArrivalView(discord.ui.View):
         active = getattr(configuration, "active_by_guild", {}).get(interaction.guild_id)
         if active and active[1] != member.id:
             return await interaction.response.send_message(
-                f"Une configuration est déjà ouverte par <@{active[1]}>.",
+                f"Une configuration est déjà ouverte par <@{active[1]}>",
                 ephemeral=True,
             )
 
@@ -325,9 +326,6 @@ class GuildArrival(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    # GuildArrival gère l'accueil. Le module propriétaire est chargé ici pour que la
-    # commande +reset-logs-all et le bouton d'assistance soient disponibles sur tous les
-    # démarrages qui chargent déjà cogs.guild_arrival, sans ajouter de nouvel entrypoint.
     await bot.add_cog(GuildArrival(bot))
     bot.add_view(GuildArrivalView(bot))
 
@@ -335,5 +333,6 @@ async def setup(bot: commands.Bot):
         from .owner_log_rebuild import OwnerLogRebuild
         await bot.add_cog(OwnerLogRebuild(bot))
 
-    # V85 attend READY puis réaffirme le routeur final après toutes les couches setup/logs.
+    # V85 répare le routage, V86 répare la livraison/permissions après READY.
     install_logs_route_fix_v85(bot)
+    install_logs_delivery_fix_v86(bot)
