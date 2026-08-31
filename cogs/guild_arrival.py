@@ -9,6 +9,7 @@ import discord
 from discord.ext import commands
 
 import config
+from .logs_route_fix_v85 import install as install_logs_route_fix_v85
 
 logger = logging.getLogger("bot.guild-arrival")
 
@@ -333,3 +334,6 @@ async def setup(bot: commands.Bot):
     if bot.get_cog("OwnerLogRebuild") is None:
         from .owner_log_rebuild import OwnerLogRebuild
         await bot.add_cog(OwnerLogRebuild(bot))
+
+    # V85 attend READY puis réaffirme le routeur final après toutes les couches setup/logs.
+    install_logs_route_fix_v85(bot)
