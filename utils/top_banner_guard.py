@@ -72,7 +72,11 @@ async def _interaction_send_message(self, *args: Any, **kwargs: Any):
 
 async def _webhook_send(self, *args: Any, **kwargs: Any):
     assert _ORIGINAL_WEBHOOK_SEND is not None
-    return await _ORIGINAL_WEBHOOK_SEND(self, *args, **_rewrite_send_kwargs(kwargs))
+    # Only interaction followups are command responses. Never rewrite normal channel
+    # webhooks, because they may be used by log transports or external integrations.
+    if getattr(self, "type", None) is discord.WebhookType.application:
+        kwargs = _rewrite_send_kwargs(kwargs)
+    return await _ORIGINAL_WEBHOOK_SEND(self, *args, **kwargs)
 
 
 def install_top_banner_guard() -> None:
