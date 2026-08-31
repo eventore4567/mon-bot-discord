@@ -74,13 +74,17 @@ def _interaction_command_name(interaction: discord.Interaction | None) -> str:
 def _semantic(embed: discord.Embed) -> discord.Embed:
     """Clone an embed and remove only a legacy SentriX command banner image."""
     try:
-        return visuals._semantic_embed(embed)
+        helper = getattr(visuals, "_semantic_embed", None)
+        if callable(helper):
+            return helper(embed)
     except Exception:
-        clone = embed.copy()
-        image_url = getattr(getattr(clone, "image", None), "url", None)
-        if visuals._is_command_banner(image_url):
-            clone.set_image(url=None)
-        return clone
+        pass
+
+    clone = embed.copy()
+    image_url = getattr(getattr(clone, "image", None), "url", None)
+    if visuals._is_command_banner(image_url):
+        clone.remove_image()
+    return clone
 
 
 def _is_banner_only(embed: discord.Embed) -> bool:
@@ -390,7 +394,10 @@ def install_unified_command_panels() -> None:
     _RAW_INTERACTION_SEND = _unwrap_send(current_interaction)
     if not getattr(current_interaction, "_sentrix_unified_command_panels", False):
         _interaction_send._sentrix_unified_command_panels = True
-        _interaction_send._sentrix_original = current_interaction
+        # Deliberately do NOT expose ``_sentrix_original``: final_interaction_policy
+        # unwraps that marker. Keeping this wrapper visible lets the official policy
+        # normalize content first, then hand the payload to this final V2 renderer.
+        _interaction_send._sentrix_previous_send = current_interaction
         discord.InteractionResponse.send_message = _interaction_send
 
     current_webhook = discord.Webhook.send
@@ -398,7 +405,7 @@ def install_unified_command_panels() -> None:
     _RAW_WEBHOOK_SEND = _unwrap_send(current_webhook)
     if not getattr(current_webhook, "_sentrix_unified_command_panels", False):
         _webhook_send._sentrix_unified_command_panels = True
-        _webhook_send._sentrix_original = current_webhook
+        _webhook_send._sentrix_previous_send = current_webhook
         discord.Webhook.send = _webhook_send
 
     logger.info("Rendu commandes unifié : un panneau V2 par réponse simple, texte brut inclus.")
