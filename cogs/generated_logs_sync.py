@@ -1,13 +1,9 @@
-"""Synchronise les salons de logs générés avec le routeur canonique SentriX.
+"""Compatibilité et synchronisation des salons de logs SentriX.
 
-Cette couche a deux rôles :
-- redécouvrir les salons de logs existants après un redémarrage/perte de cache ;
-- garantir que TOUT le panneau +setup Logs écrit dans ``log_config`` via
-  ``utils.log_service`` au lieu de modifier directement l'ancienne table ``log_settings``.
-
-Ainsi une sélection de salon ne peut plus être visible dans Discord sans être réellement
-persistée, et ``ValueError: channel_required`` ne peut plus apparaître après avoir choisi
-un salon.
+Cette couche maintient le panneau +setup sur le routeur canonique ``log_config`` tout en
+préservant les serveurs configurés avant la migration. Une route canonique vide peut être
+réhydratée depuis ``log_settings`` ou ``guild_config`` ; une désactivation explicite avec
+salon vidé n'est jamais réactivée automatiquement.
 """
 from __future__ import annotations
 
@@ -25,8 +21,7 @@ from utils import log_service
 logger = logging.getLogger("bot.generated-logs-sync")
 
 
-# Toutes les routes connues, anciennes et nouvelles. Important : ``logs-salons`` n'est
-# jamais un alias de ``server`` ; Salons et Serveur sont deux catégories distinctes.
+# Les clés sont CANONIQUES. Les anciens noms ne servent qu'à reconnaître les salons.
 LOG_CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
     "messages": ("logs-messages", "logs-message"),
     "members": ("logs-membre", "logs-membres", "logs-member", "logs-members"),
@@ -36,13 +31,19 @@ LOG_CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
     "server": ("logs-serveur", "logs-server"),
     "moderation": ("logs-moderation", "logs-modération", "logs-modo"),
     "tickets": ("logs-tickets", "logs-ticket"),
-    "dossiers": ("logs-dossiers", "logs-invitations"),
-    "spam": ("logs-protect-spam-logs", "logs-spam", "protect-spam-logs"),
-    "automod": ("automod", "logs-securite", "logs-sécurité", "logs-automod", "logs-security"),
-    "raid": ("raidprotect-logs", "logs-raid", "raid-protect-logs"),
-    # Compatibilité avec les anciennes versions qui avaient deux routes ressources/fichiers.
-    "files": ("logs-fichiers", "logs-files"),
-    "resources": ("logs-ressources",),
+    "protection": (
+        "automod",
+        "logs-securite",
+        "logs-sécurité",
+        "logs-automod",
+        "logs-security",
+        "logs-protect-spam-logs",
+        "logs-spam",
+        "protect-spam-logs",
+        "raidprotect-logs",
+        "logs-raid",
+        "raid-protect-logs",
+    ),
 }
 
 
@@ -62,38 +63,176 @@ _NORMALIZED_ALIASES = {
 }
 
 
-def _looks_like_log_category(channel: discord.TextChannel) -> bool:
-    category = getattr(channel, "category", None)
-    if category is None:
-        return False
-    name = _plain(getattr(category, "name", ""))
-    return "logs" in name or ("sentrix" in name and "log" in name)
-
-
 def _find_log_channel(guild: discord.Guild, log_type: str) -> discord.TextChannel | None:
     wanted = _NORMALIZED_ALIASES.get(log_type, frozenset())
     if not wanted:
         return None
-    # Priorité à la catégorie de logs pour éviter un salon homonyme ailleurs.
+
+    # Priorité aux salons placés dans une catégorie de logs.
     for channel in guild.text_channels:
-        if _plain(channel.name) in wanted and _looks_like_log_category(channel):
+        category = getattr(channel, "category", None)
+        category_name = _plain(getattr(category, "name", "")) if category else ""
+        if (
+            _plain(channel.name) in wanted
+            and ("logs" in category_name or ("sentrix" in category_name and "log" in category_name))
+        ):
             return channel
+
     for channel in guild.text_channels:
         if _plain(channel.name) in wanted:
             return channel
     return None
 
 
-async def _explicitly_disabled(bot: commands.Bot, guild_id: int, log_type: str) -> bool:
-    """Une route historique avec salon + enabled=0 est une désactivation volontaire."""
+async def _legacy_candidate(
+    bot: commands.Bot,
+    guild_id: int,
+    category: str,
+) -> tuple[int | None, bool | None, str | None]:
+    """Retourne l'ancienne route sans écraser une suppression explicite.
+
+    ``log_settings`` est prioritaire. Une ligne désactivée sans salon correspond au nouvel
+    état produit par +setup quand l'utilisateur retire volontairement une route : dans ce
+    cas on ne retombe surtout pas sur une vieille colonne de ``guild_config``.
+    """
     try:
-        row = await bot.db.fetchone(
-            "SELECT enabled, channel_id FROM log_settings WHERE guild_id=? AND log_type=?",
-            (guild_id, log_type),
+        channel_id, enabled = await log_service._legacy_log_settings(
+            bot,
+            int(guild_id),
+            category,
+        )
+    except Exception:
+        channel_id, enabled = None, None
+
+    if channel_id is not None:
+        return int(channel_id), enabled, "log_settings"
+
+    # Une ligne explicitement désactivée et vidée protège contre la résurrection d'une
+    # ancienne valeur guild_config encore présente.
+    if enabled is False:
+        return None, False, "explicit_clear"
+
+    try:
+        channel_id = await log_service._legacy_channel_id(
+            bot,
+            int(guild_id),
+            category,
+        )
+    except Exception:
+        channel_id = None
+
+    if channel_id is not None:
+        return int(channel_id), enabled, "guild_config"
+    return None, enabled, None
+
+
+async def _explicitly_disabled(
+    bot: commands.Bot,
+    guild_id: int,
+    log_type: str,
+) -> bool:
+    """Indique qu'une ancienne configuration demande réellement l'état désactivé."""
+    try:
+        category, _emoji, _kind = log_service.resolve(log_type)
+        _channel_id, enabled, source = await _legacy_candidate(
+            bot,
+            int(guild_id),
+            category,
         )
     except Exception:
         return False
-    return bool(row is not None and not bool(row["enabled"]) and row["channel_id"])
+    return bool(enabled is False and source in {"log_settings", "explicit_clear"})
+
+
+def _install_legacy_route_repair() -> None:
+    """Répare les lignes ``log_config`` vides créées avant la migration complète.
+
+    Ancienne régression : ``_ensure_category_row`` retournait immédiatement une ligne
+    existante, même si ``channel_id`` était NULL. Les anciennes valeurs de ``log_settings``
+    et ``guild_config`` n'étaient donc plus consultées. Ici on ne remplit qu'une route vide
+    lorsqu'une vraie ancienne route existe encore.
+    """
+    current = log_service._ensure_category_row
+    if getattr(current, "_sentrix_legacy_route_repair_v84", False):
+        return
+
+    @functools.wraps(current)
+    async def ensure_category_row_compat(
+        bot: commands.Bot,
+        guild_id: int,
+        category: str,
+    ):
+        canonical, _emoji, _kind = log_service.resolve(category)
+        row = await current(bot, int(guild_id), canonical)
+        row_dict = dict(row)
+
+        if row_dict.get("channel_id"):
+            return row_dict
+
+        legacy_channel, legacy_enabled, source = await _legacy_candidate(
+            bot,
+            int(guild_id),
+            canonical,
+        )
+        if legacy_channel is None:
+            return row_dict
+
+        # Si l'ancienne ligne porte un état explicite, on le conserve. Sinon on garde
+        # l'état canonique déjà présent.
+        enabled = (
+            bool(legacy_enabled)
+            if legacy_enabled is not None
+            else bool(row_dict.get("enabled", 1))
+        )
+
+        await bot.db.execute(
+            "UPDATE log_config SET channel_id=?, enabled=? "
+            "WHERE guild_id=? AND category=? AND channel_id IS NULL",
+            (
+                int(legacy_channel),
+                1 if enabled else 0,
+                int(guild_id),
+                canonical,
+            ),
+        )
+        repaired = await bot.db.fetchone(
+            "SELECT guild_id,category,channel_id,enabled FROM log_config "
+            "WHERE guild_id=? AND category=?",
+            (int(guild_id), canonical),
+        )
+        if repaired is None:
+            return row_dict
+
+        logger.warning(
+            "Route log legacy restaurée guild=%s type=%s channel=%s enabled=%s source=%s",
+            guild_id,
+            canonical,
+            legacy_channel,
+            enabled,
+            source,
+        )
+        return dict(repaired)
+
+    ensure_category_row_compat._sentrix_legacy_route_repair_v84 = True
+    ensure_category_row_compat._sentrix_previous = current
+    log_service._ensure_category_row = ensure_category_row_compat
+    logger.info("Compatibilité des anciennes routes log_config installée.")
+
+
+def _install_legacy_router_aliases() -> None:
+    """Corrige les noms historiques avant que V83 ne vérifie LOG_TYPES."""
+    try:
+        from . import logs as logs_cog
+    except Exception:
+        logger.exception("Impossible de corriger les aliases du routeur Logs.")
+        return
+
+    # log_server est historiquement la colonne des événements de salons.
+    logs_cog.CONFIG_TO_LOG_TYPE["log_server"] = "channels"
+    # V83 refuse un type non canonique avant d'appeler resolve(); il faut donc fournir
+    # directement la clé canonique.
+    logs_cog.CONFIG_TO_LOG_TYPE["log_automod"] = "protection"
+    logger.info("Aliases logs legacy corrigés : log_server->channels, log_automod->protection.")
 
 
 def _install_atomic_log_route_save() -> None:
@@ -101,7 +240,7 @@ def _install_atomic_log_route_save() -> None:
     current_set_channel = log_service.set_log_channel
     current_set_enabled = log_service.set_log_enabled
 
-    if getattr(current_set_channel, "_sentrix_atomic_route_save_v2", False):
+    if getattr(current_set_channel, "_sentrix_atomic_route_save_v84", False):
         return
 
     @functools.wraps(current_set_channel)
@@ -113,6 +252,9 @@ def _install_atomic_log_route_save() -> None:
     ) -> dict:
         category, _emoji, _kind = log_service.resolve(log_type)
         await log_service._ensure_log_config_schema(bot)
+        # Garantit que les anciennes routes ont eu une chance d'être récupérées avant
+        # toute nouvelle écriture.
+        await log_service._ensure_category_row(bot, int(guild_id), category)
 
         normalized_channel_id = int(channel_id) if channel_id is not None else None
         existing = await bot.db.fetchone(
@@ -145,7 +287,7 @@ def _install_atomic_log_route_save() -> None:
             )
         except Exception:
             logger.debug(
-                "Miroir legacy ignoré après sauvegarde atomique guild=%s type=%s",
+                "Miroir legacy ignoré après sauvegarde guild=%s type=%s",
                 guild_id,
                 category,
                 exc_info=True,
@@ -154,7 +296,7 @@ def _install_atomic_log_route_save() -> None:
         saved = await log_service.get_log_setting(bot, int(guild_id), category)
         if (
             normalized_channel_id is not None
-            and int(saved.get("channel_id") or 0) != normalized_channel_id
+            and int(saved.get("dedicated_channel_id") or 0) != normalized_channel_id
         ):
             raise RuntimeError("log_channel_not_persisted")
         return saved
@@ -168,25 +310,31 @@ def _install_atomic_log_route_save() -> None:
     ) -> dict:
         category, _emoji, _kind = log_service.resolve(log_type)
         await log_service._ensure_log_config_schema(bot)
+        await log_service._ensure_category_row(bot, int(guild_id), category)
 
         row = await bot.db.fetchone(
             "SELECT channel_id,enabled FROM log_config WHERE guild_id=? AND category=?",
             (int(guild_id), category),
         )
-        if row is None:
-            await log_service._ensure_category_row(bot, int(guild_id), category)
-            row = await bot.db.fetchone(
-                "SELECT channel_id,enabled FROM log_config WHERE guild_id=? AND category=?",
-                (int(guild_id), category),
-            )
-
         dedicated_channel_id = (
             int(row["channel_id"])
             if row is not None and row["channel_id"]
             else None
         )
+
+        # Le transport accepte le salon général comme repli. L'activation doit donc
+        # suivre la même règle et ne pas exiger artificiellement un salon dédié.
         if enabled and dedicated_channel_id is None:
-            raise ValueError("channel_required")
+            try:
+                effective = await log_service.get_log_setting(
+                    bot,
+                    int(guild_id),
+                    category,
+                )
+            except Exception:
+                effective = {}
+            if not effective.get("channel_id"):
+                raise ValueError("channel_required")
 
         await bot.db.execute(
             "INSERT INTO log_config (guild_id,category,channel_id,enabled) VALUES (?,?,?,?) "
@@ -208,20 +356,20 @@ def _install_atomic_log_route_save() -> None:
             )
         except Exception:
             logger.debug(
-                "Miroir legacy ignoré après activation atomique guild=%s type=%s",
+                "Miroir legacy ignoré après activation guild=%s type=%s",
                 guild_id,
                 category,
                 exc_info=True,
             )
         return await log_service.get_log_setting(bot, int(guild_id), category)
 
-    set_log_channel_atomic._sentrix_atomic_route_save_v2 = True
+    set_log_channel_atomic._sentrix_atomic_route_save_v84 = True
     set_log_channel_atomic._sentrix_previous = current_set_channel
-    set_log_enabled_atomic._sentrix_atomic_route_save_v2 = True
+    set_log_enabled_atomic._sentrix_atomic_route_save_v84 = True
     set_log_enabled_atomic._sentrix_previous = current_set_enabled
     log_service.set_log_channel = set_log_channel_atomic
     log_service.set_log_enabled = set_log_enabled_atomic
-    logger.info("Sauvegarde atomique V2 des salons de logs installée.")
+    logger.info("Sauvegarde atomique V84 des salons de logs installée.")
 
 
 async def _mirror_exact_setup_setting(
@@ -249,7 +397,6 @@ async def _mirror_exact_setup_setting(
             ),
         )
     except Exception:
-        # Certains très anciens schémas n'ont pas toutes les colonnes optionnelles.
         try:
             await bot.db.execute(
                 "INSERT INTO log_settings (guild_id,log_type,enabled,channel_id) "
@@ -281,7 +428,8 @@ async def _save_setup_log_route(
     guild_id = int(owner.guild.id)
 
     if channel_id is None:
-        # Désactiver AVANT de retirer le salon évite toute tentative d'activer une route vide.
+        # Désactivation AVANT suppression : l'état vide devient un marqueur explicite et
+        # ne sera jamais réhydraté depuis guild_config au prochain redémarrage.
         try:
             await log_service.set_log_enabled(owner.bot, guild_id, log_type, False)
         except ValueError:
@@ -295,30 +443,30 @@ async def _save_setup_log_route(
     if not isinstance(channel, discord.TextChannel):
         raise ValueError("invalid_log_channel")
 
-    # Une sélection non vide signifie : cette catégorie doit réellement utiliser ce salon.
     await log_service.set_log_channel(owner.bot, guild_id, log_type, channel_id)
     saved = await log_service.set_log_enabled(owner.bot, guild_id, log_type, True)
     await _mirror_exact_setup_setting(owner.bot, guild_id, log_type, channel_id, True)
 
-    persisted = int(saved.get("channel_id") or 0)
+    persisted = int(saved.get("dedicated_channel_id") or 0)
     if persisted != channel_id:
         raise RuntimeError("log_channel_not_persisted")
     return saved
 
 
 async def _legacy_channel_for_toggle(owner, log_type: str) -> int | None:
-    """Récupère une ancienne sélection avant d'afficher une erreur 'salon requis'."""
     try:
-        row = await owner.bot.db.fetchone(
-            "SELECT channel_id FROM log_settings WHERE guild_id=? AND log_type=?",
-            (owner.guild.id, log_type),
+        category, _emoji, _kind = log_service.resolve(log_type)
+        channel_id, _enabled, _source = await _legacy_candidate(
+            owner.bot,
+            owner.guild.id,
+            category,
         )
     except Exception:
         return None
-    if row is None or not row["channel_id"]:
+
+    if channel_id is None:
         return None
-    channel_id = int(row["channel_id"])
-    return channel_id if owner.guild.get_channel(channel_id) is not None else None
+    return int(channel_id) if owner.guild.get_channel(int(channel_id)) is not None else None
 
 
 def _install_setup_log_callbacks() -> None:
@@ -329,9 +477,8 @@ def _install_setup_log_callbacks() -> None:
         logger.exception("Impossible d'installer les callbacks canoniques du Setup Logs.")
         return
 
-    # 1) Sélecteur de salon : ce callback est commun à TOUTES les catégories.
     current_channel_callback = setup_ui.LogChannelSelect.callback
-    if not getattr(current_channel_callback, "_sentrix_all_logs_canonical", False):
+    if not getattr(current_channel_callback, "_sentrix_all_logs_canonical_v84", False):
 
         async def canonical_channel_callback(self, interaction: discord.Interaction):
             log_type = self.owner.selected_log
@@ -346,14 +493,12 @@ def _install_setup_log_callbacks() -> None:
             await self.owner.audit(interaction.user.id, log_type, channel_id)
             await self.owner.refresh(interaction)
 
-        canonical_channel_callback._sentrix_all_logs_canonical = True
+        canonical_channel_callback._sentrix_all_logs_canonical_v84 = True
         canonical_channel_callback._sentrix_previous = current_channel_callback
         setup_ui.LogChannelSelect.callback = canonical_channel_callback
 
-    # 2) Le bouton d'activation est une closure recréée par SetupView.render().
-    # On enveloppe donc render() et on remplace ce callback après chaque rendu.
     current_render = setup_ui.SetupView.render
-    if getattr(current_render, "_sentrix_all_logs_toggle", False):
+    if getattr(current_render, "_sentrix_all_logs_toggle_v84", False):
         return
 
     @functools.wraps(current_render)
@@ -369,7 +514,7 @@ def _install_setup_log_callbacks() -> None:
             label = (item.label or "").casefold()
             if "log" not in label or not ("activer" in label or "désactiver" in label):
                 continue
-            if getattr(item.callback, "_sentrix_all_logs_canonical", False):
+            if getattr(item.callback, "_sentrix_all_logs_canonical_v84", False):
                 continue
 
             async def canonical_toggle(
@@ -390,38 +535,43 @@ def _install_setup_log_callbacks() -> None:
                 )
                 target_enabled = not bool(setting.get("enabled"))
                 channel_id = (
-                    int(setting["channel_id"])
-                    if setting.get("channel_id")
+                    int(setting["dedicated_channel_id"])
+                    if setting.get("dedicated_channel_id")
                     else None
                 )
 
                 if target_enabled and channel_id is None:
-                    # Répare d'abord une éventuelle sélection provenant d'une ancienne table.
                     channel_id = await _legacy_channel_for_toggle(owner, log_type)
                     if channel_id is None:
                         discovered = _find_log_channel(owner.guild, log_type)
                         channel_id = discovered.id if discovered is not None else None
-                    if channel_id is None:
-                        return await interaction.response.send_message(
-                            "Choisissez d'abord le salon de cette catégorie de logs.",
-                            ephemeral=True,
+
+                    # Si aucun salon dédié n'existe mais que le repli général est valide,
+                    # set_log_enabled l'accepte maintenant.
+                    if channel_id is not None:
+                        await log_service.set_log_channel(
+                            owner.bot,
+                            owner.guild.id,
+                            log_type,
+                            channel_id,
                         )
-                    await log_service.set_log_channel(
+
+                try:
+                    saved = await log_service.set_log_enabled(
                         owner.bot,
                         owner.guild.id,
                         log_type,
-                        channel_id,
+                        target_enabled,
+                    )
+                except ValueError:
+                    return await interaction.response.send_message(
+                        "Choisissez d'abord le salon de cette catégorie de logs.",
+                        ephemeral=True,
                     )
 
-                saved = await log_service.set_log_enabled(
-                    owner.bot,
-                    owner.guild.id,
-                    log_type,
-                    target_enabled,
-                )
                 final_channel_id = (
-                    int(saved["channel_id"])
-                    if saved.get("channel_id")
+                    int(saved["dedicated_channel_id"])
+                    if saved.get("dedicated_channel_id")
                     else channel_id
                 )
                 await _mirror_exact_setup_setting(
@@ -438,60 +588,86 @@ def _install_setup_log_callbacks() -> None:
                 )
                 await owner.refresh(interaction)
 
-            canonical_toggle._sentrix_all_logs_canonical = True
+            canonical_toggle._sentrix_all_logs_canonical_v84 = True
             item.callback = canonical_toggle
 
         return result
 
-    render_with_canonical_log_toggle._sentrix_all_logs_toggle = True
+    render_with_canonical_log_toggle._sentrix_all_logs_toggle_v84 = True
     render_with_canonical_log_toggle._sentrix_previous = current_render
     setup_ui.SetupView.render = render_with_canonical_log_toggle
-    logger.info("Callbacks +setup Logs canoniques installés pour toutes les catégories.")
+    logger.info("Callbacks +setup Logs V84 installés pour toutes les catégories.")
+
+
+async def repair_legacy_routes(bot: commands.Bot, guild: discord.Guild) -> int:
+    """Réhydrate les routes des serveurs déjà configurés, sans modifier les clears."""
+    repaired = 0
+    await log_service._ensure_log_config_schema(bot)
+
+    for category in log_service.LOG_TYPES:
+        before = await bot.db.fetchone(
+            "SELECT channel_id,enabled FROM log_config WHERE guild_id=? AND category=?",
+            (guild.id, category),
+        )
+        before_channel = (
+            int(before["channel_id"])
+            if before is not None and before["channel_id"]
+            else None
+        )
+
+        row = await log_service._ensure_category_row(bot, guild.id, category)
+        after_channel = int(row["channel_id"]) if row.get("channel_id") else None
+        if before_channel is None and after_channel is not None:
+            repaired += 1
+
+    if repaired:
+        logger.warning(
+            "Compatibilité logs restaurée guild=%s : %s route(s) legacy récupérée(s).",
+            guild.id,
+            repaired,
+        )
+    return repaired
 
 
 async def sync_generated_logs(bot: commands.Bot, guild: discord.Guild) -> int:
-    """Redécouvre les routes manquantes sans écraser les désactivations explicites."""
+    """Complète seulement les routes encore absentes après la migration legacy."""
+    await repair_legacy_routes(bot, guild)
+
     found: dict[str, discord.TextChannel] = {}
     for log_type in LOG_CHANNEL_ALIASES:
         channel = _find_log_channel(guild, log_type)
         if channel is not None:
             found[log_type] = channel
 
-    if len(found) < 2:
-        logger.info(
-            "Auto-récupération logs ignorée guild=%s : seulement %s salon(s) reconnu(s).",
-            guild.id,
-            len(found),
-        )
+    if not found:
         return 0
 
     try:
         await bot.db.ensure_guild(guild.id)
     except Exception:
-        logger.exception(
-            "Impossible de garantir guild_config avant resynchronisation guild=%s.",
-            guild.id,
-        )
+        logger.debug("ensure_guild indisponible pour %s", guild.id, exc_info=True)
 
     synced = 0
     preserved = 0
     for log_type, channel in found.items():
-        meta = log_service.LOG_TYPES.get(log_type)
-        # Les catégories V3 sont présentes après READY. Si un runtime ne les connaît pas,
-        # on ne les rabat surtout pas sur 'server'.
-        if not meta:
-            continue
-        if not meta.get("emits", True):
+        if log_type not in log_service.LOG_TYPES:
             continue
 
         try:
-            if await _explicitly_disabled(bot, guild.id, log_type):
+            row = await log_service._ensure_category_row(bot, guild.id, log_type)
+            if row.get("channel_id"):
+                # Une route existante (ancienne ou nouvelle) gagne toujours sur le nom
+                # automatique du salon.
                 preserved += 1
                 continue
 
-            legacy_column = meta.get("legacy_column")
-            if legacy_column:
-                await bot.db.set_guild_config(guild.id, legacy_column, channel.id)
+            if not bool(row.get("enabled", 1)):
+                preserved += 1
+                continue
+
+            if await _explicitly_disabled(bot, guild.id, log_type):
+                preserved += 1
+                continue
 
             await log_service.set_log_channel(bot, guild.id, log_type, channel.id)
             await log_service.set_log_enabled(bot, guild.id, log_type, True)
@@ -511,12 +687,10 @@ async def sync_generated_logs(bot: commands.Bot, guild: discord.Guild) -> int:
                 channel.id,
             )
 
-    logger.warning(
-        "Logs SentriX auto-récupérés guild=%s : %s/%s route(s) actives, "
-        "%s désactivation(s) conservée(s).",
+    logger.info(
+        "Synchronisation logs guild=%s : %s route(s) complétée(s), %s préservée(s).",
         guild.id,
         synced,
-        len(found),
         preserved,
     )
     return synced
@@ -528,31 +702,41 @@ async def _bootstrap(bot: commands.Bot) -> None:
     except RuntimeError:
         return
 
-    # Les couches V73/V74/V3 peuvent avoir remplacé des callbacks pendant le chargement.
-    # On réaffirme donc la version canonique une fois le runtime final prêt.
+    # Réaffirme les patches après le chargement des couches V73/V74/V83.
+    _install_legacy_route_repair()
+    _install_legacy_router_aliases()
     _install_atomic_log_route_save()
     _install_setup_log_callbacks()
 
-    await asyncio.sleep(4)
+    await asyncio.sleep(2)
+    total_repaired = 0
     for guild in list(bot.guilds):
         try:
+            total_repaired += await repair_legacy_routes(bot, guild)
             await sync_generated_logs(bot, guild)
         except Exception:
             logger.exception(
-                "Synchronisation des logs impossible sur %s (%s).",
+                "Réparation/synchronisation des logs impossible sur %s (%s).",
                 guild.name,
                 guild.id,
             )
+
+    logger.warning(
+        "Bootstrap compatibilité logs terminé : %s ancienne(s) route(s) restaurée(s).",
+        total_repaired,
+    )
 
 
 def install(bot: commands.Bot) -> None:
     from . import server_builder
 
+    _install_legacy_route_repair()
+    _install_legacy_router_aliases()
     _install_atomic_log_route_save()
     _install_setup_log_callbacks()
 
     original = server_builder.ServerBuilder._configure_bot_channels
-    if not getattr(original, "_sentrix_log_settings_sync", False):
+    if not getattr(original, "_sentrix_log_settings_sync_v84", False):
 
         async def configure_with_log_sync(
             self,
@@ -573,13 +757,14 @@ def install(bot: commands.Bot) -> None:
             await sync_generated_logs(self.bot, guild)
             return result
 
-        configure_with_log_sync._sentrix_log_settings_sync = True
+        configure_with_log_sync._sentrix_log_settings_sync_v84 = True
         server_builder.ServerBuilder._configure_bot_channels = configure_with_log_sync
 
-    if getattr(bot, "_sentrix_generated_logs_sync_installed_v2", False):
+    if getattr(bot, "_sentrix_generated_logs_sync_installed_v84", False):
         return
-    bot._sentrix_generated_logs_sync_installed_v2 = True
-    asyncio.create_task(_bootstrap(bot), name="sentrix-generated-logs-sync-v2")
+
+    bot._sentrix_generated_logs_sync_installed_v84 = True
+    asyncio.create_task(_bootstrap(bot), name="sentrix-generated-logs-sync-v84")
     logger.info(
-        "Synchronisation LOGS V2 activée : toutes les catégories utilisent log_config."
+        "Compatibilité LOGS V84 activée : anciennes configurations + log_config canonique."
     )
