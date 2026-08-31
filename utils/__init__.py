@@ -13,21 +13,26 @@ pour garder la bannière SentriX au-dessus du contenu pendant toutes leurs édit
 déjà une bannière SentriX sans modifier les logs ni les images métier.
 ``profile_embed_guard`` garde /profile en vrai embed Discord afin que ses statistiques
 inline restent compactes et s'affichent sur plusieurs colonnes.
+``me_single_panel`` rend +me dans un seul Container Components V2 avec sa bannière,
+son contenu et ses quatre boutons de navigation dans le même bloc.
 """
 
 from .command_visuals import install_command_visuals
 from .top_command_banners import install_top_command_banners
 from .top_banner_guard import install_top_banner_guard
 from .profile_embed_guard import install_profile_embed_guard
+from .me_single_panel import install_me_single_panel
 
 install_command_visuals()
 install_top_command_banners()
 install_top_banner_guard()
 install_profile_embed_guard()
+install_me_single_panel()
 
 __all__ = [
     "install_command_visuals",
     "install_top_command_banners",
     "install_top_banner_guard",
     "install_profile_embed_guard",
+    "install_me_single_panel",
 ]
