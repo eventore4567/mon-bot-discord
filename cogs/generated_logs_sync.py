@@ -5,10 +5,16 @@ historique, ``/create-logs`` et ``+create-server`` n'ont pas toujours créé exa
 mêmes noms. Après une perte de base locale, cette couche peut redécouvrir les salons
 SentriX existants. Elle ne doit en revanche jamais annuler un choix explicite fait dans
 ``+setup`` : un log déjà configuré puis désactivé reste désactivé.
+
+Cette couche installe aussi la sauvegarde atomique des routes de logs. Le panneau Setup
+ne doit jamais pouvoir afficher un salon sélectionné puis échouer avec
+``ValueError: channel_required`` parce qu'une ligne ``log_config`` n'existait pas encore :
+la sélection du salon fait désormais un UPSERT réel avant toute activation.
 """
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import re
 import unicodedata
@@ -87,6 +93,143 @@ async def _explicitly_disabled(bot: commands.Bot, guild_id: int, log_type: str) 
         (guild_id, log_type),
     )
     return bool(row is not None and not bool(row["enabled"]) and row["channel_id"])
+
+
+def _install_atomic_log_route_save() -> None:
+    """Rend le choix de salon du Setup réellement persistant et atomique.
+
+    L'ancien ``set_log_channel`` faisait d'abord ``_ensure_category_row`` puis un simple
+    ``UPDATE``. Avec plusieurs générations de schéma/runtime, une ligne pouvait être
+    absente ou migrée au mauvais moment : l'UPDATE touchait alors 0 ligne. Le menu Discord
+    montrait pourtant la sélection locale, puis ``set_log_enabled(True)`` relisait une
+    route sans salon et levait ``ValueError: channel_required``.
+
+    On écrit maintenant la route avec ``INSERT .. ON CONFLICT DO UPDATE``. Une sélection
+    non vide active aussi la route dans la même transaction logique ; le callback Setup
+    peut ensuite rappeler ``set_log_enabled(True)`` sans course ni état intermédiaire.
+    """
+    current_set_channel = log_service.set_log_channel
+    current_set_enabled = log_service.set_log_enabled
+
+    if getattr(current_set_channel, "_sentrix_atomic_route_save", False):
+        return
+
+    @functools.wraps(current_set_channel)
+    async def set_log_channel_atomic(
+        bot: commands.Bot,
+        guild_id: int,
+        log_type: str,
+        channel_id: int | None,
+    ) -> dict:
+        category, _emoji, _kind = log_service.resolve(log_type)
+        await log_service._ensure_log_config_schema(bot)
+
+        # Valide l'ID tôt pour éviter d'enregistrer une pseudo-valeur issue d'un composant.
+        normalized_channel_id = int(channel_id) if channel_id is not None else None
+
+        existing = await bot.db.fetchone(
+            "SELECT enabled FROM log_config WHERE guild_id=? AND category=?",
+            (int(guild_id), category),
+        )
+        previous_enabled = bool(existing["enabled"]) if existing is not None else True
+        enabled = True if normalized_channel_id is not None else previous_enabled
+
+        await bot.db.execute(
+            "INSERT INTO log_config (guild_id,category,channel_id,enabled) VALUES (?,?,?,?) "
+            "ON CONFLICT(guild_id,category) DO UPDATE SET "
+            "channel_id=excluded.channel_id, "
+            "enabled=CASE WHEN excluded.channel_id IS NOT NULL THEN 1 ELSE log_config.enabled END",
+            (
+                int(guild_id),
+                category,
+                normalized_channel_id,
+                1 if enabled else 0,
+            ),
+        )
+
+        # Garde les anciens écrans/modules synchronisés sans dépendre de leur schéma.
+        try:
+            await log_service._mirror_legacy_setting(
+                bot,
+                int(guild_id),
+                category,
+                channel_id=normalized_channel_id,
+                enabled=bool(enabled),
+            )
+        except Exception:
+            logger.debug(
+                "Miroir legacy ignoré après sauvegarde atomique guild=%s type=%s",
+                guild_id,
+                category,
+                exc_info=True,
+            )
+
+        saved = await log_service.get_log_setting(bot, int(guild_id), category)
+        if normalized_channel_id is not None and int(saved.get("channel_id") or 0) != normalized_channel_id:
+            # Ne jamais masquer une écriture qui n'aurait pas réellement persisté.
+            raise RuntimeError("log_channel_not_persisted")
+        return saved
+
+    @functools.wraps(current_set_enabled)
+    async def set_log_enabled_atomic(
+        bot: commands.Bot,
+        guild_id: int,
+        log_type: str,
+        enabled: bool,
+    ) -> dict:
+        category, _emoji, _kind = log_service.resolve(log_type)
+        await log_service._ensure_log_config_schema(bot)
+
+        row = await bot.db.fetchone(
+            "SELECT channel_id,enabled FROM log_config WHERE guild_id=? AND category=?",
+            (int(guild_id), category),
+        )
+        if row is None:
+            # Crée la ligne canonique avant de modifier son état.
+            await log_service._ensure_category_row(bot, int(guild_id), category)
+            row = await bot.db.fetchone(
+                "SELECT channel_id,enabled FROM log_config WHERE guild_id=? AND category=?",
+                (int(guild_id), category),
+            )
+
+        dedicated_channel_id = int(row["channel_id"]) if row is not None and row["channel_id"] else None
+        if enabled and dedicated_channel_id is None:
+            raise ValueError("channel_required")
+
+        await bot.db.execute(
+            "INSERT INTO log_config (guild_id,category,channel_id,enabled) VALUES (?,?,?,?) "
+            "ON CONFLICT(guild_id,category) DO UPDATE SET enabled=excluded.enabled",
+            (
+                int(guild_id),
+                category,
+                dedicated_channel_id,
+                1 if enabled else 0,
+            ),
+        )
+        try:
+            await log_service._mirror_legacy_setting(
+                bot,
+                int(guild_id),
+                category,
+                channel_id=dedicated_channel_id,
+                enabled=bool(enabled),
+            )
+        except Exception:
+            logger.debug(
+                "Miroir legacy ignoré après activation atomique guild=%s type=%s",
+                guild_id,
+                category,
+                exc_info=True,
+            )
+        return await log_service.get_log_setting(bot, int(guild_id), category)
+
+    set_log_channel_atomic._sentrix_atomic_route_save = True
+    set_log_channel_atomic._sentrix_previous = current_set_channel
+    set_log_enabled_atomic._sentrix_atomic_route_save = True
+    set_log_enabled_atomic._sentrix_previous = current_set_enabled
+    log_service.set_log_channel = set_log_channel_atomic
+    log_service.set_log_enabled = set_log_enabled_atomic
+    logger.info("Sauvegarde atomique des salons de logs installée.")
 
 
 async def sync_generated_logs(bot: commands.Bot, guild: discord.Guild) -> int:
@@ -175,6 +318,10 @@ async def _bootstrap(bot: commands.Bot) -> None:
 
 def install(bot: commands.Bot) -> None:
     from . import server_builder
+
+    # Cette fonction est appelée tôt par cogs.__init__, avant l'ouverture du Setup.
+    # Le patch reste donc actif pour tous les callbacks de sélection de salon.
+    _install_atomic_log_route_save()
 
     original = server_builder.ServerBuilder._configure_bot_channels
     if not getattr(original, "_sentrix_log_settings_sync", False):
