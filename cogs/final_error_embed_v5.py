@@ -53,6 +53,23 @@ def _usage(ctx: commands.Context) -> str:
     return f"{base} {signature}".strip()
 
 
+def _libelles(permissions) -> str:
+    """Noms de permissions en francais.
+
+    discord.py renvoie « ban_members » ; l'afficher tel quel oblige le lecteur a
+    traduire lui-meme. access_matrix.permission_label porte deja les libelles utilises
+    partout ailleurs dans SentriX : on les reutilise au lieu d'en inventer d'autres.
+    """
+    from utils.access_matrix import permission_label
+
+    noms = [permission_label(str(p)) for p in (permissions or ())]
+    if not noms:
+        return "une permission supplémentaire"
+    if len(noms) == 1:
+        return noms[0]
+    return ", ".join(noms[:-1]) + f" et {noms[-1]}"
+
+
 def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> discord.Embed:
     base = getattr(error, "original", error)
     prefix = _prefix(ctx)
@@ -110,11 +127,21 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
             warning=True,
         )
     if isinstance(base, commands.MissingPermissions):
-        required = ", ".join(str(p).replace("_", " ") for p in base.missing_permissions)
-        return _panel("Permission insuffisante", f"Permission requise : **{required}**.")
+        required = _libelles(base.missing_permissions)
+        return _panel(
+            "Permission insuffisante",
+            f"Il vous faut la permission **{required}** pour utiliser cette commande.\n"
+            "Un administrateur peut vous l'accorder dans les paramètres du serveur, "
+            "ou vous autoriser via `Setup > Permissions`.",
+        )
     if isinstance(base, commands.BotMissingPermissions):
-        required = ", ".join(str(p).replace("_", " ") for p in base.missing_permissions)
-        return _panel("Permission du bot insuffisante", f"SentriX a besoin de : **{required}**.")
+        required = _libelles(base.missing_permissions)
+        return _panel(
+            "SentriX n'a pas les permissions",
+            f"SentriX a besoin de **{required}** pour faire cela.\n"
+            "Accordez-la au rôle **SentriX** dans "
+            "Paramètres du serveur > Rôles, puis réessayez.",
+        )
     if isinstance(base, commands.NoPrivateMessage):
         return _panel("Serveur requis", "Cette commande doit être utilisée dans un serveur.", warning=True)
     if isinstance(base, commands.PrivateMessageOnly):
@@ -129,12 +156,18 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
         return _panel("Accès refusé", message)
     if isinstance(base, discord.Forbidden):
         return _panel(
-            "Permission du bot insuffisante",
-            "Discord a refusé cette action. Vérifiez les permissions et la position du rôle SentriX.",
+            "Discord a refusé l'action",
+            "Deux causes possibles :\n"
+            "• le rôle **SentriX** est placé **en dessous** du rôle ou du membre visé ;\n"
+            "• il lui manque une permission sur ce salon ou sur le serveur.\n\n"
+            "Remontez le rôle **SentriX** dans Paramètres du serveur > Rôles, "
+            "puis réessayez.",
         )
     return _panel(
         "Erreur de commande",
-        "Une erreur technique inattendue a interrompu la commande. Réessayez après avoir vérifié les paramètres.",
+        "Une erreur technique a interrompu la commande. Elle a été enregistrée "
+        "et n'a rien modifié sur le serveur.\n"
+        f"Vérifiez les paramètres avec `{_usage(ctx)}` puis réessayez.",
     )
 
 

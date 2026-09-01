@@ -420,7 +420,18 @@ def module_for_command(name: str) -> str | None:
 
 
 def permission_label(permission: str) -> str:
-    return PERMISSION_LABELS.get(permission, permission)
+    """Libelle francais d'une permission Discord.
+
+    Repli lisible pour une permission absente de la table : « manage_webhooks »
+    devient « Manage webhooks » plutot que d'etre affiche en snake_case a un membre.
+    """
+    connue = PERMISSION_LABELS.get(permission)
+    if connue:
+        return connue
+    brut = str(permission or "").strip()
+    if not brut:
+        return "une permission"
+    return brut.replace("_", " ").capitalize()
 
 
 def access_tier(name: str) -> str:
