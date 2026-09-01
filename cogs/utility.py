@@ -1022,10 +1022,93 @@ class Utility(commands.Cog, name="Utility"):
     @app_commands.describe(salon="Le salon visé (optionnel)")
     async def channelinfo(self, ctx: commands.Context, salon: discord.abc.GuildChannel = None):
         salon = salon or ctx.channel
-        e = await self._embed(ctx.guild.id, title=f"#{salon.name}")
-        e.add_field(name="ID", value=salon.id, inline=True)
-        e.add_field(name="Type", value=str(salon.type), inline=True)
-        e.add_field(name="Créé le", value=f"<t:{int(salon.created_at.timestamp())}:D>", inline=True)
+        cree = int(salon.created_at.timestamp())
+
+        types_lisibles = {
+            discord.ChannelType.text: "Salon textuel",
+            discord.ChannelType.voice: "Salon vocal",
+            discord.ChannelType.category: "Catégorie",
+            discord.ChannelType.news: "Salon d'annonces",
+            discord.ChannelType.stage_voice: "Conférence",
+            discord.ChannelType.forum: "Forum",
+        }
+        libelle = types_lisibles.get(salon.type, str(salon.type).replace("_", " ").capitalize())
+
+        ouverture = f"{salon.mention} · `{salon.id}`\n**{libelle}**"
+        if getattr(salon, "category", None) is not None:
+            ouverture += f" dans **{salon.category.name}**"
+        ouverture += f", créé <t:{cree}:R>."
+
+        e = await self._embed(ctx.guild.id, title=salon.name, description=ouverture)
+
+        # --- sujet du salon, s'il en a un -----------------------------------
+        sujet = str(getattr(salon, "topic", "") or "").strip()
+        if sujet:
+            e.add_field(name="Sujet", value=sujet[:1000], inline=False)
+
+        # --- reglages, selon le type ----------------------------------------
+        reglages: list[str] = []
+        lenteur = getattr(salon, "slowmode_delay", 0) or 0
+        if lenteur:
+            reglages.append(f"Mode lent **{lenteur}s**")
+        if getattr(salon, "nsfw", False):
+            reglages.append("Marqué **NSFW**")
+        if isinstance(salon, discord.VoiceChannel):
+            reglages.append(f"Qualité **{salon.bitrate // 1000} kbps**")
+            reglages.append(
+                f"Limite **{salon.user_limit}**" if salon.user_limit else "Aucune limite de place"
+            )
+            reglages.append(f"**{len(salon.members)}** connecté(s)")
+        if isinstance(salon, discord.TextChannel):
+            fils = len(salon.threads)
+            reglages.append(f"**{fils}** fil(s) actif(s)" if fils else "Aucun fil actif")
+        reglages.append(f"Position **{getattr(salon, 'position', 0)}**")
+        e.add_field(name="Réglages", value="\n".join(reglages), inline=True)
+
+        # --- qui y a acces --------------------------------------------------
+        acces: list[str] = []
+        try:
+            everyone = salon.overwrites_for(ctx.guild.default_role)
+            if everyone.view_channel is False:
+                acces.append("🔒 **Salon privé** — @everyone ne le voit pas")
+            else:
+                acces.append("🌐 Visible par **@everyone**")
+            roles_autorises = [
+                cible.mention for cible, perms in salon.overwrites.items()
+                if isinstance(cible, discord.Role)
+                and cible != ctx.guild.default_role
+                and perms.view_channel is True
+            ]
+            if roles_autorises:
+                acces.append("Accès explicite : " + ", ".join(roles_autorises[:5]))
+            personnalisations = len(salon.overwrites)
+            acces.append(f"**{personnalisations}** permission(s) personnalisée(s)")
+        except Exception:
+            logger.exception("channelinfo : lecture des permissions impossible.")
+            acces.append("Permissions illisibles")
+        e.add_field(name="Accès", value="\n".join(acces), inline=True)
+
+        # --- ce que SentriX peut y faire -------------------------------------
+        me = ctx.guild.me
+        if me is not None:
+            perms = salon.permissions_for(me)
+            manques = [
+                libelle for attribut, libelle in (
+                    ("view_channel", "Voir le salon"),
+                    ("send_messages", "Envoyer des messages"),
+                    ("embed_links", "Intégrer des liens"),
+                    ("attach_files", "Joindre des fichiers"),
+                    ("manage_messages", "Gérer les messages"),
+                ) if not getattr(perms, attribut, False)
+            ]
+            if manques:
+                e.add_field(
+                    name="⚠️ SentriX ne peut pas",
+                    value=" · ".join(manques),
+                    inline=False,
+                )
+
+        e.add_field(name="Création", value=f"<t:{cree}:F>", inline=False)
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="membercount", description="Afficher le nombre de membres du serveur.", with_app_command=False)

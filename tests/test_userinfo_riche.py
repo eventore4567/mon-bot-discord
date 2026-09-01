@@ -73,3 +73,37 @@ def test_userinfo_ne_fait_aucune_ecriture():
     corps = _corps("userinfo")
     for interdit in ("db.execute", "INSERT", "UPDATE", "DELETE", "set_guild_config"):
         assert interdit not in corps, f"userinfo ecrit : {interdit}"
+
+
+# ------------------------------------------------------------- channelinfo
+def test_channelinfo_ouvre_sur_une_phrase():
+    corps = _corps("channelinfo")
+    assert "salon.mention" in corps and "`{salon.id}`" in corps
+    assert "types_lisibles" in corps, "le type brut de discord.py est illisible"
+
+
+def test_channelinfo_adapte_les_reglages_au_type_de_salon():
+    corps = _corps("channelinfo")
+    assert "VoiceChannel" in corps and "bitrate" in corps
+    assert "TextChannel" in corps and "threads" in corps
+    assert "slowmode_delay" in corps
+
+
+def test_channelinfo_dit_qui_a_acces():
+    """Un salon prive doit etre annonce comme tel, pas devine."""
+    corps = _corps("channelinfo")
+    assert "Salon privé" in corps
+    assert "overwrites" in corps
+
+
+def test_channelinfo_signale_ce_que_sentrix_ne_peut_pas_faire():
+    """Le vrai piege : un salon configure ou le bot ne peut pas ecrire."""
+    corps = _corps("channelinfo")
+    assert "SentriX ne peut pas" in corps
+    assert "permissions_for" in corps
+
+
+def test_channelinfo_ne_fait_aucune_ecriture():
+    corps = _corps("channelinfo")
+    for interdit in ("db.execute", "INSERT", "UPDATE", "DELETE"):
+        assert interdit not in corps
