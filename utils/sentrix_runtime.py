@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 import discord
+
+import config as _config
 from discord.ext import commands
 
 import config
@@ -22,13 +24,16 @@ _INSTALLED = False
 BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 CHANGE_BAR = BAR
 
-COLOR_INFO = 0x3B82F6
-COLOR_SUCCESS = 0x57F287
-COLOR_WARNING = 0xF97316
+# Palette semantique : referencee depuis config, source unique. Ces constantes
+# ecrasent celles de utils/embeds.py au demarrage — c'est donc CETTE palette que le
+# bot affiche reellement, et c'est pour cela qu'elle est devenue la reference.
+COLOR_INFO = _config.COLOR_INFO
+COLOR_SUCCESS = _config.COLOR_SUCCESS
+COLOR_WARNING = _config.COLOR_WARNING
 COLOR_MODIFICATION = 0xFACC15
-COLOR_DANGER = 0xED4245
+COLOR_DANGER = _config.COLOR_ERROR
 COLOR_SYSTEM = 0x8B5CF6
-COLOR_NEUTRAL = 0xB5BAC1
+COLOR_NEUTRAL = _config.COLOR_NEUTRAL
 
 _IDENTITY_FIELDS = {"membre", "auteur", "utilisateur", "cible"}
 _BEFORE_FIELDS = {"avant", "ancienne valeur", "ancien"}

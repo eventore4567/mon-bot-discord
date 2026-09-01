@@ -24,6 +24,8 @@ from typing import Optional
 
 import discord
 
+import config as _config
+
 
 # =============================================================================
 # 1. Couleurs
@@ -31,12 +33,16 @@ import discord
 
 @dataclass(frozen=True)
 class SentriXColors:
-    primary: int = 0x5865F2
+    # Etats : references sur config, source unique de la palette semantique. Elles
+    # divergeaient (0x23A559 contre 0x57F287 pour « succes »), donc deux commandes
+    # du meme bot n'affichaient pas le meme vert.
+    primary: int = _config.COLOR_INFO
     secondary: int = 0x7C5CFC
-    success: int = 0x23A559
-    warning: int = 0xF0B232
-    danger: int = 0xF23F43
-    neutral: int = 0x5847EB
+    success: int = _config.COLOR_SUCCESS
+    warning: int = _config.COLOR_WARNING
+    danger: int = _config.COLOR_ERROR
+    neutral: int = _config.COLOR_NEUTRAL
+    # Teintes d'identite par categorie : propres a design_system, pas des etats.
     economy: int = 0xF1C40F
     moderation: int = 0xE74C3C
     security: int = 0x9B59B6

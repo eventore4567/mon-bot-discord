@@ -73,12 +73,26 @@ DASHBOARD_CALLBACK_URL = f"{DASHBOARD_PUBLIC_URL}/oauth/callback"
 # Ancien réglage conservé pour ne pas casser les installations existantes.
 DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "")
 
-# Couleurs des embeds (identité visuelle SentriX : violet électrique / futuriste)
+# ---------------------------------------------------------------------------
+# PALETTE SEMANTIQUE — SOURCE UNIQUE
+#
+# Ces valeurs sont celles REELLEMENT affichees par le bot. Mesure faite apres un
+# boot complet : utils/sentrix_runtime.py ecrase les constantes de utils/embeds.py
+# au demarrage, donc les valeurs codees dans embeds.py etaient mortes. Trois
+# fichiers definissaient la meme semantique avec des valeurs differentes — un
+# membre voyait deux verts distincts selon la commande utilisee.
+#
+# utils/design_system.py et utils/sentrix_runtime.py referencent desormais ces
+# constantes. Changer une couleur ici la change PARTOUT.
+#
+# Les couleurs par CATEGORIE (economie, moderation, tickets...) restent definies
+# dans design_system : ce sont des teintes d'identite, pas des etats.
+# ---------------------------------------------------------------------------
 COLOR_SUCCESS = 0x57F287
 COLOR_ERROR = 0xED4245
-COLOR_WARNING = 0xFEE75C
-COLOR_INFO = 0x5865F2
-COLOR_NEUTRAL = 0x5847EB
+COLOR_WARNING = 0xF97316
+COLOR_INFO = 0x3B82F6
+COLOR_NEUTRAL = 0xB5BAC1
 COLOR_BRAND = 0x5847EB
 
 # Valeurs historiques conservées pour compatibilité avec les anciens modules.
