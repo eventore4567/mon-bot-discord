@@ -23,7 +23,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from utils import embeds, premium_style
+from utils import embeds, log_service, premium_style
 from utils.instance_identity import brand_label
 from . import honeypot_verification_v48 as honeypot_v50
 from . import setup_control_center as setup_ui
@@ -529,11 +529,17 @@ class LogActionSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         if not self.owner.selected_log:
             return await interaction.response.send_message("Choisis d'abord un type de log.", ephemeral=True)
-        await self.owner.bot.db.execute(
-            "INSERT INTO log_settings(guild_id,log_type,enabled,updated_at) VALUES(?,?,?,strftime('%s','now')) "
-            "ON CONFLICT(guild_id,log_type) DO UPDATE SET enabled=excluded.enabled,updated_at=excluded.updated_at",
-            (self.owner.guild.id, self.owner.selected_log, 1 if self.values[0] == "on" else 0),
-        )
+        # Point d'écriture unique : plus de SQL direct sur log_settings (table archivée).
+        try:
+            await log_service.set_log_enabled(
+                self.owner.bot, self.owner.guild.id, self.owner.selected_log,
+                self.values[0] == "on",
+            )
+        except ValueError:
+            return await interaction.response.send_message(
+                "Choisis d'abord un salon pour ce type de log avant de l'activer.",
+                ephemeral=True,
+            )
         await self.owner.refresh(interaction)
 
 

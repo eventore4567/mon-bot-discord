@@ -30,6 +30,7 @@ invitations, niveaux, économie, réputation, giveaways, sauvegardes, mode urgen
 """
 
 import json
+import logging
 import re
 import discord
 from discord import app_commands
@@ -39,6 +40,8 @@ import config
 from utils import embeds, checks, helpers, log_service
 from cogs.automod import AUTOMOD_TOGGLE_LABELS, SECURITY_PRESETS
 from database.db import MANAGER_CATEGORIES
+
+log = logging.getLogger("bot.configuration")
 # Le système de tickets (panels/types/formulaires) est entièrement géré depuis cogs/tickets.py
 # via +ticketsetup — rien à importer ici, /setup se contente d'y rediriger (page 3/9).
 
@@ -55,6 +58,71 @@ SETUP_COLOR_DANGER = 0xF23F43
 
 # (colonne guild_config, nom du salon, description) — utilisé par /create-logs pour
 # générer toute la catégorie de logs d'un coup, et par les listeners de logging.py.
+async def repair_member_log_access(
+    bot,
+    guild: discord.Guild,
+    member: discord.Member,
+) -> int:
+    """Garantit lecture/écriture des logs au configurateur autorisé.
+
+    Les salons de logs sont privés (@everyone refusé). Sans overwrite explicite, la
+    personne qui vient de lancer +create-logs / +create-server voit « Aucun accès » si
+    elle ne possède pas encore un rôle staff. On n'accorde rien globalement : uniquement
+    au membre qui exécute un flux déjà protégé par les checks existants.
+    """
+    if not isinstance(member, discord.Member) or member.guild.id != guild.id:
+        return 0
+    conf = await bot.db.get_guild_config(guild.id)
+    if not conf:
+        return 0
+
+    channel_ids: set[int] = set()
+    for column, _name, _description in LOG_CHANNEL_DEFINITIONS:
+        try:
+            channel_id = int(conf[column] or 0)
+        except (KeyError, TypeError, ValueError):
+            channel_id = 0
+        if channel_id:
+            channel_ids.add(channel_id)
+
+    categories: dict[int, discord.CategoryChannel] = {}
+    repaired = 0
+    reason = f"Accès aux logs pour le configurateur autorisé {member}"
+
+    def needs_fix(overwrite) -> bool:
+        return (
+            overwrite.view_channel is not True
+            or overwrite.read_message_history is not True
+            or overwrite.send_messages is not True
+        )
+
+    def grant(overwrite):
+        overwrite.view_channel = True
+        overwrite.read_message_history = True
+        overwrite.send_messages = True
+        return overwrite
+
+    for channel_id in channel_ids:
+        channel = guild.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            continue
+        overwrite = channel.overwrites_for(member)
+        if needs_fix(overwrite):
+            await channel.set_permissions(member, overwrite=grant(overwrite), reason=reason)
+            repaired += 1
+        if channel.category is not None:
+            categories[channel.category.id] = channel.category
+
+    # Discord masque aussi visuellement une catégorie privée sans overwrite explicite.
+    for category in categories.values():
+        overwrite = category.overwrites_for(member)
+        if needs_fix(overwrite):
+            await category.set_permissions(member, overwrite=grant(overwrite), reason=reason)
+            repaired += 1
+
+    return repaired
+
+
 LOG_CHANNEL_DEFINITIONS = [
     ("log_server", "logs-serveur", "Création/suppression/modification de salons, catégories et rôles du serveur."),
     ("log_messages", "logs-messages", "Messages modifiés ou supprimés."),
@@ -64,6 +132,21 @@ LOG_CHANNEL_DEFINITIONS = [
     ("log_moderation", "logs-moderation", "Sanctions : avertissements, mutes, kicks, bans."),
     ("log_automod", "logs-securite", "Actions AutoMod et anti-nuke (spam, liens, protection du serveur)."),
 ]
+
+# Colonne guild_config -> catégorie canonique de log_config. /create-logs doit écrire
+# dans les DEUX : la colonne (compatibilité des écrans existants) et log_config, qui est
+# la seule table lue par le transport.
+LOG_COLUMN_TO_CATEGORY = {
+    "log_server": "channels",
+    "log_messages": "messages",
+    "log_members": "members",
+    "log_voice": "voice",
+    "log_roles": "roles",
+    "log_moderation": "moderation",
+    "log_automod": "automod",
+    "log_channel": "server",
+    "ticket_log_channel": "tickets",
+}
 
 # Libellés affichés par /logs-status pour chaque colonne de LOG_CHANNEL_DEFINITIONS.
 LOG_KIND_LABELS = {
@@ -166,8 +249,33 @@ class Configuration(commands.Cog):
                 reason=f"Système de logs créé par {author}",
             )
             await self.bot.db.set_guild_config(guild.id, db_column, channel.id)
+            # Point d'écriture unique du routage : sans ça le salon serait créé mais
+            # jamais routé, puisque le transport ne lit que log_config.
+            category_key = LOG_COLUMN_TO_CATEGORY.get(db_column)
+            if category_key:
+                try:
+                    await log_service.set_log_config(
+                        self.bot, guild.id, category_key,
+                        channel_id=channel.id, enabled=True,
+                    )
+                except Exception:
+                    log.exception(
+                        "Route de log non enregistrée guild=%s category=%s",
+                        guild.id, category_key,
+                    )
             created.append(channel)
             await channel.send(embed=embeds.brand("📡 Journal SentriX", topic))
+
+        try:
+            repaired = await repair_member_log_access(self.bot, guild, author)
+            if repaired:
+                log.info(
+                    "Accès logs réparé pour %s sur %s (%s overwrite(s)).",
+                    author, guild.id, repaired,
+                )
+        except discord.HTTPException:
+            log.exception("Impossible de réparer les permissions des salons de logs.")
+
         return created
 
     @commands.hybrid_command(
@@ -820,169 +928,10 @@ class Configuration(commands.Cog):
             return None
         return await automod_cog.get_audit_actor(guild, action, target_id)
 
-    @commands.Cog.listener()
-    async def on_message_delete(self, message: discord.Message):
-        if message.author.bot or not message.guild or not message.content:
-            return
-        e = embeds.log_entry(
-            "🗑️ Message supprimé",
-            config.COLOR_ERROR,
-            cible=message.author,
-            cible_label="👤 Auteur",
-            extra={
-                "📍 Salon": f"{message.channel.mention}\n`ID: {message.channel.id}`",
-                "💬 Contenu": message.content[:1000] or "*(vide)*",
-                "🔗 ID du message": f"`{message.id}`",
-            },
-        )
-        await helpers.send_log(self.bot, message.guild, "messages", e)
-
-    @commands.Cog.listener()
-    async def on_message_edit(self, before: discord.Message, after: discord.Message):
-        if before.author.bot or not before.guild or before.content == after.content:
-            return
-        e = embeds.log_entry(
-            "✏️ Message modifié",
-            config.COLOR_INFO,
-            cible=before.author,
-            cible_label="👤 Auteur",
-            extra={
-                "📍 Salon": f"{before.channel.mention}\n`ID: {before.channel.id}`",
-                "⬅️ Avant": before.content[:500] or "*(vide)*",
-                "➡️ Après": after.content[:500] or "*(vide)*",
-                "🔗 ID du message": f"`{before.id}`",
-            },
-        )
-        await helpers.send_log(self.bot, before.guild, "messages", e)
-
-    @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member):
-        if member.bot:
-            return
-        age_days = (discord.utils.utcnow() - member.created_at).days
-        warning_note = " ⚠️ **Compte très récent**" if age_days < 7 else ""
-        e = embeds.log_entry(
-            "📥 Arrivée d'un membre",
-            config.COLOR_SUCCESS,
-            cible=member,
-            cible_label="👤 Membre",
-            extra={
-                "📅 Compte créé": f"<t:{int(member.created_at.timestamp())}:D> (il y a {age_days} jour(s)){warning_note}",
-                "📊 Membres du serveur": str(member.guild.member_count),
-            },
-        )
-        await helpers.send_log(self.bot, member.guild, "members", e)
-
-    @commands.Cog.listener()
-    async def on_member_remove(self, member: discord.Member):
-        roles = [r.mention for r in member.roles if not r.is_default()]
-        actor = await self._get_actor(member.guild, discord.AuditLogAction.kick, member.id)
-        e = embeds.log_entry(
-            "📤 Départ d'un membre" if not actor else "👢 Membre expulsé",
-            config.COLOR_ERROR,
-            cible=member,
-            cible_label="👤 Membre",
-            acteur=actor,
-            acteur_label="🛠️ Expulsé par",
-            extra={"🎭 Rôles qu'il avait": ", ".join(roles) if roles else "Aucun"},
-        )
-        await helpers.send_log(self.bot, member.guild, "members", e)
-
-    @commands.Cog.listener()
-    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-        if member.bot:
-            return
-        if before.channel == after.channel:
-            return  # simple mute/deafen/stream toggle : pas assez pertinent pour un log
-        if before.channel is None:
-            title, extra = "🔊 Connexion vocale", {"📍 Salon": f"{after.channel.mention}\n`ID: {after.channel.id}`"}
-        elif after.channel is None:
-            title, extra = "🔇 Déconnexion vocale", {"📍 Salon": f"{before.channel.mention}\n`ID: {before.channel.id}`"}
-        else:
-            title = "🔀 Changement de salon vocal"
-            extra = {
-                "⬅️ Depuis": f"{before.channel.mention}\n`ID: {before.channel.id}`",
-                "➡️ Vers": f"{after.channel.mention}\n`ID: {after.channel.id}`",
-            }
-        e = embeds.log_entry(title, config.COLOR_NEUTRAL, cible=member, cible_label="👤 Membre", extra=extra)
-        await helpers.send_log(self.bot, member.guild, "voice", e)
-
-    @commands.Cog.listener()
-    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
-        actor = await self._get_actor(channel.guild, discord.AuditLogAction.channel_create, channel.id)
-        e = embeds.log_entry(
-            "📁 Salon créé",
-            config.COLOR_SUCCESS,
-            cible=channel,
-            cible_label="📍 Salon",
-            acteur=actor,
-            acteur_label="🛠️ Créé par",
-            extra={"🗂️ Catégorie": channel.category.name if getattr(channel, "category", None) else "Aucune", "🏷️ Type": str(channel.type).replace("_", " ").capitalize()},
-        )
-        await helpers.send_log(self.bot, channel.guild, "server", e)
-
-    @commands.Cog.listener()
-    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
-        actor = await self._get_actor(channel.guild, discord.AuditLogAction.channel_delete, channel.id)
-        e = embeds.log_entry(
-            "📁 Salon supprimé",
-            config.COLOR_ERROR,
-            acteur=actor,
-            acteur_label="🛠️ Supprimé par",
-            extra={"📍 Nom du salon": f"#{channel.name}", "🔗 ID": f"`{channel.id}`", "🏷️ Type": str(channel.type).replace("_", " ").capitalize()},
-        )
-        await helpers.send_log(self.bot, channel.guild, "server", e)
-
-    @commands.Cog.listener()
-    async def on_guild_role_create(self, role: discord.Role):
-        actor = await self._get_actor(role.guild, discord.AuditLogAction.role_create, role.id)
-        e = embeds.log_entry(
-            "🎭 Rôle créé",
-            config.COLOR_SUCCESS,
-            cible=role,
-            cible_label="🎭 Rôle",
-            acteur=actor,
-            acteur_label="🛠️ Créé par",
-            extra={"🎨 Couleur": str(role.color)},
-        )
-        await helpers.send_log(self.bot, role.guild, "roles", e)
-
-    @commands.Cog.listener()
-    async def on_guild_role_delete(self, role: discord.Role):
-        actor = await self._get_actor(role.guild, discord.AuditLogAction.role_delete, role.id)
-        e = embeds.log_entry(
-            "🎭 Rôle supprimé",
-            config.COLOR_ERROR,
-            acteur=actor,
-            acteur_label="🛠️ Supprimé par",
-            extra={"🎭 Nom du rôle": role.name, "🔗 ID": f"`{role.id}`"},
-        )
-        await helpers.send_log(self.bot, role.guild, "roles", e)
-
-    @commands.Cog.listener()
-    async def on_member_update(self, before: discord.Member, after: discord.Member):
-        if before.roles == after.roles:
-            return
-        added = [r for r in after.roles if r not in before.roles]
-        removed = [r for r in before.roles if r not in after.roles]
-        extra = {}
-        if added:
-            extra["● Rôles ajoutés"] = ", ".join(r.mention for r in added)
-        if removed:
-            extra["○ Rôles retirés"] = ", ".join(r.mention for r in removed)
-        if not extra:
-            return
-        actor = await self._get_actor(after.guild, discord.AuditLogAction.member_role_update, after.id)
-        e = embeds.log_entry(
-            "🎭 Rôles modifiés",
-            config.COLOR_NEUTRAL,
-            cible=after,
-            cible_label="👤 Membre",
-            acteur=actor,
-            acteur_label="🛠️ Modifié par",
-            extra=extra,
-        )
-        await helpers.send_log(self.bot, after.guild, "roles", e)
+    # Les listeners de journalisation ont été retirés d'ici : ils dupliquaient à
+    # l'identique ceux de cogs/logs.py, seul pipeline officiel. Deux cogs sur le même
+    # événement produisaient deux envois dont un était systématiquement jeté par la
+    # déduplication — donc le contenu affiché dépendait de qui gagnait la course.
 
 
 # Chaque "étape" = une page de l'assistant. "role"/"channel" = type de menu déroulant.

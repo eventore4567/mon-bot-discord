@@ -9,8 +9,6 @@ import discord
 from discord.ext import commands
 
 import config
-from .logs_route_fix_v85 import install as install_logs_route_fix_v85
-from .logs_delivery_fix_v86 import install as install_logs_delivery_fix_v86
 
 logger = logging.getLogger("bot.guild-arrival")
 
@@ -333,6 +331,5 @@ async def setup(bot: commands.Bot):
         from .owner_log_rebuild import OwnerLogRebuild
         await bot.add_cog(OwnerLogRebuild(bot))
 
-    # V85 répare le routage, V86 répare la livraison/permissions après READY.
-    install_logs_route_fix_v85(bot)
-    install_logs_delivery_fix_v86(bot)
+    # V85/V86 supprimés : le routage vient de log_config et la validation des permissions
+    # est faite par log_service.validate_channel avant chaque envoi.

@@ -1903,6 +1903,22 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             ),
             inline=False,
         )
+
+        # Repris de cogs/log_access_fix.py (supprimé) : les salons de logs sont privés,
+        # le configurateur doit y garder accès sans dépendre d'un rôle staff.
+        try:
+            from .configuration import repair_member_log_access
+            repaired = await repair_member_log_access(self.bot, guild, author)
+            if repaired:
+                logger.info(
+                    "Accès logs create-server réparé pour %s sur %s (%s overwrite(s)).",
+                    author, guild.id, repaired,
+                )
+        except discord.HTTPException:
+            logger.exception("Impossible de réparer les permissions logs après create-server.")
+        except Exception:
+            logger.exception("Réparation d'accès aux logs ignorée après create-server.")
+
         return result
 
     @commands.hybrid_command(

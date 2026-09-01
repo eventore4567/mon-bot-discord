@@ -29,11 +29,8 @@ def _state(bot: commands.Bot) -> dict[str, Any]:
     state = getattr(bot, "_sentrix_v15_state", None)
     if not isinstance(state, dict):
         state = {
-            "log_settings": {},
             "seen_prefix_messages": {},
-            "log_cache_patched": False,
             "duplicate_guard_patched": False,
-            "guild_listener_installed": False,
             "metrics_patch_target": None,
         }
         bot._sentrix_v15_state = state
@@ -56,104 +53,14 @@ def _prune_timed(cache: dict, ttl: float) -> None:
             cache.pop(key, None)
 
 
-def _install_log_setting_cache(bot: commands.Bot) -> None:
-    """Évite une lecture SQLite à chaque log tout en gardant les changements quasi immédiats."""
-    from utils import log_service
-
-    state = _state(bot)
-    if state["log_cache_patched"]:
-        return
-    current_get = log_service.get_log_setting
-    current_set_enabled = log_service.set_log_enabled
-    current_set_channel = log_service.set_log_channel
-
-    if getattr(current_get, "_sentrix_v15_cache", False):
-        state["log_cache_patched"] = True
-        return
-
-    def cache_key(runtime_bot, guild_id: int, log_type: str):
-        return (id(runtime_bot), int(guild_id), str(log_type))
-
-    def cache_put(key, value: dict) -> dict:
-        cache = state["log_settings"]
-        if len(cache) >= MAX_CACHE_ITEMS:
-            _prune_timed(cache, LOG_SETTING_TTL)
-        clean = dict(value)
-        cache[key] = (time.monotonic(), clean)
-        return dict(clean)
-
-    def cache_drop(runtime_bot, guild_id: int, log_type: str | None = None) -> None:
-        cache = state["log_settings"]
-        prefix = (id(runtime_bot), int(guild_id))
-        if log_type is not None:
-            cache.pop(prefix + (str(log_type),), None)
-            return
-        for key in [key for key in cache if key[:2] == prefix]:
-            cache.pop(key, None)
-
-    async def get_log_setting_v15(runtime_bot, guild_id: int, log_type: str) -> dict:
-        key = cache_key(runtime_bot, guild_id, log_type)
-        cached = state["log_settings"].get(key)
-        if cached is not None and time.monotonic() - float(cached[0]) <= LOG_SETTING_TTL:
-            return dict(cached[1])
-        state["log_settings"].pop(key, None)
-        value = await current_get(runtime_bot, int(guild_id), str(log_type))
-        return cache_put(key, value)
-
-    async def set_log_enabled_v15(runtime_bot, guild_id: int, log_type: str, enabled: bool) -> dict:
-        # On invalide avant ET après : l'implémentation historique appelle get_log_setting
-        # plusieurs fois pendant la modification.
-        cache_drop(runtime_bot, guild_id, log_type)
-        result = await current_set_enabled(runtime_bot, int(guild_id), str(log_type), bool(enabled))
-        cache_drop(runtime_bot, guild_id, log_type)
-        return cache_put(cache_key(runtime_bot, guild_id, log_type), result)
-
-    async def set_log_channel_v15(runtime_bot, guild_id: int, log_type: str, channel_id: int | None) -> dict:
-        cache_drop(runtime_bot, guild_id, log_type)
-        # Réimplémentation minuscule pour éviter que le get interne de l'ancienne fonction
-        # ne relise une valeur mise en cache juste avant l'UPDATE.
-        await get_log_setting_v15(runtime_bot, int(guild_id), str(log_type))
-        cursor = await runtime_bot.db.execute(
-            "UPDATE log_settings SET channel_id = ?, updated_at = ? WHERE guild_id = ? AND log_type = ?",
-            (channel_id, log_service._now(), int(guild_id), str(log_type)),
-        )
-        # SXTRACE 7 : cette fonction n'ecrit QUE dans log_settings. Si rowcount vaut 0,
-        # aucune ligne n'a ete touchee, aucun trigger n'a pu se declencher, et log_config
-        # — la seule table lue par send_log — reste inchangee. Le retour force pourtant
-        # channel_id plus bas, ce qui affiche "ACTIF" dans le panneau.
-        rowcount = getattr(cursor, "rowcount", None)
-        try:
-            written = await runtime_bot.db.fetchone(
-                "SELECT channel_id, enabled, updated_at FROM log_config "
-                "WHERE guild_id = ? AND category = ?",
-                (int(guild_id), str(log_type)),
-            )
-        except Exception as exc:  # pragma: no cover - diagnostic uniquement
-            written = f"<erreur {type(exc).__name__}>"
-        logger.warning(
-            "SXTRACE 7 SETUP_WRITE guild=%s log_type=%s asked_channel=%s "
-            "log_settings_rowcount=%s log_config_readback=%s",
-            guild_id, log_type, channel_id, rowcount,
-            dict(written) if hasattr(written, "keys") else written,
-        )
-        cache_drop(runtime_bot, guild_id, log_type)
-        value = await current_get(runtime_bot, int(guild_id), str(log_type))
-        value["channel_id"] = channel_id
-        return cache_put(cache_key(runtime_bot, guild_id, log_type), value)
-
-    get_log_setting_v15._sentrix_v15_cache = True
-    get_log_setting_v15._sentrix_original = current_get
-    set_log_enabled_v15._sentrix_v15_cache = True
-    set_log_enabled_v15._sentrix_original = current_set_enabled
-    set_log_channel_v15._sentrix_v15_cache = True
-    set_log_channel_v15._sentrix_original = current_set_channel
-
-    log_service.get_log_setting = get_log_setting_v15
-    log_service.set_log_enabled = set_log_enabled_v15
-    log_service.set_log_channel = set_log_channel_v15
-    log_service.invalidate_log_cache = cache_drop
-    state["log_cache_patched"] = True
-    logger.info("V15 : cache court des réglages de logs actif (%ss).", LOG_SETTING_TTL)
+# _install_log_setting_cache SUPPRIMÉ.
+#
+# Il remplaçait log_service.set_log_channel par une réimplémentation qui écrivait
+# UNIQUEMENT dans log_settings — jamais dans log_config, la seule table lue par le
+# transport — puis forçait channel_id dans la valeur retournée et la mettait en cache
+# sans vérifier qu'une ligne avait été touchée. Le panneau affichait donc "ACTIF" pour
+# une route qui n'existait pas. log_service.set_log_config est désormais l'unique point
+# d'écriture et relit systématiquement la base après écriture.
 
 
 def _install_duplicate_command_guard(bot: commands.Bot) -> None:
@@ -265,27 +172,13 @@ def _install_batched_production_metrics(bot: commands.Bot) -> None:
     logger.info("V15 : métriques commandes écrites en transaction groupée.")
 
 
-def _install_guild_cleanup(bot: commands.Bot) -> None:
-    state = _state(bot)
-    if state["guild_listener_installed"]:
-        return
-
-    async def cleanup_guild(guild) -> None:
-        gid = int(guild.id)
-        cache = state["log_settings"]
-        for key in [key for key in cache if len(key) >= 3 and int(key[1]) == gid]:
-            cache.pop(key, None)
-
-    bot.add_listener(cleanup_guild, "on_guild_remove")
-    state["guild_listener_installed"] = True
+# _install_guild_cleanup SUPPRIMÉ : il ne purgeait que le cache des réglages de logs.
 
 
 def install(bot: commands.Bot, extension_name: str = "") -> None:
     """Réappliqué après les extensions ; chaque sous-patch reste idempotent."""
-    _install_log_setting_cache(bot)
     _install_duplicate_command_guard(bot)
     _install_batched_production_metrics(bot)
-    _install_guild_cleanup(bot)
     bot._sentrix_v15_active = True
 
 

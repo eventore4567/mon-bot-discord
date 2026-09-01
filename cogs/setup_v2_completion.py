@@ -349,7 +349,11 @@ async def _reset_config(bot, guild: discord.Guild, target: str) -> str:
             await bot.db.execute("UPDATE automod_settings SET antispam=0,antilink=0,antiinvite=0,antimention=0,anticaps=0,antiemoji=0,antiraid=0,antibot=0,antiaccount=0,antiscam=0,antinuke=0 WHERE guild_id=?", (gid,))
             await bot.db.execute("DELETE FROM trusted_members WHERE guild_id=?", (gid,)); await bot.db.execute("DELETE FROM antinuke_whitelist WHERE guild_id=?", (gid,))
         elif item == "logs":
-            await bot.db.execute("UPDATE log_settings SET enabled=0,channel_id=NULL,updated_at=? WHERE guild_id=?", (int(time.time()), gid))
+            for _category in log_service.CATEGORIES:
+                try:
+                    await log_service.set_log_config(bot, gid, _category, channel_id=None, enabled=False)
+                except Exception:
+                    pass
             for key in ("log_channel","log_messages","log_members","log_voice","log_roles","log_server","log_automod","log_moderation","ticket_log_channel"): await bot.db.set_guild_config(gid, key, None)
         elif item == "notifications": await bot.db.execute("DELETE FROM social_notifications WHERE guild_id=?", (gid,))
         elif item == "welcome":

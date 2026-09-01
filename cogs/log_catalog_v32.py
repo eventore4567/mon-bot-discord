@@ -291,15 +291,8 @@ async def _sync_existing_channels(bot: commands.Bot) -> None:
                 channel = _find_channel(guild, aliases)
                 if channel is None:
                     continue
-                row = await bot.db.fetchone(
-                    "SELECT enabled, channel_id FROM log_settings WHERE guild_id = ? AND log_type = ?",
-                    (guild.id, log_type),
-                )
-                if row is None:
-                    await log_service.set_log_channel(bot, guild.id, log_type, channel.id)
-                    await log_service.set_log_enabled(bot, guild.id, log_type, True)
-                    continue
-                current_id = row["channel_id"]
+                row = await log_service.get_log_config(bot, guild.id, log_type)
+                current_id = (row or {}).get("channel_id")
                 if not current_id or guild.get_channel(int(current_id)) is None:
                     await log_service.set_log_channel(bot, guild.id, log_type, channel.id)
                     # Une ligne sans salon n'était pas réellement configurée : le salon

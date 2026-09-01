@@ -46,3 +46,6 @@ logs/
 *.tmp
 *.bak.new
 backup_phase*/
+
+# Bannières de logs régénérées au démarrage par ensure_banners(force=True)
+assets/log_banners/banner_*.png

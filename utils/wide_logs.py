@@ -62,15 +62,9 @@ CREATE INDEX IF NOT EXISTS idx_logs_guild_created
 ON logs(guild_id, created_at DESC);
 """
 
-_LOG_CONFIG_SCHEMA = """
-CREATE TABLE IF NOT EXISTS log_config (
-    guild_id INTEGER NOT NULL,
-    category TEXT NOT NULL,
-    channel_id INTEGER,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY (guild_id, category)
-)
-"""
+# Pas de schéma log_config ici : cette table appartient à database/db.py. Une seconde
+# définition (sans colonne updated_at) entrait en concurrence avec la définition
+# canonique selon qui créait la table en premier.
 
 
 def log_runtime_capabilities() -> None:
@@ -527,39 +521,6 @@ def _ensure_database_parent() -> None:
     Path(path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
 
 
-async def _migrate_log_config(db: aiosqlite.Connection) -> None:
-    cursor = await db.execute("PRAGMA table_info(log_config)")
-    info = await cursor.fetchall()
-    await cursor.close()
-    columns = {str(row[1]) for row in info}
-    if not columns:
-        await db.execute(_LOG_CONFIG_SCHEMA)
-        return
-    if "category" in columns:
-        return
-    if "log_type" not in columns:
-        logger.warning("log_config possède un schéma inconnu; migration ignorée: %s", sorted(columns))
-        return
-
-    await db.execute("ALTER TABLE log_config RENAME TO log_config_legacy")
-    await db.execute(_LOG_CONFIG_SCHEMA)
-    cursor = await db.execute("SELECT guild_id, log_type, channel_id, enabled FROM log_config_legacy")
-    rows = await cursor.fetchall()
-    await cursor.close()
-    for guild_id, log_type, channel_id, enabled in rows:
-        category = category_for(str(log_type))
-        await db.execute(
-            "INSERT INTO log_config (guild_id,category,channel_id,enabled) VALUES (?,?,?,?) "
-            "ON CONFLICT(guild_id,category) DO UPDATE SET "
-            "channel_id=COALESCE(log_config.channel_id,excluded.channel_id), "
-            "enabled=CASE WHEN log_config.channel_id IS NULL AND excluded.channel_id IS NOT NULL "
-            "THEN excluded.enabled ELSE log_config.enabled END",
-            (int(guild_id), category, channel_id, int(enabled)),
-        )
-    await db.execute("DROP TABLE log_config_legacy")
-    logger.warning("Migration log_config log_type -> category terminée (%s lignes).", len(rows))
-
-
 async def ensure_log_storage(force: bool = False) -> None:
     global _DB_READY
     if _DB_READY and not force:
@@ -567,8 +528,9 @@ async def ensure_log_storage(force: bool = False) -> None:
     _ensure_database_parent()
     async with aiosqlite.connect(_database_path()) as db:
         await db.execute("PRAGMA busy_timeout = 5000")
+        # Uniquement la table d'historique des logs. Le routage (log_config) est créé et
+        # migré par database/db.py sur la connexion principale du bot.
         await db.executescript(_LOG_SCHEMA)
-        await _migrate_log_config(db)
         await db.commit()
     _DB_READY = True
 
@@ -750,18 +712,9 @@ async def send_wide_log(
     return False
 
 
-async def upsert_log_config(guild_id: int, log_type: str, channel_id: int | None, enabled: bool) -> None:
-    """Miroite une configuration en utilisant désormais la catégorie comme clé."""
-    await ensure_log_storage()
-    category = category_for(log_type)
-    async with aiosqlite.connect(_database_path()) as db:
-        await db.execute("PRAGMA busy_timeout = 5000")
-        await db.execute(
-            "INSERT INTO log_config (guild_id,category,channel_id,enabled) VALUES (?,?,?,?) "
-            "ON CONFLICT(guild_id,category) DO UPDATE SET channel_id=excluded.channel_id,enabled=excluded.enabled",
-            (int(guild_id), category, channel_id, 1 if enabled else 0),
-        )
-        await db.commit()
+# upsert_log_config SUPPRIMÉ : il écrivait le routage sur une connexion aiosqlite
+# distincte de bot.db, avec un schéma sans updated_at. Le seul point d'écriture est
+# désormais log_service.set_log_config.
 
 
 async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> list[dict[str, Any]]:
@@ -783,5 +736,5 @@ async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> l
 __all__ = [
     "FALLBACK_ENABLED", "NO_PINGS", "WideLogView", "build_rows", "compact_fields",
     "derive_identity", "ensure_log_storage", "extract_history_ids", "fetch_log_history",
-    "log_runtime_capabilities", "narrative_body", "safe_text", "send_wide_log", "upsert_log_config",
+    "log_runtime_capabilities", "narrative_body", "safe_text", "send_wide_log",
 ]
