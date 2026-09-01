@@ -453,7 +453,7 @@ class Logs(commands.Cog, name="Logs"):
             fields.append(("Présence", f"{max(0, duration.days)} jour(s)", True))
         panel = self._embed("Membre parti", identity=member, fields=fields)
         view = log_service.log_actions(ids=[("Copier l'ID du membre", member.id)])
-        key = log_service.make_event_key(member.guild.id, "member_remove", target_id=member.id)
+        key = log_service.make_event_key(member.guild.id, "member_leave", target_id=member.id)
         await self._send(member.guild, "member_leave", panel, view=view, event_key=key)
 
     @commands.Cog.listener()
@@ -504,6 +504,7 @@ class Logs(commands.Cog, name="Logs"):
             )
 
         for event_name, roles in (("Rôle ajouté", added), ("Rôle retiré", removed)):
+            event_type = "role_add" if event_name == "Rôle ajouté" else "role_remove"
             for role in roles:
                 fields = [
                     ("Membre", _user_ref(after.id), True),
@@ -520,7 +521,7 @@ class Logs(commands.Cog, name="Logs"):
                     ids.append(("Copier l'ID du modérateur", actor.id))
                 key = log_service.make_event_key(
                     after.guild.id,
-                    "role_add" if event_name == "Rôle ajouté" else "role_remove",
+                    event_type,
                     target_id=after.id,
                     executor_id=getattr(actor, "id", None),
                     audit_log_id=getattr(audit, "id", None),
@@ -528,7 +529,7 @@ class Logs(commands.Cog, name="Logs"):
                 )
                 await self._send(
                     after.guild,
-                    "role_add",
+                    event_type,
                     panel,
                     view=log_service.log_actions(ids=ids),
                     event_key=key,
