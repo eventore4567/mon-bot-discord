@@ -85,8 +85,14 @@ def _day() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+_ULTIMATE_CACHE_TTL = 60.0
+
+
 class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     def __init__(self, bot: commands.Bot):
+        # Caches du chemin chaud : _goal() est appele a CHAQUE message.
+        self._module_cache: dict[tuple[int, str], tuple[float, bool]] = {}
+        self._no_goals: dict[int, bool] = {}
         self.bot = bot
         self.join_windows: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=100))
         self.voice_started: dict[tuple[int, int], float] = {}
@@ -124,19 +130,35 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             await self.bot.db.execute(sql)
 
     async def _enabled(self, guild_id: int, module: str) -> bool:
+        """Interrupteur de module, mis en cache : lu a chaque message via _goal.
+
+        Meme raisonnement que pour module_settings : c'est de la configuration, donc
+        l'invalidation est explicite dans _set_module, seul ecrivain de la table. Le TTL
+        n'est qu'un filet.
+        """
+        key = (int(guild_id), str(module))
+        cached = self._module_cache.get(key)
+        if cached is not None and (time.monotonic() - cached[0]) < _ULTIMATE_CACHE_TTL:
+            return cached[1]
         row = await self.bot.db.fetchone(
             "SELECT enabled FROM ultimate_modules WHERE guild_id=? AND module=?",
             (guild_id, module),
         )
         if row is not None:
-            return bool(int(_get(row, "enabled", 0)))
-        return bool(MODULES.get(module, ("", False))[1])
+            value = bool(int(_get(row, "enabled", 0)))
+        else:
+            value = bool(MODULES.get(module, ("", False))[1])
+        if len(self._module_cache) > 5000:
+            self._module_cache.clear()
+        self._module_cache[key] = (time.monotonic(), value)
+        return value
 
     async def _set_module(self, guild_id: int, module: str, enabled: bool):
         await self.bot.db.execute(
             "INSERT OR REPLACE INTO ultimate_modules(guild_id,module,enabled) VALUES(?,?,?)",
             (guild_id, module, int(enabled)),
         )
+        self._module_cache.pop((int(guild_id), str(module)), None)
 
     async def _setting(self, guild_id: int, key: str, default: str | None = None):
         row = await self.bot.db.fetchone(
@@ -247,10 +269,24 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     async def _goal(self, guild: discord.Guild, metric: str, amount: int, actor: discord.Member | None):
         if not await self._enabled(guild.id, "server_goals"):
             return
+        # Cache NEGATIF : la grande majorite des serveurs n'a aucun objectif. On evite
+        # alors un fetchall a chaque message. On ne cache jamais le cas positif, car la
+        # progression doit rester exacte et ends_at peut expirer sans ecriture.
+        if self._no_goals.get(int(guild.id)) is True:
+            return
         rows = await self.bot.db.fetchall(
             "SELECT * FROM ultimate_goals WHERE guild_id=? AND metric=? AND status='active' AND (ends_at IS NULL OR ends_at>=?)",
             (guild.id, metric, now()),
         )
+        if not rows:
+            # Aucun objectif actif : on verifie une seule fois si la table est vide pour
+            # ce serveur. Une ligne existante mais expiree ne doit PAS activer le cache.
+            total = await self.bot.db.fetchone(
+                "SELECT COUNT(*) AS n FROM ultimate_goals WHERE guild_id=?", (guild.id,)
+            )
+            if int(_get(total, "n", 0)) == 0:
+                self._no_goals[int(guild.id)] = True
+            return
         for row in rows:
             goal_id = int(_get(row, "id"))
             target = max(1, int(_get(row, "target", 1)))
@@ -690,9 +726,9 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         action = action.casefold()
         if action == "list":
             rows = await self.bot.db.fetchall("SELECT * FROM ultimate_goals WHERE guild_id=? ORDER BY id DESC LIMIT 15", (ctx.guild.id,)); text = "\n".join(f"#{_get(r,'id')} • {_get(r,'metric')} • {_get(r,'progress')}/{_get(r,'target')} • {_get(r,'status')}" for r in rows) or "Aucun objectif."; return await ctx.send(embed=discord.Embed(title="Objectifs serveur", description=text[:4000], colour=discord.Colour.blurple()))
-        if action == "remove" and metric and metric.isdigit(): await self.bot.db.execute("DELETE FROM ultimate_goals WHERE guild_id=? AND id=?", (ctx.guild.id, int(metric))); return await ctx.send("Objectif supprimé.")
+        if action == "remove" and metric and metric.isdigit(): await self.bot.db.execute("DELETE FROM ultimate_goals WHERE guild_id=? AND id=?", (ctx.guild.id, int(metric))); self._no_goals.pop(int(ctx.guild.id), None); return await ctx.send("Objectif supprimé.")
         if action == "add" and metric in {"messages","joins","voice_minutes"} and target and target > 0:
-            await self.bot.db.execute("INSERT INTO ultimate_goals(guild_id,metric,target,progress,reward_role_id,reward_money,starts_at,status) VALUES(?,?,?,?,?,?,?,'active')", (ctx.guild.id, metric, int(target), 0, reward_role.id if reward_role else None, max(0, int(reward_money)), now())); return await ctx.send(f"Objectif créé : **{target} {metric}**.")
+            await self.bot.db.execute("INSERT INTO ultimate_goals(guild_id,metric,target,progress,reward_role_id,reward_money,starts_at,status) VALUES(?,?,?,?,?,?,?,'active')", (ctx.guild.id, metric, int(target), 0, reward_role.id if reward_role else None, max(0, int(reward_money)), now())); self._no_goals.pop(int(ctx.guild.id), None); return await ctx.send(f"Objectif créé : **{target} {metric}**.")
         await ctx.send("Syntaxe : `goal add messages 10000 [argent] [@role]`, `goal list`, `goal remove <id>`.")
 
     @sentrixpro.command(name="aimod")
