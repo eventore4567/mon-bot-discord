@@ -486,6 +486,8 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
             log_type: str,
             embed: discord.Embed,
             file: discord.File | None = None,
+        
+            **identity,
         ) -> bool:
             # Protection cross-process Railway.
             if not _is_primary_log_service():
@@ -493,12 +495,12 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
 
             # Protection intra-process contre deux listeners historiques qui décrivent le
             # même événement avec deux cartes légèrement différentes.
-            if _is_duplicate(guild, log_type, embed):
+            if _is_duplicate(guild, log_type, embed, **identity):
                 logger.debug("V24 : doublon log supprimé guild=%s type=%s", guild.id, log_type)
                 return True
 
             # Toujours travailler avec une copie sans syntaxe de mention Discord.
-            safe_embed = _sanitize_embed(inner_bot, guild, embed)
+            safe_embed = _sanitize_embed(inner_bot, guild, embed, **identity)
 
             if file is None:
                 return await previous_send(inner_bot, guild, log_type, safe_embed, file=None)

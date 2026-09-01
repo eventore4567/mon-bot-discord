@@ -1264,4 +1264,14 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
 
 
 async def setup(bot: commands.Bot) -> None:
+    # cogs/create_command_router.py est la racine canonique de +create (sous-groupes
+    # sentrix / server / manox). Quand il est deja installe, ce cog historique n'a plus
+    # rien a enregistrer : tenter de le faire levait CommandRegistrationError et faisait
+    # echouer tout le chargement de cogs.create_sentrix.
+    existing = bot.get_command("create")
+    if isinstance(existing, commands.Group):
+        logger.info(
+            "Routeur +create canonique deja en place : cog CreateSentrix historique ignore."
+        )
+        return
     await bot.add_cog(CreateSentrix(bot))

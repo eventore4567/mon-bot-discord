@@ -52,8 +52,19 @@ CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
     ),
 }
 
-_ORIGINAL_SEND_LOG = log_service.send_log
 _MARKER = "_sentrix_live_log_delivery_v5"
+# Transport canonique en dessous de cette couche. Capture au moment de l'installation,
+# pas a l'import : une capture a l'import dependait de l'ordre de chargement des cogs et
+# pouvait court-circuiter une couche installee entre-temps.
+_CANONICAL_SEND_LOG = None
+
+
+def _canonical_send_log():
+    """Le sender en dessous de V5. Repli sur log_service si rien n'a ete capture."""
+    if _CANONICAL_SEND_LOG is not None:
+        return _CANONICAL_SEND_LOG
+    current = log_service.send_log
+    return current if not getattr(current, _MARKER, False) else log_service.send_log
 
 
 def _plain(value: Any) -> str:
@@ -127,18 +138,11 @@ async def _repair_route(
     if callable(ensure):
         await ensure(guild.id)
 
-    legacy_column = (log_service.LOG_TYPES.get(log_type) or {}).get("legacy_column")
-    if legacy_column:
-        await bot.db.set_guild_config(guild.id, legacy_column, channel.id)
-    # Compatibilité des anciens producteurs de sanctions.
-    if log_type == "moderation":
-        try:
-            await bot.db.set_guild_config(guild.id, "log_channel", channel.id)
-        except Exception:
-            logger.debug("Impossible de synchroniser log_channel legacy.", exc_info=True)
-
-    await log_service.set_log_channel(bot, guild.id, log_type, channel.id)
-    await log_service.set_log_enabled(bot, guild.id, log_type, True)
+    # Point d'écriture unique. Les anciennes colonnes guild_config ne sont plus écrites :
+    # log_config est la seule source de vérité du routage depuis la migration.
+    await log_service.set_log_config(
+        bot, guild.id, log_type, channel_id=channel.id, enabled=True
+    )
 
 
 async def send_log_v5(
@@ -150,6 +154,8 @@ async def send_log_v5(
     *,
     view: discord.ui.View | None = None,
     event_key: str | None = None,
+
+    **identity,
 ) -> bool:
     state = _runtime_state(bot)
     state["attempts"] = int(state.get("attempts") or 0) + 1
@@ -178,8 +184,9 @@ async def send_log_v5(
         )
         if ok:
             state["last_channel_id"] = int(setting["channel_id"])
-            result = await _ORIGINAL_SEND_LOG(
-                bot, guild, log_type, embed, file, view=view, event_key=event_key
+            result = await _canonical_send_log()(
+                bot, guild, log_type, embed, file,
+                view=view, event_key=event_key, **identity,
             )
             state["last_result"] = "normal_send_success" if result else "normal_send_rejected"
             return bool(result)
@@ -226,8 +233,9 @@ async def send_log_v5(
         )
         return False
 
-    result = await _ORIGINAL_SEND_LOG(
-        bot, guild, log_type, embed, file, view=view, event_key=event_key
+    result = await _canonical_send_log()(
+        bot, guild, log_type, embed, file,
+        view=view, event_key=event_key, **identity,
     )
     if result:
         state["successful_after_recovery"] = int(state.get("successful_after_recovery") or 0) + 1
@@ -259,13 +267,16 @@ def _install_health(bot: commands.Bot) -> None:
 
 
 def install(bot: commands.Bot) -> None:
+    global _CANONICAL_SEND_LOG
     current = log_service.send_log
     if getattr(current, _MARKER, False):
         _runtime_state(bot)["installed"] = True
         return
 
-    # Toujours repartir du transport canonique sauvegardé au chargement de ce module.
-    send_log_v5._sentrix_original = _ORIGINAL_SEND_LOG
+    # Capture le sender réellement en place au moment de l'installation.
+    _CANONICAL_SEND_LOG = current
+    send_log_v5._sentrix_original = current
+    send_log_v5._sentrix_previous = current
     setattr(send_log_v5, _MARKER, True)
     log_service.send_log = send_log_v5
     state = _runtime_state(bot)

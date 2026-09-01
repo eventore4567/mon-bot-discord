@@ -325,14 +325,16 @@ def install(bot: commands.Bot) -> None:
         log_type: str,
         embed: discord.Embed,
         file: discord.File | None = None,
+    
+        **identity,
     ) -> bool:
         # Les fichiers/transcripts restent sur l'embed premium précédent. Components V2
         # peut gérer des fichiers, mais garder ce chemin évite toute régression d'attachment.
         if file is not None:
-            return await original_send(inner_bot, guild, log_type, embed, file=file)
+            return await original_send(inner_bot, guild, log_type, embed, file=file, **identity)
 
         try:
-            styled = style_log(inner_bot, guild, log_type, embed)
+            styled = style_log(inner_bot, guild, log_type, embed, **identity)
             _fix_timeout_duration(styled, embed)
             buttons = _button_items(styled, str(styled.title or ""))
 
@@ -377,7 +379,7 @@ def install(bot: commands.Bot) -> None:
 
         # Aucun log perdu si Discord/API/UI change : le sender premium v1 reste le secours.
         try:
-            return await original_send(inner_bot, guild, log_type, embed, file=file)
+            return await original_send(inner_bot, guild, log_type, embed, file=file, **identity)
         except Exception:
             return False
 

@@ -437,11 +437,13 @@ def _install_router(bot: commands.Bot) -> None:
         log_type: str,
         embed: discord.Embed,
         file: discord.File | None = None,
+    
+        **identity,
     ) -> bool:
         source = str(log_type)
         working = embed
         if source == "messages" and file is None:
-            working = await _restore_long_message(inner_bot, guild, embed)
+            working = await _restore_long_message(inner_bot, guild, embed, **identity)
 
         sample = _sample(working)
         event = v28._event(source, working)

@@ -195,12 +195,12 @@ def install_log_pipeline(bot: commands.Bot) -> None:
         runtime["v17_log_pipeline"] = True
         return
 
-    async def send_log_v17(runtime_bot, guild: discord.Guild, log_type: str, embed: discord.Embed, file: discord.File | None = None) -> bool:
+    async def send_log_v17(runtime_bot, guild: discord.Guild, log_type: str, embed: discord.Embed, file: discord.File | None = None, **identity) -> bool:
         event_key = _event_key(embed)
         if event_key is not None and not await _event_enabled(runtime_bot, guild.id, event_key):
             return False
         if event_key not in GROUPABLE or file is not None:
-            return await current(runtime_bot, guild, log_type, embed, file=file)
+            return await current(runtime_bot, guild, log_type, embed, file=file, **identity)
         key = (guild.id, event_key, str(log_type))
         buffers = state(runtime_bot).setdefault("v17_log_buffers", {})
         buffers.setdefault(key, []).append((guild, embed.copy(), file))

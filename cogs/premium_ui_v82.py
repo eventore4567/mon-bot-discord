@@ -272,6 +272,8 @@ async def _send_log_v82(
     *,
     view: discord.ui.View | None = None,
     event_key: str | None = None,
+
+    **identity,
 ) -> bool:
     if not log_service.is_primary_process():
         return False
@@ -360,10 +362,11 @@ def install(bot: commands.Bot) -> None:
     v81.PremiumEmbedView = PremiumEmbedViewV82
     v81.PremiumLogView = PremiumLogViewV82
 
-    _send_log_v82._sentrix_logs_v82 = True
-    _send_test_log_v82._sentrix_logs_v82 = True
-    log_service.send_log = _send_log_v82
-    log_service.send_test_log = _send_test_log_v82
+    # Le transport des logs n'est PLUS remplace ici. _send_log_v82 reimplementait tout le
+    # pipeline (lecture de route, validation, rendu, channel.send) avec une banniere par
+    # URL, ce qui court-circuitait utils.wide_logs.send_wide_log : ni la banniere 1024x110
+    # generee, ni le panneau Components V2 (Section/Thumbnail/narratif), ni les traces
+    # SXTRACE 6 n'etaient atteints. utils.log_service est desormais le seul pipeline.
 
     bot._sentrix_premium_ui_v82 = True
     logger.info(

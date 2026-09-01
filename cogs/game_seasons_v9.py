@@ -121,7 +121,11 @@ class GameSeasonsV9(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="season", aliases=["saison"])
+    # Renommee : "season" appartient au groupe hybride de v17_ai_economy_games (saisons
+    # d'economie/niveaux). La collision faisait echouer game_seasons_v9.setup(), donc
+    # slash_reliability_v7.setup() entier, et avec lui moderation_advisor_v9 et bot_v10.
+    # Cette commande-ci concerne les scores de mini-jeux : elle porte desormais son nom.
+    @commands.command(name="gameseason", aliases=["saison-jeux", "gamesaison"])
     async def season(self, ctx):
         if not ctx.guild:
             return await ctx.send("Cette commande doit être utilisée sur un serveur.")

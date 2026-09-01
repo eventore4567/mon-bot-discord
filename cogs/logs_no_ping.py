@@ -270,12 +270,14 @@ def install() -> None:
             log_type: str,
             embed: discord.Embed,
             file: discord.File | None = None,
+        
+            **identity,
         ) -> bool:
             if file is None and log_type == "roles":
                 action_meta = ROLE_ACTIONS.get(str(embed.title or ""))
                 if action_meta is not None:
-                    return await _queue_role_log(original_send_log, bot, guild, embed, action_meta)
-            return await original_send_log(bot, guild, log_type, embed, file=file)
+                    return await _queue_role_log(original_send_log, bot, guild, embed, action_meta, **identity)
+            return await original_send_log(bot, guild, log_type, embed, file=file, **identity)
 
         send_with_role_batching._sentrix_role_batcher = True
         log_service.send_log = send_with_role_batching

@@ -391,8 +391,10 @@ def install(bot: commands.Bot) -> None:
         log_type: str,
         embed: discord.Embed,
         file: discord.File | None = None,
+    
+        **identity,
     ) -> bool:
-        styled = style_log(inner_bot, guild, log_type, embed)
+        styled = style_log(inner_bot, guild, log_type, embed, **identity)
         buttons = _button_items(styled, str(styled.title or ""))
         view = LogIdView(buttons) if buttons else None
 

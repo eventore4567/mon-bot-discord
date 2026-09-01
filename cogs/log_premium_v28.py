@@ -213,13 +213,15 @@ def install_source_guard(bot: commands.Bot) -> None:
         log_type: str,
         embed: discord.Embed,
         file: discord.File | None = None,
+    
+        **identity,
     ) -> bool:
         enriched = _ensure_message_id_field(str(log_type), embed)
         key = _message_key(guild, str(log_type), enriched)
         if key is not None and not _remember_message(key):
             logger.debug("V28 : doublon exact message bloqué guild=%s key=%s", guild.id, key)
             return True
-        return await previous(inner_bot, guild, log_type, enriched, file=file)
+        return await previous(inner_bot, guild, log_type, enriched, file=file, **identity)
 
     send_with_message_identity._sentrix_premium_v28_source = True
     send_with_message_identity._sentrix_original = previous

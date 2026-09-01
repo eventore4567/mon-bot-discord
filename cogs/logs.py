@@ -17,15 +17,11 @@ from utils import embeds, log_service
 
 logger = logging.getLogger("bot.logs")
 
-CONFIG_TO_LOG_TYPE = {
-    "log_messages": "messages",
-    "log_members": "members",
-    "log_voice": "voice",
-    "log_roles": "roles",
-    "log_server": "server",
-    "log_moderation": "moderation",
-    "log_automod": "automod",
-}
+# Plus de table config_key -> categorie. Chaque listener passe le type d'événement
+# canonique de LOG_REGISTRY, et log_service en déduit la catégorie. L'ancienne clé
+# fourre-tout "log_server" faisait tomber channel_*, role_* ET guild_update dans la
+# même catégorie « Serveur », alors que le registre les répartit entre Salons, Rôles
+# et Serveur.
 
 MESSAGE_CACHE_RETENTION_SECONDS = 86400
 MESSAGE_CACHE_CLEANUP_EVERY = 250
@@ -80,22 +76,16 @@ class Logs(commands.Cog, name="Logs"):
     async def _send(
         self,
         guild: discord.Guild,
-        config_key: str,
+        log_type: str,
         embed: discord.Embed,
         *,
         view: discord.ui.View | None = None,
         event_key: str | None = None,
     ) -> bool:
-        log_type = CONFIG_TO_LOG_TYPE.get(config_key)
-        if log_type is None:
-            logger.warning(
-                "SXTRACE 2 CALL guild=%s config_key=%s skipped=UNMAPPED_CONFIG_KEY known=%s",
-                getattr(guild, "id", None), config_key, sorted(CONFIG_TO_LOG_TYPE),
-            )
-            return False
         logger.warning(
-            "SXTRACE 2 CALL guild=%s config_key=%s log_type=%s event_key=%s target=%s.%s",
-            getattr(guild, "id", None), config_key, log_type, event_key,
+            "SXTRACE 2 CALL guild=%s log_type=%s category=%s event_key=%s target=%s.%s",
+            getattr(guild, "id", None), log_type,
+            log_service.category_for(log_type), event_key,
             getattr(log_service.send_log, "__module__", "?"),
             getattr(log_service.send_log, "__name__", "?"),
         )
@@ -257,7 +247,7 @@ class Logs(commands.Cog, name="Logs"):
             target_id=author_id,
             message_id=message_id,
         )
-        await self._send(guild, "log_messages", panel, view=view, event_key=key)
+        await self._send(guild, "message_delete", panel, view=view, event_key=key)
 
     # ---------------------------------------------------------------- MESSAGES
 
@@ -305,7 +295,7 @@ class Logs(commands.Cog, name="Logs"):
             target_id=message.author.id,
             message_id=message.id,
         )
-        await self._send(message.guild, "log_messages", panel, view=view, event_key=key)
+        await self._send(message.guild, "message_delete", panel, view=view, event_key=key)
         await self._forget_cached_message(message.id)
 
     @commands.Cog.listener()
@@ -349,7 +339,7 @@ class Logs(commands.Cog, name="Logs"):
             "message_delete",
             message_id=payload.message_id,
         )
-        await self._send(guild, "log_messages", panel, view=view, event_key=key)
+        await self._send(guild, "message_delete", panel, view=view, event_key=key)
 
     @commands.Cog.listener()
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent):
@@ -402,7 +392,7 @@ class Logs(commands.Cog, name="Logs"):
             message_id=after.id,
             discriminator=int(after.edited_at.timestamp()) if after.edited_at else time.time_ns(),
         )
-        await self._send(after.guild, "log_messages", panel, view=view, event_key=key)
+        await self._send(after.guild, "message_edit", panel, view=view, event_key=key)
 
     # ---------------------------------------------------------------- MEMBRES / MODÉRATION
 
@@ -419,7 +409,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         view = log_service.log_actions(ids=[("Copier l'ID du membre", member.id)])
         key = log_service.make_event_key(member.guild.id, "member_join", target_id=member.id)
-        await self._send(member.guild, "log_members", panel, view=view, event_key=key)
+        await self._send(member.guild, "member_join", panel, view=view, event_key=key)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -450,7 +440,7 @@ class Logs(commands.Cog, name="Logs"):
             )
             await self._send(
                 member.guild,
-                "log_moderation",
+                "member_kick",
                 panel,
                 view=view,
                 event_key=key,
@@ -464,7 +454,7 @@ class Logs(commands.Cog, name="Logs"):
         panel = self._embed("Membre parti", identity=member, fields=fields)
         view = log_service.log_actions(ids=[("Copier l'ID du membre", member.id)])
         key = log_service.make_event_key(member.guild.id, "member_remove", target_id=member.id)
-        await self._send(member.guild, "log_members", panel, view=view, event_key=key)
+        await self._send(member.guild, "member_leave", panel, view=view, event_key=key)
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
@@ -495,7 +485,7 @@ class Logs(commands.Cog, name="Logs"):
             )
             await self._send(
                 after.guild,
-                "log_members",
+                "member_update",
                 panel,
                 view=log_service.log_actions(ids=ids),
                 event_key=key,
@@ -538,7 +528,7 @@ class Logs(commands.Cog, name="Logs"):
                 )
                 await self._send(
                     after.guild,
-                    "log_roles",
+                    "role_add",
                     panel,
                     view=log_service.log_actions(ids=ids),
                     event_key=key,
@@ -573,7 +563,7 @@ class Logs(commands.Cog, name="Logs"):
             )
             await self._send(
                 after.guild,
-                "log_moderation",
+                "member_timeout",
                 panel,
                 view=log_service.log_actions(ids=ids),
                 event_key=key,
@@ -600,7 +590,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         await self._send(
             guild,
-            "log_moderation",
+            "member_ban",
             panel,
             view=log_service.log_actions(ids=ids),
             event_key=key,
@@ -627,7 +617,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         await self._send(
             guild,
-            "log_moderation",
+            "member_unban",
             panel,
             view=log_service.log_actions(ids=ids),
             event_key=key,
@@ -660,14 +650,22 @@ class Logs(commands.Cog, name="Logs"):
             fields.append(("Micro", "Coupé" if after.self_mute else "Activé", True))
         if before.self_deaf != after.self_deaf:
             fields.append(("Casque", "Désactivé" if after.self_deaf else "Activé", True))
+        if before.channel is None and after.channel is not None:
+            voice_type = "voice_join"
+        elif before.channel is not None and after.channel is None:
+            voice_type = "voice_leave"
+        elif before.channel != after.channel:
+            voice_type = "voice_move"
+        else:
+            voice_type = "voice_state"
         panel = self._embed("Activité vocale", identity=member, fields=fields)
         key = log_service.make_event_key(
             member.guild.id,
-            "voice",
+            voice_type,
             target_id=member.id,
             discriminator=f"{getattr(after.channel, 'id', 0)}:{after.self_mute}:{after.self_deaf}",
         )
-        await self._send(member.guild, "log_voice", panel, event_key=key)
+        await self._send(member.guild, voice_type, panel, event_key=key)
 
     # ---------------------------------------------------------------- SALONS
 
@@ -694,7 +692,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         await self._send(
             channel.guild,
-            "log_server",
+            "channel_create",
             panel,
             view=log_service.log_actions(ids=ids),
             event_key=key,
@@ -723,7 +721,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         await self._send(
             channel.guild,
-            "log_server",
+            "channel_delete",
             panel,
             view=log_service.log_actions(ids=ids),
             event_key=key,
@@ -783,7 +781,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         await self._send(
             after.guild,
-            "log_server",
+            "channel_update",
             panel,
             view=log_service.log_actions(ids=ids),
             event_key=key,
@@ -814,7 +812,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         await self._send(
             role.guild,
-            "log_server",
+            "role_create",
             panel,
             view=log_service.log_actions(ids=ids),
             event_key=key,
@@ -843,7 +841,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         await self._send(
             role.guild,
-            "log_server",
+            "role_delete",
             panel,
             view=log_service.log_actions(ids=ids),
             event_key=key,
@@ -905,7 +903,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         await self._send(
             after.guild,
-            "log_server",
+            "role_update",
             panel,
             view=log_service.log_actions(ids=ids),
             event_key=key,
@@ -957,7 +955,7 @@ class Logs(commands.Cog, name="Logs"):
         )
         await self._send(
             after,
-            "log_server",
+            "guild_update",
             panel,
             view=log_service.log_actions(ids=ids),
             event_key=key,

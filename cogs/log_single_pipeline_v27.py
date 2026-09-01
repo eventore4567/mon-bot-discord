@@ -471,8 +471,10 @@ def _install_source_guard(bot: commands.Bot) -> None:
         log_type: str,
         embed: discord.Embed,
         file: discord.File | None = None,
+    
+        **identity,
     ) -> bool:
-        canonical, event = _canonicalize(guild, str(log_type), embed)
+        canonical, event = _canonicalize(guild, str(log_type), embed, **identity)
         key = _semantic_key(guild, str(log_type), canonical, event)
         if not _remember_source(key):
             logger.debug("V27 : doublon source bloqué guild=%s event=%s", guild.id, event)

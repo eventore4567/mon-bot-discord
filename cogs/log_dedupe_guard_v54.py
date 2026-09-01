@@ -299,6 +299,8 @@ def _install_source_guard() -> None:
         log_type: str,
         embed: discord.Embed,
         file: discord.File | None = None,
+    
+        **identity,
     ) -> bool:
         # Absolument aucun journal n'est émis depuis le service Railway secondaire.
         if not v25._is_primary_process():
@@ -306,9 +308,9 @@ def _install_source_guard() -> None:
             return False
 
         if not isinstance(embed, discord.Embed):
-            return await current(bot, guild, log_type, embed, file=file)
+            return await current(bot, guild, log_type, embed, file=file, **identity)
 
-        key = _source_key(guild, str(log_type), embed)
+        key = _source_key(guild, str(log_type), embed, **identity)
         priority = _priority(str(log_type), embed)
 
         # Laisse à une fiche détaillée (Dossier, raison, modérateur...) le temps d'arriver
@@ -328,7 +330,7 @@ def _install_source_guard() -> None:
 
         _SOURCE_INFLIGHT.add(key)
         try:
-            sent = await current(bot, guild, log_type, embed, file=file)
+            sent = await current(bot, guild, log_type, embed, file=file, **identity)
         except Exception:
             _SOURCE_INFLIGHT.discard(key)
             raise

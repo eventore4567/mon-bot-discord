@@ -302,6 +302,8 @@ async def _send_log_v81(
     *,
     view: discord.ui.View | None = None,
     event_key: str | None = None,
+
+    **identity,
 ) -> bool:
     """Remplacement du transport central : mêmes réglages/déduplication, nouveau rendu V2."""
     if not log_service.is_primary_process():
@@ -479,19 +481,14 @@ def _install_profile(bot: commands.Bot) -> None:
 
 
 def _install_log_renderer() -> None:
-    current = log_service.send_log
-    if getattr(current, "_sentrix_logs_v81", False):
-        return
-    _send_log_v81._sentrix_logs_v81 = True
-    _send_log_v81._sentrix_previous = current
-    log_service.send_log = _send_log_v81
+    """Ne remplace plus le transport des logs.
 
-    current_test = log_service.send_test_log
-    if not getattr(current_test, "_sentrix_logs_v81", False):
-        _send_test_log_v81._sentrix_logs_v81 = True
-        _send_test_log_v81._sentrix_previous = current_test
-        log_service.send_test_log = _send_test_log_v81
-    logger.info("V81: renderer central des logs remplacé par Components V2 + bande 1024px")
+    _send_log_v81 etait un pipeline complet parallele (route, dedup, rendu, envoi) qui
+    n'appelait jamais utils.wide_logs.send_wide_log. Les couches de rendu premium
+    restent utilisees pour les profils et les embeds de commandes ; les journaux passent
+    exclusivement par utils.log_service.
+    """
+    return None
 
 
 def install(bot: commands.Bot) -> None:

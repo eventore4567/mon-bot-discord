@@ -423,23 +423,14 @@ def _install_cog_patches() -> None:
 
 
 def _install_log_transport() -> None:
-    current = log_service.send_log
-    if getattr(current, "_sentrix_unified_log", False):
-        return
-    original = current
+    """Ne remplace plus log_service.send_log.
 
-    async def send_log(bot, guild, log_type, embed, file=None, *, view=None, event_key=None):
-        # Normalise avant l'ancien transport : même une ancienne bannière ne peut plus
-        # contourner le renderer central. normalize_log est idempotent.
-        rendered = _normalize_log(embed)
-        return await original(
-            bot, guild, log_type, rendered, file,
-            view=view, event_key=event_key,
-        )
-
-    send_log._sentrix_unified_log = True
-    send_log._sentrix_original = original
-    log_service.send_log = send_log
+    Cette couche n'ajoutait qu'un appel a normalize_log avant de retransmettre. Le
+    pipeline canonique (utils.log_service.send_log) normalise deja l'embed lui-meme, avec
+    la meme fonction : le wrapper etait une double normalisation pour rien, au prix d'un
+    maillon de plus dans une chaine dont l'ordre dependait du chargeur de cogs.
+    """
+    return None
 
 
 def install() -> None:

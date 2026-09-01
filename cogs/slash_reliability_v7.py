@@ -380,9 +380,15 @@ async def _install_production_v9(bot: commands.Bot) -> None:
     """Compatibilite historique si ce module est charge comme extension complete."""
     from . import ai_context_v9, game_seasons_v9, moderation_advisor_v9, production_observability_v9
 
-    await production_observability_v9.setup(bot)
+    # Idempotent : command_runtime_hardening_v18 rejoue load_extension une fois apres une
+    # collision d'enregistrement, mais discord.py ne retire que les cogs declares DANS ce
+    # module. Sans ces gardes, le retry echouait sur "Cog already loaded" et masquait
+    # l'erreur d'origine.
+    if bot.get_cog("ProductionObservabilityV9") is None:
+        await production_observability_v9.setup(bot)
     await ai_context_v9.setup(bot)
-    await game_seasons_v9.setup(bot)
+    if bot.get_cog("GameSeasonsV9") is None:
+        await game_seasons_v9.setup(bot)
     await moderation_advisor_v9.setup(bot)
 
 
@@ -390,8 +396,21 @@ async def _install_bot_v10(bot: commands.Bot) -> None:
     """Compatibilite historique du bootstrap V10 ; non utilisee par install()."""
     from . import bot_v10
 
-    if bot.get_cog("BotV10") is None:
-        await bot_v10.setup(bot)
+    if bot.get_cog("BotV10") is not None:
+        return
+
+    # BotV10 expose un +health complet. security_v2_runtime enregistre un +health
+    # autonome (hors cog) plus tot : la collision faisait echouer bot_v10.setup(), donc
+    # tout le chargement de slash_reliability_v7, et BotV10 n'existait jamais. On laisse
+    # la place a la version riche, comme le routeur +create le fait pour sa racine.
+    existing = bot.get_command("health")
+    if existing is not None and getattr(existing, "cog", None) is None:
+        bot.remove_command("health")
+        logger.warning(
+            "+health autonome retire au profit du diagnostic complet de BotV10."
+        )
+
+    await bot_v10.setup(bot)
 
 
 async def setup(bot: commands.Bot) -> None:

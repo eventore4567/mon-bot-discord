@@ -442,7 +442,7 @@ def _patch_log_service() -> None:
         "games": "games",
     }
 
-    async def send_log(bot, guild, log_type, embed, file=None):
+    async def send_log(bot, guild, log_type, embed, file=None, **identity):
         if isinstance(embed, discord.Embed):
             premium_style.style_embed(
                 embed,
@@ -450,8 +450,8 @@ def _patch_log_service() -> None:
                 bot_user=getattr(bot, "user", None),
                 category=category_by_type.get(str(log_type), "logs"),
                 log_type=str(log_type),
-            )
-        return await original(bot, guild, log_type, embed, file=file)
+            **identity)
+        return await original(bot, guild, log_type, embed, file=file, **identity)
 
     log_service.send_log = send_log
 

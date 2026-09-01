@@ -271,61 +271,40 @@ def _install_log_policy(bot: commands.Bot) -> None:
     if getattr(current, "_sentrix_v33_no_general", False):
         return
 
-    async def send_log_v33(active_bot, guild: discord.Guild, log_type: str, embed: discord.Embed,
-                           file: discord.File | None = None) -> bool:
-        # Les propres messages de SentriX ne doivent pas remplir le journal Messages.
+    async def send_log_v33(
+        active_bot,
+        guild: discord.Guild,
+        log_type: str,
+        embed: discord.Embed,
+        file: discord.File | None = None,
+        **identity,
+    ) -> bool:
+        """Deux gardes anti-bruit, puis passage au pipeline canonique.
+
+        La resolution de route, la validation et le rendu ne sont plus refaits ici : ils
+        appartiennent a utils.log_service. L'ancien repli « salon global herite » a ete
+        retire : il relisait les colonnes legacy de guild_config et pouvait DESACTIVER
+        tout seul une categorie pourtant correctement configuree, simplement parce que
+        son salon coincidait avec l'ancien log_channel global.
+        """
+        # 1. Les propres messages de SentriX ne doivent pas remplir le journal Messages.
         if log_type == "messages" and _embed_mentions_bot_author(active_bot, embed):
             return False
 
-        try:
-            setting = await log_service.get_log_setting(active_bot, guild.id, log_type)
-        except Exception:
-            logger.exception("V3.3 : lecture du réglage de log impossible (%s).", log_type)
-            return False
-
-        if not setting.get("enabled"):
-            return False
-
-        channel_id = setting.get("channel_id")
-        meta = log_service.LOG_TYPES.get(log_type, {})
-        legacy_column = meta.get("legacy_column")
-        inherited_global_fallback = False
-
-        if legacy_column and legacy_column != "ticket_log_channel" and channel_id:
+        # 2. Pas de journal recursif quand on edite un message DANS le salon de logs.
+        if log_type == "messages":
             try:
-                conf = await active_bot.db.get_guild_config(guild.id)
-                dedicated = _row_get(conf, legacy_column)
-                global_log = _row_get(conf, "log_channel")
-                inherited_global_fallback = bool(
-                    not dedicated and global_log and int(global_log) == int(channel_id)
-                )
+                config = await log_service.get_log_config(active_bot, guild.id, "messages")
             except Exception:
-                inherited_global_fallback = False
-
-        if inherited_global_fallback:
-            candidate = _candidate_log_channel(guild, log_type)
-            if candidate is not None:
-                await log_service.set_log_channel(active_bot, guild.id, log_type, candidate.id)
-                channel_id = candidate.id
-                logger.info(
-                    "V3.3 : log %s rerouté automatiquement vers #%s au lieu du salon global.",
-                    log_type, candidate.name,
-                )
-            else:
-                # Aucun salon dédié sûr : mieux vaut couper ce type de log que polluer général.
-                await log_service.set_log_enabled(active_bot, guild.id, log_type, False)
-                logger.warning(
-                    "V3.3 : log %s désactivé car il héritait du salon global et aucun salon dédié n'existe.",
-                    log_type,
-                )
+                config = None
+            channel_id = (config or {}).get("channel_id")
+            source_channel_id = _embed_source_channel_id(embed)
+            if source_channel_id and channel_id and int(source_channel_id) == int(channel_id):
                 return False
 
-        source_channel_id = _embed_source_channel_id(embed)
-        if source_channel_id and channel_id and int(source_channel_id) == int(channel_id) and log_type == "messages":
-            # Évite les journaux récursifs lorsque quelqu'un modifie un message dans le salon de logs.
-            return False
-
-        return await current(active_bot, guild, log_type, _clean_log_embed(embed), file=file)
+        return await current(
+            active_bot, guild, log_type, _clean_log_embed(embed), file=file, **identity
+        )
 
     send_log_v33._sentrix_v33_no_general = True
     send_log_v33._sentrix_original = current

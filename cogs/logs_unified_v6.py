@@ -157,12 +157,17 @@ def _install_routes() -> None:
     rebuild_v1.KNOWN_OLD_LOG_NAMES.update(LEGACY_LOG_NAMES)
     rebuild_v1.LEGACY_COLUMNS = tuple(route[1] for route in rebuild_v1.LOG_ROUTES) + ("log_channel",)
 
-    logs_mod.CONFIG_TO_LOG_TYPE["log_files"] = "files"
-
+    # cogs.logs n'a plus de table CONFIG_TO_LOG_TYPE : chaque listener passe son type
+    # d'événement canonique. La route "files" est alimentée par UnifiedLogsV6 lui-même.
     generated_logs_sync.LOG_CHANNEL_ALIASES["files"] = (
         "logs-dossiers", "logs-fichiers", "logs-files"
     )
-    generated_logs_sync._NORMALIZED_ALIASES["files"] = frozenset(
+    # Le dictionnaire normalisé s'appelle _NORMALIZED. La faute de frappe
+    # _NORMALIZED_ALIASES levait une AttributeError ici, ce qui faisait echouer
+    # logs_unified_v6.install() et, avec lui, tout le chargement de
+    # slash_error_completion_guard : no_cooldown_final et passive_ai_single_reply_final
+    # n'etaient donc jamais installes.
+    generated_logs_sync._NORMALIZED["files"] = frozenset(
         generated_logs_sync._plain(name)
         for name in generated_logs_sync.LOG_CHANNEL_ALIASES["files"]
     )

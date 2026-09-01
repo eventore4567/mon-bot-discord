@@ -22,7 +22,9 @@ from .create_sentrix import CreateSentrix as SentriXBuilder
 logger = logging.getLogger("bot.create-router")
 
 
-class CreateRouter(commands.Cog, name="CreateSentrix"):
+# Le nom de cog "CreateSentrix" appartient a cogs/create_sentrix.py. Le partager
+# faisait echouer le chargement de create_sentrix (Cog named ... already loaded).
+class CreateRouter(commands.Cog, name="CreateRouter"):
     """Racine unique des commandes ``+create``."""
 
     def __init__(self, bot: commands.Bot):
@@ -249,17 +251,19 @@ class CreateRouter(commands.Cog, name="CreateSentrix"):
 async def install(bot: commands.Bot) -> None:
     """Supprime toute ancienne racine ``create`` puis installe le routeur canonique."""
     current = bot.get_command("create")
-    current_cog = bot.get_cog("CreateSentrix")
+    installed = bot.get_cog("CreateRouter")
 
     if (
         current is not None
-        and current_cog is not None
-        and getattr(current_cog, "_sentrix_canonical_create_router", False)
-        and getattr(current, "cog", None) is current_cog
+        and installed is not None
+        and getattr(installed, "_sentrix_canonical_create_router", False)
+        and getattr(current, "cog", None) is installed
     ):
         return
 
-    if current_cog is not None:
+    # Le routeur prend la racine +create au cog historique, qui garde son propre nom.
+    legacy_cog = bot.get_cog("CreateSentrix")
+    if legacy_cog is not None:
         try:
             await bot.remove_cog("CreateSentrix")
         except Exception:

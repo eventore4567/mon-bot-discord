@@ -475,7 +475,7 @@ def _patch_logs(bot: commands.Bot) -> None:
     current_send_log = log_service.send_log
     if not getattr(current_send_log, "_sentrix_setup_v2", False):
 
-        async def send_log_v2(target_bot, guild, log_type, embed, file=None, *, view=None, event_key=None):
+        async def send_log_v2(target_bot, guild, log_type, embed, file=None, *, view=None, event_key=None, **identity):
             if not await module_enabled(target_bot, guild.id, "logs"):
                 return False
             return await current_send_log(
@@ -486,7 +486,7 @@ def _patch_logs(bot: commands.Bot) -> None:
                 file,
                 view=view,
                 event_key=event_key,
-            )
+            **identity)
 
         send_log_v2._sentrix_setup_v2 = True
         send_log_v2._sentrix_previous = current_send_log

@@ -282,6 +282,8 @@ def _install_source_consolidation() -> None:
         *,
         view: discord.ui.View | None = None,
         event_key: str | None = None,
+    
+        **identity,
     ) -> bool:
         if not isinstance(embed, discord.Embed):
             return await _forward_sender(
@@ -293,9 +295,9 @@ def _install_source_consolidation() -> None:
                 file=file,
                 view=view,
                 event_key=event_key,
-            )
+            **identity)
 
-        exact_key = _exact_event_key(guild, str(log_type), embed)
+        exact_key = _exact_event_key(guild, str(log_type), embed, **identity)
         if not _claim_exact(exact_key):
             logger.info(
                 "V67: vrai doublon identique supprimé guild=%s type=%s.",
@@ -321,14 +323,14 @@ def _install_source_consolidation() -> None:
                     await asyncio.sleep(PRIMARY_HOLD_SECONDS)
 
                 elif family == "channel_update" and _category_only_update(embed):
-                    if _merge_update_into_primary(guild, embed):
+                    if _merge_update_into_primary(guild, embed, **identity):
                         logger.info(
                             "V67: update de catégorie absorbée dans la fiche principale guild=%s.",
                             guild.id,
                         )
                         return False
                     await asyncio.sleep(UPDATE_WAIT_SECONDS)
-                    if _merge_update_into_primary(guild, embed):
+                    if _merge_update_into_primary(guild, embed, **identity):
                         logger.info(
                             "V67: update de catégorie anticipée fusionnée après attente guild=%s.",
                             guild.id,
@@ -344,7 +346,7 @@ def _install_source_consolidation() -> None:
                 file=file,
                 view=view,
                 event_key=event_key,
-            )
+            **identity)
             return bool(sent)
         finally:
             _release_exact(exact_key, bool(sent))

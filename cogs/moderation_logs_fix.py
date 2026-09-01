@@ -341,6 +341,8 @@ def _install_routing_repair(bot: commands.Bot) -> None:
                 log_type: str,
                 embed: discord.Embed,
                 file: discord.File | None = None,
+            
+                **identity,
             ) -> bool:
                 try:
                     setting = await log_service.get_log_setting(inner_bot, guild.id, log_type)
@@ -363,7 +365,7 @@ def _install_routing_repair(bot: commands.Bot) -> None:
                         "Réparation du log %s impossible sur %s (%s).",
                         log_type, guild.name, guild.id,
                     )
-                return await original_send_log(inner_bot, guild, log_type, embed, file=file)
+                return await original_send_log(inner_bot, guild, log_type, embed, file=file, **identity)
 
             send_log_repaired._sentrix_universal_log_repair = True
             log_service.send_log = send_log_repaired

@@ -151,67 +151,18 @@ def _valid_log_channel(guild: discord.Guild, channel_id: int | None) -> bool:
 
 
 def _install_log_fallback() -> None:
-    current = log_service.get_log_setting
-    if getattr(current, "_sentrix_v57_fallback", False):
-        return
+    """Ne remplace plus log_service.get_log_setting.
 
-    async def get_log_setting_with_fallback(bot, guild_id: int, log_type: str) -> dict:
-        setting = await current(bot, guild_id, log_type)
-        # Une désactivation explicite doit rester une désactivation : aucun fallback.
-        if not setting.get("enabled"):
-            return setting
+    Ce repli relisait les colonnes legacy de guild_config, y compris le salon GLOBAL
+    log_channel, des que le salon d'une categorie devenait invalide. N'importe quelle
+    categorie basculait donc dans le salon general : un bannissement finissait dans le
+    meme salon qu'un message supprime, alors que chaque categorie a son propre salon.
 
-        guild = bot.get_guild(int(guild_id)) if hasattr(bot, "get_guild") else None
-        if guild is None or _valid_log_channel(guild, setting.get("channel_id")):
-            return setting
-
-        try:
-            conf = await bot.db.get_guild_config(int(guild_id))
-        except Exception:
-            logger.exception("V57 : lecture fallback logs impossible pour guild=%s", guild_id)
-            return setting
-        if not conf:
-            return setting
-
-        meta = log_service.LOG_TYPES.get(log_type, {})
-        legacy_column = meta.get("legacy_column")
-        candidates: list[int] = []
-        for key in (legacy_column, "log_channel"):
-            if not key:
-                continue
-            value = _config_value(conf, str(key))
-            if not value:
-                continue
-            try:
-                channel_id = int(value)
-            except (TypeError, ValueError):
-                continue
-            if channel_id not in candidates:
-                candidates.append(channel_id)
-
-        broken_id = setting.get("channel_id")
-        for candidate in candidates:
-            if candidate == broken_id:
-                continue
-            if not _valid_log_channel(guild, candidate):
-                continue
-            repaired = dict(setting)
-            repaired["channel_id"] = candidate
-            logger.warning(
-                "V57 : log %s guild=%s redirigé vers le salon général valide %s "
-                "car le salon configuré %s est inutilisable.",
-                log_type,
-                guild_id,
-                candidate,
-                broken_id,
-            )
-            return repaired
-        return setting
-
-    get_log_setting_with_fallback._sentrix_v57_fallback = True
-    get_log_setting_with_fallback._sentrix_previous = current
-    log_service.get_log_setting = get_log_setting_with_fallback
-    logger.info("V57 : fallback des logs activés vers le salon général valide installé.")
+    log_config est la seule source de verite. Quand un salon disparait, la validation le
+    signale, et live_log_delivery_v5 retrouve un salon par son nom DANS la meme categorie
+    au lieu de traverser les categories.
+    """
+    return None
 
 
 def install(bot: commands.Bot) -> None:
