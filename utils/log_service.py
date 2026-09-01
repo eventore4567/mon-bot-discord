@@ -1,7 +1,9 @@
-"""Transport officiel et unique des journaux Discord SentriX.
+"""Transport canonique des journaux Discord SentriX.
 
-Routage : événement -> catégorie -> salon dédié -> salon général de repli.
-Rendu : ``send_wide_log`` Components V2 uniquement.
+Source de vérité runtime : ``log_config`` uniquement.
+Les anciennes tables/colonnes ne servent qu'à restaurer une route manquante et à garder
+l'ancien écran +setup compatible pendant la transition. Aucun envoi ne lit sa route dans
+``log_settings`` ou ``guild_config``.
 """
 from __future__ import annotations
 
@@ -14,23 +16,43 @@ from typing import Any
 
 import discord
 
-from utils.log_categories import CATEGORIES, CATEGORY_ORDER as CATEGORY_KEYS, canonical_event_type, category_for, resolve
+from utils.log_categories import (
+    CATEGORIES,
+    CATEGORY_ORDER as CATEGORY_KEYS,
+    LOG_REGISTRY,
+    canonical_event_type,
+    category_for,
+    legacy_to_category,
+    resolve,
+)
 from utils.wide_logs import send_wide_log
 
 logger = logging.getLogger("bot")
 
-# Contrat public conservé pour /setup, diagnostics et anciens modules. Les clés sont
-# désormais les catégories configurables, pas les événements individuels.
+_LEGACY_COLUMNS = {
+    "moderation": "log_moderation",
+    "messages": "log_messages",
+    "members": "log_members",
+    "channels": "log_server",
+    "roles": "log_roles",
+    "voice": "log_voice",
+    "server": "log_channel",
+    "tickets": "ticket_log_channel",
+    "automod": "log_automod",
+    "spam": None,
+    "raid": None,
+    "resources": None,
+    "files": None,
+}
+
 LOG_TYPES: dict[str, dict[str, Any]] = {
-    "moderation": {"label": "Modération", "category": "Modération", "legacy_column": "log_moderation", "emits": True},
-    "messages": {"label": "Messages", "category": "Messages", "legacy_column": "log_messages", "emits": True},
-    "members": {"label": "Membres", "category": "Membres", "legacy_column": "log_members", "emits": True},
-    "channels": {"label": "Salons", "category": "Salons", "legacy_column": "log_server", "emits": True},
-    "roles": {"label": "Rôles", "category": "Rôles", "legacy_column": "log_roles", "emits": True},
-    "voice": {"label": "Vocal", "category": "Vocal", "legacy_column": "log_voice", "emits": True},
-    "server": {"label": "Serveur", "category": "Serveur", "legacy_column": "log_channel", "emits": True},
-    "tickets": {"label": "Tickets", "category": "Tickets", "legacy_column": "ticket_log_channel", "emits": True},
-    "protection": {"label": "Protection", "category": "Protection", "legacy_column": "log_automod", "emits": True},
+    key: {
+        "label": label,
+        "category": label,
+        "legacy_column": _LEGACY_COLUMNS.get(key),
+        "emits": True,
+    }
+    for key, label in CATEGORIES.items()
 }
 CATEGORY_ORDER = [CATEGORIES[key] for key in CATEGORY_KEYS]
 
@@ -38,29 +60,37 @@ DEFAULT_LOG_SETTING = {
     "enabled": True,
     "channel_id": None,
     "dedicated_channel_id": None,
+    "fallback_channel_id": None,
     "include_content": True,
     "include_attachments": True,
     "include_actor": True,
     "include_reason": True,
 }
-
-LOG_ALLOWED_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=False)
+LOG_ALLOWED_MENTIONS = discord.AllowedMentions(
+    everyone=False, users=False, roles=False, replied_user=False
+)
 
 _DEDUP_TTL = 8.0
 _DEDUP_MAX = 4096
 _recent_event_keys: OrderedDict[str, float] = OrderedDict()
 _SCHEMA_READY: set[int] = set()
 
+# Conservé pour quelques anciens modules qui importent cette constante. Le runtime ne
+# s'en sert pas comme source de vérité.
 _LEGACY_SETTING_KEYS = {
-    "moderation": ("moderation",),
-    "messages": ("messages",),
-    "members": ("members",),
-    "channels": ("server", "channels"),
-    "roles": ("roles",),
-    "voice": ("voice",),
-    "server": ("system",),
-    "tickets": ("tickets",),
-    "protection": ("automod", "protection"),
+    "moderation": ("moderation", "log_moderation"),
+    "messages": ("messages", "log_messages"),
+    "members": ("members", "log_members"),
+    "channels": ("channels", "log_channels", "log_server"),
+    "roles": ("roles", "log_roles"),
+    "voice": ("voice", "log_voice"),
+    "server": ("server", "system", "log_channel"),
+    "tickets": ("tickets", "log_tickets", "ticket_log_channel"),
+    "automod": ("automod", "protection", "log_automod"),
+    "spam": ("spam", "log_spam"),
+    "raid": ("raid", "log_raid"),
+    "resources": ("resources", "dossiers", "log_resources", "log_dossiers"),
+    "files": ("files", "log_files"),
 }
 
 
@@ -70,7 +100,7 @@ def is_primary_process() -> bool:
 
 
 def categories_with_types() -> dict[str, list[str]]:
-    return {CATEGORIES[key]: [key] for key in CATEGORY_KEYS if key in LOG_TYPES}
+    return {CATEGORIES[key]: [key] for key in CATEGORY_KEYS}
 
 
 def _now() -> int:
@@ -87,10 +117,18 @@ def make_event_key(
     message_id: int | None = None,
     discriminator: str | int | None = None,
 ) -> str:
-    return ":".join(str(part) for part in (
-        guild_id, event_type, target_id or 0, executor_id or 0,
-        audit_log_id or 0, message_id or 0, discriminator or "",
-    ))
+    return ":".join(
+        str(part)
+        for part in (
+            guild_id,
+            event_type,
+            target_id or 0,
+            executor_id or 0,
+            audit_log_id or 0,
+            message_id or 0,
+            discriminator or "",
+        )
+    )
 
 
 def _prune_recent(now: float) -> None:
@@ -122,8 +160,12 @@ def _first_snowflake(text: object) -> int | None:
 def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> str | None:
     event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
     if event_type not in {
-        "member_ban", "member_unban", "member_kick", "member_timeout",
-        "member_untimeout", "member_warn",
+        "member_ban",
+        "member_unban",
+        "member_kick",
+        "member_timeout",
+        "member_untimeout",
+        "member_warn",
     }:
         return None
     sample = " ".join(
@@ -137,7 +179,12 @@ def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> st
 class RevealIdButton(discord.ui.Button):
     def __init__(self, label: str, entity_id: int, *, row: int = 0):
         self.entity_id = int(entity_id)
-        super().__init__(label=label[:80], style=discord.ButtonStyle.secondary, custom_id=f"sxid:{self.entity_id}", row=row)
+        super().__init__(
+            label=label[:80],
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"sxid:{self.entity_id}",
+            row=row,
+        )
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
@@ -148,15 +195,31 @@ class RevealIdButton(discord.ui.Button):
 
 
 class LogActionsView(discord.ui.View):
-    def __init__(self, *, jump_url: str | None = None, ids: list[tuple[str, int]] | None = None):
+    def __init__(
+        self,
+        *,
+        jump_url: str | None = None,
+        ids: list[tuple[str, int]] | None = None,
+    ):
         super().__init__(timeout=None)
         if jump_url:
-            self.add_item(discord.ui.Button(label="Voir le message", style=discord.ButtonStyle.link, url=jump_url, row=0))
+            self.add_item(
+                discord.ui.Button(
+                    label="Voir le message",
+                    style=discord.ButtonStyle.link,
+                    url=jump_url,
+                    row=0,
+                )
+            )
         for label, entity_id in (ids or [])[:4]:
             self.add_item(RevealIdButton(label, entity_id, row=0))
 
 
-def log_actions(*, jump_url: str | None = None, ids: list[tuple[str, int]] | None = None) -> LogActionsView | None:
+def log_actions(
+    *,
+    jump_url: str | None = None,
+    ids: list[tuple[str, int]] | None = None,
+) -> LogActionsView | None:
     return LogActionsView(jump_url=jump_url, ids=ids) if jump_url or ids else None
 
 
@@ -177,6 +240,54 @@ async def _table_columns(bot, table: str) -> set[str]:
     return result
 
 
+def _legacy_case_sql(prefix: str = "NEW.log_type") -> str:
+    """CASE SQLite utilisé uniquement pour synchroniser l'ancien UI vers log_config."""
+    pairs: dict[str, str] = {}
+    for category, keys in _LEGACY_SETTING_KEYS.items():
+        for key in keys:
+            pairs[key] = category
+    pairs.update({key: key for key in CATEGORIES})
+    clauses = " ".join(
+        f"WHEN lower({prefix})='{key}' THEN '{category}'"
+        for key, category in sorted(pairs.items())
+    )
+    return f"CASE {clauses} ELSE 'server' END"
+
+
+async def _install_legacy_ui_bridge(bot) -> None:
+    """L'ancien composant +setup écrit encore dans log_settings.
+
+    On garde cette table comme *entrée de compatibilité* uniquement : deux triggers
+    répercutent immédiatement l'écriture dans log_config. Le transport ne lit jamais
+    log_settings. Ce bridge peut disparaître quand l'ancien composant UI sera retiré.
+    """
+    columns = await _table_columns(bot, "log_settings")
+    if not {"guild_id", "log_type", "channel_id", "enabled"}.issubset(columns):
+        return
+
+    case_sql = _legacy_case_sql()
+    await bot.db.execute("DROP TRIGGER IF EXISTS sentrix_log_settings_to_config_insert")
+    await bot.db.execute("DROP TRIGGER IF EXISTS sentrix_log_settings_to_config_update")
+    await bot.db.execute(
+        "CREATE TRIGGER sentrix_log_settings_to_config_insert "
+        "AFTER INSERT ON log_settings BEGIN "
+        "INSERT INTO log_config (guild_id,category,channel_id,enabled,updated_at) "
+        f"VALUES (NEW.guild_id,{case_sql},NEW.channel_id,NEW.enabled,strftime('%s','now')) "
+        "ON CONFLICT(guild_id,category) DO UPDATE SET "
+        "channel_id=excluded.channel_id,enabled=excluded.enabled,updated_at=excluded.updated_at; "
+        "END"
+    )
+    await bot.db.execute(
+        "CREATE TRIGGER sentrix_log_settings_to_config_update "
+        "AFTER UPDATE OF channel_id,enabled ON log_settings BEGIN "
+        "INSERT INTO log_config (guild_id,category,channel_id,enabled,updated_at) "
+        f"VALUES (NEW.guild_id,{case_sql},NEW.channel_id,NEW.enabled,strftime('%s','now')) "
+        "ON CONFLICT(guild_id,category) DO UPDATE SET "
+        "channel_id=excluded.channel_id,enabled=excluded.enabled,updated_at=excluded.updated_at; "
+        "END"
+    )
+
+
 async def _ensure_log_config_schema(bot) -> None:
     key = id(bot.db)
     if key in _SCHEMA_READY:
@@ -186,49 +297,59 @@ async def _ensure_log_config_schema(bot) -> None:
     if not columns:
         await bot.db.execute(
             "CREATE TABLE IF NOT EXISTS log_config ("
-            "guild_id INTEGER NOT NULL, category TEXT NOT NULL, channel_id INTEGER, "
-            "enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (guild_id, category))"
+            "guild_id INTEGER NOT NULL,category TEXT NOT NULL,channel_id INTEGER,"
+            "enabled INTEGER NOT NULL DEFAULT 1,updated_at INTEGER NOT NULL DEFAULT 0,"
+            "PRIMARY KEY (guild_id,category))"
         )
-        _SCHEMA_READY.add(key)
-        return
-
-    if "category" in columns:
-        _SCHEMA_READY.add(key)
-        return
-
-    if "log_type" not in columns:
-        logger.warning("Schéma log_config non reconnu: %s", sorted(columns))
-        return
-
-    rows = await bot.db.fetchall("SELECT guild_id,log_type,channel_id,enabled FROM log_config")
-    grouped: dict[tuple[int, str], dict[str, Any]] = {}
-    for row in rows:
-        guild_id = int(row["guild_id"])
-        category = category_for(str(row["log_type"]))
-        channel_id = int(row["channel_id"]) if row["channel_id"] else None
-        enabled = bool(row["enabled"])
-        current = grouped.get((guild_id, category))
-        if current is None:
-            grouped[(guild_id, category)] = {"channel_id": channel_id, "enabled": enabled}
-            continue
-        current["enabled"] = bool(current["enabled"] or enabled)
-        if current["channel_id"] is None and channel_id is not None:
-            current["channel_id"] = channel_id
-
-    await bot.db.execute("DROP TABLE IF EXISTS log_config_category_migration")
-    await bot.db.execute(
-        "CREATE TABLE log_config_category_migration ("
-        "guild_id INTEGER NOT NULL, category TEXT NOT NULL, channel_id INTEGER, "
-        "enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (guild_id, category))"
-    )
-    for (guild_id, category), setting in grouped.items():
+    elif "category" not in columns and "log_type" in columns:
+        rows = await bot.db.fetchall(
+            "SELECT guild_id,log_type,channel_id,enabled FROM log_config"
+        )
+        await bot.db.execute("DROP TABLE IF EXISTS log_config_category_migration")
         await bot.db.execute(
-            "INSERT INTO log_config_category_migration (guild_id,category,channel_id,enabled) VALUES (?,?,?,?)",
-            (guild_id, category, setting["channel_id"], 1 if setting["enabled"] else 0),
+            "CREATE TABLE log_config_category_migration ("
+            "guild_id INTEGER NOT NULL,category TEXT NOT NULL,channel_id INTEGER,"
+            "enabled INTEGER NOT NULL DEFAULT 1,updated_at INTEGER NOT NULL DEFAULT 0,"
+            "PRIMARY KEY (guild_id,category))"
         )
-    await bot.db.execute("DROP TABLE log_config")
-    await bot.db.execute("ALTER TABLE log_config_category_migration RENAME TO log_config")
-    logger.warning("Migration log_config par catégorie terminée: %s routes préservées.", len(grouped))
+        for row in rows:
+            category = legacy_to_category(str(row["log_type"])) or "server"
+            await bot.db.execute(
+                "INSERT INTO log_config_category_migration "
+                "(guild_id,category,channel_id,enabled,updated_at) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(guild_id,category) DO UPDATE SET "
+                "channel_id=COALESCE(log_config_category_migration.channel_id,excluded.channel_id),"
+                "enabled=CASE WHEN log_config_category_migration.channel_id IS NULL "
+                "THEN excluded.enabled ELSE log_config_category_migration.enabled END,"
+                "updated_at=MAX(log_config_category_migration.updated_at,excluded.updated_at)",
+                (
+                    int(row["guild_id"]),
+                    category,
+                    int(row["channel_id"]) if row["channel_id"] else None,
+                    int(bool(row["enabled"])),
+                    _now(),
+                ),
+            )
+        await bot.db.execute("DROP TABLE log_config")
+        await bot.db.execute(
+            "ALTER TABLE log_config_category_migration RENAME TO log_config"
+        )
+        logger.warning("Migration log_config log_type -> category terminée (%s lignes).", len(rows))
+
+    columns = await _table_columns(bot, "log_config")
+    if "updated_at" not in columns:
+        await bot.db.execute(
+            "ALTER TABLE log_config ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0"
+        )
+        await bot.db.execute(
+            "UPDATE log_config SET updated_at=strftime('%s','now') WHERE updated_at=0"
+        )
+    if "enabled" not in columns:
+        await bot.db.execute(
+            "ALTER TABLE log_config ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"
+        )
+
+    await _install_legacy_ui_bridge(bot)
     _SCHEMA_READY.add(key)
 
 
@@ -239,119 +360,265 @@ async def _guild_config(bot, guild_id: int):
         return None
 
 
-async def _general_channel_id(bot, guild_id: int) -> int | None:
-    conf = await _guild_config(bot, guild_id)
-    if not conf:
-        return None
-    try:
-        value = conf["log_channel"]
-    except (KeyError, IndexError, TypeError):
-        value = None
-    return int(value) if value else None
-
-
-async def _legacy_channel_id(bot, guild_id: int, category: str) -> int | None:
-    meta = LOG_TYPES.get(category, {})
-    legacy_column = meta.get("legacy_column")
-    conf = await _guild_config(bot, guild_id)
-    if not conf or not legacy_column:
-        return None
-    try:
-        value = conf[legacy_column]
-    except (KeyError, IndexError, TypeError):
-        value = None
-    # ``server`` n'a jamais eu de salon dédié historique : log_channel est son repli.
-    if category == "server":
-        return None
-    return int(value) if value else None
-
-
-async def _legacy_log_settings(bot, guild_id: int, category: str) -> tuple[int | None, bool | None]:
+async def _legacy_log_settings(
+    bot, guild_id: int, category: str
+) -> tuple[int | None, bool | None]:
+    """Lecture de migration uniquement, jamais utilisée pour router un envoi."""
     columns = await _table_columns(bot, "log_settings")
-    if not columns or "log_type" not in columns:
+    if not {"guild_id", "log_type", "channel_id", "enabled"}.issubset(columns):
         return None, None
-    keys = _LEGACY_SETTING_KEYS.get(category, (category,))
-    placeholders = ",".join("?" for _ in keys)
+    select = "log_type,channel_id,enabled"
+    if "updated_at" in columns:
+        select += ",updated_at"
+    else:
+        select += ",0 AS updated_at"
     try:
         rows = await bot.db.fetchall(
-            f"SELECT log_type,channel_id,enabled FROM log_settings WHERE guild_id=? AND log_type IN ({placeholders})",
-            (guild_id, *keys),
+            f"SELECT {select} FROM log_settings WHERE guild_id=?",
+            (int(guild_id),),
         )
     except Exception:
         return None, None
-    chosen_channel = None
-    enabled_values: list[bool] = []
+
+    candidates = []
     for row in rows:
-        enabled_values.append(bool(row["enabled"]))
-        if chosen_channel is None and row["channel_id"]:
-            chosen_channel = int(row["channel_id"])
-    enabled = any(enabled_values) if enabled_values else None
-    return chosen_channel, enabled
+        if legacy_to_category(str(row["log_type"])) != category:
+            continue
+        candidates.append(
+            (
+                1 if row["channel_id"] else 0,
+                int(row["updated_at"] or 0),
+                int(row["channel_id"]) if row["channel_id"] else None,
+                bool(row["enabled"]),
+            )
+        )
+    if not candidates:
+        return None, None
+    candidates.sort(reverse=True)
+    _has_channel, _updated, channel_id, enabled = candidates[0]
+    return channel_id, enabled
 
 
-async def _ensure_category_row(bot, guild_id: int, category: str) -> dict[str, Any]:
-    await _ensure_log_config_schema(bot)
-    row = await bot.db.fetchone(
-        "SELECT guild_id,category,channel_id,enabled FROM log_config WHERE guild_id=? AND category=?",
-        (guild_id, category),
-    )
-    if row is not None:
-        return dict(row)
-
-    migrated_channel, migrated_enabled = await _legacy_log_settings(bot, guild_id, category)
-    if migrated_channel is None:
-        migrated_channel = await _legacy_channel_id(bot, guild_id, category)
-    enabled = True if migrated_enabled is None else bool(migrated_enabled)
-    await bot.db.execute(
-        "INSERT INTO log_config (guild_id,category,channel_id,enabled) VALUES (?,?,?,?) "
-        "ON CONFLICT(guild_id,category) DO NOTHING",
-        (guild_id, category, migrated_channel, 1 if enabled else 0),
-    )
-    return {
-        "guild_id": guild_id,
-        "category": category,
-        "channel_id": migrated_channel,
-        "enabled": 1 if enabled else 0,
-    }
+async def _legacy_channel_id(bot, guild_id: int, category: str) -> int | None:
+    """Migration des anciennes colonnes guild_config, uniquement si log_config est vide."""
+    column = _LEGACY_COLUMNS.get(category)
+    if not column:
+        return None
+    conf = await _guild_config(bot, int(guild_id))
+    if conf is None:
+        return None
+    try:
+        value = conf[column]
+    except (KeyError, IndexError, TypeError):
+        value = None
+    return int(value) if value else None
 
 
-async def _mirror_legacy_setting(bot, guild_id: int, category: str, *, channel_id: int | None, enabled: bool) -> None:
-    """Conserve les anciens écrans/modules qui lisent encore ``log_settings``."""
+async def _ensure_legacy_ui_row(
+    bot,
+    guild_id: int,
+    category: str,
+    *,
+    channel_id: int | None,
+    enabled: bool,
+) -> None:
+    """Garantit que l'ancien UPDATE du +setup touche bien une ligne et déclenche le bridge."""
     columns = await _table_columns(bot, "log_settings")
-    required = {"guild_id", "log_type", "channel_id", "enabled"}
-    if not required.issubset(columns):
+    if not {"guild_id", "log_type", "channel_id", "enabled"}.issubset(columns):
         return
-    legacy_key = _LEGACY_SETTING_KEYS.get(category, (category,))[0]
     now_ts = _now()
     try:
         if {"created_at", "updated_at"}.issubset(columns):
             await bot.db.execute(
-                "INSERT INTO log_settings (guild_id,log_type,enabled,channel_id,created_at,updated_at) "
-                "VALUES (?,?,?,?,?,?) ON CONFLICT(guild_id,log_type) DO UPDATE SET "
-                "enabled=excluded.enabled,channel_id=excluded.channel_id,updated_at=excluded.updated_at",
-                (guild_id, legacy_key, 1 if enabled else 0, channel_id, now_ts, now_ts),
+                "INSERT INTO log_settings "
+                "(guild_id,log_type,enabled,channel_id,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT(guild_id,log_type) DO NOTHING",
+                (guild_id, category, 1 if enabled else 0, channel_id, now_ts, now_ts),
             )
         else:
             await bot.db.execute(
-                "INSERT INTO log_settings (guild_id,log_type,enabled,channel_id) VALUES (?,?,?,?) "
-                "ON CONFLICT(guild_id,log_type) DO UPDATE SET enabled=excluded.enabled,channel_id=excluded.channel_id",
-                (guild_id, legacy_key, 1 if enabled else 0, channel_id),
+                "INSERT INTO log_settings (guild_id,log_type,enabled,channel_id) "
+                "VALUES (?,?,?,?) ON CONFLICT(guild_id,log_type) DO NOTHING",
+                (guild_id, category, 1 if enabled else 0, channel_id),
             )
     except Exception:
-        logger.debug("Miroir log_settings ignoré pour %s/%s", guild_id, category, exc_info=True)
+        logger.debug("Création ligne UI legacy ignorée %s/%s", guild_id, category, exc_info=True)
+
+
+async def _ensure_category_row(bot, guild_id: int, category: str) -> dict[str, Any]:
+    await _ensure_log_config_schema(bot)
+    canonical = category if category in CATEGORIES else category_for(category)
+    row = await bot.db.fetchone(
+        "SELECT guild_id,category,channel_id,enabled,updated_at FROM log_config "
+        "WHERE guild_id=? AND category=?",
+        (int(guild_id), canonical),
+    )
+
+    # Une ligne canonique non vide gagne toujours.
+    if row is not None and row["channel_id"]:
+        result = dict(row)
+        await _ensure_legacy_ui_row(
+            bot,
+            int(guild_id),
+            canonical,
+            channel_id=int(row["channel_id"]),
+            enabled=bool(row["enabled"]),
+        )
+        return result
+
+    # Migration prudente : log_settings d'abord, puis anciennes colonnes guild_config.
+    legacy_channel, legacy_enabled = await _legacy_log_settings(
+        bot, int(guild_id), canonical
+    )
+    source = "log_settings" if legacy_channel is not None else None
+    if legacy_channel is None:
+        legacy_channel = await _legacy_channel_id(bot, int(guild_id), canonical)
+        source = "guild_config" if legacy_channel is not None else None
+
+    if row is None:
+        enabled = bool(legacy_enabled) if legacy_enabled is not None else True
+        await bot.db.execute(
+            "INSERT INTO log_config (guild_id,category,channel_id,enabled,updated_at) "
+            "VALUES (?,?,?,?,?) ON CONFLICT(guild_id,category) DO NOTHING",
+            (
+                int(guild_id),
+                canonical,
+                legacy_channel,
+                1 if enabled else 0,
+                _now(),
+            ),
+        )
+    elif legacy_channel is not None:
+        # Remplit uniquement une route vide. Une vraie route canonique n'est jamais écrasée.
+        enabled = bool(legacy_enabled) if legacy_enabled is not None else bool(row["enabled"])
+        await bot.db.execute(
+            "UPDATE log_config SET channel_id=?,enabled=?,updated_at=? "
+            "WHERE guild_id=? AND category=? AND channel_id IS NULL",
+            (
+                legacy_channel,
+                1 if enabled else 0,
+                _now(),
+                int(guild_id),
+                canonical,
+            ),
+        )
+        logger.warning(
+            "MIGRATION LOGS route restaurée guild=%s category=%s channel=%s source=%s",
+            guild_id,
+            canonical,
+            legacy_channel,
+            source,
+        )
+
+    final = await bot.db.fetchone(
+        "SELECT guild_id,category,channel_id,enabled,updated_at FROM log_config "
+        "WHERE guild_id=? AND category=?",
+        (int(guild_id), canonical),
+    )
+    result = dict(final) if final is not None else {
+        "guild_id": int(guild_id),
+        "category": canonical,
+        "channel_id": None,
+        "enabled": 1,
+        "updated_at": _now(),
+    }
+    await _ensure_legacy_ui_row(
+        bot,
+        int(guild_id),
+        canonical,
+        channel_id=int(result["channel_id"]) if result.get("channel_id") else None,
+        enabled=bool(result.get("enabled", 1)),
+    )
+    return result
+
+
+async def _mirror_legacy_setting(
+    bot,
+    guild_id: int,
+    category: str,
+    *,
+    channel_id: int | None,
+    enabled: bool,
+) -> None:
+    """Compatibilité UI uniquement. Le runtime ne relit jamais cette valeur."""
+    await _ensure_legacy_ui_row(
+        bot,
+        int(guild_id),
+        category,
+        channel_id=channel_id,
+        enabled=enabled,
+    )
+    columns = await _table_columns(bot, "log_settings")
+    if not {"guild_id", "log_type", "channel_id", "enabled"}.issubset(columns):
+        return
+    now_ts = _now()
+    if "updated_at" in columns:
+        await bot.db.execute(
+            "UPDATE log_settings SET channel_id=?,enabled=?,updated_at=? "
+            "WHERE guild_id=? AND log_type=?",
+            (channel_id, 1 if enabled else 0, now_ts, int(guild_id), category),
+        )
+    else:
+        await bot.db.execute(
+            "UPDATE log_settings SET channel_id=?,enabled=? "
+            "WHERE guild_id=? AND log_type=?",
+            (channel_id, 1 if enabled else 0, int(guild_id), category),
+        )
+
+
+async def get_log_config(bot, guild_id: int, category: str) -> dict | None:
+    canonical = category if category in CATEGORIES else category_for(category)
+    row = await _ensure_category_row(bot, int(guild_id), canonical)
+    return {
+        "guild_id": int(row["guild_id"]),
+        "category": canonical,
+        "channel_id": int(row["channel_id"]) if row.get("channel_id") else None,
+        "enabled": bool(row.get("enabled", 1)),
+        "updated_at": int(row.get("updated_at") or 0),
+    }
+
+
+async def set_log_config(
+    bot,
+    guild_id: int,
+    category: str,
+    *,
+    channel_id: int | None,
+    enabled: bool,
+) -> dict:
+    """Écriture atomique unique utilisée par les nouveaux écrans de configuration."""
+    canonical = category if category in CATEGORIES else category_for(category)
+    if canonical not in CATEGORIES:
+        raise ValueError(f"unknown_log_category:{category}")
+    await _ensure_log_config_schema(bot)
+    normalized = int(channel_id) if channel_id is not None else None
+    await bot.db.execute(
+        "INSERT INTO log_config (guild_id,category,channel_id,enabled,updated_at) "
+        "VALUES (?,?,?,?,?) ON CONFLICT(guild_id,category) DO UPDATE SET "
+        "channel_id=excluded.channel_id,enabled=excluded.enabled,updated_at=excluded.updated_at",
+        (int(guild_id), canonical, normalized, 1 if enabled else 0, _now()),
+    )
+    await _mirror_legacy_setting(
+        bot,
+        int(guild_id),
+        canonical,
+        channel_id=normalized,
+        enabled=bool(enabled),
+    )
+    return await get_log_config(bot, int(guild_id), canonical)
 
 
 async def get_log_setting(bot, guild_id: int, log_type: str) -> dict:
-    category, _emoji, _kind = resolve(log_type)
-    row = await _ensure_category_row(bot, guild_id, category)
-    dedicated = int(row["channel_id"]) if row.get("channel_id") else None
-    general = await _general_channel_id(bot, guild_id)
-    effective = dedicated or general
+    category = log_type if log_type in CATEGORIES else category_for(log_type)
+    config = await get_log_config(bot, int(guild_id), category)
+    if config is None:
+        return {**DEFAULT_LOG_SETTING, "category": category}
+    channel_id = config["channel_id"]
     return {
-        "enabled": bool(row.get("enabled", 1)),
-        "channel_id": effective,
-        "dedicated_channel_id": dedicated,
-        "fallback_channel_id": general if not dedicated else None,
+        "enabled": bool(config["enabled"]),
+        "channel_id": channel_id,
+        "dedicated_channel_id": channel_id,
+        "fallback_channel_id": None,
         "category": category,
         "include_content": True,
         "include_attachments": True,
@@ -361,44 +628,57 @@ async def get_log_setting(bot, guild_id: int, log_type: str) -> dict:
 
 
 async def get_all_log_settings(bot, guild_id: int) -> dict[str, dict]:
-    return {category: await get_log_setting(bot, guild_id, category) for category in LOG_TYPES}
+    return {
+        category: await get_log_setting(bot, int(guild_id), category)
+        for category in LOG_TYPES
+    }
 
 
-async def set_log_enabled(bot, guild_id: int, log_type: str, enabled: bool) -> dict:
-    category, _emoji, _kind = resolve(log_type)
-    current = await get_log_setting(bot, guild_id, category)
-    if enabled and not current["channel_id"]:
-        raise ValueError("channel_required")
-    await bot.db.execute(
-        "UPDATE log_config SET enabled=? WHERE guild_id=? AND category=?",
-        (1 if enabled else 0, guild_id, category),
+async def set_log_channel(
+    bot, guild_id: int, log_type: str, channel_id: int | None
+) -> dict:
+    category = log_type if log_type in CATEGORIES else category_for(log_type)
+    current = await get_log_config(bot, int(guild_id), category)
+    enabled = bool(current["enabled"]) if current is not None else channel_id is not None
+    saved = await set_log_config(
+        bot,
+        int(guild_id),
+        category,
+        channel_id=channel_id,
+        enabled=enabled if channel_id is None else True,
     )
-    await _mirror_legacy_setting(
-        bot, guild_id, category,
-        channel_id=current.get("dedicated_channel_id"),
+    return await get_log_setting(bot, int(guild_id), saved["category"])
+
+
+async def set_log_enabled(
+    bot, guild_id: int, log_type: str, enabled: bool
+) -> dict:
+    category = log_type if log_type in CATEGORIES else category_for(log_type)
+    current = await get_log_config(bot, int(guild_id), category)
+    channel_id = current["channel_id"] if current else None
+    if enabled and channel_id is None:
+        raise ValueError("channel_required")
+    saved = await set_log_config(
+        bot,
+        int(guild_id),
+        category,
+        channel_id=channel_id,
         enabled=bool(enabled),
     )
-    return await get_log_setting(bot, guild_id, category)
+    return await get_log_setting(bot, int(guild_id), saved["category"])
 
 
-async def set_log_channel(bot, guild_id: int, log_type: str, channel_id: int | None) -> dict:
-    category, _emoji, _kind = resolve(log_type)
-    row = await _ensure_category_row(bot, guild_id, category)
-    enabled = bool(row.get("enabled", 1))
-    await bot.db.execute(
-        "UPDATE log_config SET channel_id=? WHERE guild_id=? AND category=?",
-        (channel_id, guild_id, category),
-    )
-    await _mirror_legacy_setting(bot, guild_id, category, channel_id=channel_id, enabled=enabled)
-    return await get_log_setting(bot, guild_id, category)
-
-
-def validate_channel(guild: discord.Guild, channel_id: int | None, *, needs_file: bool = False):
+def validate_channel(
+    guild: discord.Guild,
+    channel_id: int | None,
+    *,
+    needs_file: bool = False,
+):
     if not channel_id:
         return False, "aucun salon configuré"
     channel = guild.get_channel(int(channel_id))
-    if channel is None:
-        return False, "salon introuvable"
+    if not isinstance(channel, discord.TextChannel):
+        return False, "salon introuvable ou non textuel"
     me = guild.me
     if me is None:
         return False, "membre bot introuvable dans le cache du serveur"
@@ -409,9 +689,36 @@ def validate_channel(guild: discord.Guild, channel_id: int | None, *, needs_file
         return False, "le bot ne peut pas envoyer de messages dans ce salon"
     if not perms.embed_links:
         return False, "le bot ne peut pas intégrer d'embed dans ce salon"
+    if not perms.read_message_history:
+        return False, "le bot ne peut pas lire l'historique de ce salon"
     if needs_file and not perms.attach_files:
         return False, "le bot ne peut pas joindre de fichiers dans ce salon"
     return True, "ok"
+
+
+def _event_from_key(event_key: str | None) -> str | None:
+    if not event_key:
+        return None
+    parts = str(event_key).split(":")
+    if len(parts) < 2:
+        return None
+    candidate = canonical_event_type(parts[1])
+    return candidate if candidate in LOG_REGISTRY else None
+
+
+async def route_for(bot, guild: discord.Guild, log_type: str) -> tuple[discord.TextChannel | None, str, str | None]:
+    category = category_for(log_type)
+    config = await get_log_config(bot, guild.id, category)
+    if config is None:
+        return None, category, "NO CONFIG"
+    if not config["enabled"]:
+        return None, category, "DISABLED"
+    if config["channel_id"] is None:
+        return None, category, "NO CHANNEL"
+    channel = guild.get_channel(int(config["channel_id"]))
+    if not isinstance(channel, discord.TextChannel):
+        return None, category, "CHANNEL GONE"
+    return channel, category, None
 
 
 async def send_log(
@@ -427,12 +734,16 @@ async def send_log(
     identity_id: int | None = None,
     identity_icon: str | None = None,
 ) -> bool:
-    """Point de sortie central : catégorie, déduplication puis Components V2."""
+    """Pipeline unique : event -> catégorie -> log_config -> validation -> Components V2."""
     if not is_primary_process():
         return False
 
-    event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
-    category, _emoji, _kind = resolve(event_type, embed.title or "", embed.description or "")
+    # Les listeners officiels créent un event_key avec le vrai événement. Il gagne sur
+    # les anciennes pseudo-clés comme log_server/log_roles et supprime leur ambiguïté.
+    event_type = _event_from_key(event_key) or canonical_event_type(
+        log_type, embed.title or "", embed.description or ""
+    )
+    category = category_for(event_type, embed.title or "", embed.description or "")
 
     from utils import embeds as embeds_mod
     try:
@@ -446,22 +757,49 @@ async def send_log(
         logger.debug("Log dupliqué ignoré guild=%s type=%s", guild.id, event_type)
         return False
 
-    try:
-        setting = await get_log_setting(bot, guild.id, category)
-    except Exception:
-        logger.exception("Impossible de résoudre la configuration de log %s/%s.", guild.id, category)
+    config = await get_log_config(bot, guild.id, category)
+    channel_id = config["channel_id"] if config else None
+    if config is None:
+        logger.info(
+            "SENTRIX ROUTE log_type=%s category=%s channel_id=None source=log_config skipped=NO CONFIG",
+            event_type,
+            category,
+        )
+        return False
+    if not config["enabled"]:
+        logger.info(
+            "SENTRIX ROUTE log_type=%s category=%s channel_id=%s source=log_config skipped=DISABLED",
+            event_type,
+            category,
+            channel_id,
+        )
+        return False
+    if channel_id is None:
+        logger.info(
+            "SENTRIX ROUTE log_type=%s category=%s channel_id=None source=log_config skipped=NO CHANNEL",
+            event_type,
+            category,
+        )
         return False
 
-    if not setting["enabled"]:
-        logger.info("Log désactivé guild=%s category=%s type=%s", guild.id, category, event_type)
-        return False
-
-    ok, reason = validate_channel(guild, setting["channel_id"], needs_file=True)
+    ok, reason = validate_channel(guild, channel_id, needs_file=True)
     if not ok:
-        logger.warning("Log non envoyé guild=%s category=%s type=%s: %s", guild.id, category, event_type, reason)
+        logger.warning(
+            "SENTRIX ROUTE log_type=%s category=%s channel_id=%s source=log_config skipped=%s",
+            event_type,
+            category,
+            channel_id,
+            reason,
+        )
         return False
 
-    channel = guild.get_channel(int(setting["channel_id"]))
+    channel = guild.get_channel(int(channel_id))
+    logger.info(
+        "SENTRIX ROUTE log_type=%s category=%s channel_id=%s source=log_config",
+        event_type,
+        category,
+        channel_id,
+    )
     return await send_wide_log(
         channel,
         rendered,
@@ -474,29 +812,52 @@ async def send_log(
     )
 
 
-async def send_test_log(bot, guild: discord.Guild, log_type: str, author: discord.abc.User) -> tuple[bool, str]:
-    category, _emoji, _kind = resolve(log_type)
-    setting = await get_log_setting(bot, guild.id, category)
-    if not setting["enabled"]:
+async def send_test_log(
+    bot,
+    guild: discord.Guild,
+    log_type: str,
+    author: discord.abc.User,
+) -> tuple[bool, str]:
+    category = log_type if log_type in CATEGORIES else category_for(log_type)
+    config = await get_log_config(bot, guild.id, category)
+    if config is None or not config["enabled"]:
         return False, "Cette catégorie de logs est désactivée."
-    ok, reason = validate_channel(guild, setting["channel_id"], needs_file=True)
+    ok, reason = validate_channel(guild, config["channel_id"], needs_file=True)
     if not ok:
         return False, f"Impossible d'envoyer le test : {reason}."
 
     from utils import embeds as embeds_mod
     test_embed = embeds_mod.log_embed(
         "Test de log",
-        description=f"<@{author.id}> a lancé un test de la catégorie **{CATEGORIES.get(category, category)}**.",
+        description=(
+            f"<@{author.id}> a lancé un test de la catégorie "
+            f"**{CATEGORIES.get(category, category)}**."
+        ),
     )
-    channel = guild.get_channel(int(setting["channel_id"]))
+    channel = guild.get_channel(int(config["channel_id"]))
     sent = await send_wide_log(
         channel,
         test_embed,
         log_type=category,
-        identity_name=getattr(author, "display_name", None) or getattr(author, "name", None),
+        identity_name=getattr(author, "display_name", None)
+        or getattr(author, "name", None),
         identity_id=author.id,
-        identity_icon=str(getattr(getattr(author, "display_avatar", None), "url", "") or "") or None,
+        identity_icon=str(
+            getattr(getattr(author, "display_avatar", None), "url", "") or ""
+        )
+        or None,
     )
     if sent:
         return True, f"Test Components V2 envoyé dans {channel.mention}."
     return False, "Échec du renderer Components V2. Vérifiez Railway."
+
+
+__all__ = [
+    "CATEGORY_ORDER", "DEFAULT_LOG_SETTING", "LOG_ALLOWED_MENTIONS", "LOG_TYPES",
+    "LogActionsView", "RevealIdButton", "_ensure_category_row", "_ensure_log_config_schema",
+    "_legacy_channel_id", "_legacy_log_settings", "_mirror_legacy_setting",
+    "categories_with_types", "get_all_log_settings", "get_log_config", "get_log_setting",
+    "is_primary_process", "log_actions", "make_event_key", "route_for", "semantic_event_key",
+    "send_log", "send_test_log", "set_log_channel", "set_log_config", "set_log_enabled",
+    "validate_channel",
+]
