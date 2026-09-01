@@ -206,18 +206,138 @@ def install() -> bool:
     original_build_embed = SetupView.build_embed
     original_render_home = SetupView._render_home
 
+    async def _etat_configuration(vue) -> tuple[list[str], list[str], list[str]]:
+        """Ce qui est configure, ce qui manque, et les permissions absentes du bot.
+
+        Lecture seule. Chaque bloc est isole : une categorie illisible n'empeche pas
+        d'afficher les autres, le panneau doit toujours s'ouvrir.
+        """
+        configures: list[str] = []
+        manquants: list[str] = []
+        alertes: list[str] = []
+
+        guild = vue.bot.get_guild(int(vue.guild_id))
+        if guild is None:
+            return configures, manquants, alertes
+
+        # --- reglages stockes dans guild_config -----------------------------
+        essentiels = (
+            ("mod_role", "Rôle staff", True),
+            ("log_channel", "Salon de logs", True),
+            ("welcome_channel", "Salon de bienvenue", False),
+            ("goodbye_channel", "Salon de départ", False),
+            ("autorole", "Rôle automatique", False),
+            ("ticket_log_channel", "Logs des tickets", False),
+        )
+        try:
+            conf = await vue.bot.db.get_guild_config(int(vue.guild_id))
+        except Exception:
+            logger.exception("Etat setup : lecture de guild_config impossible.")
+            conf = None
+        if conf is not None:
+            for champ, libelle, essentiel in essentiels:
+                try:
+                    valeur = conf[champ]
+                except (KeyError, IndexError, TypeError):
+                    valeur = None
+                if valeur:
+                    configures.append(libelle)
+                elif essentiel:
+                    manquants.append(f"**{libelle}**")
+                else:
+                    manquants.append(libelle)
+
+        # --- routes de logs par categorie -----------------------------------
+        try:
+            from utils import log_service
+
+            actives = 0
+            total = 0
+            for categorie in log_service.CATEGORIES:
+                total += 1
+                route = await log_service.get_log_config(vue.bot, int(vue.guild_id), categorie)
+                if route and route.get("channel_id") and route.get("enabled"):
+                    actives += 1
+            if actives:
+                configures.append(f"Journaux ({actives}/{total} catégories)")
+            else:
+                manquants.append("**Journaux** — aucune catégorie active")
+        except Exception:
+            logger.exception("Etat setup : lecture du routage des logs impossible.")
+
+        # --- permissions manquantes du bot ----------------------------------
+        try:
+            me = guild.me
+            if me is not None:
+                requises = (
+                    ("manage_roles", "Gérer les rôles"),
+                    ("manage_channels", "Gérer les salons"),
+                    ("kick_members", "Expulser des membres"),
+                    ("ban_members", "Bannir des membres"),
+                    ("manage_messages", "Gérer les messages"),
+                    ("view_audit_log", "Voir les logs d'audit"),
+                )
+                absentes = [
+                    libelle for attribut, libelle in requises
+                    if not getattr(me.guild_permissions, attribut, False)
+                ]
+                if absentes:
+                    alertes.append(
+                        "SentriX n'a pas : " + ", ".join(f"**{a}**" for a in absentes[:4])
+                        + ("…" if len(absentes) > 4 else "")
+                    )
+        except Exception:
+            logger.exception("Etat setup : lecture des permissions du bot impossible.")
+
+        return configures, manquants, alertes
+
     async def spacious_home_embed(self):
         e = await original_home_embed(self)
+
+        configures, manquants, alertes = [], [], []
+        try:
+            configures, manquants, alertes = await _etat_configuration(self)
+        except Exception:
+            logger.exception("Etat setup indisponible ; panneau affiche sans resume.")
+
+        total = len(configures) + len(manquants)
+        if total:
+            entete = f"**{len(configures)} sur {total}** réglages essentiels sont en place."
+        else:
+            entete = "Configurez SentriX sans quitter ce panneau."
+
         e.description = (
-            "Configurez SentriX sans quitter ce panneau.\n\n"
+            f"{entete}\n\n"
             "**1.** Choisissez une catégorie dans le menu.\n"
             "**2.** Modifiez uniquement ce dont vous avez besoin.\n"
-            "**3.** Enregistrez, puis utilisez le diagnostic pour vérifier le serveur.\n\n"
-            "Vous pouvez aussi lancer une configuration automatique avec un profil préparé."
+            "**3.** Enregistrez, puis utilisez le diagnostic pour vérifier le serveur."
         )
-        if len(e.fields) < 24:
+
+        # L'etat passe AVANT les instructions : c'est la premiere chose a voir.
+        if alertes and len(e.fields) < 24:
             e.insert_field_at(
                 0,
+                name="⚠️ Permissions manquantes",
+                value="\n".join(alertes) + "\nCertains réglages resteront sans effet tant que ce n'est pas corrigé.",
+                inline=False,
+            )
+        if manquants and len(e.fields) < 24:
+            e.insert_field_at(
+                0,
+                name=f"○ À configurer ({len(manquants)})",
+                value=" · ".join(manquants[:8]) + ("…" if len(manquants) > 8 else ""),
+                inline=False,
+            )
+        if configures and len(e.fields) < 24:
+            e.insert_field_at(
+                0,
+                name=f"● Déjà configuré ({len(configures)})",
+                value=" · ".join(configures[:8]) + ("…" if len(configures) > 8 else ""),
+                inline=False,
+            )
+
+        if len(e.fields) < 24:
+            e.add_field(
                 name="Accès rapide",
                 value=(
                     "**Configuration manuelle** — menu principal ci-dessous\n"
