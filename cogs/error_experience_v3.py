@@ -51,7 +51,7 @@ def _command_candidates(bot: commands.Bot) -> tuple[list[str], dict[str, str]]:
     for command in bot.walk_commands():
         if getattr(command, "hidden", False):
             continue
-        for value in (command.qualified_name, command.name, *(getattr(command, "aliases", ()) or ())):
+        for value in (command.qualified_name, command.name, *(getattr(command, "aliases", ()) or ()):
             key = str(value or "").casefold().strip()
             if key:
                 candidates.append(key)
@@ -92,6 +92,20 @@ def _can_reply_unknown(bot: commands.Bot, ctx: commands.Context) -> bool:
 async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: commands.CommandError) -> bool:
     base = getattr(error, "original", error)
     prefix = _prefix(ctx)
+
+    # Diagnostic volontairement explicite pour +logsdiag : cette commande sert justement
+    # à retrouver les erreurs que le handler utilisateur masque normalement.
+    command = getattr(ctx, "command", None)
+    command_name = str(getattr(command, "qualified_name", "") or getattr(ctx, "invoked_with", "")).casefold()
+    if command_name == "logsdiag":
+        detail = str(base).replace("```", "'''").replace("\n", " ")[:1500]
+        await ctx.send(
+            "```text\n"
+            f"LOGSDIAG COMMAND ERROR\nTYPE={type(base).__name__}\nDETAIL={detail or '(aucun message)'}\n"
+            "```"
+        )
+        logger.exception("+logsdiag a échoué", exc_info=base if isinstance(base, BaseException) else None)
+        return True
 
     if isinstance(base, commands.CommandNotFound):
         if not _can_reply_unknown(bot, ctx):
