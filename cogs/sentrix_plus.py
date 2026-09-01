@@ -52,6 +52,8 @@ def _human_delay(seconds: int) -> str:
 
 class SentriXPlus(commands.Cog, name="SentriXPlus"):
     def __init__(self, bot: commands.Bot):
+        # Cache negatif : la plupart des salons n'ont aucun sticky.
+        self._no_sticky: dict[int, bool] = {}
         self.bot = bot
         self._sticky_cooldowns: dict[int, float] = {}
 
@@ -485,6 +487,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             "INSERT OR REPLACE INTO sentrix_sticky(channel_id,guild_id,content,message_id,every_messages,counter) VALUES(?,?,?,?,5,0)",
             (channel.id, ctx.guild.id, content, sent.id),
         )
+        self._no_sticky.pop(int(channel.id), None)
         await ctx.send(f"Message sticky activé dans {channel.mention}. Il remontera automatiquement tous les 5 messages.")
 
     @commands.command(name="sticky-every")
@@ -513,17 +516,26 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
         await self.bot.db.execute("DELETE FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
+        self._no_sticky[int(channel.id)] = True
         await ctx.send(f"Sticky désactivé dans {channel.mention}.")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.guild is None or message.author.bot:
             return
+        # Cache NEGATIF : un sticky n'existe que dans quelques salons. Sans ce cache,
+        # CHAQUE message de CHAQUE salon interrogeait la table. Seul le cas « aucun
+        # sticky ici » est cache ; des qu'un sticky existe on relit a chaque fois, car
+        # le compteur doit rester exact.
+        channel_id = int(message.channel.id)
+        if self._no_sticky.get(channel_id) is True:
+            return
         row = await self.bot.db.fetchone(
             "SELECT content,message_id,every_messages,counter FROM sentrix_sticky WHERE channel_id=?",
-            (message.channel.id,),
+            (channel_id,),
         )
         if not row:
+            self._no_sticky[channel_id] = True
             return
         if row["message_id"] and int(row["message_id"]) == int(message.id):
             return
