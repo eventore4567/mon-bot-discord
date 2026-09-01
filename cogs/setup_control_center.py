@@ -44,7 +44,7 @@ AUTOMOD = (
 BOT_PERMS = {
     "moderation": ("manage_messages", "moderate_members", "kick_members", "ban_members"),
     "security": ("manage_messages", "manage_roles", "manage_channels", "view_audit_log"),
-    "logs": ("view_channel", "send_messages", "embed_links", "view_audit_log"),
+    "logs": ("view_channel", "send_messages", "embed_links", "attach_files", "read_message_history", "view_audit_log"),
     "tickets": ("manage_channels", "manage_roles", "view_channel", "send_messages"),
     "welcome": ("view_channel", "send_messages", "embed_links", "manage_roles"),
     "roles": ("manage_roles",),
@@ -55,6 +55,7 @@ BOT_PERMS = {
 PERM_LABELS = {
     "view_channel": "Voir les salons", "send_messages": "Envoyer des messages",
     "embed_links": "Intégrer des liens", "attach_files": "Joindre des fichiers",
+    "read_message_history": "Lire l’historique des messages",
     "manage_messages": "Gérer les messages", "moderate_members": "Modérer les membres",
     "kick_members": "Expulser des membres", "ban_members": "Bannir des membres",
     "manage_roles": "Gérer les rôles", "manage_channels": "Gérer les salons",
@@ -157,9 +158,9 @@ async def module_statuses(bot, guild, conf):
             if channel is None:
                 log_errors.append(f"{meta['category']} : salon introuvable.")
             else:
-                perms = channel.permissions_for(guild.me)
-                if not (perms.view_channel and perms.send_messages):
-                    log_errors.append(f"{meta['category']} : permissions du salon insuffisantes.")
+                ok, reason = log_service.validate_channel(guild, channel.id, needs_file=True)
+                if not ok:
+                    log_errors.append(f"{meta['category']} : {reason}.")
     result["logs"] = (
         ConfigState.ERROR if log_errors else ConfigState.ACTIVE if active_logs else ConfigState.INACTIVE if configured_logs else ConfigState.UNCONFIGURED,
         f"{active_logs} type(s) actif(s).",
@@ -340,14 +341,44 @@ class LogChannelSelect(discord.ui.ChannelSelect):
         )
 
     async def callback(self, interaction):
-        setting = await log_service.get_log_setting(self.owner.bot, self.owner.guild.id, self.owner.selected_log)
+        category = self.owner.selected_log
         channel_id = self.values[0].id if self.values else None
-        await self.owner.bot.db.execute(
-            "UPDATE log_settings SET channel_id = ?, enabled = ?, updated_at = strftime('%s','now') "
-            "WHERE guild_id = ? AND log_type = ?",
-            (channel_id, int(bool(setting.get("enabled")) and channel_id is not None), self.owner.guild.id, self.owner.selected_log),
+        if channel_id is not None:
+            ok, reason = log_service.validate_channel(
+                self.owner.guild,
+                channel_id,
+                needs_file=True,
+            )
+            if not ok:
+                return await interaction.response.send_message(
+                    embed=embeds.error(
+                        f"Ce salon ne peut pas recevoir les logs SentriX : **{reason}**."
+                    ),
+                    ephemeral=True,
+                )
+
+        await log_service.set_log_config(
+            self.owner.bot,
+            self.owner.guild.id,
+            category,
+            channel_id=channel_id,
+            enabled=channel_id is not None,
         )
-        await self.owner.audit(interaction.user.id, self.owner.selected_log, channel_id)
+        saved = await log_service.get_log_config(
+            self.owner.bot,
+            self.owner.guild.id,
+            category,
+        )
+        if channel_id is not None and (
+            saved is None or int(saved.get("channel_id") or 0) != int(channel_id)
+        ):
+            return await interaction.response.send_message(
+                embed=embeds.error(
+                    "La configuration du salon de logs n’a pas été enregistrée correctement."
+                ),
+                ephemeral=True,
+            )
+        await self.owner.audit(interaction.user.id, category, channel_id)
         await self.owner.refresh(interaction)
 
 
@@ -543,10 +574,25 @@ class SetupView(discord.ui.View):
                 toggle = discord.ui.Button(label="Activer / désactiver ce log", style=discord.ButtonStyle.primary, row=4)
 
                 async def toggle_log(interaction):
-                    setting = await log_service.get_log_setting(self.bot, self.guild.id, self.selected_log)
-                    await self.bot.db.execute(
-                        "UPDATE log_settings SET enabled = ?, updated_at = strftime('%s','now') WHERE guild_id = ? AND log_type = ?",
-                        (0 if setting.get("enabled") else 1, self.guild.id, self.selected_log),
+                    setting = await log_service.get_log_setting(
+                        self.bot,
+                        self.guild.id,
+                        self.selected_log,
+                    )
+                    channel_id = setting.get("channel_id")
+                    if not setting.get("enabled") and not channel_id:
+                        return await interaction.response.send_message(
+                            embed=embeds.error(
+                                "Choisissez d’abord un salon pour cette catégorie de logs."
+                            ),
+                            ephemeral=True,
+                        )
+                    await log_service.set_log_config(
+                        self.bot,
+                        self.guild.id,
+                        self.selected_log,
+                        channel_id=channel_id,
+                        enabled=not bool(setting.get("enabled")),
                     )
                     await self.refresh(interaction)
 
