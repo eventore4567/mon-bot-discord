@@ -342,7 +342,10 @@ async def _reset_config(bot, guild: discord.Guild, target: str) -> str:
     if target not in set(core.MODULES) | {"permissions", "all"}: raise ValueError("module_inconnu")
     targets = list(core.MODULES) + ["permissions"] if target == "all" else [target]; gid = guild.id
     for item in targets:
-        if item in core.MODULES: await bot.db.execute("DELETE FROM module_settings WHERE guild_id=? AND module=?", (gid, item))
+        if item in core.MODULES:
+            await bot.db.execute("DELETE FROM module_settings WHERE guild_id=? AND module=?", (gid, item))
+            # SQL direct : le cache de core ne peut pas le deviner.
+            core.invalidate_module_cache(gid, item)
         if item == "permissions": await bot.db.execute("DELETE FROM command_role_permissions WHERE guild_id=?", (gid,))
         elif item == "security":
             await bot.db.execute("INSERT INTO automod_settings (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING", (gid,))

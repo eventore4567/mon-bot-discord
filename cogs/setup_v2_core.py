@@ -123,14 +123,66 @@ async def ensure_schema(bot: commands.Bot) -> None:
         logger.info("SentriX V2: schéma prêt.")
 
 
+# --------------------------------------------------------------------------
+# Cache des interrupteurs de modules
+#
+# Mesure : un message ordinaire declenchait TROIS fois la meme requete
+# "SELECT enabled FROM module_settings WHERE guild_id=? AND module=?", depuis trois
+# modules differents. C'est le poste le plus lourd du chemin chaud.
+#
+# Un interrupteur de module est de la CONFIGURATION : une valeur perimee laisserait
+# tourner un module qu'un administrateur vient de couper. L'invalidation est donc
+# explicite a chaque ecriture, et un TTL court sert uniquement de filet si une
+# nouvelle ecriture apparaissait un jour sans invalidation.
+#
+# Les DEUX seuls ecrivains de module_settings sont :
+#   - set_module_enabled (ci-dessous)
+#   - setup_v2_completion, qui supprime la ligne lors d'une reinitialisation
+# Tous deux appellent invalidate_module_cache.
+_MODULE_ROW_CACHE: dict[tuple[int, str], tuple[float, int | None]] = {}
+_MODULE_CACHE_TTL = 60.0
+
+
+def invalidate_module_cache(guild_id: int | None = None, module: str | None = None) -> None:
+    """Purge le cache. Sans argument : tout. Avec : la seule entree concernee."""
+    if guild_id is None:
+        _MODULE_ROW_CACHE.clear()
+        return
+    if module is None:
+        for key in [k for k in _MODULE_ROW_CACHE if k[0] == int(guild_id)]:
+            _MODULE_ROW_CACHE.pop(key, None)
+        return
+    _MODULE_ROW_CACHE.pop((int(guild_id), str(module)), None)
+
+
+async def module_row_value(bot: commands.Bot, guild_id: int, module: str) -> int | None:
+    """Valeur brute de module_settings.enabled, ou None si aucune ligne.
+
+    Point de lecture unique et mis en cache. Les appelants appliquent ensuite LEUR
+    propre semantique : c'est volontaire, module_enabled et access_matrix n'ont pas
+    exactement les memes regles de repli et il ne faut pas les confondre.
+    """
+    key = (int(guild_id), str(module))
+    cached = _MODULE_ROW_CACHE.get(key)
+    if cached is not None and (time.monotonic() - cached[0]) < _MODULE_CACHE_TTL:
+        return cached[1]
+    row = await bot.db.fetchone(
+        "SELECT enabled FROM module_settings WHERE guild_id=? AND module=?",
+        (int(guild_id), str(module)),
+    )
+    value = None if row is None else int(row["enabled"])
+    if len(_MODULE_ROW_CACHE) > 5000:
+        _MODULE_ROW_CACHE.clear()
+    _MODULE_ROW_CACHE[key] = (time.monotonic(), value)
+    return value
+
+
 async def module_enabled(bot: commands.Bot, guild_id: int, module: str) -> bool:
     if module not in MODULES:
         return True
     await ensure_schema(bot)
-    row = await bot.db.fetchone(
-        "SELECT enabled FROM module_settings WHERE guild_id=? AND module=?",
-        (int(guild_id), module),
-    )
+    value = await module_row_value(bot, guild_id, module)
+    row = None if value is None else {"enabled": value}
     if row is None:
         if module == "ai":
             ai = await bot.db.fetchone("SELECT enabled FROM ai_settings WHERE guild_id=?", (int(guild_id),))
@@ -158,6 +210,9 @@ async def set_module_enabled(
         "updated_by=excluded.updated_by, updated_at=excluded.updated_at",
         (int(guild_id), module, 1 if enabled else 0, actor_id, now_ts),
     )
+    # Invalidation immediate : couper un module doit prendre effet au message suivant,
+    # pas au bout du TTL.
+    invalidate_module_cache(guild_id, module)
     if module == "ai":
         await bot.db.execute(
             "INSERT INTO ai_settings (guild_id,enabled,updated_at) VALUES (?,?,?) "

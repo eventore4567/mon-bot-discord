@@ -566,7 +566,21 @@ class Backend:
         return str(reason or "Aucune raison fournie")
 
     async def module_enabled(self, guild_id: int, module: str) -> bool:
+        """Meme semantique qu'avant : aucune ligne = module actif.
+
+        La LECTURE passe par le cache de cogs.setup_v2_core, proprietaire canonique de
+        module_settings, pour que les trois lecteurs du chemin chaud partagent une seule
+        entree de cache et une seule invalidation. L'import est fait ici et non en tete
+        de fichier : utils ne doit pas dependre de cogs au chargement.
+        """
         try:
+            from cogs.setup_v2_core import module_row_value
+        except Exception:
+            module_row_value = None
+        try:
+            if module_row_value is not None:
+                value = await module_row_value(self.bot, int(guild_id), str(module))
+                return True if value is None else bool(value)
             row = await self.bot.db.fetchone(
                 "SELECT enabled FROM module_settings WHERE guild_id=? AND module=?",
                 (int(guild_id), str(module)),
