@@ -124,7 +124,6 @@ async def _install_setup_bridge(bot: commands.Bot) -> None:
         logger.warning("Pont Setup logs non installé : table log_settings absente/incompatible.")
         return
 
-    # log_config est préparée par le service canonique avant d'installer les triggers.
     if bot.guilds:
         await log_service.get_log_config(bot, bot.guilds[0].id, "messages")
 
@@ -184,8 +183,6 @@ async def _reconcile_recent_setup_rows(bot: commands.Bot) -> int:
         current_updated = int((current or {}).get("updated_at") or 0)
         legacy_channel = int(row["channel_id"]) if row["channel_id"] else None
         current_channel = int(current["channel_id"]) if current and current.get("channel_id") else None
-        # Avec timestamp, la dernière action utilisateur gagne. Sans timestamp, on ne
-        # remplace qu'une route canonique vide afin de ne pas écraser une vraie config.
         should_apply = (
             legacy_updated > current_updated
             if has_updated and legacy_updated
@@ -252,47 +249,82 @@ class LogsDiagnostics(commands.Cog, name="LogsDiagnostics"):
 
     @commands.command(name="logsdiag")
     @commands.guild_only()
-    @commands.has_permissions(administrator=True)
-    async def logsdiag(self, ctx: commands.Context, category: str | None = None):
-        """Diagnostic log_config. Option : +logsdiag messages pour faire aussi un test."""
+    async def logsdiag(self, ctx: commands.Context, category: str = ""):
+        """Diagnostic robuste de log_config. Exemple : +logsdiag messages."""
+        if ctx.guild is None:
+            return
+        member = ctx.author if isinstance(ctx.author, discord.Member) else None
+        if member is None or not member.guild_permissions.administrator:
+            return await ctx.send("Cette commande est réservée aux administrateurs du serveur.")
+
         requested = (category or "").strip().casefold().replace("-", "_")
         if requested and requested not in log_service.LOG_TYPES:
             return await ctx.send(
                 "Catégorie inconnue. Utilise : `" + ", ".join(log_service.LOG_TYPES) + "`."
             )
 
-        rows = []
-        for key in log_service.LOG_TYPES:
-            if requested and key != requested:
-                continue
-            config = await log_service.get_log_config(self.bot, ctx.guild.id, key)
-            setting = await log_service.get_log_setting(self.bot, ctx.guild.id, key)
-            channel_id = setting.get("channel_id")
-            channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
-            ok, reason = log_service.validate_channel(ctx.guild, channel_id, needs_file=True)
-            legacy = None
+        rows: list[str] = []
+        keys = [requested] if requested else list(log_service.LOG_TYPES)
+        for key in keys:
             try:
-                legacy = await self.bot.db.fetchone(
-                    "SELECT channel_id,enabled,updated_at FROM log_settings "
-                    "WHERE guild_id=? AND log_type=?",
-                    (ctx.guild.id, key),
+                config = await log_service.get_log_config(self.bot, ctx.guild.id, key)
+                channel_id = (config or {}).get("channel_id")
+                channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+                ok, reason = log_service.validate_channel(
+                    ctx.guild, channel_id, needs_file=True
                 )
-            except Exception:
-                pass
-            legacy_id = int(legacy["channel_id"]) if legacy and legacy["channel_id"] else None
-            rows.append(
-                f"{key}: enabled={int(bool((config or {}).get('enabled')))} "
-                f"config={channel_id or '-'} legacy={legacy_id or '-'} "
-                f"channel={'OK' if channel else 'ABSENT'} perms={'OK' if ok else reason}"
-            )
+                legacy_id = None
+                legacy_enabled = None
+                try:
+                    columns = await _table_columns(self.bot, "log_settings")
+                    select = "channel_id,enabled"
+                    if "updated_at" in columns:
+                        select += ",updated_at"
+                    legacy = await self.bot.db.fetchone(
+                        f"SELECT {select} FROM log_settings WHERE guild_id=? AND log_type=?",
+                        (ctx.guild.id, key),
+                    )
+                    if legacy is not None:
+                        legacy_id = int(legacy["channel_id"]) if legacy["channel_id"] else None
+                        legacy_enabled = int(bool(legacy["enabled"]))
+                except Exception as exc:
+                    logger.exception("logsdiag lecture legacy échouée guild=%s category=%s", ctx.guild.id, key)
+                    rows.append(
+                        f"{key}: LEGACY_ERROR {type(exc).__name__}: {str(exc)[:180]}"
+                    )
+
+                rows.append(
+                    f"{key}: enabled={int(bool((config or {}).get('enabled')))} "
+                    f"config={channel_id or '-'} legacy={legacy_id or '-'} "
+                    f"legacy_enabled={legacy_enabled if legacy_enabled is not None else '-'} "
+                    f"channel={'OK' if channel else 'ABSENT'} "
+                    f"perms={'OK' if ok else reason}"
+                )
+            except Exception as exc:
+                logger.exception("logsdiag route échouée guild=%s category=%s", ctx.guild.id, key)
+                rows.append(
+                    f"{key}: ROUTE_ERROR {type(exc).__name__}: {str(exc)[:300]}"
+                )
 
         text = "LOGS DIAG — source runtime=log_config\n" + "\n".join(rows)
+        for start in range(0, len(text), 1850):
+            await ctx.send(f"```text\n{text[start:start + 1850]}\n```")
+
         if requested:
-            sent, detail = await log_service.send_test_log(self.bot, ctx.guild, requested, ctx.author)
-            text += f"\nTEST {requested}: {'OK' if sent else 'ECHEC'} — {detail}"
-        # Discord limite un message à 2000 caractères.
-        for start in range(0, len(text), 1900):
-            await ctx.send(f"```text\n{text[start:start + 1900]}\n```")
+            try:
+                sent, detail = await log_service.send_test_log(
+                    self.bot, ctx.guild, requested, ctx.author
+                )
+                await ctx.send(
+                    f"```text\nTEST {requested}: {'OK' if sent else 'ECHEC'} — {detail[:1500]}\n```"
+                )
+            except Exception as exc:
+                logger.exception("logsdiag test échoué guild=%s category=%s", ctx.guild.id, requested)
+                await ctx.send(
+                    "```text\n"
+                    f"TEST {requested}: EXCEPTION {type(exc).__name__}: {str(exc)[:1500]}\n"
+                    "```"
+                )
 
 
 async def _bootstrap(bot: commands.Bot) -> None:
