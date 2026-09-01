@@ -159,18 +159,12 @@ def _install_routes() -> None:
 
     # cogs.logs n'a plus de table CONFIG_TO_LOG_TYPE : chaque listener passe son type
     # d'événement canonique. La route "files" est alimentée par UnifiedLogsV6 lui-même.
-    generated_logs_sync.LOG_CHANNEL_ALIASES["files"] = (
-        "logs-dossiers", "logs-fichiers", "logs-files"
-    )
-    # Le dictionnaire normalisé s'appelle _NORMALIZED. La faute de frappe
-    # _NORMALIZED_ALIASES levait une AttributeError ici, ce qui faisait echouer
-    # logs_unified_v6.install() et, avec lui, tout le chargement de
-    # slash_error_completion_guard : no_cooldown_final et passive_ai_single_reply_final
-    # n'etaient donc jamais installes.
-    generated_logs_sync._NORMALIZED["files"] = frozenset(
-        generated_logs_sync._plain(name)
-        for name in generated_logs_sync.LOG_CHANNEL_ALIASES["files"]
-    )
+    # Les alias de la route Fichiers sont declares dans generated_logs_sync, table
+    # canonique. Ils etaient auparavant reecrits ici au runtime, via un nom de dictionnaire
+    # qui n'existait pas (_NORMALIZED_ALIASES au lieu de _NORMALIZED) : l'AttributeError
+    # faisait echouer logs_unified_v6.install() et, avec lui, tout le chargement de
+    # slash_error_completion_guard, donc no_cooldown_final et passive_ai_single_reply_final.
+    assert "files" in generated_logs_sync.LOG_CHANNEL_ALIASES
 
 
 def _install_visuals(bot: commands.Bot) -> None:

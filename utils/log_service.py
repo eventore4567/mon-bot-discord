@@ -142,7 +142,15 @@ def _first_snowflake(text: object) -> int | None:
 
 
 def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> str | None:
-    event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
+    title, description = embed.title or "", embed.description or ""
+    event_type = canonical_event_type(log_type, title, description)
+    if event_type not in LOG_REGISTRY:
+        # log_type etait une CATEGORIE ("moderation") et non un type d'evenement :
+        # canonical_event_type la renvoie telle quelle sans jamais lire le texte. Les
+        # commandes de sanction passent la categorie, les listeners Discord passent
+        # l'evenement — sans cette relecture, les deux sources ne partageaient aucune
+        # cle semantique et un meme kick sortait deux fois.
+        event_type = canonical_event_type("", title, description)
     if event_type not in {
         "member_ban",
         "member_unban",
@@ -153,7 +161,7 @@ def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> st
     }:
         return None
     sample = " ".join(
-        [str(embed.title or ""), str(embed.description or "")]
+        [str(title), str(description)]
         + [f"{field.name} {field.value}" for field in embed.fields]
     )
     target = _first_snowflake(sample)

@@ -59,14 +59,6 @@ def _unwrap_messageable_send():
     return current
 
 
-def _force_sentrix_log_icon(embed: discord.Embed) -> discord.Embed:
-    return embed
-
-
-def _force_command_divider(embed: discord.Embed) -> discord.Embed:
-    return embed
-
-
 def _render(embed: discord.Embed) -> discord.Embed:
     if not isinstance(embed, discord.Embed):
         return embed
@@ -220,5 +212,4 @@ __all__ = [
     "_render",
     "_unwrap_messageable_send",
     "_force_command_divider",
-    "_force_sentrix_log_icon",
 ]

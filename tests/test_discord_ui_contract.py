@@ -117,7 +117,8 @@ class DiscordUiContractTests(unittest.TestCase):
         )
         self.assertEqual(
             log_service.semantic_event_key(1, "moderation", event_log),
-            f"semantic:1:kick:{target}",
+            # member_kick est le nom canonique du registre ; "kick" n'en est qu'un alias.
+            f"semantic:1:member_kick:{target}",
         )
 
     def test_legacy_ticket_fallback_is_never_sent_to_moderation_logger(self):

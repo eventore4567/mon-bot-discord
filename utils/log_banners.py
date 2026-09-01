@@ -28,7 +28,24 @@ logger = logging.getLogger("bot.log-banners")
 
 ROOT = Path(__file__).resolve().parents[1]
 BANNER_DIR = ROOT / "assets" / "log_banners"
-LOGO_PATH = ROOT / "assets" / "sentrix_logo.png"
+
+# Logo de la bannière, par ordre de préférence. assets/sentrix_logo.png n'existe pas dans
+# le dépôt : on retombe sur la marque déjà présente. Déposer sentrix_logo.png suffit à
+# prendre la main sans toucher au code.
+_LOGO_CANDIDATES = (
+    ROOT / "assets" / "sentrix_logo.png",
+    ROOT / "assets" / "sentrix" / "brand.png",
+)
+
+
+def _resolve_logo():
+    for candidate in _LOGO_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return _LOGO_CANDIDATES[0]
+
+
+LOGO_PATH = _resolve_logo()
 WIDTH = 1024
 HEIGHT = 110
 
@@ -125,7 +142,7 @@ def _composite_logo(image: Image.Image, accent: tuple[int, int, int]) -> Image.I
         logger.warning("Logo illisible (%s) : bannière générée sans logo.", LOGO_PATH)
         return image
 
-    scale = min(210 / max(1, logo.width), 86 / max(1, logo.height), 1.0)
+    scale = min(210 / max(1, logo.width), 82 / max(1, logo.height), 1.0)
     size = (max(1, round(logo.width * scale)), max(1, round(logo.height * scale)))
     if size != logo.size:
         logo = logo.resize(size, Image.Resampling.LANCZOS)

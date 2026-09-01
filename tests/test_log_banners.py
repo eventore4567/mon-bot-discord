@@ -38,13 +38,19 @@ def test_every_registry_entry_maps_to_a_generated_banner():
 
 
 def test_banner_has_a_top_light_edge_and_a_right_vignette():
+    # x=200 : hors du logo centre et de son halo, qui eclaircissent le milieu.
     with Image.open(log_banners.BANNER_DIR / "banner_info.png") as image:
         rgb = image.convert("RGB")
-        top = sum(rgb.getpixel((512, 0)))
-        middle = sum(rgb.getpixel((512, 55)))
+        top = sum(rgb.getpixel((200, 0)))
+        middle = sum(rgb.getpixel((200, 55)))
         right = sum(rgb.getpixel((1015, 55)))
     assert top > middle, "liseré lumineux en haut absent"
     assert right < middle, "vignettage à droite absent"
+
+
+def test_banner_uses_the_repository_logo():
+    assert log_banners.LOGO_PATH.exists(), "aucun logo resolu"
+    assert log_banners.LOGO_PATH.name in {"sentrix_logo.png", "brand.png"}
 
 
 def test_generation_survives_a_missing_logo(tmp_path, monkeypatch):

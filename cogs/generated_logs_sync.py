@@ -30,8 +30,8 @@ LOG_CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
     "automod": ("automod", "logs-automod", "logs-securite", "logs-sécurité", "logs-security"),
     "spam": ("logs-spam", "logs-protect-spam-logs", "protect-spam-logs"),
     "raid": ("logs-raid", "raidprotect-logs", "raid-protect-logs", "anti-raid-logs"),
-    "resources": ("logs-resources", "logs-ressources", "logs-dossiers", "logs-invitations"),
-    "files": ("logs-files", "logs-fichiers"),
+    "resources": ("logs-resources", "logs-ressources", "logs-invitations"),
+    "files": ("logs-dossiers", "logs-fichiers", "logs-files"),
 }
 
 _CANONICAL = tuple(LOG_CHANNEL_ALIASES)

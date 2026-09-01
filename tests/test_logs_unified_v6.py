@@ -28,10 +28,24 @@ def test_official_structure_has_deleted_files_route():
     source = read(V6)
     assert '"files",\n    "log_files",\n    "logs-dossiers"' in source
     assert 'log_service.LOG_TYPES["files"]' in source
-    assert 'logs_mod.CONFIG_TO_LOG_TYPE["log_files"] = "files"' in source
-    sync = read(SYNC)
-    assert '"files": ("logs-dossiers", "logs-fichiers", "logs-files")' in sync
-    assert '"server": ("logs-salons"' in sync
+    # CONFIG_TO_LOG_TYPE a disparu de cogs/logs.py : chaque listener passe desormais son
+    # type d'evenement canonique. On verifie donc le routage reel plutot que la table.
+    from utils.log_categories import category_for
+    assert category_for("file_delete") == "files"
+    assert category_for("file_upload") == "files"
+    from cogs.generated_logs_sync import LOG_CHANNEL_ALIASES
+    # Chaque categorie a ses propres alias de salon. "logs-salons" appartient a Salons,
+    # pas a Serveur : l'ancienne cle fourre-tout log_server melangeait les deux.
+    assert LOG_CHANNEL_ALIASES["files"] == ("logs-dossiers", "logs-fichiers", "logs-files")
+    assert "logs-salons" in LOG_CHANNEL_ALIASES["channels"]
+    assert "logs-salons" not in LOG_CHANNEL_ALIASES["server"]
+    # Un alias ne doit jamais appartenir a deux categories : le meme salon serait
+    # retrouve pour deux routes selon l'ordre d'iteration.
+    seen: dict[str, str] = {}
+    for category, aliases in LOG_CHANNEL_ALIASES.items():
+        for alias in aliases:
+            assert alias not in seen, f"{alias} partage entre {seen.get(alias)} et {category}"
+            seen[alias] = category
 
 
 def test_separator_is_longer_and_shared():
