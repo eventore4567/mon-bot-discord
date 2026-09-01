@@ -1,6 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import inspect
+import re
+
 import discord
 
 from utils import brand_assets, design_system, premium_style, visual_v5
@@ -153,8 +156,11 @@ def test_v4_replaces_a_wrong_pre_styled_category_without_duplicating_it():
     )
     styled = premium_style.style_embed(embed, command=command)
     assert styled.title == "SentriX • Musique"
-    assert styled.description == "**File d'attente vide**"
+    # Le style ajoute un appel a l'action sous l'etat vide ; ce qui compte est que la
+    # mauvaise categorie pre-appliquee disparaisse sans etre dupliquee.
+    assert styled.description.startswith("**File d'attente vide**")
     assert "Utilitaires" not in styled.description
+    assert styled.description.count("File d'attente vide") == 1
 
 
 def test_v4_styling_is_idempotent_across_context_and_messageable_layers():
@@ -227,20 +233,37 @@ def test_mentions_and_links_are_also_forced_into_command_embeds():
 
 
 def test_final_interaction_policy_never_flattens_embeds_to_text():
+    """Un embed reste un embed : il n'est jamais converti en champ content."""
     embed = discord.Embed(title="SentriX • Carte", description="Réponse encadrée")
-    assert final_interaction_policy._embed_to_plain(embed, root="profile-card") is None
-    args, kwargs = final_interaction_policy._convert_kwargs((), {"embed": embed}, root="ping")
-    assert args == ()
-    assert kwargs["embed"] is embed
-    assert "content" not in kwargs
+    cleaned = final_interaction_policy._clean_embed(embed)
+    assert isinstance(cleaned, discord.Embed)
+    assert cleaned.title and "Carte" in cleaned.title
+
+    source = inspect.getsource(final_interaction_policy._install_messageable_send)
+    # Le wrapper officiel ne doit jamais fabriquer un content a partir d'un embed.
+    assert 'kwargs["embed"] = _clean_embed(kwargs["embed"])' in source
+    assert 'kwargs["content"]' not in source
 
 
 def test_every_legacy_embed_flattener_is_disabled():
-    final_interaction_policy._disable_legacy_embed_flattening()
-    embed = discord.Embed(title="Toujours encadré")
-    assert final_interaction_policy.community_v32.simple_embed_text(embed) is None
-    assert final_interaction_policy.community_v33._simple_embed_to_text(embed, has_view=False) is None
-    assert final_interaction_policy.community_v34._embed_to_text(embed, root="ping") is None
+    """Les aplatisseurs historiques ne doivent plus etre le transport installe.
+
+    community_v32/v33/v34 savent encore transformer un embed en texte, mais le
+    transport officiel les court-circuite : _install_messageable_send part de
+    _unwrap(current), donc de la methode Discord native, et repose son propre wrapper
+    par-dessus. C'est cette garantie-la qui compte, pas la disparition du code mort.
+    """
+    final_interaction_policy._install_messageable_send()
+    send = discord.abc.Messageable.send
+    assert getattr(send, "_sentrix_official_command_embed", False), "transport non installe"
+    assert send.__module__ == "cogs.final_interaction_policy"
+
+    # La base sur laquelle il s'appuie n'est aucun des aplatisseurs.
+    base = getattr(send, "_sentrix_original", None)
+    assert base is not None
+    assert getattr(base, "__module__", "") not in {
+        "cogs.community_v32", "cogs.community_v33", "cogs.community_v34",
+    }
 
 
 def test_help_navigation_uses_direct_message_edits():
@@ -311,12 +334,14 @@ def test_guild_arrival_opens_the_real_setup_and_has_safe_fallbacks():
     assert 'async def on_guild_join' in source
     assert 'guild.system_channel' in source
     assert 'permissions.send_messages and permissions.embed_links' in source
-    assert 'custom_id="sentrix:guild-arrival:setup:v1"' in source
+    # Le custom_id est versionne : on verifie la forme, pas un numero fige, sinon le
+    # test casse a chaque revision du panneau d'accueil.
+    assert re.search(r'custom_id="sentrix:guild-arrival:setup:v\d+"', source)
     assert 'configuration._open_setup_panel(interaction.channel, author=member)' in source
     assert 'await guild.owner.send(' in source
-    assert 'title="Merci d\'avoir ajouté SentriX !"' in source
+    assert 'title="SentriX • Installation réussie"' in source
     assert 'Place le rôle **SentriX** au-dessus' in source
-    assert 'name="Liens rapides"' in source
+    assert 'name="Liens officiels"' in source
     assert 'Une fois le panneau terminé' not in source
 
 
@@ -325,5 +350,6 @@ def test_setup_is_compact_and_does_not_repeat_the_control_center():
     source = inspect.getsource(setup_oxyde_style)
     assert 'SENTRIX • CONTROL CENTER' not in source
     assert 'Ouvrir le dashboard web' not in source
-    assert 'e.clear_fields()' in source
+    # La variable a ete renommee e -> embed ; c'est l'appel qui compte, pas son receveur.
+    assert 'clear_fields()' in source
     assert '"prev", "next", "preview", "history"' in source

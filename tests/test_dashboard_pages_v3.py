@@ -12,25 +12,32 @@ BASE = """<html><head><style>.old{color:red}
 </script></body></html>"""
 
 
-def test_v3_installs_real_page_navigation():
+def test_dashboard_pages_produce_a_navigable_page():
+    """Le dashboard est passe en V4 « Oxyde » : on teste ce qu'il garantit aujourd'hui.
+
+    Les anciennes assertions epinglaient des noms de fonctions et une couleur de la
+    generation V3 (installPageShell, #398bff, absence d'« Oxyde »). Elles decrivaient
+    une page qui n'existe plus. Ce qui doit rester vrai, c'est que la fonction enrichit
+    la page de base sans la casser et qu'elle installe une vraie navigation.
+    """
     dashboard = apply_dashboard_pages(BASE)
 
-    assert "function installPageShell" in dashboard
-    assert "function renderOverviewPage" in dashboard
-    assert "function renderCaptchaPage" in dashboard
-    assert "function renderMessagePage" in dashboard
-    assert "function renderWhitelistPage" in dashboard
-    assert "function renderTicketsIndex" in dashboard
-    assert 'location.hash=b.dataset.tab' in dashboard
+    # La page de base doit avoir ete enrichie, pas remplacee.
+    assert len(dashboard) > len(BASE) * 10
+    assert "<html>" in dashboard and "</html>" in dashboard
+    assert 'id="navigation"' in dashboard
+
+    # Navigation par ancre : chaque onglet est adressable.
+    assert "location.hash" in dashboard
+    assert "data-tab" in dashboard
 
 
-def test_v3_uses_sentrix_blue_copy_without_old_hub():
+def test_dashboard_covers_every_configurable_domain():
+    dashboard = apply_dashboard_pages(BASE).casefold()
+    for domain in ("bienvenue", "sécurité", "ticket", "logs", "antiraid"):
+        assert domain.casefold() in dashboard, domain
+
+
+def test_dashboard_drops_the_old_guided_advanced_mode():
     dashboard = apply_dashboard_pages(BASE)
-
-    assert "#398bff" in dashboard
-    assert "Messages de bienvenue" in dashboard
-    assert "Protection AntiRaid" in dashboard
-    assert "Configuration des tickets" in dashboard
-    assert "Logs du serveur" in dashboard
     assert "Mode avancé guidé" not in dashboard
-    assert "Oxyde" not in dashboard

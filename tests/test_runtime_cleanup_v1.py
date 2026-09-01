@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import inspect
 from pathlib import Path
 
 
@@ -42,6 +43,17 @@ def _external_imports(module_name: str, own_filename: str) -> list[str]:
     )
     for path in ROOT.rglob("*.py"):
         if path.name in {own_filename, Path(__file__).name}:
+            continue
+        # La regle vise le RUNTIME : aucun module de production ne doit dependre d'un
+        # coordinateur legacy. Un test ou un outil d'audit qui l'importe pour verifier
+        # son contenu ne cree aucun couplage a l'execution.
+        if path.parts and path.parts[0] in {"tests", "tools"}:
+            continue
+        try:
+            relative_parts = path.relative_to(ROOT).parts
+        except ValueError:
+            relative_parts = ()
+        if relative_parts and relative_parts[0] in {"tests", "tools"}:
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -94,15 +106,36 @@ def test_guild_arrival_does_not_install_global_style_anymore():
 
 
 def test_final_interaction_does_not_reinstall_legacy_v34_transport():
-    assert "community_v34.install(bot)" not in FINAL_INTERACTION
-    assert "_install_v34_runtime_only(bot)" in FINAL_INTERACTION
-    assert "community_v34._install_slash_watchdog_policy(bot)" in FINAL_INTERACTION
-    assert "community_v34._install_fast_ai(bot)" in FINAL_INTERACTION
+    """Le transport officiel ne doit pas ressusciter la couche V34.
+
+    final_interaction_policy ne reference plus community_v34 du tout : il repart de la
+    methode Discord native (_unwrap) et repose son propre wrapper. Les deux morceaux
+    utiles de V34 (watchdog slash, IA rapide) restent installes par community_v34.install,
+    appele depuis runtime_quality_v25.
+    """
+    assert "community_v34" not in FINAL_INTERACTION
+    assert "_unwrap(discord.abc.Messageable.send)" in FINAL_INTERACTION
+
+    from cogs import community_v34
+    install_source = inspect.getsource(community_v34.install)
+    assert "_install_slash_watchdog_policy(bot)" in install_source
+    assert "_install_fast_ai(bot)" in install_source
+
+    quality = (ROOT / "cogs" / "runtime_quality_v25.py").read_text(encoding="utf-8")
+    assert "community_v34.install(bot)" in quality
 
 
 def test_single_setup_style_chain_is_documented_and_mobile_legacy_is_absent():
     setup_section = COGS_INIT.split("async def _install_configuration_critical_patches", 1)[1]
     setup_section = setup_section.split("async def _install_common_runtime", 1)[0]
-    assert "install_setup_oxyde_style" in setup_section
+    # La chaine de style du setup est passee a setup_oxyde_v69 ; setup_oxyde_style ne
+    # sert plus que de table de metadonnees (STEP_META) a language_setup_finalizer.
     assert "install_language_setup_finalizer" in setup_section
     assert "setup_mobile_cleanup" not in setup_section
+    # Un seul installateur de style de setup dans tout le chargeur.
+    style_installers = [
+        line for line in COGS_INIT.splitlines()
+        if "_run_installer(" in line and "oxyde" in line.casefold()
+    ]
+    assert len(style_installers) == 1, style_installers
+    assert "install_setup_oxyde_v69" in style_installers[0]
