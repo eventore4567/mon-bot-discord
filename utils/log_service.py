@@ -261,16 +261,55 @@ async def _ensure_category_row(bot, guild_id: int, category: str) -> dict[str, A
     }
 
 
-async def get_log_config(bot, guild_id: int, category: str) -> dict | None:
+# --------------------------------------------------------------------------
+# Cache de lecture du routage
+#
+# Mesure : get_log_config etait appele a chaque message. C'est de la CONFIGURATION,
+# donc l'invalidation est explicite dans set_log_config, seul point d'ecriture du
+# runtime (la migration de database/db.py, elle, tourne au demarrage avant toute
+# lecture, quand le cache est encore vide).
+#
+# Piege evite : set_log_config relit la base APRES ecriture et leve si elle ne
+# contient pas ce qui vient d'etre demande. C'est ce controle qui empeche +setup
+# d'afficher « ACTIF » pour une route jamais ecrite. Cette relecture-la doit donc
+# TOUJOURS toucher la base : elle passe par fresh=True, jamais par le cache.
+_CONFIG_CACHE: dict[tuple[int, str], tuple[float, dict]] = {}
+_CONFIG_CACHE_TTL = 30.0
+
+
+def invalidate_log_config(guild_id: int | None = None, category: str | None = None) -> None:
+    """Purge le cache de routage. Sans argument : tout."""
+    if guild_id is None:
+        _CONFIG_CACHE.clear()
+        return
+    if category is None:
+        for key in [k for k in _CONFIG_CACHE if k[0] == int(guild_id)]:
+            _CONFIG_CACHE.pop(key, None)
+        return
+    _CONFIG_CACHE.pop((int(guild_id), str(category)), None)
+
+
+async def get_log_config(
+    bot, guild_id: int, category: str, *, fresh: bool = False
+) -> dict | None:
     canonical = category if category in CATEGORIES else category_for(category)
+    key = (int(guild_id), canonical)
+    if not fresh:
+        cached = _CONFIG_CACHE.get(key)
+        if cached is not None and (time.monotonic() - cached[0]) < _CONFIG_CACHE_TTL:
+            return dict(cached[1])
     row = await _ensure_category_row(bot, int(guild_id), canonical)
-    return {
+    result = {
         "guild_id": int(row["guild_id"]),
         "category": canonical,
         "channel_id": int(row["channel_id"]) if row.get("channel_id") else None,
         "enabled": bool(row.get("enabled", 1)),
         "updated_at": int(row.get("updated_at") or 0),
     }
+    if len(_CONFIG_CACHE) > 5000:
+        _CONFIG_CACHE.clear()
+    _CONFIG_CACHE[key] = (time.monotonic(), dict(result))
+    return dict(result)
 
 
 async def set_log_config(
@@ -296,7 +335,10 @@ async def set_log_config(
     # Relecture systématique : l'appelant reçoit ce que la base contient vraiment, jamais
     # la valeur qu'il vient de demander. C'est ce qui empêche un panneau d'afficher
     # "ACTIF" pour une route qui n'a pas été écrite.
-    saved = await get_log_config(bot, int(guild_id), canonical)
+    invalidate_log_config(guild_id, canonical)
+    # fresh=True : la confirmation doit venir de la BASE, jamais du cache. Sans ca, une
+    # ecriture qui n'aboutit pas serait confirmee par la valeur precedente.
+    saved = await get_log_config(bot, int(guild_id), canonical, fresh=True)
     if saved is None or saved.get("channel_id") != normalized:
         logger.error(
             "SENTRIX LOG WRITE FAILED guild=%s category=%s demande=%s relu=%s",
