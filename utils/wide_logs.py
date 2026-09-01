@@ -19,7 +19,13 @@ import discord
 
 import config
 from utils.log_banners import COLORS, get_banner
-from utils.log_categories import category_for, canonical_event_type, resolve
+from utils.log_categories import (
+    DEFAULT_EVENT_EMOJI,
+    EVENT_EMOJI,
+    canonical_event_type,
+    category_for,
+    resolve,
+)
 
 logger = logging.getLogger("bot.wide-logs")
 
@@ -266,6 +272,14 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
     return text[:limit]
 
 
+def _with_id(mention: str) -> str:
+    """Mention suivie de son ID en inline code, comme demandé par le format narratif."""
+    if not mention:
+        return ""
+    snowflake = _first_snowflake(mention)
+    return f"{mention} (`{snowflake}`)" if snowflake else mention
+
+
 def narrative_body(
     embed: discord.Embed,
     *,
@@ -278,7 +292,11 @@ def narrative_body(
     member = _first_user_ref(_field_value(embed, "membre", "auteur", "utilisateur", "cible"))
     if not member and identity_id:
         member = f"<@{identity_id}>"
-    moderator = _first_user_ref(_field_value(embed, "modérateur", "moderateur", "staff", "responsable", "acteur"))
+    moderator = _with_id(
+        _first_user_ref(
+            _field_value(embed, "modérateur", "moderateur", "staff", "responsable", "acteur")
+        )
+    )
     channel = _first_channel_ref(_field_value(embed, "salon", "channel"))
     role = _first_role_ref(_field_value(embed, "rôle", "role"))
     reason = _field_value(embed, "raison", "reason")
@@ -364,13 +382,22 @@ def narrative_body(
         if base:
             lines.append(base)
 
-    # Ajoute uniquement les blocs réellement longs qui n'ont pas déjà été rendus.
+    # Ajoute uniquement les blocs longs qui n'ont pas déjà été rendus. La comparaison
+    # porte sur le CORPS du bloc, pas sur le bloc entier : "**Contenu**\n```texte```"
+    # et "```texte```" désignent la même information, et le contenu d'un message
+    # supprimé sortait donc deux fois.
     extras = compact_fields(embed, limit=1800)
     if extras:
-        existing = "\n".join(lines)
+        existing = "\n\n".join(lines)
         for block in extras.split("\n\n"):
-            if block and block not in existing:
-                lines.append(block)
+            if not block.strip():
+                continue
+            body = block.split("\n", 1)[1] if block.startswith("**") and "\n" in block else block
+            if body.strip() and body.strip() in existing:
+                continue
+            if block in existing:
+                continue
+            lines.append(block)
 
     return "\n\n".join(part for part in lines if part.strip())[:3000]
 
@@ -457,10 +484,28 @@ class WideLogView(discord.ui.LayoutView):
             accent_colour=discord.Colour(accent) if accent is not None else None
         )
 
+        # Deux séparateurs maximum par panneau. Le compteur garantit la règle quelle que
+        # soit la combinaison de blocs présents (identité absente, boutons absents...).
+        separators = 0
+
+        def add_separator() -> bool:
+            nonlocal separators
+            if separators >= 2:
+                return False
+            try:
+                container.add_item(_sep())
+            except Exception:
+                logger.exception("SENTRIX V2 separator")
+                return False
+            separators += 1
+            return True
+
+        # add_item(media=...) sans description= : une description affiche un badge « ALT »
+        # par-dessus la bannière.
         gallery = discord.ui.MediaGallery()
         gallery.add_item(media=f"attachment://{banner_filename}")
         container.add_item(gallery)
-        container.add_item(_sep())
+        add_separator()
 
         # BLOC 1 — identité de l'entité concernée, jamais le bot par défaut.
         if identity_name:
@@ -473,7 +518,8 @@ class WideLogView(discord.ui.LayoutView):
                     container.add_item(
                         discord.ui.Section(
                             discord.ui.TextDisplay(ident),
-                            accessory=discord.ui.Thumbnail(str(identity_icon)),
+                            # Thumbnail sans description= : sinon Discord affiche « ALT ».
+                        accessory=discord.ui.Thumbnail(str(identity_icon)),
                         )
                     )
                     placed = True
@@ -481,11 +527,12 @@ class WideLogView(discord.ui.LayoutView):
                     logger.exception("SENTRIX V2 identity section")
             if not placed:
                 container.add_item(discord.ui.TextDisplay(ident))
-            container.add_item(_sep())
+            add_separator()
 
         # BLOC 2 — événement.
         title = safe_text(embed.title or "Journal SentriX")[:200]
-        heading = f"### {emoji} {title}".strip()
+        badge = emoji or EVENT_EMOJI.get(log_type, DEFAULT_EVENT_EMOJI)
+        heading = f"### {badge} {title}".strip()
         container.add_item(discord.ui.TextDisplay(heading))
 
         body = narrative_body(
@@ -501,9 +548,10 @@ class WideLogView(discord.ui.LayoutView):
         if footer:
             container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
 
+        # Les boutons restent DANS le Container, en ActionRow, tous en secondary.
         rows = build_rows(old_view)
         if rows:
-            container.add_item(_sep())
+            add_separator()
             for row in rows:
                 container.add_item(row)
 
