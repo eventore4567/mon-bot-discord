@@ -419,7 +419,7 @@ def _is_log_view(view) -> bool:
         or getattr(cls, "_sentrix_log_layout", False)
         or name in {"PremiumLogLayout", "DetailedPremiumLogLayout", "RectangleLogLayout"}
         or module.endswith("premium_logs_v2")
-        or module.endswith("log_detail_layout_v24")
+        # log_detail_layout_v24 supprime : plus aucune vue ne peut venir de ce module.
         or module.endswith("log_rectangle_v25")
     )
 
