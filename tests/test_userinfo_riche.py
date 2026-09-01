@@ -150,22 +150,25 @@ def test_botinfo_resiste_a_une_latence_indisponible():
 # ------------------------------------------------- mention reelle et @@everyone
 def test_userinfo_ping_reellement_la_personne_visee():
     """Une mention dans un EMBED ne ping jamais : elle doit etre dans le content."""
-    corps = _corps("userinfo")
+    corps = _corps("_envoi_cible")
     # ast.unparse normalise les guillemets : on cherche la CLE, pas sa notation.
     assert "envoi['content'] = membre.mention" in corps
     assert "AllowedMentions" in corps
     assert "users=[membre]" in corps
+    # userinfo et avatar passent tous les deux par ce helper.
+    assert "_envoi_cible" in _corps("userinfo")
+    assert "_envoi_cible" in _corps("avatar")
 
 
 def test_userinfo_ne_ping_ni_soi_meme_ni_un_bot():
-    corps = _corps("userinfo")
-    assert "membre.id != ctx.author.id" in corps
-    assert "not membre.bot" in corps
+    corps = _corps("_envoi_cible")
+    assert "getattr(auteur, 'id', None) != getattr(membre, 'id', None)" in corps
+    assert "getattr(membre, 'bot', False)" in corps
 
 
 def test_userinfo_n_autorise_que_la_personne_visee():
     """Jamais everyone ni les roles : une fiche d'info ne doit pas alerter le serveur."""
-    corps = _corps("userinfo")
+    corps = _corps("_envoi_cible")
     assert "roles=False" in corps
     assert "everyone=False" in corps
 
@@ -174,3 +177,18 @@ def test_serverinfo_n_affiche_plus_everyone_dans_les_roles():
     """role.name du role par defaut vaut litteralement "@everyone" : d'ou le "@@everyone"."""
     corps = _corps("info_serveur")
     assert "role != guild.default_role" in corps
+
+
+def test_le_helper_de_ping_n_est_pas_utilise_hors_portee():
+    """Regression : un remplacement global l'avait glisse dans help_cmd, ou membre
+    n'existe pas — NameError a chaque affichage de l'aide d'une commande."""
+    source = (ROOT / "cogs" / "utility.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            continue
+        corps = ast.unparse(node)
+        if "_envoi_cible(ctx, membre" not in corps:
+            continue
+        parametres = [a.arg for a in node.args.args]
+        assert "membre" in parametres, f"{node.name} appelle _envoi_cible sans parametre membre"

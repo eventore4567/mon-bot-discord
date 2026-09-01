@@ -586,6 +586,32 @@ class Utility(commands.Cog, name="Utility"):
         self.afk_users: dict[int, str] = {}
 
     @staticmethod
+    def _envoi_cible(ctx, membre, embed) -> dict:
+        """Arguments d'envoi d'une fiche concernant une personne.
+
+        Une mention placee dans un EMBED ne notifie JAMAIS : c'est une regle Discord.
+        Pour que la personne soit reellement prevenue, la mention doit etre dans le
+        content du message et allowed_mentions doit l'autoriser nommement.
+
+        Deux gardes volontaires : on ne ping que si une cible a ete demandee (consulter
+        sa propre fiche ne s'auto-notifie pas, et un bot n'est jamais ping), et jamais
+        everyone ni les roles — consulter une fiche ne doit pas pouvoir alerter le
+        serveur entier.
+        """
+        envoi = {"embed": embed}
+        auteur = getattr(ctx, "author", None)
+        if (
+            membre is not None
+            and getattr(auteur, "id", None) != getattr(membre, "id", None)
+            and not getattr(membre, "bot", False)
+        ):
+            envoi["content"] = membre.mention
+            envoi["allowed_mentions"] = discord.AllowedMentions(
+                users=[membre], roles=False, everyone=False, replied_user=False
+            )
+        return envoi
+
+    @staticmethod
     def _limited_list(values, *, empty: str, limit: int = 1000) -> str:
         """Assemble une liste sans dépasser la limite de 1 024 caractères d'un champ Discord."""
         values = [str(value) for value in values]
@@ -778,7 +804,7 @@ class Utility(commands.Cog, name="Utility"):
                     if _image_kind(data) is None:
                         continue
                     e.set_image(url=str(asset.url))
-                    return await ctx.send(embed=e)
+                    return await ctx.send(**self._envoi_cible(ctx, membre, e))
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
                     continue
 
@@ -791,14 +817,14 @@ class Utility(commands.Cog, name="Utility"):
         if downloaded is not None:
             _data, _kind, verified_url = downloaded
             e.set_image(url=verified_url)
-            return await ctx.send(embed=e)
+            return await ctx.send(**self._envoi_cible(ctx, membre, e))
 
         # Ne jamais remplacer silencieusement la vraie photo par l'avatar orange.
         e.description = (
             f"{membre.mention}\n"
             "Discord n'a pas transmis son avatar personnalisé. Réessaie dans quelques secondes."
         )
-        await ctx.send(embed=e)
+        await ctx.send(**self._envoi_cible(ctx, membre, e))
 
     @commands.hybrid_group(
         name="info",
@@ -992,13 +1018,7 @@ class Utility(commands.Cog, name="Utility"):
         # content du message, et allowed_mentions doit l'autoriser explicitement.
         # On ne ping que si une cible a ete demandee : lancer +userinfo sur soi-meme
         # ne doit pas s'auto-notifier.
-        envoi = {"embed": e}
-        if membre.id != ctx.author.id and not membre.bot:
-            envoi["content"] = membre.mention
-            envoi["allowed_mentions"] = discord.AllowedMentions(
-                users=[membre], roles=False, everyone=False, replied_user=False
-            )
-        await ctx.send(**envoi)
+        await ctx.send(**self._envoi_cible(ctx, membre, e))
 
     @info.command(name="role", description="Afficher la fiche complète d'un rôle.")
     @app_commands.describe(role="Le rôle à inspecter")
