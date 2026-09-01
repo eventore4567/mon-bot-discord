@@ -68,10 +68,15 @@ async def main() -> int:
 
     # Une reference TEXTUELLE depuis un module vivant suffit a retenir un fichier :
     # elle attrape aussi les imports differes dans une fonction rarement appelee.
+    # web/ compte comme du code VIVANT : le dashboard importe des cogs
+    # (web/platform_v4.py fait « from cogs import platform_v4 »), et ce chemin n'est
+    # jamais exerce par un harnais qui ne charge que le bot. L'oublier ferait passer
+    # pour mort un module bien utilise en production.
     vivants = [
         p for p in list((ROOT / "cogs").glob("*.py")) + list((ROOT / "utils").glob("*.py"))
+        + list((ROOT / "web").glob("*.py"))
         + [ROOT / "main.py", ROOT / "railway_boot.py"]
-        if p.stem not in jamais
+        if p.parent.name != "cogs" or p.stem not in jamais
     ]
     retenus_par: dict[str, list[str]] = {}
     for fichier in vivants:
@@ -92,6 +97,10 @@ async def main() -> int:
     print(f"  retenus par un vivant  : {len(retenus_par)}")
     print(f"  dependance verifiee    : {len(RETENUS)}")
     print(f"  ORPHELINS              : {len(orphelins)} ({lignes} lignes)")
+    print()
+    print("Rappel : « orphelin » signifie qu'aucun texte du code vivant ne les nomme.")
+    print("Cela ne prouve pas qu'ils sont morts — verifiez les appelants reels avant")
+    print("toute suppression, comme pour railway_boot et le dashboard web.")
 
     if orphelins:
         print("\nModules que plus rien n'atteint :")
