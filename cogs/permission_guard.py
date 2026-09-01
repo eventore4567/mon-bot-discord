@@ -41,10 +41,20 @@ PROOF_ADMIN_COMMANDS = frozenset({
 
 
 def command_root_name(command: Any) -> str:
+    """Nom evalue par la matrice.
+
+    Par defaut la racine : les alias sont deja resolus par discord.py et les
+    sous-commandes heritent de leur groupe. access_matrix.resolve_name ne renvoie le nom
+    COMPLET que pour les rares sous-commandes declarees plus strictes que leur groupe
+    (table SUBCOMMAND_TIERS), afin qu'une sous-commande sensible ne puisse pas devenir
+    publique parce que sa racine l'est.
+    """
     if command is None:
         return ""
     root = getattr(command, "root_parent", None) or command
-    return normalise(getattr(root, "name", ""))
+    return access_matrix.resolve_name(
+        getattr(command, "qualified_name", ""), getattr(root, "name", "")
+    )
 
 
 def interaction_root_name(interaction: discord.Interaction) -> str:

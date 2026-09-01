@@ -85,6 +85,9 @@ PUBLIC_COMMANDS = frozenset({
     "sentrix-plus", "sentrixpro",
     # Salons vocaux temporaires : le membre pilote SON salon
     "voice-limit", "voice-lock", "voice-name", "voice-transfer", "voice-unlock",
+    # Commandes membre qui tombaient en fail-closed faute d'etre declarees ici :
+    # elles n'ont aucun check local et affichent seulement des informations.
+    "leaderboard", "serverinfo", "gameseason",
 })
 
 OWNER_ONLY_COMMANDS = frozenset({
@@ -94,7 +97,52 @@ OWNER_ONLY_COMMANDS = frozenset({
     "logs-diag", "reset-logs-all",
 })
 
+# ---------------------------------------------------------------- NIVEAU 4
+# Propriétaire du SERVEUR uniquement. Un administrateur Discord ne suffit pas.
+#
+# Critère unique et volontairement etroit : destruction irreversible de donnees ou de
+# structure, touchant tout le serveur. Les outils d'URGENCE (panic, lockdown-server,
+# antinuke, smartlockdown) restent volontairement au niveau administrateur : pendant un
+# raid, le staff doit pouvoir reagir sans attendre le proprietaire.
+GUILD_OWNER_COMMANDS = frozenset({
+    # Structure du serveur
+    "wipe-server",          # supprime tous les salons et tous les roles
+    "create-server",        # reconstruit entierement le serveur
+    "create",               # racine du constructeur (+create server / sentrix / manox)
+    "server-restore",       # ecrase le serveur vivant avec une sauvegarde
+    # Donnees de tous les membres
+    "config-reset",         # efface toute la configuration SentriX
+    "reset-economy",        # remet a zero les soldes de TOUS les membres
+    "reset-levels",         # remet a zero l'XP de TOUS les membres
+    "represet",             # remet a zero la reputation de TOUS les membres
+    "proofreset",           # efface toutes les preuves de verification
+})
+
 CUSTOM_PERMISSION_COMMANDS = frozenset({"embed"})
+
+# Sous-commandes dont le niveau DIFFERE de leur groupe. Sans cette table, le garde
+# evalue la racine et une sous-commande ne peut jamais etre plus stricte que son
+# groupe : c'est ce qui rendait "+season start" accessible a tout membre alors que la
+# racine "season" est publique.
+SUBCOMMAND_TIERS: dict[str, str] = {
+    # Groupe public, sous-commandes administratives
+    "season start": "economie",
+    "season end": "economie",
+    "sentrixpro aimod": "configuration",
+    "sentrixpro autorole": "configuration",
+    "sentrixpro digest": "configuration",
+    "sentrixpro goal": "configuration",
+    "sentrixpro history": "configuration",
+    "sentrixpro live": "configuration",
+    "sentrixpro lockdown": "securite",
+    "sentrixpro module": "configuration",
+    "sentrixpro modules": "configuration",
+    "sentrixpro notifications": "configuration",
+    "sentrixpro quarantine-setup": "securite",
+    "sentrixpro security": "securite",
+    "sentrixpro ticket-summary": "tickets",
+    "sentrixpro welcome": "configuration",
+}
 
 DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     "ban": "ban_members",
@@ -160,6 +208,9 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
 
 CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
     "configuration": frozenset({
+        # Classees explicitement : elles tombaient en fail-closed, donc admin
+        # par accident plutot que par declaration.
+        "server-managed", "verification-review", "verification-calibration",
         "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs-status",
         "logsetup", "logs", "setwelcomechannel", "setgoodbyechannel",
         "setwelcomemessage", "setgoodbyemessage", "setticketlogchannel",
@@ -194,6 +245,9 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
     }),
     "moderation": frozenset({"sanctiondm", "sanctionpolicy"}),
     "securite": frozenset({
+        # Classees explicitement : elles tombaient en fail-closed, donc admin
+        # par accident plutot que par declaration.
+        "whitelist", "unwhitelist",
         "antispam", "antilink", "antiinvite", "antimention", "anticaps",
         "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
         "antinuke", "antinuke-whitelist-add", "antinuke-whitelist-remove",
@@ -319,6 +373,26 @@ def normalise(value: Any) -> str:
     return str(value or "").strip().casefold().lstrip("+/")
 
 
+def resolve_name(qualified_name: Any, root_name: Any = None) -> str:
+    """Nom a evaluer : le nom COMPLET s'il est connu, sinon la racine.
+
+    Le garde evalue historiquement ``root.name``, ce qui fait heriter alias et
+    sous-commandes du niveau de leur groupe. C'est le bon defaut, mais il empeche une
+    sous-commande d'etre PLUS stricte que son groupe. Cette resolution corrige ce seul
+    cas, sans changer le comportement des centaines de sous-commandes qui doivent bien
+    heriter.
+    """
+    qualified = normalise(qualified_name)
+    if qualified and qualified in SUBCOMMAND_TIERS:
+        return qualified
+    if qualified and qualified in GUILD_OWNER_COMMANDS:
+        return qualified
+    root = normalise(root_name) if root_name is not None else ""
+    if root:
+        return root
+    return qualified.split(" ")[0] if qualified else ""
+
+
 def module_for_command(name: str) -> str | None:
     name = normalise(name)
     if name in _MODULE_BY_COMMAND:
@@ -350,6 +424,19 @@ def permission_label(permission: str) -> str:
 
 
 def access_tier(name: str) -> str:
+    key = normalise(name)
+    if key in GUILD_OWNER_COMMANDS:
+        return "guild-owner"
+    if key in SUBCOMMAND_TIERS:
+        return f"categorie:{SUBCOMMAND_TIERS[key]}"
+    # Sous-commande sans regle propre : elle herite de son groupe, exactement comme le
+    # fait le garde au runtime via resolve_name.
+    if " " in key:
+        return access_tier(key.split(" ")[0])
+    return _access_tier_base(key)
+
+
+def _access_tier_base(name: str) -> str:
     """Niveau théorique, sans état serveur. Utilisé par +help et /help."""
     name = normalise(name)
     if name in OWNER_ONLY_COMMANDS:
@@ -373,6 +460,8 @@ def help_requirement(name: str) -> str:
         return "Tout le monde"
     if tier == "owner-global":
         return "Propriétaire global SentriX"
+    if tier == "guild-owner":
+        return "Propriétaire du serveur uniquement"
     if tier == "embed-staff":
         return "Gérer les messages / Gérer le serveur / rôle +embed"
     if tier.startswith("discord:"):
@@ -583,6 +672,10 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
     name = normalise(command_name)
     if not name:
         return _deny("Commande impossible à identifier.", "invalid")
+    # Resolution du nom : une sous-commande declaree plus stricte que son groupe garde
+    # son nom complet, toutes les autres heritent de leur racine. Fait ici et pas
+    # seulement dans le garde, pour que tout appelant direct obtienne la meme decision.
+    name = resolve_name(name)
 
     backend = backend_for(bot)
     user_id = getattr(author, "id", None)
@@ -647,6 +740,19 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
                 "Les **commandes IA** sont désactivées sur ce serveur.",
                 "ai:commands-off",
             )
+
+    # (4c) NIVEAU 4 — proprietaire du SERVEUR uniquement.
+    # Place AVANT les regles Setup, le bypass proprietaire et le bypass Administrateur :
+    # un administrateur Discord ne doit pas pouvoir detruire le serveur.
+    if name in GUILD_OWNER_COMMANDS:
+        if _is_guild_owner(author, guild):
+            return AccessDecision(True, policy="guild-owner-only")
+        return _deny(
+            "Cette commande est reservee au **proprietaire du serveur**.\n"
+            "Elle detruit des donnees de maniere irreversible : le role Administrateur "
+            "ne suffit pas.",
+            "guild-owner-only",
+        )
 
     # Recovery exception: an explicit deny may restrict the guild owner for
     # dangerous commands, but +setup and /setup must always stay reachable so

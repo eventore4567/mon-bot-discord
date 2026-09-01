@@ -76,6 +76,10 @@ async def secure_evaluate_v68(
     name = matrix.normalise(command_name)
     if not name:
         return _deny("Commande impossible à identifier.", "invalid")
+    # Resolution du nom : une sous-commande declaree plus stricte que son groupe garde
+    # son nom complet, toutes les autres heritent de leur racine. Fait ici et pas
+    # seulement dans le garde, pour que tout appelant direct obtienne la meme decision.
+    name = matrix.resolve_name(name)
 
     backend = matrix.backend_for(bot)
     raw_user_id = getattr(author, "id", None)
@@ -131,6 +135,19 @@ async def secure_evaluate_v68(
                 "Les **commandes IA** sont désactivées sur ce serveur.",
                 "ai:commands-off",
             )
+
+    # (4c) NIVEAU 4 — proprietaire du SERVEUR uniquement.
+    # Place AVANT les regles Setup, le bypass proprietaire et le bypass Administrateur :
+    # un administrateur Discord ne doit pas pouvoir detruire le serveur.
+    if name in matrix.GUILD_OWNER_COMMANDS:
+        if _is_guild_owner(author, guild):
+            return matrix.AccessDecision(True, policy="guild-owner-only")
+        return _deny(
+            "Cette commande est reservee au **proprietaire du serveur**.\n"
+            "Elle detruit des donnees de maniere irreversible : le role Administrateur "
+            "ne suffit pas.",
+            "guild-owner-only",
+        )
 
     if name == "setup" and _is_guild_owner(author, guild):
         return matrix.AccessDecision(True, policy="guild-owner:setup-recovery")

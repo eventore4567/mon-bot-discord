@@ -96,7 +96,10 @@ def check_role_target(author: discord.Member, role: discord.Role) -> str | None:
     if getattr(role, "managed", False):
         return "Ce rôle est géré par une intégration et ne peut pas être modifié."
     if me is not None and role >= me.top_role:
-        return "Mon rôle est trop bas dans la hiérarchie pour gérer ce rôle."
+        return (
+            "SentriX ne peut pas gérer ce rôle : il est placé au-dessus de son rôle "
+            "le plus élevé. Remontez le rôle **SentriX** dans Paramètres du serveur > Rôles."
+        )
     if author.id == guild.owner_id:
         return None
     if role >= author.top_role:
@@ -109,7 +112,9 @@ def check_channel_target(author: discord.Member, channel) -> str | None:
     guild = author.guild
     me = guild.me
     if me is not None and not channel.permissions_for(me).manage_channels:
-        return "Je ne peux pas modifier les permissions de ce salon."
+        return (
+            "SentriX n'a pas la permission **Gérer les salons** dans ce salon."
+        )
     if author.id == guild.owner_id:
         return None
     if not channel.permissions_for(author).manage_channels:
@@ -223,7 +228,11 @@ def check_bot_hierarchy(guild: discord.Guild, target: discord.Member) -> str | N
     if target.id == guild.owner_id:
         return "Je ne peux pas sanctionner le propriétaire du serveur."
     if target.top_role >= me.top_role:
-        return "Mon rôle est trop bas dans la hiérarchie pour sanctionner ce membre."
+        return (
+            "SentriX ne peut pas sanctionner ce membre : son rôle le plus élevé est "
+            "au-dessus de celui de SentriX. Remontez le rôle **SentriX** dans "
+            "Paramètres du serveur > Rôles."
+        )
     return None
 
 
