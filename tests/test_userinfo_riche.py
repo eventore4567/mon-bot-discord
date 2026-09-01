@@ -107,3 +107,41 @@ def test_channelinfo_ne_fait_aucune_ecriture():
     corps = _corps("channelinfo")
     for interdit in ("db.execute", "INSERT", "UPDATE", "DELETE"):
         assert interdit not in corps
+
+
+# ---------------------------------------------------------------- botinfo
+def _corps_stats(nom: str) -> str:
+    source = (ROOT / "cogs" / "stats.py").read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name == nom:
+            return ast.unparse(node)
+    raise AssertionError(f"{nom} introuvable")
+
+
+def test_botinfo_ne_dit_plus_developpe_pour_ce_serveur():
+    """C'etait un texte de remplissage, pas une information."""
+    corps = _corps_stats("botinfo")
+    assert "Développé pour ce serveur" not in corps
+
+
+def test_botinfo_nomme_le_vrai_createur():
+    corps = _corps_stats("botinfo")
+    assert "PRIMARY_CREATOR_ID" in corps
+
+
+def test_botinfo_donne_la_portee_reelle():
+    corps = _corps_stats("botinfo")
+    assert "member_count" in corps
+    assert "walk_commands" in corps and "tree.walk_commands" in corps
+
+
+def test_botinfo_qualifie_la_latence_au_lieu_de_l_afficher_brute():
+    """« 87 ms — excellente » se lit ; « 0.087 » ne dit rien a un membre."""
+    corps = _corps_stats("botinfo")
+    assert "excellente" in corps and "dégradée" in corps
+
+
+def test_botinfo_resiste_a_une_latence_indisponible():
+    """bot.latency vaut nan tant que la websocket n'a pas de heartbeat."""
+    corps = _corps_stats("botinfo")
+    assert "latence == latence" in corps, "le cas nan n'est pas traite"

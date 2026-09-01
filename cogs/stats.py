@@ -6,6 +6,8 @@ Cog STATISTIQUES / DÉVELOPPEMENT.
 import time
 import platform
 import discord
+
+from database.db import PRIMARY_CREATOR_DISPLAY_NAME, PRIMARY_CREATOR_ID
 from discord import app_commands
 from discord.ext import commands
 
@@ -295,11 +297,67 @@ class Stats(commands.Cog, name="Stats"):
 
     @commands.hybrid_command(name="botinfo", description="Afficher des informations générales sur le bot.")
     async def botinfo(self, ctx: commands.Context):
-        e = await self._embed(ctx.guild.id if ctx.guild else None, title=f"À propos de {self.bot.user.name}")
-        e.set_thumbnail(url=self.bot.user.display_avatar.url)
-        e.add_field(name="Créateur", value="Développé pour ce serveur", inline=True)
-        e.add_field(name="Serveurs", value=len(self.bot.guilds), inline=True)
-        e.add_field(name="Commandes", value=sum(1 for _ in self.bot.commands), inline=True)
+        bot = self.bot
+        serveurs = len(bot.guilds)
+        membres = sum(g.member_count or 0 for g in bot.guilds)
+        prefixees = sum(1 for _ in bot.walk_commands())
+        slash = sum(1 for _ in bot.tree.walk_commands())
+        latence = bot.latency
+        latence_ms = round(latence * 1000) if latence and latence == latence else None
+
+        depuis = getattr(bot, "_sentrix_started_at", None)
+        if depuis is None:
+            depuis = int(time.time())
+            bot._sentrix_started_at = depuis
+
+        ouverture = (
+            f"**{bot.user.name}** veille sur **{serveurs}** serveur"
+            f"{'s' if serveurs > 1 else ''} et **{membres:,}** membres."
+        ).replace(",", " ")
+        ouverture += f"\nEn ligne depuis <t:{depuis}:R>."
+
+        e = await self._embed(
+            ctx.guild.id if ctx.guild else None,
+            title=f"À propos de {bot.user.name}",
+            description=ouverture,
+        )
+        e.set_thumbnail(url=bot.user.display_avatar.url)
+
+        e.add_field(
+            name="Portée",
+            value=(
+                f"**{serveurs}** serveur{'s' if serveurs > 1 else ''}\n"
+                f"**{membres:,}** membres".replace(",", " ")
+            ),
+            inline=True,
+        )
+        e.add_field(
+            name="Commandes",
+            value=f"**{prefixees}** préfixées\n**{slash}** slash",
+            inline=True,
+        )
+
+        sante = []
+        if latence_ms is not None:
+            qualite = "excellente" if latence_ms < 120 else "correcte" if latence_ms < 300 else "dégradée"
+            sante.append(f"Latence **{latence_ms} ms** — {qualite}")
+        shards = getattr(bot, "shard_count", None)
+        if shards:
+            sante.append(f"**{shards}** shard{'s' if shards > 1 else ''}")
+        sante.append(f"discord.py **{discord.__version__}**")
+        e.add_field(name="Santé", value="\n".join(sante), inline=True)
+
+        createur = ctx.bot.get_user(PRIMARY_CREATOR_ID)
+        e.add_field(
+            name="Créateur",
+            value=(
+                f"{createur.mention} · `{PRIMARY_CREATOR_ID}`"
+                if createur is not None
+                else f"**{PRIMARY_CREATOR_DISPLAY_NAME}** · `{PRIMARY_CREATOR_ID}`"
+            ),
+            inline=False,
+        )
+        e.set_footer(text=f"{ctx.clean_prefix}help pour la liste complète des commandes")
         await ctx.send(embed=e)
 
 
