@@ -219,11 +219,8 @@ async def _bootstrap_named_channels(bot: commands.Bot) -> None:
     for guild in list(bot.guilds):
         for log_type in log_service.LOG_TYPES:
             try:
-                row = await bot.db.fetchone(
-                    "SELECT enabled, channel_id FROM log_settings WHERE guild_id = ? AND log_type = ?",
-                    (guild.id, log_type),
-                )
-                if row is None:
+                row = await log_service.get_log_config(bot, guild.id, log_type)
+                if row is None or not row.get("channel_id"):
                     channel = _named_log_channel(guild, log_type)
                     if channel is None:
                         continue

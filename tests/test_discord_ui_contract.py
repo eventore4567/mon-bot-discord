@@ -77,11 +77,29 @@ class DiscordUiContractTests(unittest.TestCase):
         with patch.dict(os.environ, {"SENTRIX_LOG_PRODUCER": "false"}, clear=True):
             self.assertFalse(log_service.is_primary_process())
 
-    def test_legacy_log_settings_have_self_heal_path(self):
+    def test_log_config_is_the_only_source_of_truth(self):
+        """log_settings est migrée puis archivée une fois ; le runtime ne la touche plus."""
         source = (ROOT / "utils" / "log_service.py").read_text(encoding="utf-8")
-        self.assertIn("untouched_migration", source)
-        self.assertIn("_legacy_channel_id", source)
-        self.assertIn("UPDATE log_settings SET enabled = 1, channel_id = ?", source)
+        # Aucun accès SQL à log_settings, aucun trigger, aucun miroir legacy.
+        for forbidden in ("FROM log_settings", "INTO log_settings", "UPDATE log_settings",
+                          "CREATE TRIGGER", "_mirror_legacy_setting"):
+            self.assertNotIn(forbidden, source, forbidden)
+
+        db_source = (ROOT / "database" / "db.py").read_text(encoding="utf-8")
+        # La table log_settings ne doit plus être recréée à chaque connect().
+        self.assertNotIn("LOG_SETTINGS_SCHEMA", db_source)
+        # La migration existe, est unique, et archive la table.
+        self.assertIn("async def _migrate_logs", db_source)
+        self.assertIn("ALTER TABLE log_settings RENAME TO", db_source)
+        self.assertIn("LOG_CONFIG_SCHEMA", db_source)
+
+    def test_set_log_config_rereads_after_write(self):
+        """Le panneau ne doit jamais afficher ACTIF sur une écriture non confirmée."""
+        source = (ROOT / "utils" / "log_service.py").read_text(encoding="utf-8")
+        body = source[source.index("async def set_log_config("):]
+        body = body[: body.index("\nasync def ")]
+        self.assertIn("saved = await get_log_config(", body)
+        self.assertIn("log_config_write_failed", body)
 
     def test_kick_command_and_discord_event_share_semantic_dedup_key(self):
         target = 1355855757991481475

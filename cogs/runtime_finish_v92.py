@@ -437,8 +437,8 @@ def _apply() -> None:
 
 def _post_v83_hook() -> None:
     package = sys.modules.get(__package__)
-    current = getattr(package, "install_logs_runtime_v83", None) if package else None
-    if not callable(current) or getattr(current, "_sentrix_v92_post_v83", False):
+    current = getattr(package, "run_late_runtime_hooks", None) if package else None
+    if not callable(current) or getattr(current, "_sentrix_v92_late_hook", False):
         return
 
     def wrapped(bot: commands.Bot):
@@ -446,9 +446,9 @@ def _post_v83_hook() -> None:
         _apply()
         return result
 
-    wrapped._sentrix_v92_post_v83 = True
+    wrapped._sentrix_v92_late_hook = True
     wrapped._sentrix_previous = current
-    setattr(package, "install_logs_runtime_v83", wrapped)
+    setattr(package, "run_late_runtime_hooks", wrapped)
 
 
 async def install(bot: commands.Bot) -> None:

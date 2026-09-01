@@ -74,21 +74,21 @@ def _install_post_v83_hook(bot: commands.Bot) -> bool:
     shop_default_prices/V90 est installé tôt dans finalize_runtime. À ce moment, V75 n'a
     pas encore remplacé SentriXSetupV74._build_page. Modifier la classe trop tôt serait donc
     annulé quelques lignes plus tard. Le chargeur ``cogs`` résout son global
-    ``install_logs_runtime_v83`` au moment de l'appel : on enveloppe ce global afin de
+    ``run_late_runtime_hooks`` au moment de l'appel : on enveloppe ce global afin de
     réappliquer les correctifs juste après V83, dernière couche officielle du Setup/logs.
     """
     package = sys.modules.get(__package__)
     if package is None:
         return False
 
-    current = getattr(package, "install_logs_runtime_v83", None)
+    current = getattr(package, "run_late_runtime_hooks", None)
     if not callable(current):
-        logger.warning("V90 : install_logs_runtime_v83 introuvable dans le chargeur cogs.")
+        logger.warning("V90 : run_late_runtime_hooks introuvable dans le chargeur cogs.")
         return False
-    if getattr(current, "_sentrix_v90_post_v83", False):
+    if getattr(current, "_sentrix_v90_late_hook", False):
         return True
 
-    def install_v83_then_v90(active_bot: commands.Bot):
+    def install_late_then_v90(active_bot: commands.Bot):
         result = current(active_bot)
         # V75/V83 ont désormais terminé leurs remplacements : cette fois le patch touche
         # exactement la méthode du panneau que l'utilisateur voit.
@@ -97,9 +97,9 @@ def _install_post_v83_hook(bot: commands.Bot) -> bool:
         logger.info("V90 post-V83 : Setup Logs final + Tickets canoniques réappliqués.")
         return result
 
-    install_v83_then_v90._sentrix_v90_post_v83 = True
-    install_v83_then_v90._sentrix_previous = current
-    setattr(package, "install_logs_runtime_v83", install_v83_then_v90)
+    install_late_then_v90._sentrix_v90_late_hook = True
+    install_late_then_v90._sentrix_previous = current
+    setattr(package, "run_late_runtime_hooks", install_late_then_v90)
     logger.info("V90 : hook post-V83 installé dans le chargeur runtime.")
     return True
 

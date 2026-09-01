@@ -7,9 +7,12 @@ sont stockées ici. Aucune adresse IP n'est jamais collectée ni stockée.
 import aiosqlite
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 import time
+
+logger = logging.getLogger("bot.database")
 
 # Créateur principal vérifié de SentriX. Ces informations sont recopiées dans la table
 # bot_creators au démarrage afin que l'identité et les permissions ne dépendent pas
@@ -1092,26 +1095,106 @@ CREATE TABLE IF NOT EXISTS game_settings (
 );
 """
 
-# Refonte des logs (Partie 3) : une ligne par (guild_id, log_type), additive — ne touche
-# jamais aux colonnes log_channel/log_messages/etc. déjà existantes dans guild_config
-# (qui restent la source des salons déjà configurés, reprise telle quelle à la migration).
-LOG_SETTINGS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS log_settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+# Journaux : ``log_config`` est l'UNIQUE source de vérité du routage.
+#
+# L'ancienne table ``log_settings`` n'est plus créée ici. La recréer à chaque connect()
+# ressuscitait une table vide après la migration, ce qui annulait la migration au
+# redémarrage suivant. Elle est désormais migrée puis archivée une seule fois par
+# ``Database._migrate_logs()``.
+LOG_CONFIG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS log_config (
     guild_id INTEGER NOT NULL,
-    log_type TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 0,
+    category TEXT NOT NULL,
     channel_id INTEGER,
-    include_content INTEGER NOT NULL DEFAULT 1,
-    include_attachments INTEGER NOT NULL DEFAULT 1,
-    include_actor INTEGER NOT NULL DEFAULT 1,
-    include_reason INTEGER NOT NULL DEFAULT 1,
-    created_at INTEGER,
-    updated_at INTEGER,
-    UNIQUE (guild_id, log_type)
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, category)
 );
-CREATE INDEX IF NOT EXISTS idx_log_settings_guild ON log_settings (guild_id);
+CREATE INDEX IF NOT EXISTS idx_log_config_guild ON log_config (guild_id);
 """
+
+LOG_CATEGORIES: tuple[str, ...] = (
+    "moderation", "messages", "members", "channels", "roles", "voice",
+    "server", "tickets", "automod", "spam", "raid", "resources", "files",
+)
+DEFAULT_LOG_CATEGORY = "server"
+
+# Mapping legacy EXPLICITE des valeurs rencontrées dans log_settings.log_type.
+# Volontairement autonome : la migration tourne pendant connect(), avant le chargement
+# des cogs, et ne doit dépendre d'aucun module qui importe config/Pillow.
+LEGACY_LOG_TYPE_TO_CATEGORY: dict[str, str] = {
+    **{key: key for key in LOG_CATEGORIES},
+    # Anciennes clés préfixées écrites par les versions successives du +setup.
+    "log_moderation": "moderation",
+    "log_messages": "messages",
+    "log_members": "members",
+    "log_channels": "channels",
+    "log_roles": "roles",
+    "log_voice": "voice",
+    "log_server": "server",
+    "log_channel": "server",
+    "log_tickets": "tickets",
+    "ticket_log_channel": "tickets",
+    "log_automod": "automod",
+    "log_spam": "spam",
+    "log_raid": "raid",
+    "log_resources": "resources",
+    "log_dossiers": "resources",
+    "log_files": "files",
+    "log_protection": "automod",
+    # Synonymes historiques.
+    "protection": "automod",
+    "system": "server",
+    "dossiers": "resources",
+    "guild": "server",
+    "channel": "channels",
+    "salon": "channels",
+    "salons": "channels",
+    "role": "roles",
+    "membre": "members",
+    "membres": "members",
+    "vocal": "voice",
+    "fichiers": "files",
+    # Types d'événements écrits par erreur comme clé de configuration.
+    "message_delete": "messages", "message_edit": "messages", "message_bulk": "messages",
+    "member_join": "members", "member_leave": "members", "member_remove": "members",
+    "member_update": "members", "member_roles": "members",
+    "member_ban": "moderation", "member_unban": "moderation", "member_kick": "moderation",
+    "member_timeout": "moderation", "member_untimeout": "moderation",
+    "member_warn": "moderation", "member_clear": "moderation",
+    "channel_create": "channels", "channel_delete": "channels", "channel_update": "channels",
+    "role_create": "roles", "role_delete": "roles", "role_update": "roles",
+    "voice_join": "voice", "voice_leave": "voice", "voice_move": "voice",
+    "ticket_open": "tickets", "ticket_close": "tickets", "ticket_claim": "tickets",
+    "guild_update": "server",
+}
+
+
+def legacy_log_category(value: object) -> str | None:
+    """Résout une valeur log_type historique. None = non résolue (routée vers server)."""
+    key = str(value or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    if not key:
+        return None
+    if key in LEGACY_LOG_TYPE_TO_CATEGORY:
+        return LEGACY_LOG_TYPE_TO_CATEGORY[key]
+    if key.startswith("log_"):
+        return LEGACY_LOG_TYPE_TO_CATEGORY.get(key[4:])
+    return None
+
+
+# Colonnes historiques de guild_config -> catégorie canonique. Mapping figé : il décrit
+# ce que la production a réellement écrit, pas ce qui serait logique aujourd'hui.
+LEGACY_GUILD_CONFIG_LOG_COLUMNS: dict[str, str] = {
+    "log_moderation": "moderation",
+    "log_messages": "messages",
+    "log_members": "members",
+    "log_server": "channels",
+    "log_roles": "roles",
+    "log_voice": "voice",
+    "log_channel": "server",
+    "ticket_log_channel": "tickets",
+    "log_automod": "automod",
+}
 
 # Seuil (en jours) en dessous duquel un compte est considéré "fake" pour le classement
 # d'invitations — mêmes valeur et logique que l'heuristique "comptes suspects" déjà
@@ -1162,7 +1245,7 @@ class Database:
         # Nouvelles tables additives (jeux + logs indépendants) : CREATE TABLE IF NOT
         # EXISTS, ne touche à aucune table/donnée déjà existante.
         await self._conn.executescript(GAME_TRANSACTIONS_SCHEMA)
-        await self._conn.executescript(LOG_SETTINGS_SCHEMA)
+        await self._conn.executescript(LOG_CONFIG_SCHEMA)
         await self._migrate()
         await self._conn.execute(
             "INSERT INTO bot_creators (user_id, display_name, username, is_primary, added_at) "
@@ -1222,6 +1305,120 @@ class Database:
         for column, col_type in REACTION_ROLES_NEW_COLUMNS.items():
             if column not in existing_reaction_roles:
                 await self._conn.execute(f"ALTER TABLE reaction_roles ADD COLUMN {column} {col_type}")
+
+        await self._migrate_logs()
+
+    async def _table_columns(self, table: str) -> set[str]:
+        cur = await self._conn.execute(f"PRAGMA table_info({table})")
+        return {str(row[1]) for row in await cur.fetchall()}
+
+    async def _migrate_logs(self) -> None:
+        """Migre une fois pour toutes le routage des logs vers ``log_config``.
+
+        Deux sources historiques sont reprises : la table ``log_settings`` et les
+        anciennes colonnes ``log_*`` de ``guild_config``. Une valeur qui ne se résout
+        pas est routée vers ``server`` et tracée — jamais perdue.
+
+        Arbitrage à l'intérieur d'une même catégorie, dans cet ordre :
+        1. une ligne avec salon bat une ligne sans salon ;
+        2. activée bat désactivée ;
+        3. la plus récente gagne.
+
+        Idempotent : ``log_settings`` est archivée à la fin, donc un second passage ne
+        trouve plus rien à migrer.
+        """
+        now_ts = now()
+        # (rang_salon, rang_actif, updated_at) -> (channel_id, enabled)
+        candidates: dict[tuple[int, str], tuple[tuple[int, int, int], int | None, int]] = {}
+        unresolved: list[str] = []
+
+        def offer(guild_id: int, category: str, channel_id, enabled, updated_at: int) -> None:
+            channel = int(channel_id) if channel_id else None
+            flag = 1 if enabled else 0
+            rank = (1 if channel else 0, flag, int(updated_at or 0))
+            key = (int(guild_id), category)
+            current = candidates.get(key)
+            if current is None or rank > current[0]:
+                candidates[key] = (rank, channel, flag)
+
+        # --- Source 1 : table log_settings ---------------------------------------
+        columns = await self._table_columns("log_settings")
+        if {"guild_id", "log_type", "channel_id"}.issubset(columns):
+            select = "guild_id, log_type, channel_id"
+            select += ", enabled" if "enabled" in columns else ", 1 AS enabled"
+            select += ", updated_at" if "updated_at" in columns else ", 0 AS updated_at"
+            cur = await self._conn.execute(f"SELECT {select} FROM log_settings")
+            for row in await cur.fetchall():
+                raw = str(row[1] or "")
+                category = legacy_log_category(raw)
+                if category not in LOG_CATEGORIES:
+                    unresolved.append(raw)
+                    category = DEFAULT_LOG_CATEGORY
+                offer(row[0], category, row[2], row[3], row[4])
+
+        # --- Source 2 : colonnes log_* de guild_config ----------------------------
+        guild_columns = await self._table_columns("guild_config")
+        usable = {
+            column: category
+            for column, category in LEGACY_GUILD_CONFIG_LOG_COLUMNS.items()
+            if column in guild_columns
+        }
+        if usable and "guild_id" in guild_columns:
+            names = ", ".join(usable)
+            cur = await self._conn.execute(f"SELECT guild_id, {names} FROM guild_config")
+            ordered = list(usable.items())
+            for row in await cur.fetchall():
+                for index, (_column, category) in enumerate(ordered, start=1):
+                    value = row[index]
+                    if value:
+                        # updated_at=0 : une colonne guild_config perd toujours contre une
+                        # ligne log_settings horodatée, mais remplit une catégorie vide.
+                        offer(row[0], category, value, 1, 0)
+
+        # --- Écriture canonique ---------------------------------------------------
+        written = 0
+        for (guild_id, category), (_rank, channel_id, enabled) in candidates.items():
+            await self._conn.execute(
+                "INSERT INTO log_config (guild_id, category, channel_id, enabled, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, category) DO UPDATE SET "
+                "channel_id = COALESCE(log_config.channel_id, excluded.channel_id), "
+                "enabled = CASE WHEN log_config.channel_id IS NULL "
+                "THEN excluded.enabled ELSE log_config.enabled END, "
+                "updated_at = MAX(log_config.updated_at, excluded.updated_at)",
+                (guild_id, category, channel_id, enabled, now_ts),
+            )
+            written += 1
+
+        if unresolved:
+            logger.warning(
+                "MIGRATION LOGS %s valeurs log_type non résolues routées vers '%s' : %s",
+                len(unresolved), DEFAULT_LOG_CATEGORY, sorted(set(unresolved)),
+            )
+
+        # --- Archivage de log_settings -------------------------------------------
+        if columns:
+            backup = "log_settings_backup"
+            cur = await self._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (backup,)
+            )
+            if await cur.fetchone() is not None:
+                backup = f"log_settings_backup_{now_ts}"
+            # Les triggers des anciennes couches pointent vers log_settings : ils
+            # disparaissent avec le renommage, mais on les retire explicitement pour
+            # qu'aucun ne survive sur la table archivée.
+            for trigger in (
+                "sentrix_log_settings_insert",
+                "sentrix_log_settings_update",
+                "sentrix_log_settings_to_config_insert",
+                "sentrix_log_settings_to_config_update",
+            ):
+                await self._conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+            await self._conn.execute(f"ALTER TABLE log_settings RENAME TO {backup}")
+            logger.warning(
+                "MIGRATION LOGS terminée : %s routes dans log_config, log_settings archivée en %s.",
+                written, backup,
+            )
 
     async def close(self):
         if self._conn:

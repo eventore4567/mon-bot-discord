@@ -39,8 +39,6 @@ from web import dashboard as dashboard_web
 
 if "cogs.drop" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.drop")
-if "cogs.log_access_fix" not in bot_main.EXTENSIONS:
-    bot_main.EXTENSIONS.append("cogs.log_access_fix")
 if "cogs.interaction_transport_guard" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.interaction_transport_guard")
 # Les deux anciens diagnostics ci-dessous ne sont plus chargés en permanence :

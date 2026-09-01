@@ -116,6 +116,13 @@ LEGACY_CATEGORY_KEYS: dict[str, str] = {
     "log_files": "files",
 }
 
+# Emoji par type d'événement, indexé sur log_type. Dérivé du registre pour qu'il ne
+# puisse jamais diverger de la catégorie et du style de bannière du même événement.
+EVENT_EMOJI: dict[str, str] = {
+    log_type: emoji for log_type, (_category, emoji, _kind) in LOG_REGISTRY.items()
+}
+DEFAULT_EVENT_EMOJI = "📋"
+
 LOGS = LOG_REGISTRY
 
 
@@ -198,6 +205,7 @@ def legacy_to_category(value: str) -> str | None:
 
 __all__ = [
     "CATEGORIES", "CATEGORY_META", "CATEGORY_ORDER", "DEFAULT_CATEGORY",
-    "LEGACY_CATEGORY_KEYS", "LEGACY_EVENT_ALIASES", "LOG_REGISTRY", "LOGS",
+    "DEFAULT_EVENT_EMOJI", "EVENT_EMOJI", "LEGACY_CATEGORY_KEYS", "LEGACY_EVENT_ALIASES",
+    "LOG_REGISTRY", "LOGS",
     "canonical_event_type", "category_for", "legacy_to_category", "resolve",
 ]

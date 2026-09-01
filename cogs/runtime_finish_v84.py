@@ -370,23 +370,11 @@ async def _ensure_channel(
 
 
 async def _persist_log_route(bot: commands.Bot, guild_id: int, log_type: str, channel_id: int) -> None:
+    """Passe par le point d'écriture unique : plus de SQL direct, plus de miroir legacy."""
     category, _emoji, _kind = log_service.resolve(log_type)
-    row = await log_service._ensure_category_row(bot, guild_id, category)
-    enabled = bool(row.get("enabled", 1))
-    await bot.db.execute(
-        "UPDATE log_config SET channel_id=?, enabled=1 WHERE guild_id=? AND category=?",
-        (int(channel_id), int(guild_id), category),
+    await log_service.set_log_config(
+        bot, int(guild_id), category, channel_id=int(channel_id), enabled=True
     )
-    try:
-        await log_service._mirror_legacy_setting(
-            bot,
-            int(guild_id),
-            category,
-            channel_id=int(channel_id),
-            enabled=True if not enabled else enabled,
-        )
-    except Exception:
-        logger.debug("Miroir legacy du log %s ignoré", category, exc_info=True)
 
 
 async def _safe_set_config(bot: commands.Bot, guild_id: int, field: str, value: int) -> bool:

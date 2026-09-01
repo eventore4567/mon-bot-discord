@@ -7,12 +7,15 @@ Discord Event -> Audit Log corrélé -> normalisation -> déduplication -> grand
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 import discord
 from discord.ext import commands
 
 from utils import embeds, log_service
+
+logger = logging.getLogger("bot.logs")
 
 CONFIG_TO_LOG_TYPE = {
     "log_messages": "messages",
@@ -85,7 +88,17 @@ class Logs(commands.Cog, name="Logs"):
     ) -> bool:
         log_type = CONFIG_TO_LOG_TYPE.get(config_key)
         if log_type is None:
+            logger.warning(
+                "SXTRACE 2 CALL guild=%s config_key=%s skipped=UNMAPPED_CONFIG_KEY known=%s",
+                getattr(guild, "id", None), config_key, sorted(CONFIG_TO_LOG_TYPE),
+            )
             return False
+        logger.warning(
+            "SXTRACE 2 CALL guild=%s config_key=%s log_type=%s event_key=%s target=%s.%s",
+            getattr(guild, "id", None), config_key, log_type, event_key,
+            getattr(log_service.send_log, "__module__", "?"),
+            getattr(log_service.send_log, "__name__", "?"),
+        )
         return await log_service.send_log(
             self.bot,
             guild,
@@ -254,7 +267,19 @@ class Logs(commands.Cog, name="Logs"):
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
+        logger.warning(
+            "SXTRACE 1 LISTENER event=on_message_delete cog=cogs.logs guild=%s channel=%s "
+            "message=%s author=%s author_bot=%s",
+            getattr(message.guild, "id", None),
+            getattr(message.channel, "id", None),
+            message.id,
+            getattr(message.author, "id", None),
+            getattr(message.author, "bot", None),
+        )
         if message.guild is None or message.author.bot:
+            logger.warning(
+                "SXTRACE 1 LISTENER skipped=GUILD_NONE_OR_BOT_AUTHOR message=%s", message.id
+            )
             return
         fields = [
             ("Auteur", _user_ref(message.author.id), True),
@@ -285,7 +310,19 @@ class Logs(commands.Cog, name="Logs"):
 
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        logger.warning(
+            "SXTRACE 1 LISTENER event=on_raw_message_delete cog=cogs.logs guild=%s channel=%s "
+            "message=%s cached=%s",
+            payload.guild_id,
+            payload.channel_id,
+            payload.message_id,
+            payload.cached_message is not None,
+        )
         if payload.guild_id is None or payload.cached_message is not None:
+            logger.warning(
+                "SXTRACE 1 LISTENER skipped=NO_GUILD_OR_ALREADY_CACHED message=%s",
+                payload.message_id,
+            )
             return
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:

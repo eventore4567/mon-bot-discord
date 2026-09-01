@@ -1,9 +1,8 @@
 """Réconciliation légère et diagnostic des salons de logs SentriX.
 
 Le runtime lit uniquement ``log_config``. L'ancien écran +setup écrit encore dans
-``log_settings`` : tant que cet écran n'est pas totalement retiré, deux triggers SQLite
-font uniquement office de pont d'écriture vers ``log_config``. Aucun envoi de log ne lit
-``log_settings``.
+``log_config``, écrite via ``log_service.set_log_config``. Ce module ne fait plus que
+créer les salons manquants et exposer ``+logsdiag``.
 """
 from __future__ import annotations
 
@@ -36,7 +35,6 @@ LOG_CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 _CANONICAL = tuple(LOG_CHANNEL_ALIASES)
-_CANONICAL_SQL = ",".join(f"'{item}'" for item in _CANONICAL)
 
 
 def _sanitize_catalog() -> None:
@@ -99,109 +97,29 @@ def _find_log_channel(guild: discord.Guild, category: str) -> discord.TextChanne
     return None
 
 
-async def _table_columns(bot: commands.Bot, table: str) -> set[str]:
-    try:
-        rows = await bot.db.fetchall(f"PRAGMA table_info({table})")
-    except Exception:
-        return set()
-    result = set()
-    for row in rows:
-        try:
-            result.add(str(row["name"]))
-        except Exception:
-            try:
-                result.add(str(row[1]))
-            except Exception:
-                pass
-    return result
+# _install_setup_bridge et _reconcile_recent_setup_rows SUPPRIMÉS.
+#
+# Ils installaient deux triggers SQL sur log_settings pour répercuter les écritures du
+# vieux +setup vers log_config. Deux autres triggers faisaient la même chose depuis
+# log_service, avec un mapping différent (ELSE 'server') : toute valeur non reconnue
+# écrasait donc silencieusement la route de la catégorie "server". log_settings est
+# désormais migrée puis archivée une seule fois par Database._migrate_logs(), et le
+# +setup écrit directement dans log_config via log_service.set_log_config.
 
 
-async def _install_setup_bridge(bot: commands.Bot) -> None:
-    """Fait suivre immédiatement les écritures du vieux +setup vers log_config."""
-    columns = await _table_columns(bot, "log_settings")
-    if not {"guild_id", "log_type", "channel_id", "enabled"}.issubset(columns):
-        logger.warning("Pont Setup logs non installé : table log_settings absente/incompatible.")
-        return
+async def _explicitly_disabled(bot: commands.Bot, guild_id: int, category: str) -> bool:
+    """Une route désactivée AVEC salon est un choix explicite : on ne la réactive jamais.
 
-    if bot.guilds:
-        await log_service.get_log_config(bot, bot.guilds[0].id, "messages")
-
-    updated_expr = "COALESCE(NEW.updated_at, strftime('%s','now'))" if "updated_at" in columns else "strftime('%s','now')"
-    for name in ("sentrix_log_settings_insert", "sentrix_log_settings_update"):
-        await bot.db.execute(f"DROP TRIGGER IF EXISTS {name}")
-
-    await bot.db.execute(
-        f"""
-        CREATE TRIGGER sentrix_log_settings_insert
-        AFTER INSERT ON log_settings
-        WHEN NEW.log_type IN ({_CANONICAL_SQL})
-        BEGIN
-            INSERT INTO log_config (guild_id, category, channel_id, enabled, updated_at)
-            VALUES (NEW.guild_id, NEW.log_type, NEW.channel_id, NEW.enabled, {updated_expr})
-            ON CONFLICT(guild_id, category) DO UPDATE SET
-                channel_id = excluded.channel_id,
-                enabled = excluded.enabled,
-                updated_at = excluded.updated_at;
-        END
-        """
+    Une route désactivée SANS salon n'a jamais été configurée : la synchronisation peut
+    donc l'alimenter avec un salon nommé logs-* trouvé sur le serveur.
+    """
+    row = await bot.db.fetchone(
+        "SELECT enabled, channel_id FROM log_config WHERE guild_id = ? AND category = ?",
+        (int(guild_id), str(category)),
     )
-    await bot.db.execute(
-        f"""
-        CREATE TRIGGER sentrix_log_settings_update
-        AFTER UPDATE OF channel_id, enabled ON log_settings
-        WHEN NEW.log_type IN ({_CANONICAL_SQL})
-        BEGIN
-            INSERT INTO log_config (guild_id, category, channel_id, enabled, updated_at)
-            VALUES (NEW.guild_id, NEW.log_type, NEW.channel_id, NEW.enabled, {updated_expr})
-            ON CONFLICT(guild_id, category) DO UPDATE SET
-                channel_id = excluded.channel_id,
-                enabled = excluded.enabled,
-                updated_at = excluded.updated_at;
-        END
-        """
-    )
-    logger.warning("Pont SQL +setup logs -> log_config installé pour %s catégories.", len(_CANONICAL))
-
-
-async def _reconcile_recent_setup_rows(bot: commands.Bot) -> int:
-    """Récupère aussi un choix fait dans +setup juste avant le déploiement du pont."""
-    columns = await _table_columns(bot, "log_settings")
-    if not {"guild_id", "log_type", "channel_id", "enabled"}.issubset(columns):
-        return 0
-    has_updated = "updated_at" in columns
-    select_updated = ", updated_at" if has_updated else ""
-    rows = await bot.db.fetchall(
-        f"SELECT guild_id, log_type, channel_id, enabled{select_updated} FROM log_settings "
-        f"WHERE log_type IN ({_CANONICAL_SQL})"
-    )
-    changed = 0
-    for row in rows:
-        category = str(row["log_type"])
-        current = await log_service.get_log_config(bot, int(row["guild_id"]), category)
-        legacy_updated = int(row["updated_at"] or 0) if has_updated else 0
-        current_updated = int((current or {}).get("updated_at") or 0)
-        legacy_channel = int(row["channel_id"]) if row["channel_id"] else None
-        current_channel = int(current["channel_id"]) if current and current.get("channel_id") else None
-        should_apply = (
-            legacy_updated > current_updated
-            if has_updated and legacy_updated
-            else current_channel is None and legacy_channel is not None
-        )
-        if not should_apply:
-            continue
-        await log_service.set_log_config(
-            bot,
-            int(row["guild_id"]),
-            category,
-            channel_id=legacy_channel,
-            enabled=bool(row["enabled"]) and legacy_channel is not None,
-        )
-        changed += 1
-        logger.warning(
-            "Setup log récupéré guild=%s category=%s channel=%s",
-            row["guild_id"], category, legacy_channel,
-        )
-    return changed
+    if row is None:
+        return False
+    return not bool(row["enabled"]) and bool(row["channel_id"])
 
 
 async def sync_generated_logs(bot: commands.Bot, guild: discord.Guild) -> int:
@@ -213,7 +131,11 @@ async def sync_generated_logs(bot: commands.Bot, guild: discord.Guild) -> int:
         except Exception:
             logger.exception("Lecture log_config impossible guild=%s category=%s", guild.id, category)
             continue
-        if config is None or not config.get("enabled") or config.get("channel_id"):
+        if config is None or config.get("channel_id"):
+            continue
+        if not config.get("enabled") and await _explicitly_disabled(bot, guild.id, category):
+            continue
+        if not config.get("enabled"):
             continue
         channel = _find_log_channel(guild, category)
         if channel is None:
@@ -270,34 +192,10 @@ class LogsDiagnostics(commands.Cog, name="LogsDiagnostics"):
                 ok, reason = log_service.validate_channel(
                     guild, channel_id, needs_file=True
                 )
-                legacy_id = None
-                legacy_enabled = None
-                try:
-                    columns = await _table_columns(self.bot, "log_settings")
-                    select = "channel_id,enabled"
-                    if "updated_at" in columns:
-                        select += ",updated_at"
-                    legacy = await self.bot.db.fetchone(
-                        f"SELECT {select} FROM log_settings WHERE guild_id=? AND log_type=?",
-                        (guild.id, key),
-                    )
-                    if legacy is not None:
-                        legacy_id = int(legacy["channel_id"]) if legacy["channel_id"] else None
-                        legacy_enabled = int(bool(legacy["enabled"]))
-                except Exception as exc:
-                    logger.exception(
-                        "logsdiag lecture legacy échouée guild=%s category=%s",
-                        guild.id,
-                        key,
-                    )
-                    rows.append(
-                        f"{key}: LEGACY_ERROR {type(exc).__name__}: {str(exc)[:180]}"
-                    )
-
                 rows.append(
                     f"{key}: enabled={int(bool((config or {}).get('enabled')))} "
-                    f"config={channel_id or '-'} legacy={legacy_id or '-'} "
-                    f"legacy_enabled={legacy_enabled if legacy_enabled is not None else '-'} "
+                    f"config={channel_id or '-'} "
+                    f"updated_at={(config or {}).get('updated_at') or '-'} "
                     f"channel={'OK' if channel else 'ABSENT'} "
                     f"perms={'OK' if ok else reason}"
                 )
@@ -378,18 +276,12 @@ async def _bootstrap(bot: commands.Bot) -> None:
         return
     await asyncio.sleep(2)
     _sanitize_catalog()
-    await _install_setup_bridge(bot)
-    recovered = await _reconcile_recent_setup_rows(bot)
     total = 0
     for guild in list(bot.guilds):
         total += await sync_generated_logs(bot, guild)
     if bot.get_cog("LogsDiagnostics") is None:
         await bot.add_cog(LogsDiagnostics(bot))
-    logger.info(
-        "Réconciliation logs terminée : %s route(s) générée(s), %s choix Setup récupéré(s).",
-        total,
-        recovered,
-    )
+    logger.info("Réconciliation logs terminée : %s route(s) générée(s).", total)
 
 
 def install(bot: commands.Bot) -> None:
@@ -400,4 +292,4 @@ def install(bot: commands.Bot) -> None:
     asyncio.create_task(_bootstrap(bot), name="sentrix-generated-logs-reconcile")
 
 
-__all__ = ["LOG_CHANNEL_ALIASES", "LogsDiagnostics", "install", "sync_generated_logs"]
+__all__ = ["LOG_CHANNEL_ALIASES", "LogsDiagnostics", "_explicitly_disabled", "install", "sync_generated_logs"]

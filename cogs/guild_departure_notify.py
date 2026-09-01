@@ -86,8 +86,9 @@ async def install(bot: commands.Bot) -> None:
     from . import log_transport_v52
     log_transport_v52.install(bot)
 
-    from . import log_runtime_diagnostic
-    await log_runtime_diagnostic.install(bot)
+    # log_runtime_diagnostic supprimé : ses listeners ne faisaient qu'observer, et son
+    # alias "logsdiag" entrait en collision avec la commande du même nom de
+    # generated_logs_sync (CommandRegistrationError au chargement).
 
 
 async def setup(bot: commands.Bot) -> None:

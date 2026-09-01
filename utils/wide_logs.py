@@ -19,7 +19,13 @@ import discord
 
 import config
 from utils.log_banners import COLORS, get_banner
-from utils.log_categories import category_for, canonical_event_type, resolve
+from utils.log_categories import (
+    DEFAULT_EVENT_EMOJI,
+    EVENT_EMOJI,
+    canonical_event_type,
+    category_for,
+    resolve,
+)
 
 logger = logging.getLogger("bot.wide-logs")
 
@@ -62,15 +68,9 @@ CREATE INDEX IF NOT EXISTS idx_logs_guild_created
 ON logs(guild_id, created_at DESC);
 """
 
-_LOG_CONFIG_SCHEMA = """
-CREATE TABLE IF NOT EXISTS log_config (
-    guild_id INTEGER NOT NULL,
-    category TEXT NOT NULL,
-    channel_id INTEGER,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY (guild_id, category)
-)
-"""
+# Pas de schéma log_config ici : cette table appartient à database/db.py. Une seconde
+# définition (sans colonne updated_at) entrait en concurrence avec la définition
+# canonique selon qui créait la table en premier.
 
 
 def log_runtime_capabilities() -> None:
@@ -272,6 +272,14 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
     return text[:limit]
 
 
+def _with_id(mention: str) -> str:
+    """Mention suivie de son ID en inline code, comme demandé par le format narratif."""
+    if not mention:
+        return ""
+    snowflake = _first_snowflake(mention)
+    return f"{mention} (`{snowflake}`)" if snowflake else mention
+
+
 def narrative_body(
     embed: discord.Embed,
     *,
@@ -284,7 +292,11 @@ def narrative_body(
     member = _first_user_ref(_field_value(embed, "membre", "auteur", "utilisateur", "cible"))
     if not member and identity_id:
         member = f"<@{identity_id}>"
-    moderator = _first_user_ref(_field_value(embed, "modérateur", "moderateur", "staff", "responsable", "acteur"))
+    moderator = _with_id(
+        _first_user_ref(
+            _field_value(embed, "modérateur", "moderateur", "staff", "responsable", "acteur")
+        )
+    )
     channel = _first_channel_ref(_field_value(embed, "salon", "channel"))
     role = _first_role_ref(_field_value(embed, "rôle", "role"))
     reason = _field_value(embed, "raison", "reason")
@@ -370,13 +382,22 @@ def narrative_body(
         if base:
             lines.append(base)
 
-    # Ajoute uniquement les blocs réellement longs qui n'ont pas déjà été rendus.
+    # Ajoute uniquement les blocs longs qui n'ont pas déjà été rendus. La comparaison
+    # porte sur le CORPS du bloc, pas sur le bloc entier : "**Contenu**\n```texte```"
+    # et "```texte```" désignent la même information, et le contenu d'un message
+    # supprimé sortait donc deux fois.
     extras = compact_fields(embed, limit=1800)
     if extras:
-        existing = "\n".join(lines)
+        existing = "\n\n".join(lines)
         for block in extras.split("\n\n"):
-            if block and block not in existing:
-                lines.append(block)
+            if not block.strip():
+                continue
+            body = block.split("\n", 1)[1] if block.startswith("**") and "\n" in block else block
+            if body.strip() and body.strip() in existing:
+                continue
+            if block in existing:
+                continue
+            lines.append(block)
 
     return "\n\n".join(part for part in lines if part.strip())[:3000]
 
@@ -463,10 +484,28 @@ class WideLogView(discord.ui.LayoutView):
             accent_colour=discord.Colour(accent) if accent is not None else None
         )
 
+        # Deux séparateurs maximum par panneau. Le compteur garantit la règle quelle que
+        # soit la combinaison de blocs présents (identité absente, boutons absents...).
+        separators = 0
+
+        def add_separator() -> bool:
+            nonlocal separators
+            if separators >= 2:
+                return False
+            try:
+                container.add_item(_sep())
+            except Exception:
+                logger.exception("SENTRIX V2 separator")
+                return False
+            separators += 1
+            return True
+
+        # add_item(media=...) sans description= : une description affiche un badge « ALT »
+        # par-dessus la bannière.
         gallery = discord.ui.MediaGallery()
         gallery.add_item(media=f"attachment://{banner_filename}")
         container.add_item(gallery)
-        container.add_item(_sep())
+        add_separator()
 
         # BLOC 1 — identité de l'entité concernée, jamais le bot par défaut.
         if identity_name:
@@ -479,7 +518,8 @@ class WideLogView(discord.ui.LayoutView):
                     container.add_item(
                         discord.ui.Section(
                             discord.ui.TextDisplay(ident),
-                            accessory=discord.ui.Thumbnail(str(identity_icon)),
+                            # Thumbnail sans description= : sinon Discord affiche « ALT ».
+                        accessory=discord.ui.Thumbnail(str(identity_icon)),
                         )
                     )
                     placed = True
@@ -487,11 +527,12 @@ class WideLogView(discord.ui.LayoutView):
                     logger.exception("SENTRIX V2 identity section")
             if not placed:
                 container.add_item(discord.ui.TextDisplay(ident))
-            container.add_item(_sep())
+            add_separator()
 
         # BLOC 2 — événement.
         title = safe_text(embed.title or "Journal SentriX")[:200]
-        heading = f"### {emoji} {title}".strip()
+        badge = emoji or EVENT_EMOJI.get(log_type, DEFAULT_EVENT_EMOJI)
+        heading = f"### {badge} {title}".strip()
         container.add_item(discord.ui.TextDisplay(heading))
 
         body = narrative_body(
@@ -507,9 +548,10 @@ class WideLogView(discord.ui.LayoutView):
         if footer:
             container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
 
+        # Les boutons restent DANS le Container, en ActionRow, tous en secondary.
         rows = build_rows(old_view)
         if rows:
-            container.add_item(_sep())
+            add_separator()
             for row in rows:
                 container.add_item(row)
 
@@ -527,39 +569,6 @@ def _ensure_database_parent() -> None:
     Path(path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
 
 
-async def _migrate_log_config(db: aiosqlite.Connection) -> None:
-    cursor = await db.execute("PRAGMA table_info(log_config)")
-    info = await cursor.fetchall()
-    await cursor.close()
-    columns = {str(row[1]) for row in info}
-    if not columns:
-        await db.execute(_LOG_CONFIG_SCHEMA)
-        return
-    if "category" in columns:
-        return
-    if "log_type" not in columns:
-        logger.warning("log_config possède un schéma inconnu; migration ignorée: %s", sorted(columns))
-        return
-
-    await db.execute("ALTER TABLE log_config RENAME TO log_config_legacy")
-    await db.execute(_LOG_CONFIG_SCHEMA)
-    cursor = await db.execute("SELECT guild_id, log_type, channel_id, enabled FROM log_config_legacy")
-    rows = await cursor.fetchall()
-    await cursor.close()
-    for guild_id, log_type, channel_id, enabled in rows:
-        category = category_for(str(log_type))
-        await db.execute(
-            "INSERT INTO log_config (guild_id,category,channel_id,enabled) VALUES (?,?,?,?) "
-            "ON CONFLICT(guild_id,category) DO UPDATE SET "
-            "channel_id=COALESCE(log_config.channel_id,excluded.channel_id), "
-            "enabled=CASE WHEN log_config.channel_id IS NULL AND excluded.channel_id IS NOT NULL "
-            "THEN excluded.enabled ELSE log_config.enabled END",
-            (int(guild_id), category, channel_id, int(enabled)),
-        )
-    await db.execute("DROP TABLE log_config_legacy")
-    logger.warning("Migration log_config log_type -> category terminée (%s lignes).", len(rows))
-
-
 async def ensure_log_storage(force: bool = False) -> None:
     global _DB_READY
     if _DB_READY and not force:
@@ -567,8 +576,9 @@ async def ensure_log_storage(force: bool = False) -> None:
     _ensure_database_parent()
     async with aiosqlite.connect(_database_path()) as db:
         await db.execute("PRAGMA busy_timeout = 5000")
+        # Uniquement la table d'historique des logs. Le routage (log_config) est créé et
+        # migré par database/db.py sur la connexion principale du bot.
         await db.executescript(_LOG_SCHEMA)
-        await _migrate_log_config(db)
         await db.commit()
     _DB_READY = True
 
@@ -659,7 +669,17 @@ async def send_wide_log(
     banner_path = get_banner(event_type, embed.title or "", embed.description or "")
     banner_filename = f"sentrix_log_{kind}.png"
 
+    logger.warning(
+        "SXTRACE 6 TRANSPORT phase=enter channel=%s log_type=%s event_type=%s kind=%s "
+        "banner=%s banner_exists=%s",
+        getattr(channel, "id", "?"), log_type, event_type, kind,
+        banner_path, banner_path.exists(),
+    )
+
     if not banner_path.exists():
+        logger.error(
+            "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_MISSING path=%s", banner_path
+        )
         logger.error("SENTRIX LOG V2 FAILED bannière introuvable: %s", banner_path)
         return False
 
@@ -686,12 +706,20 @@ async def send_wide_log(
             event_type,
         )
     except Exception as exc:
+        logger.error(
+            "SXTRACE 6 TRANSPORT phase=abort reason=VIEW_BUILD_FAILED type=%s",
+            type(exc).__name__,
+        )
         logger.error("SENTRIX LOG V2 FAILED construction type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
     try:
         banner_file = discord.File(str(banner_path), filename=banner_filename)
     except Exception as exc:
+        logger.error(
+            "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_FILE_FAILED type=%s",
+            type(exc).__name__,
+        )
         logger.error("SENTRIX LOG V2 FAILED file type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
@@ -700,8 +728,16 @@ async def send_wide_log(
         _rewind_file(extra_file)
         files.append(extra_file)
 
+    logger.warning(
+        "SXTRACE 6 TRANSPORT phase=before-send channel=%s event_type=%s files=%s view=%s",
+        getattr(channel, "id", "?"), event_type, len(files), type(view).__name__,
+    )
     try:
         message = await channel.send(view=view, files=files, allowed_mentions=NO_PINGS)
+        logger.warning(
+            "SXTRACE 6 TRANSPORT phase=after-send channel=%s event_type=%s message_id=%s",
+            getattr(channel, "id", "?"), event_type, getattr(message, "id", "?"),
+        )
         flags_value = int(getattr(getattr(message, "flags", None), "value", 0) or 0)
         logger.warning(
             "SENTRIX LOG V2 SUCCESS message_id=%s type=%s kind=%s components_v2=%s",
@@ -710,24 +746,23 @@ async def send_wide_log(
         _schedule_history(channel, embed, event_type, kind)
         return True
     except discord.HTTPException as exc:
+        logger.error(
+            "SXTRACE 6 TRANSPORT phase=send-failed channel=%s reason=HTTP status=%s code=%s",
+            getattr(channel, "id", "?"), getattr(exc, "status", None), getattr(exc, "code", None),
+        )
         logger.error("SENTRIX LOG V2 FAILED HTTP status=%s code=%s text=%r\n%s", getattr(exc, "status", None), getattr(exc, "code", None), getattr(exc, "text", None), traceback.format_exc())
     except Exception as exc:
+        logger.error(
+            "SXTRACE 6 TRANSPORT phase=send-failed channel=%s reason=%s",
+            getattr(channel, "id", "?"), type(exc).__name__,
+        )
         logger.error("SENTRIX LOG V2 FAILED type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
     return False
 
 
-async def upsert_log_config(guild_id: int, log_type: str, channel_id: int | None, enabled: bool) -> None:
-    """Miroite une configuration en utilisant désormais la catégorie comme clé."""
-    await ensure_log_storage()
-    category = category_for(log_type)
-    async with aiosqlite.connect(_database_path()) as db:
-        await db.execute("PRAGMA busy_timeout = 5000")
-        await db.execute(
-            "INSERT INTO log_config (guild_id,category,channel_id,enabled) VALUES (?,?,?,?) "
-            "ON CONFLICT(guild_id,category) DO UPDATE SET channel_id=excluded.channel_id,enabled=excluded.enabled",
-            (int(guild_id), category, channel_id, 1 if enabled else 0),
-        )
-        await db.commit()
+# upsert_log_config SUPPRIMÉ : il écrivait le routage sur une connexion aiosqlite
+# distincte de bot.db, avec un schéma sans updated_at. Le seul point d'écriture est
+# désormais log_service.set_log_config.
 
 
 async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> list[dict[str, Any]]:
@@ -749,5 +784,5 @@ async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> l
 __all__ = [
     "FALLBACK_ENABLED", "NO_PINGS", "WideLogView", "build_rows", "compact_fields",
     "derive_identity", "ensure_log_storage", "extract_history_ids", "fetch_log_history",
-    "log_runtime_capabilities", "narrative_body", "safe_text", "send_wide_log", "upsert_log_config",
+    "log_runtime_capabilities", "narrative_body", "safe_text", "send_wide_log",
 ]
