@@ -904,13 +904,82 @@ class Utility(commands.Cog, name="Utility"):
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def userinfo(self, ctx: commands.Context, membre: discord.Member = None):
         membre = membre or ctx.author
-        e = await self._embed(ctx.guild.id, title=str(membre))
+        maintenant = discord.utils.utcnow()
+
+        # --- phrase d'ouverture : qui, depuis quand, avec quel role ----------
+        cree = int(membre.created_at.timestamp())
+        arrive = int(membre.joined_at.timestamp()) if membre.joined_at else None
+        anciennete = (maintenant - membre.created_at).days
+        plus_haut = membre.top_role if membre.top_role.name != "@everyone" else None
+
+        ouverture = f"{membre.mention} · `{membre.id}`"
+        if arrive:
+            ouverture += f"\nMembre du serveur depuis <t:{arrive}:R>"
+        if plus_haut is not None:
+            ouverture += f", rôle le plus élevé {plus_haut.mention}"
+        ouverture += "."
+
+        e = await self._embed(
+            ctx.guild.id,
+            title=membre.display_name,
+            description=ouverture,
+        )
         e.set_thumbnail(url=membre.display_avatar.url)
-        e.add_field(name="ID", value=membre.id, inline=True)
-        e.add_field(name="Compte créé", value=f"<t:{int(membre.created_at.timestamp())}:D>", inline=True)
-        e.add_field(name="A rejoint le", value=f"<t:{int(membre.joined_at.timestamp())}:D>" if membre.joined_at else "Inconnu", inline=True)
-        roles = [r.mention for r in membre.roles if r.name != "@everyone"]
-        e.add_field(name=f"Rôles ({len(roles)})", value=", ".join(roles) if roles else "Aucun", inline=False)
+        if membre.colour.value:
+            e.colour = membre.colour
+
+        # --- compte ----------------------------------------------------------
+        compte = [f"Nom d'utilisateur **{membre.name}**"]
+        compte.append(f"Créé <t:{cree}:D> · <t:{cree}:R>")
+        if anciennete < 7:
+            compte.append(f"⚠️ Compte récent : **{anciennete} jour{'s' if anciennete > 1 else ''}**")
+        if membre.bot:
+            compte.append("Ce compte est un **bot**")
+        e.add_field(name="Compte", value="\n".join(compte), inline=True)
+
+        # --- presence sur le serveur ------------------------------------------
+        serveur = []
+        if arrive:
+            serveur.append(f"Arrivé <t:{arrive}:D>")
+        if membre.premium_since:
+            serveur.append(f"Booste depuis <t:{int(membre.premium_since.timestamp())}:R>")
+        if ctx.guild.owner_id == membre.id:
+            serveur.append("**Propriétaire du serveur**")
+        timeout = getattr(membre, "timed_out_until", None)
+        if timeout and timeout > maintenant:
+            serveur.append(f"🔇 En timeout jusqu'à <t:{int(timeout.timestamp())}:R>")
+        e.add_field(name="Sur ce serveur", value="\n".join(serveur) or "Aucune information", inline=True)
+
+        # --- pouvoirs reels, pas la liste des 40 permissions -------------------
+        perms = membre.guild_permissions
+        notables = [
+            ("administrator", "Administrateur"),
+            ("manage_guild", "Gérer le serveur"),
+            ("manage_roles", "Gérer les rôles"),
+            ("manage_channels", "Gérer les salons"),
+            ("ban_members", "Bannir"),
+            ("kick_members", "Expulser"),
+            ("moderate_members", "Timeout"),
+            ("manage_messages", "Gérer les messages"),
+        ]
+        pouvoirs = [libelle for attribut, libelle in notables if getattr(perms, attribut, False)]
+        if perms.administrator:
+            pouvoirs = ["**Administrateur** — toutes les permissions"]
+        e.add_field(
+            name="Pouvoirs",
+            value=" · ".join(pouvoirs) if pouvoirs else "Aucune permission de modération",
+            inline=False,
+        )
+
+        # --- roles -------------------------------------------------------------
+        roles = [r.mention for r in reversed(membre.roles) if r.name != "@everyone"]
+        e.add_field(
+            name=f"Rôles ({len(roles)})",
+            value=self._limited_list(roles, empty="Aucun rôle"),
+            inline=False,
+        )
+
+        e.set_footer(text=f"Demandé par {ctx.author.display_name}")
         await ctx.send(embed=e)
 
     @info.command(name="role", description="Afficher la fiche complète d'un rôle.")
