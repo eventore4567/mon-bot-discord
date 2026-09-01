@@ -39,7 +39,8 @@ def test_disabling_sentrix_acl_never_disables_native_discord_permissions() -> No
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "secure_evaluate_v68"
     )
     text = ast.unparse(fn)
-    assert 'core.module_enabled(bot, guild_id, "permissions")' in text
+    # ast.unparse re-emet les litteraux avec des guillemets simples.
+    assert "core.module_enabled(bot, guild_id, 'permissions')" in text
     assert "backend.explicit_rule" in text
     assert "matrix.DISCORD_PERMISSION_COMMANDS" in text
     assert "_has_native_permission" in text

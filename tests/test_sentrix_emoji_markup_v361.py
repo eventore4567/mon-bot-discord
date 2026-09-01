@@ -21,12 +21,30 @@ def test_guard_adds_no_discord_command():
 
 
 def test_broken_v36_markup_pattern_is_repaired():
-    source = GUARD.read_text(encoding="utf-8")
-    assert "_BROKEN_V36_RE" in source
-    pattern = re.compile(r"(?<!<)(?:a:|:)?sxv36_[A-Za-z0-9_~]+:\d+>")
-    assert pattern.sub("", "a:sxv36_update:1541658913592713327> Configuration").strip() == "Configuration"
-    valid = "<a:sxv36_update:1541658913592713327> Configuration"
-    assert pattern.sub("", valid) == valid
+    """Teste la vraie fonction, pas une copie du regex.
+
+    _BROKEN_V36_RE a ete renomme _BROKEN_PACK_RE et generalise aux deux generations
+    du pack (sxv36 et sxv37). Recopier le motif dans le test le rendait faux a chaque
+    evolution ; on exerce donc directement _repair_broken.
+    """
+    from cogs.sentrix_emoji_markup_guard_v361 import _repair_broken
+
+    assert "_BROKEN_PACK_RE" in GUARD.read_text(encoding="utf-8")
+
+    # Un fragment casse (chevron ouvrant perdu) doit disparaitre.
+    for broken in (
+        "a:sxv36_update:1541658913592713327> Configuration",
+        "a:sxv37_update:1541658913592713327> Configuration",
+        ":sxv37_ok:1541658913592713327> Configuration",
+    ):
+        assert _repair_broken(broken).strip() == "Configuration", broken
+
+    # Un token custom valide doit rester intact.
+    for valid in (
+        "<a:sxv36_update:1541658913592713327> Configuration",
+        "<a:sxv37_update:1541658913592713327> Configuration",
+    ):
+        assert _repair_broken(valid) == valid, valid
 
 
 def test_guard_preserves_full_custom_emoji_token():

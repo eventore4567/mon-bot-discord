@@ -27,8 +27,19 @@ def _norm(value: str) -> str:
 
 
 def is_major_update(raw_message: str) -> bool:
-    """Vrai uniquement lorsqu'une annonce importante a été demandée explicitement."""
+    """Vrai uniquement lorsqu'une annonce importante a été demandée explicitement.
+
+    Politique d'opt-in strict : aucune detection par mots-cles. Une release ordinaire ne
+    doit jamais declencher d'annonce parce que son message de commit contient « majeure »
+    ou « refonte ».
+
+    Un marqueur d'exclusion l'emporte TOUJOURS sur un marqueur d'inclusion : sur
+    « [MINOR] [MAJOR] », l'intention la plus prudente gagne. Se tromper en n'annoncant
+    pas est sans consequence ; se tromper en annoncant notifie tout un serveur.
+    """
     low = _norm(raw_message)
+    if re.search(r"\[(?:no-?ping|minor|silent|quiet)\]", low):
+        return False
     return bool(re.search(r"\[(?:major|ping)\]", low))
 
 

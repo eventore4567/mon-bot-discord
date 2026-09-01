@@ -22,12 +22,17 @@ def test_small_fixes_never_ping_everyone() -> None:
 
 def test_explicit_major_release_pings() -> None:
     assert is_major_update("[MAJOR] Nouvelle génération SentriX") is True
-    assert is_major_update("Grosse mise à jour : nouvelle version majeure de SentriX") is True
+    # Opt-in STRICT : un message de commit qui parle de version majeure ne suffit pas.
+    # Sans marqueur explicite, aucune annonce n'est envoyee.
+    assert is_major_update("Grosse mise à jour : nouvelle version majeure de SentriX") is False
+    assert is_major_update("[PING] Grosse mise à jour de SentriX") is True
 
 
 def test_multi_system_refactor_can_ping() -> None:
     message = "Refonte SentriX : nouveau système tickets, logs et sécurité"
-    assert is_major_update(message) is True
+    # Idem : une refonte multi-systemes ne pingue que si elle est marquee.
+    assert is_major_update(message) is False
+    assert is_major_update("[MAJOR] " + message) is True
 
 
 def test_no_ping_marker_always_wins() -> None:

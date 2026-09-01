@@ -54,7 +54,7 @@ CATEGORY_ICONS: dict[str, str] = {
 }
 
 STATIC_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("🔎", ("rechercher", "recherche", "chercher", "search")),
+    ("🔎", ("rechercher", "recherche", "chercher", "trouver", "search", "find")),
     ("⚙️", ("setup", "configuration", "configurer", "paramètres", "parametres", "settings")),
     ("🛡️", ("sécurité", "securite", "security", "protection", "automod")),
     ("🔨", ("modération", "moderation", "ban", "mute", "warn", "sanction")),
@@ -66,6 +66,9 @@ STATIC_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("🎵", ("musique", "music")),
     ("🛒", ("boutique", "shop", "inventaire", "inventory")),
     ("📋", ("logs", "journal", "résumé", "resume", "historique")),
+    # En dernier : les regles plus specifiques ci-dessus gagnent. "Systemes de securite"
+    # reste donc un bouclier, pas une piece de puzzle.
+    ("🧩", ("système", "systeme", "systèmes", "systemes", "module", "system")),
 )
 
 BUTTON_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (

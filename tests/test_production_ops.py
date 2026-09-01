@@ -46,7 +46,12 @@ class ProductionOpsTests(unittest.TestCase):
             bot = _Bot(str(source))
             with mock.patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("SENTRIX_BACKUP_DIR", None)
-                self.assertEqual(production_ops._backup_dir(bot), source.parent / "backups")
+                # macOS : /var est un lien symbolique vers /private/var. On compare donc
+                # des chemins resolus, sinon le test echoue selon le repertoire temporaire.
+                self.assertEqual(
+                    production_ops._backup_dir(bot).resolve(),
+                    (source.parent / "backups").resolve(),
+                )
 
     def test_health_alert_ignores_user_errors(self):
         bot = _Bot("unused.db")

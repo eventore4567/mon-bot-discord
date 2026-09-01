@@ -84,7 +84,10 @@ def test_short_information_card_stays_compact_and_generic() -> None:
         description="Réponse rapide.",
     )
     visual._promote_real_title(embed, kind="info")
-    assert embed.title == "Information"
+    # Une carte d'information conserve le nom reel du panneau : "Utilitaires" renseigne
+    # le lecteur la ou "Information" ne dit rien. Seuls les etats (erreur, succes,
+    # avertissement) recoivent un titre generique — voir le test suivant.
+    assert embed.title == "Utilitaires"
 
 
 def test_error_and_success_titles_are_not_rewritten_as_panel_names() -> None:
