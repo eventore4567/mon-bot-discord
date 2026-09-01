@@ -17,7 +17,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import checks, embeds
+from utils import access_matrix, checks, embeds
 
 
 logger = logging.getLogger("bot.server_builder")
@@ -2032,6 +2032,32 @@ class WipeConfirmModal(discord.ui.Modal, title="Confirmation de suppression tota
         self.add_item(self.confirm_input)
 
     async def on_submit(self, interaction: discord.Interaction):
+        # Revérification AU MOMENT DU SUBMIT, pas a l'ouverture de la fenetre.
+        # WipeConfirmView limite deja le bouton a l'auteur, mais une fenetre de
+        # confirmation reste ouverte plusieurs dizaines de secondes : un role retire
+        # entre-temps doit invalider la suppression. On rejoue la decision canonique de
+        # la matrice, la meme que pour "+wipe-server".
+        # access_matrix.evaluate est resolu ICI et pas a l'import : setup_simple_v68
+        # remplace cet attribut au demarrage, et c'est sa version qui doit decider.
+        decision = await access_matrix.evaluate(
+            interaction.client,
+            command_name="wipe-server",
+            author=interaction.user,
+            guild=interaction.guild,
+        )
+        if not decision.allowed:
+            logger.warning(
+                "Wipe refuse au submit guild=%s user=%s policy=%s",
+                getattr(interaction.guild, "id", None),
+                getattr(interaction.user, "id", None),
+                decision.policy,
+            )
+            return await interaction.response.send_message(
+                "Suppression annulée : vos permissions ont changé depuis l'ouverture "
+                f"de cette confirmation.\n{decision.message}",
+                ephemeral=True,
+            )
+
         if self.confirm_input.value.strip() != self.guild.name:
             return await interaction.response.send_message(
                 "Nom incorrect : suppression annulée, aucun salon ni rôle n'a été touché.",

@@ -175,11 +175,23 @@ class ConfigurationPermissionTests(unittest.TestCase):
         self.assertTrue(result.allowed)
         self.assertEqual(result.policy, "discord:manage_guild")
 
-    def test_complete_commands_still_require_administrator(self):
+    def test_complete_commands_are_now_guild_owner_only(self):
+        """wipe-server est passe au niveau 4 : Administrateur ne suffit plus.
+
+        Ancienne regle : tout administrateur pouvait supprimer l'integralite des salons
+        et des roles. Elle est volontairement remplacee — la commande detruit des
+        donnees de maniere irreversible.
+        """
         manager = Member(32, manage_guild=True)
         self.assertFalse(decide(Backend(), manager, "wipe-server").allowed)
+
         admin = Member(33, administrator=True)
-        self.assertTrue(decide(Backend(), admin, "wipe-server").allowed)
+        refus = decide(Backend(), admin, "wipe-server")
+        self.assertFalse(refus.allowed)
+        self.assertEqual(refus.policy, "guild-owner-only")
+
+        proprietaire = Member(GUILD_OWNER_ID, administrator=True)
+        self.assertTrue(decide(Backend(), proprietaire, "wipe-server").allowed)
 
     def test_help_never_claims_a_setup_role_can_replace_native_permission(self):
         label = secure_help_requirement("ban")

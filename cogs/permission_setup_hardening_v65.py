@@ -109,6 +109,9 @@ def _deny(reason: str, policy: str) -> matrix.AccessDecision:
 async def secure_evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> matrix.AccessDecision:
     """Décision finale commune aux commandes + et /."""
     name = matrix.normalise(command_name)
+    # Meme resolution que la matrice : une sous-commande declaree plus stricte que
+    # son groupe garde son nom complet, les autres heritent de leur racine.
+    name = matrix.resolve_name(name)
     if not name:
         return _deny("Commande impossible à identifier.", "invalid")
 
@@ -168,6 +171,20 @@ async def secure_evaluate(bot, *, command_name: Any, author: Any, guild: Any) ->
                 "Les **commandes IA** sont désactivées sur ce serveur.",
                 "ai:commands-off",
             )
+
+    # (4c) NIVEAU 4 — proprietaire du SERVEUR uniquement.
+    # Duplique volontairement depuis utils/access_matrix.py : V65 reimplemente tout le
+    # flux. Sans ce bloc, V65 laissait passer un simple Administrateur sur les commandes
+    # destructives des qu'il gagnait la course d'installation contre V68.
+    if name in matrix.GUILD_OWNER_COMMANDS:
+        if _is_guild_owner(author, guild):
+            return matrix.AccessDecision(True, policy="guild-owner-only")
+        return _deny(
+            "Cette commande est reservee au **proprietaire du serveur**.\n"
+            "Elle detruit des donnees de maniere irreversible : le role Administrateur "
+            "ne suffit pas.",
+            "guild-owner-only",
+        )
 
     if name == "setup" and _is_guild_owner(author, guild):
         return matrix.AccessDecision(True, policy="guild-owner:setup-recovery")

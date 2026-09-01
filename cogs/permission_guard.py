@@ -68,6 +68,72 @@ def interaction_root_name(interaction: discord.Interaction) -> str:
     return ""
 
 
+def _default_permissions_for(name: str) -> discord.Permissions | None:
+    """Permission Discord a afficher pour une commande slash, tiree de la matrice.
+
+    Ce reglage est PUREMENT COSMETIQUE : il indique a Discord de masquer la commande
+    dans le menu des membres qui ne pourront de toute facon pas l'utiliser. La decision
+    reelle reste prise au runtime par access_matrix.evaluate a chaque invocation — un
+    membre qui contournerait l'affichage serait refuse exactement pareil.
+
+    Les commandes publiques ne recoivent RIEN : elles doivent rester visibles de tous.
+    """
+    from cogs.permission_setup_hardening_v65 import CATEGORY_REQUIRED_PERMISSION
+
+    tier = access_matrix.access_tier(name)
+    if tier == "public":
+        return None
+    if tier in {"guild-owner", "owner-global"}:
+        # Discord ne sait pas exprimer « proprietaire uniquement » : Administrateur est
+        # le filtre d'affichage le plus proche. Le niveau reel est applique au runtime.
+        return discord.Permissions(administrator=True)
+    if tier == "embed-staff":
+        return discord.Permissions(manage_messages=True)
+    if tier.startswith("discord:"):
+        permission = tier.split(":", 1)[1]
+        try:
+            return discord.Permissions(**{permission: True})
+        except TypeError:
+            return discord.Permissions(manage_guild=True)
+    if tier.startswith("categorie:"):
+        category = tier.split(":", 1)[1]
+        native = CATEGORY_REQUIRED_PERMISSION.get(category, "manage_guild")
+        try:
+            return discord.Permissions(**{native: True})
+        except TypeError:
+            return discord.Permissions(manage_guild=True)
+    # fail-closed : la commande n'est pas classee, on ne l'affiche pas aux membres.
+    return discord.Permissions(administrator=True)
+
+
+def apply_slash_default_permissions(bot: commands.Bot) -> int:
+    """Aligne l'AFFICHAGE des commandes slash sur la matrice. Retourne le nombre pose.
+
+    Appele une fois avant la synchronisation de l'arbre. Ce n'est pas un wrapper : rien
+    n'est intercepte, on renseigne un attribut declaratif que Discord lit au sync.
+    """
+    applied = 0
+    for command in bot.tree.walk_commands():
+        if command.parent is not None:
+            continue  # Discord n'applique le reglage qu'a la racine d'un groupe
+        if getattr(command, "default_permissions", None) is not None:
+            continue  # deja declare explicitement dans le code
+        name = access_matrix.resolve_name(
+            getattr(command, "qualified_name", ""), getattr(command, "name", "")
+        )
+        permissions = _default_permissions_for(name)
+        if permissions is None:
+            continue
+        try:
+            command.default_permissions = permissions
+            applied += 1
+        except Exception:
+            logger.exception("default_permissions impossible sur /%s", name)
+    if applied:
+        logger.info("Affichage slash aligne sur la matrice : %s commande(s).", applied)
+    return applied
+
+
 async def evaluate_command_access(
     bot: commands.Bot, *, command_name: str, author: Any, guild: Any
 ) -> AccessDecision:
@@ -232,6 +298,10 @@ def install(bot: commands.Bot) -> None:
 
     prefix_permission_guard._sentrix_permission_guard = True
     bot.global_permission_check = prefix_permission_guard
+
+    # Affichage seulement : Discord masque aux membres les commandes qu'ils ne peuvent
+    # pas utiliser. La decision reste prise au runtime a chaque invocation.
+    apply_slash_default_permissions(bot)
 
     original_tree_check = bot.tree.interaction_check
 
