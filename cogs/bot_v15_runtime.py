@@ -113,9 +113,28 @@ def _install_log_setting_cache(bot: commands.Bot) -> None:
         # Réimplémentation minuscule pour éviter que le get interne de l'ancienne fonction
         # ne relise une valeur mise en cache juste avant l'UPDATE.
         await get_log_setting_v15(runtime_bot, int(guild_id), str(log_type))
-        await runtime_bot.db.execute(
+        cursor = await runtime_bot.db.execute(
             "UPDATE log_settings SET channel_id = ?, updated_at = ? WHERE guild_id = ? AND log_type = ?",
             (channel_id, log_service._now(), int(guild_id), str(log_type)),
+        )
+        # SXTRACE 7 : cette fonction n'ecrit QUE dans log_settings. Si rowcount vaut 0,
+        # aucune ligne n'a ete touchee, aucun trigger n'a pu se declencher, et log_config
+        # — la seule table lue par send_log — reste inchangee. Le retour force pourtant
+        # channel_id plus bas, ce qui affiche "ACTIF" dans le panneau.
+        rowcount = getattr(cursor, "rowcount", None)
+        try:
+            written = await runtime_bot.db.fetchone(
+                "SELECT channel_id, enabled, updated_at FROM log_config "
+                "WHERE guild_id = ? AND category = ?",
+                (int(guild_id), str(log_type)),
+            )
+        except Exception as exc:  # pragma: no cover - diagnostic uniquement
+            written = f"<erreur {type(exc).__name__}>"
+        logger.warning(
+            "SXTRACE 7 SETUP_WRITE guild=%s log_type=%s asked_channel=%s "
+            "log_settings_rowcount=%s log_config_readback=%s",
+            guild_id, log_type, channel_id, rowcount,
+            dict(written) if hasattr(written, "keys") else written,
         )
         cache_drop(runtime_bot, guild_id, log_type)
         value = await current_get(runtime_bot, int(guild_id), str(log_type))

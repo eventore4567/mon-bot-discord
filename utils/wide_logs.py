@@ -659,7 +659,17 @@ async def send_wide_log(
     banner_path = get_banner(event_type, embed.title or "", embed.description or "")
     banner_filename = f"sentrix_log_{kind}.png"
 
+    logger.warning(
+        "SXTRACE 6 TRANSPORT phase=enter channel=%s log_type=%s event_type=%s kind=%s "
+        "banner=%s banner_exists=%s",
+        getattr(channel, "id", "?"), log_type, event_type, kind,
+        banner_path, banner_path.exists(),
+    )
+
     if not banner_path.exists():
+        logger.error(
+            "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_MISSING path=%s", banner_path
+        )
         logger.error("SENTRIX LOG V2 FAILED bannière introuvable: %s", banner_path)
         return False
 
@@ -686,12 +696,20 @@ async def send_wide_log(
             event_type,
         )
     except Exception as exc:
+        logger.error(
+            "SXTRACE 6 TRANSPORT phase=abort reason=VIEW_BUILD_FAILED type=%s",
+            type(exc).__name__,
+        )
         logger.error("SENTRIX LOG V2 FAILED construction type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
     try:
         banner_file = discord.File(str(banner_path), filename=banner_filename)
     except Exception as exc:
+        logger.error(
+            "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_FILE_FAILED type=%s",
+            type(exc).__name__,
+        )
         logger.error("SENTRIX LOG V2 FAILED file type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
@@ -700,8 +718,16 @@ async def send_wide_log(
         _rewind_file(extra_file)
         files.append(extra_file)
 
+    logger.warning(
+        "SXTRACE 6 TRANSPORT phase=before-send channel=%s event_type=%s files=%s view=%s",
+        getattr(channel, "id", "?"), event_type, len(files), type(view).__name__,
+    )
     try:
         message = await channel.send(view=view, files=files, allowed_mentions=NO_PINGS)
+        logger.warning(
+            "SXTRACE 6 TRANSPORT phase=after-send channel=%s event_type=%s message_id=%s",
+            getattr(channel, "id", "?"), event_type, getattr(message, "id", "?"),
+        )
         flags_value = int(getattr(getattr(message, "flags", None), "value", 0) or 0)
         logger.warning(
             "SENTRIX LOG V2 SUCCESS message_id=%s type=%s kind=%s components_v2=%s",
@@ -710,8 +736,16 @@ async def send_wide_log(
         _schedule_history(channel, embed, event_type, kind)
         return True
     except discord.HTTPException as exc:
+        logger.error(
+            "SXTRACE 6 TRANSPORT phase=send-failed channel=%s reason=HTTP status=%s code=%s",
+            getattr(channel, "id", "?"), getattr(exc, "status", None), getattr(exc, "code", None),
+        )
         logger.error("SENTRIX LOG V2 FAILED HTTP status=%s code=%s text=%r\n%s", getattr(exc, "status", None), getattr(exc, "code", None), getattr(exc, "text", None), traceback.format_exc())
     except Exception as exc:
+        logger.error(
+            "SXTRACE 6 TRANSPORT phase=send-failed channel=%s reason=%s",
+            getattr(channel, "id", "?"), type(exc).__name__,
+        )
         logger.error("SENTRIX LOG V2 FAILED type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
     return False
 
