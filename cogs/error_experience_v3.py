@@ -51,7 +51,7 @@ def _command_candidates(bot: commands.Bot) -> tuple[list[str], dict[str, str]]:
     for command in bot.walk_commands():
         if getattr(command, "hidden", False):
             continue
-        for value in (command.qualified_name, command.name, *(getattr(command, "aliases", ()) or ()):
+        for value in (command.qualified_name, command.name, *(getattr(command, "aliases", ()) or ())):
             key = str(value or "").casefold().strip()
             if key:
                 candidates.append(key)
@@ -93,10 +93,11 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
     base = getattr(error, "original", error)
     prefix = _prefix(ctx)
 
-    # Diagnostic volontairement explicite pour +logsdiag : cette commande sert justement
-    # à retrouver les erreurs que le handler utilisateur masque normalement.
+    # +logsdiag doit exposer l'erreur brute au lieu de la masquer derrière le fallback.
     command = getattr(ctx, "command", None)
-    command_name = str(getattr(command, "qualified_name", "") or getattr(ctx, "invoked_with", "")).casefold()
+    command_name = str(
+        getattr(command, "qualified_name", "") or getattr(ctx, "invoked_with", "")
+    ).casefold()
     if command_name == "logsdiag":
         detail = str(base).replace("```", "'''").replace("\n", " ")[:1500]
         await ctx.send(
@@ -104,7 +105,11 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
             f"LOGSDIAG COMMAND ERROR\nTYPE={type(base).__name__}\nDETAIL={detail or '(aucun message)'}\n"
             "```"
         )
-        logger.exception("+logsdiag a échoué", exc_info=base if isinstance(base, BaseException) else None)
+        logger.error(
+            "+logsdiag a échoué: %s: %s",
+            type(base).__name__,
+            detail,
+        )
         return True
 
     if isinstance(base, commands.CommandNotFound):
