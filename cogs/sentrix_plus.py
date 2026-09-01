@@ -535,6 +535,10 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             (channel_id,),
         )
         if not row:
+            # Borne memoire : ce cache est indexe par SALON, pas par serveur. Sur un bot
+            # present sur beaucoup de serveurs il grossirait sans limite.
+            if len(self._no_sticky) > 20000:
+                self._no_sticky.clear()
             self._no_sticky[channel_id] = True
             return
         if row["message_id"] and int(row["message_id"]) == int(message.id):
