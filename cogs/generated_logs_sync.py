@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import time
 import unicodedata
 
 import discord
@@ -247,31 +246,29 @@ class LogsDiagnostics(commands.Cog, name="LogsDiagnostics"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.command(name="logsdiag")
-    @commands.guild_only()
-    async def logsdiag(self, ctx: commands.Context, category: str = ""):
-        """Diagnostic robuste de log_config. Exemple : +logsdiag messages."""
-        if ctx.guild is None:
-            return
-        member = ctx.author if isinstance(ctx.author, discord.Member) else None
-        if member is None or not member.guild_permissions.administrator:
-            return await ctx.send("Cette commande est réservée aux administrateurs du serveur.")
-
+    async def _send_diag(
+        self,
+        destination,
+        guild: discord.Guild,
+        author: discord.Member,
+        category: str = "",
+    ) -> None:
         requested = (category or "").strip().casefold().replace("-", "_")
         if requested and requested not in log_service.LOG_TYPES:
-            return await ctx.send(
+            await destination.send(
                 "Catégorie inconnue. Utilise : `" + ", ".join(log_service.LOG_TYPES) + "`."
             )
+            return
 
         rows: list[str] = []
         keys = [requested] if requested else list(log_service.LOG_TYPES)
         for key in keys:
             try:
-                config = await log_service.get_log_config(self.bot, ctx.guild.id, key)
+                config = await log_service.get_log_config(self.bot, guild.id, key)
                 channel_id = (config or {}).get("channel_id")
-                channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+                channel = guild.get_channel(int(channel_id)) if channel_id else None
                 ok, reason = log_service.validate_channel(
-                    ctx.guild, channel_id, needs_file=True
+                    guild, channel_id, needs_file=True
                 )
                 legacy_id = None
                 legacy_enabled = None
@@ -282,13 +279,17 @@ class LogsDiagnostics(commands.Cog, name="LogsDiagnostics"):
                         select += ",updated_at"
                     legacy = await self.bot.db.fetchone(
                         f"SELECT {select} FROM log_settings WHERE guild_id=? AND log_type=?",
-                        (ctx.guild.id, key),
+                        (guild.id, key),
                     )
                     if legacy is not None:
                         legacy_id = int(legacy["channel_id"]) if legacy["channel_id"] else None
                         legacy_enabled = int(bool(legacy["enabled"]))
                 except Exception as exc:
-                    logger.exception("logsdiag lecture legacy échouée guild=%s category=%s", ctx.guild.id, key)
+                    logger.exception(
+                        "logsdiag lecture legacy échouée guild=%s category=%s",
+                        guild.id,
+                        key,
+                    )
                     rows.append(
                         f"{key}: LEGACY_ERROR {type(exc).__name__}: {str(exc)[:180]}"
                     )
@@ -301,30 +302,73 @@ class LogsDiagnostics(commands.Cog, name="LogsDiagnostics"):
                     f"perms={'OK' if ok else reason}"
                 )
             except Exception as exc:
-                logger.exception("logsdiag route échouée guild=%s category=%s", ctx.guild.id, key)
+                logger.exception(
+                    "logsdiag route échouée guild=%s category=%s",
+                    guild.id,
+                    key,
+                )
                 rows.append(
                     f"{key}: ROUTE_ERROR {type(exc).__name__}: {str(exc)[:300]}"
                 )
 
         text = "LOGS DIAG — source runtime=log_config\n" + "\n".join(rows)
         for start in range(0, len(text), 1850):
-            await ctx.send(f"```text\n{text[start:start + 1850]}\n```")
+            await destination.send(f"```text\n{text[start:start + 1850]}\n```")
 
         if requested:
             try:
                 sent, detail = await log_service.send_test_log(
-                    self.bot, ctx.guild, requested, ctx.author
+                    self.bot, guild, requested, author
                 )
-                await ctx.send(
+                await destination.send(
                     f"```text\nTEST {requested}: {'OK' if sent else 'ECHEC'} — {detail[:1500]}\n```"
                 )
             except Exception as exc:
-                logger.exception("logsdiag test échoué guild=%s category=%s", ctx.guild.id, requested)
-                await ctx.send(
+                logger.exception(
+                    "logsdiag test échoué guild=%s category=%s",
+                    guild.id,
+                    requested,
+                )
+                await destination.send(
                     "```text\n"
                     f"TEST {requested}: EXCEPTION {type(exc).__name__}: {str(exc)[:1500]}\n"
                     "```"
                 )
+
+    @commands.command(name="logsdiag")
+    @commands.guild_only()
+    async def logsdiag(self, ctx: commands.Context, category: str = ""):
+        if ctx.guild is None or not isinstance(ctx.author, discord.Member):
+            return
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("Cette commande est réservée aux administrateurs du serveur.")
+        await self._send_diag(ctx.channel, ctx.guild, ctx.author, category)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """Diagnostic hors moteur de commandes : écrire `logsdiag messages` sans préfixe."""
+        if message.author.bot or message.guild is None:
+            return
+        raw = (message.content or "").strip()
+        lowered = raw.casefold()
+        if lowered != "logsdiag" and not lowered.startswith("logsdiag "):
+            return
+        if not isinstance(message.author, discord.Member):
+            return
+        if not message.author.guild_permissions.administrator:
+            await message.channel.send("Ce diagnostic est réservé aux administrateurs du serveur.")
+            return
+        parts = raw.split(maxsplit=1)
+        category = parts[1] if len(parts) > 1 else ""
+        try:
+            await self._send_diag(message.channel, message.guild, message.author, category)
+        except Exception as exc:
+            logger.exception("logsdiag hors commande a échoué guild=%s", message.guild.id)
+            await message.channel.send(
+                "```text\n"
+                f"LOGSDIAG FATAL {type(exc).__name__}: {str(exc)[:1500]}\n"
+                "```"
+            )
 
 
 async def _bootstrap(bot: commands.Bot) -> None:
