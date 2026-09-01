@@ -59,10 +59,31 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
 
     if isinstance(base, commands.CommandNotFound):
         typed = str(getattr(ctx, "invoked_with", "") or "").strip()
-        return _panel(
-            "Commande introuvable",
-            f"La commande `{prefix}{typed}` n’existe pas.\n\nUtilisez `{prefix}help` pour consulter les commandes disponibles.",
-        )
+        # Renvoyer l'utilisateur vers +help alors qu'on CONNAIT les commandes proches
+        # n'aide personne : taper "+sticky" doit proposer sticky-set / sticky-off.
+        # La recherche vit dans command_response_guard ; on la reutilise au lieu d'en
+        # ecrire une seconde.
+        suggestions: list[str] = []
+        try:
+            from . import command_response_guard as guard
+
+            suggestions = guard._command_suggestions(getattr(ctx, "bot", None), ctx, typed)
+        except Exception:
+            logger.debug("Suggestions de commandes indisponibles.", exc_info=True)
+
+        if suggestions:
+            lignes = "\n".join(f"• `{prefix}{name}`" for name in suggestions[:3])
+            description = (
+                f"La commande `{prefix}{typed}` n’existe pas.\n\n"
+                f"**Vouliez-vous dire :**\n{lignes}\n\n"
+                f"`{prefix}help {suggestions[0]}` donne la syntaxe exacte."
+            )
+        else:
+            description = (
+                f"La commande `{prefix}{typed}` n’existe pas.\n\n"
+                f"Utilisez `{prefix}help` pour consulter les commandes disponibles."
+            )
+        return _panel("Commande introuvable", description)
     if isinstance(base, commands.MissingRequiredArgument):
         name = str(getattr(getattr(base, "param", None), "name", "argument") or "argument")
         return _panel(
