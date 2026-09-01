@@ -85,6 +85,11 @@ def _replace_resource_listeners(bot) -> None:
     bot.add_listener(on_guild_stickers_update, "on_guild_stickers_update")
 
 
+# Intervalle minimal entre deux purges de message_attachment_cache_v2.
+_ATTACHMENT_PURGE_EVERY = 300.0
+_attachment_purge_state = {"last": 0.0}
+
+
 def _finalize_log_runtime(bot) -> None:
     if "members" in log_service.LOG_TYPES:
         log_service.LOG_TYPES["members"]["label"] = "Membres (arrivées/départs/pseudo/rôles attribués)"
@@ -101,11 +106,22 @@ def _finalize_log_runtime(bot) -> None:
         if not setting.get("enabled"):
             return
         await current_cache(message)
+        # Purge des pieces jointes expirees : au plus une fois toutes les 5 minutes.
+        #
+        # Elle etait executee a CHAQUE message mis en cache, soit une ECRITURE SQLite
+        # (donc le verrou d'ecriture) sur le chemin le plus chaud du bot. La table n'est
+        # jamais lue par balayage sur stored_at, seulement par (guild_id, message_id) :
+        # retarder la purge ne change donc rien de visible, la retention passe de 24 h a
+        # 24 h 05 au pire.
+        moment = time.monotonic()
+        if moment - _attachment_purge_state["last"] < _ATTACHMENT_PURGE_EVERY:
+            return
+        _attachment_purge_state["last"] = moment
         try:
             await core.ensure_schema(bot)
             await bot.db.execute("DELETE FROM message_attachment_cache_v2 WHERE stored_at < ?", (int(time.time()) - 86400,))
         except Exception:
-            pass
+            logger.exception("Purge des pieces jointes expirees impossible.")
     logs_cog._cache_message = MethodType(cache_only_when_needed, logs_cog)
     logs_cog._sentrix_setup_v2_cache_final = True
 
