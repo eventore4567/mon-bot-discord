@@ -24,7 +24,6 @@ CATEGORY_ORDER = tuple(CATEGORIES)
 CATEGORY_META = {key: {"label": label, "emits": True} for key, label in CATEGORIES.items()}
 DEFAULT_CATEGORY = "server"
 
-# log_type -> (catégorie, emoji, kind bannière)
 LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "member_kick": ("moderation", "👢", "error"),
     "member_ban": ("moderation", "🔨", "error"),
@@ -33,11 +32,9 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "member_untimeout": ("moderation", "✅", "success"),
     "member_warn": ("moderation", "⚠️", "warning"),
     "member_clear": ("moderation", "🧹", "warning"),
-
     "message_delete": ("messages", "🗑️", "error"),
     "message_edit": ("messages", "✏️", "warning"),
     "message_bulk": ("messages", "🧹", "error"),
-
     "member_join": ("members", "📥", "success"),
     "member_leave": ("members", "📤", "error"),
     "member_remove": ("members", "📤", "error"),
@@ -45,41 +42,31 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "member_roles": ("members", "🎭", "info"),
     "role_add": ("members", "➕", "info"),
     "role_remove": ("members", "➖", "info"),
-
     "channel_create": ("channels", "📗", "success"),
     "channel_delete": ("channels", "📕", "error"),
     "channel_update": ("channels", "📘", "info"),
     "pins_update": ("channels", "📌", "info"),
-
     "role_create": ("roles", "➕", "success"),
     "role_delete": ("roles", "➖", "error"),
     "role_update": ("roles", "🛡️", "warning"),
-
     "voice_join": ("voice", "🔊", "success"),
     "voice_leave": ("voice", "🔇", "error"),
     "voice_move": ("voice", "↔️", "info"),
     "voice_state": ("voice", "🎙️", "info"),
     "voice_update": ("voice", "🎙️", "info"),
-
     "guild_update": ("server", "⚙️", "info"),
-
     "ticket_open": ("tickets", "📬", "success"),
     "ticket_close": ("tickets", "🔒", "special"),
     "ticket_claim": ("tickets", "🙋", "info"),
-
     "automod_link": ("automod", "🔗", "error"),
     "automod_word": ("automod", "🛑", "error"),
     "automod_mention": ("automod", "📣", "error"),
-
     "automod_spam": ("spam", "🚫", "error"),
     "spam_detected": ("spam", "🚫", "error"),
     "spam_purge": ("spam", "🧹", "warning"),
-
     "antiraid": ("raid", "🛡️", "error"),
     "raid_detected": ("raid", "🛡️", "error"),
     "raid_lockdown": ("raid", "🔒", "error"),
-
-    # Ces événements appartiennent à Ressources, jamais au fourre-tout Serveur.
     "emoji_update": ("resources", "😀", "info"),
     "invite_create": ("resources", "🔗", "success"),
     "invite_delete": ("resources", "🔗", "error"),
@@ -87,7 +74,6 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "webhook_update": ("resources", "🔗", "warning"),
     "resource_add": ("resources", "📎", "success"),
     "resource_remove": ("resources", "📎", "error"),
-
     "file_delete": ("files", "📎", "error"),
     "file_upload": ("files", "📁", "info"),
     "file_blocked": ("files", "⛔", "error"),
@@ -106,7 +92,6 @@ LEGACY_EVENT_ALIASES: dict[str, str] = {
     "member_departure": "member_leave",
 }
 
-# Valeurs historiques de log_settings / guild_config / vieux appelants.
 LEGACY_CATEGORY_KEYS: dict[str, str] = {
     **{key: key for key in CATEGORIES},
     "protection": "automod",
@@ -131,7 +116,6 @@ LEGACY_CATEGORY_KEYS: dict[str, str] = {
     "log_files": "files",
 }
 
-# Compatibilité avec d'anciens imports.
 LOGS = LOG_REGISTRY
 
 
@@ -139,11 +123,21 @@ def _norm(value: object) -> str:
     return str(value or "").strip().casefold().replace("-", "_").replace(" ", "_")
 
 
+def _canonical_category(value: str) -> str:
+    key = _norm(value)
+    # Alias legacy AVANT CATEGORIES : même si un ancien runtime rajoute temporairement
+    # ``dossiers`` au dictionnaire, il reste canoniquement ``resources``.
+    if key in LEGACY_CATEGORY_KEYS:
+        return LEGACY_CATEGORY_KEYS[key]
+    if key in CATEGORIES:
+        return key
+    return DEFAULT_CATEGORY
+
+
 def canonical_event_type(log_type: str, title: str = "", description: str = "") -> str:
     key = LEGACY_EVENT_ALIASES.get(_norm(log_type), _norm(log_type))
     if key in LOG_REGISTRY or key in CATEGORIES or key in LEGACY_CATEGORY_KEYS:
         return key
-
     sample = f"{title} {description}".casefold()
     checks = (
         ("message supprim", "message_delete"),
@@ -171,17 +165,16 @@ def canonical_event_type(log_type: str, title: str = "", description: str = "") 
 def category_for(log_type: str, title: str = "", description: str = "") -> str:
     key = canonical_event_type(log_type, title, description)
     if key in LOG_REGISTRY:
-        return LOG_REGISTRY[key][0]
-    if key in CATEGORIES:
-        return key
-    return LEGACY_CATEGORY_KEYS.get(key, DEFAULT_CATEGORY)
+        return _canonical_category(LOG_REGISTRY[key][0])
+    return _canonical_category(key)
 
 
 def resolve(log_type: str, title: str = "", description: str = "") -> tuple[str, str, str]:
     key = canonical_event_type(log_type, title, description)
     if key in LOG_REGISTRY:
-        return LOG_REGISTRY[key]
-    return category_for(key), "📋", "info"
+        category, emoji, kind = LOG_REGISTRY[key]
+        return _canonical_category(category), emoji, kind
+    return _canonical_category(key), "📋", "info"
 
 
 def legacy_to_category(value: str) -> str | None:
@@ -190,16 +183,16 @@ def legacy_to_category(value: str) -> str | None:
         return None
     if key in LEGACY_CATEGORY_KEYS:
         return LEGACY_CATEGORY_KEYS[key]
-    if key in CATEGORIES:
-        return key
     if key in LOG_REGISTRY:
-        return LOG_REGISTRY[key][0]
+        return _canonical_category(LOG_REGISTRY[key][0])
+    if key in CATEGORIES:
+        return _canonical_category(key)
     if key.startswith("log_"):
         tail = key[4:]
-        if tail in CATEGORIES:
-            return tail
+        if tail in LEGACY_CATEGORY_KEYS:
+            return LEGACY_CATEGORY_KEYS[tail]
         if tail in LOG_REGISTRY:
-            return LOG_REGISTRY[tail][0]
+            return _canonical_category(LOG_REGISTRY[tail][0])
     return None
 
 
