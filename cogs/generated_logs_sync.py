@@ -1,8 +1,8 @@
 """Réconciliation légère des salons de logs générés par SentriX.
 
-Ce module ne monkey-patch rien. Il reconnaît uniquement les noms de salons créés par les
-constructeurs SentriX et remplit une route ``log_config`` encore vide. Une route choisie
-par un administrateur n'est jamais remplacée.
+Aucun monkey-patch : ce module reconnaît les salons créés automatiquement et remplit
+uniquement une route canonique encore vide. Il retire aussi l'ancien alias d'affichage
+``dossiers`` si un module legacy l'a réinjecté pendant le chargement.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import unicodedata
 import discord
 from discord.ext import commands
 
-from utils import log_service
+from utils import log_categories, log_service
 
 logger = logging.getLogger("bot.generated-logs-sync")
 
@@ -30,9 +30,36 @@ LOG_CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
     "automod": ("automod", "logs-automod", "logs-securite", "logs-sécurité", "logs-security"),
     "spam": ("logs-spam", "logs-protect-spam-logs", "protect-spam-logs"),
     "raid": ("logs-raid", "raidprotect-logs", "raid-protect-logs", "anti-raid-logs"),
-    "resources": ("logs-resources", "logs-ressources", "logs-dossiers"),
+    "resources": ("logs-resources", "logs-ressources", "logs-dossiers", "logs-invitations"),
     "files": ("logs-files", "logs-fichiers"),
 }
+
+
+def _sanitize_catalog() -> None:
+    """Réaffirme les 13 catégories sans remplacer aucune fonction Python."""
+    log_categories.CATEGORIES.pop("dossiers", None)
+    log_service.LOG_TYPES.pop("dossiers", None)
+    log_service.LOG_TYPES.pop("protection", None)
+    log_categories.LOG_REGISTRY.update(
+        {
+            "invite_create": ("resources", "🔗", "success"),
+            "invite_delete": ("resources", "🔗", "error"),
+            "emoji_update": ("resources", "😀", "info"),
+            "sticker_update": ("resources", "🧩", "info"),
+            "webhook_update": ("resources", "🔗", "warning"),
+            "automod_link": ("automod", "🔗", "error"),
+            "automod_word": ("automod", "🛑", "error"),
+            "automod_spam": ("spam", "🚫", "error"),
+            "antiraid": ("raid", "🛡️", "error"),
+        }
+    )
+    log_categories.CATEGORY_ORDER = tuple(
+        key for key in log_categories.CATEGORIES if key in log_service.LOG_TYPES
+    )
+    log_service.CATEGORY_ORDER = [
+        log_categories.CATEGORIES[key]
+        for key in log_categories.CATEGORY_ORDER
+    ]
 
 
 def _plain(value: str) -> str:
@@ -55,8 +82,6 @@ def _find_log_channel(guild: discord.Guild, category: str) -> discord.TextChanne
     wanted = _NORMALIZED.get(category, frozenset())
     if not wanted:
         return None
-
-    # Préférence aux salons rangés dans une catégorie de logs SentriX.
     for channel in guild.text_channels:
         parent = getattr(channel, "category", None)
         parent_name = _plain(getattr(parent, "name", "")) if parent else ""
@@ -71,15 +96,14 @@ def _find_log_channel(guild: discord.Guild, category: str) -> discord.TextChanne
 
 
 async def sync_generated_logs(bot: commands.Bot, guild: discord.Guild) -> int:
-    """Complète uniquement les routes encore vides et actives."""
+    _sanitize_catalog()
     changed = 0
-    for category in log_service.LOG_TYPES:
+    for category in tuple(log_service.LOG_TYPES):
         try:
             config = await log_service.get_log_config(bot, guild.id, category)
         except Exception:
             logger.exception("Lecture log_config impossible guild=%s category=%s", guild.id, category)
             continue
-
         if config is None or not config.get("enabled") or config.get("channel_id"):
             continue
         channel = _find_log_channel(guild, category)
@@ -114,7 +138,9 @@ async def _bootstrap(bot: commands.Bot) -> None:
         await bot.wait_until_ready()
     except RuntimeError:
         return
+    # Les vieux cogs ont fini leurs on_ready : on réaffirme ensuite uniquement le catalogue.
     await asyncio.sleep(2)
+    _sanitize_catalog()
     total = 0
     for guild in list(bot.guilds):
         total += await sync_generated_logs(bot, guild)
@@ -125,6 +151,7 @@ def install(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_generated_logs_reconciler", False):
         return
     bot._sentrix_generated_logs_reconciler = True
+    _sanitize_catalog()
     asyncio.create_task(_bootstrap(bot), name="sentrix-generated-logs-reconcile")
 
 
