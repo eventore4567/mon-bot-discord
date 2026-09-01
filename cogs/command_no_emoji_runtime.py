@@ -213,26 +213,6 @@ def install(bot: commands.Bot) -> None:
             # Un outil de construction du serveur officiel ne doit jamais bloquer le bot.
             pass
 
-    # Fondation SentriX V3 : cette couche est réaffirmée après les anciens systèmes
-    # help/style à chaque chargement d'extension. Elle ne crée aucune commande et ne
-    # modifie pas les protections métier ; elle choisit seulement l'expérience finale.
-    try:
-        from .sentrix_v3_ux import install as install_sentrix_v3_ux
-        install_sentrix_v3_ux(bot)
-    except Exception:
-        # Une évolution UX ne doit jamais empêcher le bot de démarrer.
-        pass
-
-    # +help et /help sont des commandes de navigation. Elles doivent rester accessibles
-    # même quand l'utilisateur vient d'utiliser plusieurs commandes, sans désactiver les
-    # protections anti-spam des actions réelles du bot.
-    try:
-        from .help_cooldown_exemption_v3 import install as install_help_cooldown_exemption_v3
-        install_help_cooldown_exemption_v3(bot)
-    except Exception:
-        # Un correctif de confort ne doit jamais empêcher SentriX de démarrer.
-        pass
-
     # V3 : une faute de frappe ou un mauvais argument doit produire une aide utile, pas
     # un silence ou un message Python. Le handler conserve toutes les protections métier
     # et délègue les permissions/cooldowns au système historique.
@@ -243,15 +223,16 @@ def install(bot: commands.Bot) -> None:
         # Une amélioration UX ne doit jamais empêcher SentriX de démarrer.
         pass
 
-    # V3.6.1 : doit rester après les renderers historiques et V3.6. Il protège le token
-    # complet <a:emoji:id> contre les nettoyeurs de titres qui supprimaient le caractère
-    # '<' et répare les fragments a:sxv36_...> lors des prochaines éditions de panneaux.
-    try:
-        from .sentrix_emoji_markup_guard_v361 import install as install_emoji_markup_guard_v361
-        install_emoji_markup_guard_v361(bot)
-    except Exception:
-        # Un garde purement visuel ne doit jamais empêcher le bot de démarrer.
-        pass
+    # Le pack d'emojis animes (sentrix_v3_ux, help_cooldown_exemption_v3,
+    # sentrix_emoji_markup_guard_v361 et leurs dependances) a ete retire ici.
+    #
+    # Cette fonction install() n'est appelee par PERSONNE : ce module n'a meme pas de
+    # setup(), et seuls _clean_send_args / _clean_edit_kwargs sont utilises, importes a
+    # la volee par plain_response_policy. Ces trois couches ne se sont donc jamais
+    # installees. Confirme en production : aucun emoji anime dans +help.
+    #
+    # Les 10 GIFs restent dans assets/sentrix_emojis/. Pour rebrancher le pack un jour,
+    # mieux vaut repartir de ces assets que ressusciter sept couches imbriquees.
 
     bot._sentrix_no_emoji_commands = False
     bot._sentrix_command_style_v2 = True
