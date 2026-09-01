@@ -869,10 +869,16 @@ class Utility(commands.Cog, name="Utility"):
             inline=True,
         )
 
-        roles = [role.mention for role in guild.roles]
+        # @everyone est exclu : tous les serveurs l'ont, il n'apprend rien, et son
+        # role.name vaut litteralement "@everyone" — ce qui produisait un "@@everyone"
+        # a l'affichage des qu'une couche prefixait la mention.
+        roles = [
+            role.mention for role in reversed(guild.roles)
+            if role != guild.default_role
+        ]
         e.add_field(
             name=f"Rôles [{len(roles)}]",
-            value=self._limited_list(roles, empty="Aucun rôle"),
+            value=self._limited_list(roles, empty="Aucun rôle en dehors de @everyone"),
             inline=False,
         )
 
@@ -980,7 +986,19 @@ class Utility(commands.Cog, name="Utility"):
         )
 
         e.set_footer(text=f"Demandé par {ctx.author.display_name}")
-        await ctx.send(embed=e)
+
+        # Une mention placee dans un EMBED ne ping jamais : c'est une regle Discord.
+        # Pour que la personne soit reellement notifiee, la mention doit etre dans le
+        # content du message, et allowed_mentions doit l'autoriser explicitement.
+        # On ne ping que si une cible a ete demandee : lancer +userinfo sur soi-meme
+        # ne doit pas s'auto-notifier.
+        envoi = {"embed": e}
+        if membre.id != ctx.author.id and not membre.bot:
+            envoi["content"] = membre.mention
+            envoi["allowed_mentions"] = discord.AllowedMentions(
+                users=[membre], roles=False, everyone=False, replied_user=False
+            )
+        await ctx.send(**envoi)
 
     @info.command(name="role", description="Afficher la fiche complète d'un rôle.")
     @app_commands.describe(role="Le rôle à inspecter")

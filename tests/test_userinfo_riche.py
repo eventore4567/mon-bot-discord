@@ -145,3 +145,32 @@ def test_botinfo_resiste_a_une_latence_indisponible():
     """bot.latency vaut nan tant que la websocket n'a pas de heartbeat."""
     corps = _corps_stats("botinfo")
     assert "latence == latence" in corps, "le cas nan n'est pas traite"
+
+
+# ------------------------------------------------- mention reelle et @@everyone
+def test_userinfo_ping_reellement_la_personne_visee():
+    """Une mention dans un EMBED ne ping jamais : elle doit etre dans le content."""
+    corps = _corps("userinfo")
+    # ast.unparse normalise les guillemets : on cherche la CLE, pas sa notation.
+    assert "envoi['content'] = membre.mention" in corps
+    assert "AllowedMentions" in corps
+    assert "users=[membre]" in corps
+
+
+def test_userinfo_ne_ping_ni_soi_meme_ni_un_bot():
+    corps = _corps("userinfo")
+    assert "membre.id != ctx.author.id" in corps
+    assert "not membre.bot" in corps
+
+
+def test_userinfo_n_autorise_que_la_personne_visee():
+    """Jamais everyone ni les roles : une fiche d'info ne doit pas alerter le serveur."""
+    corps = _corps("userinfo")
+    assert "roles=False" in corps
+    assert "everyone=False" in corps
+
+
+def test_serverinfo_n_affiche_plus_everyone_dans_les_roles():
+    """role.name du role par defaut vaut litteralement "@everyone" : d'ou le "@@everyone"."""
+    corps = _corps("info_serveur")
+    assert "role != guild.default_role" in corps
