@@ -242,6 +242,12 @@ async def install(bot, extension_name: str) -> None:
     elif name in {"cogs.minigames", "cogs.economy"} or name.endswith((".minigames", ".economy")):
         _install_atomic_game_daily_limit(bot)
 
+    # Les médias configurables (tickets, +embed, bienvenue/notifications) utilisent le
+    # FileUpload natif de Discord. Les liens qui représentent réellement une destination
+    # web restent des URLs ; seules les URLs d'images imposées à l'utilisateur disparaissent.
+    from .media_upload_runtime import install as install_media_upload_runtime
+    install_media_upload_runtime(bot, name)
+
     # Cette installation est volontairement appelée après chaque extension : le wrapper
     # enterprise_runtime retourne immédiatement dès que le Cog existe. Cela garantit que
     # les audits et le démarrage Railway obtiennent la suite Enterprise sans modifier la
