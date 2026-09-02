@@ -218,7 +218,7 @@ class MemberTests(unittest.TestCase):
 
     def test_member_gets_no_moderation_or_admin_command(self):
         b = FakeBackend()
-        for cmd in ("ban", "kick", "mute", "clear", "setup", "antiraid"):
+        for cmd in ("ban", "kick", "mute", "clear", "setup", "antiraid", "dmall"):
             self.assertFalse(decide(b, member(), cmd).allowed, cmd)
 
     def test_denial_always_carries_the_standard_header(self):
@@ -270,6 +270,11 @@ class AdministratorTests(unittest.TestCase):
             self.assertFalse(d.allowed, cmd)
             self.assertEqual(d.policy, "owner-global")
 
+    def test_administrator_cannot_broadcast_to_every_member(self):
+        d = decide(FakeBackend(), administrator(), "dmall")
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.policy, "guild-owner-only")
+
     def test_explicit_setup_deny_beats_administrator(self):
         b = FakeBackend(rules={("everyone", 0, "ban"): False})
         d = decide(b, administrator(), "ban")
@@ -280,7 +285,7 @@ class AdministratorTests(unittest.TestCase):
 class GuildOwnerTests(unittest.TestCase):
     def test_guild_owner_reaches_his_own_server_functions(self):
         b = FakeBackend()
-        for cmd in ("setup", "ban", "antiraid", "ticketsetup"):
+        for cmd in ("setup", "ban", "antiraid", "ticketsetup", "dmall"):
             self.assertTrue(decide(b, guild_owner(), cmd).allowed, cmd)
 
     def test_guild_owner_never_reaches_global_owner_commands(self):
@@ -392,6 +397,8 @@ class HelpTests(unittest.TestCase):
                          "Bannir des membres (ou rôle autorisé dans Setup)")
         self.assertEqual(M.help_requirement("bl"),
                          "Propriétaire global SentriX")
+        self.assertEqual(M.help_requirement("dmall"),
+                         "Propriétaire du serveur uniquement")
 
 
 class ProductionSchemaTests(unittest.TestCase):
