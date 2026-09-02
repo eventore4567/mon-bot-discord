@@ -173,6 +173,12 @@ class _Guild:
         self.verification_level = discord.VerificationLevel.low
         self.explicit_content_filter = discord.ContentFilter.disabled
         self.mfa_level = 0
+        self.afk_channel = self.afk_timeout = None
+        self.system_channel = self.rules_channel = None
+        self.public_updates_channel = self.widget_channel = None
+        self.vanity_url_code = self.description = None
+        self.features = []
+        self.scheduled_events = []
 
     async def fetch_members(self, *a, **k):
         """Itere les membres comme le fait la vraie passerelle."""
