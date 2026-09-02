@@ -92,6 +92,16 @@ def _saut_autorise(cible: str) -> bool:
     return receveur in RECEVEURS_SUIVIS or receveur.endswith("_cog")
 
 
+def _famille(commande) -> str:
+    """Famille fonctionnelle d'une commande, telle que +help la presente."""
+    try:
+        from cogs.help import _category
+
+        return _category(commande)
+    except Exception:
+        return "Autres"
+
+
 PROFONDEUR = 6
 
 
@@ -229,6 +239,7 @@ async def analyser() -> list[dict]:
         resultats.append({
             "nom": commande.qualified_name,
             "module": module,
+            "famille": _famille(commande),
             "verdict": classer("\n".join(sources)),
             "maillons": len(chaine),
         })
@@ -247,6 +258,8 @@ async def analyser() -> list[dict]:
 def main() -> int:
     parseur = argparse.ArgumentParser(description=__doc__)
     parseur.add_argument("--liste", action="store_true")
+    parseur.add_argument("--familles", action="store_true",
+                         help="groupe ce qui reste par famille fonctionnelle")
     parseur.add_argument("--json", action="store_true")
     args = parseur.parse_args()
 
@@ -273,6 +286,25 @@ def main() -> int:
     for module, noms in sorted(par_module.items(), key=lambda kv: -len(kv[1])):
         print(f"  {len(noms):>3}  {module}: {', '.join(sorted(noms)[:8])}"
               + (" …" if len(noms) > 8 else ""))
+
+    if args.familles:
+        # La famille vient du cog reel, via la meme table que +help : c'est ce que
+        # l'utilisateur voit dans le menu, pas un decoupage invente pour l'occasion.
+        from cogs.help import CATEGORY_DESCRIPTIONS  # noqa: F401
+
+        par_famille: dict[str, list[dict]] = {}
+        for r in par_verdict.get("embed", []):
+            par_famille.setdefault(r.get("famille", "Autres"), []).append(r)
+        print("\nCe qui garde son ancienne composition, par famille :\n")
+        for famille, lot in sorted(par_famille.items(), key=lambda kv: -len(kv[1])):
+            modules: dict[str, int] = {}
+            for r in lot:
+                modules[r["module"]] = modules.get(r["module"], 0) + 1
+            tete = ", ".join(
+                f"{m} ({n})" for m, n in sorted(modules.items(), key=lambda kv: -kv[1])[:4]
+            )
+            print(f"  {len(lot):>4}  {famille:<22} {tete}")
+        return 0
 
     if args.liste:
         print("\nreste en embed classique, par module :")

@@ -1116,31 +1116,103 @@ class Levels(commands.Cog, name="Levels"):
 
     @commands.hybrid_command(name="leaderboard-levels", description="Afficher le classement des niveaux.")
     async def leaderboard_levels(self, ctx: commands.Context):
+        """Classement des niveaux, compose.
+
+        L'ancien rendu etait une liste de dix lignes dans un seul bloc. Le podium
+        se confondait avec le reste, et personne ne voyait sa propre position —
+        la premiere chose qu'on cherche dans un classement.
+        """
         if ctx.interaction:
             await ctx.defer()
         rows = await self.bot.db.fetchall(
-            "SELECT * FROM levels WHERE guild_id = ? ORDER BY level DESC, xp DESC LIMIT 15", (ctx.guild.id,)
+            "SELECT * FROM levels WHERE guild_id = ? ORDER BY level DESC, xp DESC LIMIT 50",
+            (ctx.guild.id,),
         )
-        if not rows:
-            return await ctx.send(embed=embeds.info("Aucune donnée de niveau pour l'instant."))
-        lines = []
-        rank = 0
-        for r in rows:
-            # Sur un gros serveur, un membre peut ne pas être dans le cache Discord du bot
-            # (get_member() renvoie alors None) sans pour autant avoir quitté le serveur —
-            # on l'affiche quand même avec un identifiant de secours plutôt que de le faire
-            # disparaître silencieusement du classement. On n'exclut que les BOTS confirmés.
-            member = ctx.guild.get_member(r["user_id"])
-            if member is not None and member.bot:
+        classement = []
+        for row in rows:
+            # Un membre absent du cache Discord n'a pas forcement quitte le serveur :
+            # on l'affiche avec un identifiant de secours plutot que de le faire
+            # disparaitre. On n'exclut que les bots confirmes.
+            membre = ctx.guild.get_member(row["user_id"])
+            if membre is not None and membre.bot:
                 continue
-            name = member.display_name if member else f"Utilisateur {r['user_id']}"
-            rank += 1
-            if rank > 10:
-                break
-            lines.append(f"**{rank}.** {name} — Niveau {r['level']} ({r['xp']} XP)")
-        if not lines:
-            return await ctx.send(embed=embeds.info("Aucune donnée de niveau pour l'instant."))
-        await ctx.send(embed=embeds.neutral("🏆 Classement des niveaux", "\n".join(lines)))
+            nom = membre.display_name if membre else f"Utilisateur {row['user_id']}"
+            classement.append((row["user_id"], nom, int(row["level"]), int(row["xp"])))
+
+        if not classement:
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre="SentriX — Classement des niveaux",
+                    sous_titre="Personne n'a encore gagné d'XP sur ce serveur.",
+                    kind="brand",
+                    sections=[
+                        panels.Section(
+                            "Comment démarrer",
+                            [
+                                panels.Ligne("Écrivez", "L'XP se gagne en participant aux discussions"),
+                                panels.Ligne("`+level`", "Voir votre progression"),
+                            ],
+                        )
+                    ],
+                    pied="SentriX • Niveaux",
+                ),
+            )
+
+        nombre = stats_service.format_number
+        medailles = ("1er", "2e", "3e")
+        podium = [
+            panels.Ligne(
+                medailles[i],
+                f"**{nom}** · niveau **{niveau}**",
+                indice=f"{nombre(xp)} XP",
+            )
+            for i, (_uid, nom, niveau, xp) in enumerate(classement[:3])
+        ]
+        suite = [
+            panels.Ligne(f"{i}", f"{nom} · niveau {niveau}")
+            for i, (_uid, nom, niveau, _xp) in enumerate(classement[3:10], start=4)
+        ]
+
+        sections = [panels.Section("Podium", podium)]
+        if suite:
+            sections.append(panels.Section("Suivants", suite, aligne=True))
+
+        # La position du demandeur : la premiere chose qu'on cherche.
+        rang = next(
+            (i for i, (uid, *_r) in enumerate(classement, start=1) if uid == ctx.author.id), None
+        )
+        if rang is not None:
+            _uid, _nom, niveau, xp = classement[rang - 1]
+            sections.append(
+                panels.Section(
+                    "Votre position",
+                    [
+                        panels.Ligne("Rang", f"**#{rang}** sur {len(classement)}"),
+                        panels.Ligne("Niveau", str(niveau)),
+                        panels.Ligne("XP", nombre(xp)),
+                    ],
+                    aligne=True,
+                )
+            )
+        else:
+            sections.append(
+                panels.Section(
+                    "Votre position",
+                    [panels.Ligne("Non classé", "Écrivez quelques messages pour apparaître ici")],
+                )
+            )
+
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — Classement des niveaux",
+                sous_titre=f"**{len(classement)}** membre(s) classé(s) sur {ctx.guild.name}.",
+                kind="brand",
+                sections=sections,
+                pied="SentriX • Niveaux",
+            ),
+        )
 
     @commands.hybrid_command(name="set-level-role", description="[Admin] Associer un rôle à un niveau.", with_app_command=False)
     @app_commands.describe(niveau="Le niveau requis", role="Le rôle à attribuer")

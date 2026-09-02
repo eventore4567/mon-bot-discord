@@ -18,6 +18,7 @@ est enregistrée dans economy_transactions (Database.log_transaction).
 
 import asyncio
 import random
+import time
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -185,6 +186,91 @@ class Economy(commands.Cog, name="Economy"):
         if task:
             task.cancel()
 
+    async def _emoji_monnaie(self, guild_id: int) -> str:
+        reglages = await self.bot.db.get_stats_settings(guild_id)
+        return reglages.get("economy_emoji", "🪙")
+
+    async def _panneau_gain(
+        self,
+        ctx: commands.Context,
+        *,
+        titre: str,
+        resume: str,
+        montant: int,
+        cooldown: int,
+        details: "list[panels.Ligne] | None" = None,
+    ) -> None:
+        """Panneau commun a toutes les recompenses.
+
+        Les confirmations disaient seulement combien on venait de gagner. Elles ne
+        disaient ni le nouveau solde, ni QUAND on peut recommencer — la question
+        posee juste apres, a chaque fois. Les deux sont ici.
+        """
+        emoji = await self._emoji_monnaie(ctx.guild.id)
+        stats = await stats_service.get_member_statistics(self.bot, ctx.guild, ctx.author)
+        nombre = stats_service.format_number
+        prochain = int(time.time()) + cooldown
+
+        gain = [panels.Ligne("Gagné", f"**+{nombre(montant)}** {emoji}")]
+        gain.extend(details or [])
+        gain.append(panels.Ligne("Nouveau solde", f"{nombre(stats['total_money'])} {emoji}"))
+
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre=titre,
+                sous_titre=resume,
+                kind="economie",
+                vignette=ctx.author.display_avatar.url,
+                sections=[
+                    panels.Section("Récompense", gain),
+                    panels.Section(
+                        "Prochaine fois",
+                        [
+                            panels.Ligne("Disponible", f"<t:{prochain}:R>"),
+                            panels.Ligne("Soit", f"<t:{prochain}:t>"),
+                        ],
+                    ),
+                ],
+                pied="SentriX • Économie",
+            ),
+        )
+
+    async def _panneau_attente(
+        self, ctx: commands.Context, *, titre: str, restant: int, commande: str
+    ) -> None:
+        """Refus d'une recompense encore en attente.
+
+        « Revenez dans 3h20 » obligeait a calculer soi-meme l'heure. Un horodatage
+        Discord s'affiche dans le fuseau de chacun et se met a jour tout seul.
+        """
+        pret = int(time.time()) + max(0, int(restant))
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre=titre,
+                sous_titre="Cette récompense n'est pas encore disponible.",
+                kind="warning",
+                sections=[
+                    panels.Section(
+                        "Disponible",
+                        [
+                            panels.Ligne("Dans", f"<t:{pret}:R>"),
+                            panels.Ligne("À", f"<t:{pret}:t>"),
+                        ],
+                    ),
+                    panels.Section(
+                        "En attendant",
+                        [
+                            panels.Ligne("`+balance`", "Voir votre solde et votre classement"),
+                            panels.Ligne("`+shop`", "Dépenser ce que vous avez déjà"),
+                        ],
+                    ),
+                ],
+                pied="SentriX • Économie",
+            ),
+        )
+
     async def _send_balance(self, ctx: commands.Context, membre: discord.Member):
         """Fiche économique composée : avoirs, activité, position.
 
@@ -248,27 +334,50 @@ class Economy(commands.Cog, name="Economy"):
     async def daily(self, ctx: commands.Context):
         ok, remaining = await self.bot.db.claim_timed_reward(ctx.guild.id, ctx.author.id, "last_daily", DAILY_AMOUNT, DAILY_COOLDOWN, "daily")
         if not ok:
-            h, m = remaining // 3600, (remaining % 3600) // 60
-            return await ctx.send(embed=embeds.warning(f"Vous avez déjà récupéré votre récompense. Revenez dans {h}h{m}m."))
-        await ctx.send(embed=embeds.success(f"🎁 Vous avez reçu **{stats_service.format_number(DAILY_AMOUNT)} 🪙** !"))
+            return await self._panneau_attente(
+                ctx, titre="SentriX — Récompense quotidienne", restant=remaining, commande="daily"
+            )
+        await self._panneau_gain(
+            ctx,
+            titre="SentriX — Récompense quotidienne",
+            resume=f"Récompense du jour encaissée par {ctx.author.mention}.",
+            montant=DAILY_AMOUNT,
+            cooldown=DAILY_COOLDOWN,
+        )
 
     @commands.hybrid_command(name="weekly", description="Récupérer votre récompense hebdomadaire.")
     async def weekly(self, ctx: commands.Context):
         ok, remaining = await self.bot.db.claim_timed_reward(ctx.guild.id, ctx.author.id, "last_weekly", WEEKLY_AMOUNT, WEEKLY_COOLDOWN, "weekly")
         if not ok:
-            d, rest = remaining // 86400, remaining % 86400
-            h = rest // 3600
-            return await ctx.send(embed=embeds.warning(f"Vous avez déjà récupéré votre récompense hebdomadaire. Revenez dans {d}j {h}h."))
-        await ctx.send(embed=embeds.success(f"🎁 Vous avez reçu votre récompense hebdomadaire de **{stats_service.format_number(WEEKLY_AMOUNT)} 🪙** !"))
+            return await self._panneau_attente(
+                ctx, titre="SentriX — Récompense hebdomadaire", restant=remaining, commande="weekly"
+            )
+        await self._panneau_gain(
+            ctx,
+            titre="SentriX — Récompense hebdomadaire",
+            resume=f"Récompense de la semaine encaissée par {ctx.author.mention}.",
+            montant=WEEKLY_AMOUNT,
+            cooldown=WEEKLY_COOLDOWN,
+        )
 
     @commands.hybrid_command(name="work", description="Travailler pour gagner de l'argent.")
     async def work(self, ctx: commands.Context):
         amount = random.randint(WORK_MIN, WORK_MAX)
         ok, remaining = await self.bot.db.claim_timed_reward(ctx.guild.id, ctx.author.id, "last_work", amount, WORK_COOLDOWN, "work")
         if not ok:
-            return await ctx.send(embed=embeds.warning(f"Vous êtes fatigué. Revenez dans {remaining // 60} minutes."))
-        jobs = ["développeur", "livreur", "chef cuisinier", "streamer", "modérateur", "vendeur"]
-        await ctx.send(embed=embeds.success(f"💼 Vous avez travaillé comme **{random.choice(jobs)}** et gagné **{stats_service.format_number(amount)} 🪙** !"))
+            return await self._panneau_attente(
+                ctx, titre="SentriX — Travail", restant=remaining, commande="work"
+            )
+        metiers = ["développeur", "livreur", "chef cuisinier", "streamer", "modérateur", "vendeur"]
+        metier = random.choice(metiers)
+        await self._panneau_gain(
+            ctx,
+            titre="SentriX — Travail",
+            resume=f"{ctx.author.mention} a travaillé comme **{metier}**.",
+            montant=amount,
+            cooldown=WORK_COOLDOWN,
+            details=[panels.Ligne("Métier", metier.capitalize())],
+        )
 
     @commands.hybrid_command(name="rob", description="Tenter de voler un autre membre.")
     @app_commands.describe(membre="Le membre à voler")
@@ -318,42 +427,91 @@ class Economy(commands.Cog, name="Economy"):
 
     @commands.hybrid_command(name="economyleaderboard", description="Afficher le classement des plus riches.")
     async def economyleaderboard(self, ctx: commands.Context):
-        design = await self.bot.db.get_design_settings(ctx.guild.id)
+        """Classement economique, compose.
+
+        Le podium etait en trois champs cote a cote et la suite dans la
+        description : deux mises en forme differentes pour la meme liste. Et la
+        position du demandeur, ce qu'on cherche d'abord, n'apparaissait nulle part.
+        """
+        emoji = await self._emoji_monnaie(ctx.guild.id)
         rows = await self.bot.db.fetchall(
-            "SELECT * FROM economy WHERE guild_id = ? ORDER BY (cash + bank) DESC LIMIT 15",
+            "SELECT * FROM economy WHERE guild_id = ? ORDER BY (cash + bank) DESC LIMIT 50",
             (ctx.guild.id,),
         )
-        entries = []
+        classement = []
         for row in rows:
-            member = ctx.guild.get_member(row["user_id"])
-            if member is not None and member.bot:
+            membre = ctx.guild.get_member(row["user_id"])
+            if membre is not None and membre.bot:
                 continue
-            name = member.display_name if member else f"Utilisateur {row['user_id']}"
-            entries.append((name, int(row["cash"] + row["bank"])))
-            if len(entries) >= 10:
-                break
-        if not entries:
-            return await ctx.send(embed=embeds.info("Aucune donnée économique pour l'instant."))
+            nom = membre.display_name if membre else f"Utilisateur {row['user_id']}"
+            classement.append((row["user_id"], nom, int(row["cash"] + row["bank"])))
 
-        style = design_system.CATEGORY_STYLES["economy"]
-        remaining = [
-            f"**{index}.** {name} • {stats_service.format_number(total)} pièces"
-            for index, (name, total) in enumerate(entries[3:], start=4)
-        ]
-        embed = design_system.create_embed(
-            title="Classement économique",
-            description="\n".join(remaining) if remaining else "Top du serveur",
-            colour=design.get("primary_color", style["colour"]),
-            footer=design.get("footer"),
-        )
-        podium_labels = ("1er", "2e", "3e")
-        for index, (name, total) in enumerate(entries[:3]):
-            embed.add_field(
-                name=podium_labels[index],
-                value=f"**{name}**\n{stats_service.format_number(total)} pièces",
-                inline=True,
+        if not classement:
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre="SentriX — Classement économique",
+                    sous_titre="Personne n'a encore de solde sur ce serveur.",
+                    kind="economie",
+                    sections=[
+                        panels.Section(
+                            "Comment démarrer",
+                            [
+                                panels.Ligne("`+daily`", "Récompense quotidienne"),
+                                panels.Ligne("`+work`", "Travailler pour gagner"),
+                            ],
+                        )
+                    ],
+                    pied="SentriX • Économie",
+                ),
             )
-        await ctx.send(embed=embed)
+
+        nombre = stats_service.format_number
+        medailles = ("1er", "2e", "3e")
+        podium = [
+            panels.Ligne(medailles[i], f"**{nom}**", indice=f"{nombre(total)} {emoji}")
+            for i, (_uid, nom, total) in enumerate(classement[:3])
+        ]
+        suite = [
+            panels.Ligne(f"{i}", f"{nom} · {nombre(total)}")
+            for i, (_uid, nom, total) in enumerate(classement[3:10], start=4)
+        ]
+
+        sections = [panels.Section("Podium", podium)]
+        if suite:
+            sections.append(panels.Section("Suivants", suite, aligne=True))
+
+        rang = next(
+            (i for i, (uid, *_r) in enumerate(classement, start=1) if uid == ctx.author.id), None
+        )
+        if rang is not None:
+            _uid, _nom, total = classement[rang - 1]
+            ecart = classement[rang - 2][2] - total if rang > 1 else 0
+            lignes = [
+                panels.Ligne("Rang", f"**#{rang}** sur {len(classement)}"),
+                panels.Ligne("Fortune", f"{nombre(total)} {emoji}"),
+            ]
+            if ecart > 0:
+                lignes.append(panels.Ligne("Pour passer devant", f"{nombre(ecart + 1)} {emoji}"))
+            sections.append(panels.Section("Votre position", lignes, aligne=True))
+        else:
+            sections.append(
+                panels.Section(
+                    "Votre position",
+                    [panels.Ligne("Non classé", "`+daily` puis `+work` pour démarrer")],
+                )
+            )
+
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — Classement économique",
+                sous_titre=f"**{len(classement)}** membre(s) classé(s) sur {ctx.guild.name}.",
+                kind="economie",
+                sections=sections,
+                pied="SentriX • Économie",
+            ),
+        )
 
     @commands.hybrid_command(name="leaderboard-money", description="Afficher le classement des plus riches.", with_app_command=False)
     async def leaderboard_money(self, ctx: commands.Context):
@@ -719,19 +877,59 @@ class Economy(commands.Cog, name="Economy"):
         rows = await self.bot.db.fetchall(
             "SELECT * FROM inventory WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, ctx.author.id)
         )
+        emoji = await self._emoji_monnaie(ctx.guild.id)
+        nombre = stats_service.format_number
         if not rows:
-            return await ctx.send(embed=embeds.info("Votre inventaire est vide."))
-        lines = [f"• {r['item_name']} × {stats_service.format_number(r['quantity'])}" for r in rows]
-        style = design_system.CATEGORY_STYLES["economy"]
-        embed = design_system.create_embed(
-            title=f"🎒 Inventaire de {ctx.author.display_name}",
-            description="\n".join(lines),
-            colour=design.get("primary_color", style["colour"]),
-            user=ctx.author if design.get("show_avatars", True) else None,
-            thumbnail=ctx.author.display_avatar.url if design.get("show_avatars", True) else None,
-            footer=design.get("footer"),
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre="SentriX — Inventaire",
+                    sous_titre=f"L'inventaire de {ctx.author.mention} est vide.",
+                    kind="economie",
+                    vignette=ctx.author.display_avatar.url,
+                    sections=[
+                        panels.Section(
+                            "Comment le remplir",
+                            [
+                                panels.Ligne("`+shop`", "Voir ce que le serveur propose"),
+                                panels.Ligne("`+buy <objet>`", "Acheter avec votre solde"),
+                            ],
+                        )
+                    ],
+                    pied="SentriX • Économie",
+                ),
+            )
+
+        objets = sorted(rows, key=lambda r: int(r["quantity"]), reverse=True)
+        total_objets = sum(int(r["quantity"]) for r in objets)
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — Inventaire",
+                sous_titre=f"{ctx.author.mention} possède **{nombre(total_objets)}** objet(s), "
+                           f"en **{len(objets)}** type(s).",
+                kind="economie",
+                vignette=ctx.author.display_avatar.url,
+                sections=[
+                    panels.Section(
+                        f"Objets ({len(objets)})",
+                        [
+                            panels.Ligne(str(r["item_name"]), nombre(r["quantity"]))
+                            for r in objets[:20]
+                        ],
+                        aligne=True,
+                    ),
+                    panels.Section(
+                        "Que faire",
+                        [
+                            panels.Ligne("`+sell <objet>`", "Revendre un objet"),
+                            panels.Ligne("`+balance`", "Voir votre solde"),
+                        ],
+                    ),
+                ],
+                pied="SentriX • Économie",
+            ),
         )
-        await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="sell", description="Vendre un article de votre inventaire.", with_app_command=False)
     @app_commands.describe(objet="Le nom de l'objet à vendre")
