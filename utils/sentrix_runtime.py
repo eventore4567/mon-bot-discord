@@ -12,6 +12,9 @@ from typing import Any, Iterable
 
 import discord
 
+from utils import helpers
+from utils import sentrix_panels as panels
+
 import config as _config
 from discord.ext import commands
 
@@ -285,38 +288,6 @@ def _normalize_log(source: discord.Embed, *, event_time: datetime | None = None)
     return panel
 
 
-def _latency_state(latency_ms: int) -> tuple[str, str, int]:
-    if latency_ms <= 80:
-        return "Excellente", "██████████", COLOR_SUCCESS
-    if latency_ms <= 140:
-        return "Très bonne", "█████████░", COLOR_INFO
-    if latency_ms <= 220:
-        return "Correcte", "███████░░░", COLOR_WARNING
-    return "Dégradée", "████░░░░░░", COLOR_DANGER
-
-
-def _ping_embed(bot: commands.Bot) -> discord.Embed:
-    latency_ms = max(0, round(float(getattr(bot, "latency", 0.0)) * 1000))
-    quality, quality_bar, colour = _latency_state(latency_ms)
-    guilds = list(getattr(bot, "guilds", ()) or ())
-    members = sum(int(getattr(guild, "member_count", 0) or 0) for guild in guilds)
-    shards = int(getattr(bot, "shard_count", None) or 1)
-    is_closed = getattr(bot, "is_closed", None)
-    active = not bool(is_closed()) if callable(is_closed) else True
-    return _base(
-        "Ping",
-        (
-            f"**Latence :** {latency_ms} ms   •   **Qualité :** {quality}   `{quality_bar}`\n"
-            f"**Connexion :** {'Active' if active else 'Hors ligne'}   •   "
-            f"**État :** {'Opérationnel' if active else 'Indisponible'}   •   "
-            f"**Serveurs :** {len(guilds):,}   •   **Membres :** {members:,}   •   **Shards :** {shards}"
-        ),
-        footer="SentriX • Mesure en temps réel",
-        colour=colour,
-        kind="brand",
-    )
-
-
 def _command_key(payload: Any) -> str:
     command = getattr(payload, "command", None)
     if command is not None:
@@ -352,6 +323,20 @@ def _install_per_command_cooldown() -> None:
     commands.CooldownMapping._bucket_key = bucket_key
 
 
+def _clear_panneau(nombre: int) -> "panels.Panneau":
+    """Confirmation de purge, composee comme le reste du bot.
+
+    Ce message s'auto-detruit : il doit se lire d'un coup d'oeil, d'ou une seule
+    ligne utile plutot qu'un tableau.
+    """
+    return panels.Panneau(
+        titre="Salon nettoyé",
+        sous_titre=f"{nombre} message(s) supprimé(s).",
+        kind="moderation",
+        pied="Ce message disparaît tout seul.",
+    )
+
+
 def _patch_clear(bot: commands.Bot) -> None:
     command = bot.get_command("clear")
     if command is None or getattr(command, "_sentrix_clear_fixed", False):
@@ -365,10 +350,7 @@ def _patch_clear(bot: commands.Bot) -> None:
             if not ctx.interaction.response.is_done():
                 await ctx.interaction.response.defer(ephemeral=True)
             deleted = await ctx.channel.purge(limit=amount)
-            return await ctx.send(
-                embed=sx.success(f"{len(deleted)} message(s) supprimé(s)."),
-                ephemeral=True,
-            )
+            return await panels.envoyer(ctx, _clear_panneau(len(deleted)), ephemere=True)
 
         # +clear 10 retire d'abord le message « +clear 10 », puis exactement 10 anciens
         # messages. La confirmation n'essaie donc jamais de répondre à un message supprimé.
@@ -379,16 +361,29 @@ def _patch_clear(bot: commands.Bot) -> None:
         try:
             deleted = await ctx.channel.purge(limit=amount)
         except discord.Forbidden:
-            return await ctx.channel.send(
-                embed=sx.error(
-                    "Je n'ai pas les permissions nécessaires. Vérifiez Gérer les messages "
-                    "et Voir l'historique des messages."
+            return await panels.envoyer(
+                ctx.channel,
+                panels.Panneau(
+                    titre="Suppression impossible",
+                    sous_titre="Il manque une permission à SentriX dans ce salon.",
+                    kind="danger",
+                    sections=[
+                        panels.Section(
+                            "À VÉRIFIER",
+                            lignes=[
+                                panels.Ligne("Gérer les messages", "requise pour supprimer"),
+                                panels.Ligne("Voir l'historique des messages", "requise pour lire ce qui précède"),
+                            ],
+                        )
+                    ],
+                    pied="Aucun message n'a été supprimé.",
                 ),
                 allowed_mentions=discord.AllowedMentions.none(),
                 delete_after=6,
             )
-        return await ctx.channel.send(
-            embed=sx.success(f"{len(deleted)} message(s) supprimé(s)."),
+        return await panels.envoyer(
+            ctx.channel,
+            _clear_panneau(len(deleted)),
             allowed_mentions=discord.AllowedMentions.none(),
             delete_after=4,
         )
@@ -396,21 +391,6 @@ def _patch_clear(bot: commands.Bot) -> None:
     command.callback = functools.wraps(old_callback)(callback)
     command.params = params
     command._sentrix_clear_fixed = True
-
-
-def _patch_ping(bot: commands.Bot) -> None:
-    command = bot.get_command("ping")
-    if command is None or getattr(command, "_sentrix_ping_fixed", False):
-        return
-    params = command.params.copy()
-    old_callback = command.callback
-
-    async def callback(_cog, ctx: commands.Context):
-        return await ctx.send(embed=_ping_embed(bot))
-
-    command.callback = functools.wraps(old_callback)(callback)
-    command.params = params
-    command._sentrix_ping_fixed = True
 
 
 def _install_cog_patches() -> None:
@@ -422,7 +402,6 @@ def _install_cog_patches() -> None:
     async def add_cog(bot, cog, *args, **kwargs):
         result = await original(bot, cog, *args, **kwargs)
         _patch_clear(bot)
-        _patch_ping(bot)
         return result
 
     add_cog._sentrix_runtime_patch = True

@@ -321,8 +321,12 @@ def test_avatar_uses_the_target_display_name_and_real_animated_asset():
     assert '_download_discord_avatar(' in source
     assert 'asyncio.as_completed(tasks, timeout=5)' in source
     assert '"/embed/avatars/" in original_url' in source
-    assert 'e.set_image(url=str(asset.url))' in source
-    assert 'e.set_image(url=verified_url)' in source
+    # L'avatar est desormais rendu en panneau : l'URL verifiee part dans la
+    # galerie de contenu du panneau, plus dans set_image d'un embed. La garantie
+    # testee reste la meme — c'est bien l'URL VERIFIEE qui est affichee.
+    assert 'self._panneau_avatar(display_name, membre, str(asset.url))' in source
+    assert 'self._panneau_avatar(display_name, membre, verified_url)' in source
+    assert 'image=url' in source
     assert 'file=discord.File(io.BytesIO(data), filename=filename)' not in source
     assert 'getattr(membre, "default_avatar", None)' not in source
     assert 'label="Ouvrir l\'avatar"' not in source

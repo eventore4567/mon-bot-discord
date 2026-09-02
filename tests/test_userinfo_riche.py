@@ -187,24 +187,27 @@ def test_userinfo_ping_reellement_la_personne_visee():
     assert "kwargs.pop('content', None)" in envoi
 
 
-def test_avatar_garde_le_ping_par_le_contenu():
-    """+avatar repond encore en embed : pour lui, le content reste la bonne voie."""
-    corps = _corps("_envoi_cible")
-    assert "envoi['content'] = membre.mention" in corps
-    assert "users=[membre]" in corps
-    assert "_envoi_cible" in _corps("avatar")
+def test_avatar_notifie_toujours_la_personne_visee():
+    """+avatar repond en panneau : la mention passe par mentionner=, pas par content.
+
+    Un message Components V2 refuse un content ; c'est panels.envoyer qui place la
+    mention dans le texte du panneau et ouvre allowed_mentions nommement. La
+    notification promise a l'utilisateur doit survivre a ce changement de voie.
+    """
+    assert "mentionner=self._cible_a_notifier(ctx, membre)" in _corps("avatar")
+    assert "users=[" in _corps_de("utils/sentrix_panels.py", "envoyer")
 
 
 
 def test_userinfo_ne_ping_ni_soi_meme_ni_un_bot():
-    corps = _corps("_envoi_cible")
+    corps = _corps("_cible_a_notifier")
     assert "getattr(auteur, 'id', None) != getattr(membre, 'id', None)" in corps
     assert "getattr(membre, 'bot', False)" in corps
 
 
 def test_userinfo_n_autorise_que_la_personne_visee():
     """Jamais everyone ni les roles : une fiche d'info ne doit pas alerter le serveur."""
-    corps = _corps("_envoi_cible")
+    corps = _corps_de("utils/sentrix_panels.py", "envoyer")
     assert "roles=False" in corps
     assert "everyone=False" in corps
 
@@ -224,7 +227,7 @@ def test_le_helper_de_ping_n_est_pas_utilise_hors_portee():
         if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
             continue
         corps = ast.unparse(node)
-        if "_envoi_cible(ctx, membre" not in corps:
+        if "_cible_a_notifier(ctx, membre" not in corps:
             continue
         parametres = [a.arg for a in node.args.args]
-        assert "membre" in parametres, f"{node.name} appelle _envoi_cible sans parametre membre"
+        assert "membre" in parametres, f"{node.name} appelle _cible_a_notifier sans parametre membre"

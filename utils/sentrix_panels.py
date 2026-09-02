@@ -197,6 +197,7 @@ class Panneau(discord.ui.LayoutView):
         boutons: Sequence[Bouton] = (),
         pied: str | None = None,
         banniere: bool = True,
+        image: str | None = None,
     ) -> None:
         super().__init__(timeout=None)
         self.kind = kind if kind in INTENTIONS else "info"
@@ -241,6 +242,15 @@ class Panneau(discord.ui.LayoutView):
             conteneur.add_item(discord.ui.TextDisplay(rendu[:_LIMITE_BLOC]))
 
         # 4 — pied de page en petit, comme la signature d'un document.
+        if image:
+            # Une image de contenu (avatar, banniere de serveur) n'est pas la
+            # banniere d'intention : elle porte l'information demandee, donc elle
+            # prend toute la largeur sous le texte plutot qu'une vignette d'angle.
+            contenu = discord.ui.MediaGallery()
+            contenu.add_item(media=str(image))
+            conteneur.add_item(discord.ui.Separator())
+            conteneur.add_item(contenu)
+
         if pied:
             conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(pied, 200)}"))
 

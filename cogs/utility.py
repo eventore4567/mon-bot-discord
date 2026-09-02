@@ -636,30 +636,38 @@ class Utility(commands.Cog, name="Utility"):
         self.afk_users: dict[int, str] = {}
 
     @staticmethod
-    def _envoi_cible(ctx, membre, embed) -> dict:
-        """Arguments d'envoi d'une fiche concernant une personne.
+    def _panneau_avatar(nom: str, membre, url: str) -> "panels.Panneau":
+        """La photo EST le contenu : elle occupe toute la largeur, pas une vignette.
 
-        Une mention placee dans un EMBED ne notifie JAMAIS : c'est une regle Discord.
-        Pour que la personne soit reellement prevenue, la mention doit etre dans le
-        content du message et allowed_mentions doit l'autoriser nommement.
-
-        Deux gardes volontaires : on ne ping que si une cible a ete demandee (consulter
-        sa propre fiche ne s'auto-notifie pas, et un bot n'est jamais ping), et jamais
-        everyone ni les roles — consulter une fiche ne doit pas pouvoir alerter le
-        serveur entier.
+        L'URL est deja verifiee par l'appelant (lue, pesee, type d'image reconnu).
+        On la passe telle quelle plutot qu'en attachment:// : une couche de style
+        intermediaire ne peut pas la desolidariser du panneau.
         """
-        envoi = {"embed": embed}
+        return panels.Panneau(
+            titre=f"Avatar de {nom}",
+            sous_titre=membre.mention,
+            kind="info",
+            image=url,
+            pied=f"Identifiant : {membre.id}",
+        )
+
+    @staticmethod
+    def _cible_a_notifier(ctx, membre):
+        """Qui doit reellement etre notifie par une fiche.
+
+        Memes gardes que _envoi_cible : on ne ping que si une cible a ete demandee
+        (consulter sa propre fiche ne s'auto-notifie pas, un bot n'est jamais ping).
+        Un panneau Components V2 refuse un content : c'est panels.envoyer qui place
+        la mention dans le texte et ouvre allowed_mentions nommement.
+        """
         auteur = getattr(ctx, "author", None)
         if (
             membre is not None
             and getattr(auteur, "id", None) != getattr(membre, "id", None)
             and not getattr(membre, "bot", False)
         ):
-            envoi["content"] = membre.mention
-            envoi["allowed_mentions"] = discord.AllowedMentions(
-                users=[membre], roles=False, everyone=False, replied_user=False
-            )
-        return envoi
+            return membre
+        return None
 
     @staticmethod
     def _limited_list(values, *, empty: str, limit: int = 1000) -> str:
@@ -770,7 +778,7 @@ class Utility(commands.Cog, name="Utility"):
         « Pong ! 42 ms » ne dit pas si 42 ms est bon, ni si la base répond. Les
         deux comptent quand on tape +ping : on cherche à savoir si le bot va bien.
         """
-        latence = max(0, round(self.bot.latency * 1000))
+        latence = helpers.latence_ms(self.bot)
         if latence <= 120:
             etat, intention = "Excellente", "success"
         elif latence <= 300:
@@ -787,6 +795,16 @@ class Utility(commands.Cog, name="Utility"):
         if ctx.guild is not None and ctx.guild.shard_id is not None:
             connexion.append(panels.Ligne("Fragment", f"#{ctx.guild.shard_id}"))
 
+        # Ce que la latence recouvre : une bonne latence sur deux serveurs ne dit
+        # pas la meme chose qu'une bonne latence sur deux cents.
+        serveurs = list(getattr(self.bot, "guilds", ()) or ())
+        membres = sum(int(getattr(g, "member_count", 0) or 0) for g in serveurs)
+        portee = [
+            panels.Ligne("Serveurs", f"{len(serveurs):,}".replace(",", " ")),
+            panels.Ligne("Membres couverts", f"{membres:,}".replace(",", " ")),
+            panels.Ligne("Fragments", str(int(getattr(self.bot, "shard_count", None) or 1))),
+        ]
+
         base = "opérationnelle"
         try:
             await self.bot.db.fetchone("SELECT 1")
@@ -802,13 +820,8 @@ class Utility(commands.Cog, name="Utility"):
                 kind=intention,
                 sections=[
                     panels.Section("Connexion", connexion),
-                    panels.Section(
-                        "Services",
-                        [
-                            panels.Ligne("Base de données", base),
-                            panels.Ligne("Serveurs", f"{len(self.bot.guilds)}"),
-                        ],
-                    ),
+                    panels.Section("Services", [panels.Ligne("Base de données", base)]),
+                    panels.Section("Portée", portee),
                 ],
                 pied="SentriX • État",
             ),
@@ -824,12 +837,16 @@ class Utility(commands.Cog, name="Utility"):
         try:
             if ctx.guild is not None:
                 fresh_member = await ctx.guild.fetch_member(membre.id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        except Exception:
+            # Rafraichir n'est qu'un bonus : le cache suffit a afficher la fiche.
+            # Une coupure reseau ne doit pas faire echouer la commande entiere.
             pass
         fresh_user = None
         try:
             fresh_user = await self.bot.fetch_user(membre.id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        except Exception:
+            # Rafraichir n'est qu'un bonus : le cache suffit a afficher la fiche.
+            # Une coupure reseau ne doit pas faire echouer la commande entiere.
             pass
 
         display_name = (
@@ -900,8 +917,11 @@ class Utility(commands.Cog, name="Utility"):
                         continue
                     if _image_kind(data) is None:
                         continue
-                    e.set_image(url=str(asset.url))
-                    return await ctx.send(**self._envoi_cible(ctx, membre, e))
+                    return await panels.envoyer(
+                        ctx,
+                        self._panneau_avatar(display_name, membre, str(asset.url)),
+                        mentionner=self._cible_a_notifier(ctx, membre),
+                    )
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
                     continue
 
@@ -913,15 +933,32 @@ class Utility(commands.Cog, name="Utility"):
         )
         if downloaded is not None:
             _data, _kind, verified_url = downloaded
-            e.set_image(url=verified_url)
-            return await ctx.send(**self._envoi_cible(ctx, membre, e))
+            return await panels.envoyer(
+                ctx,
+                self._panneau_avatar(display_name, membre, verified_url),
+                mentionner=self._cible_a_notifier(ctx, membre),
+            )
 
         # Ne jamais remplacer silencieusement la vraie photo par l'avatar orange.
-        e.description = (
-            f"{membre.mention}\n"
-            "Discord n'a pas transmis son avatar personnalisé. Réessaie dans quelques secondes."
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre=f"Avatar de {display_name}",
+                sous_titre=f"{membre.mention} — image indisponible pour l'instant.",
+                kind="warning",
+                sections=[
+                    panels.Section(
+                        "CE QUI S'EST PASSÉ",
+                        lignes=[
+                            panels.Ligne("Cause", "Discord n'a pas transmis l'avatar personnalisé"),
+                            panels.Ligne("À faire", "réessayer dans quelques secondes"),
+                        ],
+                    )
+                ],
+                pied="Aucune image de remplacement n'est affichée volontairement.",
+            ),
+            mentionner=self._cible_a_notifier(ctx, membre),
         )
-        await ctx.send(**self._envoi_cible(ctx, membre, e))
 
     @commands.hybrid_group(
         name="info",

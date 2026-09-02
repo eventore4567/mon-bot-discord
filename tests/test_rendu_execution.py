@@ -11,6 +11,8 @@ import pathlib
 import sys
 import unittest
 
+import discord
+
 RACINE = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE / "tools"))
 
@@ -97,3 +99,46 @@ class SyntheseDArguments(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_avatar_rend_un_panneau_avec_l_image_et_la_mention():
+    """Regression : +avatar est reste en embed longtemps apres la migration.
+
+    Le harnais d'execution echouait AVANT l'envoi (un faux Asset sans read()), et
+    « aucun envoi » avait ete lu comme une limite de simulation plutot que comme
+    une commande non migree. On verifie donc les trois promesses a la fois : c'est
+    un panneau, il porte l'image, et la personne visee est toujours notifiable.
+    """
+    import ast
+
+    source = (RACINE / "cogs" / "utility.py").read_text(encoding="utf-8")
+    corps = next(
+        ast.unparse(n)
+        for n in ast.walk(ast.parse(source))
+        if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == "avatar"
+    )
+    assert "panels.envoyer" in corps
+    assert "ctx.send" not in corps
+    assert "mentionner=self._cible_a_notifier(ctx, membre)" in corps
+
+    constructeur = next(
+        ast.unparse(n)
+        for n in ast.walk(ast.parse(source))
+        if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == "_panneau_avatar"
+    )
+    assert "image=url" in constructeur
+
+
+def test_le_panneau_expose_une_image_de_contenu():
+    from utils import sentrix_panels as panels
+
+    panneau = panels.Panneau(titre="Avatar", kind="info", image="https://exemple/i.png")
+    medias = [
+        item
+        for conteneur in panneau.children
+        for item in getattr(conteneur, "children", ())
+        if isinstance(item, discord.ui.MediaGallery)
+    ]
+    # Deux galeries : la banniere d'intention, puis l'image demandee.
+    urls = [str(m.media.url) for galerie in medias for m in galerie.items]
+    assert any("exemple/i.png" in u for u in urls), urls
