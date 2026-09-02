@@ -54,7 +54,7 @@ class GamesSetup(commands.Cog, name="GamesSetup"):
     async def gamesetup(self, ctx: commands.Context):
         e, view = await self._build_home(ctx.guild.id)
         view.author_id = ctx.author.id
-        msg = await ctx.send(embed=e, view=view)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), view))
         view.message = msg
 
 

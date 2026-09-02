@@ -272,6 +272,9 @@ class _Rien:
 VOIES_REPONSE = ("ctx.send", "ctx.reply", "ctx.channel.send")
 
 
+DERNIERE_VUE = ""
+
+
 def _classer(captures) -> tuple[str, int]:
     """Ce que l'UTILISATEUR verrait, par ordre de proximite.
 
@@ -287,10 +290,22 @@ def _classer(captures) -> tuple[str, int]:
     if not retenues:
         return "aucun", 0
 
+    # Un embed visible reste un embed, MEME accompagne d'une vue : une View
+    # classique porte des boutons a cote du message, elle n'est pas le message.
+    # Seule une LayoutView est le corps compose. Confondre les deux comptait
+    # `+aisetup` (embed + AiSetupView) comme migre.
+    for c in retenues:
+        kw = c.get("kwargs", {})
+        if kw.get("embed") is not None or kw.get("embeds"):
+            vue = kw.get("view")
+            global DERNIERE_VUE
+            DERNIERE_VUE = type(vue).__name__ if vue is not None else ""
+            return "embed", 0
+
     for c in retenues:
         kw = c.get("kwargs", {})
         vue = kw.get("view")
-        if vue is not None and hasattr(vue, "to_components"):
+        if isinstance(vue, discord.ui.LayoutView):
             plat: list = []
 
             def parcourir(items):
@@ -310,11 +325,6 @@ def _classer(captures) -> tuple[str, int]:
                 return "panneau", 0
             sections = sum(1 for t in plat if t.startswith("### "))
             return ("panneau+sections" if sections else "panneau"), sections
-
-    for c in retenues:
-        kw = c.get("kwargs", {})
-        if kw.get("embed") is not None or kw.get("embeds"):
-            return "embed", 0
 
     # Reste du texte nu : +say repete le message d'un membre, l'IA rend sa reponse
     # en texte. Les habiller les denaturerait — c'est un choix, pas un manque.
@@ -447,8 +457,11 @@ async def main(fichiers: list[str]) -> int:
                 import traceback
                 print(f"\n--- {commande.qualified_name} ---")
                 traceback.print_exc()
+        globals()["DERNIERE_VUE"] = ""
         verdict, _ = _classer(list(CAPTURES))
         etiquette = commande.qualified_name
+        if verdict == "embed" and DERNIERE_VUE:
+            etiquette = f"{commande.qualified_name}  [{DERNIERE_VUE}]"
         if verdict == "aucun" and cause:
             etiquette = f"{commande.qualified_name}  ←  {cause}"
         resultats.setdefault(verdict, []).append(etiquette)
@@ -462,7 +475,7 @@ async def main(fichiers: list[str]) -> int:
     for verdict in ordre:
         lot = resultats.get(verdict, [])
         print(f"  {verdict:20} {len(lot):>4}")
-        if verdict in ("embed", "aucun") and lot:
+        if verdict in ("embed", "aucun", "texte volontaire", "argument non synthétisable") and lot:
             for nom in sorted(lot):
                 print(f"       {nom}")
     return 0

@@ -179,7 +179,7 @@ class MoneyDrops(commands.Cog, name="MoneyDrops"):
             ctx.author.id,
             currency_emoji,
         )
-        message = await ctx.send(embed=embed, view=view)
+        message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
         view.message = message
 
 

@@ -1447,10 +1447,7 @@ class Tickets(commands.Cog):
 
         if len(available) == 1:
             panel, types = available[0]
-            return await ctx.send(
-                embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types),
-                ephemeral=True if ctx.interaction else False,
-            )
+            return await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemeral=True if ctx.interaction else False)
 
         # Plusieurs panels actifs sur ce serveur : on laisse d'abord choisir la catégorie
         # (les options du menu viennent toutes de la DB, jamais du code).
@@ -1469,7 +1466,7 @@ class Tickets(commands.Cog):
 
         select.callback = on_pick
         view.add_item(select)
-        await ctx.send(embed=e, view=view, ephemeral=True if ctx.interaction else False)
+        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(e), view), ephemeral=True if ctx.interaction else False)
 
     # ---------------------------------------------------------------- COMMANDES : HUB
 
@@ -1487,7 +1484,7 @@ class Tickets(commands.Cog):
         e.add_field(name="📋 Panels", value=str(len(panels)), inline=True)
         e.add_field(name="🎫 Types de tickets", value=str(len(types)), inline=True)
         e.add_field(name="📬 Tickets ouverts", value=str(open_tickets["c"]), inline=True)
-        await ctx.send(embed=e, view=TicketSetupHubView(self, ctx.author.id), ephemeral=True if ctx.interaction else False)
+        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(e), TicketSetupHubView(self, ctx.author.id)), ephemeral=True if ctx.interaction else False)
 
     # ---------------------------------------------------------------- COMMANDES : PANELS
 
@@ -1544,7 +1541,7 @@ class Tickets(commands.Cog):
         panel_id = await self.create_panel(ctx.guild.id, nom)
         panel = await self.get_panel(panel_id)
         e = embeds.success(f"Panel **{nom}** créé (#{panel_id}). Configurez-le ci-dessous.")
-        await ctx.send(embed=e, view=PanelEditView(self, panel_id, ctx.author.id))
+        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(e), PanelEditView(self, panel_id, ctx.author.id)))
 
     @ticketpanel.command(name="edit", description="Modifier un panel existant.")
     @app_commands.describe(nom="Le nom du panel à modifier")
@@ -1554,7 +1551,7 @@ class Tickets(commands.Cog):
         if not panel:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {nom} ».')))
         e = embeds.neutral(f"⚙️ Modifier le panel « {panel['name']} »", "Choisissez ce que vous voulez modifier.")
-        await ctx.send(embed=e, view=PanelEditView(self, panel["id"], ctx.author.id))
+        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(e), PanelEditView(self, panel['id'], ctx.author.id)))
 
     @ticketpanel.command(name="delete", description="Supprimer un panel (et ses types de tickets).")
     @app_commands.describe(nom="Le nom du panel à supprimer")
@@ -1565,10 +1562,7 @@ class Tickets(commands.Cog):
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {nom} ».')))
         types = await self.get_panel_types(panel["id"])
         view = helpers.ConfirmView(ctx.author.id)
-        msg = await ctx.send(
-            embed=embeds.warning(f"Supprimer le panel **{panel['name']}** et ses **{len(types)}** type(s) de ticket associés ?"),
-            view=view,
-        )
+        msg = await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(embeds.warning(f"Supprimer le panel **{panel['name']}** et ses **{len(types)}** type(s) de ticket associés ?")), view))
         await view.wait()
         if not view.value:
             return await msg.edit(embed=embeds.error("Suppression annulée."), view=None)
@@ -1594,7 +1588,7 @@ class Tickets(commands.Cog):
         types = await self.get_panel_types(panel["id"])
         if not types:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning("Ce panel n'a aucun type de ticket.")))
-        await ctx.send(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types), ephemeral=True if ctx.interaction else False)
+        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemeral=True if ctx.interaction else False)
 
     @ticketpanel.command(name="send", description="Envoyer (ou mettre à jour) un panel dans son salon configuré.")
     @app_commands.describe(nom="Le nom du panel à envoyer")
@@ -1700,7 +1694,7 @@ class Tickets(commands.Cog):
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Un type nommé « {nom} » existe déjà sur ce serveur.')))
         type_id = await self.add_type(ctx.guild.id, panel_row["id"], nom)
         e = embeds.success(f"Type **{nom}** créé sur le panel « {panel} » (#{type_id}). Configurez-le ci-dessous.")
-        await ctx.send(embed=e, view=TypeEditView(self, type_id, ctx.author.id))
+        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(e), TypeEditView(self, type_id, ctx.author.id)))
 
     @tickettype.command(name="edit", description="Modifier un type de ticket.")
     @app_commands.describe(nom="Le nom du type de ticket à modifier")
@@ -1710,7 +1704,7 @@ class Tickets(commands.Cog):
         if not t:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {nom} ».')))
         e = embeds.neutral(f"⚙️ Modifier le type « {t['name']} »", "Choisissez ce que vous voulez modifier.")
-        await ctx.send(embed=e, view=TypeEditView(self, t["id"], ctx.author.id))
+        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(e), TypeEditView(self, t['id'], ctx.author.id)))
 
     @tickettype.command(name="remove", description="Supprimer un type de ticket.")
     @app_commands.describe(nom="Le nom du type de ticket à supprimer")
@@ -1720,7 +1714,7 @@ class Tickets(commands.Cog):
         if not t:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {nom} ».')))
         view = helpers.ConfirmView(ctx.author.id)
-        msg = await ctx.send(embed=embeds.warning(f"Supprimer le type **{t['name']}** et son formulaire ?"), view=view)
+        msg = await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(embeds.warning(f"Supprimer le type **{t['name']}** et son formulaire ?")), view))
         await view.wait()
         if not view.value:
             return await msg.edit(embed=embeds.error("Suppression annulée."), view=None)
@@ -1820,7 +1814,7 @@ class Tickets(commands.Cog):
         toggle_rating.callback = rating_cb
         view.add_item(toggle_rating)
 
-        await ctx.send(embed=e, view=view)
+        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(e), view))
 
     @commands.hybrid_command(name="ticketlogs", description="Définir rapidement le salon de logs d'un type de ticket.", with_app_command=False)
     @app_commands.describe(type_ticket="Le nom du type de ticket", salon="Le salon de logs")

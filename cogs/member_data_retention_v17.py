@@ -226,16 +226,7 @@ async def _send_reset_confirmation(
         description=description,
         runner=runner,
     )
-    return await ctx.send(
-        embed=embeds.warning(
-            "Cette action est **volontairement séparée** d'un ban, kick ou départ.\n\n"
-            f"Elle va réinitialiser **{description}**.\n"
-            "Un ban ne déclenche jamais cette suppression.\n\n"
-            "Confirmez uniquement si vous voulez réellement effacer cette progression.",
-            title="Confirmation de suppression de données",
-        ),
-        view=view,
-    )
+    return await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.warning(f"Cette action est **volontairement séparée** d'un ban, kick ou départ.\n\nElle va réinitialiser **{description}**.\nUn ban ne déclenche jamais cette suppression.\n\nConfirmez uniquement si vous voulez réellement effacer cette progression.", title='Confirmation de suppression de données')), view))
 
 
 def _install_reset_confirmations(bot: commands.Bot) -> list[str]:

@@ -607,7 +607,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
     async def home(self, ctx):
         if ctx.guild is None or not isinstance(ctx.author, discord.Member): return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         view = HomeView(self, ctx.guild, ctx.author, await self.can_staff_context(ctx))
-        view.message = await ctx.send(embed=await self.build_home_embed(ctx.guild, ctx.author), view=view)
+        view.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await self.build_home_embed(ctx.guild, ctx.author)), view))
 
     @commands.hybrid_command(name="profilecard", description="Afficher une carte de profil V2.", with_app_command=False)
     async def profilecard(self, ctx, membre: discord.Member = None):
@@ -623,7 +623,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
     async def gamehub(self, ctx):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         view = GameView(self, ctx.author)
-        view.message = await ctx.send(embed=await self.build_games_embed(ctx.guild, ctx.author), view=view)
+        view.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await self.build_games_embed(ctx.guild, ctx.author)), view))
 
     @commands.hybrid_command(name="aicenter", description="Afficher le centre IA.", with_app_command=False)
     async def aicenter(self, ctx):
@@ -651,7 +651,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
     async def market(self, ctx):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         view = MarketView(self, ctx.author)
-        view.message = await ctx.send(embed=await self.build_market_embed(ctx.guild, ctx.author), view=view)
+        view.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await self.build_market_embed(ctx.guild, ctx.author)), view))
 
     @commands.hybrid_command(name="market-sell", description="Vendre un objet de votre inventaire.", with_app_command=False)
     async def market_sell(self, ctx, quantity: int, unit_price: int, *, item: str):
@@ -714,7 +714,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
             embed = await self.build_member_mod_embed(ctx.guild, membre)
         else:
             embed = await self.build_mod_embed(ctx.guild, ctx.author)
-        view.message = await ctx.send(embed=embed, view=view)
+        view.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
 
 
 async def setup(bot: commands.Bot):

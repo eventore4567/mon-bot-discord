@@ -279,7 +279,7 @@ class Design(commands.Cog, name="Design"):
         settings = await self.bot.db.get_design_settings(ctx.guild.id)
         view = DesignSetupView(self, ctx.guild, ctx.author.id, settings)
         embed = view.build_summary_embed()
-        msg = await ctx.send(embed=embed, view=view)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
         view.message = msg
 
 

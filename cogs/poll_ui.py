@@ -397,11 +397,14 @@ class PollUI(commands.Cog, name="PollUI"):
             "Cliquez sur le bouton ci-dessous. Une fenêtre Discord vous demandera la question et les réponses. "
             "Vous pourrez ensuite choisir la durée et publier le sondage.",
         )
-        await ctx.send(
-            embed=embed,
-            view=PollLauncherView(self.bot, ctx.author.id),
-            reference=None,
-            mention_author=False,
+        # reference=None / mention_author=False etaient les valeurs par defaut :
+        # sans reponse citee, mention_author n'a aucun effet.
+        await panels.envoyer(
+            ctx,
+            panels.avec_composants(
+                panels.depuis_embed(embed),
+                PollLauncherView(self.bot, ctx.author.id),
+            ),
         )
 
 

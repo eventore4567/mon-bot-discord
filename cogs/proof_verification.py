@@ -462,7 +462,7 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Permission requise : Administrateur')))
         await proof_service.ensure_settings(self.bot, ctx.guild.id, actor_id=ctx.author.id)
         view = ProofSetupView(self, ctx.guild, ctx.author.id)
-        await ctx.send(embed=await view.build_embed(), view=view)
+        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await view.build_embed()), view))
 
     @commands.hybrid_command(name="proofexample", description="Ajouter une capture exemple au système de preuve")
     @app_commands.describe(image="Capture de référence", nom="Nom de l'exemple, par exemple Confirmation")

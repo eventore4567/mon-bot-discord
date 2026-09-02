@@ -244,7 +244,7 @@ class SentriXV21(commands.Cog):
                 colour=discord.Colour.blurple(),
             )
             view = MarketConfirmView(self, ctx.author, listing_id)
-            view.message = await ctx.send(embed=embed, view=view)
+            view.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
 
         functools.update_wrapper(confirmed_buy, buy.callback)
         buy.callback = confirmed_buy

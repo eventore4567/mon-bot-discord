@@ -315,7 +315,7 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         options = options[:4]
         target_name, target_emoji = game_rewards.secure_pick(options)
         view = _ColorQuizView(author_id=ctx.author.id, options=options, target=target_name)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Quiz couleur", description=f"🎨 Cliquez sur **{target_name.upper()}**"), view=view)
+        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz couleur', description=f'🎨 Cliquez sur **{target_name.upper()}**')), view))
         await view.wait()
         if view.correct is None:
             await _finish(self.bot, ctx, "colorquiz", sid, "loss", 0)
@@ -490,11 +490,7 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel', description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "duel")  # le verrou individuel ne s'applique pas aux duels à 2
         view = _RPSDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
-        msg = await ctx.send(
-            embed=await _embed(self.bot, guild_id, title="Duel — Pierre-feuille-ciseaux",
-                                description=f"⚔️ {ctx.author.mention} défie {adversaire.mention} !\nCliquez sur le bouton pour faire votre choix EN PRIVÉ."),
-            view=view,
-        )
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel — Pierre-feuille-ciseaux', description=f'⚔️ {ctx.author.mention} défie {adversaire.mention} !\nCliquez sur le bouton pour faire votre choix EN PRIVÉ.')), view))
         view.message = msg
 
     @commands.hybrid_command(name="numberduel", description="Duel : chacun choisit un nombre secret entre 1 et 100, le plus proche gagne.", with_app_command=False)
@@ -509,11 +505,7 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel du nombre secret', description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "numberduel")
         view = _NumberDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
-        msg = await ctx.send(
-            embed=await _embed(self.bot, guild_id, title="Duel du nombre secret",
-                                description=f"🔢 {ctx.author.mention} vs {adversaire.mention}\nLe bot a choisi un nombre secret entre 1 et 100. Cliquez pour proposer le vôtre EN PRIVÉ."),
-            view=view,
-        )
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel du nombre secret', description=f'🔢 {ctx.author.mention} vs {adversaire.mention}\nLe bot a choisi un nombre secret entre 1 et 100. Cliquez pour proposer le vôtre EN PRIVÉ.')), view))
         view.message = msg
 
     @commands.hybrid_command(name="quizduel", description="Duel de quiz : répondez en privé, le plus rapide des bonnes réponses gagne.", with_app_command=False)
@@ -529,11 +521,7 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         game_rewards.release_play_lock(guild_id, ctx.author.id, "quizduel")
         question, answer = game_rewards.secure_pick(WORDGAME_CLUES)
         view = _QuizDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid, answer=answer)
-        msg = await ctx.send(
-            embed=await _embed(self.bot, guild_id, title="Duel de quiz",
-                                description=f"❓ {ctx.author.mention} vs {adversaire.mention}\n**{question}**\nCliquez pour répondre EN PRIVÉ."),
-            view=view,
-        )
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de quiz', description=f'❓ {ctx.author.mention} vs {adversaire.mention}\n**{question}**\nCliquez pour répondre EN PRIVÉ.')), view))
         view.message = msg
 
     @commands.hybrid_command(name="reactionduel", description="Duel de réaction : soyez le premier à cliquer quand le bouton apparaît.", with_app_command=False)
@@ -570,7 +558,7 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Puissance 4', description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "connect4")
         view = ConnectFourView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
-        msg = await ctx.send(embed=await _embed(self.bot, guild_id, title="Puissance 4", description=view.render(f"Au tour de {ctx.author.mention} (🔴)")), view=view)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Puissance 4', description=view.render(f'Au tour de {ctx.author.mention} (🔴)'))), view))
         view.message = msg
 
 
@@ -1034,7 +1022,7 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         pool = ["🍒", "🍋", "🍊", "🍇", "💎"]
         target = game_rewards.secure_pick(pool)
         view = _EmojiRaceView(pool, target)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Course à l'emoji", description=f"🎯 Cliquez sur **{target}** — premier(e) à cliquer sur le bon emoji gagne ! (15s)"), view=view)
+        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description=f'🎯 Cliquez sur **{target}** — premier(e) à cliquer sur le bon emoji gagne ! (15s)')), view))
         await view.wait()
         await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, "emoji-race")
         if view.winner is None:

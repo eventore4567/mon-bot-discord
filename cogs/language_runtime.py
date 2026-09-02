@@ -806,7 +806,7 @@ async def _localized_help_callback(cog, ctx: commands.Context, *, commande: str 
         return await panels.envoyer(ctx, panels.depuis_embed(e))
 
     home = _help_home(bot, ctx.guild, prefix, is_staff, language)
-    return await ctx.send(embed=home, view=LanguageHelpHomeView(bot, prefix, is_staff, language, ctx.author.id))
+    return await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(home), LanguageHelpHomeView(bot, prefix, is_staff, language, ctx.author.id)))
 
 
 def _install_help_patch(bot: commands.Bot) -> None:

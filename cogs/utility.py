@@ -764,7 +764,7 @@ class Utility(commands.Cog, name="Utility"):
         e = build_help_home(self.bot, ctx.guild, prefix, is_staff)
         try:
             view = HelpView(self.bot, prefix, is_staff)
-            await ctx.send(embed=e, view=view)
+            await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), view))
         except Exception:
             # L'aide textuelle reste disponible même si Discord refuse ponctuellement
             # un composant du menu. Le détail technique reste visible dans Railway.

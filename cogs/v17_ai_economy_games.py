@@ -862,7 +862,7 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
         if command is None or game not in GAME_COMMANDS:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Mini-jeu inconnu ou non compatible avec les lobbies V17.')))
         view = GameLobbyView(self, ctx, game)
-        message = await ctx.send(embed=view.embed(), view=view)
+        message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(view.embed()), view))
         view.message = message
 
     @commands.hybrid_command(name="matchmake", description="Chercher automatiquement un adversaire pour un duel/mini-jeu.", with_app_command=False)

@@ -371,7 +371,7 @@ class NotificationRolePanels(commands.Cog):
 
         role_ids = [role.id for role in roles]
         view = NotificationRoleView(ctx.guild, role_ids)
-        message = await ctx.send(embed=_panel_embed(ctx.guild, role_ids), view=view)
+        message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(_panel_embed(ctx.guild, role_ids)), view))
         await self._save_panel(message, ctx.author.id, role_ids)
         self.bot.add_view(NotificationRoleView(ctx.guild, role_ids), message_id=message.id)
 

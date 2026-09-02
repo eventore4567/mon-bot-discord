@@ -306,7 +306,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
 
         async def callback(_cog, ctx: commands.Context):
             view = StatusHubView(self.bot, ctx.guild, ctx.author.id, "status")
-            message = await ctx.send(embed=await build_status_embed(self.bot, ctx.guild), view=view)
+            message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await build_status_embed(self.bot, ctx.guild)), view))
             view.message = message
 
         command.callback = functools.wraps(command.callback)(callback)
@@ -322,7 +322,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
 
         async def callback(_cog, ctx: commands.Context):
             view = StatusHubView(self.bot, ctx.guild, ctx.author.id, "updates")
-            message = await ctx.send(embed=build_updates_embed(self.bot), view=view)
+            message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(build_updates_embed(self.bot)), view))
             view.message = message
 
         command.callback = functools.wraps(command.callback)(callback)
@@ -332,7 +332,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
     @commands.command(name="about")
     async def about_command(self, ctx: commands.Context):
         view = StatusHubView(self.bot, ctx.guild, ctx.author.id, "about")
-        message = await ctx.send(embed=build_about_embed(self.bot), view=view)
+        message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(build_about_embed(self.bot)), view))
         view.message = message
 
     @commands.command(name="design-theme", aliases=["theme-design"])
@@ -347,7 +347,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
         if resolved:
             settings = await self.bot.db.set_design_settings(ctx.guild.id, visual_v5.theme_settings(resolved))
         view = ThemeView(self.bot, ctx.guild, ctx.author.id, settings)
-        message = await ctx.send(embed=view.embed(saved=bool(resolved)), view=view)
+        message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(view.embed(saved=bool(resolved))), view))
         view.message = message
 
     @commands.command(name="profile-card", aliases=["card"])

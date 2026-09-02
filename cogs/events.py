@@ -286,7 +286,7 @@ class Events(commands.Cog, name="Events"):
         if image:
             e.set_image(url=image)
 
-        msg = await ctx.send(embed=e, view=GiveawayView())
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), GiveawayView()))
         await self.bot.db.execute(
             "INSERT INTO giveaways "
             "(guild_id, channel_id, message_id, prize, winners_count, status, end_at, "

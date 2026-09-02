@@ -1103,7 +1103,7 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
         if not row:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun modèle nommé « {nom} ».')))
         view = helpers_confirm_view(ctx.author.id)
-        msg = await ctx.send(embed=embeds.warning(f"Supprimer le modèle **{nom}** ? Cette action est irréversible."), view=view)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.warning(f'Supprimer le modèle **{nom}** ? Cette action est irréversible.')), view))
         await view.wait()
         if not view.value:
             return await msg.edit(embed=embeds.error("Suppression annulée."), view=None)

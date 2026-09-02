@@ -455,7 +455,7 @@ class V17TicketsLogs(commands.Cog, name="V17TicketsLogs"):
                 pass
         from .tickets import TicketControlView, get_button_settings
         settings = await get_button_settings(self.bot, ctx.guild.id)
-        await ctx.send(embed=embeds.success(f"Ticket **#{ticket['id']}** rouvert par {ctx.author.mention}."), view=TicketControlView(settings))
+        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.success(f"Ticket **#{ticket['id']}** rouvert par {ctx.author.mention}.")), TicketControlView(settings)))
 
     @commands.hybrid_command(name="ticketstaffstats", description="Statistiques de traitement des tickets par membre du staff.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")

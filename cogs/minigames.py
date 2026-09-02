@@ -326,7 +326,7 @@ class Minigames(commands.Cog, name="Minigames"):
         session_id = game_rewards.new_session_id("tictactoe")
         view = TicTacToeView(ctx.author, adversaire, cog=self, session_id=session_id)
         e = await self._embed(guild_id, title="Morpion", description=f"{ctx.author.mention} (○) vs {adversaire.mention} (⭕)\nAu tour de {ctx.author.mention}")
-        await ctx.send(embed=e, view=view)
+        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), view))
 
     @commands.hybrid_command(name="hangman", description="Jouer au pendu.", with_app_command=False)
     async def hangman(self, ctx: commands.Context):

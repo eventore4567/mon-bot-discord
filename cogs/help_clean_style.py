@@ -401,7 +401,7 @@ async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = No
         return await panels.envoyer(ctx, panels.depuis_embed(embed))
     home = _help_home(bot, ctx.guild, prefix, is_staff, language)
     view = CleanHelpHomeView(bot, prefix, is_staff, language, ctx.author.id)
-    message = await ctx.send(embed=home, view=view)
+    message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(home), view))
     view.message = message
     return message
 

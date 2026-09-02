@@ -494,7 +494,7 @@ class Configuration(commands.Cog):
     async def logsetup(self, ctx: commands.Context):
         e, view = await self._build_logs_home(ctx.guild.id)
         view.author_id = ctx.author.id
-        msg = await ctx.send(embed=e, view=view)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), view))
         view.message = msg
 
     @commands.hybrid_group(name="logs", description="Commandes rapides pour les logs (voir aussi +logsetup pour le panneau complet).", with_app_command=False)
@@ -950,13 +950,7 @@ class Configuration(commands.Cog):
         if existing and existing[1] != ctx.author.id:
             locked_message_id, locked_author_id, locked_author_name = existing
             view = SetupLockPromptView(self, ctx.guild.id, locked_message_id, locked_author_id, locked_author_name, ctx.author.id)
-            return await ctx.send(
-                embed=embeds.warning(
-                    f"⚠️ Une configuration est déjà en cours par **{locked_author_name}**.",
-                    title="Configuration déjà ouverte",
-                ),
-                view=view,
-            )
+            return await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.warning(f'⚠️ Une configuration est déjà en cours par **{locked_author_name}**.', title='Configuration déjà ouverte')), view))
         await self._open_setup_panel(ctx)
 
     async def _open_setup_panel(self, ctx_or_channel, *, author: discord.Member = None):

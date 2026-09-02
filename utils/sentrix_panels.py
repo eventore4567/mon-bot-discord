@@ -503,3 +503,86 @@ __all__ = [
     "fichier_banniere",
     "nom_banniere",
 ]
+
+
+def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
+    """Reloge les composants d'une View existante DANS un panneau.
+
+    Une interface interactive (aide, setup, confirmation, panneau de tickets)
+    envoyait jusqu'ici un embed et, a cote, une View classique portant ses
+    boutons. Un message Components V2 n'accepte pas cette cohabitation : la vue
+    EST le message. Reconstruire ces boutons a l'identique reviendrait a
+    dupliquer des dizaines de callbacks metier, donc on deplace les items
+    existants au lieu de les recreer.
+
+    C'est sur : un item decore par ``@discord.ui.button`` garde une reference a
+    la vue qui l'a cree (discord.py lie son callback a cette instance), donc son
+    comportement ne change pas en changeant de conteneur. On redirige en plus le
+    controle d'interaction et l'expiration vers la vue d'origine, sinon ses
+    gardes (« ce bouton n'est pas pour vous », desactivation a l'expiration)
+    seraient perdues.
+    """
+    enfants = list(getattr(vue, "children", ()) or ())
+    if not enfants:
+        return panneau
+
+    conteneur = next((c for c in panneau.children if isinstance(c, discord.ui.Container)), None)
+    if conteneur is None:
+        return panneau
+
+    rangees = _rangees_d_items(enfants)
+    if rangees:
+        conteneur.add_item(discord.ui.Separator())
+        for rangee in rangees:
+            conteneur.add_item(rangee)
+
+    # La vue d'origine reste responsable de son comportement ; le panneau n'est
+    # que le contenant. Sans ces trois renvois, un bouton continuerait de
+    # fonctionner mais les gardes de la vue seraient muettes.
+    panneau._vue_source = vue
+    if getattr(vue, "timeout", None) is not None:
+        panneau.timeout = vue.timeout
+    for nom in ("interaction_check", "on_timeout", "on_error"):
+        methode = getattr(vue, nom, None)
+        if methode is not None:
+            setattr(panneau, nom, methode)
+    return panneau
+
+
+def _rangees_d_items(items: Sequence[discord.ui.Item]) -> list[discord.ui.ActionRow]:
+    """Regroupe des items en rangees Discord valides.
+
+    Discord impose cinq boutons par rangee, et un menu deroulant occupe une
+    rangee entiere. Un item qui declare deja sa rangee (``row=``) la garde :
+    l'auteur de la vue avait une raison de la fixer.
+    """
+    rangees: list[discord.ui.ActionRow] = []
+    courante: discord.ui.ActionRow | None = None
+    places = 0
+    derniere_rangee_declaree = None
+
+    for item in items[:25]:
+        seul = not isinstance(item, discord.ui.Button)
+        declaree = getattr(item, "row", None)
+        rupture = (
+            courante is None
+            or seul
+            or places >= 5
+            or (declaree is not None and declaree != derniere_rangee_declaree)
+        )
+        if rupture:
+            courante = discord.ui.ActionRow()
+            rangees.append(courante)
+            places = 0
+        derniere_rangee_declaree = declaree
+        try:
+            # Un item pose dans une ActionRow ne doit plus porter de row= : la
+            # rangee lui donne sa position.
+            item.row = None
+            courante.add_item(item)
+            places += 1
+        except Exception:
+            continue
+        if seul:
+            places = 5
+    return [r for r in rangees if len(r.children)][:5]

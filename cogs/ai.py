@@ -994,7 +994,7 @@ class Ai(commands.Cog, name="Ai"):
                 await thinking_msg.edit(embed=embed, view=view)
                 view.message = thinking_msg
             else:
-                msg = await ctx.send(embed=embed, view=view)
+                msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
                 view.message = msg if not ctx.interaction else await ctx.interaction.original_response()
             return
 
@@ -1102,7 +1102,7 @@ class Ai(commands.Cog, name="Ai"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
         settings = await ai_service.get_settings(self.bot, ctx.guild.id)
         view = AiSetupView(self, ctx.guild.id, ctx.author.id, settings)
-        await ctx.send(embed=view.build_embed(), view=view)
+        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(view.build_embed()), view))
 
     @commands.hybrid_command(
         name="aidiag",

@@ -1068,7 +1068,7 @@ class Levels(commands.Cog, name="Levels"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Une erreur est survenue en préparant ces statistiques.')))
         if settings.get("buttons_visible", True):
             view = StatsView(self, ctx.guild, membre, ctx.author.id)
-            msg = await ctx.send(embed=embed, view=view)
+            msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
             view.message = msg
         else:
             await panels.envoyer(ctx, panels.depuis_embed(embed))
@@ -1367,7 +1367,7 @@ class Levels(commands.Cog, name="Levels"):
             f"**Après** — niveau {new_level}, XP {stats_service.format_number(new_xp)}\n"
             f"XP totale conservée à l'identique : {stats_service.format_number(total_xp)}."
         )
-        msg = await ctx.send(embed=embeds.warning(f"Confirmer la réparation du niveau de {membre.mention} ?\n\n{preview}"), view=view)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.warning(f'Confirmer la réparation du niveau de {membre.mention} ?\n\n{preview}')), view))
         view.message = msg
         await view.wait()
         if not view.confirmed:
@@ -1576,7 +1576,7 @@ class Levels(commands.Cog, name="Levels"):
         view.category = category
         view.rebuild_items()
         embed = view.build_summary_embed()
-        msg = await ctx.send(embed=embed, view=view)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
         view.message = msg
 
     @commands.hybrid_command(name="statsconfig", description="[Admin] Configurer l'apparence et le comportement de /stats et /level.", with_app_command=False)

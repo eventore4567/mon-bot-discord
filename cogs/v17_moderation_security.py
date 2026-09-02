@@ -141,13 +141,7 @@ def install_danger_confirmations(bot: commands.Bot) -> None:
             if ctx is None or ctx.guild is None:
                 return await __original(*args, **kwargs)
             view = helpers.ConfirmView(ctx.author.id, timeout=30)
-            message = await ctx.send(
-                embed=embeds.warning(
-                    f"Vous êtes sur le point de **{__label}**. Une sauvegarde automatique sera créée avant l'action. Confirmer ?",
-                    title="Confirmation obligatoire",
-                ),
-                view=view,
-            )
+            message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.warning(f"Vous êtes sur le point de **{__label}**. Une sauvegarde automatique sera créée avant l'action. Confirmer ?", title='Confirmation obligatoire')), view))
             await view.wait()
             if view.value is not True:
                 try:
@@ -599,7 +593,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
         if not row:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Snapshot introuvable.')))
         view = helpers.ConfirmView(ctx.author.id, timeout=30)
-        msg = await ctx.send(embed=embeds.warning("La restauration est **additive** : elle recrée ce qui manque sans supprimer les éléments actuels. Continuer ?"), view=view)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.warning('La restauration est **additive** : elle recrée ce qui manque sans supprimer les éléments actuels. Continuer ?')), view))
         await view.wait()
         if view.value is not True:
             return await msg.edit(embed=embeds.info("Restauration annulée."), view=None)

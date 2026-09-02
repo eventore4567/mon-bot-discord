@@ -371,7 +371,7 @@ def _install_interactive_profile(bot: commands.Bot) -> None:
         member = membre or ctx.author
         view = ProfileHubView(bot, ctx.guild, member, ctx.author.id)
         embed = await build_profile_page(bot, ctx.guild, member, ctx.author.id, "overview")
-        message = await ctx.send(embed=embed, view=view)
+        message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
         view.message = message
 
     _replace_callback(command, interactive_profile, "_sentrix_v31_interactive_profile")

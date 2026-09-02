@@ -444,7 +444,7 @@ class Security(commands.Cog):
             f"**{sum(len(c['channels']) for c in data['categories']) + len(data.get('uncategorized', []))}** salons"
         ), inline=False)
         view = helpers.ConfirmView(ctx.author.id)
-        msg = await ctx.send(embed=preview, view=view)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(preview), view))
         await view.wait()
         if not view.value:
             return await msg.edit(embed=embeds.error("Restauration annulée."), view=None)

@@ -225,10 +225,7 @@ class Verification(commands.Cog, name="Verification"):
         title = title.strip()[:256] or "Choisissez vos notifications"
         temporary_panel = {"title": title}
         options = await self._self_role_options(ctx.guild, 0)
-        message = await ctx.channel.send(
-            embed=await self._self_role_embed(ctx.guild, temporary_panel, options),
-            view=SelfRolePublicView(options),
-        )
+        message = await panels.envoyer(ctx.channel, panels.avec_composants(panels.depuis_embed(await self._self_role_embed(ctx.guild, temporary_panel, options)), SelfRolePublicView(options)))
         await self.bot.db.execute(
             "INSERT INTO self_role_panels (guild_id, channel_id, message_id, title, created_by, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(guild_id, message_id) DO NOTHING",
@@ -313,7 +310,7 @@ class Verification(commands.Cog, name="Verification"):
     @checks.is_owner_or_admin()
     async def verify_panel(self, ctx: commands.Context):
         e = await self._embed(ctx.guild.id, title="Vérification", description="Cliquez sur le bouton ci-dessous après avoir lu les règles du serveur pour obtenir l'accès complet.")
-        await ctx.send(embed=e, view=VerifyView())
+        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), VerifyView()))
 
     async def _panel_and_message(self, guild: discord.Guild, message_id: int):
         panel = await self.bot.db.fetchone(

@@ -1936,7 +1936,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         if not me.guild_permissions.administrator:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Pour installer plus de 50 rôles avec leurs permissions, les salons privés et les tickets, SentriX doit avoir la permission **Administrateur**. Placez aussi son rôle au-dessus des rôles qu'il doit gérer, puis relancez +create-server.")))
         view = ServerBuilderView(self.bot, ctx.author.id)
-        await ctx.send(embed=view.build_preview_embed(), view=view)
+        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(view.build_preview_embed()), view))
 
     @commands.hybrid_command(
         name="delete-channel",
@@ -2001,7 +2001,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             title="Suppression totale du serveur",
         )
         view = WipeConfirmView(ctx.author.id, guild, ctx.channel.id)
-        await ctx.send(embed=warning, view=view)
+        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(warning), view))
 
 
 class WipeConfirmModal(discord.ui.Modal, title="Confirmation de suppression totale"):

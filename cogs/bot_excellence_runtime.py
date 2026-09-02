@@ -1480,7 +1480,7 @@ async def _matchmake_tictactoe(ctx: commands.Context) -> None:
             title="Morpion",
             description=f"{first.mention} contre {ctx.author.mention}.\nAu tour de {first.mention}.",
         )
-        return await ctx.send(embed=embed, view=view)
+        return await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
     queue[key] = (ctx.author.id, stamp)
     await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Recherche d'un adversaire dans ce salon. Un autre membre peut taper `+tictactoe` sans mention pour rejoindre la partie.")))
 

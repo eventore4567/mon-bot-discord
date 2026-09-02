@@ -616,7 +616,7 @@ class Economy(commands.Cog, name="Economy"):
     async def shoppanel(self, ctx: commands.Context):
         """Publie la boutique que les membres utilisent sans commande."""
         chunks = await self._shop_role_options(ctx.guild)
-        message = await ctx.channel.send(embed=await self._shop_panel_embed(ctx.guild), view=ShopRoleView(chunks))
+        message = await panels.envoyer(ctx.channel, panels.avec_composants(panels.depuis_embed(await self._shop_panel_embed(ctx.guild)), ShopRoleView(chunks)))
         await self.bot.db.execute(
             "INSERT INTO shop_panels (guild_id, channel_id, message_id, created_by, created_at) "
             "VALUES (?, ?, ?, ?, ?) ON CONFLICT(guild_id, message_id) DO NOTHING",
@@ -774,7 +774,7 @@ class Economy(commands.Cog, name="Economy"):
             pages.append(embed)
 
         view = ShopCatalogueView(pages, ctx.author.id)
-        message = await ctx.send(embed=pages[0], view=view)
+        message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(pages[0]), view))
         view.message = message
 
     @commands.hybrid_command(name="buy", description="Acheter un article de la boutique.")
