@@ -241,3 +241,52 @@ class Confirmations(unittest.TestCase):
         source = inspect.getsource(ConfirmView.interaction_check)
         self.assertIn("Lancez la commande vous-même", source)
         self.assertIn("panels.envoyer", source)
+
+
+class RenduUnifie(unittest.TestCase):
+    """Un seul rendu pour toutes les commandes.
+
+    +profile, +serverinfo et +leaderboard passaient par un convertisseur
+    parallele : titre sans chevrons, aucune banniere, et surtout aucune methode
+    fichiers() alors que le code appelant l'invoque — les trois commandes
+    levaient une AttributeError. Elles doivent produire exactement la meme
+    typographie que les 521 autres.
+    """
+
+    def _embed(self):
+        import discord
+
+        embed = discord.Embed(title="Profil", description="Deux ans", colour=0x8B7AFF)
+        embed.add_field(name="Niveau", value="42")
+        embed.set_footer(text="SentriX")
+        return embed
+
+    def test_le_convertisseur_compact_produit_un_panneau(self):
+        from cogs.premium_ui_v82 import PremiumEmbedViewV82
+
+        vue = PremiumEmbedViewV82(self._embed(), compact=True)
+        self.assertIsInstance(vue, panels.Panneau)
+        # fichiers() est le contrat que panels.envoyer utilise pour joindre la
+        # banniere : sans lui, l'appelant plante.
+        self.assertTrue(vue.fichiers())
+
+    def test_la_typographie_est_celle_de_tous_les_autres_panneaux(self):
+        from cogs.premium_ui_v82 import PremiumEmbedViewV82
+
+        rendu = panels.texte_complet(PremiumEmbedViewV82(self._embed(), compact=True))
+        self.assertTrue(rendu.startswith("## "), rendu[:40])
+        self.assertIn("### ◢ ", rendu)
+
+    def test_le_mode_compact_tient_sur_moins_de_lignes(self):
+        from cogs.premium_ui_v82 import PremiumEmbedViewV82
+
+        import discord
+
+        embed = discord.Embed(title="Profil")
+        for i in range(6):
+            embed.add_field(name=f"Champ {i}", value=str(i))
+        compact = panels.texte_complet(PremiumEmbedViewV82(embed, compact=True))
+        large = panels.texte_complet(PremiumEmbedViewV82(embed, compact=False))
+        # C'est la seule raison d'etre du mode compact : six champs ne doivent
+        # pas occuper douze lignes.
+        self.assertLess(len(compact.splitlines()), len(large.splitlines()))

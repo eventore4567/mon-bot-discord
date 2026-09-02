@@ -21,6 +21,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds, log_service
+from utils import sentrix_panels as sx_panels
 from . import premium_ui_v81 as v81
 
 logger = logging.getLogger("bot.premium-ui-v82")
@@ -130,62 +131,57 @@ def _append_buttons(container: discord.ui.Container, legacy_view: discord.ui.Vie
         container.add_item(discord.ui.ActionRow(*buttons[index:index + 5]))
 
 
-class PremiumEmbedViewV82(discord.ui.LayoutView):
-    """Version compacte de V81, particulièrement adaptée à +profile/+serverinfo."""
+def PremiumEmbedViewV82(
+    embed: discord.Embed,
+    *,
+    compact: bool = False,
+    legacy_view: discord.ui.View | None = None,
+    title_override: str | None = None,
+):
+    """Version compacte de V81, pour +profile, +serverinfo et +leaderboard.
 
-    def __init__(
-        self,
-        embed: discord.Embed,
-        *,
-        compact: bool = False,
-        legacy_view: discord.ui.View | None = None,
-        title_override: str | None = None,
-    ):
-        super().__init__(timeout=getattr(legacy_view, "timeout", 300) if legacy_view is not None else 300)
-        container = discord.ui.Container(accent_colour=ACCENT)
-        title = _safe_text(title_override or embed.title or "SentriX")
-        description = _clean_description(embed.description)
-        thumbnail = _plain(getattr(embed.thumbnail, "url", None))
+    Ces trois commandes ont beaucoup de champs : une section par champ donnerait
+    vingt lignes la ou quatre suffisent. D'ou le mode compact — mais il produit
+    desormais un vrai Panneau, pas un rendu parallele.
 
-        # ## au lieu de # : le titre reste net sans prendre une hauteur excessive.
-        header = f"## {title}"
-        if description:
-            header += f"\n{description[:700]}"
+    L'ancienne version construisait son propre Container : elle n'avait donc ni
+    banniere (aucune galerie), ni chevrons de section, ni methode fichiers() —
+    que le code appelant de V81 invoque pourtant, ce qui faisait planter les
+    trois commandes avec une AttributeError. Trois des interfaces les plus
+    consultees du bot rendaient un troisieme style, quand elles repondaient.
+    """
+    titre = _safe_text(title_override or embed.title or "SentriX")
+    description = _clean_description(embed.description)
+    vignette = _plain(getattr(embed.thumbnail, "url", None))
 
-        if thumbnail:
-            container.add_item(
-                discord.ui.Section(
-                    discord.ui.TextDisplay(header),
-                    accessory=discord.ui.Thumbnail(thumbnail),
-                )
-            )
-        else:
-            container.add_item(discord.ui.TextDisplay(header))
+    if compact and embed.fields:
+        # Un champ = une ligne, au lieu d'un en-tete de section suivi de sa
+        # valeur. C'est la seule raison d'etre de ce mode.
+        lignes = [
+            sx_panels.Ligne(_safe_text(f.name), _safe_text(f.value))
+            for f in embed.fields
+            if _safe_text(f.name) and _safe_text(f.value)
+        ]
+        sections = [sx_panels.Section("Résumé", lignes)] if lignes else []
+        panneau = sx_panels.Panneau(
+            titre=titre,
+            sous_titre=description[:700] if description else None,
+            kind=sx_panels.intention_de(embed.colour) if embed.colour else "brand",
+            vignette=vignette,
+            sections=sections,
+            pied=_plain(getattr(embed.footer, "text", None)),
+        )
+    else:
+        # depuis_embed lit le titre DANS l'embed : pour l'ecraser, on le pose
+        # avant la conversion plutot que de reconstruire le panneau apres coup.
+        if title_override:
+            embed = embed.copy()
+            embed.title = titre
+        panneau = sx_panels.depuis_embed(embed)
 
-        if embed.fields:
-            container.add_item(discord.ui.Separator())
-            if compact:
-                # Une seule zone texte : 4 sections deviennent 4 lignes au lieu de 20+ lignes.
-                rows = _compact_field_rows(embed)
-                if rows:
-                    body = "\n".join(rows)
-                    container.add_item(discord.ui.TextDisplay(body[:3900]))
-            else:
-                for field in embed.fields:
-                    name = _safe_text(field.name)
-                    value = _safe_text(field.value)
-                    if name and value:
-                        container.add_item(discord.ui.TextDisplay(f"**{name}**\n{value}"[:3900]))
-
-        # En compact, le footer purement décoratif n'ajoute pas une ligne supplémentaire.
-        if not compact:
-            footer = _plain(getattr(embed.footer, "text", None))
-            if footer:
-                container.add_item(discord.ui.Separator())
-                container.add_item(discord.ui.TextDisplay(f"-# {_safe_text(footer)[:500]}"))
-
-        _append_buttons(container, legacy_view)
-        self.add_item(container)
+    if legacy_view is not None:
+        panneau = sx_panels.avec_composants(panneau, legacy_view)
+    return panneau
 
 
 def _log_field_body(embed: discord.Embed) -> str:
