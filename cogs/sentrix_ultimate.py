@@ -16,7 +16,7 @@ from typing import Any
 
 import discord
 
-from utils import embeds
+from utils import embeds, helpers
 from utils import sentrix_panels as panels
 from discord.ext import commands, tasks
 
@@ -340,7 +340,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             (guild.id, now() - 86400),
         )
         count, severity = int(_get(row, "n", 0)), int(_get(row, "s", 0))
-        protections = sum(int(await self._enabled(guild.id, x)) for x in ("auto_lockdown", "anti_alt", "ai_moderation"))
+        protections = sum([int(await self._enabled(guild.id, x)) for x in ("auto_lockdown", "anti_alt", "ai_moderation")])
         score = _clamp(100 - min(55, severity * 2) - (3 - protections) * 5, 0, 100)
         lock = await self.bot.db.fetchone("SELECT active,until_ts,reason FROM ultimate_lockdown WHERE guild_id=?", (guild.id,))
         return {"score": score, "events": count, "severity": severity, "protections": protections, "lockdown": bool(int(_get(lock, "active", 0))), "until": _get(lock, "until_ts"), "reason": _get(lock, "reason", "")}
@@ -396,6 +396,9 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             return False
 
     async def live_snapshot(self, guild: discord.Guild) -> dict[str, Any]:
+        # Attention : `sum(... await ... for ...)` construit un generateur
+        # ASYNCHRONE, que sum() ne sait pas parcourir — TypeError a l'execution.
+        # Les crochets forcent une liste, evaluee avant l'appel.
         voice_users = sum(len(c.members) for c in guild.voice_channels)
         online = sum(1 for m in guild.members if not m.bot and getattr(m, "status", discord.Status.offline) != discord.Status.offline)
         try:
@@ -403,8 +406,8 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             tickets = int(_get(row, "n", 0))
         except Exception: tickets = 0
         sec = await self._security(guild)
-        enabled = sum(int(await self._enabled(guild.id, name)) for name in MODULES)
-        return {"online_members": online, "voice_users": voice_users, "open_tickets": tickets, "security_score": sec["score"], "security_events_24h": sec["events"], "lockdown": sec["lockdown"], "modules_enabled": enabled, "modules_total": len(MODULES), "latency_ms": round(self.bot.latency * 1000)}
+        enabled = sum([int(await self._enabled(guild.id, name)) for name in MODULES])
+        return {"online_members": online, "voice_users": voice_users, "open_tickets": tickets, "security_score": sec["score"], "security_events_24h": sec["events"], "lockdown": sec["lockdown"], "modules_enabled": enabled, "modules_total": len(MODULES), "latency_ms": helpers.latence_ms(self.bot)}
 
     def _patch_dashboard_metrics(self):
         try:
