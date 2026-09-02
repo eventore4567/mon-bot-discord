@@ -145,15 +145,15 @@ async def _move_flow(cog, type_id: int, author_id: int, interaction: discord.Int
     t = await cog.get_type(type_id)
     if not t:
         return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Type introuvable.')), ephemere=True)
-    panels = await cog.bot.db.fetchall(
+    panneaux = await cog.bot.db.fetchall(
         "SELECT * FROM ticket_panels_v2 WHERE guild_id=? ORDER BY id", (interaction.guild.id,)
     )
-    others = [p for p in panels if int(p["id"]) != int(t["panel_id"] or 0)]
+    others = [p for p in panneaux if int(p["id"]) != int(t["panel_id"] or 0)]
     if not others:
         return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.info("Il n'y a aucun autre panel vers lequel déplacer ce type.")), ephemere=True)
     await interaction.response.send_message(
         embed=embeds.neutral("Modifier le panel", f"Nouveau panel pour **{t['name']}** :"),
-        view=MoveTypeView(cog, t, panels, author_id),
+        view=MoveTypeView(cog, t, panneaux, author_id),
         ephemeral=True,
     )
 
@@ -292,18 +292,18 @@ class CreateTypePanelView(discord.ui.View):
 
 
 async def _create_flow(cog, interaction: discord.Interaction):
-    panels = await cog.bot.db.fetchall(
+    panneaux = await cog.bot.db.fetchall(
         "SELECT * FROM ticket_panels_v2 WHERE guild_id=? ORDER BY id", (interaction.guild.id,)
     )
-    if not panels:
+    if not panneaux:
         return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Créez d'abord un panel : un type doit appartenir à un panel.")), ephemere=True)
-    if len(panels) == 1:
+    if len(panneaux) == 1:
         return await interaction.response.send_modal(
-            CreateTypeModal(cog, panels[0]["id"], interaction.user.id)
+            CreateTypeModal(cog, panneaux[0]["id"], interaction.user.id)
         )
     await interaction.response.send_message(
         embed=embeds.neutral("Créer un type", "Choisissez le panel dans lequel il apparaîtra."),
-        view=CreateTypePanelView(cog, panels, interaction.user.id),
+        view=CreateTypePanelView(cog, panneaux, interaction.user.id),
         ephemeral=True,
     )
 

@@ -523,8 +523,8 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
         settings = await proof_service.get_settings(self.bot, ctx.guild.id)
         if not _get(settings, "enabled", 0):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('La vérification par preuve est désactivée sur ce serveur.')))
-        panels, files = await self.build_public_panel(ctx.guild)
-        await ctx.send(embeds=panels, files=files)
+        vues, files = await self.build_public_panel(ctx.guild)
+        await ctx.send(embeds=vues, files=files)
 
     @commands.hybrid_command(name="proofstatus", description="Voir votre dernière vérification par preuve")
     async def proofstatus(self, ctx: commands.Context):

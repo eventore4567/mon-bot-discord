@@ -421,7 +421,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
     async def _build_tickets(self) -> None:
         enabled = await core.module_enabled(self.bot, self.guild.id, "tickets")
         ready = await v72.ticket_configuration_ready(self.bot, self.guild)
-        panels, panel, types = await v72._existing_ticket_rows(self.bot, self.guild.id)
+        panneaux, panel, types = await v72._existing_ticket_rows(self.bot, self.guild.id)
         status_label = "Activé" if enabled and ready else "À configurer" if enabled else "Désactivé"
         status_style = (
             discord.ButtonStyle.success
@@ -438,7 +438,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                     "titre, texte, couleur, image, miniature, salon, rôle support, catégorie, logs, "
                     "formulaire, message d’ouverture et boutons.\n\n"
                     "**Un type de ticket = un bouton** en mode boutons. Discord permet jusqu’à "
-                    "**25 options par panel** ; vous pouvez créer plusieurs panels si nécessaire."
+                    "**25 options par panel** ; vous pouvez créer plusieurs panneaux si nécessaire."
                 ),
                 accessory=v73._thumbnail(self.bot),
             )
@@ -446,7 +446,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(discord.ui.Separator())
         summary = (
             f"### Configuration actuelle\n"
-            f"Panels : **{len(panels)}** · Types/boutons : **{len(types)}**\n"
+            f"Panels : **{len(panneaux)}** · Types/boutons : **{len(types)}**\n"
             + (
                 f"Panel principal : **{v72._row_get(panel, 'name', 'Panel')}**"
                 if panel is not None
@@ -507,7 +507,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             ticket_runtime = v72._tickets_module()
             panel_embed = embeds.neutral(
                 "Configuration complète des tickets",
-                "Créez autant de panels et de types que nécessaire. "
+                "Créez autant de panneaux et de types que nécessaire. "
                 "Vous pouvez modifier le texte, l’image, la couleur, les boutons, "
                 "les formulaires, les salons et les rôles.",
             )

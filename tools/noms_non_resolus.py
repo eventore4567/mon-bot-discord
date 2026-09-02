@@ -57,6 +57,70 @@ def _lies(arbre: ast.AST) -> set[str]:
     return lies
 
 
+def _collisions_module(arbre, nom_fichier: str) -> list[str]:
+    """Un module importe puis masque par une variable locale du meme nom.
+
+    `panels, files = ...` dans une fonction qui appelle aussi `panels.envoyer`
+    rend `panels` LOCAL sur toute la fonction : Python leve UnboundLocalError sur
+    les lignes precedentes. Cinq commandes plantaient ainsi apres la migration —
+    dont +proof, qui echouait avant meme d'agir.
+    """
+    # Seuls les imports de NIVEAU MODULE comptent. Un `from . import utility` place
+    # dans la fonction, avec un repli `utility = None` dans son except, est un motif
+    # correct : le nom est local des le depart, il n'y a rien a masquer.
+    modules = set()
+    for n in arbre.body:
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            for alias in n.names:
+                modules.add((alias.asname or alias.name).split(".")[0])
+    problemes = []
+    for fn in ast.walk(arbre):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        locales = {
+            x.id for x in ast.walk(fn)
+            if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store)
+        }
+        heurte = modules & locales
+        if not heurte:
+            continue
+        source = ast.unparse(fn)
+        for nom in sorted(heurte):
+            if f"{nom}." in source:
+                problemes.append(
+                    f"{nom_fichier}:{fn.lineno} — `{nom}` est un module ET une variable "
+                    f"locale de {fn.name}() : UnboundLocalError garanti"
+                )
+    return problemes
+
+
+CONSOMMATEURS = {"sum", "any", "all", "min", "max", "list", "sorted", "len", "tuple", "set"}
+
+
+def _generateurs_asynchrones(arbre, nom_fichier: str) -> list[str]:
+    """Une comprehension contenant `await`, consommee par sum() ou list().
+
+    Dans une fonction async, `sum(await f(x) for x in y)` construit un generateur
+    ASYNCHRONE — que sum() ne sait pas parcourir. TypeError a l'execution, sur un
+    chemin que la lecture ne signale pas. Trois commandes sentrixpro plantaient
+    ainsi. Les crochets suffisent : `sum([... for ...])` evalue avant l'appel.
+    """
+    problemes = []
+    for n in ast.walk(arbre):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id in CONSOMMATEURS):
+            continue
+        for argument in n.args:
+            if isinstance(argument, ast.GeneratorExp) and any(
+                isinstance(x, ast.Await) for x in ast.walk(argument)
+            ):
+                problemes.append(
+                    f"{nom_fichier}:{n.lineno} — {n.func.id}() consomme une compréhension "
+                    f"contenant `await` : générateur asynchrone, TypeError à l'exécution"
+                )
+    return problemes
+
+
 def verifier(chemin: pathlib.Path) -> list[str]:
     try:
         arbre = ast.parse(chemin.read_text(encoding="utf-8"))
@@ -67,7 +131,11 @@ def verifier(chemin: pathlib.Path) -> list[str]:
     for n in ast.walk(arbre):
         if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id not in connus:
             manquants.setdefault(n.id, n.lineno)
-    return [f"{chemin.name}:{ligne} — {nom}" for nom, ligne in sorted(manquants.items())]
+    return (
+        [f"{chemin.name}:{ligne} — {nom}" for nom, ligne in sorted(manquants.items())]
+        + _collisions_module(arbre, chemin.name)
+        + _generateurs_asynchrones(arbre, chemin.name)
+    )
 
 
 def main() -> int:

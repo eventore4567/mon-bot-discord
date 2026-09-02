@@ -511,17 +511,17 @@ class Verification(commands.Cog, name="Verification"):
     @rolepanel.command(name="list", aliases=["liste"])
     @checks.is_owner_or_admin()
     async def rolepanel_list(self, ctx: commands.Context):
-        panels = await self.bot.db.fetchall(
+        panneaux = await self.bot.db.fetchall(
             "SELECT p.*, COUNT(r.message_id) AS role_count FROM reaction_role_panels p "
             "LEFT JOIN reaction_roles r ON r.guild_id = p.guild_id AND r.message_id = p.message_id "
             "WHERE p.guild_id = ? GROUP BY p.id ORDER BY p.id DESC",
             (ctx.guild.id,),
         )
-        if not panels:
+        if not panneaux:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Aucun panneau configuré')))
         lines = [
             f"<#{panel['channel_id']}> — **{panel['title']}** — `{panel['message_id']}` — {panel['role_count']} rôle(s)"
-            for panel in panels
+            for panel in panneaux
         ]
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Panneaux de rôles', description='\n'.join(lines))))
 
