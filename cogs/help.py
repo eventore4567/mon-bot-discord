@@ -15,6 +15,7 @@ from discord.ext import commands
 
 import config
 from utils import embeds
+from utils import sentrix_panels as panels
 from utils.command_permissions import command_example, command_requirement
 
 PAGE_SIZE = 7
@@ -327,6 +328,13 @@ def _exact_match(rows: list[commands.Command], query: str) -> commands.Command |
     )
 
 
+def _lots(command_rows: list[commands.Command]) -> list[list[commands.Command]]:
+    """Decoupe la liste en pages. Remplace _pages, qui fabriquait des embeds."""
+    return [
+        command_rows[i:i + PAGE_SIZE] for i in range(0, len(command_rows), PAGE_SIZE)
+    ] or [[]]
+
+
 class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
     query = discord.ui.TextInput(label="Nom ou mot-clé", max_length=60, placeholder="ban, ticket, image, logs...")
 
@@ -335,16 +343,25 @@ class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
         self.help_view = view
 
     async def on_submit(self, interaction: discord.Interaction):
-        rows = _search(_visible(self.help_view.bot, interaction.user), str(self.query.value))
-        exact = _exact_match(rows, str(self.query.value))
+        vue = self.help_view
+        recherche = str(self.query.value)
+        rows = _search(_visible(vue.bot, interaction.user), recherche)
+        exact = _exact_match(rows, recherche)
         if exact:
-            view = HelpView(self.help_view.bot, self.help_view.prefix, interaction.user.id, member=interaction.user)
-            return await interaction.response.edit_message(
-                content=None, embed=_detail(self.help_view.bot, exact, self.help_view.prefix), view=view,
+            nouvelle = VueAide(
+                vue.bot, vue.prefix, interaction.user.id,
+                titre=f"SentriX — {exact.qualified_name}",
+                resume=_description(exact),
+                sections=_sections_detail(vue.bot, exact, vue.prefix),
+                member=interaction.user,
             )
-        pages = _pages(self.help_view.bot, rows, self.help_view.prefix, f"Recherche : {str(self.query.value)[:40]}")
-        view = HelpView(self.help_view.bot, self.help_view.prefix, interaction.user.id, pages=pages, member=interaction.user)
-        await interaction.response.edit_message(content=None, embed=pages[0], view=view)
+        else:
+            nouvelle = VueAide(
+                vue.bot, vue.prefix, interaction.user.id,
+                titre=f"SentriX — recherche « {recherche[:40]} »",
+                lots=_lots(rows), index=0, member=interaction.user,
+            )
+        await _remplacer(interaction, nouvelle)
 
 
 class CategorySelect(discord.ui.Select):
@@ -365,10 +382,259 @@ class CategorySelect(discord.ui.Select):
         category = self.values[0]
         if category == "__empty__":
             return await _private_error(interaction, "Aucune catégorie disponible.")
-        rows = [command for command in _visible(self.owner.bot, interaction.user) if _category(command) == category]
-        pages = _pages(self.owner.bot, rows, self.owner.prefix, category)
-        view = HelpView(self.owner.bot, self.owner.prefix, interaction.user.id, pages=pages, member=interaction.user)
-        await interaction.response.edit_message(content=None, embed=pages[0], view=view)
+        rows = [c for c in _visible(self.owner.bot, interaction.user) if _category(c) == category]
+        await _remplacer(
+            interaction,
+            VueAide(
+                self.owner.bot, self.owner.prefix, interaction.user.id,
+                titre=f"SentriX — {category}",
+                lots=_lots(rows), index=0, member=interaction.user,
+            ),
+        )
+
+
+def _sections_accueil(bot: commands.Bot, member=None) -> list[panels.Section]:
+    """Accueil de l'aide : les categories, puis comment chercher."""
+    groupes = _ordered_categories(bot, member)
+    total = sum(groupes.values())
+    return [
+        panels.Section(
+            f"Catégories ({len(groupes)})",
+            [
+                panels.Ligne(
+                    categorie,
+                    f"`{compte}` commande{'s' if compte > 1 else ''}",
+                    indice=CATEGORY_DESCRIPTIONS.get(categorie, "Commandes SentriX."),
+                )
+                for categorie, compte in groupes.items()
+            ],
+        ),
+        panels.Section(
+            "Trouver une commande",
+            [
+                panels.Ligne("Par son nom", "`+help ban`"),
+                panels.Ligne("Par catégorie", "Le menu déroulant ci-dessous"),
+                panels.Ligne("Par mot-clé", "Le bouton **Rechercher**"),
+            ],
+        ),
+        panels.Section(
+            "Bon à savoir",
+            [
+                panels.Ligne("Commandes visibles", f"**{total}** au total"),
+                panels.Ligne(
+                    "Permissions",
+                    "La fiche de chaque commande indique celle qu'elle exige",
+                ),
+            ],
+        ),
+    ]
+
+
+def _sections_detail(bot: commands.Bot, command: commands.Command, prefix: str) -> list[panels.Section]:
+    """Fiche d'une commande : comment l'appeler, qui peut, un exemple."""
+    slash = _slash_map(bot).get(command.qualified_name.casefold())
+    appel = [panels.Ligne("Préfixe", f"`{_usage(command, prefix)}`")]
+    if slash:
+        appel.append(panels.Ligne("Slash", f"`/{slash}`"))
+    appel.append(panels.Ligne("Exemple", f"`{command_example(command, prefix)}`"))
+
+    sections = [
+        panels.Section("Comment l'utiliser", appel),
+        panels.Section(
+            "Accès",
+            [
+                panels.Ligne("Permission nécessaire", command_requirement(command)),
+                panels.Ligne("Catégorie", _category(command)),
+            ],
+        ),
+    ]
+    alias = [a for a in getattr(command, "aliases", ()) if a]
+    if alias:
+        sections.append(
+            panels.Section(
+                "Autres noms",
+                texte=" · ".join(f"`{prefix}{a}`" for a in alias[:8]),
+            )
+        )
+    return sections
+
+
+def _sections_liste(bot: commands.Bot, lot, prefix: str) -> list[panels.Section]:
+    """Une page de resultats : une ligne par commande, avec sa permission."""
+    if not lot:
+        return [
+            panels.Section(
+                "Aucun résultat",
+                [panels.Ligne("Essayez", "Un autre mot-clé, ou le menu par catégorie")],
+            )
+        ]
+    return [
+        panels.Section(
+            "Commandes",
+            [
+                panels.Ligne(
+                    _command_label(bot, command, prefix),
+                    _description(command),
+                    indice=f"Permission : {command_requirement(command)}",
+                )
+                for command in lot
+            ],
+        )
+    ]
+
+
+class VueAide(discord.ui.LayoutView):
+    """Centre d'aide compose : banniere, sections, menu et navigation.
+
+    Une LayoutView ne se modifie pas en place : chaque navigation reconstruit une
+    vue complete et remplace le message. C'est plus simple que de synchroniser
+    l'etat de dix composants, et cela garantit qu'aucun reste de la page
+    precedente ne subsiste.
+    """
+
+    def __init__(
+        self,
+        bot: commands.Bot,
+        prefix: str,
+        author_id: int,
+        *,
+        titre: str = "SentriX — Centre d'aide",
+        resume: str | None = None,
+        sections: list[panels.Section] | None = None,
+        lots: list[list] | None = None,
+        index: int = 0,
+        member=None,
+    ) -> None:
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.prefix = prefix
+        self.author_id = int(author_id)
+        self.member = member or bot.get_user(author_id)
+        self.lots = lots
+        self.index = index
+        self.kind = "brand"
+
+        if sections is None:
+            sections = (
+                _sections_liste(bot, lots[index], prefix)
+                if lots
+                else _sections_accueil(bot, self.member)
+            )
+        if resume is None:
+            resume = (
+                f"Page **{index + 1}** sur **{len(lots)}**"
+                if lots
+                else "Toutes les commandes de SentriX, classées et cherchables."
+            )
+
+        conteneur = discord.ui.Container(
+            accent_colour=discord.Colour(panels.INTENTIONS[self.kind][0])
+        )
+        galerie = discord.ui.MediaGallery()
+        galerie.add_item(media=f"attachment://{panels.nom_banniere(self.kind)}")
+        conteneur.add_item(galerie)
+        conteneur.add_item(discord.ui.TextDisplay(f"## {titre}\n{resume}"))
+
+        for section in sections:
+            rendu = section.rendu()
+            if rendu:
+                conteneur.add_item(discord.ui.Separator())
+                conteneur.add_item(discord.ui.TextDisplay(rendu[:3800]))
+
+        conteneur.add_item(discord.ui.TextDisplay("-# SentriX • Centre d'aide"))
+        conteneur.add_item(discord.ui.Separator())
+        conteneur.add_item(discord.ui.ActionRow(CategorySelect(self)))
+        conteneur.add_item(discord.ui.ActionRow(*self._navigation()))
+        liens = self._liens()
+        if liens:
+            conteneur.add_item(discord.ui.ActionRow(*liens))
+        self.add_item(conteneur)
+
+    # -- boutons ----------------------------------------------------------
+    def _navigation(self) -> list[discord.ui.Button]:
+        precedent = discord.ui.Button(
+            label="Précédent", style=discord.ButtonStyle.secondary,
+            custom_id="sentrix:aide:prec",
+            disabled=not self.lots or self.index <= 0,
+        )
+        accueil = discord.ui.Button(
+            label="Accueil", style=discord.ButtonStyle.secondary, custom_id="sentrix:aide:accueil"
+        )
+        suivant = discord.ui.Button(
+            label="Suivant", style=discord.ButtonStyle.secondary,
+            custom_id="sentrix:aide:suiv",
+            disabled=not self.lots or self.index >= len(self.lots or []) - 1,
+        )
+        rechercher = discord.ui.Button(
+            label="Rechercher", style=discord.ButtonStyle.primary, custom_id="sentrix:aide:cherche"
+        )
+
+        async def aller(interaction, delta: int):
+            vue = VueAide(
+                self.bot, self.prefix, self.author_id,
+                lots=self.lots, index=max(0, min(len(self.lots) - 1, self.index + delta)),
+                member=interaction.user,
+            )
+            await _remplacer(interaction, vue)
+
+        async def cb_prec(interaction):
+            await aller(interaction, -1)
+
+        async def cb_suiv(interaction):
+            await aller(interaction, 1)
+
+        async def cb_accueil(interaction):
+            await _remplacer(
+                interaction,
+                VueAide(self.bot, self.prefix, self.author_id, member=interaction.user),
+            )
+
+        async def cb_cherche(interaction):
+            await interaction.response.send_modal(SearchModal(self))
+
+        precedent.callback = cb_prec
+        suivant.callback = cb_suiv
+        accueil.callback = cb_accueil
+        rechercher.callback = cb_cherche
+        return [precedent, accueil, suivant, rechercher]
+
+    def _liens(self) -> list[discord.ui.Button]:
+        """Invitation, tableau de bord, support — seulement s'ils sont configures."""
+        boutons: list[discord.ui.Button] = []
+        for libelle, url in (
+            ("Ajouter SentriX", _invite_url(self.bot)),
+            ("Tableau de bord", _dashboard_url()),
+            ("Support", _support_url()),
+        ):
+            if url:
+                boutons.append(discord.ui.Button(label=libelle, url=url))
+        return boutons[:5]
+
+    def fichiers(self) -> list[discord.File]:
+        """Banniere a joindre. Meme contrat que panels.Panneau, pour que
+        panels.envoyer traite les deux sans savoir lequel il tient."""
+        fichier = panels.fichier_banniere(self.kind)
+        return [fichier] if fichier is not None else []
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await _private_error(interaction, "Ce panneau d'aide appartient à une autre personne.")
+        return False
+
+
+async def _remplacer(interaction: discord.Interaction, vue: "VueAide") -> None:
+    """Remplace le message par la nouvelle vue, banniere comprise.
+
+    `attachments=` doit reprendre la banniere : sans elle, l'edition la retire et
+    la galerie pointerait vers une piece jointe disparue.
+    """
+    await interaction.response.edit_message(
+        content=None,
+        embeds=[],
+        view=vue,
+        attachments=[f for f in (panels.fichier_banniere(vue.kind),) if f is not None],
+    )
 
 
 class HelpView(discord.ui.View):
@@ -434,22 +700,23 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
             rows = _search(_visible(self.bot, member), query)
             exact = _exact_match(rows, query)
             if exact:
-                panel = _detail(self.bot, exact, prefix)
-                if isinstance(target, commands.Context):
-                    return await target.send(content=None, embed=panel)
-                return await target.response.send_message(content=None, embed=panel)
+                vue = VueAide(
+                    self.bot, prefix, member.id,
+                    titre=f"SentriX — {exact.qualified_name}",
+                    resume=_description(exact),
+                    sections=_sections_detail(self.bot, exact, prefix),
+                    member=member,
+                )
+            else:
+                vue = VueAide(
+                    self.bot, prefix, member.id,
+                    titre=f"SentriX — recherche « {query[:40]} »",
+                    lots=_lots(rows), index=0, member=member,
+                )
+        else:
+            vue = VueAide(self.bot, prefix, member.id, member=member)
 
-            pages = _pages(self.bot, rows, prefix, f"Recherche : {query[:40]}")
-            view = HelpView(self.bot, prefix, member.id, pages=pages, member=member)
-            if isinstance(target, commands.Context):
-                return await target.send(content=None, embed=pages[0], view=view)
-            return await target.response.send_message(content=None, embed=pages[0], view=view)
-
-        panel = _home(self.bot, member)
-        view = HelpView(self.bot, prefix, member.id, member=member)
-        if isinstance(target, commands.Context):
-            return await target.send(content=None, embed=panel, view=view)
-        return await target.response.send_message(content=None, embed=panel, view=view)
+        return await panels.envoyer(target, vue)
 
     @commands.command(name="help", aliases=["aide"])
     async def prefix_help(self, ctx: commands.Context, *, query: str | None = None):

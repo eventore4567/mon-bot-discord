@@ -319,7 +319,10 @@ async def envoyer(
     reste fermé sur @everyone et sur les rôles : consulter une fiche ne doit jamais
     pouvoir alerter le serveur entier.
     """
-    fichiers = panneau.fichiers()
+    # Toute vue exposant fichiers() est acceptee, pas seulement Panneau : les
+    # panneaux interactifs (aide, setup) sont des LayoutView batis sur mesure.
+    fabrique = getattr(panneau, "fichiers", None)
+    fichiers = fabrique() if callable(fabrique) else []
     autorisees = _MENTIONS_SURES
     if mentionner is not None:
         autorisees = discord.AllowedMentions(

@@ -23,6 +23,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, checks, stats_service, design_system
+from utils import sentrix_panels as panels
 from database.db import now
 
 DAILY_AMOUNT = 200
@@ -185,24 +186,52 @@ class Economy(commands.Cog, name="Economy"):
             task.cancel()
 
     async def _send_balance(self, ctx: commands.Context, membre: discord.Member):
-        # Migrée vers design_system (Phase 4) — la couleur/footer viennent de +designsetup,
-        # l'emoji de la monnaie reste piloté par +statsconfig (economy_emoji), inchangé.
+        """Fiche économique composée : avoirs, activité, position.
+
+        L'ancienne version affichait trois champs côte à côte — portefeuille,
+        banque, total — sans dire ce que ces montants valent sur ce serveur. Le
+        classement et les gains récurrents rendent le chiffre lisible.
+        """
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
-        design = await self.bot.db.get_design_settings(ctx.guild.id)
-        eco_emoji = settings.get("economy_emoji", "🪙")
+        emoji = settings.get("economy_emoji", "🪙")
         stats = await stats_service.get_member_statistics(self.bot, ctx.guild, membre)
-        style = design_system.CATEGORY_STYLES["economy"]
-        e = design_system.create_embed(
-            title=f"{style['emoji']} Économie de {membre.display_name}",
-            colour=design.get("primary_color", style["colour"]),
-            user=membre if design.get("show_avatars", True) else None,
-            thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
-            footer=design.get("footer"),
+        nombre = stats_service.format_number
+
+        avoirs = [
+            panels.Ligne("Portefeuille", f"{nombre(stats['wallet'])} {emoji}"),
+            panels.Ligne("Banque", f"{nombre(stats['bank'])} {emoji}"),
+            panels.Ligne("Total", f"{nombre(stats['total_money'])} {emoji}"),
+        ]
+
+        # Ce que le montant vaut sur CE serveur : sans repère, un chiffre ne dit rien.
+        situation: list[panels.Ligne] = []
+        if stats.get("is_ranked"):
+            situation.append(panels.Ligne("Classement", f"#{stats.get('rank', 0)}"))
+        situation.append(panels.Ligne("Niveau", str(stats.get("current_level", 0))))
+        situation.append(panels.Ligne("Messages", nombre(stats.get("message_count", 0))))
+
+        sections = [
+            panels.Section("Avoirs", avoirs, aligne=True),
+            panels.Section("Sur ce serveur", situation, aligne=True),
+            panels.Section(
+                "Gagner plus",
+                [
+                    panels.Ligne("`+daily`", "Récompense quotidienne"),
+                    panels.Ligne("`+work`", "Travailler, avec un délai entre deux fois"),
+                    panels.Ligne("`+shop`", "Dépenser dans la boutique du serveur"),
+                ],
+            ),
+        ]
+
+        panneau = panels.Panneau(
+            titre="SentriX — Économie",
+            sous_titre=f"{membre.mention} · **{nombre(stats['total_money'])} {emoji}** au total",
+            kind="warning" if stats["total_money"] == 0 else "success",
+            vignette=membre.display_avatar.url,
+            sections=sections,
+            pied=f"SentriX • Économie · demandé par {ctx.author.display_name}",
         )
-        e.add_field(name="👛 Portefeuille", value=f"{stats_service.format_number(stats['wallet'])} {eco_emoji}", inline=True)
-        e.add_field(name="🏦 Banque", value=f"{stats_service.format_number(stats['bank'])} {eco_emoji}", inline=True)
-        e.add_field(name="💎 Total", value=f"**{stats_service.format_number(stats['total_money'])}** {eco_emoji}", inline=True)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panneau)
 
     @commands.hybrid_command(name="balance", description="Afficher votre solde ou celui d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")

@@ -18,6 +18,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, checks, stats_service, design_system, visual_v5
+from utils import sentrix_panels as panels
 from database.db import now, DEFAULT_STATS_SETTINGS
 
 XP_COOLDOWN_FALLBACK = 60
@@ -952,6 +953,58 @@ class Levels(commands.Cog, name="Levels"):
         e.set_footer(text=settings.get("footer", DEFAULT_STATS_SETTINGS["footer"]))
         return e
 
+    async def build_level_panneau(self, guild: discord.Guild, member: discord.Member) -> panels.Panneau:
+        """Fiche de niveau composée.
+
+        build_level_embed reste : une vue qui rafraichit son message ne peut pas
+        remplacer un embed par un panneau Components V2. Ce constructeur sert la
+        commande, l'autre sert le panneau interactif.
+        """
+        stats = await stats_service.get_member_statistics(self.bot, guild, member)
+        nombre = stats_service.format_number
+        restant = max(0, stats["required_xp"] - stats["current_level_xp"])
+
+        progression = [
+            panels.Ligne("Niveau", str(stats["current_level"])),
+            panels.Ligne("XP", f"{nombre(stats['current_level_xp'])} / {nombre(stats['required_xp'])}"),
+            panels.Ligne("Avancement", f"{stats['progress_pct']} %"),
+            panels.Ligne("Restant", f"{nombre(restant)} XP"),
+        ]
+
+        # La barre est un repere visuel immediat, la ou un pourcentage demande un effort.
+        barre = stats_service.progress_bar(
+            stats["current_level_xp"], stats["required_xp"], length=18,
+            emoji_filled="█", emoji_empty="░",
+        )
+
+        activite = [
+            panels.Ligne("Messages", nombre(stats.get("message_count", 0))),
+            panels.Ligne(
+                "Classement", f"#{stats['rank']}" if stats["is_ranked"] else "Non classé"
+            ),
+        ]
+        if stats.get("voice_seconds"):
+            activite.append(
+                panels.Ligne("En vocal", stats_service.format_duration(stats["voice_seconds"]))
+            )
+
+        sections = [
+            panels.Section("Progression", progression, aligne=True),
+            panels.Section("Avancement", texte=f"`{barre}`"),
+            panels.Section("Activité", activite, aligne=True),
+            panels.Section("Prochain rôle", [panels.Ligne("Palier", self._next_role_text(stats))]),
+        ]
+
+        return panels.Panneau(
+            titre="SentriX — Niveau",
+            sous_titre=f"{member.mention} · niveau **{stats['current_level']}**, "
+                       f"encore **{nombre(restant)} XP** avant le suivant",
+            kind="brand",
+            vignette=member.display_avatar.url,
+            sections=sections,
+            pied="SentriX • Niveaux",
+        )
+
     async def build_economy_embed(self, guild: discord.Guild, member: discord.Member) -> discord.Embed:
         settings = await self.bot.db.get_stats_settings(guild.id)
         stats = await stats_service.get_member_statistics(self.bot, guild, member)
@@ -1043,12 +1096,12 @@ class Levels(commands.Cog, name="Levels"):
         try:
             if not await self._can_view(ctx, membre, settings):
                 return await ctx.send(embed=embeds.error("La consultation des statistiques d'un autre membre est désactivée sur ce serveur."))
-            embed = await self.build_level_embed(ctx.guild, membre)
+            panneau = await self.build_level_panneau(ctx.guild, membre)
         except (discord.Forbidden, discord.NotFound, discord.HTTPException):
             return await ctx.send(embed=embeds.error("Impossible de récupérer le niveau pour le moment (erreur Discord)."))
         except Exception:
             return await ctx.send(embed=embeds.error("Une erreur est survenue en préparant ce niveau."))
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panneau)
 
     @commands.hybrid_command(name="level", description="Afficher votre niveau ou celui d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")

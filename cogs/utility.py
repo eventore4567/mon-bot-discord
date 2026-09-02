@@ -1257,6 +1257,8 @@ class Utility(commands.Cog, name="Utility"):
     @commands.hybrid_command(name="channelinfo", description="Afficher les informations d'un salon.", with_app_command=False)
     @app_commands.describe(salon="Le salon visé (optionnel)")
     async def channelinfo(self, ctx: commands.Context, salon: discord.abc.GuildChannel = None):
+        """Fiche salon composée. Ce qu'on cherche devant un salon, dans l'ordre :
+        ce que c'est, qui peut le voir, et ce que SentriX peut y faire."""
         salon = salon or ctx.channel
         cree = int(salon.created_at.timestamp())
 
@@ -1270,45 +1272,51 @@ class Utility(commands.Cog, name="Utility"):
         }
         libelle = types_lisibles.get(salon.type, str(salon.type).replace("_", " ").capitalize())
 
-        ouverture = f"{salon.mention} · `{salon.id}`\n**{libelle}**"
+        resume = f"{salon.mention} · `{salon.id}`\n**{libelle}**"
         if getattr(salon, "category", None) is not None:
-            ouverture += f" dans **{salon.category.name}**"
-        ouverture += f", créé <t:{cree}:R>."
+            resume += f" dans **{salon.category.name}**"
 
-        e = await self._embed(ctx.guild.id, title=salon.name, description=ouverture)
+        sections: list[panels.Section] = []
 
-        # --- sujet du salon, s'il en a un -----------------------------------
         sujet = str(getattr(salon, "topic", "") or "").strip()
         if sujet:
-            e.add_field(name="Sujet", value=sujet[:1000], inline=False)
+            sections.append(panels.Section("Sujet", texte=sujet[:900]))
 
-        # --- reglages, selon le type ----------------------------------------
-        reglages: list[str] = []
+        # --- RÉGLAGES : ce qui change le comportement du salon -----------------
+        reglages: list[panels.Ligne] = [
+            panels.Ligne("Type", libelle),
+            panels.Ligne("Position", str(getattr(salon, "position", 0))),
+            panels.Ligne("Création", f"<t:{cree}:D> · <t:{cree}:R>"),
+        ]
         lenteur = getattr(salon, "slowmode_delay", 0) or 0
         if lenteur:
-            reglages.append(f"Mode lent **{lenteur}s**")
-        if getattr(salon, "nsfw", False):
-            reglages.append("Marqué **NSFW**")
-        if isinstance(salon, discord.VoiceChannel):
-            reglages.append(f"Qualité **{salon.bitrate // 1000} kbps**")
             reglages.append(
-                f"Limite **{salon.user_limit}**" if salon.user_limit else "Aucune limite de place"
+                panels.Ligne("Mode lent", f"**{lenteur} s**",
+                             indice="Délai imposé entre deux messages d'un même membre.")
             )
-            reglages.append(f"**{len(salon.members)}** connecté(s)")
+        if getattr(salon, "nsfw", False):
+            reglages.append(panels.Ligne("Contenu", "Marqué **NSFW**"))
+        if isinstance(salon, discord.VoiceChannel):
+            reglages.append(panels.Ligne("Qualité", f"{salon.bitrate // 1000} kbps"))
+            reglages.append(
+                panels.Ligne("Places", str(salon.user_limit) if salon.user_limit else "Illimitées")
+            )
+            reglages.append(panels.Ligne("Connectés", str(len(salon.members))))
         if isinstance(salon, discord.TextChannel):
-            fils = len(salon.threads)
-            reglages.append(f"**{fils}** fil(s) actif(s)" if fils else "Aucun fil actif")
-        reglages.append(f"Position **{getattr(salon, 'position', 0)}**")
-        e.add_field(name="Réglages", value="\n".join(reglages), inline=True)
+            reglages.append(panels.Ligne("Fils actifs", str(len(salon.threads))))
+        sections.append(panels.Section("Réglages", reglages))
 
-        # --- qui y a acces --------------------------------------------------
-        acces: list[str] = []
+        # --- ACCÈS : qui voit ce salon ----------------------------------------
+        acces: list[panels.Ligne] = []
         try:
             everyone = salon.overwrites_for(ctx.guild.default_role)
             if everyone.view_channel is False:
-                acces.append("🔒 **Salon privé** — @everyone ne le voit pas")
+                acces.append(
+                    panels.Ligne("Visibilité", "**Salon privé**",
+                                 indice="Le rôle par défaut ne voit pas ce salon.")
+                )
             else:
-                acces.append("🌐 Visible par **@everyone**")
+                acces.append(panels.Ligne("Visibilité", "Visible par tout le monde"))
             roles_autorises = [
                 cible.mention for cible, perms in salon.overwrites.items()
                 if isinstance(cible, discord.Role)
@@ -1316,20 +1324,20 @@ class Utility(commands.Cog, name="Utility"):
                 and perms.view_channel is True
             ]
             if roles_autorises:
-                acces.append("Accès explicite : " + ", ".join(roles_autorises[:5]))
-            personnalisations = len(salon.overwrites)
-            acces.append(f"**{personnalisations}** permission(s) personnalisée(s)")
+                acces.append(panels.Ligne("Accès explicite", ", ".join(roles_autorises[:5])))
+            acces.append(panels.Ligne("Règles personnalisées", str(len(salon.overwrites))))
         except Exception:
             logger.exception("channelinfo : lecture des permissions impossible.")
-            acces.append("Permissions illisibles")
-        e.add_field(name="Accès", value="\n".join(acces), inline=True)
+            acces.append(panels.Ligne("Permissions", "Illisibles"))
+        sections.append(panels.Section("Accès", acces))
 
-        # --- ce que SentriX peut y faire -------------------------------------
-        me = ctx.guild.me
-        if me is not None:
-            perms = salon.permissions_for(me)
+        # --- CE QUE SENTRIX NE PEUT PAS : la section qui débloque vraiment -----
+        moi = ctx.guild.me
+        intention = "info"
+        if moi is not None:
+            perms = salon.permissions_for(moi)
             manques = [
-                libelle for attribut, libelle in (
+                libelle_perm for attribut, libelle_perm in (
                     ("view_channel", "Voir le salon"),
                     ("send_messages", "Envoyer des messages"),
                     ("embed_links", "Intégrer des liens"),
@@ -1338,14 +1346,23 @@ class Utility(commands.Cog, name="Utility"):
                 ) if not getattr(perms, attribut, False)
             ]
             if manques:
-                e.add_field(
-                    name="⚠️ SentriX ne peut pas",
-                    value=" · ".join(manques),
-                    inline=False,
+                intention = "warning"
+                sections.append(
+                    panels.Section(
+                        "SentriX ne peut pas",
+                        [panels.Ligne("Permissions manquantes", " · ".join(manques),
+                                      indice="Ouvrez les permissions du salon pour le rôle SentriX.")],
+                    )
                 )
 
-        e.add_field(name="Création", value=f"<t:{cree}:F>", inline=False)
-        await ctx.send(embed=e)
+        panneau = panels.Panneau(
+            titre="SentriX — Informations salon",
+            sous_titre=resume,
+            kind=intention,
+            sections=sections,
+            pied=f"SentriX • Salons · demandé par {ctx.author.display_name}",
+        )
+        await panels.envoyer(ctx, panneau)
 
     @commands.hybrid_command(name="membercount", description="Afficher le nombre de membres du serveur.", with_app_command=False)
     async def membercount(self, ctx: commands.Context):

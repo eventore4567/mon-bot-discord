@@ -50,6 +50,9 @@ def rendre(panneau: panels.Panneau) -> str:
                 lignes.append(f"   ⌐ vignette : {str(item.get('media', {}).get('url',''))[:46]}")
             elif t == 2:
                 boutons.append(f"[ {item.get('label', '')} ]")
+            elif t == 3:
+                options = len(item.get("options", []))
+                lignes.append(f"( ▾ {item.get('placeholder', 'Choisir')} — {options} options )")
             for cle in ("components", "accessory"):
                 valeur = item.get(cle)
                 if isinstance(valeur, list):
@@ -83,6 +86,8 @@ def mesurer(panneau: panels.Panneau) -> dict:
                 plat.append(("filet", ""))
             elif t == 2:
                 plat.append(("bouton", str(item.get("label", ""))))
+            elif t == 3:
+                plat.append(("menu", str(item.get("placeholder", ""))))
             elif t == 11:
                 plat.append(("vignette", ""))
             for cle in ("components", "accessory"):
@@ -99,6 +104,7 @@ def mesurer(panneau: panels.Panneau) -> dict:
         "sections": sum(1 for t in textes if t.startswith("### ")),
         "filets": sum(1 for k, _ in plat if k == "filet"),
         "boutons": [v for k, v in plat if k == "bouton"],
+        "menus": [v for k, v in plat if k == "menu"],
         "vignette": any(k == "vignette" for k, _ in plat),
         "titre": next((t.split("\n")[0].replace("## ", "") for t in textes if t.startswith("## ")), ""),
     }
