@@ -25,7 +25,7 @@ from types import MethodType
 import discord
 from discord.ext import commands, tasks
 
-from utils import embeds
+from utils import embeds, helpers
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.security.v2")
@@ -741,7 +741,7 @@ async def _send_health(bot: commands.Bot, ctx: commands.Context) -> None:
     )
     e = embeds.neutral(
         "SentriX Health",
-        f"Latence Discord : **{round(bot.latency * 1000)} ms**\n"
+        f"Latence Discord : **{helpers.latence_ms(bot)} ms**\n"
         f"Base SQLite : **{'OK' if db_ok else 'ERREUR'}**\n"
         f"Seuil anti-nuke : **{policy['action_threshold']} actions / {policy['window_seconds']}s**",
     )

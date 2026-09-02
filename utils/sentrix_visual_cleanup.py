@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 import discord
+
+from utils import helpers
 from discord.ext import commands
 
 from . import design_system
@@ -307,7 +309,7 @@ def _latency_state(latency_ms: int) -> tuple[str, int]:
 
 
 def _ping_embed(bot: commands.Bot) -> discord.Embed:
-    latency_ms = max(0, round(float(getattr(bot, "latency", 0.0)) * 1000))
+    latency_ms = helpers.latence_ms(bot)
     quality, colour = _latency_state(latency_ms)
     guilds = list(getattr(bot, "guilds", ()) or ())
     members = sum(int(getattr(guild, "member_count", 0) or 0) for guild in guilds)

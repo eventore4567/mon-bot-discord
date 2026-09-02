@@ -29,7 +29,7 @@ import discord
 from discord.ext import commands, tasks
 
 from database.db import now
-from utils import embeds
+from utils import embeds, helpers
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.excellence-runtime")
@@ -1346,7 +1346,7 @@ async def _health_snapshot(bot: commands.Bot) -> None:
         "(latency_ms,guild_count,member_count,cog_count,persistent_view_count,db_ok,missing_permissions_json,background_loops_json,created_at) "
         "VALUES (?,?,?,?,?,?,?,?,?)",
         (
-            max(0, round(float(getattr(bot, "latency", 0.0) or 0.0) * 1000)),
+            helpers.latence_ms(bot),
             len(bot.guilds),
             sum(int(g.member_count or 0) for g in bot.guilds),
             len(bot.cogs),
@@ -1364,7 +1364,7 @@ async def _health_snapshot(bot: commands.Bot) -> None:
         "OK" if db_ok else "ERREUR",
         len(bot.cogs),
         persistent_views,
-        max(0, round(float(getattr(bot, "latency", 0.0) or 0.0) * 1000)),
+        helpers.latence_ms(bot),
     )
 
 

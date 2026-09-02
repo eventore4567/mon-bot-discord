@@ -6,6 +6,8 @@ import time
 from types import MethodType
 
 import discord
+
+from utils import helpers
 from discord.ext import commands, tasks
 
 from database.db import now
@@ -87,7 +89,7 @@ class BotResilienceV11(commands.Cog):
                     state = {
                         "discord": {
                             "ready": bool(self.bot.is_ready()),
-                            "latency_ms": round(float(getattr(self.bot, "latency", 0.0) or 0.0) * 1000),
+                            "latency_ms": helpers.latence_ms(self.bot),
                         },
                         "database": {"sqlite": "erreur", "postgres": "inconnu", "redis": "inconnu"},
                         "openai": {"state": "inconnu"},

@@ -12,6 +12,7 @@ from discord.ext import commands, tasks
 
 import config
 from database.db import now
+from utils import helpers
 
 logger = logging.getLogger("bot.production-observability-v9")
 
@@ -128,7 +129,7 @@ async def _record_metric(
 async def build_health_snapshot(bot: commands.Bot) -> dict:
     problems = []
     discord_ready = bool(bot.is_ready())
-    latency_ms = round(float(getattr(bot, "latency", 0.0) or 0.0) * 1000) if discord_ready else None
+    latency_ms = helpers.latence_ms(bot) if discord_ready else None
     if not discord_ready:
         problems.append("Discord n'est pas encore prêt.")
 

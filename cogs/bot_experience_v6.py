@@ -22,7 +22,7 @@ from typing import Any
 
 import discord
 
-from utils import sentrix_panels as panels
+from utils import sentrix_panels as panels, helpers
 from discord.ext import commands
 
 import config
@@ -319,7 +319,7 @@ def _install_fast_home(bot: commands.Bot) -> None:
 
         intent = _quick_intent(question)
         if intent == "ping":
-            latency = max(0, round(float(getattr(self.bot, "latency", 0.0)) * 1000))
+            latency = helpers.latence_ms(self.bot)
             embed = discord.Embed(
                 title=f"{brand_label()} — Latence",
                 description=f"Discord : **{latency} ms**",

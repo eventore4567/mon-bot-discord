@@ -13,6 +13,8 @@ from typing import Any, Iterable
 
 import discord
 
+from utils import helpers
+
 import config as _config
 from config import COLOR_BRAND
 
@@ -304,7 +306,7 @@ def _latency_quality(latency_ms: int) -> tuple[str, str]:
 def enrich_ping(embed: discord.Embed, bot: Any) -> discord.Embed:
     if bot is None:
         return embed
-    latency_ms = max(0, round(float(getattr(bot, "latency", 0.0)) * 1000))
+    latency_ms = helpers.latence_ms(bot)
     quality, quality_bar = _latency_quality(latency_ms)
     guilds = list(getattr(bot, "guilds", ()) or ())
     server_count = len(guilds)

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import discord
 
-from utils import embeds
+from utils import embeds, helpers
 from utils import sentrix_panels as panels
 from discord.ext import commands
 
@@ -51,7 +51,7 @@ def _base(bot: commands.Bot, title: str, description: str = "", colour: int | No
 
 
 async def build_status_embed(bot: commands.Bot, guild: discord.Guild | None) -> discord.Embed:
-    latency = max(0, round(float(bot.latency) * 1000))
+    latency = helpers.latence_ms(bot)
     database_ok = False
     try:
         row = await bot.db.fetchone("SELECT 1 AS ok")

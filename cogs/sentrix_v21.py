@@ -16,6 +16,7 @@ from discord.ext import commands
 
 from utils import design_system, embeds, stats_service
 from utils import sentrix_panels as panels
+from utils import helpers
 from utils.v21_rules import (
     MARKET_MAX_ACTIVE_PER_USER,
     achievement_rows,
@@ -483,7 +484,7 @@ class SentriXV21(commands.Cog):
                 db_ok = False
             snapshot = {
                 "status": "healthy" if self.bot.is_ready() and db_ok else "degraded",
-                "discord": {"ready": self.bot.is_ready(), "latency_ms": round(self.bot.latency * 1000)},
+                "discord": {"ready": self.bot.is_ready(), "latency_ms": helpers.latence_ms(self.bot)},
                 "database": {"sqlite": "ok" if db_ok else "erreur", "postgres": "inconnu", "redis": "inconnu"},
                 "openai": {"state": "inconnu"},
                 "commands": {},

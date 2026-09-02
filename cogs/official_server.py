@@ -21,7 +21,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from utils import embeds
+from utils import embeds, helpers
 from utils import sentrix_panels as panels
 from . import server_builder
 
@@ -761,7 +761,7 @@ class OfficialServerRuntime:
         return published
 
     def _status_embed(self) -> discord.Embed:
-        latency = max(0, round(self.bot.latency * 1000))
+        latency = helpers.latence_ms(self.bot)
         if latency < 250:
             label = "🟢 Opérationnel"
             colour = discord.Color.from_rgb(34, 197, 94)

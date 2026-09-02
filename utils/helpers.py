@@ -175,6 +175,26 @@ def confirm_embed(message: str, *, state: str = "pending") -> discord.Embed:
     return embeds.warning(message, title="Confirmation requise")
 
 
+def latence_ms(bot, defaut: int = 0) -> int:
+    """Latence de la passerelle en millisecondes, jamais NaN.
+
+    `bot.latency` vaut `nan` tant que la passerelle n'a pas recu son premier
+    battement — juste apres un demarrage ou une reconnexion. Or `round(nan)` leve
+    ValueError, et le repli habituel `float(bot.latency or 0.0)` ne protege PAS :
+    NaN est vrai en Python, donc `or` ne se declenche jamais.
+
+    Cinq commandes plantaient ainsi dans les premieres secondes de vie du bot,
+    dont +ping — celle qu'on tape justement pour verifier qu'il repond.
+    """
+    try:
+        valeur = float(getattr(bot, "latency", 0.0))
+    except (TypeError, ValueError):
+        return defaut
+    if valeur != valeur or valeur in (float("inf"), float("-inf")):  # NaN ou infini
+        return defaut
+    return max(0, round(valeur * 1000))
+
+
 class ConfirmView(discord.ui.View):
     """Confirmation partagée par tout le bot.
 

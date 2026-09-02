@@ -11,7 +11,7 @@ from database.db import PRIMARY_CREATOR_DISPLAY_NAME, PRIMARY_CREATOR_ID
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, design_system, checks
+from utils import embeds, design_system, checks, helpers
 from utils import sentrix_panels as panels
 from database.db import now
 
@@ -46,7 +46,7 @@ class Stats(commands.Cog, name="Stats"):
     @commands.hybrid_command(name="bot-status", description="Afficher l'état général du bot.")
     async def system_status(self, ctx: commands.Context):
         e = await self._embed(ctx.guild.id if ctx.guild else None, title="État du bot")
-        e.add_field(name="Latence", value=f"{round(self.bot.latency * 1000)}ms", inline=True)
+        e.add_field(name="Latence", value=f"{helpers.latence_ms(self.bot)}ms", inline=True)
         e.add_field(name="Serveurs", value=len(self.bot.guilds), inline=True)
         e.add_field(name="Utilisateurs", value=sum(g.member_count for g in self.bot.guilds), inline=True)
         e.add_field(name="Python", value=platform.python_version(), inline=True)
@@ -135,7 +135,7 @@ class Stats(commands.Cog, name="Stats"):
             ),
             kind=kind,
         )
-        e.add_field(name="Connexion Discord", value=f"En ligne — {round(self.bot.latency * 1000)} ms", inline=True)
+        e.add_field(name="Connexion Discord", value=f"En ligne — {helpers.latence_ms(self.bot)} ms", inline=True)
         e.add_field(name="Base de données", value=database_label, inline=True)
         e.add_field(name="Modules chargés", value=f"{modules_loaded} / {modules_expected}", inline=True)
         e.add_field(name="Commandes texte", value=str(len(self.bot.commands)), inline=True)
@@ -234,7 +234,7 @@ class Stats(commands.Cog, name="Stats"):
         start = time.perf_counter()
         msg = await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Latence', description='Calcul en cours...')))
         elapsed = (time.perf_counter() - start) * 1000
-        e = await self._embed(guild_id, title="Latence", description=f"🏓 Latence API : **{round(self.bot.latency * 1000)}ms**\n📨 Latence message : **{round(elapsed)}ms**")
+        e = await self._embed(guild_id, title="Latence", description=f"🏓 Latence API : **{helpers.latence_ms(self.bot)}ms**\n📨 Latence message : **{round(elapsed)}ms**")
         if ctx.interaction:
             await ctx.edit_original_response(embed=e)
         else:

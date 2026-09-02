@@ -19,6 +19,7 @@ from discord.ext import commands
 
 import config
 from utils import ai_api_compat
+from utils import helpers
 
 logger = logging.getLogger("bot.ai-api-hotfix")
 _SHARED_RUNTIME_PREFIX = "sentrix:v177:ai-runtime:"
@@ -348,7 +349,7 @@ def _install_safe_health_patch(bot: commands.Bot) -> None:
         return web.json_response({
             "ok": True,
             "discord_ready": runtime_bot.is_ready(),
-            "latency_ms": round(runtime_bot.latency * 1000) if runtime_bot.is_ready() else None,
+            "latency_ms": helpers.latence_ms(runtime_bot) if runtime_bot.is_ready() else None,
             "ai": ai_payload,
         })
 

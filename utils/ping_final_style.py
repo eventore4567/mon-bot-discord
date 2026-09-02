@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import discord
 
+from utils import helpers
+
 from . import command_style_v2
 
 _INSTALLED = False
@@ -34,7 +36,7 @@ def _enrich_ping(embed: discord.Embed, command) -> None:
     if bot is None:
         return
 
-    latency_ms = max(0, round(float(getattr(bot, "latency", 0.0)) * 1000))
+    latency_ms = helpers.latence_ms(bot)
     quality, _unused = _latency_quality(latency_ms)
     server_count = len(getattr(bot, "guilds", ()) or ())
     member_count = sum(

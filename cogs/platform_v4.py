@@ -17,6 +17,8 @@ from collections import Counter, defaultdict
 from typing import Any
 
 import discord
+
+from utils import helpers
 from discord.ext import commands, tasks
 
 from database.db import now
@@ -1027,7 +1029,7 @@ class PlatformV4(commands.Cog):
         pending_apps = await self.bot.db.fetchone("SELECT COUNT(*) c FROM staff_applications WHERE guild_id=? AND status='pending'", (guild.id,))
         return {
             "discord": bool(self.bot.is_ready()),
-            "latency_ms": round(float(getattr(self.bot, "latency", 0.0)) * 1000, 1),
+            "latency_ms": helpers.latence_ms(self.bot),
             "database": db_ok,
             "database_ms": db_ms,
             "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
@@ -1051,7 +1053,7 @@ class PlatformV4(commands.Cog):
             "messages_tracked": int(messages["c"] if messages else 0),
             "active_giveaways": int(active_giveaways["c"] if active_giveaways else 0),
             "active_events": int(events["c"] if events else 0),
-            "latency_ms": round(float(getattr(self.bot, "latency", 0.0)) * 1000, 1),
+            "latency_ms": helpers.latence_ms(self.bot),
             "timestamp": now(),
         }
 

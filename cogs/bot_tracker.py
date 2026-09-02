@@ -8,7 +8,7 @@ import time
 import discord
 from discord.ext import commands, tasks
 
-from utils import embeds
+from utils import embeds, helpers
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.tracker")
@@ -384,7 +384,7 @@ class BotTracker(commands.Cog):
 
     def build_embed(self, guild: discord.Guild | None = None) -> discord.Embed:
         online = self.bot.is_ready()
-        latency = round(self.bot.latency * 1000) if online else None
+        latency = helpers.latence_ms(self.bot) if online else None
         total_members = sum(g.member_count or 0 for g in self.bot.guilds)
         command_count = sum(1 for _ in self.bot.walk_commands())
         uptime = _duration(int(time.time()) - self.started_at)

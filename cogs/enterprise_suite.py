@@ -35,6 +35,7 @@ from discord.ext import commands, tasks
 import config
 from database.db import now
 from utils.enterprise_infra import EnterpriseInfra
+from utils import helpers
 
 logger = logging.getLogger("bot.enterprise")
 _COG_NAME = "EnterpriseSuite"
@@ -910,13 +911,26 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
         infra = await self.infra.health()
         latencies = []
         try:
-            latencies = [{"shard_id": int(sid), "latency_ms": round(float(lat) * 1000, 1)} for sid, lat in self.bot.latencies]
+            # Un fragment pas encore connecte a une latence NaN : round(NaN) leve.
+            # On l'annonce comme inconnue plutot que de faire echouer tout le
+            # diagnostic — c'est justement quand ca va mal qu'on le consulte.
+            latencies = [
+                {
+                    "shard_id": int(sid),
+                    "latency_ms": (
+                        round(float(lat) * 1000, 1)
+                        if isinstance(lat, (int, float)) and float(lat) == float(lat)
+                        else None
+                    ),
+                }
+                for sid, lat in self.bot.latencies
+            ]
         except Exception:
             pass
         return {
             "current": {
                 "online": self.bot.is_ready(),
-                "latency_ms": round(self.bot.latency * 1000, 1) if self.bot.is_ready() else None,
+                "latency_ms": helpers.latence_ms(self.bot) if self.bot.is_ready() else None,
                 "guilds": len(self.bot.guilds),
                 "members": sum(g.member_count or 0 for g in self.bot.guilds),
                 "ram_mb": self._ram_mb(),
@@ -1220,10 +1234,10 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
             shard_count = int(getattr(self.bot, "shard_count", 1) or 1)
             await self.bot.db.execute(
                 "INSERT INTO runtime_metrics_v2 (guild_id,shard_id,latency_ms,guild_count,member_count,commands_minute,errors_minute,ram_mb,db_size_mb,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (None, None, round(self.bot.latency * 1000, 2) if self.bot.is_ready() else None, len(self.bot.guilds), sum(g.member_count or 0 for g in self.bot.guilds), commands_min, errors_min, self._ram_mb(), self._db_size_mb(), ts),
+                (None, None, helpers.latence_ms(self.bot) if self.bot.is_ready() else None, len(self.bot.guilds), sum(g.member_count or 0 for g in self.bot.guilds), commands_min, errors_min, self._ram_mb(), self._db_size_mb(), ts),
             )
             await self.infra.mirror_metric("commands_minute", None, commands_min, {"shards": shard_count}, ts)
-            await self.infra.mirror_metric("latency_ms", None, self.bot.latency * 1000 if self.bot.is_ready() else 0, {"shards": shard_count}, ts)
+            await self.infra.mirror_metric("latency_ms", None, helpers.latence_ms(self.bot) if self.bot.is_ready() else 0, {"shards": shard_count}, ts)
             await self.bot.db.execute("DELETE FROM runtime_metrics_v2 WHERE created_at < ?", (ts - 14 * 86400,))
             await self.bot.db.execute("DELETE FROM message_activity_hourly WHERE hour_bucket < ?", (_hour_bucket(ts) - 30 * 86400,))
         except Exception as exc:

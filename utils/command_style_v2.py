@@ -16,7 +16,7 @@ from typing import Any, Iterable
 
 import discord
 
-from utils import microcopy, premium_style
+from utils import microcopy, premium_style, helpers
 
 
 _INSTALLED = False
@@ -141,7 +141,7 @@ def _enrich_ping(embed: discord.Embed, command: Any) -> None:
     if bot is None:
         return
 
-    latency_ms = max(0, round(float(getattr(bot, "latency", 0.0)) * 1000))
+    latency_ms = helpers.latence_ms(bot)
     quality, quality_bar = _latency_quality(latency_ms)
     server_count = len(getattr(bot, "guilds", ()) or ())
     member_count = sum((guild.member_count or 0) for guild in getattr(bot, "guilds", ()) or ())

@@ -19,6 +19,7 @@ from discord.ext import commands, tasks
 from database.db import now
 from utils import checks, embeds, helpers
 from utils import sentrix_panels as panels
+from utils import helpers
 
 logger = logging.getLogger("bot.v10")
 
@@ -235,7 +236,7 @@ class BotV10(commands.Cog, name="BotV10"):
    try: platform_health = await platform.health(guild)
    except Exception: pass
   missing = self.missing_bot_permissions(guild)
-  return {"status": str(v9.get("status") or ("healthy" if not missing else "degraded")), "discord": v9.get("discord", {"ready": self.bot.is_ready(), "latency_ms": round(self.bot.latency*1000)}), "database": v9.get("database", {}), "openai": v9.get("openai", {}), "commands": v9.get("commands", {}), "platform": platform_health, "backups": await _count(self.bot,"SELECT COUNT(*) c FROM server_backups WHERE guild_id=?",(guild.id,)), "missing_permissions": missing}
+  return {"status": str(v9.get("status") or ("healthy" if not missing else "degraded")), "discord": v9.get("discord", {"ready": self.bot.is_ready(), "latency_ms": helpers.latence_ms(self.bot)}), "database": v9.get("database", {}), "openai": v9.get("openai", {}), "commands": v9.get("commands", {}), "platform": platform_health, "backups": await _count(self.bot,"SELECT COUNT(*) c FROM server_backups WHERE guild_id=?",(guild.id,)), "missing_permissions": missing}
 
  @commands.command(name="health")
  @checks.is_owner_or_admin_for("configuration")
