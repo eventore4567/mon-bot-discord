@@ -249,6 +249,23 @@ async def _replace_prefix_response(ctx: commands.Context, panel: discord.Embed) 
         return False
 
 
+def _component_error_panel(item: object | None) -> discord.Embed:
+    """Panneau affiche quand un bouton, un menu ou un formulaire echoue.
+
+    Sans lui, discord.ui.View.on_error se contente de journaliser : le membre voit
+    le « L'interaction a échoué » generique de Discord, sans savoir si l'action a
+    ete faite ni quoi tenter. On reutilise le meme constructeur que les autres
+    erreurs pour que la reponse soit identique au reste du bot.
+    """
+    libelle = str(getattr(item, "label", "") or getattr(item, "placeholder", "") or "").strip()
+    quoi = f"**{_clip(libelle, 60)}**" if libelle else "cette action"
+    return _panel(
+        "Action interrompue",
+        f"Une erreur technique a interrompu {quoi}. "
+        "Rien n'a été enregistré. Relancez la commande pour rouvrir le panneau.",
+    )
+
+
 async def _raw_slash_send(interaction: discord.Interaction, panel: discord.Embed) -> None:
     response_type = getattr(interaction.response, "type", None)
     deferred = response_type in {
@@ -311,6 +328,31 @@ def install(bot: commands.Bot) -> None:
 
     slash_error._sentrix_final_error_embed_v5 = True
     bot.tree.on_error = slash_error
+
+    # Boutons, menus et formulaires : discord.ui n'affiche RIEN par defaut, il
+    # journalise. On branche sur les classes de base, donc les vues qui definissent
+    # deja leur propre on_error gardent le leur — l'heritage s'en charge.
+    if not getattr(discord.ui.View.on_error, "_sentrix_final_error_embed_v5", False):
+
+        async def component_error(self, interaction, error, item=None):
+            logger.exception("V5 : erreur dans un composant.", exc_info=error)
+            try:
+                await _raw_slash_send(interaction, _component_error_panel(item))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException,
+                    discord.ClientException):
+                logger.exception("V5 : impossible d'afficher l'erreur de composant.")
+
+        async def view_error(self, interaction, error, item):
+            await component_error(self, interaction, error, item)
+
+        async def modal_error(self, interaction, error):
+            await component_error(self, interaction, error, None)
+
+        view_error._sentrix_final_error_embed_v5 = True
+        modal_error._sentrix_final_error_embed_v5 = True
+        discord.ui.View.on_error = view_error
+        discord.ui.Modal.on_error = modal_error
+
     logger.info("V5 erreurs actif : réponse existante remplacée, aucune carte d'erreur en doublon.")
 
 
@@ -319,5 +361,6 @@ __all__ = [
     "_panel",
     "_prefix_error_panel",
     "_slash_error_panel",
+    "_component_error_panel",
     "_replace_prefix_response",
 ]
