@@ -151,3 +151,55 @@ class ContrainteComponentsV2(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PontDepuisEmbed(unittest.TestCase):
+    """Beaucoup de reponses SentriX sont produites par une CHAINE de modules.
+
+    Douze couches enrichissent le centre de configuration, deux enrichissent les
+    sanctions. Porter chaque maillon vers un nouveau contrat serait autant
+    d'occasions de casser ce qui marche ; convertir le resultat final n'en est
+    aucune. Ce pont est donc structurel, pas un raccourci.
+    """
+
+    def _embed(self):
+        import discord as d
+
+        embed = d.Embed(title="Dossier #42 — Bannissement", description="━━━━━━━━━━\nRésumé")
+        embed.add_field(name="👤 Membre", value="<@1>", inline=True)
+        embed.add_field(name="📝 Raison", value="Spam massif", inline=False)
+        embed.add_field(name="Vide", value="", inline=False)
+        embed.set_footer(text="SentriX")
+        return embed
+
+    def test_un_champ_devient_une_section(self):
+        panneau = panels.depuis_embed(self._embed(), kind="moderation")
+        titres = [
+            t.split("\n")[0] for t in
+            [i.get("content", "") for i in _aplatir(panneau.to_components())]
+            if t.startswith("### ")
+        ]
+        self.assertEqual(len(titres), 2, "un champ vide ne doit pas créer de section")
+
+    def test_les_emojis_de_tete_sont_retires(self):
+        """Le chevron et le filet marquent deja la section ; l'emoji fait du bruit."""
+        texte = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation"))
+        self.assertIn("### ◢ MEMBRE", texte)
+        self.assertNotIn("👤", texte)
+
+    def test_la_barre_dessinee_disparait(self):
+        """Le panneau a de vrais filets : la barre en caracteres ferait doublon."""
+        texte = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation"))
+        self.assertNotIn("━━━━━━", texte)
+        self.assertIn("Résumé", texte)
+
+    def test_la_banniere_suit_le_domaine_demande(self):
+        panneau = panels.depuis_embed(self._embed(), kind="moderation")
+        self.assertEqual([f.filename for f in panneau.fichiers()], ["banner_moderation.webp"])
+
+    def test_une_sanction_n_est_pas_peinte_en_vert(self):
+        """« Membre banni » n'est pas une bonne nouvelle : c'est un acte de modération."""
+        panneau = panels.depuis_embed(self._embed(), kind="moderation")
+        accent = panneau.to_components()[0]["accent_color"]
+        self.assertNotEqual(accent, config.COLOR_SUCCESS)
+        self.assertEqual(accent, panels.INTENTIONS["moderation"][0])

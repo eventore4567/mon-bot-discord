@@ -24,6 +24,7 @@ from discord.ext import commands, tasks
 
 import config
 from utils import embeds, checks, helpers, design_system
+from utils import sentrix_panels as panels
 from database.db import now
 
 
@@ -327,7 +328,7 @@ class Moderation(commands.Cog):
         await self._send_sanction_dm(ctx, membre, "ban", raison)
         await ctx.guild.ban(membre, reason=f"{ctx.author} : {raison}", delete_message_seconds=0)
         e = await self.log_sanction(ctx, "ban", membre, raison)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
     @app_commands.describe(membre="Le membre à bannir", duree="Durée (ex: 30m, 2h, 1j)", raison="La raison")
@@ -346,7 +347,7 @@ class Moderation(commands.Cog):
             (ctx.guild.id, membre.id, now() + seconds),
         )
         e = await self.log_sanction(ctx, "tempban", membre, raison, duration_seconds=seconds)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     @commands.hybrid_command(name="unban", description="Débannir un utilisateur via son identifiant Discord.")
     @app_commands.describe(user_id="L'identifiant Discord de l'utilisateur", raison="La raison")
@@ -366,7 +367,7 @@ class Moderation(commands.Cog):
         except discord.NotFound:
             return await ctx.send(embed=embeds.error("Cet utilisateur n'est pas banni ou n'existe pas."))
         e = await self.log_sanction(ctx, "unban", user, raison)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     # ---------------------------------------------------------------- KICK
 
@@ -382,7 +383,7 @@ class Moderation(commands.Cog):
         await self._send_sanction_dm(ctx, membre, "kick", raison)
         await ctx.guild.kick(membre, reason=f"{ctx.author} : {raison}")
         e = await self.log_sanction(ctx, "kick", membre, raison)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     # ---------------------------------------------------------------- MUTE
 
@@ -410,7 +411,7 @@ class Moderation(commands.Cog):
         await membre.timeout(until, reason=f"{ctx.author} : {raison}")
         await self._send_sanction_dm(ctx, membre, "mute", raison, seconds)
         e = await self.log_sanction(ctx, "mute", membre, raison, duration_seconds=seconds)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     @commands.hybrid_command(name="unmute", description="Retirer le mute (timeout) d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à démuter", raison="La raison")
@@ -424,7 +425,7 @@ class Moderation(commands.Cog):
         await membre.timeout(None, reason=f"{ctx.author} : {raison}")
         await self._send_sanction_dm(ctx, membre, "unmute", raison)
         e = await self.log_sanction(ctx, "unmute", membre, raison)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     # ---------------------------------------------------------------- WARN
 
@@ -462,7 +463,7 @@ class Moderation(commands.Cog):
         await self._send_sanction_dm(ctx, membre, "warn", raison)
         extra = {"📌 Détails": f"Total d'avertissements : {total}{role_note}"}
         e = await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
         # Bannissement automatique au bout de N avertissements (/setwarnbanthreshold,
         # 3 par défaut, 0 = désactivé). Pas de confirmation demandée : c'est le but de
@@ -608,7 +609,38 @@ class Moderation(commands.Cog):
     async def clear(self, ctx: commands.Context, nombre: app_commands.Range[int, 1, 100]):
         await ctx.defer(ephemeral=True) if ctx.interaction else None
         deleted = await ctx.channel.purge(limit=nombre)
-        await ctx.send(embed=embeds.success(f"{len(deleted)} message(s) supprimé(s)."), ephemeral=True)
+        auteurs = len({m.author.id for m in deleted if getattr(m, "author", None)})
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — Nettoyage",
+                sous_titre=f"**{len(deleted)}** message(s) supprimé(s) dans {ctx.channel.mention}.",
+                kind="moderation",
+                sections=[
+                    panels.Section(
+                        "Détail",
+                        [
+                            panels.Ligne("Messages supprimés", str(len(deleted))),
+                            panels.Ligne("Demandé", str(nombre)),
+                            panels.Ligne("Auteurs concernés", str(auteurs)),
+                        ],
+                        aligne=True,
+                    ),
+                    panels.Section(
+                        "À savoir",
+                        [
+                            panels.Ligne(
+                                "Limite Discord",
+                                "Les messages de plus de 14 jours ne peuvent pas être supprimés en masse",
+                            ),
+                            panels.Ligne("Modérateur", ctx.author.mention),
+                        ],
+                    ),
+                ],
+                pied="SentriX • Modération",
+            ),
+            ephemere=bool(ctx.interaction),
+        )
 
     @commands.hybrid_command(name="slowmode", description="Définir le mode lent du salon (durée libre : 5s, 1m, 10m, 1h...).", with_app_command=False)
     @app_commands.describe(duree="Ex: 5s, 30s, 1m, 10m, 1h — ou 0 / off pour désactiver (maximum 6 heures)")
@@ -631,9 +663,46 @@ class Moderation(commands.Cog):
         secondes = max(0, min(21600, secondes))
         await ctx.channel.edit(slowmode_delay=secondes)
         if secondes == 0:
-            await ctx.send(embed=embeds.success("⏱️ Le mode lent a été désactivé."))
+            panneau = panels.Panneau(
+                titre="SentriX — Mode lent",
+                sous_titre=f"Le mode lent est **désactivé** dans {ctx.channel.mention}.",
+                kind="moderation",
+                sections=[
+                    panels.Section(
+                        "Effet",
+                        [panels.Ligne("Les membres peuvent", "Écrire sans délai imposé")],
+                    )
+                ],
+                pied="SentriX • Modération",
+            )
         else:
-            await ctx.send(embed=embeds.success(f"⏱️ Mode lent activé — {helpers.format_duration(secondes)} entre chaque message."))
+            panneau = panels.Panneau(
+                titre="SentriX — Mode lent",
+                sous_titre=f"**{helpers.format_duration(secondes)}** entre deux messages dans {ctx.channel.mention}.",
+                kind="moderation",
+                sections=[
+                    panels.Section(
+                        "Réglage",
+                        [
+                            panels.Ligne("Délai", helpers.format_duration(secondes)),
+                            panels.Ligne("Salon", ctx.channel.mention),
+                            panels.Ligne("Modérateur", ctx.author.mention),
+                        ],
+                    ),
+                    panels.Section(
+                        "À savoir",
+                        [
+                            panels.Ligne(
+                                "Exemptions",
+                                "Le staff pouvant gérer les messages n'est pas soumis au délai",
+                            ),
+                            panels.Ligne("Désactiver", "`+slowmode off`"),
+                        ],
+                    ),
+                ],
+                pied="SentriX • Modération",
+            )
+        await panels.envoyer(ctx, panneau)
 
     @commands.hybrid_command(name="lock", description="Verrouiller le salon (empêche @everyone d'écrire).", with_app_command=False)
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
@@ -647,7 +716,33 @@ class Moderation(commands.Cog):
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = False
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=raison)
-        await ctx.send(embed=embeds.warning(f"🔒 Salon verrouillé.\nRaison : {raison}"))
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — Salon verrouillé",
+                sous_titre=f"{ctx.channel.mention} est fermé à l'écriture.",
+                kind="moderation",
+                sections=[
+                    panels.Section(
+                        "Sanction",
+                        [
+                            panels.Ligne("Salon", ctx.channel.mention),
+                            panels.Ligne("Raison", raison),
+                            panels.Ligne("Modérateur", ctx.author.mention),
+                        ],
+                    ),
+                    panels.Section(
+                        "Qui est concerné",
+                        [
+                            panels.Ligne("Bloqué", "Tous les membres du rôle par défaut"),
+                            panels.Ligne("Non bloqué", "Les rôles ayant une autorisation explicite sur ce salon"),
+                            panels.Ligne("Rouvrir", "`+unlock`"),
+                        ],
+                    ),
+                ],
+                pied="SentriX • Modération",
+            ),
+        )
 
     @commands.hybrid_command(name="unlock", description="Déverrouiller le salon.", with_app_command=False)
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
@@ -661,7 +756,29 @@ class Moderation(commands.Cog):
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = None
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-        await ctx.send(embed=embeds.success("🔓 Salon déverrouillé."))
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — Salon déverrouillé",
+                sous_titre=f"{ctx.channel.mention} est de nouveau ouvert à l'écriture.",
+                kind="success",
+                sections=[
+                    panels.Section(
+                        "Détail",
+                        [
+                            panels.Ligne("Salon", ctx.channel.mention),
+                            panels.Ligne("Modérateur", ctx.author.mention),
+                            panels.Ligne(
+                                "Permission rétablie",
+                                "L'autorisation d'écrire revient à sa valeur d'origine",
+                                indice="Les réglages propres à chaque rôle ne sont pas modifiés.",
+                            ),
+                        ],
+                    )
+                ],
+                pied="SentriX • Modération",
+            ),
+        )
 
     @commands.hybrid_command(name="hide", description="Cacher le salon aux membres (@everyone).", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")

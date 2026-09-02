@@ -31,6 +31,7 @@ message (``attachment://``). Elles ne dépendent donc pas du dépôt distant.
 from __future__ import annotations
 
 import logging
+import re as _re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
@@ -366,6 +367,70 @@ async def envoyer(
     return await destination.send(**kwargs)
 
 
+_BARRE_DESSINEE = _re.compile(r"[━─—]{6,}")
+
+
+def _sans_barre(texte: str) -> str:
+    """Retire les barres dessinees : le panneau a de vrais filets."""
+    return _BARRE_DESSINEE.sub("", str(texte or "")).strip()
+
+
+_EMOJI_DE_TETE = _re.compile(
+    r"^[\s\u200d\ufe0f]*(?:[\U0001F000-\U0001FAFF\u2190-\u2BFF\u2600-\u27BF]"
+    r"[\s\u200d\ufe0f]*)+"
+)
+
+
+def _titre_propre(nom: object) -> str:
+    """Titre de section sans emoji de tete.
+
+    Les champs d'embed etaient prefixes d'un emoji pour se distinguer les uns des
+    autres — « 👤 Membre », « 📝 Raison ». Dans un panneau, le chevron et le filet
+    font deja ce travail : l'emoji ne fait plus qu'ajouter du bruit a un titre en
+    capitales. On le retire ici, jamais a la source : l'embed continue d'alimenter
+    les journaux, qui gardent leur propre mise en forme.
+    """
+    return _EMOJI_DE_TETE.sub("", str(nom or "").strip()).strip() or "Détail"
+
+
+def depuis_embed(
+    embed: discord.Embed,
+    *,
+    kind: str = "info",
+    titre: str | None = None,
+    sous_titre: str | None = None,
+    pied: str | None = None,
+    boutons: Sequence[Bouton] = (),
+) -> Panneau:
+    """Convertit un embed deja construit en panneau compose.
+
+    C'est le pont vers le code existant. Beaucoup de reponses SentriX sont
+    produites par une CHAINE de modules qui enrichissent un embed — sanctions,
+    centre de configuration, panneaux de securite. Porter chaque maillon vers un
+    nouveau contrat serait autant d'occasions de casser ce qui marche ; convertir
+    le resultat final n'en est aucune.
+
+    Un champ d'embed devient une section : c'est exactement la meme intention,
+    rendue avec un filet et un en-tete au lieu d'une colonne.
+    """
+    sections = [
+        Section(_titre_propre(champ.name), texte=_sans_barre(champ.value))
+        for champ in getattr(embed, "fields", ())
+        if str(champ.value or "").strip()
+    ]
+    vignette = getattr(getattr(embed, "thumbnail", None), "url", None)
+    pied_embed = getattr(getattr(embed, "footer", None), "text", None)
+    return Panneau(
+        titre=titre or str(getattr(embed, "title", "") or "SentriX"),
+        sous_titre=sous_titre or _sans_barre(getattr(embed, "description", "")) or None,
+        kind=kind,
+        vignette=vignette,
+        sections=sections,
+        boutons=boutons,
+        pied=pied or pied_embed or "SentriX",
+    )
+
+
 def texte_complet(panneau: Panneau) -> str:
     """Tout le texte d'un panneau, mis bout a bout.
 
@@ -397,6 +462,7 @@ __all__ = [
     "Ligne",
     "Panneau",
     "Section",
+    "depuis_embed",
     "envoyer",
     "texte_complet",
     "fichier_banniere",
