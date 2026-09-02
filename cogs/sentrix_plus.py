@@ -11,6 +11,8 @@ import time
 from typing import Any
 
 import discord
+
+from utils import embeds
 from discord.ext import commands, tasks
 
 logger = logging.getLogger("bot.sentrix-plus")
@@ -48,6 +50,16 @@ def _human_delay(seconds: int) -> str:
         return f"{hours} h {minutes} min" if minutes else f"{hours} h"
     minutes = max(1, seconds // 60)
     return f"{minutes} min"
+
+
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse SentriX Plus au format canonique.
+
+    Ce module repondait en texte brut : ses 17 commandes etaient les seules du bot
+    a ne porter ni couleur d'intention, ni pied de page, ni barre d'identite.
+    """
+    return embeds._base(titre, description, kind=kind)
 
 
 class SentriXPlus(commands.Cog, name="SentriXPlus"):
@@ -142,16 +154,14 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             "INSERT OR REPLACE INTO sentrix_starboard_config(guild_id,channel_id,threshold) VALUES(?,?,?)",
             (ctx.guild.id, channel.id, threshold),
         )
-        await ctx.send(
-            f"Starboard activé dans {channel.mention}. Un message y apparaîtra à partir de {threshold} réactions {STAR_EMOJI}."
-        )
+        await ctx.send(embed=_reponse("Starboard", f'Starboard activé dans {channel.mention}. Un message y apparaîtra à partir de {threshold} réactions {STAR_EMOJI}.', kind="success"))
 
     @commands.command(name="starboard-off")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def starboard_off(self, ctx: commands.Context):
         await self.bot.db.execute("DELETE FROM sentrix_starboard_config WHERE guild_id=?", (ctx.guild.id,))
-        await ctx.send("Starboard désactivé sur ce serveur.")
+        await ctx.send(embed=_reponse("Starboard", 'Starboard désactivé sur ce serveur.', kind="success"))
 
     async def _refresh_starboard(self, guild_id: int | None, channel_id: int, message_id: int, emoji: str) -> None:
         if guild_id is None or emoji != STAR_EMOJI:
@@ -287,7 +297,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         guild = ctx.guild
         me = guild.me
         if me is None or not me.guild_permissions.manage_channels or not me.guild_permissions.move_members:
-            return await ctx.send("SentriX a besoin de Gérer les salons et Déplacer des membres pour activer VoiceHub.")
+            return await ctx.send(embed=_reponse("VoiceHub", 'SentriX a besoin de Gérer les salons et Déplacer des membres pour activer VoiceHub.', kind="danger"))
 
         category = discord.utils.get(guild.categories, name=VOICE_CATEGORY_NAME)
         if category is None:
@@ -301,16 +311,14 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             "INSERT OR REPLACE INTO sentrix_voicehub_config(guild_id,lobby_channel_id,category_id) VALUES(?,?,?)",
             (guild.id, lobby.id, category.id),
         )
-        await ctx.send(
-            f"VoiceHub activé : rejoins {lobby.mention} pour créer automatiquement ton propre salon vocal."
-        )
+        await ctx.send(embed=_reponse("VoiceHub", f'VoiceHub activé : rejoins {lobby.mention} pour créer automatiquement ton propre salon vocal.', kind="success"))
 
     @commands.command(name="voicehub-off")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def voicehub_off(self, ctx: commands.Context):
         await self.bot.db.execute("DELETE FROM sentrix_voicehub_config WHERE guild_id=?", (ctx.guild.id,))
-        await ctx.send("VoiceHub désactivé. Les vocaux temporaires existants restent actifs jusqu'à ce qu'ils soient vides.")
+        await ctx.send(embed=_reponse("VoiceHub", "VoiceHub désactivé. Les vocaux temporaires existants restent actifs jusqu'à ce qu'ils soient vides.", kind="success"))
 
     async def _owned_voice(self, ctx: commands.Context) -> tuple[discord.VoiceChannel | None, Any | None]:
         voice = getattr(ctx.author, "voice", None)
@@ -330,30 +338,30 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     async def voice_name(self, ctx: commands.Context, *, name: str):
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
-            return await ctx.send("Tu dois être propriétaire d'un vocal temporaire SentriX.")
+            return await ctx.send(embed=_reponse("Salon vocal", "Tu dois être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
         name = str(name).strip()[:90]
         if len(name) < 2:
-            return await ctx.send("Choisis un nom de salon plus long.")
+            return await ctx.send(embed=_reponse("Salon vocal", 'Choisis un nom de salon plus long.', kind="danger"))
         await channel.edit(name=name, reason=f"VoiceHub : renommage par {ctx.author}")
-        await ctx.send(f"Ton vocal s'appelle maintenant « {name} ».")
+        await ctx.send(embed=_reponse("Salon vocal", f"Ton vocal s'appelle maintenant « {name} ».", kind="success"))
 
     @commands.command(name="voice-limit")
     @commands.guild_only()
     async def voice_limit(self, ctx: commands.Context, limit: int):
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
-            return await ctx.send("Tu dois être propriétaire d'un vocal temporaire SentriX.")
+            return await ctx.send(embed=_reponse("Salon vocal", "Tu dois être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
         if limit < 0 or limit > 99:
-            return await ctx.send("La limite doit être comprise entre 0 et 99. 0 signifie illimité.")
+            return await ctx.send(embed=_reponse("Salon vocal", 'La limite doit être comprise entre 0 et 99. 0 signifie illimité.', kind="danger"))
         await channel.edit(user_limit=limit, reason=f"VoiceHub : limite par {ctx.author}")
-        await ctx.send(f"Limite du vocal : {'illimitée' if limit == 0 else limit}.")
+        await ctx.send(embed=_reponse("Salon vocal", f"Limite du vocal : {('illimitée' if limit == 0 else limit)}.", kind="success"))
 
     @commands.command(name="voice-lock")
     @commands.guild_only()
     async def voice_lock(self, ctx: commands.Context):
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
-            return await ctx.send("Tu dois être propriétaire d'un vocal temporaire SentriX.")
+            return await ctx.send(embed=_reponse("Salon vocal", "Tu dois être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
         overwrite = channel.overwrites_for(ctx.guild.default_role)
         overwrite.connect = False
         await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason="VoiceHub : verrouillage")
@@ -362,27 +370,27 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         owner_overwrite.manage_channels = True
         owner_overwrite.move_members = True
         await channel.set_permissions(ctx.author, overwrite=owner_overwrite, reason="VoiceHub : propriétaire")
-        await ctx.send("Ton vocal est maintenant verrouillé.")
+        await ctx.send(embed=_reponse("Salon vocal", 'Ton vocal est maintenant verrouillé.', kind="success"))
 
     @commands.command(name="voice-unlock")
     @commands.guild_only()
     async def voice_unlock(self, ctx: commands.Context):
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
-            return await ctx.send("Tu dois être propriétaire d'un vocal temporaire SentriX.")
+            return await ctx.send(embed=_reponse("Salon vocal", "Tu dois être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
         overwrite = channel.overwrites_for(ctx.guild.default_role)
         overwrite.connect = None
         await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason="VoiceHub : déverrouillage")
-        await ctx.send("Ton vocal est de nouveau ouvert.")
+        await ctx.send(embed=_reponse("Salon vocal", 'Ton vocal est de nouveau ouvert.', kind="success"))
 
     @commands.command(name="voice-transfer")
     @commands.guild_only()
     async def voice_transfer(self, ctx: commands.Context, member: discord.Member):
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
-            return await ctx.send("Tu dois être propriétaire d'un vocal temporaire SentriX.")
+            return await ctx.send(embed=_reponse("Salon vocal", "Tu dois être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
         if member.bot or member not in channel.members:
-            return await ctx.send("Le nouveau propriétaire doit être un membre présent dans ton vocal.")
+            return await ctx.send(embed=_reponse("Salon vocal", 'Le nouveau propriétaire doit être un membre présent dans ton vocal.', kind="danger"))
         await self.bot.db.execute(
             "UPDATE sentrix_temp_voice SET owner_id=? WHERE channel_id=?",
             (member.id, channel.id),
@@ -396,7 +404,14 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         new_overwrite.manage_channels = True
         new_overwrite.move_members = True
         await channel.set_permissions(member, overwrite=new_overwrite, reason="VoiceHub : nouveau propriétaire")
-        await ctx.send(f"{member.mention} est maintenant propriétaire du vocal.")
+        # La mention etait dans le texte du message et notifiait donc le nouveau
+        # proprietaire. Une mention placee dans un embed ne notifie personne : on la
+        # garde dans le contenu pour ne pas perdre l'avertissement.
+        await ctx.send(
+            content=member.mention,
+            embed=_reponse("Salon vocal", f"{member.mention} est maintenant propriétaire du vocal.", kind="success"),
+            allowed_mentions=discord.AllowedMentions(users=[member], roles=False, everyone=False),
+        )
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
@@ -474,7 +489,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         """Crée un message sticky : +sticky-set #annonces texte"""
         content = str(message).strip()
         if not content or len(content) > 1700:
-            return await ctx.send("Le message sticky doit contenir entre 1 et 1700 caractères.")
+            return await ctx.send(embed=_reponse("Message sticky", 'Le message sticky doit contenir entre 1 et 1700 caractères.', kind="danger"))
         old = await self.bot.db.fetchone("SELECT message_id FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
         if old and old["message_id"]:
             try:
@@ -488,7 +503,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             (channel.id, ctx.guild.id, content, sent.id),
         )
         self._no_sticky.pop(int(channel.id), None)
-        await ctx.send(f"Message sticky activé dans {channel.mention}. Il remontera automatiquement tous les 5 messages.")
+        await ctx.send(embed=_reponse("Message sticky", f'Message sticky activé dans {channel.mention}. Il remontera automatiquement tous les 5 messages.', kind="success"))
 
     @commands.command(name="sticky-every")
     @commands.guild_only()
@@ -497,12 +512,12 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         every = max(2, min(50, int(every)))
         row = await self.bot.db.fetchone("SELECT channel_id FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
         if not row:
-            return await ctx.send("Aucun sticky n'est configuré dans ce salon.")
+            return await ctx.send(embed=_reponse("Message sticky", "Aucun sticky n'est configuré dans ce salon.", kind="warning"))
         await self.bot.db.execute(
             "UPDATE sentrix_sticky SET every_messages=?,counter=0 WHERE channel_id=?",
             (every, channel.id),
         )
-        await ctx.send(f"Le sticky de {channel.mention} remontera maintenant tous les {every} messages.")
+        await ctx.send(embed=_reponse("Message sticky", f'Le sticky de {channel.mention} remontera maintenant tous les {every} messages.', kind="success"))
 
     @commands.command(name="sticky-off")
     @commands.guild_only()
@@ -517,7 +532,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
                 pass
         await self.bot.db.execute("DELETE FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
         self._no_sticky[int(channel.id)] = True
-        await ctx.send(f"Sticky désactivé dans {channel.mention}.")
+        await ctx.send(embed=_reponse("Message sticky", f'Sticky désactivé dans {channel.mention}.', kind="success"))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -583,10 +598,10 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     async def schedule_send(self, ctx: commands.Context, delay: str, channel: discord.TextChannel, *, message: str):
         seconds = _parse_delay(delay)
         if seconds is None:
-            return await ctx.send("Durée invalide. Exemples : 10m, 2h, 1d. Minimum 1 minute, maximum 30 jours.")
+            return await ctx.send(embed=_reponse("Annonce programmée", 'Durée invalide. Exemples : 10m, 2h, 1d. Minimum 1 minute, maximum 30 jours.', kind="danger"))
         content = str(message).strip()
         if not content or len(content) > 1900:
-            return await ctx.send("Le message planifié doit contenir entre 1 et 1900 caractères.")
+            return await ctx.send(embed=_reponse("Annonce programmée", 'Le message planifié doit contenir entre 1 et 1900 caractères.', kind="danger"))
         now_ts = int(time.time())
         due_at = now_ts + seconds
         await self.bot.db.execute(
@@ -598,9 +613,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             (ctx.guild.id, ctx.author.id, now_ts),
         )
         ident = int(row["id"]) if row else 0
-        await ctx.send(
-            f"Annonce #{ident} programmée dans {channel.mention} dans {_human_delay(seconds)}."
-        )
+        await ctx.send(embed=_reponse("Annonce programmée", f'Annonce #{ident} programmée dans {channel.mention} dans {_human_delay(seconds)}.', kind="success"))
 
     @commands.command(name="schedule-list")
     @commands.guild_only()
@@ -611,7 +624,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             (ctx.guild.id,),
         )
         if not rows:
-            return await ctx.send("Aucune annonce programmée.")
+            return await ctx.send(embed=_reponse("Annonces programmées", 'Aucune annonce programmée.', kind="warning"))
         now_ts = int(time.time())
         lines = []
         for row in rows:
@@ -619,7 +632,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             destination = channel.mention if isinstance(channel, discord.TextChannel) else f"salon {row['channel_id']}"
             preview = str(row["content"]).replace("\n", " ")[:70]
             lines.append(f"#{row['id']} • {destination} • dans {_human_delay(int(row['due_at']) - now_ts)} • {preview}")
-        await ctx.send("Annonces programmées :\n" + "\n".join(lines))
+        await ctx.send(embed=_reponse("Annonces programmées", 'Annonces programmées :\n' + '\n'.join(lines), kind="brand"))
 
     @commands.command(name="schedule-cancel")
     @commands.guild_only()
@@ -630,12 +643,12 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             (ident, ctx.guild.id),
         )
         if not row:
-            return await ctx.send("Annonce programmée introuvable.")
+            return await ctx.send(embed=_reponse("Annonce programmée", 'Annonce programmée introuvable.', kind="warning"))
         await self.bot.db.execute(
             "DELETE FROM sentrix_scheduled_messages WHERE id=? AND guild_id=?",
             (ident, ctx.guild.id),
         )
-        await ctx.send(f"Annonce #{ident} annulée.")
+        await ctx.send(embed=_reponse("Annonce programmée", f'Annonce #{ident} annulée.', kind="success"))
 
     @tasks.loop(seconds=15)
     async def scheduled_worker(self):
@@ -691,7 +704,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         guild = ctx.guild
         me = guild.me
         if me is None:
-            return await ctx.send("Impossible de lire les permissions de SentriX sur ce serveur.")
+            return await ctx.send(embed=_reponse("Diagnostic du serveur", 'Impossible de lire les permissions de SentriX sur ce serveur.', kind="danger"))
 
         permission_checks = {
             "Gérer les salons": me.guild_permissions.manage_channels,
@@ -742,19 +755,12 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             lines.append("Permissions manquantes : " + ", ".join(missing[:5]))
         else:
             lines.append("Aucune permission essentielle manquante.")
-        await ctx.send("\n".join(lines))
+        await ctx.send(embed=_reponse("Diagnostic du serveur", '\n'.join(lines), kind="brand"))
 
     @commands.command(name="sentrix-plus", aliases=["plus-features", "newfeatures"])
     @commands.guild_only()
     async def sentrix_plus(self, ctx: commands.Context):
-        await ctx.send(
-            "Nouveautés SentriX Plus :\n"
-            "• Starboard : +starboard-setup #salon 3\n"
-            "• VoiceHub : +voicehub-setup, puis +voice-name / +voice-limit / +voice-lock\n"
-            "• Sticky : +sticky-set #salon message\n"
-            "• Annonces programmées : +schedule-send 2h #annonces message\n"
-            "• Diagnostic : +server-health"
-        )
+        await ctx.send(embed=_reponse("SentriX Plus", 'Nouveautés SentriX Plus :\n• Starboard : +starboard-setup #salon 3\n• VoiceHub : +voicehub-setup, puis +voice-name / +voice-limit / +voice-lock\n• Sticky : +sticky-set #salon message\n• Annonces programmées : +schedule-send 2h #annonces message\n• Diagnostic : +server-health', kind="brand"))
 
 
 async def setup(bot: commands.Bot):
