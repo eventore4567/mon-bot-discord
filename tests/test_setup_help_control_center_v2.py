@@ -27,7 +27,10 @@ def test_setup_has_requested_categories_and_states():
     for state in ("ACTIF", "INACTIF", "NON CONFIGURÉ", "ERREUR DE CONFIGURATION"):
         assert state in source
     assert "_completion" in source
-    assert "Permissions SentriX" in source
+    # La section s'appelle maintenant « Permissions manquantes » et n'apparait que
+    # s'il en manque vraiment : enumerer les « OK » noyait l'information utile.
+    assert "Permissions manquantes" in source
+    assert "BOT_PERMS" in source
 
 
 def test_setup_edits_one_message_and_has_clear_navigation():

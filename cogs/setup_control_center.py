@@ -5,13 +5,14 @@ message et lisent les configurations historiques au lieu de les recréer.
 """
 from __future__ import annotations
 
+import re
 from enum import Enum
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import checks, embeds, log_service
+from utils import checks, embeds, log_service, sentrix_panels as panels
 
 
 class ConfigState(str, Enum):
@@ -500,18 +501,38 @@ class AiModal(discord.ui.Modal, title="Limites IA"):
             "updated_at = strftime('%s','now') WHERE guild_id = ?",
             (*values, self.owner.guild.id),
         )
-        await interaction.response.edit_message(embed=await self.owner.build_embed(), view=self.owner)
+        await self.owner.composer()
+        await interaction.response.edit_message(
+            content=None, embeds=[], view=self.owner, attachments=self.owner.fichiers()
+        )
 
 
-class SetupView(discord.ui.View):
+class SetupView(discord.ui.LayoutView):
+    """Centre de controle SentriX, compose.
+
+    C'etait une View classique qui remplacait un embed a champs. Le contenu et les
+    commandes vivent maintenant dans le MEME conteneur : banniere en tete, etat
+    general, sections par sujet, puis les selecteurs et boutons sous l'accent de
+    couleur. Une LayoutView ne se modifie pas en place, donc chaque action
+    recompose le conteneur — aucun reste de l'ecran precedent ne subsiste.
+    """
+
     def __init__(self, bot, guild, author_id):
         super().__init__(timeout=900)
         self.bot, self.guild, self.author_id = bot, guild, int(author_id)
         self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
+        self._commandes: list = []
+
+    # -- collecte des composants -------------------------------------------
+    def ajouter(self, item) -> None:
+        """Remplace self.add_item : les composants vont dans le conteneur."""
+        self._commandes.append(item)
 
     async def interaction_check(self, interaction):
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=embeds.error("Ce panneau appartient à une autre personne."), ephemeral=True)
+            await interaction.response.send_message(
+                embed=embeds.error("Ce panneau appartient à une autre personne."), ephemeral=True
+            )
             return False
         if not await _can_setup(self.bot, interaction.user, interaction.guild):
             await _permission_error(interaction)
@@ -534,15 +555,82 @@ class SetupView(discord.ui.View):
         )
 
     async def refresh(self, interaction):
+        await self.composer()
+        await interaction.response.edit_message(
+            content=None, embeds=[], view=self, attachments=self.fichiers()
+        )
+
+    def fichiers(self):
+        fichier = panels.fichier_banniere(self.intention())
+        return [fichier] if fichier is not None else []
+
+    def intention(self) -> str:
+        """La configuration a sa propre famille de banniere : c'est un domaine."""
+        return "configuration"
+
+    # -- composition --------------------------------------------------------
+    async def composer(self) -> None:
+        """Compose le panneau a partir de l'embed produit par TOUTE la chaine.
+
+        Douze modules enrichissent SetupView.build_embed : verification, honeypot,
+        permissions, langue, tickets, polish... Porter chacun vers un nouveau
+        contrat aurait ete douze occasions de casser le setup. On garde donc
+        build_embed comme contrat — chaque couche continue d'y ajouter ses champs —
+        et c'est le RESULTAT FINAL qui devient un panneau : titre, resume, puis une
+        section par champ, chacune precedee de son filet.
+        """
+        self.clear_items()
+        self._commandes = []
         self.render()
-        await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+        await self.prepare()
+
+        # Les douze couches appellent self.add_item : sur une LayoutView, cela
+        # place le composant AU NIVEAU DE LA VUE, donc au-dessus du conteneur et
+        # au-dessus de la banniere. On les recupere pour les remettre dedans.
+        recuperes = [
+            item for item in list(self.children)
+            if not isinstance(item, (discord.ui.Container, discord.ui.ActionRow))
+        ]
+        for item in recuperes:
+            self.remove_item(item)
+        self._commandes = _sans_doublons(self._commandes + recuperes)
+        self.clear_items()
+
+        embed = await self.build_embed()
+        titre = str(getattr(embed, "title", "") or "SentriX — Centre de contrôle")
+        resume = _sans_barre(str(getattr(embed, "description", "") or ""))
+        sections = [
+            panels.Section(str(champ.name or "").strip(), texte=_sans_barre(str(champ.value or "")))
+            for champ in getattr(embed, "fields", ())
+            if str(champ.value or "").strip()
+        ]
+
+        conteneur = discord.ui.Container(
+            accent_colour=discord.Colour(panels.INTENTIONS[self.intention()][0])
+        )
+        galerie = discord.ui.MediaGallery()
+        galerie.add_item(media=f"attachment://{panels.nom_banniere(self.intention())}")
+        conteneur.add_item(galerie)
+        conteneur.add_item(discord.ui.TextDisplay(f"## {titre}\n{resume}"))
+
+        for section in sections:
+            rendu = section.rendu()
+            if rendu:
+                conteneur.add_item(discord.ui.Separator())
+                conteneur.add_item(discord.ui.TextDisplay(rendu[:3800]))
+
+        conteneur.add_item(
+            discord.ui.TextDisplay("-# SentriX • Configuration · chaque modification est enregistrée aussitôt")
+        )
+        for rangee in _rangees_de(self._commandes):
+            conteneur.add_item(rangee)
+        self.add_item(conteneur)
 
     def render(self):
-        self.clear_items()
-        self.add_item(CategorySelect(self))
-        home = discord.ui.Button(label="Accueil", style=discord.ButtonStyle.secondary, row=1)
-        refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary, row=1)
-        close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger, row=1)
+        self.ajouter(CategorySelect(self))
+        home = discord.ui.Button(label="Accueil", style=discord.ButtonStyle.secondary)
+        refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary)
+        close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
 
         async def go_home(interaction):
             self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
@@ -553,68 +641,69 @@ class SetupView(discord.ui.View):
 
         async def do_close(interaction):
             self.clear_items()
+            ferme = panels.Panneau(
+                titre="SentriX — Configuration",
+                sous_titre="Panneau fermé. Relancez `+setup` pour le rouvrir.",
+                kind="configuration",
+                pied="SentriX • Configuration",
+            )
             await interaction.response.edit_message(
-                embed=embeds.neutral("SentriX — Configuration", "Panneau fermé."), view=self
+                content=None, embeds=[], view=ferme, attachments=ferme.fichiers()
             )
             self.stop()
 
         home.callback, refresh.callback, close.callback = go_home, do_refresh, do_close
-        self.add_item(home); self.add_item(refresh); self.add_item(close)
+        self.ajouter(home); self.ajouter(refresh); self.ajouter(close)
 
         if self.category == "moderation":
-            self.add_item(FieldRoleSelect(self, "mod_role", "Rôle staff", 2))
-            self.add_item(FieldRoleSelect(self, "mute_role", "Rôle mute", 3))
-            self.add_item(FieldRoleSelect(self, "warn_role", "Rôle warn", 4))
+            self.ajouter(FieldRoleSelect(self, "mod_role", "Rôle staff", 2))
+            self.ajouter(FieldRoleSelect(self, "mute_role", "Rôle mute", 3))
+            self.ajouter(FieldRoleSelect(self, "warn_role", "Rôle warn", 4))
         elif self.category == "security":
-            self.add_item(AutomodSelect(self))
+            self.ajouter(AutomodSelect(self))
         elif self.category == "logs":
-            self.add_item(LogSelect(self))
+            self.ajouter(LogSelect(self))
             if self.selected_log:
-                self.add_item(LogChannelSelect(self))
-                toggle = discord.ui.Button(label="Activer / désactiver ce log", style=discord.ButtonStyle.primary, row=4)
+                self.ajouter(LogChannelSelect(self))
+                toggle = discord.ui.Button(
+                    label="Activer / désactiver ce log", style=discord.ButtonStyle.primary
+                )
 
                 async def toggle_log(interaction):
-                    setting = await log_service.get_log_setting(
-                        self.bot,
-                        self.guild.id,
-                        self.selected_log,
-                    )
+                    setting = await log_service.get_log_setting(self.bot, self.guild.id, self.selected_log)
                     channel_id = setting.get("channel_id")
                     if not setting.get("enabled") and not channel_id:
                         return await interaction.response.send_message(
-                            embed=embeds.error(
-                                "Choisissez d’abord un salon pour cette catégorie de logs."
-                            ),
+                            embed=embeds.error("Choisissez d’abord un salon pour cette catégorie de logs."),
                             ephemeral=True,
                         )
                     await log_service.set_log_config(
-                        self.bot,
-                        self.guild.id,
-                        self.selected_log,
-                        channel_id=channel_id,
-                        enabled=not bool(setting.get("enabled")),
+                        self.bot, self.guild.id, self.selected_log,
+                        channel_id=channel_id, enabled=not bool(setting.get("enabled")),
                     )
                     await self.refresh(interaction)
 
                 toggle.callback = toggle_log
-                self.add_item(toggle)
+                self.ajouter(toggle)
         elif self.category == "welcome":
-            self.add_item(FieldChannelSelect(self, "welcome_channel", "Salon de bienvenue", 2))
-            self.add_item(FieldChannelSelect(self, "goodbye_channel", "Salon de départ", 3))
-            self.add_item(FieldRoleSelect(self, "autorole", "Rôle automatique", 4))
+            self.ajouter(FieldChannelSelect(self, "welcome_channel", "Salon de bienvenue", 2))
+            self.ajouter(FieldChannelSelect(self, "goodbye_channel", "Salon de départ", 3))
+            self.ajouter(FieldRoleSelect(self, "autorole", "Rôle automatique", 4))
         elif self.category == "roles":
-            self.add_item(FieldRoleSelect(self, "autorole", "Autorole", 2))
-            self.add_item(FieldRoleSelect(self, "verify_role", "Rôle vérifié", 3))
-            self.add_item(FieldRoleSelect(self, "member_role", "Rôle membre", 4))
+            self.ajouter(FieldRoleSelect(self, "autorole", "Autorole", 2))
+            self.ajouter(FieldRoleSelect(self, "verify_role", "Rôle vérifié", 3))
+            self.ajouter(FieldRoleSelect(self, "member_role", "Rôle membre", 4))
         elif self.category == "levels":
-            self.add_item(FieldChannelSelect(self, "level_channel", "Salon des notifications de niveau", 2))
+            self.ajouter(FieldChannelSelect(self, "level_channel", "Salon des notifications de niveau", 2))
         elif self.category == "ai":
-            toggle = discord.ui.Button(label="Activer / désactiver l’IA", style=discord.ButtonStyle.primary, row=2)
-            limits = discord.ui.Button(label="Modifier les limites", style=discord.ButtonStyle.secondary, row=2)
+            toggle = discord.ui.Button(label="Activer / désactiver l’IA", style=discord.ButtonStyle.primary)
+            limits = discord.ui.Button(label="Modifier les limites", style=discord.ButtonStyle.secondary)
 
             async def toggle_ai(interaction):
                 await self.ensure_ai()
-                row = await self.bot.db.fetchone("SELECT enabled FROM ai_settings WHERE guild_id = ?", (self.guild.id,))
+                row = await self.bot.db.fetchone(
+                    "SELECT enabled FROM ai_settings WHERE guild_id = ?", (self.guild.id,)
+                )
                 await self.bot.db.execute(
                     "UPDATE ai_settings SET enabled = ?, updated_at = strftime('%s','now') WHERE guild_id = ?",
                     (0 if _get(row, "enabled", 1) else 1, self.guild.id),
@@ -625,194 +714,431 @@ class SetupView(discord.ui.View):
                 await interaction.response.send_modal(AiModal(self))
 
             toggle.callback, limits.callback = toggle_ai, edit_ai
-            self.add_item(toggle); self.add_item(limits)
+            self.ajouter(toggle); self.ajouter(limits)
 
     async def prepare(self):
         if self.category == "tickets":
-            rows = await self.bot.db.fetchall("SELECT id, name FROM ticket_types WHERE guild_id = ? ORDER BY id", (self.guild.id,))
-            self.add_item(TicketSelect(self, rows))
+            rows = await self.bot.db.fetchall(
+                "SELECT id, name FROM ticket_types WHERE guild_id = ? ORDER BY id", (self.guild.id,)
+            )
+            self.ajouter(TicketSelect(self, rows))
             if self.selected_ticket:
-                self.add_item(TicketCategorySelect(self)); self.add_item(TicketRoleSelect(self))
+                self.ajouter(TicketCategorySelect(self)); self.ajouter(TicketRoleSelect(self))
         elif self.category == "notifications":
             rows = await self.bot.db.fetchall(
-                "SELECT id, platform, source_url FROM social_notifications WHERE guild_id = ? ORDER BY id", (self.guild.id,)
+                "SELECT id, platform, source_url FROM social_notifications WHERE guild_id = ? ORDER BY id",
+                (self.guild.id,),
             )
-            self.add_item(NotificationSelect(self, rows))
+            self.ajouter(NotificationSelect(self, rows))
             if self.selected_notification:
-                self.add_item(NotificationChannelSelect(self)); self.add_item(NotificationRoleSelect(self))
+                self.ajouter(NotificationChannelSelect(self)); self.ajouter(NotificationRoleSelect(self))
 
+    # -- contenu ------------------------------------------------------------
     async def build_embed(self):
-        await self.prepare()
+        """Embed du centre de controle, base de la chaine des douze couches.
+
+        Le rendu final est un panneau compose, mais le CONTRAT reste un embed :
+        c'est lui que les autres modules enrichissent. Chaque section devient un
+        champ, et composer() les retransforme en sections apres la chaine.
+        """
         conf = await self.bot.db.get_guild_config(self.guild.id)
         statuses = await module_statuses(self.bot, self.guild, conf)
         if self.category is None:
-            active = sum(state == ConfigState.ACTIVE for state, _, _ in statuses.values())
-            panel = embeds.brand("SentriX — Configuration", "Configurez les fonctionnalités de SentriX pour ce serveur.")
-            panel.add_field(name="Serveur", value=self.guild.name, inline=False)
-            panel.add_field(name="Modules actifs", value=f"{active} / {len(statuses)}", inline=True)
-            panel.add_field(name="Configuration", value=f"{_completion(statuses)} % terminée", inline=True)
-            panel.add_field(
-                name="Modules",
-                value="\n".join(f"**{CATEGORIES[key][0]}** — {statuses[key][0].value}" for key in CATEGORY_ORDER),
-                inline=False,
-            )
-            errors = [(key, data) for key, data in statuses.items() if data[0] == ConfigState.ERROR]
-            if errors:
-                panel.add_field(
-                    name="À corriger",
-                    value="\n".join(f"**{CATEGORIES[key][0]}** — {data[2][0]}" for key, data in errors)[:1024],
-                    inline=False,
-                )
-            panel.set_footer(text="SentriX • Centre de configuration • Choisissez une catégorie")
-            return panel
+            titre, resume, sections = await self._contenu_accueil(statuses)
+        else:
+            titre, resume, sections = await self._contenu_categorie(conf, statuses)
+        return _embed_de_sections(titre, resume, sections)
 
+    async def _contenu_accueil(self, statuses):
+        """Vue d'ensemble : ce qui marche, ce qui manque, ce qui bloque."""
+        actifs = sum(state == ConfigState.ACTIVE for state, _, _ in statuses.values())
+        pourcentage = _completion(statuses)
+
+        etats = [
+            panels.Ligne(
+                CATEGORIES[cle][0],
+                statuses[cle][0].value,
+                indice=statuses[cle][1] if statuses[cle][1] else None,
+            )
+            for cle in CATEGORY_ORDER
+        ]
+
+        sections = [
+            panels.Section(
+                "État général",
+                [
+                    panels.Ligne("Configuration", f"**{pourcentage} %** terminée"),
+                    panels.Ligne("Modules actifs", f"**{actifs}** sur **{len(statuses)}**"),
+                    panels.Ligne("Serveur", self.guild.name),
+                ],
+            ),
+            panels.Section("Modules", etats),
+        ]
+
+        # Ce qui bloque passe AVANT le reste : c'est la raison d'ouvrir +setup.
+        erreurs = [
+            (cle, data) for cle, data in statuses.items() if data[0] == ConfigState.ERROR
+        ]
+        if erreurs:
+            sections.insert(
+                0,
+                panels.Section(
+                    f"À corriger ({len(erreurs)})",
+                    [
+                        panels.Ligne(CATEGORIES[cle][0], data[2][0] if data[2] else "Configuration incomplète")
+                        for cle, data in erreurs
+                    ],
+                ),
+            )
+
+        a_configurer = [
+            CATEGORIES[cle][0]
+            for cle, data in statuses.items()
+            if data[0] == ConfigState.UNCONFIGURED
+        ]
+        if a_configurer:
+            sections.append(
+                panels.Section(
+                    "Jamais configuré",
+                    [panels.Ligne("Modules", " · ".join(a_configurer),
+                                  indice="Choisissez-les dans le menu ci-dessous pour les activer.")],
+                )
+            )
+
+        resume = (
+            f"**{pourcentage} %** configuré · **{actifs}/{len(statuses)}** modules actifs"
+        )
+        if erreurs:
+            resume += f" · **{len(erreurs)}** à corriger"
+        return "SentriX — Centre de contrôle", resume, sections
+
+    async def _contenu_categorie(self, conf, statuses):
+        """Une categorie : son etat, sa configuration reelle, ce qui manque."""
         state, summary, problems = statuses[self.category]
-        title, description = CATEGORIES[self.category]
-        panel = embeds.brand(f"SentriX — {title}", description)
-        panel.add_field(name="État", value=f"**{state.value}**", inline=True)
-        panel.add_field(name="Configuration", value=summary, inline=True)
+        titre, description = CATEGORIES[self.category]
 
-        me = self.guild.me
-        perms = me.guild_permissions if me else discord.Permissions.none()
-        lines = []
-        missing = []
-        for permission in BOT_PERMS[self.category]:
-            label = PERM_LABELS.get(permission, permission)
-            if getattr(perms, permission, False):
-                lines.append(f"{label} : OK")
-            else:
-                lines.append(f"{label} : MANQUANT"); missing.append(label)
-        panel.add_field(name="Permissions SentriX", value="\n".join(lines), inline=False)
+        sections = [
+            panels.Section(
+                "État",
+                [
+                    panels.Ligne("Module", f"**{state.value}**"),
+                    panels.Ligne("Configuration", summary or "Aucune"),
+                ],
+            )
+        ]
+
         if problems:
-            panel.add_field(name="Problèmes détectés", value="\n".join(problems)[:1024], inline=False)
-
-        if self.category == "moderation":
-            panel.add_field(
-                name="Rôles",
-                value=f"**Staff :** {_role(self.guild, _get(conf, 'mod_role'))}\n"
-                      f"**Mute :** {_role(self.guild, _get(conf, 'mute_role'))}\n"
-                      f"**Warn :** {_role(self.guild, _get(conf, 'warn_role'))}",
-                inline=False,
-            )
-            panel.add_field(name="Fonctions", value="Warn • timeout/mute • ban • kick • clear • raisons • DM de sanction", inline=False)
-        elif self.category == "security":
-            row = await self.bot.db.fetchone("SELECT * FROM automod_settings WHERE guild_id = ?", (self.guild.id,))
-            panel.add_field(
-                name="Protections",
-                value="\n".join(f"**{label} :** {'ACTIF' if _get(row, field, 0) else 'INACTIF'}" for field, label in AUTOMOD),
-                inline=False,
-            )
-        elif self.category == "logs":
-            lines = []
-            for log_type, meta in log_service.LOG_TYPES.items():
-                if meta.get("emits"):
-                    setting = await log_service.get_log_setting(self.bot, self.guild.id, log_type)
-                    lines.append(
-                        f"**{meta['category']} :** {'ACTIF' if setting.get('enabled') else 'INACTIF'} — "
-                        f"{_channel(self.guild, setting.get('channel_id'))}"
-                    )
-            panel.add_field(name="Types de logs", value="\n".join(lines)[:1024], inline=False)
-        elif self.category == "tickets":
-            panels = await self.bot.db.fetchall(
-                "SELECT name, channel_id, enabled FROM ticket_panels_v2 WHERE guild_id = ? ORDER BY id", (self.guild.id,)
-            )
-            panel.add_field(
-                name="Panels",
-                value="\n".join(
-                    f"**{_get(row, 'name', 'Panel')} :** {'ACTIF' if _get(row, 'enabled', 1) else 'INACTIF'} — "
-                    f"{_channel(self.guild, _get(row, 'channel_id'))}" for row in panels
-                )[:1024] or "Aucun panel configuré.",
-                inline=False,
-            )
-            if self.selected_ticket:
-                row = await self.bot.db.fetchone(
-                    "SELECT * FROM ticket_types WHERE guild_id = ? AND id = ?", (self.guild.id, self.selected_ticket)
+            sections.append(
+                panels.Section(
+                    f"Problèmes détectés ({len(problems)})",
+                    [panels.Ligne(f"{i}", probleme) for i, probleme in enumerate(problems[:6], 1)],
                 )
-                if row:
-                    panel.add_field(
-                        name=f"Type — {_get(row, 'name', 'Ticket')}",
-                        value=f"**Catégorie :** {_channel(self.guild, _get(row, 'category_id'))}\n"
-                              f"**Support :** {_role(self.guild, _get(row, 'staff_role_id'))}\n"
-                              f"**Ping support :** {'ACTIF' if _get(row, 'mention_staff', 1) else 'INACTIF'}\n"
-                              f"**Limite :** {_get(row, 'max_per_member', 1)} ticket(s)\n"
-                              f"**Fermeture auto :** {_get(row, 'autoclose_hours', 0)} h",
-                        inline=False,
+            )
+
+        # Permissions : on ne liste QUE ce qui manque. Enumerer ce qui marche
+        # deja noyait l'information utile au milieu de « OK » repetes.
+        moi = self.guild.me
+        perms = moi.guild_permissions if moi else discord.Permissions.none()
+        manquantes = [
+            PERM_LABELS.get(permission, permission)
+            for permission in BOT_PERMS[self.category]
+            if not getattr(perms, permission, False)
+        ]
+        if manquantes:
+            sections.append(
+                panels.Section(
+                    f"Permissions manquantes ({len(manquantes)})",
+                    [panels.Ligne("SentriX a besoin de", " · ".join(manquantes),
+                                  indice="Paramètres du serveur › Rôles › SentriX.")],
+                )
+            )
+        else:
+            sections.append(
+                panels.Section(
+                    "Permissions",
+                    [panels.Ligne("SentriX", f"A tout ce qu'il faut pour **{titre.casefold()}**")],
+                )
+            )
+
+        detail = await self._detail_categorie(conf)
+        sections.extend(detail)
+
+        intention_etat = {
+            ConfigState.ACTIVE: "actif",
+            ConfigState.INACTIVE: "inactif",
+            ConfigState.UNCONFIGURED: "jamais configuré",
+            ConfigState.ERROR: "à corriger",
+        }.get(state, state.value)
+        resume = f"{description}\n**État :** {intention_etat}"
+        return f"SentriX — {titre}", resume, sections
+
+    async def _detail_categorie(self, conf):
+        """Configuration reelle de la categorie : salons, roles, sources."""
+        cle = self.category
+        if cle == "moderation":
+            return [
+                panels.Section(
+                    "Rôles configurés",
+                    [
+                        panels.Ligne("Staff", _role(self.guild, _get(conf, "mod_role"))),
+                        panels.Ligne("Mute", _role(self.guild, _get(conf, "mute_role"))),
+                        panels.Ligne("Avertissements", _role(self.guild, _get(conf, "warn_role"))),
+                    ],
+                )
+            ]
+        if cle == "security":
+            row = await self.bot.db.fetchone(
+                "SELECT * FROM automod_settings WHERE guild_id = ?", (self.guild.id,)
+            )
+            actives = [label for field, label in AUTOMOD if _get(row, field, 0)]
+            inactives = [label for field, label in AUTOMOD if not _get(row, field, 0)]
+            sections = [
+                panels.Section(
+                    f"Protections actives ({len(actives)}/{len(AUTOMOD)})",
+                    [panels.Ligne("Modules", " · ".join(actives) if actives else "Aucune")],
+                )
+            ]
+            if inactives:
+                sections.append(
+                    panels.Section(
+                        f"Désactivées ({len(inactives)})",
+                        [panels.Ligne("Modules", " · ".join(inactives),
+                                      indice="Le menu ci-dessous les active une par une.")],
                     )
-            panel.add_field(
-                name="Avancé",
-                value="Création de panels/types, formulaires, message d’ouverture, claim et transcript : `+ticketsetup` / `/ticketsetup`.",
-                inline=False,
-            )
-        elif self.category == "welcome":
-            panel.add_field(
-                name="Configuration",
-                value=f"**Bienvenue :** {_channel(self.guild, _get(conf, 'welcome_channel'))}\n"
-                      f"**Départ :** {_channel(self.guild, _get(conf, 'goodbye_channel'))}\n"
-                      f"**Autorole :** {_role(self.guild, _get(conf, 'autorole'))}\n"
-                      f"**Image :** {'Configurée' if _get(conf, 'welcome_image_url') else 'Non configurée'}",
-                inline=False,
-            )
-        elif self.category == "roles":
-            rewards = await self.bot.db.fetchall("SELECT level, role_id FROM level_roles WHERE guild_id = ? ORDER BY level", (self.guild.id,))
-            panel.add_field(
-                name="Rôles",
-                value=f"**Autorole :** {_role(self.guild, _get(conf, 'autorole'))}\n"
-                      f"**Vérifié :** {_role(self.guild, _get(conf, 'verify_role'))}\n"
-                      f"**Membre :** {_role(self.guild, _get(conf, 'member_role'))}",
-                inline=False,
-            )
-            panel.add_field(
-                name="Récompenses",
-                value="\n".join(f"Niveau **{_get(row, 'level')}** → {_role(self.guild, _get(row, 'role_id'))}" for row in rewards)[:1024]
-                      or "Aucune récompense.",
-                inline=False,
-            )
-        elif self.category == "levels":
-            panel.add_field(
-                name="Niveaux",
-                value=f"**Salon level-up :** {_channel(self.guild, _get(conf, 'level_channel'))}\n"
-                      f"**Multiplicateur XP :** {_get(conf, 'xp_multiplier', 1.0)}\n"
-                      f"**Message :** {'Personnalisé' if _get(conf, 'level_message') else 'Par défaut'}",
-                inline=False,
-            )
-            panel.add_field(
-                name="Conservation",
-                value="XP, niveau, messages, argent, banque et statistiques restent sauvegardés si un membre quitte ou est banni.",
-                inline=False,
-            )
-        elif self.category == "notifications":
+                )
+            return sections
+        if cle == "logs":
+            actifs, inactifs = [], []
+            for log_type, meta in log_service.LOG_TYPES.items():
+                if not meta.get("emits"):
+                    continue
+                setting = await log_service.get_log_setting(self.bot, self.guild.id, log_type)
+                if setting.get("enabled") and setting.get("channel_id"):
+                    actifs.append(
+                        panels.Ligne(meta["category"], _channel(self.guild, setting.get("channel_id")))
+                    )
+                else:
+                    inactifs.append(meta["category"])
+            sections = [
+                panels.Section(
+                    f"Journaux actifs ({len(actifs)}/{len(actifs) + len(inactifs)})",
+                    actifs or [panels.Ligne("Aucun", "Choisissez une catégorie ci-dessous")],
+                )
+            ]
+            if inactifs:
+                sections.append(
+                    panels.Section(
+                        f"Non configurés ({len(inactifs)})",
+                        [panels.Ligne("Catégories", " · ".join(inactifs))],
+                    )
+                )
+            return sections
+        if cle == "tickets":
             rows = await self.bot.db.fetchall(
-                "SELECT id, platform, discord_channel_id, role_id, enabled FROM social_notifications WHERE guild_id = ? ORDER BY id",
+                "SELECT name, channel_id, enabled FROM ticket_panels_v2 WHERE guild_id = ? ORDER BY id",
                 (self.guild.id,),
             )
-            panel.add_field(
-                name="Sources",
-                value="\n".join(
-                    f"**{str(_get(row, 'platform', 'notification')).title()} #{_get(row, 'id')} :** "
-                    f"{'ACTIF' if _get(row, 'enabled', 1) else 'INACTIF'} — "
-                    f"{_channel(self.guild, _get(row, 'discord_channel_id'))} — {_role(self.guild, _get(row, 'role_id'))}"
-                    for row in rows
-                )[:1024] or "Aucune notification configurée.",
-                inline=False,
+            sections = [
+                panels.Section(
+                    f"Panels ({len(rows)})",
+                    [
+                        panels.Ligne(
+                            _get(row, "name", "Panel"),
+                            f"{'actif' if _get(row, 'enabled', 1) else 'inactif'} · "
+                            f"{_channel(self.guild, _get(row, 'channel_id'))}",
+                        )
+                        for row in rows
+                    ] or [panels.Ligne("Aucun panel", "`+ticketsetup` en crée un en quelques clics")],
+                )
+            ]
+            if self.selected_ticket:
+                row = await self.bot.db.fetchone(
+                    "SELECT * FROM ticket_types WHERE guild_id = ? AND id = ?",
+                    (self.guild.id, self.selected_ticket),
+                )
+                if row:
+                    sections.append(
+                        panels.Section(
+                            f"Type — {_get(row, 'name', 'Ticket')}",
+                            [
+                                panels.Ligne("Catégorie", _channel(self.guild, _get(row, "category_id"))),
+                                panels.Ligne("Support", _role(self.guild, _get(row, "staff_role_id"))),
+                                panels.Ligne("Ping support", "actif" if _get(row, "mention_staff", 1) else "inactif"),
+                                panels.Ligne("Limite par membre", f"{_get(row, 'max_per_member', 1)} ticket(s)"),
+                                panels.Ligne("Fermeture auto", f"{_get(row, 'autoclose_hours', 0)} h"),
+                            ],
+                        )
+                    )
+            return sections
+        if cle == "welcome":
+            return [
+                panels.Section(
+                    "Salons et rôles",
+                    [
+                        panels.Ligne("Bienvenue", _channel(self.guild, _get(conf, "welcome_channel"))),
+                        panels.Ligne("Départ", _channel(self.guild, _get(conf, "goodbye_channel"))),
+                        panels.Ligne("Rôle automatique", _role(self.guild, _get(conf, "autorole"))),
+                        panels.Ligne(
+                            "Image d'accueil",
+                            "Configurée" if _get(conf, "welcome_image_url") else "Aucune",
+                        ),
+                    ],
+                )
+            ]
+        if cle == "roles":
+            rewards = await self.bot.db.fetchall(
+                "SELECT level, role_id FROM level_roles WHERE guild_id = ? ORDER BY level", (self.guild.id,)
             )
-            panel.add_field(name="Ajouter une source", value="Utilisez `+notifs-ping` pour ajouter une nouvelle URL YouTube/Twitch/TikTok.", inline=False)
-        elif self.category == "ai":
-            row = await self.bot.db.fetchone("SELECT * FROM ai_settings WHERE guild_id = ?", (self.guild.id,))
-            panel.add_field(
-                name="Paramètres",
-                value=f"**Conversation :** {'ACTIF' if _get(row, 'enabled', 1) else 'INACTIF'}\n"
-                      f"**Cooldown :** {_get(row, 'cooldown_seconds', 8)} s\n"
-                      f"**Par minute :** {_get(row, 'per_minute_limit', 6)}\n"
-                      f"**Par jour :** {_get(row, 'daily_limit', 50)}\n"
-                      f"**Mémoire :** {'ACTIF' if _get(row, 'memory_enabled', 1) else 'INACTIF'}",
-                inline=False,
+            return [
+                panels.Section(
+                    "Rôles automatiques",
+                    [
+                        panels.Ligne("Autorole", _role(self.guild, _get(conf, "autorole"))),
+                        panels.Ligne("Vérifié", _role(self.guild, _get(conf, "verify_role"))),
+                        panels.Ligne("Membre", _role(self.guild, _get(conf, "member_role"))),
+                    ],
+                ),
+                panels.Section(
+                    f"Récompenses de niveau ({len(rewards)})",
+                    [
+                        panels.Ligne(f"Niveau {_get(row, 'level')}", _role(self.guild, _get(row, "role_id")))
+                        for row in rewards[:10]
+                    ] or [panels.Ligne("Aucune", "`+levelroles` en ajoute une")],
+                ),
+            ]
+        if cle == "levels":
+            return [
+                panels.Section(
+                    "Réglages",
+                    [
+                        panels.Ligne("Salon des montées", _channel(self.guild, _get(conf, "level_channel"))),
+                        panels.Ligne("Multiplicateur XP", str(_get(conf, "xp_multiplier", 1.0))),
+                        panels.Ligne(
+                            "Message", "Personnalisé" if _get(conf, "level_message") else "Par défaut"
+                        ),
+                    ],
+                ),
+                panels.Section(
+                    "Conservation des données",
+                    [
+                        panels.Ligne(
+                            "Si un membre part",
+                            "XP, niveau, messages et argent sont conservés",
+                            indice="Rien n'est perdu s'il revient.",
+                        )
+                    ],
+                ),
+            ]
+        if cle == "notifications":
+            rows = await self.bot.db.fetchall(
+                "SELECT id, platform, discord_channel_id, role_id, enabled FROM social_notifications "
+                "WHERE guild_id = ? ORDER BY id",
+                (self.guild.id,),
             )
-            panel.add_field(name="Images", value="La génération d’images garde ses permissions et limites propres.", inline=False)
+            return [
+                panels.Section(
+                    f"Sources suivies ({len(rows)})",
+                    [
+                        panels.Ligne(
+                            f"{str(_get(row, 'platform', 'source')).title()} #{_get(row, 'id')}",
+                            f"{'actif' if _get(row, 'enabled', 1) else 'inactif'} · "
+                            f"{_channel(self.guild, _get(row, 'discord_channel_id'))}",
+                            indice=f"Rôle mentionné : {_role(self.guild, _get(row, 'role_id'))}"
+                            if _get(row, "role_id") else None,
+                        )
+                        for row in rows[:8]
+                    ] or [panels.Ligne("Aucune source", "`+notifs-ping` ajoute une chaîne YouTube, Twitch ou TikTok")],
+                )
+            ]
+        if cle == "ai":
+            row = await self.bot.db.fetchone(
+                "SELECT * FROM ai_settings WHERE guild_id = ?", (self.guild.id,)
+            )
+            return [
+                panels.Section(
+                    "Paramètres",
+                    [
+                        panels.Ligne("Conversation", "active" if _get(row, "enabled", 1) else "désactivée"),
+                        panels.Ligne("Mémoire", "active" if _get(row, "memory_enabled", 1) else "désactivée"),
+                    ],
+                ),
+                panels.Section(
+                    "Limites",
+                    [
+                        panels.Ligne("Délai entre deux questions", f"{_get(row, 'cooldown_seconds', 8)} s"),
+                        panels.Ligne("Par minute", str(_get(row, "per_minute_limit", 6))),
+                        panels.Ligne("Par jour", str(_get(row, "daily_limit", 50))),
+                    ],
+                    aligne=True,
+                ),
+            ]
+        return []
 
-        if missing:
-            panel.add_field(name="À corriger", value="Accordez uniquement les permissions manquantes au rôle SentriX.", inline=False)
-        panel.set_footer(text="SentriX • Configuration • Les modifications sont enregistrées immédiatement")
-        return panel
+
+_BARRE = re.compile(r"[━─—]{6,}")
+
+
+def _sans_barre(texte: str) -> str:
+    """Retire les barres dessinees des embeds : le panneau a de vrais filets."""
+    return _BARRE.sub("", texte).strip()
+
+
+def _sans_doublons(commandes):
+    """Deux couches peuvent ajouter le meme selecteur (la langue, par exemple).
+
+    Dans un embed a champs, le doublon passait inapercu ; dans un conteneur, il
+    s'affiche deux fois. On garde le premier de chaque identite.
+    """
+    vus = set()
+    garde = []
+    for item in commandes:
+        identite = (
+            type(item).__name__,
+            str(getattr(item, "placeholder", "") or getattr(item, "label", "") or ""),
+        )
+        if identite in vus:
+            continue
+        vus.add(identite)
+        garde.append(item)
+    return garde
+
+
+def _embed_de_sections(titre: str, resume: str, sections) -> discord.Embed:
+    """Sections -> embed. Le pont qui laisse les douze couches travailler."""
+    panneau = embeds.brand(titre, resume)
+    for section in sections:
+        rendu = section.rendu()
+        # On retire l'en-tete « ### ◢ TITRE » : il redevient le nom du champ.
+        corps = rendu.split("\n", 1)[1] if "\n" in rendu else ""
+        if corps.strip():
+            panneau.add_field(name=section.titre[:256], value=corps[:1024], inline=False)
+    return panneau
+
+
+def _rangees_de(commandes):
+    """Repartit les composants en rangees valides.
+
+    Un menu deroulant occupe seul sa rangee, un bouton en partage jusqu'a cinq.
+    Sans cette regle, Discord refuse le message entier.
+    """
+    rangees = []
+    lot = []
+
+    def vider():
+        if lot:
+            rangees.append(discord.ui.ActionRow(*lot))
+            lot.clear()
+
+    for item in commandes:
+        if isinstance(item, discord.ui.Button):
+            lot.append(item)
+            if len(lot) == 5:
+                vider()
+        else:
+            vider()
+            rangees.append(discord.ui.ActionRow(item))
+    vider()
+    return rangees
 
 
 class OfficialSetup(commands.Cog, name="SentriXSetup"):
@@ -825,11 +1151,8 @@ class OfficialSetup(commands.Cog, name="SentriXSetup"):
         if not await _can_setup(self.bot, member, guild):
             return await _permission_error(target)
         view = SetupView(self.bot, guild, member.id)
-        view.render()
-        panel = await view.build_embed()
-        if isinstance(target, commands.Context):
-            return await target.send(embed=panel, view=view)
-        return await target.response.send_message(embed=panel, view=view)
+        await view.composer()
+        return await panels.envoyer(target, view)
 
     @commands.command(name="setup")
     async def prefix_setup(self, ctx):
