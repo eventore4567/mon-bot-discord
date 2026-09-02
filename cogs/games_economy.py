@@ -40,7 +40,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import checks, design_system, game_rewards
+from utils import checks, design_system, game_rewards, stats_service
+from utils import sentrix_panels as panels
 
 # ---------------------------------------------------------------------------
 # Registre de tous les mini-jeux connus du bot (cogs/minigames.py + ce fichier), utilisé
@@ -1166,18 +1167,110 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
         self.bot = bot
 
     async def _run_solo(self, ctx: commands.Context, game_name: str):
-        title, cooldown, successes, failure_text = SOLO_FLAVORS[game_name]
+        """Manche solo, composee.
+
+        Le resultat tenait en une phrase et un montant. Il manquait les deux
+        informations qu'on cherche juste apres : ou en est mon solde, et quand
+        puis-je rejouer. Les deux sont maintenant des sections, et le delai est
+        un horodatage Discord plutot qu'un nombre de secondes a convertir.
+        """
+        titre, cooldown, succes, texte_echec = SOLO_FLAVORS[game_name]
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, game_name, cooldown)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title=title, description=err, kind="warning"))
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre=f"SentriX — {titre}",
+                    sous_titre=err,
+                    kind="warning",
+                    sections=[
+                        panels.Section(
+                            "En attendant",
+                            [
+                                panels.Ligne("`+balance`", "Voir votre solde"),
+                                panels.Ligne("`+games`", "Les autres jeux disponibles"),
+                            ],
+                        )
+                    ],
+                    pied="SentriX • Jeux",
+                ),
+            )
+
+        prochaine = int(time.time()) + int(cooldown)
         if random.random() < 0.15:
             await _finish(self.bot, ctx, game_name, sid, "loss", 0)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title=title, description=f"😕 {failure_text}", kind="warning"))
-        amount = random.randint(30, 90)
-        text = game_rewards.secure_pick(successes)
-        reward = await _finish(self.bot, ctx, game_name, sid, "win", amount)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title=title, description=f"✨ {text}" + _reward_line(reward), kind="success"))
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre=f"SentriX — {titre}",
+                    sous_titre=texte_echec,
+                    kind="warning",
+                    sections=[
+                        panels.Section(
+                            "Résultat",
+                            [panels.Ligne("Gain", "**Aucun** pour cette manche")],
+                        ),
+                        panels.Section(
+                            "Prochaine partie",
+                            [panels.Ligne("Disponible", f"<t:{prochaine}:R>")],
+                        ),
+                    ],
+                    pied="SentriX • Jeux",
+                ),
+            )
+
+        montant = random.randint(30, 90)
+        texte = game_rewards.secure_pick(succes)
+        recompense = await _finish(self.bot, ctx, game_name, sid, "win", montant)
+
+        resultat = [panels.Ligne("Issue", "**Réussite**")]
+        if recompense and recompense.success and recompense.amount > 0:
+            resultat.append(
+                panels.Ligne(
+                    "Gagné",
+                    f"**+{stats_service.format_number(recompense.amount)}** 🪙",
+                    indice=f"Référence `{recompense.display_id}`",
+                )
+            )
+        else:
+            # Limite quotidienne atteinte : le dire, plutot que d'afficher une
+            # reussite sans gain et laisser croire a un bug.
+            resultat.append(
+                panels.Ligne(
+                    "Gain",
+                    "**Aucun** — limite quotidienne atteinte",
+                    indice="Les gains repartent demain.",
+                )
+            )
+
+        sections = [
+            panels.Section("Résultat", resultat),
+            panels.Section("Prochaine partie", [panels.Ligne("Disponible", f"<t:{prochaine}:R>")]),
+        ]
+        try:
+            stats = await stats_service.get_member_statistics(self.bot, ctx.guild, ctx.author)
+            sections.insert(
+                1,
+                panels.Section(
+                    "Votre solde",
+                    [panels.Ligne("Total", f"{stats_service.format_number(stats['total_money'])} 🪙")],
+                ),
+            )
+        except Exception:
+            pass
+
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre=f"SentriX — {titre}",
+                sous_titre=texte,
+                kind="economie",
+                vignette=ctx.author.display_avatar.url,
+                sections=sections,
+                pied="SentriX • Jeux",
+            ),
+        )
 
     @commands.hybrid_command(name="adventure", description="Partir à l'aventure pour une récompense (cooldown long).", with_app_command=False)
     async def adventure(self, ctx: commands.Context):
