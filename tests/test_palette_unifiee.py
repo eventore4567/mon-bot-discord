@@ -83,4 +83,6 @@ def test_les_teintes_de_categorie_restent_propres_a_design_system():
 
 def test_la_marque_reste_distincte_des_etats():
     assert config.COLOR_BRAND != config.COLOR_INFO
-    assert config.COLOR_BRAND == 0x5847EB
+    # Valeur de marque unifiee : utils/embeds.py et utils/sentrix_runtime.py en
+    # definissaient chacun une variante (0x7C3AED et 0x8B5CF6). Source unique ici.
+    assert config.COLOR_BRAND == 0x7C3AED

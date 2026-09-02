@@ -13,6 +13,7 @@ from typing import Any, Iterable
 
 import discord
 
+import config as _config
 from config import COLOR_BRAND
 
 SENTRIX_COLOR = int(COLOR_BRAND)
@@ -25,12 +26,15 @@ FOOTER_TEXT = SENTRIX_FOOTER
 FOOTER_ICON: str | None = None
 BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-COLOR_INFO = 0x3B82F6
-COLOR_SUCCESS = 0x22C55E
-COLOR_WARNING = 0xF59E0B
-COLOR_DANGER = 0xEF4444
-COLOR_NEUTRAL = 0x64748B
-COLOR_BRAND_UI = 0x7C3AED
+# Ces six constantes etaient une copie locale de config.COLOR_*, et les deux copies
+# avaient diverge. On lit maintenant la source unique. Les noms restent exportes tels
+# quels : cogs/plain_text_all_extension.py et utils/wide_compact_v6.py les importent.
+COLOR_INFO = int(_config.COLOR_INFO)
+COLOR_SUCCESS = int(_config.COLOR_SUCCESS)
+COLOR_WARNING = int(_config.COLOR_WARNING)
+COLOR_DANGER = int(_config.COLOR_ERROR)
+COLOR_NEUTRAL = int(_config.COLOR_NEUTRAL)
+COLOR_BRAND_UI = int(_config.COLOR_BRAND)
 
 _CUSTOM_EMOJI_RE = re.compile(r"<a?:[A-Za-z0-9_]{2,32}:\d+>")
 _SPACE_RE = re.compile(r"[ \t]{2,}")

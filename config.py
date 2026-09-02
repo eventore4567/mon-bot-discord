@@ -88,12 +88,18 @@ DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "")
 # Les couleurs par CATEGORIE (economie, moderation, tickets...) restent definies
 # dans design_system : ce sont des teintes d'identite, pas des etats.
 # ---------------------------------------------------------------------------
-COLOR_SUCCESS = 0x57F287
-COLOR_ERROR = 0xED4245
-COLOR_WARNING = 0xF97316
+# Palette semantique UNIQUE du bot. Elle vivait a deux endroits : ici, et une copie
+# locale dans utils/embeds.py. Les deux avaient diverge, donc un succes n'avait pas le
+# meme vert selon la commande (0x57F287 contre 0x22C55E). C'est la version de
+# utils/embeds.py qui est retenue : plus lisible sur fond sombre, et deja servie a la
+# majorite des commandes. utils/embeds.py, utils/design_system.py, utils/sentrix_runtime.py
+# et utils/sentrix_visual_cleanup.py lisent tous ces constantes desormais.
+COLOR_SUCCESS = 0x22C55E
+COLOR_ERROR = 0xEF4444
+COLOR_WARNING = 0xF59E0B
 COLOR_INFO = 0x3B82F6
-COLOR_NEUTRAL = 0xB5BAC1
-COLOR_BRAND = 0x5847EB
+COLOR_NEUTRAL = 0x64748B
+COLOR_BRAND = 0x7C3AED
 
 # Valeurs historiques conservées pour compatibilité avec les anciens modules.
 GLOBAL_COOLDOWN_RATE = 3

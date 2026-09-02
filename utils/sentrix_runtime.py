@@ -32,7 +32,10 @@ COLOR_SUCCESS = _config.COLOR_SUCCESS
 COLOR_WARNING = _config.COLOR_WARNING
 COLOR_MODIFICATION = 0xFACC15
 COLOR_DANGER = _config.COLOR_ERROR
-COLOR_SYSTEM = 0x8B5CF6
+# Couleur par defaut quand aucune intention n'est donnee : c'est le role « marque »,
+# pas une intention distincte. Elle valait 0x8B5CF6 et ecrasait config.COLOR_BRAND
+# (0x7C3AED) au demarrage, ce qui faisait deux violets pour la meme chose.
+COLOR_SYSTEM = _config.COLOR_BRAND
 COLOR_NEUTRAL = _config.COLOR_NEUTRAL
 
 _IDENTITY_FIELDS = {"membre", "auteur", "utilisateur", "cible"}

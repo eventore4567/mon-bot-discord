@@ -210,18 +210,27 @@ def create_embed(
             panel.set_thumbnail(url=thumbnail)
         return panel
 
-    embed = discord.Embed(
-        title=title,
-        description=description,
-        colour=discord.Colour(colour),
-        timestamp=datetime.now(timezone.utc),
+    # On delegue au constructeur canonique (utils/embeds._base) au lieu de rebatir un
+    # embed a la main. Sans cela, les commandes passant par design_system sortaient sans
+    # la barre d'identite ━━━ que les autres affichent : deux styles visibles dans le
+    # meme bot. La couleur reste celle demandee par l'appelant — les teintes de
+    # categorie (CATEGORY_STYLES) sont une identite voulue, pas un etat, et _base les
+    # respecte car un `colour=` explicite l'emporte sur le `kind`.
+    from utils import embeds as _embeds
+
+    embed = _embeds._base(
+        title,
+        description,
+        thumbnail=thumbnail,
+        timestamp=True,
+        colour=int(colour),
     )
-    if thumbnail:
-        embed.set_thumbnail(url=thumbnail)
+    # Pied de page personnalise : design_system affiche l'avatar du demandeur, ce que
+    # _base ne fait pas. On garde ce comportement, c'est une information utile.
     if user:
         embed.set_footer(text=footer or f"SentriX • demandé par {user}", icon_url=user.display_avatar.url)
-    else:
-        embed.set_footer(text=footer or "SentriX")
+    elif footer:
+        embed.set_footer(text=footer)
     return embed
 
 
