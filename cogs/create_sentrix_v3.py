@@ -1189,15 +1189,42 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
             event_key=f"invite-delete:{guild.id}:{invite.code}",
         )
 
+    @staticmethod
+    def _changement_d_epinglage(payload: discord.RawMessageUpdateEvent, pinned: bool) -> bool:
+        """L'état épinglé a-t-il RÉELLEMENT changé ?
+
+        Le message en cache tranche : on compare l'avant et l'après. Sans cache,
+        on se rabat sur la forme de l'événement — épingler ne modifie pas le
+        message, donc une mise à jour qui porte un contenu ou une date d'édition
+        est une édition, pas un épinglage.
+        """
+        cache = getattr(payload, "cached_message", None)
+        if cache is not None:
+            return bool(cache.pinned) != pinned
+
+        donnees = payload.data
+        if donnees.get("edited_timestamp"):
+            return False
+        return "content" not in donnees
+
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
-        # Discord inclut "pinned" uniquement lors d'un changement de l'état épinglé.
         if payload.guild_id is None or "pinned" not in payload.data:
             return
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
         pinned = bool(payload.data.get("pinned"))
+
+        # Discord place "pinned" dans TOUTE mise à jour de message, pas seulement
+        # quand l'état épinglé change : l'objet message est renvoyé en entier.
+        # Chaque réédition d'un panneau par SentriX — boutique, choix des rôles,
+        # barre de progression — produisait donc un faux « Message désépinglé ».
+        #
+        # Deux façons de savoir s'il s'agit vraiment d'un épinglage :
+        if not self._changement_d_epinglage(payload, pinned):
+            return
+
         channel = guild.get_channel(payload.channel_id)
         author_id = None
         author_data = payload.data.get("author")
@@ -1210,7 +1237,11 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
             ("Salon", f"<#{payload.channel_id}>", True),
             ("ID du message", f"`{payload.message_id}`", True),
         ]
-        if author_id:
+        # L'auteur devient l'IDENTITE du journal plutôt qu'un champ : sans cela,
+        # le bloc d'identité reprenait le libellé du premier champ et le journal
+        # s'ouvrait sur un titre « Auteur » suivi d'un identifiant nu, sans nom.
+        auteur = guild.get_member(author_id) if author_id else None
+        if author_id and auteur is None:
             fields.insert(0, ("Auteur", f"<@{author_id}>", True))
         panel = embeds.log_embed(
             "Message épinglé" if pinned else "Message désépinglé",
@@ -1231,6 +1262,12 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
             panel,
             view=view,
             event_key=f"message-pin:{guild.id}:{payload.message_id}:{int(pinned)}",
+            identity_name=getattr(auteur, "display_name", None),
+            identity_id=getattr(auteur, "id", None),
+            identity_icon=str(
+                getattr(getattr(auteur, "display_avatar", None), "url", "") or ""
+            )
+            or None,
         )
 
     @commands.Cog.listener()

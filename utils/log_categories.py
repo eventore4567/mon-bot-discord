@@ -39,9 +39,13 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "member_leave": ("members", "📤", "error"),
     "member_remove": ("members", "📤", "error"),
     "member_update": ("members", "👤", "info"),
-    "member_roles": ("roles", "🎭", "info"),
-    "role_add": ("roles", "➕", "info"),
-    "role_remove": ("roles", "➖", "info"),
+    # Un rôle donné ou retiré est un événement de MEMBRE : c'est le membre qui
+    # change, pas le rôle. Ces trois-là partaient dans les logs Rôles, où l'on
+    # cherche l'historique du rôle lui-même (création, permissions, suppression)
+    # — et le noyaient sous les mouvements de chaque membre du serveur.
+    "member_roles": ("members", "🎭", "info"),
+    "role_add": ("members", "➕", "info"),
+    "role_remove": ("members", "➖", "info"),
     "channel_create": ("channels", "📗", "success"),
     "channel_delete": ("channels", "📕", "error"),
     "channel_update": ("channels", "📘", "info"),
