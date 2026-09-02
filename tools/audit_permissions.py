@@ -199,4 +199,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    code = main()
+    # Le bot laisse des taches asyncio vivantes : une sortie normale attendrait
+    # indefiniment. Ce processus n'a plus rien a faire.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
