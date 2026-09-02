@@ -721,13 +721,7 @@ class Verification(commands.Cog, name="Verification"):
                 batch = []
                 if processed % 2000 == 0:
                     try:
-                        await progress_msg.edit(embed=await self._embed(
-                            ctx.guild.id, title="Progression",
-                            description=(
-                                f"⏳ Progression : **{processed}/{ctx.guild.member_count}** membres traités, "
-                                f"**{count}** rôle(s) attribué(s) jusqu'ici..."
-                            ),
-                        ))
+                        await panels.editer(progress_msg, panels.depuis_embed(await self._embed(ctx.guild.id, title='Progression', description=f"⏳ Progression : **{processed}/{ctx.guild.member_count}** membres traités, **{count}** rôle(s) attribué(s) jusqu'ici...")))
                     except discord.HTTPException:
                         pass
         if batch:

@@ -1561,13 +1561,13 @@ class Tickets(commands.Cog):
         msg = await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(embeds.warning(f"Supprimer le panel **{panel['name']}** et ses **{len(types)}** type(s) de ticket associés ?")), view))
         await view.wait()
         if not view.value:
-            return await msg.edit(embed=embeds.error("Suppression annulée."), view=None)
+            return await sx_panels.editer(msg, sx_panels.depuis_embed(embeds.error('Suppression annulée.')))
         type_ids = [t["id"] for t in types]
         for tid in type_ids:
             await self.bot.db.execute("DELETE FROM ticket_form_questions WHERE ticket_type_id = ?", (tid,))
         await self.bot.db.execute("DELETE FROM ticket_types WHERE panel_id = ?", (panel["id"],))
         await self.bot.db.execute("DELETE FROM ticket_panels_v2 WHERE id = ?", (panel["id"],))
-        await msg.edit(embed=embeds.success(f"Panel **{panel['name']}** supprimé."), view=None)
+        await sx_panels.editer(msg, sx_panels.depuis_embed(embeds.success(f"Panel **{panel['name']}** supprimé.")))
 
     @ticketpanel.command(name="list", description="Lister tous les panels du serveur.")
     @checks.is_owner_or_admin_for("tickets")
@@ -1713,10 +1713,10 @@ class Tickets(commands.Cog):
         msg = await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(embeds.warning(f"Supprimer le type **{t['name']}** et son formulaire ?")), view))
         await view.wait()
         if not view.value:
-            return await msg.edit(embed=embeds.error("Suppression annulée."), view=None)
+            return await sx_panels.editer(msg, sx_panels.depuis_embed(embeds.error('Suppression annulée.')))
         await self.bot.db.execute("DELETE FROM ticket_form_questions WHERE ticket_type_id = ?", (t["id"],))
         await self.bot.db.execute("DELETE FROM ticket_types WHERE id = ?", (t["id"],))
-        await msg.edit(embed=embeds.success(f"Type **{t['name']}** supprimé."), view=None)
+        await sx_panels.editer(msg, sx_panels.depuis_embed(embeds.success(f"Type **{t['name']}** supprimé.")))
 
     @tickettype.command(name="list", description="Lister tous les types de tickets du serveur.")
     @checks.is_owner_or_admin_for("tickets")

@@ -433,7 +433,7 @@ class OfficialServerRuntime:
         if pointer and pointer[0] == channel.id:
             try:
                 message = await channel.fetch_message(pointer[1])
-                await message.edit(embed=embed, view=view)
+                await panels.editer(message, panels.avec_composants(panels.depuis_embed(embed), view))
                 return message
             except discord.HTTPException:
                 pass
@@ -958,7 +958,7 @@ class OfficialServerRuntime:
                 "Aucun nettoyage destructif n'est lancé ; vous pouvez corriger le problème puis relancer la commande."
             )
         try:
-            await progress.edit(embed=summary, view=None)
+            await panels.editer(progress, panels.depuis_embed(summary))
         except discord.HTTPException:
             await panels.envoyer(ctx, panels.depuis_embed(summary))
 

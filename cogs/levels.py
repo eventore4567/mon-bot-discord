@@ -1378,7 +1378,7 @@ class Levels(commands.Cog, name="Levels"):
         )
         stats_service.invalidate_rank_cache(self.bot, ctx.guild.id, membre.id)
         try:
-            await msg.edit(embed=embeds.success(f"Niveau de {membre.mention} réparé : niveau **{new_level}**, XP **{stats_service.format_number(new_xp)}** (XP totale conservée)."), view=None)
+            await panels.editer(msg, panels.depuis_embed(embeds.success(f'Niveau de {membre.mention} réparé : niveau **{new_level}**, XP **{stats_service.format_number(new_xp)}** (XP totale conservée).')))
         except discord.HTTPException:
             pass
 

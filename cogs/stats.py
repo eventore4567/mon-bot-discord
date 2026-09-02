@@ -238,7 +238,7 @@ class Stats(commands.Cog, name="Stats"):
         if ctx.interaction:
             await ctx.edit_original_response(embed=e)
         else:
-            await msg.edit(embed=e)
+            await panels.editer(msg, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="changelog", description="Afficher les dernières nouveautés du bot.", with_app_command=False)
     async def changelog(self, ctx: commands.Context):

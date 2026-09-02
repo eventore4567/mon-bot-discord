@@ -262,15 +262,15 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         await asyncio.sleep(random.uniform(2.0, 5.0))
         view = _ReactionSoloView(author_id=ctx.author.id)
         start_time = time.monotonic()
-        await msg.edit(embed=await _embed(self.bot, guild_id, title="Réaction rapide", description="🔴 **MAINTENANT !**"), view=view)
+        await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Réaction rapide', description='🔴 **MAINTENANT !**')), view))
         await view.wait()
         elapsed = view.elapsed if view.elapsed is not None else None
         if elapsed is None:
             await _finish(self.bot, ctx, "reaction", sid, "loss", 0)
-            return await msg.edit(embed=await _embed(self.bot, guild_id, title="Réaction rapide", description="⏱️ Trop lent, personne n'a cliqué à temps."))
+            return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Réaction rapide', description="⏱️ Trop lent, personne n'a cliqué à temps.")))
         amount = 30 if elapsed < 0.6 else 20 if elapsed < 1.2 else 12
         reward = await _finish(self.bot, ctx, "reaction", sid, "win", amount)
-        await msg.edit(embed=await _embed(self.bot, guild_id, title="Réaction rapide", description=f"⚡ Cliqué en **{elapsed:.2f}s** !" + _reward_line(reward), kind="success"))
+        await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Réaction rapide', description=f'⚡ Cliqué en **{elapsed:.2f}s** !' + _reward_line(reward), kind='success')))
 
     @commands.hybrid_command(name="scramble", description="Remettez les lettres d'un mot mélangé dans le bon ordre.", with_app_command=False)
     async def scramble(self, ctx: commands.Context):
@@ -538,13 +538,13 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=f'⚡ {ctx.author.mention} vs {adversaire.mention}\n⏳ Préparez-vous...')))
         await asyncio.sleep(random.uniform(2.0, 6.0))
         view = _ReactionDuelView(p1=ctx.author, p2=adversaire)
-        await msg.edit(embed=await _embed(self.bot, guild_id, title="Duel de réaction", description="🔴 **MAINTENANT !**"), view=view)
+        await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description='🔴 **MAINTENANT !**')), view))
         await view.wait()
         if view.winner is None:
             await game_rewards.reward_game_winner(self.bot, guild_id, ctx.author.id, "reactionduel", 0, sid, result="draw")
-            return await msg.edit(embed=await _embed(self.bot, guild_id, title="Duel de réaction", description="⏱️ Personne n'a cliqué à temps."))
+            return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description="⏱️ Personne n'a cliqué à temps.")))
         reward = await game_rewards.reward_game_winner(self.bot, guild_id, view.winner.id, "reactionduel", 35, sid, result="win")
-        await msg.edit(embed=await _embed(self.bot, guild_id, title="Duel de réaction", description=f"⚡ {view.winner.mention} a été le plus rapide !" + _reward_line(reward), kind="success"))
+        await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=f'⚡ {view.winner.mention} a été le plus rapide !' + _reward_line(reward), kind='success')))
 
     @commands.hybrid_command(name="connect4", description="Jouer au Puissance 4 contre un autre membre.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre à défier")
@@ -1041,13 +1041,13 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description='⚡ Un bouton va apparaître, soyez le/la plus rapide !')))
         await asyncio.sleep(random.uniform(3.0, 8.0))
         view = _CommunityRaceButtonView()
-        await msg.edit(embed=await _embed(self.bot, guild_id, title="Évènement réaction", description="🔴 **CLIQUEZ MAINTENANT !**"), view=view)
+        await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description='🔴 **CLIQUEZ MAINTENANT !**')), view))
         await view.wait()
         await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, "reactionevent")
         if view.winner is None:
-            return await msg.edit(embed=await _embed(self.bot, guild_id, title="Évènement réaction", description="⏱️ Personne n'a cliqué à temps."))
+            return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description="⏱️ Personne n'a cliqué à temps.")))
         reward = await game_rewards.reward_game_winner(self.bot, guild_id, view.winner.id, "reactionevent", 25, sid, result="win")
-        await msg.edit(embed=await _embed(self.bot, guild_id, title="Évènement réaction", description=f"🏆 {view.winner.mention} a été le/la plus rapide !" + _reward_line(reward), kind="success"))
+        await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description=f'🏆 {view.winner.mention} a été le/la plus rapide !' + _reward_line(reward), kind='success')))
 
     @commands.hybrid_command(name="emoji-race", description="Lancer une course à l'emoji : cliquez sur le bon emoji en premier.", with_app_command=False)
     async def emoji_race(self, ctx: commands.Context):

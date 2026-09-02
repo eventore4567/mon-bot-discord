@@ -117,6 +117,49 @@ def main(argv: list[str]) -> int:
                         f"({'=…, '.join(fautifs)}=…) sur un message devenu panneau"
                     )
 
+    # Deuxieme risque, hors des classes de vues : une variable qui recoit le
+    # resultat de panels.envoyer() est un message NE en panneau. L'editer avec
+    # un embed ou un content est refuse par Discord de la meme facon.
+    for nom, source in sources.items():
+        try:
+            arbre = ast.parse(source)
+        except SyntaxError:
+            continue
+        for fn in ast.walk(arbre):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            nes_panneau: set[str] = set()
+            for asg in ast.walk(fn):
+                if not isinstance(asg, ast.Assign):
+                    continue
+                valeur = asg.value
+                if isinstance(valeur, ast.Await):
+                    valeur = valeur.value
+                if not isinstance(valeur, ast.Call):
+                    continue
+                if not ast.unparse(valeur.func).endswith(("panels.envoyer", "envoyer")):
+                    continue
+                for cible in asg.targets:
+                    if isinstance(cible, ast.Name):
+                        nes_panneau.add(cible.id)
+            if not nes_panneau:
+                continue
+            for n in ast.walk(fn):
+                if not isinstance(n, ast.Call) or not isinstance(n.func, ast.Attribute):
+                    continue
+                if n.func.attr != "edit":
+                    continue
+                recepteur = ast.unparse(n.func.value)
+                if recepteur not in nes_panneau:
+                    continue
+                cles = {k.arg for k in n.keywords if k.arg}
+                fautifs = sorted({"embed", "embeds", "content"} & cles)
+                if fautifs:
+                    problemes.append(
+                        f"{nom}:{n.lineno}  {fn.name} edite `{recepteur}` "
+                        f"({'=…, '.join(fautifs)}=…) alors qu'il est ne en panneau"
+                    )
+
     print(f"vues envoyees en panneau : {len(toutes)}")
     if toutes:
         print("   " + ", ".join(sorted(toutes)))

@@ -767,7 +767,7 @@ class EngagementSuite(commands.Cog):
         if row and row["starboard_message_id"]:
             try:
                 star_message = await starboard_channel.fetch_message(int(row["starboard_message_id"]))
-                await star_message.edit(embed=embed)
+                await panels.editer(star_message, panels.depuis_embed(embed))
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 star_message = None
         if star_message is None:

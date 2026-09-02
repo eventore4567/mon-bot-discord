@@ -236,7 +236,7 @@ def install(bot: commands.Bot) -> None:
                         return await interaction.response.send_message("Catégorie invalide.", ephemeral=True)
                 self.render_page()
                 await self.persist_session()
-                await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+                await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
             return callback
 
         def _render_language_page(self) -> None:
@@ -273,7 +273,7 @@ def install(bot: commands.Bot) -> None:
                 self.page = -1
                 self.render_page()
                 await self.persist_session()
-                await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+                await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
 
             async def choose_fr(interaction: discord.Interaction) -> None:
                 await choose(interaction, language_runtime.LANG_FR)
@@ -284,7 +284,7 @@ def install(bot: commands.Bot) -> None:
             async def go_home(interaction: discord.Interaction) -> None:
                 self.page = -1
                 self.render_page()
-                await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+                await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
 
             fr.callback = choose_fr
             en.callback = choose_en
@@ -397,7 +397,7 @@ def install(bot: commands.Bot) -> None:
         self.active_setups[message.id] = view
         self.active_by_guild[guild.id] = (message.id, author.id, str(author))
         await view.persist_session()
-        await message.edit(embed=await view.build_embed(), view=view)
+        await panels.editer(message, panels.avec_composants(panels.depuis_embed(await view.build_embed()), view))
 
         asyncio.create_task(
             _purge_local_slash_for_guild(self.bot, guild),

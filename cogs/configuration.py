@@ -992,7 +992,7 @@ class Configuration(commands.Cog):
         self.active_setups[message.id] = view
         self.active_by_guild[guild.id] = (message.id, author.id, str(author))
         await view.persist_session()
-        await message.edit(embed=await view.build_embed(), view=view)
+        await panels.editer(message, panels.avec_composants(panels.depuis_embed(await view.build_embed()), view))
         return message, view
 
     async def _can_use_setup(self, interaction: discord.Interaction, author_id: int, guild_id: int) -> bool:
@@ -2274,7 +2274,7 @@ class SetupView(discord.ui.View):
         created = await cog.create_log_channels(interaction.guild, interaction.user)
         self.logs_created.extend(created)
         await self.persist_session()
-        await interaction.edit_original_response(embed=await self.build_embed(), view=self)
+        await panels.editer(interaction, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
 
     @staticmethod
     async def _warn_ephemeral(interaction: discord.Interaction, text: str):
@@ -2296,14 +2296,14 @@ class SetupView(discord.ui.View):
         message directement via son salon et son ID dans ce cas précis."""
         embed = await self.build_embed()
         if not interaction.response.is_done():
-            await interaction.response.edit_message(embed=embed, view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
             return
         try:
             channel = self.bot.get_channel(self.channel_id)
             if channel is None:
                 channel = await self.bot.fetch_channel(self.channel_id)
             message = await channel.fetch_message(self.message_id)
-            await message.edit(embed=embed, view=self)
+            await panels.editer(message, panels.avec_composants(panels.depuis_embed(embed), self))
         except discord.HTTPException:
             pass
 
@@ -2351,7 +2351,7 @@ class SetupView(discord.ui.View):
                 self.choices[field] = select.values[0].id
                 self.dirty = True
             await self.persist_session()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
 
     # ---------------------------------------------------------------- PICKER (pages Rôles / Salons)
@@ -2361,7 +2361,7 @@ class SetupView(discord.ui.View):
             if select.values:
                 self.picker_selected = select.values[0]
             self.render_page()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
 
     def _make_picker_role_value_callback(self, field: str, select: discord.ui.RoleSelect):
@@ -2386,7 +2386,7 @@ class SetupView(discord.ui.View):
             self.picker_selected = None
             await self.persist_session()
             self.render_page()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
 
     def _make_exempt_roles_callback(self, select: discord.ui.RoleSelect):
@@ -2402,7 +2402,7 @@ class SetupView(discord.ui.View):
             automod_cog = self.bot.get_cog("Automod")
             if automod_cog:
                 automod_cog.exempt_roles_cache.pop(self.guild_id, None)
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
 
     async def _clear_channels_clicked(self, interaction: discord.Interaction):
@@ -2422,7 +2422,7 @@ class SetupView(discord.ui.View):
             channel = self.bot.get_channel(self.channel_id)
             if channel:
                 message = await channel.fetch_message(self.message_id)
-                await message.edit(embed=await self.build_embed(), view=self)
+                await panels.editer(message, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         except discord.HTTPException:
             pass
 
@@ -2434,7 +2434,7 @@ class SetupView(discord.ui.View):
                 await self.bot.db.add_bot_manager(self.guild_id, user.id, self.author_id)
                 self.managers[user.id] = user.display_name
             self.render_page()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
 
     def _make_manager_remove_callback(self, select: discord.ui.Select):
@@ -2447,7 +2447,7 @@ class SetupView(discord.ui.View):
                 if self.manager_being_edited == user_id:
                     self.manager_being_edited = None
             self.render_page()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
 
     def _make_manager_permedit_callback(self, select: discord.ui.Select):
@@ -2459,7 +2459,7 @@ class SetupView(discord.ui.View):
                     cats = await self.bot.db.get_manager_categories(self.guild_id, user_id)
                     self.manager_categories_cache[user_id] = cats or ["complete"]
             self.render_page()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
 
     def _make_manager_categories_callback(self, select: discord.ui.Select):
@@ -2482,7 +2482,7 @@ class SetupView(discord.ui.View):
             categories = list(select.values)
             await self.bot.db.set_manager_categories(self.guild_id, user_id, categories, interaction.user.id)
             self.manager_categories_cache[user_id] = categories or ["complete"]
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
 
     def _make_security_preset_callback(self, level: str):
@@ -2497,7 +2497,7 @@ class SetupView(discord.ui.View):
             self.security_touched = True
             await self.bot.db.log_setup_history(self.guild_id, interaction.user.id, "Sécurité", "préréglage appliqué", new_value=level)
             self.render_page()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
 
     def _make_security_select_callback(self, select: discord.ui.Select):
@@ -2512,7 +2512,7 @@ class SetupView(discord.ui.View):
                 automod_cog.automod_cache.pop(self.guild_id, None)
             self.security_touched = True
             self.render_page()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
 
     async def _open_text_modal(self, interaction: discord.Interaction):
@@ -2525,26 +2525,26 @@ class SetupView(discord.ui.View):
             self.page = -1
             self.render_page()
             await self.persist_session()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         elif action == "summary":
             # Navigue vers la vraie page Résumé (comme les autres catégories) — contrairement
             # à "preview" qui affiche juste un aperçu éphémère sans quitter la page actuelle.
             self.page = next(i for i, s in enumerate(SETUP_STEPS) if s["key"] == "summary")
             self.render_page()
             await self.persist_session()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         elif action == "history":
             await self._show_history(interaction)
         elif action == "prev":
             self.page = max(0, self.page - 1)
             self.render_page()
             await self.persist_session()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         elif action == "next":
             self.page = min(len(SETUP_STEPS) - 1, self.page + 1)
             self.render_page()
             await self.persist_session()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         elif action == "save":
             await self._save_pending(interaction)
         elif action == "preview":
@@ -2574,7 +2574,7 @@ class SetupView(discord.ui.View):
     async def _save_pending(self, interaction: discord.Interaction):
         if not self.choices:
             self.dirty = False
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
             return
         for field, value in self.choices.items():
             await self.bot.db.set_guild_config(self.guild_id, field, value)
@@ -2586,7 +2586,7 @@ class SetupView(discord.ui.View):
             self.bot.prefix_cache[self.guild_id] = self.choices["prefix"]
         self.dirty = False
         await self.persist_session()
-        await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
 
     async def _show_preview(self, interaction: discord.Interaction):
         e = await self._build_summary_embed()
@@ -2614,7 +2614,7 @@ class SetupView(discord.ui.View):
             channel = self.bot.get_channel(self.channel_id)
             if channel:
                 message = await channel.fetch_message(self.message_id)
-                await message.edit(embed=embeds.neutral("○ Configuration annulée", "Rien de ce qui était déjà enregistré n'a été supprimé.", color=SETUP_COLOR_DANGER), view=self)
+                await panels.editer(message, panels.avec_composants(panels.depuis_embed(embeds.neutral('○ Configuration annulée', "Rien de ce qui était déjà enregistré n'a été supprimé.", color=SETUP_COLOR_DANGER)), self))
         except discord.HTTPException:
             pass
 
@@ -2624,7 +2624,7 @@ class SetupView(discord.ui.View):
         self.page = -1
         self.render_page()
         await self.persist_session()
-        await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
 
     async def _finish(self, interaction: discord.Interaction):
         if self.choices:
@@ -2663,7 +2663,7 @@ class SetupView(discord.ui.View):
             child.disabled = True
         final_embed = embeds.neutral("● Configuration enregistrée !", "\n".join(lines), color=SETUP_COLOR_SUCCESS)
         final_embed.add_field(name="🔎 Vérifications finales", value="\n".join(checks_lines)[:1024], inline=False)
-        await interaction.response.edit_message(embed=final_embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(final_embed), self))
         self.stop()
 
 

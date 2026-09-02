@@ -278,7 +278,7 @@ def install(bot: commands.Bot) -> None:
             # On réutilise toujours le message le plus récent, quel que soit son titre actuel.
             message = candidates[0]
             try:
-                await message.edit(embed=server_choice_roles.build_embed(), view=view)
+                await panels.editer(message, panels.avec_composants(panels.depuis_embed(server_choice_roles.build_embed()), view))
             except discord.HTTPException:
                 pass
             await _delete_messages(

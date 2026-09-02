@@ -249,12 +249,8 @@ class Owner(commands.Cog, name="Owner"):
         try:
             synced = await self.bot.tree.sync()
         except discord.HTTPException as e:
-            return await msg.edit(embed=await self._embed(guild_id, title="Échec de la synchronisation", description=f"Discord a refusé la synchronisation : `{e}`", kind="danger"))
-        await msg.edit(embed=await self._embed(
-            guild_id, title="Synchronisation globale terminée",
-            description=f"**{len(synced)}** commande(s) slash synchronisée(s) globalement.\n\n⏳ Propagation possible jusqu'à **1 heure** sur tous les serveurs — utilisez `+syncguild` sur un serveur précis pour un effet quasi immédiat.",
-            kind="success",
-        ))
+            return await panels.editer(msg, panels.depuis_embed(await self._embed(guild_id, title='Échec de la synchronisation', description=f'Discord a refusé la synchronisation : `{e}`', kind='danger')))
+        await panels.editer(msg, panels.depuis_embed(await self._embed(guild_id, title='Synchronisation globale terminée', description=f"**{len(synced)}** commande(s) slash synchronisée(s) globalement.\n\n⏳ Propagation possible jusqu'à **1 heure** sur tous les serveurs — utilisez `+syncguild` sur un serveur précis pour un effet quasi immédiat.", kind='success')))
 
     @commands.hybrid_command(
         name="syncguild",

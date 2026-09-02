@@ -1191,7 +1191,7 @@ class Ai(commands.Cog, name="Ai"):
             )
 
         if msg:
-            await msg.edit(embed=e)
+            await panels.editer(msg, panels.depuis_embed(e))
         else:
             await panels.envoyer(ctx, panels.depuis_embed(e))
 

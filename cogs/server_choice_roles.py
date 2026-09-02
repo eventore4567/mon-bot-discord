@@ -245,7 +245,7 @@ async def publish_or_refresh(
     if message is None:
         message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(build_embed()), view))
     else:
-        await message.edit(embed=build_embed(), view=view)
+        await panels.editer(message, panels.avec_composants(panels.depuis_embed(build_embed()), view))
     return message
 
 

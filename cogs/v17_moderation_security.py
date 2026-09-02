@@ -145,18 +145,13 @@ def install_danger_confirmations(bot: commands.Bot) -> None:
             await view.wait()
             if view.value is not True:
                 try:
-                    await message.edit(embed=embeds.info("Action annulée."), view=None)
+                    await panels.editer(message, panels.depuis_embed(embeds.info('Action annulée.')))
                 except discord.HTTPException:
                     pass
                 return None
             snapshot_id = await create_snapshot(bot, ctx.guild, f"auto-before-{__name}", ctx.author.id)
             try:
-                await message.edit(
-                    embed=embeds.success(
-                        f"Confirmation reçue. Snapshot automatique : **#{snapshot_id}**." if snapshot_id else "Confirmation reçue."
-                    ),
-                    view=None,
-                )
+                await panels.editer(message, panels.depuis_embed(embeds.success(f'Confirmation reçue. Snapshot automatique : **#{snapshot_id}**.' if snapshot_id else 'Confirmation reçue.')))
             except discord.HTTPException:
                 pass
             return await __original(*args, **kwargs)
@@ -596,7 +591,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
         msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.warning('La restauration est **additive** : elle recrée ce qui manque sans supprimer les éléments actuels. Continuer ?')), view))
         await view.wait()
         if view.value is not True:
-            return await msg.edit(embed=embeds.info("Restauration annulée."), view=None)
+            return await panels.editer(msg, panels.depuis_embed(embeds.info('Restauration annulée.')))
         payload = json.loads(row["data_json"])
         created_roles = 0
         created_channels = 0
@@ -663,7 +658,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
                     created_channels += 1
             except discord.HTTPException:
                 continue
-        await msg.edit(embed=embeds.success(f"Snapshot restauré : **{created_roles} rôle(s)** et **{created_channels} salon(s)/catégorie(s)** recréés."), view=None)
+        await panels.editer(msg, panels.depuis_embed(embeds.success(f'Snapshot restauré : **{created_roles} rôle(s)** et **{created_channels} salon(s)/catégorie(s)** recréés.')))
 
     @commands.hybrid_command(name="smartlockdown", description="Verrouillage intelligent réversible du serveur.", with_app_command=False)
     @checks.is_owner_or_admin_for("securite")

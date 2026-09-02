@@ -407,7 +407,7 @@ async def _publish_panel(
     if old_message_id:
         try:
             message = await channel.fetch_message(int(old_message_id))
-            await message.edit(embed=cog.build_panel_embed(panel), view=view)
+            await panels.editer(message, panels.avec_composants(panels.depuis_embed(cog.build_panel_embed(panel)), view))
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             message = None
     if message is None:

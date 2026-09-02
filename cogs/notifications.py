@@ -269,12 +269,12 @@ class Notifications(commands.Cog, name="Notifications"):
         try:
             latest = await _extract_latest(source_url)
         except asyncio.TimeoutError:
-            return await status.edit(embed=embeds.error("La plateforme met trop de temps à répondre. Réessayez dans quelques instants."))
+            return await panels.editer(status, panels.depuis_embed(embeds.error('La plateforme met trop de temps à répondre. Réessayez dans quelques instants.')))
         except Exception:
             logger.warning("Impossible de configurer la source sociale %s", source_url, exc_info=True)
-            return await status.edit(embed=embeds.error("Impossible de lire cette chaîne. Vérifiez que le lien est public et complet."))
+            return await panels.editer(status, panels.depuis_embed(embeds.error('Impossible de lire cette chaîne. Vérifiez que le lien est public et complet.')))
         if not latest or not latest.get("id"):
-            return await status.edit(embed=embeds.error("Aucune publication publique n'a été trouvée sur cette chaîne."))
+            return await panels.editer(status, panels.depuis_embed(embeds.error("Aucune publication publique n'a été trouvée sur cette chaîne.")))
 
         latest_id = str(latest["id"])
         latest_url = _item_url(platform, source_url, latest)
@@ -293,13 +293,7 @@ class Notifications(commands.Cog, name="Notifications"):
                 image_url, latest_id, latest_url, int(time.time()), int(time.time()),
             ),
         )
-        await status.edit(embed=embeds.success(
-            f"Surveillance **{platform}** activée.\n"
-            f"**Rôle pingé :** {role.mention}\n"
-            f"**Salon des notifications :** {ctx.channel.mention}\n"
-            f"**Vérification :** toutes les 5 minutes\n"
-            + ("**Image personnalisée :** activée" if image_url else "**Image personnalisée :** automatique ou aucune")
-        ))
+        await panels.editer(status, panels.depuis_embed(embeds.success(f'Surveillance **{platform}** activée.\n**Rôle pingé :** {role.mention}\n**Salon des notifications :** {ctx.channel.mention}\n**Vérification :** toutes les 5 minutes\n' + ('**Image personnalisée :** activée' if image_url else '**Image personnalisée :** automatique ou aucune'))))
 
     @commands.hybrid_command(name="notifs-list", description="Afficher les chaînes sociales surveillées.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")

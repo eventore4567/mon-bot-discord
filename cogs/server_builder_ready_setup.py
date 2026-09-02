@@ -143,7 +143,7 @@ async def _ensure_role_panels(bot: commands.Bot, guild: discord.Guild, channel: 
     if message is None:
         message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view))
     else:
-        await message.edit(embed=embed, view=view)
+        await panels.editer(message, panels.avec_composants(panels.depuis_embed(embed), view))
 
     await cog._save_panel(message, creator_id, role_ids)
     bot.add_view(rolepanel_notifications.NotificationRoleView(guild, role_ids), message_id=message.id)
@@ -198,7 +198,7 @@ async def _ensure_shop(bot: commands.Bot, guild: discord.Guild, channel: discord
             (guild.id, channel.id, message.id, creator_id, int(time.time())),
         )
     else:
-        await message.edit(embed=embed, view=ShopRoleView(chunks))
+        await panels.editer(message, panels.avec_composants(panels.depuis_embed(embed), ShopRoleView(chunks)))
     return ", ".join(configured) if configured else "aucun rôle VIP/Premium trouvé"
 
 
@@ -265,7 +265,7 @@ async def _ensure_announcements(bot: commands.Bot, builder_cog, guild: discord.G
     if message is None:
         message = await panels.envoyer(channel, panels.depuis_embed(tracker.build_embed(guild)))
     else:
-        await message.edit(embed=tracker.build_embed(guild))
+        await panels.editer(message, panels.depuis_embed(tracker.build_embed(guild)))
     await tracker._save_panel(guild.id, channel.id, message.id, creator_id)
     return "présentation + suivi automatique toutes les minutes"
 

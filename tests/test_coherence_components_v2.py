@@ -39,6 +39,24 @@ def test_aucune_edition_incompatible_sur_un_panneau():
     assert resultat.returncode == 0, resultat.stdout + resultat.stderr
 
 
+def test_un_message_ne_en_panneau_n_est_jamais_edite_en_embed():
+    """Deuxieme forme du meme piege, hors des classes de vues.
+
+    Un message de progression garde dans une variable (`msg = await
+    panels.envoyer(...)`) est ne en panneau : l'editer ensuite avec un embed
+    est refuse par Discord. C'est ce qui cassait +roleall, +iconsetup et la
+    restauration de sauvegarde apres leur premier ecran.
+    """
+    resultat = subprocess.run(
+        [sys.executable, str(RACINE / "tools" / "coherence_v2.py"), *_fichiers()],
+        capture_output=True,
+        text=True,
+        cwd=str(RACINE),
+        env={**os.environ, "DISCORD_TOKEN": "x"},
+    )
+    assert "est ne en panneau" not in resultat.stdout, resultat.stdout
+
+
 def test_editer_refuse_ce_que_discord_refuse():
     from utils import sentrix_panels as panels
     import asyncio

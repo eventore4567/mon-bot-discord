@@ -643,7 +643,7 @@ def _install_manox_command(bot: commands.Bot) -> None:
                 )
 
         try:
-            await progress.edit(content=None, embed=panel, view=None)
+            await panels.editer(progress, panels.depuis_embed(panel))
         except (discord.NotFound, discord.Forbidden, discord.HTTPException, TypeError):
             await panels.envoyer(ctx, panels.depuis_embed(panel))
 

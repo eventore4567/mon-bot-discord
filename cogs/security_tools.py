@@ -444,7 +444,7 @@ class Security(commands.Cog):
         msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(preview), view))
         await view.wait()
         if not view.value:
-            return await msg.edit(embed=embeds.error("Restauration annulée."), view=None)
+            return await panels.editer(msg, panels.depuis_embed(embeds.error('Restauration annulée.')))
 
         guild = ctx.guild
         created_roles = created_categories = created_channels = 0
@@ -491,7 +491,7 @@ class Security(commands.Cog):
             f"● Restauration terminée : **{created_roles}** rôle(s), **{created_categories}** catégorie(s), "
             f"**{created_channels}** salon(s) recréé(s) (les éléments déjà existants ont été ignorés)."
         )
-        await msg.edit(embed=result, view=None)
+        await panels.editer(msg, panels.depuis_embed(result))
         await self.log_action(ctx.guild, embeds.log_entry(
             "💾 Restauration de sauvegarde serveur", 0x5865F2, acteur=ctx.author,
             extra={"📦 Sauvegarde": f"#{backup_id} « {row['label']} »", "Créés": f"{created_roles} rôles, {created_categories} catégories, {created_channels} salons"},

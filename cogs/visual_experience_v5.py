@@ -433,16 +433,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
                 getattr(ctx.guild, "id", "?"),
                 getattr(member, "id", "?"),
             )
-            await message.edit(
-                content=None,
-                embed=_base(
-                    self.bot,
-                    "Envoi impossible",
-                    'Discord a refusé l’image. Vérifiez **Joindre des fichiers** et **Intégrer des liens** pour le rôle du bot. `[S1]`',
-                    0xED4245,
-                ),
-                attachments=[],
-            )
+            await panels.editer(message, panels.depuis_embed(_base(self.bot, 'Envoi impossible', 'Discord a refusé l’image. Vérifiez **Joindre des fichiers** et **Intégrer des liens** pour le rôle du bot. `[S1]`', 15548997)))
 
     async def _render_profile(self, guild: discord.Guild, member: discord.Member):
         try:
@@ -499,7 +490,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
         ]
         if failed:
             lines.append("À réessayer : " + ", ".join(failed))
-        await progress.edit(embed=_base(self.bot, "Icônes installées", "\n".join(lines), 0x2FBF71 if not failed else 0xF0B232))
+        await panels.editer(progress, panels.depuis_embed(_base(self.bot, 'Icônes installées', '\n'.join(lines), 3129201 if not failed else 15774258)))
 
 
 async def setup(bot: commands.Bot):

@@ -1106,9 +1106,9 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
         msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.warning(f'Supprimer le modèle **{nom}** ? Cette action est irréversible.')), view))
         await view.wait()
         if not view.value:
-            return await msg.edit(embed=embeds.error("Suppression annulée."), view=None)
+            return await panels.editer(msg, panels.depuis_embed(embeds.error('Suppression annulée.')))
         await self.delete_template(row["id"])
-        await msg.edit(embed=embeds.success(f"Modèle **{nom}** supprimé."), view=None)
+        await panels.editer(msg, panels.depuis_embed(embeds.success(f'Modèle **{nom}** supprimé.')))
 
     @embed_group.command(name="duplicate", description="Dupliquer un modèle d'embed existant.")
     @app_commands.describe(nom="Le nom du modèle à dupliquer", nouveau_nom="Le nom du modèle dupliqué")
