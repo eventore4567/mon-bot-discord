@@ -20,9 +20,12 @@ import zlib
 from typing import Any
 
 import discord
+
+import config as _config
 from discord.ext import commands
 
 from utils import log_service
+from utils import sentrix_panels as sx_panels
 
 logger = logging.getLogger("bot.premium-ui-v81")
 RUNTIME_MARKER = "Premium UI V81"
@@ -207,7 +210,21 @@ class PremiumEmbedView(discord.ui.LayoutView):
         title_override: str | None = None,
     ):
         super().__init__(timeout=getattr(legacy_view, "timeout", 300) if legacy_view is not None else 300)
-        container = discord.ui.Container(accent_colour=ACCENT)
+
+        # Intention deduite de l'embed d'origine : le panneau premium affichait
+        # toujours le meme accent, quel que soit le contenu converti.
+        self.kind = _intention_depuis(embed)
+        container = discord.ui.Container(
+            accent_colour=discord.Colour(sx_panels.INTENTIONS[self.kind][0])
+        )
+
+        # Banniere pleine largeur en tete. Le panneau premium n'en avait aucune :
+        # +profile, +serverinfo et +leaderboard passaient par lui et s'ouvraient
+        # donc sur un titre nu.
+        galerie = discord.ui.MediaGallery()
+        galerie.add_item(media=f"attachment://{sx_panels.nom_banniere(self.kind)}")
+        container.add_item(galerie)
+
         title = _safe_text(title_override or embed.title or "SentriX")
         description = _safe_text(embed.description)
         thumbnail = _plain(getattr(embed.thumbnail, "url", None))
@@ -220,7 +237,8 @@ class PremiumEmbedView(discord.ui.LayoutView):
             container.add_item(
                 discord.ui.Section(
                     discord.ui.TextDisplay(header),
-                    accessory=discord.ui.Thumbnail(thumbnail, description="SentriX"),
+                    # Pas de description= : Discord affiche sinon un badge « ALT » sur la vignette.
+                    accessory=discord.ui.Thumbnail(thumbnail),
                 )
             )
         else:
@@ -243,6 +261,26 @@ class PremiumEmbedView(discord.ui.LayoutView):
         _append_legacy_buttons(container, legacy_view)
         self.add_item(container)
 
+    def fichiers(self) -> list[discord.File]:
+        """Meme contrat que sentrix_panels.Panneau : la banniere part avec la vue."""
+        fichier = sx_panels.fichier_banniere(getattr(self, "kind", "brand"))
+        return [fichier] if fichier is not None else []
+
+
+def _intention_depuis(embed: discord.Embed) -> str:
+    """Intention d'un embed converti, d'apres sa couleur puis son texte."""
+    valeur = getattr(getattr(embed, "colour", None), "value", 0) or 0
+    correspondances = {
+        int(_config.COLOR_SUCCESS): "success",
+        int(_config.COLOR_ERROR): "danger",
+        int(_config.COLOR_WARNING): "warning",
+        int(_config.COLOR_INFO): "info",
+        int(_config.COLOR_BRAND): "brand",
+    }
+    if valeur in correspondances:
+        return correspondances[valeur]
+    return "brand"
+
 
 class PremiumLogView(discord.ui.LayoutView):
     def __init__(
@@ -257,7 +295,8 @@ class PremiumLogView(discord.ui.LayoutView):
 
         if banner_filename:
             gallery = discord.ui.MediaGallery()
-            gallery.add_item(media=f"attachment://{banner_filename}", description="Bannière SentriX")
+            # Pas de description= : elle ferait apparaitre un badge « ALT » sur la banniere.
+            gallery.add_item(media=f"attachment://{banner_filename}")
             container.add_item(gallery)
 
         title = _safe_text(embed.title or "Journal SentriX")
@@ -266,7 +305,8 @@ class PremiumLogView(discord.ui.LayoutView):
             container.add_item(
                 discord.ui.Section(
                     discord.ui.TextDisplay(f"# {title}"),
-                    accessory=discord.ui.Thumbnail(thumbnail, description="SentriX"),
+                    # Pas de description= : Discord affiche sinon un badge « ALT » sur la vignette.
+                    accessory=discord.ui.Thumbnail(thumbnail),
                 )
             )
         else:
@@ -425,7 +465,9 @@ async def _send_premium_from_target(ctx: commands.Context, target: commands.Comm
     if embed is None:
         return
     panel = PremiumEmbedView(embed, compact=compact, legacy_view=legacy_view, title_override=title)
-    await original_send(view=panel, allowed_mentions=discord.AllowedMentions.none())
+    await original_send(
+        view=panel, files=panel.fichiers(), allowed_mentions=discord.AllowedMentions.none()
+    )
 
 
 def _install_bridge(bot: commands.Bot, name: str, target_name: str, description: str, *, compact: bool = False) -> None:
@@ -472,7 +514,9 @@ def _install_profile(bot: commands.Bot) -> None:
         if embed is None:
             return
         panel = PremiumEmbedView(embed, compact=True, legacy_view=legacy_view)
-        await original_send(view=panel, allowed_mentions=discord.AllowedMentions.none())
+        await original_send(
+            view=panel, files=panel.fichiers(), allowed_mentions=discord.AllowedMentions.none()
+        )
 
     profile_v81._sentrix_profile_v81 = True
     profile_v81._sentrix_previous = current

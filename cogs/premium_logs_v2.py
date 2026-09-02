@@ -258,7 +258,7 @@ class PremiumLogLayout(discord.ui.LayoutView):
             container.add_item(
                 discord.ui.Section(
                     header,
-                    accessory=discord.ui.Thumbnail(thumbnail, description="Identité du log SentriX"),
+                    accessory=discord.ui.Thumbnail(thumbnail),
                 )
             )
         else:
@@ -276,7 +276,7 @@ class PremiumLogLayout(discord.ui.LayoutView):
         image_url = getattr(embed.image, "url", None)
         if image_url:
             gallery = discord.ui.MediaGallery()
-            gallery.add_item(media=str(image_url), description="Aperçu du journal")
+            gallery.add_item(media=str(image_url))
             container.add_item(discord.ui.Separator())
             container.add_item(gallery)
 

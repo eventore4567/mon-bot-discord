@@ -34,6 +34,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from utils import embeds, checks, helpers, design_system
+from utils import sentrix_panels as sx_panels
 from database.db import now
 
 # Logs techniques dédiés aux tickets (diagnostic de "L'application ne répond plus" :
@@ -1422,12 +1423,39 @@ class Tickets(commands.Cog):
                 available.append((p, types))
 
         if not available:
-            return await ctx.send(
-                embed=embeds.warning(
-                    "Aucun panel de ticket n'est configuré (ou activé) sur ce serveur pour le moment.\n"
-                    "Un membre du staff peut en créer un avec `+ticketsetup` ou `+ticketpanel create`."
+            # Impasse frequente : le membre veut de l'aide et tombe sur un refus.
+            # Le panneau dit qui peut debloquer la situation et avec quoi.
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.Panneau(
+                    titre="SentriX — Tickets",
+                    sous_titre="Aucun panel de ticket n'est encore configuré sur ce serveur.",
+                    kind="warning",
+                    sections=[
+                        sx_panels.Section(
+                            "Ce que cela veut dire",
+                            [
+                                sx_panels.Ligne(
+                                    "Pour vous",
+                                    "Il n'y a pas encore de canal de support à ouvrir",
+                                ),
+                                sx_panels.Ligne(
+                                    "Ce n'est pas une erreur",
+                                    "Rien n'a échoué : la fonctionnalité n'est simplement pas activée",
+                                ),
+                            ],
+                        ),
+                        sx_panels.Section(
+                            "Pour le staff",
+                            [
+                                sx_panels.Ligne("`+ticketsetup`", "Configuration guidée, la plus simple"),
+                                sx_panels.Ligne("`+ticketpanel create`", "Création manuelle d'un panel"),
+                            ],
+                        ),
+                    ],
+                    pied="SentriX • Tickets",
                 ),
-                ephemeral=True if ctx.interaction else False,
+                ephemere=bool(ctx.interaction),
             )
 
         if len(available) == 1:

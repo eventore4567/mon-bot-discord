@@ -156,7 +156,7 @@ class PremiumEmbedViewV82(discord.ui.LayoutView):
             container.add_item(
                 discord.ui.Section(
                     discord.ui.TextDisplay(header),
-                    accessory=discord.ui.Thumbnail(thumbnail, description="Profil"),
+                    accessory=discord.ui.Thumbnail(thumbnail),
                 )
             )
         else:
@@ -230,7 +230,7 @@ class PremiumLogViewV82(discord.ui.LayoutView):
 
         # URL publique GitHub : visible même sans permission Attach Files dans le salon.
         gallery = discord.ui.MediaGallery()
-        gallery.add_item(media=banner_url, description="Bannière SentriX")
+        gallery.add_item(media=banner_url)
         container.add_item(gallery)
 
         title = _safe_text(embed.title or "Journal SentriX")
@@ -239,7 +239,7 @@ class PremiumLogViewV82(discord.ui.LayoutView):
             container.add_item(
                 discord.ui.Section(
                     discord.ui.TextDisplay(f"## {title}"),
-                    accessory=discord.ui.Thumbnail(thumbnail, description="SentriX"),
+                    accessory=discord.ui.Thumbnail(thumbnail),
                 )
             )
         else:

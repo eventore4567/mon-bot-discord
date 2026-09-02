@@ -123,7 +123,7 @@ def _short_state(state: str) -> str:
 
 def _thumbnail(bot: commands.Bot) -> discord.ui.Thumbnail:
     # display_avatar possède toujours une URL, même si le bot utilise l'avatar Discord par défaut.
-    return discord.ui.Thumbnail(str(bot.user.display_avatar.url), description="SentriX")
+    return discord.ui.Thumbnail(str(bot.user.display_avatar.url))
 
 
 def _summary_from_embed(panel: discord.Embed) -> str:

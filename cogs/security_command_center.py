@@ -17,6 +17,7 @@ from discord.ext import commands
 import config
 from database.db import PRIMARY_CREATOR_ID
 from utils import checks, embeds
+from utils import sentrix_panels as panels
 from . import language_runtime
 from .security_runtime_hardening import apply_recommended_security
 
@@ -183,6 +184,107 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if automod is not None:
             automod.automod_cache.pop(guild_id, None)
 
+    async def _status_panneau(self, ctx: commands.Context) -> panels.Panneau:
+        """Tableau de bord sécurité composé.
+
+        L'embed listait les onze modules en un bloc, actifs et inactifs mêlés :
+        il fallait relire toute la liste pour savoir ce qui manquait. Les deux
+        états sont maintenant séparés, et la couleur du panneau suit la
+        couverture réelle plutôt qu'une teinte fixe.
+        """
+        lang = await self._lang(ctx)
+        anglais = lang == language_runtime.LANG_EN
+        conf = await self._conf(ctx.guild.id)
+        try:
+            rows = await self.bot.db.automod_stats_since(ctx.guild.id, int(time.time()) - 86400)
+            stats = {str(row["filter_name"]): int(row["c"]) for row in rows}
+        except Exception:
+            stats = {}
+
+        actifs: list[panels.Ligne] = []
+        inactifs: list[str] = []
+        for cle, libelles in SECURITY_FILTERS.items():
+            libelle = libelles[1] if anglais else libelles[0]
+            if conf.get(cle, 0):
+                touches = stats.get(cle, 0)
+                actifs.append(
+                    panels.Ligne(
+                        libelle,
+                        f"{touches} interception{'s' if touches > 1 else ''} / 24 h"
+                        if touches
+                        else "Aucune interception",
+                    )
+                )
+            else:
+                inactifs.append(libelle)
+
+        total = len(SECURITY_FILTERS)
+        couverture = len(actifs)
+        # La couleur dit l'etat avant meme la lecture : c'est un tableau de bord.
+        intention = "success" if couverture >= total - 2 else "warning" if couverture >= total // 2 else "danger"
+
+        sections = [
+            panels.Section(
+                ("Active protections" if anglais else "Protections actives")
+                + f" ({couverture}/{total})",
+                actifs or [panels.Ligne("Aucune" if not anglais else "None", "—")],
+            )
+        ]
+        if inactifs:
+            sections.append(
+                panels.Section(
+                    ("Disabled" if anglais else "Protections désactivées") + f" ({len(inactifs)})",
+                    [
+                        panels.Ligne(
+                            "Modules" if anglais else "Modules",
+                            " · ".join(inactifs),
+                            indice="`+security filter <nom> on` pour en activer un.",
+                        )
+                    ],
+                )
+            )
+        sections.append(
+            panels.Section(
+                "Security level" if anglais else "Niveau de sécurité",
+                [
+                    panels.Ligne(
+                        "Niveau" if not anglais else "Level",
+                        f"`{await self._level(ctx.guild.id)}`",
+                    ),
+                    panels.Ligne(
+                        "Actions AutoMod" if not anglais else "AutoMod actions",
+                        f"{sum(stats.values())} / 24 h",
+                    ),
+                ],
+            )
+        )
+        sections.append(
+            panels.Section(
+                "Commandes" if not anglais else "Commands",
+                [
+                    panels.Ligne("`+security scan`", "Analyser le serveur" if not anglais else "Scan the server"),
+                    panels.Ligne("`+security repair`", "Appliquer les protections recommandées" if not anglais else "Apply recommended protections"),
+                    panels.Ligne("`+security panic`", "Verrouiller le serveur en urgence" if not anglais else "Emergency lockdown"),
+                    panels.Ligne("`+security history`", "Voir les interceptions" if not anglais else "See interceptions"),
+                ],
+            )
+        )
+
+        resume = (
+            f"**{couverture}/{total}** protection modules enabled · "
+            f"**{sum(stats.values())}** AutoMod actions in the last 24 hours."
+            if anglais
+            else f"**{couverture}/{total}** modules de protection actifs · "
+                 f"**{sum(stats.values())}** interceptions AutoMod sur 24 h."
+        )
+        return panels.Panneau(
+            titre="SentriX — Sécurité" if not anglais else "SentriX — Security",
+            sous_titre=resume,
+            kind=intention,
+            sections=sections,
+            pied="SentriX • Sécurité",
+        )
+
     async def _status_embed(self, ctx: commands.Context) -> discord.Embed:
         lang = await self._lang(ctx)
         conf = await self._conf(ctx.guild.id)
@@ -245,23 +347,13 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
     @commands.guild_only()
     async def security(self, ctx: commands.Context):
         """Centre de contrôle de toute la sécurité du serveur."""
-        embed = await self._status_embed(ctx)
-        embed.add_field(
-            name=await self._t(ctx, "Commandes principales", "Main commands"),
-            value=(
-                "`+security status` · `level` · `filter` · `scan` · `repair`\n"
-                "`+security whitelist` · `blacklist` · `history` · `panic`\n"
-                "`+security quarantine` · `roles` · `permissions` · `backup`"
-            ),
-            inline=False,
-        )
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, await self._status_panneau(ctx))
 
     @security.command(name="status", aliases=["etat", "state", "overview"])
     @checks.is_owner_or_admin_for("securite")
     async def security_status(self, ctx: commands.Context):
         """Affiche l'état complet des protections."""
-        await ctx.send(embed=await self._status_embed(ctx))
+        await panels.envoyer(ctx, await self._status_panneau(ctx))
 
     @security.command(name="filter", aliases=["module", "protection", "filtre"])
     @checks.is_owner_or_admin_for("securite")
