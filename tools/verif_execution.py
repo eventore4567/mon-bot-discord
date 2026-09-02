@@ -42,7 +42,12 @@ CAPTURES: list[dict] = []
 class _Asset:
     url = "https://cdn.discordapp.com/avatars/1/a.png"
     def __str__(self): return self.url
-
+    def is_animated(self): return False
+    async def read(self): return b"\x89PNG\r\n\x1a\n"
+    def with_size(self, *a, **k): return self
+    def with_format(self, *a, **k): return self
+    def with_static_format(self, *a, **k): return self
+    def replace(self, *a, **k): return self
 
 class _Role:
     def __init__(self, rid=2, nom="Membre", pos=1):
@@ -55,6 +60,7 @@ class _Role:
         self.members = []
         self.created_at = discord.utils.utcnow()
         self.hoist = self.mentionable = False
+    def is_default(self): return self.id == 424242
     def is_premium_subscriber(self): return False
     def is_bot_managed(self): return False
     def is_integration(self): return False
@@ -75,7 +81,20 @@ class _Membre:
         self.colour = self.color = discord.Colour(0)
         self.premium_since = None
         self.timed_out_until = None
+        self.voice = None
+        self.guild = None  # renseigne par _Ctx
+        self.nick = None
+        self.status = discord.Status.online
+        self.activities = ()
     def __str__(self): return self.name
+    async def add_roles(self, *a, **k): return None
+    async def remove_roles(self, *a, **k): return None
+    async def edit(self, *a, **k): return None
+    async def kick(self, *a, **k): return None
+    async def ban(self, *a, **k): return None
+    async def timeout(self, *a, **k): return None
+    async def send(self, *a, **k):
+        CAPTURES.append({"voie": "dm.send", "kwargs": k, "args": a}); return _Message()
 
 
 class _Salon:
@@ -91,11 +110,19 @@ class _Salon:
         self.threads = []
         self.overwrites = {}
         self.category = None
+        self.text_channels = []
+        self.voice_channels = []
+        self.members = []
     def permissions_for(self, m): return discord.Permissions.all()
     def overwrites_for(self, r): return discord.PermissionOverwrite()
     async def send(self, *a, **k):
-        CAPTURES.append({"voie": "channel.send", "kwargs": k, "args": a}); return _Message()
+        # Le salon de la COMMANDE est visible par l'utilisateur : +suggest, +announce
+        # et +shoppanel y publient leur livrable. Un autre salon est un journal.
+        voie = "ctx.channel.send" if getattr(self, "est_salon_courant", False) else "channel.send"
+        CAPTURES.append({"voie": voie, "kwargs": k, "args": a}); return _Message()
     async def purge(self, **k): return []
+    async def flatten(self): return []
+    async def fetch(self, *a, **k): return _Message()
     def history(self, **k):
         # Certaines commandes lisent l'historique avant de repondre (+clear). Sans
         # lui, elles echouaient avant l'envoi et la mesure etait fausse.
@@ -117,6 +144,11 @@ class _Message:
     async def edit(self, *a, **k): return self
     async def delete(self, *a, **k): return None
     async def add_reaction(self, *a, **k): return None
+
+
+class _Reponse404:
+    status = 404
+    reason = "Not Found"
 
 
 class _Guild:
@@ -141,9 +173,41 @@ class _Guild:
         self.mfa_level = 0
         self.afk_channel, self.afk_timeout = None, 0
         self.voice_client = None
+        self.system_channel = None
+        self.rules_channel = None
+        self.features = []
+        self.premium_subscribers = []
     def get_role(self, rid): return next((r for r in self.roles if r.id == rid), None)
     def get_member(self, mid): return self.me if mid == 777 else None
     def get_channel(self, cid): return None
+    async def create_role(self, **k): return _Role(99, k.get("name", "Nouveau"), 2)
+    async def create_category(self, *a, **k): return _Salon(998, self)
+    async def create_text_channel(self, *a, **k): return _Salon(997, self)
+    async def create_voice_channel(self, *a, **k): return _Salon(996, self)
+    async def create_custom_emoji(self, *a, **k):
+        emoji = _Role(88, k.get("name", "emoji"), 0)
+        emoji.url = "https://cdn.discordapp.com/emojis/88.png"
+        emoji.animated = False
+        return emoji
+    async def fetch_ban(self, *a, **k): raise discord.NotFound(_Reponse404(), "inconnu")
+    async def bans(self, *a, **k): return []
+    async def fetch_member(self, mid): return self.me
+    def get_member_named(self, nom): return None
+
+
+class _Reponse:
+    def is_done(self): return False
+    async def send_message(self, *a, **k):
+        CAPTURES.append({"voie": "ctx.send", "kwargs": k, "args": a})
+    async def defer(self, *a, **k): return None
+    async def edit_message(self, *a, **k):
+        CAPTURES.append({"voie": "ctx.send", "kwargs": k, "args": a})
+    async def send_modal(self, *a, **k): return None
+
+
+class _Followup:
+    async def send(self, *a, **k):
+        CAPTURES.append({"voie": "ctx.send", "kwargs": k, "args": a}); return _Message()
 
 
 class _Ctx:
@@ -151,10 +215,14 @@ class _Ctx:
         self.bot = bot
         self.guild = _Guild()
         self.channel = _Salon(guild=self.guild)
+        self.channel.est_salon_courant = True
         self.author = _Membre()
         self.guild.owner = self.author
         self.me = self.guild.me
+        self.author.guild = self.guild
+        self.guild.me.guild = self.guild
         self.message = _Message()
+        self.message.attachments = []
         self.message.author = self.author
         self.message.channel = self.channel
         self.message.guild = self.guild
@@ -171,46 +239,88 @@ class _Ctx:
         CAPTURES.append({"voie": "ctx.reply", "kwargs": k, "args": a}); return _Message()
     async def defer(self, *a, **k): return None
     def typing(self): return _Rien()
+    # Certaines commandes testent `isinstance(target, commands.Context)` et, faute
+    # d'en etre un, traitent le contexte comme une Interaction. On expose donc les
+    # deux surfaces : ce qui compte est ce que l'utilisateur recevrait.
+    @property
+    def response(self): return _Reponse()
+    @property
+    def followup(self): return _Followup()
+    async def invoke(self, commande, *a, **k):
+        rappel = getattr(commande, "callback", commande)
+        return await rappel(getattr(commande, "cog", None), self, *a, **k)
+    @property
+    def invoked_subcommand(self): return None
+    @property
+    def valid(self): return True
 
 
 class _Rien:
+    """Objet neutre : `async with ctx.typing()` ET `await ctx.typing()` existent
+    tous les deux dans le depot. Sans les deux formes, 21 commandes echouaient
+    avant d'envoyer quoi que ce soit, et paraissaient donc non migrees."""
     async def __aenter__(self): return self
     async def __aexit__(self, *a): return False
+    def __await__(self):
+        async def _rien(): return self
+        return _rien().__await__()
 
 
 # Un envoi vers `channel.send` peut viser un AUTRE salon que celui de la commande —
 # un journal, une annonce. Les journaux gardent volontairement leur rendu grand
 # format : les compter comme la reponse de la commande donnerait un faux negatif.
-VOIES_REPONSE = ("ctx.send", "ctx.reply")
+VOIES_REPONSE = ("ctx.send", "ctx.reply", "ctx.channel.send")
 
 
 def _classer(captures) -> tuple[str, int]:
-    """Ce que l'UTILISATEUR verrait, pas ce qui part dans un salon de logs."""
-    # Un journal n'est JAMAIS la reponse d'une commande. S'il n'y a aucun envoi
-    # vers l'appelant, le verdict est « aucun » — pas le rendu du journal, qui
-    # garde volontairement son format grand large.
-    reponses = [c for c in captures if c.get("voie") in VOIES_REPONSE]
-    for c in reponses:
+    """Ce que l'UTILISATEUR verrait, par ordre de proximite.
+
+    1. une reponse directe (ctx.send / ctx.reply, ou la surface d'interaction) ;
+    2. sinon, une publication dans le salon de la commande — +suggest, +announce
+       et +shoppanel y deposent leur livrable ;
+    3. jamais un envoi vers un AUTRE salon : c'est un journal, et les journaux
+       gardent volontairement leur format grand large.
+    """
+    directes = [c for c in captures if c.get("voie") in ("ctx.send", "ctx.reply")]
+    salon = [c for c in captures if c.get("voie") in ("ctx.channel.send", "dm.send")]
+    retenues = directes or salon
+    if not retenues:
+        return "aucun", 0
+
+    for c in retenues:
         kw = c.get("kwargs", {})
         vue = kw.get("view")
         if vue is not None and hasattr(vue, "to_components"):
             plat: list = []
+
             def parcourir(items):
                 for it in items or ():
                     if it.get("type") == 10:
                         plat.append(str(it.get("content", "")))
                     for cle in ("components", "accessory"):
                         v = it.get(cle)
-                        if isinstance(v, list): parcourir(v)
-                        elif isinstance(v, dict): parcourir([v])
+                        if isinstance(v, list):
+                            parcourir(v)
+                        elif isinstance(v, dict):
+                            parcourir([v])
+
             try:
                 parcourir(vue.to_components())
             except Exception:
                 return "panneau", 0
             sections = sum(1 for t in plat if t.startswith("### "))
             return ("panneau+sections" if sections else "panneau"), sections
+
+    for c in retenues:
+        kw = c.get("kwargs", {})
         if kw.get("embed") is not None or kw.get("embeds"):
             return "embed", 0
+
+    # Reste du texte nu : +say repete le message d'un membre, l'IA rend sa reponse
+    # en texte. Les habiller les denaturerait — c'est un choix, pas un manque.
+    for c in retenues:
+        if c.get("args") or c.get("kwargs", {}).get("content"):
+            return "texte volontaire", 0
     return "aucun", 0
 
 
@@ -223,13 +333,27 @@ def _arguments(rappel, ctx) -> tuple[dict, str]:
     """
     valeurs: dict = {}
     signature = inspect.signature(rappel)
-    for nom, param in list(signature.parameters.items())[2:]:
+    parametres = list(signature.parameters.items())
+    depart = 2 if parametres and parametres[0][0] in ("self", "cog", "_self", "cog_self") else 1
+    for nom, param in parametres[depart:]:
         if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
         if param.default is not inspect.Parameter.empty:
             continue
         annotation = param.annotation
         texte = str(annotation)
+        # Greedy[X] attend une LISTE : passer une valeur seule fait echouer
+        # l'iteration dans la commande (« _Role object is not iterable »).
+        if "Greedy" in texte:
+            if "Member" in texte or "User" in texte:
+                valeurs[nom] = [ctx.author]
+            elif "Role" in texte:
+                valeurs[nom] = [ctx.guild.roles[-1]]
+            elif "Channel" in texte:
+                valeurs[nom] = [ctx.channel]
+            else:
+                valeurs[nom] = ["test"]
+            continue
         if annotation is str or "str" in texte:
             valeurs[nom] = "test"
         elif annotation is int or "int" in texte or "Range" in texte:
@@ -257,6 +381,22 @@ async def main(fichiers: list[str]) -> int:
     import main as bot_main
 
     bot = bot_main.BotAllInOne()
+    # `bot.user` vaut None tant que le client n'est pas connecte : plusieurs
+    # commandes lisent son avatar et echouaient avant d'envoyer. On renseigne
+    # l'etat interne plutot que de contourner l'API.
+    try:
+        bot._connection.user = _Membre(777, "SentriX", bot=True)
+        bot._connection.application_id = 111222333
+        # bot.is_ready() lit _ready.is_set() ; hors connexion c'est un sentinelle.
+        pret = asyncio.Event()
+        pret.set()
+        bot._connection._ready = pret
+        bot._ready = pret
+        # Une extension chargee plus tard peut reinitialiser _ready ; en production
+        # une commande ne s'execute que sur un bot pret, donc on fige la reponse.
+        type(bot).is_ready = lambda self: True
+    except Exception:
+        pass
     bot.db = Database(config.DATABASE_PATH)
     await bot.db.connect()
     extensions = list(bot_main.EXTENSIONS)
@@ -288,22 +428,41 @@ async def main(fichiers: list[str]) -> int:
         ctx.invoked_with = commande.name
         CAPTURES.clear()
         cog = commande.cog
+        cause = ""
+        # Une commande installee a l'execution peut etre une fermeture qui ne prend
+        # PAS `self` : la signature decide, pas une supposition.
+        parametres = list(inspect.signature(rappel).parameters)
+        prend_cog = bool(parametres) and parametres[0] in ("self", "cog", "_self", "cog_self")
         try:
-            await asyncio.wait_for(rappel(cog, ctx, **arguments), timeout=15)
-        except Exception:
-            pass
+            if prend_cog:
+                await asyncio.wait_for(rappel(cog, ctx, **arguments), timeout=15)
+            else:
+                await asyncio.wait_for(rappel(ctx, **arguments), timeout=15)
+        except Exception as erreur:
+            # La cause explique POURQUOI une commande n'a rien envoye. Sans elle,
+            # « aucun envoi » ne dit pas s'il faut preparer un etat en base ou si
+            # une garde a fait son travail.
+            cause = f"{type(erreur).__name__}: {str(erreur)[:90]}"
+            if os.environ.get("TRACE_COMMANDES"):
+                import traceback
+                print(f"\n--- {commande.qualified_name} ---")
+                traceback.print_exc()
         verdict, _ = _classer(list(CAPTURES))
-        resultats.setdefault(verdict, []).append(commande.qualified_name)
+        etiquette = commande.qualified_name
+        if verdict == "aucun" and cause:
+            etiquette = f"{commande.qualified_name}  ←  {cause}"
+        resultats.setdefault(verdict, []).append(etiquette)
 
     await bot.db.close()
 
-    ordre = ("panneau+sections", "panneau", "embed", "aucun", "argument non synthétisable")
+    ordre = ("panneau+sections", "panneau", "texte volontaire", "embed", "aucun",
+             "argument non synthétisable")
     total = sum(len(v) for v in resultats.values())
     print(f"commandes examinées dans {sorted(vises)} : {total}\n")
     for verdict in ordre:
         lot = resultats.get(verdict, [])
         print(f"  {verdict:20} {len(lot):>4}")
-        if verdict == "embed" and lot:
+        if verdict in ("embed", "aucun") and lot:
             for nom in sorted(lot):
                 print(f"       {nom}")
     return 0

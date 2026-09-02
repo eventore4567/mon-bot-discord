@@ -52,3 +52,4 @@ backup_phase*/
 assets/log_banners/banner_*.png
 assets/log_banners/banner_*.webp
 !assets/log_banners/banner_source_*.webp
+database/backups/
