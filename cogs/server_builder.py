@@ -1126,20 +1126,10 @@ class ServerBuilderView(discord.ui.View):
     async def confirm(self, interaction: discord.Interaction):
         for child in self.children:
             child.disabled = True
-        await interaction.response.edit_message(
-            embed=embeds.neutral(
-                "Configuration en cours",
-                "Création des rôles, salons, permissions et tickets. Cette opération peut prendre "
-                "une à trois minutes selon les limites de Discord.",
-            ),
-            view=self,
-        )
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.neutral('Configuration en cours', 'Création des rôles, salons, permissions et tickets. Cette opération peut prendre une à trois minutes selon les limites de Discord.')), self))
         cog = self.bot.get_cog("ServerBuilder")
         if cog is None:
-            await interaction.edit_original_response(
-                embed=embeds.error("Le module de configuration est indisponible."),
-                view=None,
-            )
+            await panels.editer(interaction, panels.depuis_embed(embeds.error('Le module de configuration est indisponible.')))
             return
         try:
             summary = await cog.build_server(
@@ -1170,7 +1160,7 @@ class ServerBuilderView(discord.ui.View):
                 "Les éléments déjà créés sont conservés. Relancez la commande après correction : "
                 "elle reprend sans doublons."
             )
-        await interaction.edit_original_response(embed=summary, view=None)
+        await panels.editer(interaction, panels.depuis_embed(summary))
         self.stop()
 
 

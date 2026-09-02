@@ -305,7 +305,7 @@ class ProfileHubView(discord.ui.View):
     async def _show(self, interaction: discord.Interaction, page: str) -> None:
         embed = await build_profile_page(self.bot, self.guild, self.member, self.author_id, page)
         self._activate(page)
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
 
     @discord.ui.button(label="Profil", emoji="🪪", style=discord.ButtonStyle.primary, custom_id="sentrix-profile:overview", row=0)
     async def overview(self, interaction: discord.Interaction, button: discord.ui.Button):

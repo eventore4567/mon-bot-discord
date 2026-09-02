@@ -119,7 +119,7 @@ class MoneyDropView(discord.ui.View):
                     title="💸 Drop récupéré !",
                 )
 
-            await interaction.response.edit_message(embed=result, view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(result), self))
 
     async def on_timeout(self) -> None:
         if self.claimed_by is not None:
@@ -135,7 +135,7 @@ class MoneyDropView(discord.ui.View):
                     f"Personne n'a récupéré les **{stats_service.format_number(self.amount)} "
                     f"{self.currency_emoji}** à temps."
                 )
-                await self.message.edit(embed=expired, view=self)
+                await panels.editer(self.message, panels.avec_composants(panels.depuis_embed(expired), self))
             else:
                 await self.message.edit(view=self)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):

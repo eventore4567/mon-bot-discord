@@ -152,17 +152,17 @@ class StatusHubView(discord.ui.View):
     @discord.ui.button(label="Statut", custom_id="sx:v5:status")
     async def status(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self._set_active("status")
-        await interaction.response.edit_message(embed=await build_status_embed(self.bot, self.guild), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await build_status_embed(self.bot, self.guild)), self))
 
     @discord.ui.button(label="À propos", custom_id="sx:v5:about")
     async def about(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self._set_active("about")
-        await interaction.response.edit_message(embed=build_about_embed(self.bot), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(build_about_embed(self.bot)), self))
 
     @discord.ui.button(label="Nouveautés", custom_id="sx:v5:updates")
     async def updates(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self._set_active("updates")
-        await interaction.response.edit_message(embed=build_updates_embed(self.bot), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(build_updates_embed(self.bot)), self))
 
     @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger, custom_id="sx:v5:close")
     async def close(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -257,13 +257,13 @@ class ThemeView(discord.ui.View):
         self.compact = not self.compact
         await self.bot.db.set_design_settings(self.guild.id, {"compact_mode": self.compact})
         self.rebuild()
-        await interaction.response.edit_message(embed=self.embed(saved=True), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.embed(saved=True)), self))
 
     async def toggle_seasonal(self, interaction: discord.Interaction):
         self.seasonal = not self.seasonal
         await self.bot.db.set_design_settings(self.guild.id, {"seasonal_theme": self.seasonal})
         self.rebuild()
-        await interaction.response.edit_message(embed=self.embed(saved=True), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.embed(saved=True)), self))
 
     async def close(self, interaction: discord.Interaction):
         await interaction.response.edit_message(view=None)

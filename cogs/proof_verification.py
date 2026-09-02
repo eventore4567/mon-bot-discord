@@ -209,7 +209,7 @@ class ProofSetupView(discord.ui.View):
 
         async def close_callback(interaction: discord.Interaction):
             self.clear_items()
-            await interaction.response.edit_message(embed=embeds.neutral("SentriX — Vérification par preuve", "Panneau fermé."), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.neutral('SentriX — Vérification par preuve', 'Panneau fermé.')), self))
             self.stop()
 
         toggle.callback = toggle_callback
@@ -272,9 +272,9 @@ class ProofSetupView(discord.ui.View):
     async def refresh(self, interaction: discord.Interaction):
         self._build_components()
         if interaction.response.is_done():
-            await interaction.edit_original_response(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         else:
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
 
 
 class ProofReviewView(discord.ui.View):

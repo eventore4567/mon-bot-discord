@@ -218,10 +218,10 @@ class DesignSetupView(design_system.SentriXView):
     async def refresh(self, interaction: discord.Interaction):
         embed = self.build_summary_embed()
         if not interaction.response.is_done():
-            await interaction.response.edit_message(embed=embed, view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
         else:
             try:
-                await interaction.edit_original_response(embed=embed, view=self)
+                await panels.editer(interaction, panels.avec_composants(panels.depuis_embed(embed), self))
             except discord.HTTPException:
                 pass
 
@@ -240,7 +240,7 @@ class DesignSetupView(design_system.SentriXView):
         await self.cog.bot.db.set_design_settings(self.guild.id, self.pending)
         embed = self.build_summary_embed()
         embed.set_footer(text="● Enregistré — ces réglages resteront après un redémarrage du bot.")
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
 
     async def _reset(self, interaction: discord.Interaction):
         await self.cog.bot.db.reset_design_settings(self.guild.id)
@@ -248,14 +248,14 @@ class DesignSetupView(design_system.SentriXView):
         self.rebuild_items()
         embed = self.build_summary_embed()
         embed.set_footer(text="🔄 Réinitialisé aux valeurs par défaut et enregistré.")
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
 
     async def _cancel(self, interaction: discord.Interaction):
         for child in self.children:
             if hasattr(child, "disabled"):
                 child.disabled = True
         embed = design_system.info_embed("Configuration fermée — les modifications non enregistrées ont été abandonnées.", interaction.user)
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
         self.stop()
 
 

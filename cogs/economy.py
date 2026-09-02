@@ -146,13 +146,13 @@ class ShopCatalogueView(discord.ui.View):
     async def previous(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self.index = max(0, self.index - 1)
         self._refresh()
-        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.pages[self.index]), self))
 
     @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self.index = min(len(self.pages) - 1, self.index + 1)
         self._refresh()
-        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.pages[self.index]), self))
 
     @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger)
     async def close(self, interaction: discord.Interaction, _button: discord.ui.Button):

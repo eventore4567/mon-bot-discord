@@ -92,25 +92,25 @@ class StatsView(discord.ui.View):
     async def btn_stats(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = await self.cog.build_stats_embed(self.guild, self.member)
         self._set_active("stats")
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
 
     @discord.ui.button(label="📈 Niveau", style=discord.ButtonStyle.blurple, custom_id="statsnav:level", row=0)
     async def btn_level(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = await self.cog.build_level_embed(self.guild, self.member)
         self._set_active("level")
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
 
     @discord.ui.button(label="💰 Économie", style=discord.ButtonStyle.blurple, custom_id="statsnav:eco", row=0)
     async def btn_economy(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = await self.cog.build_economy_embed(self.guild, self.member)
         self._set_active("eco")
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
 
     @discord.ui.button(label="🏆 Classement", style=discord.ButtonStyle.blurple, custom_id="statsnav:rank", row=0)
     async def btn_leaderboard(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = await self.cog.build_ranks_embed(self.guild, self.member)
         self._set_active("rank")
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
 
 
 # Le décorateur discord.ui.Button écrit sur des fonctions "nues" — ce qui précède les
@@ -545,10 +545,10 @@ class StatsConfigView(discord.ui.View):
     async def refresh(self, interaction: discord.Interaction):
         embed = self.build_summary_embed()
         if not interaction.response.is_done():
-            await interaction.response.edit_message(embed=embed, view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
         else:
             try:
-                await interaction.edit_original_response(embed=embed, view=self)
+                await panels.editer(interaction, panels.avec_composants(panels.depuis_embed(embed), self))
             except discord.HTTPException:
                 pass
 
@@ -568,7 +568,7 @@ class StatsConfigView(discord.ui.View):
         await self.cog.bot.db.set_stats_settings(self.guild.id, to_save)
         embed = self.build_summary_embed()
         embed.set_footer(text="● Enregistré — ces réglages sont actifs immédiatement et resteront après un redémarrage.")
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
 
     async def _reset(self, interaction: discord.Interaction):
         await self.cog.bot.db.reset_stats_settings(self.guild.id)
@@ -579,13 +579,13 @@ class StatsConfigView(discord.ui.View):
         self.rebuild_items()
         embed = self.build_summary_embed()
         embed.set_footer(text="🔄 Réinitialisé aux valeurs par défaut et enregistré.")
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
 
     async def _cancel(self, interaction: discord.Interaction):
         for child in self.children:
             child.disabled = True
         embed = embeds.info("Configuration fermée — les modifications non enregistrées ont été abandonnées.")
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
         self.stop()
 
 

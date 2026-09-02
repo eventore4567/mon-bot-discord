@@ -55,6 +55,21 @@ logger = logging.getLogger("bot.ai")
 
 # ---------------------------------------------------------------- VUE : BOUTONS DE RÉPONSE
 
+async def _remplacer_attente(ctx, message) -> None:
+    """Efface le message « SentriX réfléchit… » avant une réponse composée.
+
+    Ce message est du texte : il ne peut pas devenir un panneau par édition,
+    Discord refusant de poser le drapeau Components V2 après coup. On le retire
+    donc plutôt que de laisser deux messages, ou pire, une édition rejetée.
+    """
+    if message is None:
+        return
+    try:
+        await message.delete()
+    except discord.HTTPException:
+        pass
+
+
 class AiResponseView(discord.ui.View):
     """Boutons attachés à une réponse +ai/+chat : Régénérer, Plus détaillé, Plus court,
     Nouvelle conversation. Verrouillés à l'auteur de la demande, protégés contre le double
@@ -86,7 +101,12 @@ class AiResponseView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         try:
-            await interaction.response.edit_message(content="🤖 SentriX réfléchit…", embed=None, view=self)
+            await panels.editer(
+                interaction.response,
+                panels.avec_composants(
+                    panels.depuis_embed(embeds.info("🤖 SentriX réfléchit…")), self
+                ),
+            )
         except discord.HTTPException:
             pass
         try:
@@ -98,7 +118,9 @@ class AiResponseView(discord.ui.View):
             for item in self.children:
                 item.disabled = False
             if not result["ok"]:
-                await interaction.edit_original_response(content=None, embed=embeds.error(result["error"]), view=None)
+                await panels.editer(
+                    interaction, panels.depuis_embed(embeds.error(result["error"]))
+                )
                 return
             self.model_key = result["model_key"]
             answer = result["text"] or "…"
@@ -106,12 +128,21 @@ class AiResponseView(discord.ui.View):
                 # Une régénération peut produire une réponse bien plus longue (ex: "Plus
                 # détaillé") — dans ce cas on repasse par le pipeline normal de livraison
                 # (fichier .md ou texte découpé) plutôt que de forcer un embed trop grand.
-                await interaction.edit_original_response(content=None, embed=None, view=None)
+                # La reponse repart par le pipeline normal (fichier .md ou texte
+                # decoupe). Le panneau d'origine ne peut pas accueillir du texte
+                # brut — Discord refuse un content sur un message Components V2 —
+                # donc on le retire au lieu de tenter une edition rejetee.
+                try:
+                    await interaction.delete_original_response()
+                except discord.HTTPException:
+                    pass
                 fake_ctx = _FakeCtxForDelivery(self.cog.bot, interaction, self.channel_id)
                 await self.cog._deliver_answer(fake_ctx, self.question, result, thinking_msg=None)
                 return
             embed = self.cog._build_ai_embed(self.question, answer, self.model_key, interaction.user)
-            await interaction.edit_original_response(content=None, embed=embed, view=self)
+            await panels.editer(
+                interaction, panels.avec_composants(panels.depuis_embed(embed), self)
+            )
         finally:
             self.busy = False
 
@@ -251,9 +282,9 @@ class AiSetupView(discord.ui.View):
     async def refresh(self, interaction: discord.Interaction):
         self.settings = await ai_service.get_settings(self.cog.bot, self.guild_id)
         if interaction.response.is_done():
-            await interaction.edit_original_response(embed=self.build_embed(), view=self)
+            await panels.editer(interaction, panels.avec_composants(panels.depuis_embed(self.build_embed()), self))
         else:
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.build_embed()), self))
 
     @discord.ui.button(label="Activer / Désactiver", style=discord.ButtonStyle.secondary, emoji="🔌", row=0)
     async def toggle_enabled(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -964,7 +995,11 @@ class Ai(commands.Cog, name="Ai"):
         if ctx.interaction:
             await ctx.defer()
         else:
-            thinking_msg = await panels.envoyer(ctx, panels.depuis_embed(embeds.info('🤖 SentriX réfléchit…')))
+            # Message d'attente en TEXTE, pas en panneau : la reponse de l'IA
+            # est du texte brut et sera livree en editant ce meme message.
+            # Discord refuse un content sur un message Components V2, donc un
+            # panneau ici rendait la livraison impossible.
+            thinking_msg = await ctx.send('🤖 SentriX réfléchit…')
 
         ctx_command = getattr(ctx, "command", None)
         command_name = ctx_command.qualified_name if ctx_command else "ai"
@@ -976,10 +1011,8 @@ class Ai(commands.Cog, name="Ai"):
             )
 
         if not result["ok"]:
-            error_embed = embeds.error(result["error"])
-            if thinking_msg:
-                return await thinking_msg.edit(embed=error_embed)
-            return await panels.envoyer(ctx, panels.depuis_embed(error_embed))
+            await _remplacer_attente(ctx, thinking_msg)
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(result["error"])))
 
         await self._deliver_answer(ctx, question, result, thinking_msg)
 
@@ -991,27 +1024,23 @@ class Ai(commands.Cog, name="Ai"):
             buf = io.BytesIO(answer.encode("utf-8"))
             file = discord.File(buf, filename="reponse-sentrix-ai.md")
             note = embeds.brand("🤖 SentriX AI", f"Réponse trop longue pour un message Discord — voir le fichier joint.\n**Modèle :** {ai_service.MODEL_LABELS.get(model_key, model_key)}")
-            if thinking_msg:
-                await thinking_msg.edit(embed=note, attachments=[file])
-            else:
-                await ctx.send(embed=note, file=file)
+            await _remplacer_attente(ctx, thinking_msg)
+            panneau = panels.depuis_embed(note)
+            await ctx.send(view=panneau, files=[*panneau.fichiers(), file])
             return
 
         if len(answer) <= 1000:
             view = AiResponseView(self, author_id=ctx.author.id, guild_id=ctx.guild.id if ctx.guild else None,
                                    channel_id=ctx.channel.id, question=question, model_key=model_key)
             embed = self._build_ai_embed(question, answer, model_key, ctx.author)
-            if thinking_msg:
-                await thinking_msg.edit(embed=embed, view=view)
-                view.message = thinking_msg
-            else:
-                msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
-                view.message = msg if not ctx.interaction else await ctx.interaction.original_response()
+            await _remplacer_attente(ctx, thinking_msg)
+            msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
+            view.message = msg if not ctx.interaction else await ctx.interaction.original_response()
             return
 
         chunks = ai_service.split_for_discord(answer, limit=1900)
         if thinking_msg:
-            await thinking_msg.edit(embed=None, content=chunks[0])
+            await thinking_msg.edit(content=chunks[0])
             remaining = chunks[1:]
         else:
             await ctx.send(chunks[0])

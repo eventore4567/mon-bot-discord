@@ -586,3 +586,36 @@ def _rangees_d_items(items: Sequence[discord.ui.Item]) -> list[discord.ui.Action
         if seul:
             places = 5
     return [r for r in rangees if len(r.children)][:5]
+
+
+async def editer(cible: Any, panneau: Panneau, **extra: Any):
+    """Remplace le contenu d'un message DÉJÀ composé.
+
+    Discord pose le drapeau ``components_v2`` à la CRÉATION du message : un
+    message né en embed ne deviendra jamais un panneau par édition, et un
+    panneau ne redeviendra jamais un embed — l'API renvoie 400. Cette fonction
+    ne vaut donc que pour un message né en panneau.
+
+    Elle réattache systématiquement la bannière : un panneau d'une autre
+    intention pointe vers un AUTRE nom de fichier, et Discord conserverait
+    l'ancienne pièce jointe, laissant une image cassée dans le message.
+
+    ``cible`` accepte les trois surfaces d'édition : ``interaction.response``,
+    ``interaction`` et un ``Message``.
+    """
+    for interdit in ("embed", "embeds", "content"):
+        if extra.pop(interdit, None) is not None:
+            logger.warning(
+                "sentrix_panels.editer : %r ignoré — un message Components V2 "
+                "ne peut porter ni embed ni content.",
+                interdit,
+            )
+    extra.pop("attachments", None)
+    fichiers = panneau.fichiers() if hasattr(panneau, "fichiers") else []
+    charge = {"view": panneau, "attachments": fichiers, **extra}
+
+    for nom in ("edit_message", "edit_original_response", "edit"):
+        methode = getattr(cible, nom, None)
+        if callable(methode):
+            return await methode(**charge)
+    raise TypeError(f"{type(cible).__name__} n'expose aucune méthode d'édition.")

@@ -202,9 +202,7 @@ class MarketView(design_system.SentriXView):
 
     @discord.ui.button(label="Actualiser", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            embed=await self.cog.build_market_embed(interaction.guild, interaction.user), view=self
-        )
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.cog.build_market_embed(interaction.guild, interaction.user)), self))
 
 
 class MemberPicker(discord.ui.UserSelect):

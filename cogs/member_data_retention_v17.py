@@ -191,12 +191,7 @@ class ResetConfirmationView(discord.ui.View):
         self.used = True
         for child in self.children:
             child.disabled = True
-        await interaction.response.edit_message(
-            embed=embeds.warning(
-                f"Reset confirmé : **{self.description}**.\nL'action est en cours et sera journalisée."
-            ),
-            view=self,
-        )
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.warning(f"Reset confirmé : **{self.description}**.\nL'action est en cours et sera journalisée.")), self))
         try:
             with explicit_data_reset():
                 await self.runner()
@@ -206,13 +201,7 @@ class ResetConfirmationView(discord.ui.View):
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.used = True
-        await interaction.response.edit_message(
-            embed=embeds.neutral(
-                "Reset annulé",
-                "Aucune progression n'a été supprimée ni remise à zéro.",
-            ),
-            view=None,
-        )
+        await panels.editer(interaction.response, panels.depuis_embed(embeds.neutral('Reset annulé', "Aucune progression n'a été supprimée ni remise à zéro.")))
         self.stop()
 
 

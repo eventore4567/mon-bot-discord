@@ -844,6 +844,31 @@ class ConnectFourView(discord.ui.View):
         )
         return f"{rows_text}\n\n{status}"
 
+    def panneau(self, status: str) -> "panels.Panneau":
+        """Le plateau, en panneau.
+
+        Le plateau EST du texte (une grille d'emojis), mais il vit dans un
+        message Components V2 depuis que la partie est servie en panneau :
+        l'editer avec un content serait refuse par Discord.
+        """
+        rows_text = "\n".join(
+            "".join(
+                self.SYMBOLS["p1"] if cell == "p1"
+                else self.SYMBOLS["p2"] if cell == "p2"
+                else self.SYMBOLS["empty"]
+                for cell in row
+            )
+            for row in self.board
+        )
+        return panels.Panneau(
+            titre="Puissance 4",
+            sous_titre=status,
+            kind="brand",
+            sections=[panels.Section("Plateau", texte=rows_text)],
+            pied=f"{self.p1.display_name} {self.SYMBOLS['p1']}  ·  "
+            f"{self.p2.display_name} {self.SYMBOLS['p2']}",
+        )
+
     def _lowest_row(self, col: int) -> int | None:
         for row in range(self.ROWS - 1, -1, -1):
             if self.board[row][col] is None:
@@ -893,16 +918,28 @@ class ConnectFourView(discord.ui.View):
             self._settled = True
             winner = self.current
             reward = await game_rewards.reward_game_winner(self.cog.bot, self.guild_id, winner.id, "connect4", 40, self.session_id, result="win")
-            await interaction.response.edit_message(content=self.render(f"🏆 {winner.mention} gagne la partie !" + _reward_line(reward)), view=self)
+            await panels.editer(
+                interaction.response,
+                panels.avec_composants(
+                    self.panneau(f"🏆 {winner.mention} gagne la partie !" + _reward_line(reward)),
+                    self,
+                ),
+            )
             return
         if self._is_full():
             self._settled = True
             await game_rewards.reward_game_winner(self.cog.bot, self.guild_id, self.p1.id, "connect4", 0, self.session_id, result="draw")
-            await interaction.response.edit_message(content=self.render("🤝 Match nul, plateau plein !"), view=self)
+            await panels.editer(interaction.response, panels.avec_composants(self.panneau("🤝 Match nul, plateau plein !"), self))
             return
 
         self.current = self.p2 if self.current.id == self.p1.id else self.p1
-        await interaction.response.edit_message(content=self.render(f"Au tour de {self.current.mention} ({self.SYMBOLS['p1'] if self.current.id == self.p1.id else self.SYMBOLS['p2']})"), view=self)
+        symbole = self.SYMBOLS["p1"] if self.current.id == self.p1.id else self.SYMBOLS["p2"]
+        await panels.editer(
+            interaction.response,
+            panels.avec_composants(
+                self.panneau(f"Au tour de {self.current.mention} ({symbole})"), self
+            ),
+        )
 
     async def on_timeout(self):
         if self._settled or self.message is None:
@@ -911,7 +948,7 @@ class ConnectFourView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         try:
-            await self.message.edit(content=self.render("⏱️ Partie expirée (inactivité)."), view=self)
+            await panels.editer(self.message, panels.avec_composants(self.panneau("⏱️ Partie expirée (inactivité)."), self))
         except Exception:
             pass
 

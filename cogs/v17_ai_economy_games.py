@@ -620,13 +620,13 @@ class GameLobbyView(discord.ui.View):
         if interaction.user.id not in self.players:
             self.players.append(interaction.user.id)
         self.spectators.discard(interaction.user.id)
-        await interaction.response.edit_message(embed=self.embed(), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.embed()), self))
 
     @discord.ui.button(label="Spectateur", style=discord.ButtonStyle.secondary)
     async def spectate(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if interaction.user.id not in self.players:
             self.spectators.add(interaction.user.id)
-        await interaction.response.edit_message(embed=self.embed(), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.embed()), self))
 
     @discord.ui.button(label="Quitter", style=discord.ButtonStyle.secondary)
     async def leave(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -635,7 +635,7 @@ class GameLobbyView(discord.ui.View):
         if interaction.user.id in self.players:
             self.players.remove(interaction.user.id)
         self.spectators.discard(interaction.user.id)
-        await interaction.response.edit_message(embed=self.embed(), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.embed()), self))
 
     @discord.ui.button(label="Lancer", style=discord.ButtonStyle.primary)
     async def start(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -645,7 +645,7 @@ class GameLobbyView(discord.ui.View):
             return await interaction.response.send_message("Il faut au moins deux joueurs.", ephemeral=True)
         opponent = interaction.guild.get_member(self.players[1])
         command = self.cog.bot.get_command(self.game)
-        await interaction.response.edit_message(embed=embeds.success("Lobby lancé."), view=None)
+        await panels.editer(interaction.response, panels.depuis_embed(embeds.success('Lobby lancé.')))
         if command is not None and opponent is not None and "adversaire" in command.clean_params:
             try:
                 await self.ctx.invoke(command, adversaire=opponent)

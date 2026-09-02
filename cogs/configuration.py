@@ -1717,14 +1717,7 @@ class SetupLockPromptView(discord.ui.View):
                 channel = self.cog.bot.get_channel(old_view.channel_id)
                 if channel:
                     old_message = await channel.fetch_message(self.locked_message_id)
-                    await old_message.edit(
-                        embed=embeds.neutral(
-                            "🔄 Contrôle transféré",
-                            f"{interaction.user} a pris le contrôle de cette session de configuration.",
-                            color=SETUP_COLOR_WARNING,
-                        ),
-                        view=old_view,
-                    )
+                    await panels.editer(old_message, panels.avec_composants(panels.depuis_embed(embeds.neutral('🔄 Contrôle transféré', f'{interaction.user} a pris le contrôle de cette session de configuration.', color=SETUP_COLOR_WARNING)), old_view))
             except discord.HTTPException:
                 pass
         await self.cog.bot.db.delete_setup_session(self.locked_message_id)
