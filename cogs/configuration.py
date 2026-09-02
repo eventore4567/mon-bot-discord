@@ -1032,11 +1032,23 @@ class SetupTextModal(discord.ui.Modal, title="Préfixe & messages"):
 
 
 class LevelRoleModal(discord.ui.Modal, title="Ajouter un rôle de niveau"):
-    """Formulaire pour associer un rôle récompense à un niveau atteint."""
+    """Formulaire pour associer un rôle récompense à un niveau atteint.
 
-    niveau = discord.ui.TextInput(label="Niveau requis (ex: 5)", required=True, max_length=5)
-    role = discord.ui.TextInput(
-        label="Rôle (mentionnez-le avec @, ou collez son ID/nom)", required=True, max_length=100
+    Le rôle se choisissait en collant son identifiant, son nom ou une mention, et
+    parse_role_input echouait des qu'on se trompait d'un caractere. discord.py 2.7
+    permet un vrai selecteur de role dans une modale (composant Label) : la liste
+    est celle du serveur, il n'y a plus rien a copier ni d'echec de saisie possible.
+    """
+
+    niveau = discord.ui.Label(
+        text="Niveau requis",
+        description="Le niveau à partir duquel le rôle est attribué.",
+        component=discord.ui.TextInput(placeholder="5", required=True, max_length=5),
+    )
+    role = discord.ui.Label(
+        text="Rôle à attribuer",
+        description="Choisissez-le dans la liste du serveur.",
+        component=discord.ui.RoleSelect(min_values=1, max_values=1),
     )
 
     def __init__(self, view: "SetupView"):
@@ -1045,12 +1057,21 @@ class LevelRoleModal(discord.ui.Modal, title="Ajouter un rôle de niveau"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            level = int(self.niveau.value.strip())
-        except ValueError:
-            return await interaction.response.send_message("Niveau invalide : entrez un nombre entier.", ephemeral=True)
-        role = parse_role_input(interaction.guild, self.role.value)
-        if not role:
-            return await interaction.response.send_message("Rôle introuvable. Essayez de le mentionner avec @.", ephemeral=True)
+            level = int(str(self.niveau.component.value).strip())
+        except (ValueError, AttributeError):
+            return await interaction.response.send_message(
+                embed=embeds.error("Entrez un nombre entier, par exemple 5.", title="Niveau invalide"),
+                ephemeral=True,
+            )
+        choisis = list(getattr(self.role.component, "values", ()) or ())
+        role = choisis[0] if choisis else None
+        if role is not None and not isinstance(role, discord.Role):
+            role = interaction.guild.get_role(int(getattr(role, "id", role)))
+        if role is None:
+            return await interaction.response.send_message(
+                embed=embeds.error("Sélectionnez un rôle dans la liste.", title="Aucun rôle choisi"),
+                ephemeral=True,
+            )
 
         existing = await self.view_ref.bot.db.fetchone(
             "SELECT * FROM level_roles WHERE guild_id = ? AND level = ?", (self.view_ref.guild_id, level)

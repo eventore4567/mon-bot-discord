@@ -373,15 +373,76 @@ async def _reset_config(bot, guild: discord.Guild, target: str) -> str:
     return target
 
 
+# Libelles des cibles de reinitialisation. Ils remplacent une saisie libre ou il
+# fallait deviner le nom exact du module : « bienvenue » passait, « accueil » non.
+CIBLES_RESET = (
+    ("moderation", "Modération", "Rôles staff, mute, avertissements"),
+    ("security", "Sécurité", "AutoMod, anti-raid, listes de confiance"),
+    ("logs", "Logs", "Toutes les catégories de journalisation"),
+    ("tickets", "Tickets", "Panels, types et rôles support"),
+    ("welcome", "Bienvenue & départ", "Messages, image et rôle automatique"),
+    ("roles", "Rôles", "Autorôles, vérification, rôles de niveau"),
+    ("levels", "Niveaux", "Salon d'annonce des niveaux"),
+    ("economy", "Économie", "Réglages de monnaie et de boutique"),
+    ("notifications", "Notifications", "YouTube, Twitch et TikTok"),
+    ("ai", "IA", "Limites et permissions de l'assistant"),
+    ("permissions", "Permissions", "Rôles autorisés par commande"),
+    ("all", "Tout réinitialiser", "Les onze modules ci-dessus, d'un coup"),
+)
+
+
 class ResetConfigModal(discord.ui.Modal, title="Réinitialiser une configuration"):
-    target = discord.ui.TextInput(label="Module (ou « tout »)", placeholder="logs, bienvenue, notifications, permissions…", max_length=30)
-    confirm = discord.ui.TextInput(label="Tapez RESET pour confirmer", placeholder="RESET", max_length=10)
-    def __init__(self, owner): super().__init__(); self.owner = owner
+    """Le module se choisissait en tapant son nom, et une faute donnait « module
+    inconnu » sans dire lesquels existaient. La liste est maintenant affichee, avec
+    ce que chaque reinitialisation efface reellement."""
+
+    target = discord.ui.Label(
+        text="Module à réinitialiser",
+        description="Les données des membres (XP, argent, sanctions) ne sont jamais effacées.",
+        component=discord.ui.Select(
+            options=[
+                discord.SelectOption(label=libelle, value=cle, description=detail)
+                for cle, libelle, detail in CIBLES_RESET
+            ],
+            min_values=1,
+            max_values=1,
+        ),
+    )
+    confirm = discord.ui.Label(
+        text="Confirmation",
+        description="Tapez RESET en majuscules pour confirmer.",
+        component=discord.ui.TextInput(placeholder="RESET", max_length=10),
+    )
+
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+
     async def on_submit(self, interaction):
-        if str(self.confirm.value).strip().upper() != "RESET": return await interaction.response.send_message("Confirmation incorrecte : aucun réglage n’a été modifié.", ephemeral=True)
-        try: target = await _reset_config(self.owner.bot, self.owner.guild, str(self.target.value))
-        except ValueError: return await interaction.response.send_message("Module inconnu. Utilisez par exemple `logs`, `bienvenue`, `notifications`, `permissions` ou `tout`.", ephemeral=True)
-        await interaction.response.send_message(embed=embeds.success(f"Configuration **{target}** réinitialisée. Les données utilisateur (XP, argent, historique) ont été conservées."), ephemeral=True)
+        if str(self.confirm.component.value).strip().upper() != "RESET":
+            return await interaction.response.send_message(
+                embed=embeds.warning(
+                    "Rien n'a été réinitialisé. Tapez RESET en majuscules pour confirmer.",
+                    title="Confirmation incorrecte",
+                ),
+                ephemeral=True,
+            )
+        choisis = list(getattr(self.target.component, "values", ()) or ())
+        if not choisis:
+            return await interaction.response.send_message(
+                embed=embeds.warning("Sélectionnez le module à réinitialiser.", title="Aucun module choisi"),
+                ephemeral=True,
+            )
+        target = await _reset_config(self.owner.bot, self.owner.guild, str(choisis[0]))
+        libelle = next((l for c, l, _ in CIBLES_RESET if c == target), target)
+        await interaction.response.send_message(
+            embed=embeds.success(
+                f"Configuration **{libelle}** réinitialisée. "
+                "Les données des membres (XP, argent, sanctions) sont conservées.",
+                title="Réinitialisation effectuée",
+            ),
+            ephemeral=True,
+        )
 
 
 def _patch_setup_render() -> None:
