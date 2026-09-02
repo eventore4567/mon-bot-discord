@@ -10,6 +10,8 @@ import logging
 from types import MethodType
 
 import discord
+
+import config as _config
 from discord.ext import commands
 
 from . import final_interaction_policy as policy
@@ -17,8 +19,12 @@ from . import final_interaction_policy as policy
 logger = logging.getLogger("bot.final-error-embed-v5")
 
 BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-ERROR_COLOR = 0xED4245
-WARNING_COLOR = 0xF0B232
+# Ces deux couleurs etaient figees en dur et datent d'avant l'unification de la
+# palette. Comme ce module rend TOUS les messages d'erreur du bot, chaque refus,
+# chaque cooldown et chaque erreur interne sortait encore a l'ancienne teinte
+# pendant que le reste du bot affichait la nouvelle. Source unique desormais.
+ERROR_COLOR = int(_config.COLOR_ERROR)
+WARNING_COLOR = int(_config.COLOR_WARNING)
 FOOTER = "SentriX • Réponse rapide et sécurisée"
 _ALLOWED = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=False)
 

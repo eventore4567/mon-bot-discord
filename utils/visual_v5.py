@@ -5,6 +5,8 @@ aucune donnée métier : les valeurs affichées viennent toujours de la base exi
 """
 from __future__ import annotations
 
+import config as _config
+
 import asyncio
 import io
 import secrets
@@ -23,11 +25,13 @@ THEME_PRESETS: dict[str, dict[str, Any]] = {
     "sentrix": {
         "label": "SentriX Violet",
         "description": "Violet, indigo et cyan — identité officielle.",
-        "primary_color": 0x6C5CE7,
+        # Ce preset s'annonce comme l'identite officielle : il doit donc porter la
+        # palette officielle, pas une variante figee avant son unification.
+        "primary_color": int(_config.COLOR_BRAND),
         "secondary_color": 0x4C7DFF,
-        "success_color": 0x2FBF71,
-        "warning_color": 0xF0B232,
-        "danger_color": 0xED4245,
+        "success_color": int(_config.COLOR_SUCCESS),
+        "warning_color": int(_config.COLOR_WARNING),
+        "danger_color": int(_config.COLOR_ERROR),
     },
     "cyber": {
         "label": "Bleu Cyber",

@@ -12,16 +12,19 @@ from typing import Any
 
 import discord
 
+import config as _config
 from utils import brand_assets, microcopy, visual_v5
 
 
+# Les six premieres entrees sont des INTENTIONS : elles suivent la palette unique.
+# Les suivantes sont des identites de categorie, propres a ce renderer, et restent.
 COLORS: dict[str, int] = {
-    "brand": 0x6C5CE7,
-    "info": 0x5865F2,
-    "success": 0x2FBF71,
-    "warning": 0xF0B232,
-    "danger": 0xED4245,
-    "neutral": 0x4B5563,
+    "brand": int(_config.COLOR_BRAND),
+    "info": int(_config.COLOR_INFO),
+    "success": int(_config.COLOR_SUCCESS),
+    "warning": int(_config.COLOR_WARNING),
+    "danger": int(_config.COLOR_ERROR),
+    "neutral": int(_config.COLOR_NEUTRAL),
     "moderation": 0xE05A67,
     "security": 0x7A68D8,
     "tickets": 0x4C9AFF,
@@ -81,12 +84,17 @@ STATE_LABELS: dict[str, str] = {
     "danger": "Erreur",
 }
 
+# Jeu de RECONNAISSANCE : il doit continuer d'identifier les anciennes teintes,
+# encore presentes dans des embeds construits ailleurs, ET les nouvelles.
 SYSTEM_COLOURS = {
     0x57F287, 0x23A559, 0x2ECC71,
     0xED4245, 0xF23F43, 0xE74C3C,
     0xFEE75C, 0xF0B232, 0xF39C12,
     0x5865F2, 0x5847EB, 0x7C5CFC, 0x7C6CFF,
     0x3498DB, 0x1ABC9C, 0x00BCD4, 0x8E44AD,
+    int(_config.COLOR_SUCCESS), int(_config.COLOR_ERROR),
+    int(_config.COLOR_WARNING), int(_config.COLOR_INFO),
+    int(_config.COLOR_BRAND), int(_config.COLOR_NEUTRAL),
 }
 
 LEADING_DECORATION = re.compile(
@@ -193,16 +201,16 @@ def infer_kind(embed: discord.Embed | None = None, content: str = "") -> str:
     ).casefold()
     value = getattr(getattr(embed, "colour", None), "value", 0) if embed else 0
 
-    if value in {0xED4245, 0xF23F43, 0xE74C3C} or any(word in text for word in (
+    if value in {0xED4245, 0xF23F43, 0xE74C3C, int(_config.COLOR_ERROR)} or any(word in text for word in (
         "erreur", "impossible", "refusé", "interdit", "introuvable", "échoué",
         "manquante", "bloqué", "banni", "sanction",
     )):
         return "danger"
-    if value in {0xFEE75C, 0xF0B232, 0xF39C12} or any(word in text for word in (
+    if value in {0xFEE75C, 0xF0B232, 0xF39C12, int(_config.COLOR_WARNING)} or any(word in text for word in (
         "attention", "avertissement", "à vérifier", "déjà", "recharge", "cooldown",
     )):
         return "warning"
-    if value in {0x57F287, 0x23A559, 0x2ECC71} or any(word in text for word in (
+    if value in {0x57F287, 0x23A559, 0x2ECC71, int(_config.COLOR_SUCCESS)} or any(word in text for word in (
         "réussi", "terminé", "enregistré", "créé", "activé", "ajouté", "envoyé",
         "configuré", "effectué",
     )):
