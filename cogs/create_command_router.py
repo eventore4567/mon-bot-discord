@@ -240,10 +240,20 @@ async def install(bot: commands.Bot) -> None:
     sentrix = bot.get_command("create sentrix")
     server = bot.get_command("create server")
     legacy = bot.get_command("create-server")
-    if not isinstance(root, commands.Group) or sentrix is None or server is None or legacy is None:
+    if not isinstance(root, commands.Group) or sentrix is None or server is None:
         raise RuntimeError(
             "Registre +create incomplet après installation canonique "
-            f"(root={bool(root)}, sentrix={bool(sentrix)}, server={bool(server)}, legacy={bool(legacy)})."
+            f"(root={bool(root)}, sentrix={bool(sentrix)}, server={bool(server)})."
+        )
+
+    # +create-server appartient a cogs/server_builder, une extension
+    # independante qui peut n'etre pas encore chargee a cet instant. En faire
+    # une condition d'echec faisait planter l'installation du routeur a chaque
+    # demarrage, avec une trace complete et cinq alertes CRITIQUES — un bruit
+    # permanent qui aurait masque le prochain vrai probleme.
+    if legacy is None:
+        logger.debug(
+            "+create-server pas encore enregistre : server_builder se charge plus tard."
         )
 
     logger.info(

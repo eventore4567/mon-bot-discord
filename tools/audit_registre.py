@@ -73,6 +73,22 @@ def main() -> int:
         if id(cmd) not in vivantes:
             problemes.append(f"ALIAS ORPHELIN   {cle} designe une commande deregistree")
 
+    # Aucun parametre interne de wrapper ne doit subsister une fois TOUTES les
+    # extensions chargees : ces noms se retrouveraient dans la signature des
+    # commandes slash, donc sous les yeux des utilisateurs.
+    internes = {"self", "ctx", "context", "interaction", "bot", "original", "kwargs", "args"}
+    for commande in commandes:
+        try:
+            parametres = list(commande.clean_params)
+        except Exception:
+            problemes.append(f"PARAMETRES ILLISIBLES   {commande.qualified_name}")
+            continue
+        pollues = [p for p in parametres if p.casefold().lstrip("_") in internes]
+        if pollues:
+            problemes.append(
+                f"PARAMETRE INTERNE EXPOSE   {commande.qualified_name} → {pollues}"
+            )
+
     inconnues = sorted({c.name.lower() for c in bot.commands} - access_matrix.KNOWN_COMMANDS)
     problemes += [f"SANS POLITIQUE D'ACCES   {n}" for n in inconnues]
 

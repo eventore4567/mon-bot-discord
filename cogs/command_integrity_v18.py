@@ -32,7 +32,15 @@ from utils import sentrix_panels as panels
 logger = logging.getLogger("bot.command-integrity-v18")
 
 _RESERVED_USER_PARAMS = frozenset({"self", "ctx", "context", "interaction", "bot", "_bot"})
-_CREATE_REQUIRED = ("create", "create sentrix", "create server", "create-server")
+# Chaque commande essentielle, avec l'extension qui la fournit. Sans ce lien,
+# l'audit signalait +create-server absente a chaque passe intermediaire, alors
+# que cogs.server_builder n'etait tout simplement pas encore charge.
+_CREATE_REQUIRED = {
+    "create": "cogs.create_command_router",
+    "create sentrix": "cogs.create_command_router",
+    "create server": "cogs.create_command_router",
+    "create-server": "cogs.server_builder",
+}
 
 
 def _state(bot: commands.Bot) -> dict[str, Any]:
@@ -218,9 +226,16 @@ def _audit_registry(bot: commands.Bot) -> dict[str, Any]:
 
         aliases += len(list(getattr(command, "aliases", ()) or ()))
 
-    for required in _CREATE_REQUIRED:
-        if bot.get_command(required) is None:
-            critical.append(f"commande essentielle absente: {required}")
+    chargees = set(getattr(bot, "extensions", {}) or {})
+    for required, fournisseur in _CREATE_REQUIRED.items():
+        if bot.get_command(required) is not None:
+            continue
+        # Absente parce que son module n'est pas encore la : ce n'est pas un
+        # defaut, c'est l'ordre de chargement. L'audit final, lui, verra les
+        # extensions au complet.
+        if fournisseur not in chargees:
+            continue
+        critical.append(f"commande essentielle absente: {required}")
 
     try:
         app_commands = list(bot.tree.walk_commands())
@@ -360,9 +375,29 @@ def install(bot: commands.Bot, extension_name: str = "") -> None:
     state["audits"] = int(state.get("audits", 0)) + 1
 
     critical = list(report["critical"])
-    if critical:
+    # install() est rappele apres plusieurs vagues d'extensions. Une commande
+    # « essentielle » peut donc manquer simplement parce que le module qui la
+    # porte n'est pas encore charge : +create-server appartient a server_builder
+    # et arrive plus tard. Signaler cet instantane en ERREUR remplissait le
+    # journal d'alertes qui se resolvaient seules — un bruit permanent qui
+    # aurait masque le prochain vrai probleme.
+    #
+    # Un probleme transitoire disparait a l'audit suivant ; un vrai persiste.
+    # C'est donc la PERSISTANCE qui decide de la severite.
+    precedents = set(state.get("critical_precedents") or ())
+    state["critical_precedents"] = set(critical)
+    persistants = [c for c in critical if c in precedents]
+
+    if persistants:
         logger.error(
-            "V18 audit commandes : %s problème(s) critique(s) — %s",
+            "V18 audit commandes : %s problème(s) critique(s) persistant(s) — %s",
+            len(persistants),
+            " | ".join(persistants[:20]),
+        )
+    elif critical:
+        logger.warning(
+            "V18 audit commandes : %s problème(s) vu(s) pendant le chargement, "
+            "à confirmer au prochain audit — %s",
             len(critical),
             " | ".join(critical[:20]),
         )

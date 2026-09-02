@@ -148,10 +148,18 @@ def repair_wrapped_signatures(bot: commands.Bot) -> int:
             pass
 
         # Vérification après réparation. Si les paramètres restent contaminés, ne pas
-        # annoncer un succès silencieux : le rapport V18 le verra comme anomalie.
+        # annoncer un succès silencieux.
+        #
+        # Cette passe est rejouée après chaque vague d'extensions : une commande
+        # qu'une couche vient de réenvelopper est réparée à la passe suivante.
+        # Le signaler en ERREUR remplissait donc le journal d'alertes qui se
+        # résolvaient seules. L'état FINAL, lui, est vérifié pour de bon par
+        # tools/audit_registre.py, qui échoue si un paramètre interne subsiste
+        # une fois toutes les extensions chargées.
         if _bad_cached_params(command):
-            logger.error(
-                "V18 : paramètres internes encore exposés après réparation pour +%s.",
+            logger.warning(
+                "V18 : paramètres internes encore exposés pour +%s ; nouvelle "
+                "tentative à la prochaine passe.",
                 getattr(command, "qualified_name", getattr(command, "name", "?")),
             )
             continue
