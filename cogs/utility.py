@@ -20,7 +20,7 @@ from PIL import Image, ImageSequence, UnidentifiedImageError
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, helpers, checks, design_system
+from utils import access_matrix, embeds, helpers, checks, design_system
 from database.db import now
 
 logger = logging.getLogger("bot")
@@ -580,6 +580,56 @@ class HelpView(discord.ui.View):
         await interaction.response.send_modal(SearchModal(self.bot, self.prefix, self.is_staff))
 
 
+
+# Libelles francais des reglages de serveur. Discord les expose sous forme d'enums
+# anglaises ; les afficher brutes ne renseigne personne.
+NIVEAUX_VERIFICATION = {
+    "none": ("Aucune", "N'importe qui peut écrire immédiatement."),
+    "low": ("Faible", "E-mail vérifié exigé."),
+    "medium": ("Moyenne", "Compte Discord de plus de 5 minutes."),
+    "high": ("Élevée", "Membre du serveur depuis plus de 10 minutes."),
+    "highest": ("Maximale", "Numéro de téléphone vérifié exigé."),
+}
+FILTRES_CONTENU = {
+    "disabled": "Aucune analyse des médias",
+    "no_role": "Médias analysés pour les membres sans rôle",
+    "all_members": "Médias analysés pour tout le monde",
+}
+# Nombre de boosts requis par palier. Sert a dire ce qu'il manque, pas seulement
+# ou on en est.
+BOOSTS_PAR_PALIER = {0: 2, 1: 7, 2: 14}
+
+
+def _detail_salons(guild) -> str:
+    """Repartition reelle des salons. « 42 salons » ne dit pas s'il en manque un type."""
+    compte = {
+        "catégories": len(guild.categories),
+        "textuels": len(guild.text_channels),
+        "vocaux": len(guild.voice_channels),
+        "forums": len(getattr(guild, "forums", []) or []),
+        "conférences": len(guild.stage_channels),
+    }
+    lignes = [f"**{nombre}** {nom}" for nom, nombre in compte.items() if nombre]
+    fils = len(guild.threads)
+    if fils:
+        lignes.append(f"**{fils}** fils actifs")
+    return "\n".join(lignes) or "Aucun salon"
+
+
+def _marge_boosts(guild) -> str:
+    """Ou en est le serveur, et combien de boosts il manque pour le palier suivant."""
+    palier = guild.premium_tier
+    boosts = guild.premium_subscription_count or 0
+    actuel = f"Palier {palier}" if palier else "Aucun palier"
+    requis = BOOSTS_PAR_PALIER.get(palier)
+    if requis is None:
+        return f"{actuel} — palier maximal atteint\n**{boosts}** boosts actifs"
+    manquants = max(0, requis - boosts)
+    if manquants:
+        return f"{actuel} · **{boosts}** boosts\nEncore **{manquants}** pour le palier {palier + 1}"
+    return f"{actuel} · **{boosts}** boosts\nPalier {palier + 1} atteint sous peu"
+
+
 class Utility(commands.Cog, name="Utility"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -882,18 +932,27 @@ class Utility(commands.Cog, name="Utility"):
             inline=True,
         )
 
-        tier_names = {
-            0: "Aucun palier",
-            1: "Palier 1",
-            2: "Palier 2",
-            3: "Palier 3",
-        }
-        boost_count = guild.premium_subscription_count or 0
-        e.add_field(
-            name="Boosts",
-            value=f"{tier_names.get(guild.premium_tier, f'Palier {guild.premium_tier}')} ({boost_count} boosts)",
-            inline=True,
+        e.add_field(name="Boosts", value=_marge_boosts(guild), inline=True)
+
+        # Repartition des salons : « 42 salons » ne disait pas s'il manquait un type.
+        e.add_field(name="Salons", value=_detail_salons(guild), inline=True)
+
+        # Reglages de securite du serveur, invisibles autrement sans ouvrir les
+        # parametres Discord — et ce sont eux qui decident qui peut ecrire.
+        niveau, explication = NIVEAUX_VERIFICATION.get(
+            guild.verification_level.name, (guild.verification_level.name, "")
         )
+        moderation = [f"Vérification : **{niveau}** — {explication}"]
+        moderation.append(
+            "Filtre média : "
+            + FILTRES_CONTENU.get(guild.explicit_content_filter.name, guild.explicit_content_filter.name)
+        )
+        if guild.mfa_level:
+            moderation.append("Double authentification exigée du staff")
+        if guild.afk_channel is not None:
+            minutes = (guild.afk_timeout or 0) // 60
+            moderation.append(f"Salon inactif : {guild.afk_channel.mention} après {minutes} min")
+        e.add_field(name="Modération du serveur", value="\n".join(moderation), inline=False)
 
         # @everyone est exclu : tous les serveurs l'ont, il n'apprend rien, et son
         # role.name vaut litteralement "@everyone" — ce qui produisait un "@@everyone"
@@ -910,9 +969,20 @@ class Utility(commands.Cog, name="Utility"):
 
         emojis = [str(emoji) for emoji in guild.emojis]
         e.add_field(
-            name=f"Émojis [{len(emojis)}]",
+            name=f"Émojis [{len(emojis)}/{guild.emoji_limit}]",
             value=self._limited_list(emojis, empty="Aucun emoji personnalisé"),
             inline=False,
+        )
+        # Quotas : savoir qu'il reste de la place evite de decouvrir la limite au
+        # moment d'ajouter un emoji.
+        e.add_field(
+            name="Capacités",
+            value=(
+                f"Émojis : **{len(guild.emojis)}/{guild.emoji_limit}**\n"
+                f"Autocollants : **{len(guild.stickers)}/{guild.sticker_limit}**\n"
+                f"Fichiers : **{guild.filesize_limit // (1024 * 1024)} Mo** par envoi"
+            ),
+            inline=True,
         )
 
         created_at = int(guild.created_at.timestamp())
@@ -1032,10 +1102,45 @@ class Utility(commands.Cog, name="Utility"):
         e.add_field(name="Mention", value=role.mention, inline=True)
         e.add_field(name="Couleur", value=str(role.color), inline=True)
         e.add_field(name="Membres", value=len(role.members), inline=True)
-        e.add_field(name="Position", value=role.position, inline=True)
-        e.add_field(name="Affiché séparément", value="Oui" if role.hoist else "Non", inline=True)
-        e.add_field(name="Mentionnable", value="Oui" if role.mentionable else "Non", inline=True)
-        e.add_field(name="Géré par Discord ou un bot", value="Oui" if role.managed else "Non", inline=True)
+
+        # La position brute ne dit rien a personne. Ce qui compte, c'est si SentriX
+        # peut attribuer ou retirer ce role — c'est la cause de la plupart des echecs
+        # « je n'ai pas pu donner le rôle ».
+        moi = ctx.guild.me
+        rang = [f"Position **{role.position}** sur {len(ctx.guild.roles)}"]
+        if role == ctx.guild.default_role:
+            rang.append("Rôle par défaut : tout le monde l'a.")
+        elif moi is None:
+            rang.append("Hiérarchie inconnue.")
+        elif not moi.guild_permissions.manage_roles:
+            rang.append("SentriX ne peut pas le gérer : permission **Gérer les rôles** manquante.")
+        elif role >= moi.top_role:
+            rang.append(
+                f"SentriX ne peut pas le gérer : il est au-dessus de {moi.top_role.mention}. "
+                "Remontez le rôle de SentriX au-dessus."
+            )
+        elif role.managed:
+            rang.append("Géré par Discord ou une intégration : personne ne peut l'attribuer.")
+        else:
+            rang.append("SentriX peut l'attribuer et le retirer.")
+        e.add_field(name="Hiérarchie", value="\n".join(rang), inline=False)
+
+        nature = []
+        if role.hoist:
+            nature.append("Affiché séparément dans la liste des membres")
+        if role.mentionable:
+            nature.append("Mentionnable par tout le monde")
+        if role.is_premium_subscriber():
+            nature.append("Rôle des boosteurs du serveur")
+        if role.is_bot_managed():
+            nature.append("Rôle d'intégration d'un bot")
+        if role.is_integration():
+            nature.append("Rôle géré par une intégration")
+        e.add_field(
+            name="Particularités",
+            value="\n".join(f"• {ligne}" for ligne in nature) or "Rôle ordinaire, sans réglage particulier.",
+            inline=False,
+        )
 
         created_at = int(role.created_at.timestamp())
         e.add_field(
@@ -1044,14 +1149,37 @@ class Utility(commands.Cog, name="Utility"):
             inline=True,
         )
 
-        permissions = [
-            name.replace("_", " ")
-            for name, enabled in role.permissions
-            if enabled
-        ]
+        # Les permissions s'affichaient en anglais avec des tirets bas
+        # (« manage guild », « moderate members »). access_matrix les traduit.
+        actives = [nom for nom, activee in role.permissions if activee]
+        sensibles = [nom for nom in actives if nom in access_matrix.PERMISSIONS_SENSIBLES]
+        ordinaires = [nom for nom in actives if nom not in access_matrix.PERMISSIONS_SENSIBLES]
+
+        if role.permissions.administrator:
+            e.add_field(
+                name="Pouvoirs sensibles",
+                value=(
+                    "**Administrateur** — ce rôle contourne toutes les autres "
+                    "permissions et tous les réglages de salon."
+                ),
+                inline=False,
+            )
+        elif sensibles:
+            e.add_field(
+                name=f"Pouvoirs sensibles [{len(sensibles)}]",
+                value=self._limited_list(
+                    [access_matrix.permission_label(nom) for nom in sensibles],
+                    empty="Aucun",
+                ),
+                inline=False,
+            )
+
         e.add_field(
-            name=f"Permissions [{len(permissions)}]",
-            value=self._limited_list(permissions, empty="Aucune permission"),
+            name=f"Autres permissions [{len(ordinaires)}]",
+            value=self._limited_list(
+                [access_matrix.permission_label(nom) for nom in ordinaires],
+                empty="Aucune",
+            ),
             inline=False,
         )
         await ctx.send(embed=e)

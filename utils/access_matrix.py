@@ -292,6 +292,69 @@ PERMISSION_LABELS = {
     "view_audit_log": "Voir les logs d'audit",
 }
 
+# Completement de la table : 46 permissions Discord tombaient dans le repli et
+# s'affichaient en anglais (« Send messages », « Mention everyone ») dans les
+# messages d'erreur, +setup et la fiche d'un role. Les libelles suivent ceux de
+# l'interface Discord francaise.
+PERMISSION_LABELS.update({
+    "add_reactions": "Ajouter des réactions",
+    "attach_files": "Joindre des fichiers",
+    "bypass_slowmode": "Ignorer le mode lent",
+    "change_nickname": "Changer de pseudo",
+    "connect": "Se connecter",
+    "create_events": "Créer des événements",
+    "create_expressions": "Créer des expressions",
+    "create_instant_invite": "Créer une invitation",
+    "create_polls": "Créer des sondages",
+    "create_private_threads": "Créer des fils privés",
+    "create_public_threads": "Créer des fils publics",
+    "deafen_members": "Rendre des membres sourds",
+    "embed_links": "Intégrer des liens",
+    "external_emojis": "Utiliser des émojis externes",
+    "external_stickers": "Utiliser des autocollants externes",
+    "manage_emojis": "Gérer les émojis",
+    "manage_events": "Gérer les événements",
+    "manage_expressions": "Gérer les expressions",
+    "manage_permissions": "Gérer les permissions",
+    "manage_threads": "Gérer les fils",
+    "mention_everyone": "Mentionner @everyone, @here et tous les rôles",
+    "mute_members": "Rendre des membres muets",
+    "pin_messages": "Épingler des messages",
+    "priority_speaker": "Voix prioritaire",
+    "read_message_history": "Lire l'historique des messages",
+    "read_messages": "Voir les salons",
+    "request_to_speak": "Demander à parler",
+    "send_messages": "Envoyer des messages",
+    "send_messages_in_threads": "Envoyer des messages dans les fils",
+    "send_polls": "Envoyer des sondages",
+    "send_tts_messages": "Envoyer des messages vocaux synthétisés",
+    "send_voice_messages": "Envoyer des messages vocaux",
+    "set_voice_channel_status": "Définir le statut d'un salon vocal",
+    "speak": "Parler",
+    "stream": "Partager sa vidéo",
+    "use_application_commands": "Utiliser les commandes d'application",
+    "use_embedded_activities": "Lancer des activités",
+    "use_external_apps": "Utiliser des applications externes",
+    "use_external_emojis": "Utiliser des émojis externes",
+    "use_external_sounds": "Utiliser des sons externes",
+    "use_external_stickers": "Utiliser des autocollants externes",
+    "use_soundboard": "Utiliser la sonothèque",
+    "use_voice_activation": "Utiliser la détection de voix",
+    "view_channel": "Voir les salons",
+    "view_creator_monetization_analytics": "Voir les statistiques de monétisation",
+    "view_guild_insights": "Voir les analyses du serveur",
+})
+
+# Permissions qui donnent les cles du serveur. Les signaler sur la fiche d'un role
+# evite d'accorder « Gerer les roles » sans mesurer ce que cela ouvre.
+PERMISSIONS_SENSIBLES = (
+    "administrator", "manage_guild", "manage_roles", "manage_channels",
+    "manage_webhooks", "ban_members", "kick_members", "moderate_members",
+    "manage_messages", "mention_everyone", "manage_expressions", "manage_events",
+    "view_audit_log",
+)
+
+
 KNOWN_COMMANDS = (
     PUBLIC_COMMANDS
     | OWNER_ONLY_COMMANDS
@@ -852,5 +915,5 @@ __all__ = [
     "access_tier", "help_requirement", "permission_label", "module_for_command",
     "PUBLIC_COMMANDS", "OWNER_ONLY_COMMANDS", "CUSTOM_PERMISSION_COMMANDS",
     "DISCORD_PERMISSION_COMMANDS", "CATEGORY_COMMANDS", "KNOWN_COMMANDS",
-    "PERMISSION_LABELS", "MODULE_LABELS", "DENIAL_HEADER",
+    "PERMISSION_LABELS", "PERMISSIONS_SENSIBLES", "MODULE_LABELS", "DENIAL_HEADER",
 ]
