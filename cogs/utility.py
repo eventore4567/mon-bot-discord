@@ -765,7 +765,54 @@ class Utility(commands.Cog, name="Utility"):
 
     @commands.hybrid_command(name="ping", description="Afficher la latence du bot.")
     async def ping(self, ctx: commands.Context):
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Pong !', description=f'Latence : **{round(self.bot.latency * 1000)}ms**')))
+        """État de la connexion, pas seulement un nombre.
+
+        « Pong ! 42 ms » ne dit pas si 42 ms est bon, ni si la base répond. Les
+        deux comptent quand on tape +ping : on cherche à savoir si le bot va bien.
+        """
+        latence = max(0, round(self.bot.latency * 1000))
+        if latence <= 120:
+            etat, intention = "Excellente", "success"
+        elif latence <= 300:
+            etat, intention = "Correcte", "success"
+        elif latence <= 600:
+            etat, intention = "Dégradée", "warning"
+        else:
+            etat, intention = "Mauvaise", "danger"
+
+        connexion = [
+            panels.Ligne("Latence", f"**{latence} ms**", indice=f"Qualité : {etat.lower()}"),
+            panels.Ligne("Passerelle Discord", "connectée" if self.bot.is_ready() else "en reconnexion"),
+        ]
+        if ctx.guild is not None and ctx.guild.shard_id is not None:
+            connexion.append(panels.Ligne("Fragment", f"#{ctx.guild.shard_id}"))
+
+        base = "opérationnelle"
+        try:
+            await self.bot.db.fetchone("SELECT 1")
+        except Exception:
+            base = "**injoignable**"
+            intention = "danger"
+
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — État",
+                sous_titre=f"Latence **{latence} ms** · connexion {etat.lower()}.",
+                kind=intention,
+                sections=[
+                    panels.Section("Connexion", connexion),
+                    panels.Section(
+                        "Services",
+                        [
+                            panels.Ligne("Base de données", base),
+                            panels.Ligne("Serveurs", f"{len(self.bot.guilds)}"),
+                        ],
+                    ),
+                ],
+                pied="SentriX • État",
+            ),
+        )
 
     @commands.hybrid_command(name="avatar", description="Afficher l'avatar d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
@@ -1625,10 +1672,55 @@ class Utility(commands.Cog, name="Utility"):
 
     @commands.hybrid_command(name="emoji-list", description="Lister les emojis du serveur.", with_app_command=False)
     async def emoji_list(self, ctx: commands.Context):
-        if not ctx.guild.emojis:
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Aucun emoji', description="Ce serveur n'a aucun emoji personnalisé.", kind='warning')))
-        text = " ".join(str(e) for e in ctx.guild.emojis)[:4000]
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title=f'Emojis ({len(ctx.guild.emojis)})', description=text)))
+        """Les émojis du serveur, avec le quota restant."""
+        emojis = list(ctx.guild.emojis)
+        if not emojis:
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre="SentriX — Émojis",
+                    sous_titre="Ce serveur n'a aucun émoji personnalisé.",
+                    kind="info",
+                    sections=[
+                        panels.Section(
+                            "En ajouter",
+                            [panels.Ligne("`+addemoji <nom> <image>`", "Ajoute un émoji au serveur")],
+                        )
+                    ],
+                    pied="SentriX • Émojis",
+                ),
+            )
+
+        animes = [e for e in emojis if e.animated]
+        fixes = [e for e in emojis if not e.animated]
+        sections = [
+            panels.Section("Émojis", texte=" ".join(str(e) for e in fixes)[:1400] or "Aucun")
+        ]
+        if animes:
+            sections.append(
+                panels.Section("Animés", texte=" ".join(str(e) for e in animes)[:1400])
+            )
+        # Le quota manquait : on decouvrait la limite en essayant d'en ajouter un.
+        sections.append(
+            panels.Section(
+                "Quota",
+                [
+                    panels.Ligne("Utilisés", f"{len(emojis)} sur {ctx.guild.emoji_limit}"),
+                    panels.Ligne("Restants", str(max(0, ctx.guild.emoji_limit - len(emojis)))),
+                ],
+                aligne=True,
+            )
+        )
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — Émojis",
+                sous_titre=f"**{len(emojis)}** émoji(s) sur ce serveur, dont **{len(animes)}** animé(s).",
+                kind="info",
+                sections=sections,
+                pied="SentriX • Émojis",
+            ),
+        )
 
     @commands.hybrid_command(name="poll", description="Créer un sondage rapide (réactions 👍/👎).")
     @app_commands.describe(question="La question du sondage")
@@ -1654,11 +1746,56 @@ class Utility(commands.Cog, name="Utility"):
 
     @commands.hybrid_command(name="reminder-list", description="Lister vos rappels en cours.", with_app_command=False)
     async def reminder_list(self, ctx: commands.Context):
-        rows = await self.bot.db.fetchall("SELECT * FROM reminders WHERE user_id = ? ORDER BY trigger_at ASC", (ctx.author.id,))
+        """Vos rappels, avec leur identifiant et comment les annuler."""
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM reminders WHERE user_id = ? ORDER BY trigger_at ASC", (ctx.author.id,)
+        )
         if not rows:
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Aucun rappel', description="Vous n'avez aucun rappel en cours.")))
-        lines = [f"`#{r['id']}` <t:{r['trigger_at']}:R> — {r['text'][:50]}" for r in rows[:15]]
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Vos rappels', description='\n'.join(lines))))
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre="SentriX — Rappels",
+                    sous_titre="Vous n'avez aucun rappel en attente.",
+                    kind="info",
+                    sections=[
+                        panels.Section(
+                            "En créer un",
+                            [panels.Ligne("`+remind 2h Sortir les poubelles`",
+                                          "SentriX vous écrira au bon moment")],
+                        )
+                    ],
+                    pied="SentriX • Rappels",
+                ),
+            )
+
+        prochains = [
+            panels.Ligne(
+                f"#{r['id']}",
+                f"<t:{r['trigger_at']}:R> · {str(r['text'])[:60]}",
+            )
+            for r in rows[:12]
+        ]
+        sections = [panels.Section(f"Rappels en attente ({len(rows)})", prochains)]
+        if len(rows) > 12:
+            sections.append(
+                panels.Section("Non affichés", [panels.Ligne("Autres rappels", str(len(rows) - 12))])
+            )
+        sections.append(
+            panels.Section(
+                "Gérer",
+                [panels.Ligne("`+reminder-cancel <numéro>`", "Annule le rappel correspondant")],
+            )
+        )
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — Rappels",
+                sous_titre=f"**{len(rows)}** rappel(s) en attente, le prochain <t:{rows[0]['trigger_at']}:R>.",
+                kind="info",
+                sections=sections,
+                pied="SentriX • Rappels",
+            ),
+        )
 
     @commands.hybrid_command(name="reminder-cancel", description="Annuler un rappel.", with_app_command=False)
     @app_commands.describe(id="L'identifiant du rappel (voir /reminder-list)")
