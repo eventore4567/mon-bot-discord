@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from utils import embeds as sentrix_embeds
 from utils.command_style_v2 import style_embed
 
 
@@ -90,7 +91,7 @@ class BroadcastConfirmView(discord.ui.View):
             embed=warning(
                 "Diffusion lancée",
                 f"Envoi vers **{len(self.recipients)} membre(s)** non-bot.\n"
-                "Le bot respecte un délai entre les messages pour limiter les erreurs Discord.",
+                "Le bot respecte un délai entre les messages pour suivre les limites de Discord.",
             ),
             view=self,
         )
@@ -167,11 +168,12 @@ class Broadcast(commands.Cog):
         try:
             for index, member in enumerate(recipients, start=1):
                 dm_embed = embed(
-                    f"Message de {guild.name}",
-                    content,
+                    "Message de SentriX",
+                    f"**Serveur :** {guild.name}\n\n{content}",
                 )
                 if guild.icon:
                     dm_embed.set_thumbnail(url=guild.icon.url)
+                dm_embed.set_image(url=sentrix_embeds.SENTRIX_BANNER_URL)
                 dm_embed.set_footer(
                     text=f"Message envoyé par l'équipe de {guild.name} • SentriX"
                 )
@@ -284,7 +286,7 @@ class Broadcast(commands.Cog):
             + ("\n…" if len(content) > 1200 else "")
             + "\n\n"
             "Les membres qui ont fermé leurs MP ne recevront rien. "
-            "Une diffusion massive peut aussi être ralentie ou refusée par Discord.",
+            "Discord peut appliquer un délai supplémentaire aux diffusions importantes.",
         )
         view = BroadcastConfirmView(
             self,
