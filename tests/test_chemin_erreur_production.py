@@ -71,7 +71,7 @@ class PanneauDeComposant(unittest.TestCase):
         self.assertIn("## Action interrompue", texte)
         self.assertGreaterEqual(texte.count("### "), 2, "il faut au moins deux sections")
         self.assertIn("SentriX", texte)
-        self.assertEqual([f.filename for f in panneau.fichiers()], ["banner_error.png"])
+        self.assertEqual([f.filename for f in panneau.fichiers()], ["banner_error.webp"])
 
 
 class AutresRenderers(unittest.TestCase):

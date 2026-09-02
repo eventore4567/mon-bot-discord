@@ -63,7 +63,7 @@ class StructureDUnPanneau(unittest.TestCase):
         self.assertIn(cible.removeprefix("attachment://"), joints)
 
     def test_la_banniere_suit_l_intention(self):
-        self.assertEqual([f.filename for f in self.panneau.fichiers()], ["banner_error.png"])
+        self.assertEqual([f.filename for f in self.panneau.fichiers()], ["banner_error.webp"])
         self.assertEqual(self.panneau.to_components()[0]["accent_color"], config.COLOR_ERROR)
 
     def test_chaque_section_est_precedee_d_un_filet(self):

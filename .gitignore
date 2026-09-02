@@ -47,5 +47,8 @@ logs/
 *.bak.new
 backup_phase*/
 
-# Bannières de logs régénérées au démarrage par ensure_banners(force=True)
+# Bannières régénérées au démarrage par ensure_banners(force=True). Les sources
+# banner_source_*.webp, elles, sont versionnées : elles ne sont pas générées.
 assets/log_banners/banner_*.png
+assets/log_banners/banner_*.webp
+!assets/log_banners/banner_source_*.webp

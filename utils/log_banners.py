@@ -54,14 +54,35 @@ HEIGHT = 110
 # calculés en Python pur au démarrage.
 _GRADIENT_WIDTH = 256
 
+# Familles de bannieres. Cinq etats (les quatre premiers plus « special »), puis
+# quatre domaines. On s'arrete la volontairement : une famille par domaine reste
+# reconnaissable, une par commande ne le serait plus, et chaque variante est une
+# image de plus a garder coherente.
 COLORS: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
+    # Etats
     "error": ((255, 62, 82), (126, 17, 48)),
     "success": ((42, 221, 119), (12, 100, 67)),
     "warning": ((255, 188, 60), (176, 78, 18)),
     "info": ((55, 151, 255), (51, 67, 198)),
     "special": ((174, 97, 255), (76, 38, 180)),
+    # Domaines : une identite propre la ou la teinte d'etat ne dit rien d'utile.
+    "moderation": ((232, 84, 106), (104, 22, 46)),   # rouge sourd, distinct de l'erreur
+    "security": ((139, 122, 255), (58, 40, 148)),    # indigo, la couleur des protections
+    "economy": ((240, 190, 78), (146, 92, 20)),      # or
+    "config": ((64, 208, 214), (22, 96, 132)),       # cyan, les reglages
 }
 STYLES = tuple(COLORS)
+
+# WebP plutot que PNG : la banniere part en piece jointe a CHAQUE message, et le
+# meme visuel pese 5 Ko au lieu de 45. Sur un degrade avec logo, la difference ne
+# se voit pas ; sur la bande passante d'un gros serveur, si.
+EXTENSION = "webp"
+_QUALITE_WEBP = 88
+
+
+def nom_fichier(style: str) -> str:
+    """Nom du fichier de banniere pour une famille."""
+    return f"banner_{style}.{EXTENSION}"
 _READY = False
 
 
@@ -167,17 +188,21 @@ def build_banner(style: str) -> Image.Image:
 
 
 def ensure_banners(force: bool = False) -> None:
-    """Génère les cinq PNG. ``force=True`` régénère le cache disque au démarrage."""
+    """Genere une banniere par famille. ``force=True`` regenere le cache disque.
+
+    Les fichiers sont ecrits une seule fois au demarrage, puis relus depuis le
+    disque a chaque envoi : aucune image n'est recalculee par commande.
+    """
     global _READY
     if _READY and not force:
         return
     BANNER_DIR.mkdir(parents=True, exist_ok=True)
     for style in COLORS:
-        path = BANNER_DIR / f"banner_{style}.png"
+        path = BANNER_DIR / nom_fichier(style)
         if path.exists() and not force:
             continue
         try:
-            build_banner(style).save(path, "PNG", optimize=True)
+            build_banner(style).save(path, "WEBP", quality=_QUALITE_WEBP, method=6)
         except Exception:
             logger.exception("Génération de la bannière %s impossible.", style)
     _READY = True
@@ -191,7 +216,7 @@ def banner_kind(log_type: str, title: str = "", description: str = "") -> str:
 
 def get_banner(log_type: str, title: str = "", description: str = "") -> Path:
     ensure_banners()
-    path = BANNER_DIR / f"banner_{banner_kind(log_type, title, description)}.png"
+    path = BANNER_DIR / nom_fichier(banner_kind(log_type, title, description))
     if not path.exists():
         ensure_banners(force=True)
     return path

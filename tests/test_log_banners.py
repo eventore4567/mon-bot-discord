@@ -8,17 +8,40 @@ from utils import log_banners
 from utils.log_categories import LOG_REGISTRY
 
 
-def test_five_variants_are_1024x110_and_all_distinct():
+def test_chaque_famille_fait_1024x110_et_reste_distincte():
+    """Neuf familles : cinq etats, quatre domaines. Toutes doivent differer.
+
+    Le format est WebP depuis que la banniere part en piece jointe a chaque
+    reponse de commande et plus seulement dans les journaux : le meme visuel pese
+    5 Ko au lieu de 45.
+    """
     payloads = []
-    for style in ("error", "success", "warning", "info", "special"):
-        path = log_banners.BANNER_DIR / f"banner_{style}.png"
+    for style in log_banners.STYLES:
+        path = log_banners.BANNER_DIR / log_banners.nom_fichier(style)
         assert path.exists(), style
         payload = path.read_bytes()
         payloads.append(payload)
-        assert payload.startswith(b"\x89PNG\r\n\x1a\n")
+        assert payload[:4] == b"RIFF" and payload[8:12] == b"WEBP", style
         with Image.open(BytesIO(payload)) as image:
             assert image.size == (1024, 110)
-    assert len(set(payloads)) == 5
+    assert len(set(payloads)) == len(log_banners.STYLES)
+
+
+def test_une_banniere_reste_legere():
+    """Elle est jointe a CHAQUE message : son poids est un cout par commande."""
+    for style in log_banners.STYLES:
+        path = log_banners.BANNER_DIR / log_banners.nom_fichier(style)
+        assert path.stat().st_size < 12_000, f"{style} : {path.stat().st_size} octets"
+
+
+def test_les_domaines_ont_leur_propre_teinte():
+    """Une sanction affichee en vert de reussite serait un contresens."""
+    from utils import sentrix_panels as panels
+
+    assert panels.nom_banniere("moderation") == log_banners.nom_fichier("moderation")
+    assert panels.nom_banniere("securite") == log_banners.nom_fichier("security")
+    assert panels.nom_banniere("economie") == log_banners.nom_fichier("economy")
+    assert panels.nom_banniere("configuration") == log_banners.nom_fichier("config")
 
 
 def test_style_comes_from_the_registry_not_from_the_title():
@@ -39,7 +62,7 @@ def test_every_registry_entry_maps_to_a_generated_banner():
 
 def test_banner_has_a_top_light_edge_and_a_right_vignette():
     # x=200 : hors du logo centre et de son halo, qui eclaircissent le milieu.
-    with Image.open(log_banners.BANNER_DIR / "banner_info.png") as image:
+    with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("info")) as image:
         rgb = image.convert("RGB")
         top = sum(rgb.getpixel((200, 0)))
         middle = sum(rgb.getpixel((200, 55)))

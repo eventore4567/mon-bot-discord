@@ -37,19 +37,31 @@ from typing import Any, Iterable, Sequence
 import discord
 
 import config as _config
-from utils.log_banners import ensure_banners, BANNER_DIR
+from utils.log_banners import ensure_banners, nom_fichier, BANNER_DIR
 
 logger = logging.getLogger("bot.panels")
 
 # Intentions -> couleur d'accent du conteneur et bannière correspondante.
 # Les noms de bannière sont ceux de utils/log_banners.COLORS.
+# Deux familles d'intentions.
+#
+#   Les ETATS disent ce qui vient de se passer : reussite, refus, avertissement.
+#   Les DOMAINES disent de quoi on parle, quand l'etat n'apporte rien — une fiche
+#   de moderation reussie n'est pas « verte », elle est « moderation ». Une
+#   sanction affichee en vert de reussite serait un contresens.
 INTENTIONS: dict[str, tuple[int, str]] = {
+    # Etats
     "success": (int(_config.COLOR_SUCCESS), "success"),
     "danger": (int(_config.COLOR_ERROR), "error"),
     "warning": (int(_config.COLOR_WARNING), "warning"),
     "info": (int(_config.COLOR_INFO), "info"),
     "brand": (int(_config.COLOR_BRAND), "special"),
     "neutral": (int(_config.COLOR_NEUTRAL), "info"),
+    # Domaines
+    "moderation": (0xE8546A, "moderation"),
+    "securite": (0x8B7AFF, "security"),
+    "economie": (0xF0BE4E, "economy"),
+    "configuration": (0x40D0D6, "config"),
 }
 
 # Marqueur de section. Discord ne sait pas tracer de filet horizontal dans un
@@ -148,7 +160,7 @@ class Bouton:
 def nom_banniere(kind: str) -> str:
     """Fichier de bannière correspondant à l'intention."""
     _, style = INTENTIONS.get(kind, INTENTIONS["info"])
-    return f"banner_{style}.png"
+    return nom_fichier(style)
 
 
 def fichier_banniere(kind: str) -> discord.File | None:
