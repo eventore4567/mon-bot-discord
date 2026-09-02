@@ -76,7 +76,7 @@ class RuntimeResponseTransportTests(unittest.TestCase):
         source = (ROOT / "cogs" / "final_error_embed_v5.py").read_text(encoding="utf-8")
         self.assertIn('getattr(ctx, "_sentrix_response_sent", False)', source)
         self.assertIn("await _replace_prefix_response(ctx, panel)", source)
-        self.assertIn("await raw_edit(interaction, content=None, embed=panel", source)
+        self.assertIn("await raw_edit(interaction, content=None, embeds=[], view=panneau", source)
 
 
 if __name__ == "__main__":

@@ -163,28 +163,18 @@ def _install_close_guard(bot: commands.Bot) -> None:
 
 
 def _install_missing_argument_help(bot: commands.Bot) -> None:
-    current = bot.on_command_error
-    function = getattr(current, "__func__", current)
-    if getattr(function, "_sentrix_root_help_error", False):
-        return
+    """Ne fait plus rien : le gestionnaire canonique traite deja ce cas, en mieux.
 
-    async def production_command_error(_bot, ctx: commands.Context, error: commands.CommandError):
-        raw = getattr(error, "original", error)
-        if isinstance(raw, commands.MissingRequiredArgument):
-            command = getattr(ctx, "command", None)
-            signature = str(getattr(command, "signature", "") or "").strip()
-            prefix = str(getattr(ctx, "clean_prefix", None) or "+")
-            qualified = str(getattr(command, "qualified_name", "commande") or "commande")
-            usage = f"{prefix}{qualified} {signature}".strip()
-            return await ctx.send(
-                embed=embeds.error(
-                    f"L'argument **{raw.param.name}** est obligatoire.\nSyntaxe correcte : `{usage}`\nOuvrez `{prefix}help` puis utilisez **Rechercher** pour voir les détails de la commande."
-                )
-            )
-        return await current(ctx, error)
+    Cette fonction interceptait MissingRequiredArgument et repondait avec un embed
+    a elle AVANT de deleguer. C'etait une couche de plus sur un cas deja couvert :
+    cogs/final_error_embed_v5 rend maintenant un panneau complet — banniere,
+    section « Syntaxe attendue », section « Besoin d'aide ». Cette commande etait
+    donc la SEULE du bot a repondre encore en vieil embed, mesure a l'appui.
 
-    production_command_error._sentrix_root_help_error = True
-    bot.on_command_error = MethodType(production_command_error, bot)
+    On garde la fonction et son appel : la retirer du bootstrap demanderait de
+    toucher a l'ordre d'installation, ce qui n'apporte rien ici.
+    """
+    return
 
 
 class ProductionPhaseRuntime(commands.Cog):

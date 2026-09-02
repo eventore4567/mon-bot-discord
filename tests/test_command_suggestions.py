@@ -44,8 +44,19 @@ def test_la_recherche_reste_silencieuse_sur_une_saisie_absurde():
 
 
 def test_le_repli_reste_disponible_sans_suggestion():
-    text = open(final.__file__, encoding="utf-8").read()
-    assert "pour consulter les commandes disponibles" in text
+    """Sans commande proche, le panneau doit quand meme dire ou aller.
+
+    L'information a change de forme : elle etait une phrase dans le paragraphe,
+    elle est maintenant une section « Besoin d'aide » avec la commande exacte.
+    """
+    import pathlib
+
+    racine = pathlib.Path(__file__).resolve().parents[1]
+    source = (racine / "cogs" / "final_error_embed_v5.py").read_text(encoding="utf-8")
+    assert "def _aide(" in source
+    assert "Besoin d'aide" in source
+    assert "{prefix}help" in source
+
 
 
 def test_la_recherche_filtre_sur_les_permissions():

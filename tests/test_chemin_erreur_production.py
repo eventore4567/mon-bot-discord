@@ -16,7 +16,7 @@ import unittest
 
 import config
 from cogs import final_error_embed_v5 as erreurs
-from utils import embeds as sx, premium_style, visual_v5
+from utils import embeds as sx, premium_style, sentrix_panels as panels, visual_v5
 
 RACINE = pathlib.Path(__file__).resolve().parent.parent
 
@@ -52,23 +52,26 @@ class PanneauDeComposant(unittest.TestCase):
     def test_le_panneau_nomme_le_bouton_en_cause(self):
         class Faux:
             label = "Confirmer"
-        panneau = erreurs._component_error_panel(Faux())
-        self.assertIn("Confirmer", panneau.description or "")
+        self.assertIn("Confirmer", panels.texte_complet(erreurs._component_error_panel(Faux())))
 
     def test_il_fonctionne_sans_libelle(self):
-        panneau = erreurs._component_error_panel(None)
-        self.assertIn("cette action", panneau.description or "")
+        self.assertIn("cette action", panels.texte_complet(erreurs._component_error_panel(None)))
 
     def test_il_dit_que_rien_n_a_ete_enregistre(self):
-        """Sans cette phrase, le membre ne sait pas s'il doit recommencer."""
-        panneau = erreurs._component_error_panel(None)
-        self.assertIn("Rien n'a été enregistré", panneau.description or "")
+        """Sans cette information, le membre ne sait pas s'il doit recommencer."""
+        texte = panels.texte_complet(erreurs._component_error_panel(None)).casefold()
+        self.assertIn("aucune modification", texte)
 
     def test_il_a_l_identite_des_autres_erreurs(self):
+        """Banniere en tete, accent rouge, sections : comme tous les autres."""
         panneau = erreurs._component_error_panel(None)
-        self.assertEqual(panneau.colour.value, config.COLOR_ERROR)
-        self.assertTrue((panneau.description or "").startswith(sx.BAR[:8]))
-        self.assertTrue((panneau.footer.text or "").startswith("SentriX"))
+        composants = panneau.to_components()
+        self.assertEqual(composants[0]["accent_color"], config.COLOR_ERROR)
+        texte = panels.texte_complet(panneau)
+        self.assertIn("## Action interrompue", texte)
+        self.assertGreaterEqual(texte.count("### "), 2, "il faut au moins deux sections")
+        self.assertIn("SentriX", texte)
+        self.assertEqual([f.filename for f in panneau.fichiers()], ["banner_error.png"])
 
 
 class AutresRenderers(unittest.TestCase):
