@@ -203,3 +203,41 @@ class PontDepuisEmbed(unittest.TestCase):
         accent = panneau.to_components()[0]["accent_color"]
         self.assertNotEqual(accent, config.COLOR_SUCCESS)
         self.assertEqual(accent, panels.INTENTIONS["moderation"][0])
+
+
+class Confirmations(unittest.TestCase):
+    """Trois moments d'une confirmation etaient muets."""
+
+    def setUp(self):
+        from utils.helpers import ConfirmView
+
+        self.vue = ConfirmView(author_id=1, timeout=1)
+
+    def test_un_clic_fige_les_boutons(self):
+        """Une decision prise ne doit plus paraitre cliquable."""
+        self.vue._figer()
+        self.assertTrue(all(getattr(e, "disabled", False) for e in self.vue.children))
+
+    def test_l_expiration_vaut_un_refus(self):
+        """Le silence n'est pas un accord : value doit valoir False, jamais None."""
+        import asyncio
+
+        asyncio.run(self.vue.on_timeout())
+        self.assertIs(self.vue.value, False)
+        self.assertTrue(all(getattr(e, "disabled", False) for e in self.vue.children))
+
+    def test_l_expiration_sans_message_ne_leve_pas(self):
+        """message est facultatif : les appelants historiques ne le renseignent pas."""
+        import asyncio
+
+        self.vue.message = None
+        asyncio.run(self.vue.on_timeout())  # ne doit pas lever
+
+    def test_le_refus_explique_quoi_faire(self):
+        """« Seule la personne à l'origine peut confirmer » ne disait pas la suite."""
+        import inspect
+        from utils.helpers import ConfirmView
+
+        source = inspect.getsource(ConfirmView.interaction_check)
+        self.assertIn("Lancez la commande vous-même", source)
+        self.assertIn("panels.envoyer", source)

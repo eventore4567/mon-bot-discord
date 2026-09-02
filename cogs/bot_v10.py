@@ -123,7 +123,11 @@ class BotV10(commands.Cog, name="BotV10"):
      if parts and parts[0].casefold() == "auto":
       profile = parts[1].casefold() if len(parts) > 1 else "community"; return await self.run_auto_setup(ctx, profile)
    return await original(cog_self, ctx, *args, **kwargs)
-  wrapped._sentrix_setup_auto_v10 = True; command.callback = wrapped
+  # _sentrix_original est la convention du depot pour rendre une enveloppe
+  # tracable : sans elle, les portes d'analyse s'arretent ici et croient que
+  # +setup n'a pas de rendu.
+  wrapped._sentrix_setup_auto_v10 = True; wrapped._sentrix_original = original
+  command.callback = wrapped
 
  def _patch_ai_context(self):
   try: from cogs import ai_context_v9

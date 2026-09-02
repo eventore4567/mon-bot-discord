@@ -176,33 +176,112 @@ def confirm_embed(message: str, *, state: str = "pending") -> discord.Embed:
 
 
 class ConfirmView(discord.ui.View):
-    """Confirmation générique sobre, sans emoji décoratif."""
+    """Confirmation partagée par tout le bot.
+
+    Trois moments etaient muets et le sont moins :
+
+    - une AUTRE personne clique : elle recevait « Seule la personne à l'origine
+      peut confirmer » sans savoir quoi faire ; elle sait maintenant que la
+      commande lui est ouverte si elle la lance elle-meme ;
+    - le delai expire : rien ne se passait, les boutons restaient actifs a l'ecran
+      alors qu'ils ne repondaient plus. Ils se desactivent, et le message dit que
+      rien n'a ete fait ;
+    - apres un clic : les boutons se desactivent aussi, pour qu'on voie que la
+      decision est prise.
+
+    `message` est facultatif : renseigne-le apres l'envoi pour que l'expiration
+    puisse modifier le message. Sans lui, le comportement reste celui d'avant.
+    """
 
     def __init__(self, author_id: int, timeout: float = 30):
         super().__init__(timeout=timeout)
         self.author_id = author_id
         self.value: bool | None = None
+        self.message: discord.Message | None = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                embed=embeds.error("Seule la personne à l'origine de la commande peut confirmer."),
-                ephemeral=True,
+            from utils import sentrix_panels as panels
+
+            await panels.envoyer(
+                interaction,
+                panels.Panneau(
+                    titre="SentriX — Confirmation",
+                    sous_titre="Cette confirmation appartient à une autre personne.",
+                    kind="warning",
+                    sections=[
+                        panels.Section(
+                            "Pourquoi",
+                            [
+                                panels.Ligne(
+                                    "Sécurité",
+                                    "Seul l'auteur d'une commande peut en valider l'effet",
+                                    indice="Cela évite qu'un tiers déclenche une action à sa place.",
+                                )
+                            ],
+                        ),
+                        panels.Section(
+                            "Que faire",
+                            [panels.Ligne("Lancez la commande vous-même", "Vous obtiendrez votre propre confirmation")],
+                        ),
+                    ],
+                    pied="SentriX • Confirmation",
+                ),
+                ephemere=True,
             )
             return False
         return True
 
+    def _figer(self) -> None:
+        """Desactive les boutons : une decision prise ne doit plus paraitre cliquable."""
+        for enfant in self.children:
+            if hasattr(enfant, "disabled"):
+                enfant.disabled = True
+
     @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = True
+        self._figer()
         self.stop()
         await interaction.response.defer()
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = False
+        self._figer()
         self.stop()
         await interaction.response.defer()
+
+    async def on_timeout(self) -> None:
+        """Le silence n'est pas une reponse : on le dit."""
+        self.value = False
+        self._figer()
+        if self.message is None:
+            return
+        from utils import sentrix_panels as panels
+
+        expire = panels.Panneau(
+            titre="SentriX — Confirmation expirée",
+            sous_titre="Aucune action n'a été effectuée.",
+            kind="neutral",
+            sections=[
+                panels.Section(
+                    "Ce qui s'est passé",
+                    [
+                        panels.Ligne("Délai", "La confirmation a expiré sans réponse"),
+                        panels.Ligne("Effet", "**Aucun** — rien n'a été modifié"),
+                        panels.Ligne("Reprendre", "Relancez la commande pour obtenir une nouvelle confirmation"),
+                    ],
+                )
+            ],
+            pied="SentriX • Confirmation",
+        )
+        try:
+            await self.message.edit(
+                content=None, embeds=[], view=expire, attachments=expire.fichiers()
+            )
+        except discord.HTTPException:
+            logger.debug("Confirmation expirée : message non modifiable.", exc_info=True)
 
 
 class PaginatorView(discord.ui.View):

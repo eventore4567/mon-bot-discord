@@ -124,6 +124,35 @@ def chemins_trouves(source: str) -> set[str]:
 # Profondeur maximale de la chaine de delegation suivie. La plus longue chaine
 # reelle du depot en compte quatre (fishing -> _run_solo -> _partage -> _embed ->
 # create_embed) ; six laisse de la marge sans rendre la porte lente ou imprevisible.
+# Noms de methodes trop courants pour servir de saut inter-modules. `x.clear()`
+# sur une liste ne mene pas a la commande +clear, et `y.send()` ne mene pas a la
+# fonction send d'un cog. Sans cette liste, la porte annoncait 15 commandes
+# recomposees dans embed_builder parce qu'il appelle `.clear()` quelque part.
+NOMS_TROP_COURANTS = frozenset({
+    "clear", "send", "edit", "add", "remove", "get", "set", "close", "stop",
+    "start", "update", "keys", "values", "items", "join", "format", "strip",
+    "split", "append", "pop", "copy", "count", "index", "insert", "extend",
+    "read", "write", "open", "run", "check", "reset", "save", "load", "build",
+    "render", "refresh", "cancel", "delete", "create", "connect", "execute",
+    "lower", "upper", "title", "replace", "startswith", "endswith", "encode",
+    "decode", "sort", "reverse", "next", "seek", "flush", "wait", "done",
+})
+
+# Receveurs depuis lesquels un saut inter-modules a du sens. `cog.send_report(ctx)`
+# et `help_cog.send_help(...)` designent bien une methode d'un autre cog ; en
+# revanche `guild.ban(...)` est une methode de discord.py, pas la commande +ban.
+# Sans cette regle, +bl paraissait recompose parce qu'il appelle guild.ban().
+RECEVEURS_SUIVIS = ("self", "cog")
+
+
+def _saut_autorise(cible: str) -> bool:
+    """Le saut vers l'index global est-il legitime pour cet appel ?"""
+    if "." not in cible:
+        return True  # appel nu : envoyer(...), _aide(...)
+    receveur = cible.rsplit(".", 1)[0].split(".")[-1]
+    return receveur in RECEVEURS_SUIVIS or receveur.endswith("_cog")
+
+
 PROFONDEUR_MAX = 6
 
 

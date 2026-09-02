@@ -43,8 +43,12 @@ from ui_coverage_gate import suivre_delegation  # noqa: E402
 # helper qui renvoie un Embed dans security_command_center et un Panneau dans le
 # module d'erreur. Le retenir gonflait le compte de 60 commandes qui n'ont pas
 # change de composition. Un marqueur ambigu vaut moins qu'un chiffre juste.
+# Marqueurs precis. Un nom trop general (« SetupView(  ») matche tout fichier qui
+# se contente de referencer la classe : la porte annoncait alors 63 commandes
+# recomposees dont 40 ne l'etaient pas.
 RECOMPOSE = (
     "panels.Panneau", "sx_panels.Panneau", "panels.envoyer", "sx_panels.envoyer",
+    "panels.depuis_embed", "sx_panels.depuis_embed",
     "VueAide(", "PremiumEmbedView(", "_status_panneau", "build_level_panneau",
     "_prefix_error_panel", "_component_error_panel", "_slash_error_panel",
 )
@@ -57,6 +61,35 @@ def classer(source: str) -> str:
     if any(m in source for m in EMBED):
         return "embed"
     return "autre"
+
+
+# Noms de methodes trop courants pour servir de saut inter-modules. `x.clear()`
+# sur une liste ne mene pas a la commande +clear, et `y.send()` ne mene pas a la
+# fonction send d'un cog. Sans cette liste, la porte annoncait 15 commandes
+# recomposees dans embed_builder parce qu'il appelle `.clear()` quelque part.
+NOMS_TROP_COURANTS = frozenset({
+    "clear", "send", "edit", "add", "remove", "get", "set", "close", "stop",
+    "start", "update", "keys", "values", "items", "join", "format", "strip",
+    "split", "append", "pop", "copy", "count", "index", "insert", "extend",
+    "read", "write", "open", "run", "check", "reset", "save", "load", "build",
+    "render", "refresh", "cancel", "delete", "create", "connect", "execute",
+    "lower", "upper", "title", "replace", "startswith", "endswith", "encode",
+    "decode", "sort", "reverse", "next", "seek", "flush", "wait", "done",
+})
+
+# Receveurs depuis lesquels un saut inter-modules a du sens. `cog.send_report(ctx)`
+# et `help_cog.send_help(...)` designent bien une methode d'un autre cog ; en
+# revanche `guild.ban(...)` est une methode de discord.py, pas la commande +ban.
+# Sans cette regle, +bl paraissait recompose parce qu'il appelle guild.ban().
+RECEVEURS_SUIVIS = ("self", "cog")
+
+
+def _saut_autorise(cible: str) -> bool:
+    """Le saut vers l'index global est-il legitime pour cet appel ?"""
+    if "." not in cible:
+        return True  # appel nu : envoyer(...), _aide(...)
+    receveur = cible.rsplit(".", 1)[0].split(".")[-1]
+    return receveur in RECEVEURS_SUIVIS or receveur.endswith("_cog")
 
 
 PROFONDEUR = 6
@@ -89,9 +122,13 @@ def sources_atteintes(depart: str, fns: dict, globales: dict, profondeur: int = 
             continue
         for n in ast.walk(arbre):
             if isinstance(n, ast.Call):
-                appele = ast.unparse(n.func).split(".")[-1]
-                if appele not in vus:
-                    file.append((appele, reste - 1))
+                cible = ast.unparse(n.func)
+                appele = cible.split(".")[-1]
+                if appele in vus or appele in NOMS_TROP_COURANTS:
+                    continue
+                if appele not in fns and not _saut_autorise(cible):
+                    continue
+                file.append((appele, reste - 1))
     return "\n".join(morceaux)
 
 
@@ -152,18 +189,50 @@ async def analyser() -> list[dict]:
         rappel = getattr(commande, "callback", None)
         if rappel is None:
             continue
+        # Une commande peut etre enveloppee a l'execution : +ban passe par un garde
+        # de v17_moderation_security qui appelle l'original via une variable
+        # capturee, invisible a une analyse statique. On suit donc la chaine
+        # _sentrix_original / _sentrix_previous, comme le fait le runtime.
+        chaine = []
+        courant = rappel
+        vus_ids = set()
+        for _ in range(12):
+            if id(courant) in vus_ids:
+                break
+            vus_ids.add(id(courant))
+            chaine.append(courant)
+            suivant = getattr(courant, "_sentrix_original", None) or getattr(
+                courant, "_sentrix_previous", None
+            )
+            if suivant is None:
+                break
+            courant = suivant
+
+        sources = []
+        for maillon in chaine:
+            module_maillon = getattr(maillon, "__module__", "").split(".")[-1]
+            fns_maillon = fonctions(module_maillon)
+            depart_maillon = getattr(maillon, "__name__", "")
+            if depart_maillon not in fns_maillon:
+                qualname = getattr(maillon, "__qualname__", "")
+                if "<locals>" in qualname:
+                    englobante = qualname.split(".<locals>.")[0].split(".")[-1]
+                    if englobante in fns_maillon:
+                        depart_maillon = englobante
+            if depart_maillon in fns_maillon:
+                sources.append(sources_atteintes(depart_maillon, fns_maillon, globales))
+
         module = rappel.__module__.split(".")[-1]
-        fns = fonctions(module)
-        depart = rappel.__name__
-        if depart not in fns:
-            qualname = getattr(rappel, "__qualname__", "")
-            if "<locals>" in qualname:
-                englobante = qualname.split(".<locals>.")[0].split(".")[-1]
-                if englobante in fns:
-                    depart = englobante
-        if depart not in fns:
+        if not sources:
             resultats.append({"nom": commande.qualified_name, "module": module, "verdict": "autre"})
             continue
+        resultats.append({
+            "nom": commande.qualified_name,
+            "module": module,
+            "verdict": classer("\n".join(sources)),
+            "maillons": len(chaine),
+        })
+        continue
 
         resultats.append({
             "nom": commande.qualified_name,
