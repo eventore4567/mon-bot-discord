@@ -1,0 +1,958 @@
+name: One-shot ticket dashboard upgrade
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-ticket-dashboard-upgrade.yml
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply canonical ticket dashboard upgrade
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('cogs/tickets.py')
+          src = path.read_text(encoding='utf-8')
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global src
+              count = src.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              src = src.replace(old, new, 1)
+
+          old = '''async def get_button_settings(bot, guild_id: int) -> dict:
+              row = await bot.db.fetchone("SELECT config_json FROM ticket_button_settings WHERE guild_id = ?", (guild_id,))
+              settings = default_button_settings()
+              if row and row["config_json"]:
+                  try:
+                      saved = json.loads(row["config_json"])
+                      for key, cfg in saved.items():
+                          if key in settings:
+                              settings[key].update(cfg)
+                  except (ValueError, TypeError):
+                      pass
+              return settings
+
+
+          async def save_button_settings(bot, guild_id: int, settings: dict):
+              await bot.db.execute(
+                  "INSERT INTO ticket_button_settings (guild_id, config_json) VALUES (?, ?) "
+                  "ON CONFLICT(guild_id) DO UPDATE SET config_json = excluded.config_json",
+                  (guild_id, json.dumps(settings)),
+              )
+          '''
+          new = '''PANEL_ROLE_META_KEY = "__panel_roles__"
+          MAX_PANEL_ROLES = 10
+
+
+          async def _load_ticket_settings_payload(bot, guild_id: int) -> dict:
+              """Charge le JSON partagé des réglages tickets sans jeter les extensions futures.
+
+              Historiquement cette table ne contenait que les 9 boutons staff. Les réglages
+              de rôles de panel sont ajoutés sous une clé réservée afin de rester 100 %
+              compatibles avec les bases existantes, sans nouvelle table ni migration risquée.
+              """
+              row = await bot.db.fetchone(
+                  "SELECT config_json FROM ticket_button_settings WHERE guild_id = ?", (guild_id,)
+              )
+              if not row or not row["config_json"]:
+                  return {}
+              try:
+                  payload = json.loads(row["config_json"])
+              except (ValueError, TypeError):
+                  return {}
+              return payload if isinstance(payload, dict) else {}
+
+
+          async def _save_ticket_settings_payload(bot, guild_id: int, payload: dict) -> None:
+              await bot.db.execute(
+                  "INSERT INTO ticket_button_settings (guild_id, config_json) VALUES (?, ?) "
+                  "ON CONFLICT(guild_id) DO UPDATE SET config_json = excluded.config_json",
+                  (guild_id, json.dumps(payload, separators=(",", ":"))),
+              )
+
+
+          async def get_button_settings(bot, guild_id: int) -> dict:
+              payload = await _load_ticket_settings_payload(bot, guild_id)
+              settings = default_button_settings()
+              for key, cfg in payload.items():
+                  if key in settings and isinstance(cfg, dict):
+                      settings[key].update(cfg)
+              return settings
+
+
+          async def save_button_settings(bot, guild_id: int, settings: dict):
+              # Conserve les métadonnées de panels : personnaliser un bouton staff ne doit
+              # jamais effacer les rôles d'accès/ping configurés dans le dashboard.
+              payload = await _load_ticket_settings_payload(bot, guild_id)
+              for key in STAFF_BUTTONS:
+                  if key in settings:
+                      payload[key] = settings[key]
+              await _save_ticket_settings_payload(bot, guild_id, payload)
+
+
+          def _normalise_role_ids(values) -> list[int]:
+              result: list[int] = []
+              for value in values or []:
+                  try:
+                      role_id = int(getattr(value, "id", value))
+                  except (TypeError, ValueError):
+                      continue
+                  if role_id > 0 and role_id not in result:
+                      result.append(role_id)
+                  if len(result) >= MAX_PANEL_ROLES:
+                      break
+              return result
+
+
+          async def get_panel_role_settings(bot, guild_id: int, panel_id: int) -> dict[str, list[int]]:
+              payload = await _load_ticket_settings_payload(bot, guild_id)
+              all_panels = payload.get(PANEL_ROLE_META_KEY, {})
+              if not isinstance(all_panels, dict):
+                  all_panels = {}
+              raw = all_panels.get(str(panel_id), {})
+              if not isinstance(raw, dict):
+                  raw = {}
+              return {
+                  "ping": _normalise_role_ids(raw.get("ping", [])),
+                  "access": _normalise_role_ids(raw.get("access", [])),
+              }
+
+
+          async def save_panel_role_settings(
+              bot, guild_id: int, panel_id: int, kind: str, role_ids
+          ) -> dict[str, list[int]]:
+              if kind not in {"ping", "access"}:
+                  raise ValueError(f"Unsupported panel role kind: {kind}")
+              payload = await _load_ticket_settings_payload(bot, guild_id)
+              all_panels = payload.setdefault(PANEL_ROLE_META_KEY, {})
+              if not isinstance(all_panels, dict):
+                  all_panels = {}
+                  payload[PANEL_ROLE_META_KEY] = all_panels
+              current = all_panels.setdefault(str(panel_id), {})
+              if not isinstance(current, dict):
+                  current = {}
+                  all_panels[str(panel_id)] = current
+              current[kind] = _normalise_role_ids(role_ids)
+              await _save_ticket_settings_payload(bot, guild_id, payload)
+              return await get_panel_role_settings(bot, guild_id, panel_id)
+
+
+          async def clear_panel_role_settings(bot, guild_id: int, panel_id: int) -> None:
+              payload = await _load_ticket_settings_payload(bot, guild_id)
+              all_panels = payload.get(PANEL_ROLE_META_KEY)
+              if isinstance(all_panels, dict) and all_panels.pop(str(panel_id), None) is not None:
+                  if not all_panels:
+                      payload.pop(PANEL_ROLE_META_KEY, None)
+                  await _save_ticket_settings_payload(bot, guild_id, payload)
+          '''
+          replace_once(old, new, 'settings helpers')
+
+          marker = '''class CloseReasonModal(discord.ui.Modal, title="🔒 Fermer le ticket"):
+          '''
+          insert = '''class TypeButtonModal(discord.ui.Modal, title="🔘 Bouton d'ouverture"):
+              """Personnalise le bouton d'un type sans mélanger son identité avec son texte métier."""
+
+              def __init__(self, cog: "Tickets", ticket_type):
+                  super().__init__()
+                  self.cog = cog
+                  self.type_id = int(ticket_type["id"])
+                  self.label = discord.ui.TextInput(
+                      label="Nom affiché sur le bouton",
+                      default=ticket_type["button_label"] or ticket_type["name"] or "Ticket",
+                      max_length=80,
+                  )
+                  self.emoji = discord.ui.TextInput(
+                      label="Emoji (optionnel)",
+                      default=ticket_type["emoji"] or "",
+                      required=False,
+                      max_length=100,
+                  )
+                  current_style = ticket_type["button_style"] or DEFAULT_BUTTON_STYLE
+                  if current_style not in BUTTON_STYLES:
+                      current_style = DEFAULT_BUTTON_STYLE
+                  self.style = discord.ui.TextInput(
+                      label=f"Couleur ({'/'.join(BUTTON_STYLE_NAMES)})",
+                      default=current_style,
+                      max_length=5,
+                  )
+                  self.add_item(self.label)
+                  self.add_item(self.emoji)
+                  self.add_item(self.style)
+
+              async def on_submit(self, interaction: discord.Interaction):
+                  style = self.style.value.strip().lower()
+                  if style not in BUTTON_STYLES:
+                      return await interaction.response.send_message(
+                          embed=embeds.error(
+                              f"Couleur invalide — choisissez parmi : {', '.join(BUTTON_STYLE_NAMES)}."
+                          ),
+                          ephemeral=True,
+                      )
+                  raw_emoji = self.emoji.value.strip()
+                  emoji = parse_component_emoji(raw_emoji, interaction.client)
+                  if raw_emoji and emoji is None:
+                      return await interaction.response.send_message(
+                          embed=embeds.error(
+                              "Cet emoji n'est pas utilisable. Choisissez un emoji Unicode ou un emoji Discord complet."
+                          ),
+                          ephemeral=True,
+                      )
+                  await self.cog.bot.db.execute(
+                      "UPDATE ticket_types SET button_label = ?, emoji = ?, button_style = ? WHERE id = ?",
+                      (self.label.value.strip(), str(emoji) if emoji else None, style, self.type_id),
+                  )
+                  await interaction.response.send_message(
+                      embed=embeds.success("Le bouton d'ouverture a été mis à jour."), ephemeral=True
+                  )
+
+
+          class CloseReasonModal(discord.ui.Modal, title="🔒 Fermer le ticket"):
+          '''
+          replace_once(marker, insert, 'type button modal')
+
+          start = src.index('class PanelEditView(discord.ui.View):')
+          end = src.index('\n\nclass TypeEditView(discord.ui.View):', start)
+          old_block = src[start:end]
+          new_block = '''class PanelRolesView(discord.ui.View):
+              """Rôles propres à un panel : accès au salon et notifications sont indépendants.
+
+              Un rôle d'accès n'obtient AUCUNE permission de modération globale : uniquement
+              les overwrites du salon de ticket créé depuis ce panel.
+              """
+
+              def __init__(self, cog: "Tickets", panel_id: int, guild_id: int, author_id: int):
+                  super().__init__(timeout=300)
+                  self.cog = cog
+                  self.panel_id = panel_id
+                  self.guild_id = guild_id
+                  self.author_id = author_id
+
+              async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                  if interaction.user.id != self.author_id or not interaction.guild or interaction.guild.id != self.guild_id:
+                      await interaction.response.send_message(
+                          embed=embeds.error("Ce menu de configuration ne vous appartient pas."), ephemeral=True
+                      )
+                      return False
+                  panel = await self.cog.get_panel(self.panel_id)
+                  if not panel or panel["guild_id"] != self.guild_id:
+                      await interaction.response.send_message(
+                          embed=embeds.error("Ce panel n'existe plus sur ce serveur."), ephemeral=True
+                      )
+                      return False
+                  return True
+
+              async def _save(self, interaction: discord.Interaction, kind: str, roles) -> None:
+                  valid = [
+                      role for role in roles
+                      if isinstance(role, discord.Role)
+                      and role.guild.id == self.guild_id
+                      and not role.is_default()
+                  ]
+                  await save_panel_role_settings(
+                      self.cog.bot, self.guild_id, self.panel_id, kind, [role.id for role in valid]
+                  )
+                  label = "notifiés" if kind == "ping" else "autorisés à accéder aux tickets"
+                  value = ", ".join(role.mention for role in valid) if valid else "Aucun"
+                  await interaction.response.send_message(
+                      embed=embeds.success(f"Rôles {label} : {value}."), ephemeral=True
+                  )
+
+              @discord.ui.select(
+                  cls=discord.ui.RoleSelect,
+                  placeholder="🔔 Rôles à ping à l'ouverture (1 à 10)",
+                  min_values=1,
+                  max_values=MAX_PANEL_ROLES,
+                  row=0,
+              )
+              async def ping_roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+                  await self._save(interaction, "ping", select.values)
+
+              @discord.ui.select(
+                  cls=discord.ui.RoleSelect,
+                  placeholder="🔑 Rôles ayant accès aux tickets (1 à 10)",
+                  min_values=1,
+                  max_values=MAX_PANEL_ROLES,
+                  row=1,
+              )
+              async def access_roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+                  await self._save(interaction, "access", select.values)
+
+              @discord.ui.button(label="Effacer les rôles ping", style=discord.ButtonStyle.secondary, row=2)
+              async def clear_ping(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  await save_panel_role_settings(self.cog.bot, self.guild_id, self.panel_id, "ping", [])
+                  await interaction.response.send_message(
+                      embed=embeds.success("Aucun rôle ne sera ping automatiquement pour ce panel."), ephemeral=True
+                  )
+
+              @discord.ui.button(label="Effacer les rôles d'accès", style=discord.ButtonStyle.secondary, row=2)
+              async def clear_access(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  await save_panel_role_settings(self.cog.bot, self.guild_id, self.panel_id, "access", [])
+                  await interaction.response.send_message(
+                      embed=embeds.success("Les rôles d'accès supplémentaires ont été retirés."), ephemeral=True
+                  )
+
+
+          class PanelTypePickerView(discord.ui.View):
+              def __init__(self, cog: "Tickets", panel_id: int, guild_id: int, author_id: int, types: list):
+                  super().__init__(timeout=300)
+                  self.cog = cog
+                  self.panel_id = panel_id
+                  self.guild_id = guild_id
+                  self.author_id = author_id
+                  options = [
+                      discord.SelectOption(
+                          label=(t["button_label"] or t["name"] or "Ticket")[:100],
+                          value=str(t["id"]),
+                          description=(t["description"] or "Modifier nom, bouton, formulaire ou supprimer")[:100],
+                          emoji=parse_component_emoji(t["emoji"]),
+                      )
+                      for t in types[:25]
+                  ]
+                  select = discord.ui.Select(
+                      placeholder="🔘 Choisissez le bouton / type à modifier",
+                      options=options,
+                      min_values=1,
+                      max_values=1,
+                  )
+                  select.callback = self._pick
+                  self.selector = select
+                  self.add_item(select)
+
+              async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                  if interaction.user.id != self.author_id or not interaction.guild or interaction.guild.id != self.guild_id:
+                      await interaction.response.send_message(
+                          embed=embeds.error("Ce menu de configuration ne vous appartient pas."), ephemeral=True
+                      )
+                      return False
+                  return True
+
+              async def _pick(self, interaction: discord.Interaction):
+                  type_id = int(self.selector.values[0])
+                  ticket_type = await self.cog.get_type(type_id)
+                  if not ticket_type or ticket_type["guild_id"] != self.guild_id or ticket_type["panel_id"] != self.panel_id:
+                      return await interaction.response.send_message(
+                          embed=embeds.error("Ce type de ticket n'existe plus dans ce panel."), ephemeral=True
+                      )
+                  await interaction.response.send_message(
+                      embed=embeds.neutral(
+                          f"⚙️ Modifier « {ticket_type['name']} »",
+                          "Vous pouvez modifier le texte, le bouton, les limites, les rôles et le formulaire, ou supprimer ce type.",
+                      ),
+                      view=TypeEditView(self.cog, type_id, self.author_id),
+                      ephemeral=True,
+                  )
+
+
+          class PanelPickerView(discord.ui.View):
+              """Sélecteur du dashboard : un clic suffit pour ouvrir l'éditeur d'un panel."""
+
+              def __init__(self, cog: "Tickets", guild_id: int, author_id: int, panels: list):
+                  super().__init__(timeout=300)
+                  self.cog = cog
+                  self.guild_id = guild_id
+                  self.author_id = author_id
+                  options = []
+                  for panel in panels[:25]:
+                      state = "Actif" if panel["enabled"] else "Désactivé"
+                      options.append(
+                          discord.SelectOption(
+                              label=(panel["name"] or f"Panel #{panel['id']}")[:100],
+                              value=str(panel["id"]),
+                              description=f"{state} • cliquez pour modifier"[:100],
+                          )
+                      )
+                  selector = discord.ui.Select(
+                      placeholder="⚙️ Choisissez un panel à modifier",
+                      options=options,
+                      min_values=1,
+                      max_values=1,
+                  )
+                  selector.callback = self._pick
+                  self.selector = selector
+                  self.add_item(selector)
+
+              async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                  if interaction.user.id != self.author_id or not interaction.guild or interaction.guild.id != self.guild_id:
+                      await interaction.response.send_message(
+                          embed=embeds.error("Ce dashboard ne vous appartient pas."), ephemeral=True
+                      )
+                      return False
+                  return True
+
+              async def _pick(self, interaction: discord.Interaction):
+                  panel_id = int(self.selector.values[0])
+                  panel = await self.cog.get_panel(panel_id)
+                  if not panel or panel["guild_id"] != self.guild_id:
+                      return await interaction.response.send_message(
+                          embed=embeds.error("Ce panel n'existe plus sur ce serveur."), ephemeral=True
+                      )
+                  roles = await get_panel_role_settings(self.cog.bot, self.guild_id, panel_id)
+                  await interaction.response.send_message(
+                      embed=embeds.neutral(
+                          f"⚙️ Panel « {panel['name']} »",
+                          f"Accès supplémentaires : **{len(roles['access'])}** rôle(s) • "
+                          f"Pings : **{len(roles['ping'])}** rôle(s).\nChoisissez ce que vous voulez modifier.",
+                      ),
+                      view=PanelEditView(self.cog, panel_id, self.author_id),
+                      ephemeral=True,
+                  )
+
+
+          class PanelEditView(discord.ui.View):
+              """Dashboard complet d'un panel : apparence, accès, boutons, salon et suppression."""
+
+              def __init__(self, cog: "Tickets", panel_id: int, author_id: int):
+                  super().__init__(timeout=300)
+                  self.cog = cog
+                  self.panel_id = panel_id
+                  self.author_id = author_id
+
+              async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                  if interaction.user.id != self.author_id:
+                      await interaction.response.send_message(
+                          embed=embeds.error("Seul l'auteur de ce dashboard peut modifier le panel."), ephemeral=True
+                      )
+                      return False
+                  panel = await self.cog.get_panel(self.panel_id)
+                  if not panel or not interaction.guild or panel["guild_id"] != interaction.guild.id:
+                      await interaction.response.send_message(
+                          embed=embeds.error("Ce panel n'existe plus sur ce serveur."), ephemeral=True
+                      )
+                      return False
+                  return True
+
+              @discord.ui.button(label="Titre / Description", style=discord.ButtonStyle.secondary, emoji="📝", row=0)
+              async def edit_text(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  panel = await self.cog.get_panel(self.panel_id)
+                  await interaction.response.send_modal(PanelTextModal(self.cog, panel))
+
+              @discord.ui.button(label="Image / Couleur", style=discord.ButtonStyle.secondary, emoji="🎨", row=0)
+              async def edit_media(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  panel = await self.cog.get_panel(self.panel_id)
+                  await interaction.response.send_modal(PanelMediaModal(self.cog, panel))
+
+              @discord.ui.button(label="Limite / membre", style=discord.ButtonStyle.secondary, emoji="🔢", row=0)
+              async def edit_max(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  panel = await self.cog.get_panel(self.panel_id)
+                  await interaction.response.send_modal(PanelMaxModal(self.cog, panel))
+
+              @discord.ui.button(label="Accès & Pings", style=discord.ButtonStyle.primary, emoji="🔑", row=0)
+              async def edit_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  cfg = await get_panel_role_settings(self.cog.bot, interaction.guild.id, self.panel_id)
+                  access = [interaction.guild.get_role(rid) for rid in cfg["access"]]
+                  ping = [interaction.guild.get_role(rid) for rid in cfg["ping"]]
+                  access_text = ", ".join(r.mention for r in access if r) or "Aucun"
+                  ping_text = ", ".join(r.mention for r in ping if r) or "Aucun"
+                  e = embeds.neutral(
+                      "🔑 Accès & notifications du panel",
+                      "Les rôles d'accès peuvent voir et répondre aux tickets **même sans être modérateurs**. "
+                      "Cela ne leur donne aucune permission globale de modération.",
+                  )
+                  e.add_field(name="Rôles ayant accès", value=access_text, inline=False)
+                  e.add_field(name="Rôles ping à l'ouverture", value=ping_text, inline=False)
+                  await interaction.response.send_message(
+                      embed=e,
+                      view=PanelRolesView(self.cog, self.panel_id, interaction.guild.id, self.author_id),
+                      ephemeral=True,
+                  )
+
+              @discord.ui.button(label="Activer / Désactiver", style=discord.ButtonStyle.secondary, emoji="⏻", row=0)
+              async def toggle_enabled(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  panel = await self.cog.get_panel(self.panel_id)
+                  new_value = 0 if panel["enabled"] else 1
+                  await self.cog.bot.db.execute(
+                      "UPDATE ticket_panels_v2 SET enabled = ? WHERE id = ?", (new_value, self.panel_id)
+                  )
+                  await interaction.response.send_message(
+                      embed=embeds.success(f"Panel {'activé' if new_value else 'désactivé'}."), ephemeral=True
+                  )
+
+              @discord.ui.button(label="Style : menu ⇄ boutons", style=discord.ButtonStyle.secondary, emoji="🔘", row=1)
+              async def toggle_style(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  panel = await self.cog.get_panel(self.panel_id)
+                  new_style = "button" if panel["style"] == "select" else "select"
+                  await self.cog.bot.db.execute("UPDATE ticket_panels_v2 SET style = ? WHERE id = ?", (new_style, self.panel_id))
+                  label = "boutons" if new_style == "button" else "menu déroulant"
+                  await interaction.response.send_message(
+                      embed=embeds.success(f"Le panel affichera désormais un **{label}**."), ephemeral=True
+                  )
+
+              @discord.ui.button(label="Aperçu", style=discord.ButtonStyle.primary, emoji="👁️", row=1)
+              async def preview(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  await self.cog.send_panel_preview(interaction, self.panel_id)
+
+              @discord.ui.button(label="Ajouter un bouton / type", style=discord.ButtonStyle.secondary, emoji="➕", row=1)
+              async def add_type_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  await interaction.response.send_modal(
+                      PanelAddTypeModal(self.cog, self.panel_id, interaction.guild.id)
+                  )
+
+              @discord.ui.button(label="Modifier / supprimer les boutons", style=discord.ButtonStyle.secondary, emoji="🧩", row=1)
+              async def manage_types(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  types = await self.cog.get_panel_types(self.panel_id)
+                  if not types:
+                      return await interaction.response.send_message(
+                          embed=embeds.warning("Ce panel n'a encore aucun bouton/type. Utilisez « Ajouter un bouton / type »."),
+                          ephemeral=True,
+                      )
+                  await interaction.response.send_message(
+                      embed=embeds.neutral(
+                          "🧩 Boutons d'ouverture",
+                          "Choisissez le bouton à renommer, recolorer, modifier ou supprimer.",
+                      ),
+                      view=PanelTypePickerView(
+                          self.cog, self.panel_id, interaction.guild.id, self.author_id, types
+                      ),
+                      ephemeral=True,
+                  )
+
+              @discord.ui.select(
+                  cls=discord.ui.ChannelSelect,
+                  channel_types=[discord.ChannelType.text],
+                  placeholder="📌 Choisir le salon où envoyer le panel",
+                  row=2,
+              )
+              async def select_channel(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+                  await self.cog.bot.db.execute(
+                      "UPDATE ticket_panels_v2 SET channel_id = ? WHERE id = ?",
+                      (select.values[0].id, self.panel_id),
+                  )
+                  await interaction.response.send_message(
+                      embed=embeds.success(f"Salon de destination défini sur {select.values[0].mention}."),
+                      ephemeral=True,
+                  )
+
+              @discord.ui.button(label="📤 Envoyer / mettre à jour", style=discord.ButtonStyle.success, row=3)
+              async def send_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  await self.cog.send_panel(interaction, self.panel_id)
+
+              @discord.ui.button(label="Supprimer le panel", style=discord.ButtonStyle.danger, emoji="🗑️", row=3)
+              async def delete_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  panel = await self.cog.get_panel(self.panel_id)
+                  types = await self.cog.get_panel_types(self.panel_id)
+                  confirm = helpers.ConfirmView(self.author_id)
+                  await interaction.response.send_message(
+                      embed=embeds.warning(
+                          f"Supprimer définitivement **{panel['name']}** et ses **{len(types)}** bouton(s)/type(s) ?"
+                      ),
+                      view=confirm,
+                      ephemeral=True,
+                  )
+                  await confirm.wait()
+                  if not confirm.value:
+                      return await interaction.edit_original_response(
+                          embed=embeds.warning("Suppression annulée."), view=None
+                      )
+                  if panel["message_id"] and panel["channel_id"]:
+                      channel = interaction.guild.get_channel(panel["channel_id"])
+                      if channel:
+                          try:
+                              message = await channel.fetch_message(panel["message_id"])
+                              await message.delete()
+                          except discord.HTTPException:
+                              pass
+                  for ticket_type in types:
+                      await self.cog.bot.db.execute(
+                          "DELETE FROM ticket_form_questions WHERE ticket_type_id = ?", (ticket_type["id"],)
+                      )
+                  await self.cog.bot.db.execute("DELETE FROM ticket_types WHERE panel_id = ?", (self.panel_id,))
+                  await self.cog.bot.db.execute("DELETE FROM ticket_panels_v2 WHERE id = ?", (self.panel_id,))
+                  await clear_panel_role_settings(self.cog.bot, interaction.guild.id, self.panel_id)
+                  await interaction.edit_original_response(
+                      embed=embeds.success(f"Panel **{panel['name']}** supprimé."), view=None
+                  )
+          '''
+          src = src[:start] + new_block + src[end:]
+
+          start = src.index('class TypeEditView(discord.ui.View):')
+          end = src.index('\n\nclass ButtonSettingsView(discord.ui.View):', start)
+          new_type_view = '''class TypeEditView(discord.ui.View):
+              def __init__(self, cog: "Tickets", type_id: int, author_id: int):
+                  super().__init__(timeout=300)
+                  self.cog = cog
+                  self.type_id = type_id
+                  self.author_id = author_id
+
+              async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                  if interaction.user.id != self.author_id:
+                      await interaction.response.send_message(
+                          embed=embeds.error("Seul l'auteur de ce dashboard peut modifier ce type de ticket."), ephemeral=True
+                      )
+                      return False
+                  ticket_type = await self.cog.get_type(self.type_id)
+                  if not ticket_type or not interaction.guild or ticket_type["guild_id"] != interaction.guild.id:
+                      await interaction.response.send_message(
+                          embed=embeds.error("Ce type de ticket n'existe plus sur ce serveur."), ephemeral=True
+                      )
+                      return False
+                  return True
+
+              @discord.ui.button(label="Texte / Nom / Emoji", style=discord.ButtonStyle.secondary, emoji="📝", row=0)
+              async def edit_text(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  t = await self.cog.get_type(self.type_id)
+                  await interaction.response.send_modal(TypeTextModal(self.cog, t))
+
+              @discord.ui.button(label="Message d'ouverture", style=discord.ButtonStyle.secondary, emoji="💬", row=0)
+              async def edit_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  t = await self.cog.get_type(self.type_id)
+                  await interaction.response.send_modal(TypeOpenMessageModal(self.cog, t))
+
+              @discord.ui.button(label="Limites (max/autoclose)", style=discord.ButtonStyle.secondary, emoji="🔢", row=0)
+              async def edit_numbers(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  t = await self.cog.get_type(self.type_id)
+                  await interaction.response.send_modal(TypeNumbersModal(self.cog, t))
+
+              @discord.ui.button(label="Bouton : nom / emoji / couleur", style=discord.ButtonStyle.primary, emoji="🔘", row=1)
+              async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  t = await self.cog.get_type(self.type_id)
+                  await interaction.response.send_modal(TypeButtonModal(self.cog, t))
+
+              @discord.ui.button(label="Formulaire on/off", style=discord.ButtonStyle.secondary, emoji="📋", row=1)
+              async def toggle_form(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  t = await self.cog.get_type(self.type_id)
+                  new_val = 0 if t["use_form"] else 1
+                  await self.cog.bot.db.execute("UPDATE ticket_types SET use_form = ? WHERE id = ?", (new_val, self.type_id))
+                  state = "activé" if new_val else "désactivé"
+                  await interaction.response.send_message(
+                      embed=embeds.success(f"Formulaire {state}."), ephemeral=True
+                  )
+
+              @discord.ui.button(label="Mention staff on/off", style=discord.ButtonStyle.secondary, emoji="🔔", row=1)
+              async def toggle_mention(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  t = await self.cog.get_type(self.type_id)
+                  new_val = 0 if t["mention_staff"] else 1
+                  await self.cog.bot.db.execute("UPDATE ticket_types SET mention_staff = ? WHERE id = ?", (new_val, self.type_id))
+                  await interaction.response.send_message(
+                      embed=embeds.success(f"Mention du rôle staff {'activée' if new_val else 'désactivée'} à l'ouverture."),
+                      ephemeral=True,
+                  )
+
+              @discord.ui.button(label="Supprimer ce bouton / type", style=discord.ButtonStyle.danger, emoji="🗑️", row=1)
+              async def delete_type(self, interaction: discord.Interaction, button: discord.ui.Button):
+                  t = await self.cog.get_type(self.type_id)
+                  confirm = helpers.ConfirmView(self.author_id)
+                  await interaction.response.send_message(
+                      embed=embeds.warning(f"Supprimer définitivement **{t['name']}** et son formulaire ?"),
+                      view=confirm,
+                      ephemeral=True,
+                  )
+                  await confirm.wait()
+                  if not confirm.value:
+                      return await interaction.edit_original_response(
+                          embed=embeds.warning("Suppression annulée."), view=None
+                      )
+                  await self.cog.bot.db.execute(
+                      "DELETE FROM ticket_form_questions WHERE ticket_type_id = ?", (self.type_id,)
+                  )
+                  await self.cog.bot.db.execute("DELETE FROM ticket_types WHERE id = ?", (self.type_id,))
+                  await interaction.edit_original_response(
+                      embed=embeds.success(f"Bouton/type **{t['name']}** supprimé."), view=None
+                  )
+
+              @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="🛡️ Rôle staff principal", row=2)
+              async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+                  await self.cog.bot.db.execute(
+                      "UPDATE ticket_types SET staff_role_id = ? WHERE id = ?", (select.values[0].id, self.type_id)
+                  )
+                  await interaction.response.send_message(
+                      embed=embeds.success(f"Rôle staff défini sur {select.values[0].mention}."), ephemeral=True
+                  )
+
+              @discord.ui.select(
+                  cls=discord.ui.ChannelSelect,
+                  channel_types=[discord.ChannelType.category],
+                  placeholder="📂 Catégorie où créer les salons",
+                  row=3,
+              )
+              async def select_category(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+                  await self.cog.bot.db.execute(
+                      "UPDATE ticket_types SET category_id = ? WHERE id = ?", (select.values[0].id, self.type_id)
+                  )
+                  await interaction.response.send_message(
+                      embed=embeds.success(f"Catégorie définie sur **{select.values[0].name}**."), ephemeral=True
+                  )
+
+              @discord.ui.select(
+                  cls=discord.ui.ChannelSelect,
+                  channel_types=[discord.ChannelType.text],
+                  placeholder="📄 Salon de logs pour ce type",
+                  row=4,
+              )
+              async def select_logs(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+                  await self.cog.bot.db.execute(
+                      "UPDATE ticket_types SET log_channel_id = ? WHERE id = ?", (select.values[0].id, self.type_id)
+                  )
+                  await interaction.response.send_message(
+                      embed=embeds.success(f"Salon de logs défini sur {select.values[0].mention}."), ephemeral=True
+                  )
+          '''
+          src = src[:start] + new_type_view + src[end:]
+
+          old = '''        old_message_id = panel["message_id"]
+                  if old_message_id:
+                      try:
+                          old = await channel.fetch_message(old_message_id)
+                          await old.delete()
+                      except discord.HTTPException:
+                          pass
+                  msg = await channel.send(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types))
+                  await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?", (msg.id, channel.id, panel_id))
+          '''
+          new = '''        old_message_id = panel["message_id"]
+                  msg = None
+                  if old_message_id:
+                      try:
+                          old = await channel.fetch_message(old_message_id)
+                          await old.edit(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types))
+                          msg = old
+                      except discord.HTTPException:
+                          pass
+                  if msg is None:
+                      msg = await channel.send(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types))
+                  await self.bot.db.execute(
+                      "UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?",
+                      (msg.id, channel.id, panel_id),
+                  )
+          '''
+          replace_once(old, new, 'update existing panel message')
+
+          old = '''        staff_role = guild.get_role(ticket_type["staff_role_id"]) if ticket_type["staff_role_id"] else None
+                  if staff_role:
+                      overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+
+                  category = guild.get_channel(ticket_type["category_id"]) if ticket_type["category_id"] else None
+          '''
+          new = '''        staff_role = guild.get_role(ticket_type["staff_role_id"]) if ticket_type["staff_role_id"] else None
+                  if staff_role:
+                      overwrites[staff_role] = discord.PermissionOverwrite(
+                          view_channel=True,
+                          send_messages=True,
+                          read_message_history=True,
+                          attach_files=True,
+                          embed_links=True,
+                      )
+
+                  panel_roles = await get_panel_role_settings(
+                      self.bot, guild.id, int(ticket_type["panel_id"])
+                  )
+                  access_roles: list[discord.Role] = []
+                  for role_id in panel_roles["access"]:
+                      role = guild.get_role(role_id)
+                      if not role or role.is_default():
+                          continue
+                      access_roles.append(role)
+                      overwrites[role] = discord.PermissionOverwrite(
+                          view_channel=True,
+                          send_messages=True,
+                          read_message_history=True,
+                          attach_files=True,
+                          embed_links=True,
+                      )
+
+                  category = guild.get_channel(ticket_type["category_id"]) if ticket_type["category_id"] else None
+          '''
+          replace_once(old, new, 'ticket access roles')
+
+          old = '''        button_settings = await get_button_settings(self.bot, guild.id)
+                  content = user.mention
+                  if ticket_type["mention_staff"] and staff_role:
+                      content += f" {staff_role.mention}"
+                  await channel.send(content=content, embed=e, view=TicketControlView(button_settings))
+          '''
+          new = '''        button_settings = await get_button_settings(self.bot, guild.id)
+                  mention_roles: list[discord.Role] = []
+                  if ticket_type["mention_staff"] and staff_role and not staff_role.is_default():
+                      mention_roles.append(staff_role)
+                  for role_id in panel_roles["ping"]:
+                      role = guild.get_role(role_id)
+                      if role and not role.is_default() and role not in mention_roles:
+                          mention_roles.append(role)
+                  content = " ".join([user.mention, *(role.mention for role in mention_roles)])
+                  await channel.send(
+                      content=content,
+                      embed=e,
+                      view=TicketControlView(button_settings),
+                      allowed_mentions=discord.AllowedMentions(
+                          everyone=False,
+                          users=[user],
+                          roles=mention_roles,
+                          replied_user=False,
+                      ),
+                  )
+          '''
+          replace_once(old, new, 'ticket ping roles')
+
+          old = '''        await self._reply(ctx_or_interaction, e)
+
+              async def _reply(self, target, embed, view=None):
+          '''
+          new = '''        author = getattr(ctx_or_interaction, "user", None) or getattr(ctx_or_interaction, "author", None)
+                  view = PanelPickerView(self, guild.id, author.id, panels) if panels and author else None
+                  if panels:
+                      extra = "\n\nUtilisez le menu ci-dessous pour ouvrir directement l'éditeur d'un panel."
+                      if len(panels) > 25:
+                          extra += " Les 25 premiers sont affichés ; les autres restent accessibles par `+ticketpanel edit`."
+                      e.description = (e.description or "") + extra
+                  await self._reply(ctx_or_interaction, e, view=view)
+
+              async def _reply(self, target, embed, view=None):
+          '''
+          replace_once(old, new, 'panel picker in list')
+
+          old = '''        await self.bot.db.execute("DELETE FROM ticket_types WHERE panel_id = ?", (panel["id"],))
+                  await self.bot.db.execute("DELETE FROM ticket_panels_v2 WHERE id = ?", (panel["id"],))
+                  await msg.edit(embed=embeds.success(f"Panel **{panel['name']}** supprimé."), view=None)
+          '''
+          new = '''        await self.bot.db.execute("DELETE FROM ticket_types WHERE panel_id = ?", (panel["id"],))
+                  await self.bot.db.execute("DELETE FROM ticket_panels_v2 WHERE id = ?", (panel["id"],))
+                  await clear_panel_role_settings(self.bot, ctx.guild.id, panel["id"])
+                  if panel["message_id"] and panel["channel_id"]:
+                      channel = ctx.guild.get_channel(panel["channel_id"])
+                      if channel:
+                          try:
+                              old_panel_message = await channel.fetch_message(panel["message_id"])
+                              await old_panel_message.delete()
+                          except discord.HTTPException:
+                              pass
+                  await msg.edit(embed=embeds.success(f"Panel **{panel['name']}** supprimé."), view=None)
+          '''
+          replace_once(old, new, 'panel delete cleanup')
+
+          old = '''        await ctx.send(embed=embeds.success(f"Panel **{nom}** dupliqué en **{nouveau_nom}** (#{new_panel_id}) avec {len(types)} type(s) de ticket."))
+          '''
+          new = '''        source_roles = await get_panel_role_settings(self.bot, ctx.guild.id, panel["id"])
+                  for kind in ("access", "ping"):
+                      await save_panel_role_settings(
+                          self.bot, ctx.guild.id, new_panel_id, kind, source_roles[kind]
+                      )
+                  await ctx.send(embed=embeds.success(f"Panel **{nom}** dupliqué en **{nouveau_nom}** (#{new_panel_id}) avec {len(types)} type(s) de ticket."))
+          '''
+          replace_once(old, new, 'duplicate panel roles')
+
+          path.write_text(src, encoding='utf-8')
+
+          test = Path('tests/test_ticket_panel_dashboard_roles.py')
+          test.write_text(r'''import asyncio
+          import json
+          from types import SimpleNamespace
+
+          from cogs import tickets
+
+
+          class FakeDB:
+              def __init__(self, payload=None):
+                  self.payload = payload or {}
+                  self.writes = []
+
+              async def fetchone(self, query, args=()):
+                  if "ticket_button_settings" in query:
+                      return {"config_json": json.dumps(self.payload)} if self.payload else None
+                  return None
+
+              async def execute(self, query, args=()):
+                  self.writes.append((query, args))
+                  if "ticket_button_settings" in query:
+                      self.payload = json.loads(args[1])
+                  return SimpleNamespace(lastrowid=1)
+
+
+          def run(coro):
+              return asyncio.run(coro)
+
+
+          def test_panel_roles_are_normalised_deduplicated_and_isolated_per_panel():
+              db = FakeDB()
+              bot = SimpleNamespace(db=db)
+              run(tickets.save_panel_role_settings(bot, 10, 21, "access", [5, 5, 6, "7", -1]))
+              run(tickets.save_panel_role_settings(bot, 10, 21, "ping", [8, 9]))
+              run(tickets.save_panel_role_settings(bot, 10, 22, "access", [99]))
+              assert run(tickets.get_panel_role_settings(bot, 10, 21)) == {
+                  "access": [5, 6, 7],
+                  "ping": [8, 9],
+              }
+              assert run(tickets.get_panel_role_settings(bot, 10, 22)) == {
+                  "access": [99],
+                  "ping": [],
+              }
+
+
+          def test_staff_button_save_preserves_panel_role_metadata():
+              payload = {
+                  tickets.PANEL_ROLE_META_KEY: {"7": {"access": [111], "ping": [222]}},
+              }
+              db = FakeDB(payload)
+              bot = SimpleNamespace(db=db)
+              settings = tickets.default_button_settings()
+              settings["claim"]["label"] = "Je prends"
+              run(tickets.save_button_settings(bot, 42, settings))
+              assert db.payload[tickets.PANEL_ROLE_META_KEY]["7"] == {
+                  "access": [111],
+                  "ping": [222],
+              }
+              assert db.payload["claim"]["label"] == "Je prends"
+
+
+          def test_clear_panel_roles_does_not_touch_staff_buttons():
+              payload = {
+                  "claim": {"enabled": True, "label": "Prendre"},
+                  tickets.PANEL_ROLE_META_KEY: {
+                      "1": {"access": [1], "ping": [2]},
+                      "2": {"access": [3], "ping": []},
+                  },
+              }
+              db = FakeDB(payload)
+              bot = SimpleNamespace(db=db)
+              run(tickets.clear_panel_role_settings(bot, 42, 1))
+              assert "1" not in db.payload[tickets.PANEL_ROLE_META_KEY]
+              assert "2" in db.payload[tickets.PANEL_ROLE_META_KEY]
+              assert db.payload["claim"]["label"] == "Prendre"
+
+
+          def test_ticket_creation_source_uses_panel_access_and_safe_role_mentions():
+              import inspect
+              source = inspect.getsource(tickets.Tickets.create_ticket)
+              assert 'panel_roles["access"]' in source
+              assert 'panel_roles["ping"]' in source
+              assert "discord.AllowedMentions" in source
+              assert "manage_channels=True" not in source[source.index('panel_roles ='):source.index('category =', source.index('panel_roles ='))]
+          ''', encoding='utf-8')
+          PY
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate ticket upgrade
+        run: |
+          python -m py_compile cogs/tickets.py
+          pytest -q tests/test_ticket_panel_dashboard_roles.py
+          pytest -q
+
+      - name: Commit validated upgrade and remove one-shot workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/one-shot-ticket-dashboard-upgrade.yml
+          git config user.name "SentriX Upgrade Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add cogs/tickets.py tests/test_ticket_panel_dashboard_roles.py .github/workflows/one-shot-ticket-dashboard-upgrade.yml
+          git commit -m "feat(tickets): dashboard panel editor with access and ping roles"
+          git push origin HEAD:main
