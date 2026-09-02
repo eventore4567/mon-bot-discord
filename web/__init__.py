@@ -40,6 +40,7 @@ from . import dashboard_instance_runtime as _dashboard_instance_runtime
 from . import instance_dashboard_branding as _instance_dashboard_branding
 from . import log_settings_dashboard_v32 as _log_settings_dashboard_v32
 from . import ticket_center_v35 as _ticket_center_v35
+from . import ticket_buttons_editor_v53 as _ticket_buttons_editor_v53
 from . import feature_control_v36 as _feature_control_v36
 from . import feature_suite_dashboard_v37 as _feature_suite_dashboard_v37
 from . import seo_v38 as _seo_v38
@@ -182,10 +183,11 @@ if 'id="sentrix-core-recovery"' not in _main_html:
     _main_html = _main_html.replace("</body>", _CORE_RECOVERY_JS + "\n</body>", 1)
 _dashboard.INDEX_HTML = _main_html
 
-# V32/V35 sont installés APRÈS la restauration de la page principale : leurs interfaces
+# V32/V35/V53 sont installés APRÈS la restauration de la page principale : leurs interfaces
 # ne peuvent donc pas être effacées par les anciennes couches visuelles.
 _log_settings_dashboard_v32.install(_dashboard)
 _ticket_center_v35.install(_dashboard)
+_ticket_buttons_editor_v53.install(_dashboard)
 
 # Community Growth doit être branché AVANT build_app()/le bind HTTP. Auparavant il était
 # installé depuis une tâche asynchrone de cog ; Railway pouvait donc créer l'application
