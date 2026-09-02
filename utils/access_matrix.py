@@ -116,6 +116,8 @@ GUILD_OWNER_COMMANDS = frozenset({
     "reset-levels",         # remet a zero l'XP de TOUS les membres
     "represet",             # remet a zero la reputation de TOUS les membres
     "proofreset",           # efface toutes les preuves de verification
+    # Diffusion privee a l'ensemble du serveur
+    "dmall",                # envoie un MP a tous les membres non-bot
 })
 
 CUSTOM_PERMISSION_COMMANDS = frozenset({"embed"})
@@ -358,6 +360,7 @@ PERMISSIONS_SENSIBLES = (
 KNOWN_COMMANDS = (
     PUBLIC_COMMANDS
     | OWNER_ONLY_COMMANDS
+    | GUILD_OWNER_COMMANDS
     | CUSTOM_PERMISSION_COMMANDS
     | frozenset(DISCORD_PERMISSION_COMMANDS)
     | frozenset().union(*CATEGORY_COMMANDS.values())
@@ -835,6 +838,13 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
     if name in GUILD_OWNER_COMMANDS:
         if _is_guild_owner(author, guild):
             return AccessDecision(True, policy="guild-owner-only")
+        if name == "dmall":
+            return _deny(
+                "Cette commande est reservee au **proprietaire du serveur**.\n"
+                "Elle envoie un message prive a l'ensemble des membres non-bot : "
+                "le role Administrateur ne suffit pas.",
+                "guild-owner-only",
+            )
         return _deny(
             "Cette commande est reservee au **proprietaire du serveur**.\n"
             "Elle detruit des donnees de maniere irreversible : le role Administrateur "
@@ -914,6 +924,7 @@ __all__ = [
     "AccessDecision", "Backend", "backend_for", "evaluate", "normalise",
     "access_tier", "help_requirement", "permission_label", "module_for_command",
     "PUBLIC_COMMANDS", "OWNER_ONLY_COMMANDS", "CUSTOM_PERMISSION_COMMANDS",
-    "DISCORD_PERMISSION_COMMANDS", "CATEGORY_COMMANDS", "KNOWN_COMMANDS",
+    "GUILD_OWNER_COMMANDS", "DISCORD_PERMISSION_COMMANDS", "CATEGORY_COMMANDS",
+    "KNOWN_COMMANDS",
     "PERMISSION_LABELS", "PERMISSIONS_SENSIBLES", "MODULE_LABELS", "DENIAL_HEADER",
 ]

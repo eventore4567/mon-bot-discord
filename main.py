@@ -57,6 +57,7 @@ EXTENSIONS = [
     "cogs.design",
     "cogs.embed_builder",
     "cogs.visual_experience_v5",
+    "sentrix_broadcast_dmall_visual",
 ]
 
 # Les réglages ci-dessous existent déjà dans les panneaux interactifs. Ils restent
