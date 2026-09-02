@@ -3,9 +3,21 @@
 import json
 
 import discord
+
+from utils import embeds
 from discord.ext import commands
 
 from database.db import now
+
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse au format canonique SentriX.
+
+    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
+    ni barre d'identite, alors que le reste du bot en porte.
+    """
+    return embeds._base(titre, description, kind=kind)
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS moderation_risk_snapshots_v2 (
@@ -89,9 +101,9 @@ async def calculate_risk(bot, guild_id: int, user_id: int) -> dict:
 
 async def security_risk(ctx: commands.Context, member: discord.Member = None):
     if not ctx.guild:
-        return await ctx.send("Cette analyse doit être utilisée sur un serveur.")
+        return await ctx.send(embed=_reponse("Analyse de risque", 'Cette analyse doit être utilisée sur un serveur.', kind="danger"))
     if member is None:
-        return await ctx.send("Utilisation : `+security risk @membre`.")
+        return await ctx.send(embed=_reponse("Analyse de risque", 'Utilisation : `+security risk @membre`.', kind="warning"))
     result = await calculate_risk(ctx.bot, ctx.guild.id, member.id)
     reasons = "\n".join(f"- {reason}" for reason in result["reasons"]) or "- Aucun signal récent significatif."
     embed = discord.Embed(

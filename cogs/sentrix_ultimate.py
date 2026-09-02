@@ -15,6 +15,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 import discord
+
+from utils import embeds
 from discord.ext import commands, tasks
 
 import config
@@ -97,6 +99,16 @@ def _panneau(titre: str, description: str = "", *, kind: str = "brand") -> disco
     le monde desormais.
     """
     return embeds._base(titre, description or None, kind=kind)
+
+
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse au format canonique SentriX.
+
+    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
+    ni barre d'identite, alors que le reste du bot en porte.
+    """
+    return embeds._base(titre, description, kind=kind)
 
 
 class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
@@ -634,8 +646,8 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     @commands.has_guild_permissions(manage_guild=True)
     async def pro_lockdown(self, ctx, mode: str):
         if mode.casefold() == "on": return await ctx.send("Lockdown activé pour 15 minutes." if await self._start_lockdown(ctx.guild, f"Activation manuelle par {ctx.author}", 900) else "Permissions insuffisantes.")
-        if mode.casefold() == "off": await self._stop_lockdown(ctx.guild); return await ctx.send("Lockdown désactivé.")
-        await ctx.send("Utilise `lockdown on` ou `lockdown off`.")
+        if mode.casefold() == "off": await self._stop_lockdown(ctx.guild); return await ctx.send(embed=_reponse("Verrouillage du serveur", 'Lockdown désactivé.', kind="success"))
+        await ctx.send(embed=_reponse("Verrouillage du serveur", 'Utilise `lockdown on` ou `lockdown off`.', kind="warning"))
 
     @sentrixpro.command(name="quarantine-setup")
     @commands.has_guild_permissions(manage_guild=True)
@@ -653,7 +665,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             except Exception: pass
         await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_quarantine(guild_id,role_id,channel_id,min_account_hours) VALUES(?,?,?,?)", (guild.id, role.id, channel.id, hours))
         await self._set_module(guild.id, "anti_alt", True)
-        await ctx.send(f"Quarantaine prête. Comptes de moins de {hours} h -> {channel.mention}.")
+        await ctx.send(embed=_reponse("Quarantaine", f'Quarantaine prête. Comptes de moins de {hours} h -> {channel.mention}.', kind="success"))
 
     @sentrixpro.command(name="trust")
     async def pro_trust(self, ctx, member: discord.Member | None = None):
@@ -695,10 +707,10 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     @sentrixpro.command(name="welcome")
     @commands.has_guild_permissions(manage_guild=True)
     async def pro_welcome(self, ctx, target: str):
-        if target.casefold() == "off": await self._set_module(ctx.guild.id, "smart_welcome", False); return await ctx.send("Welcome intelligent désactivé.")
+        if target.casefold() == "off": await self._set_module(ctx.guild.id, "smart_welcome", False); return await ctx.send(embed=_reponse("Accueil intelligent", 'Welcome intelligent désactivé.', kind="success"))
         match = re.search(r"(\d{15,22})", target); channel = ctx.guild.get_channel(int(match.group(1))) if match else None
-        if not isinstance(channel, discord.TextChannel): return await ctx.send("Mentionne un salon texte.")
-        await self._set_setting(ctx.guild.id, "smart_welcome_channel", channel.id); await self._set_module(ctx.guild.id, "smart_welcome", True); await ctx.send(f"Welcome intelligent activé dans {channel.mention}.")
+        if not isinstance(channel, discord.TextChannel): return await ctx.send(embed=_reponse("Accueil intelligent", 'Mentionne un salon texte.', kind="warning"))
+        await self._set_setting(ctx.guild.id, "smart_welcome_channel", channel.id); await self._set_module(ctx.guild.id, "smart_welcome", True); await ctx.send(embed=_reponse("Accueil intelligent", f'Welcome intelligent activé dans {channel.mention}.', kind="success"))
 
     @sentrixpro.command(name="autorole")
     @commands.has_guild_permissions(manage_roles=True)
@@ -706,10 +718,10 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         action = action.casefold()
         if action == "list":
             rows = await self.bot.db.fetchall("SELECT id,metric,threshold,role_id FROM ultimate_autoroles WHERE guild_id=?", (ctx.guild.id,)); text = "\n".join(f"#{_get(r,'id')} • {_get(r,'metric')} >= {_get(r,'threshold')} -> <@&{_get(r,'role_id')}>" for r in rows) or "Aucune règle."; return await ctx.send(embed=_panneau('Auto-rôles intelligents', text[:4000], kind="brand"))
-        if action == "remove" and metric and metric.isdigit(): await self.bot.db.execute("DELETE FROM ultimate_autoroles WHERE guild_id=? AND id=?", (ctx.guild.id, int(metric))); return await ctx.send("Règle supprimée.")
+        if action == "remove" and metric and metric.isdigit(): await self.bot.db.execute("DELETE FROM ultimate_autoroles WHERE guild_id=? AND id=?", (ctx.guild.id, int(metric))); return await ctx.send(embed=_reponse("Rôles automatiques", 'Règle supprimée.', kind="success"))
         if action == "add" and metric in {"trust","messages","level","days"} and threshold is not None and role is not None:
-            await self.bot.db.execute("INSERT INTO ultimate_autoroles(guild_id,metric,threshold,role_id) VALUES(?,?,?,?)", (ctx.guild.id, metric, int(threshold), role.id)); await self._set_module(ctx.guild.id, "smart_autorole", True); return await ctx.send(f"Règle ajoutée : {metric} >= {threshold} -> {role.mention}.")
-        await ctx.send("Syntaxe : `autorole add trust 80 @Role`, `autorole list`, `autorole remove <id>`.")
+            await self.bot.db.execute("INSERT INTO ultimate_autoroles(guild_id,metric,threshold,role_id) VALUES(?,?,?,?)", (ctx.guild.id, metric, int(threshold), role.id)); await self._set_module(ctx.guild.id, "smart_autorole", True); return await ctx.send(embed=_reponse("Rôles automatiques", f'Règle ajoutée : {metric} >= {threshold} -> {role.mention}.', kind="success"))
+        await ctx.send(embed=_reponse("Rôles automatiques", 'Syntaxe : `autorole add trust 80 @Role`, `autorole list`, `autorole remove <id>`.', kind="warning"))
 
     @sentrixpro.command(name="profile")
     async def pro_profile(self, ctx, member: discord.Member | None = None):
@@ -737,32 +749,32 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         action = action.casefold()
         if action == "list":
             rows = await self.bot.db.fetchall("SELECT * FROM ultimate_goals WHERE guild_id=? ORDER BY id DESC LIMIT 15", (ctx.guild.id,)); text = "\n".join(f"#{_get(r,'id')} • {_get(r,'metric')} • {_get(r,'progress')}/{_get(r,'target')} • {_get(r,'status')}" for r in rows) or "Aucun objectif."; return await ctx.send(embed=_panneau('Objectifs serveur', text[:4000], kind="brand"))
-        if action == "remove" and metric and metric.isdigit(): await self.bot.db.execute("DELETE FROM ultimate_goals WHERE guild_id=? AND id=?", (ctx.guild.id, int(metric))); self._no_goals.pop(int(ctx.guild.id), None); return await ctx.send("Objectif supprimé.")
+        if action == "remove" and metric and metric.isdigit(): await self.bot.db.execute("DELETE FROM ultimate_goals WHERE guild_id=? AND id=?", (ctx.guild.id, int(metric))); self._no_goals.pop(int(ctx.guild.id), None); return await ctx.send(embed=_reponse("Objectifs du serveur", 'Objectif supprimé.', kind="success"))
         if action == "add" and metric in {"messages","joins","voice_minutes"} and target and target > 0:
-            await self.bot.db.execute("INSERT INTO ultimate_goals(guild_id,metric,target,progress,reward_role_id,reward_money,starts_at,status) VALUES(?,?,?,?,?,?,?,'active')", (ctx.guild.id, metric, int(target), 0, reward_role.id if reward_role else None, max(0, int(reward_money)), now())); self._no_goals.pop(int(ctx.guild.id), None); return await ctx.send(f"Objectif créé : **{target} {metric}**.")
-        await ctx.send("Syntaxe : `goal add messages 10000 [argent] [@role]`, `goal list`, `goal remove <id>`.")
+            await self.bot.db.execute("INSERT INTO ultimate_goals(guild_id,metric,target,progress,reward_role_id,reward_money,starts_at,status) VALUES(?,?,?,?,?,?,?,'active')", (ctx.guild.id, metric, int(target), 0, reward_role.id if reward_role else None, max(0, int(reward_money)), now())); self._no_goals.pop(int(ctx.guild.id), None); return await ctx.send(embed=_reponse("Objectifs du serveur", f'Objectif créé : **{target} {metric}**.', kind="success"))
+        await ctx.send(embed=_reponse("Objectifs du serveur", 'Syntaxe : `goal add messages 10000 [argent] [@role]`, `goal list`, `goal remove <id>`.', kind="warning"))
 
     @sentrixpro.command(name="aimod")
     @commands.has_guild_permissions(manage_guild=True)
     async def pro_aimod(self, ctx, mode: str, action: str = "alert"):
         action = action.casefold()
-        if action not in {"alert","delete","timeout"}: return await ctx.send("Action : `alert`, `delete` ou `timeout`.")
-        enabled = mode.casefold() in {"on","enable","1","true"}; await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_ai_mod(guild_id,enabled,action,confidence) VALUES(?,?,?,0.88)", (ctx.guild.id, int(enabled), action)); await self._set_module(ctx.guild.id, "ai_moderation", enabled); await ctx.send(f"IA de modération {'activée' if enabled else 'désactivée'} • action : {action}.")
+        if action not in {"alert","delete","timeout"}: return await ctx.send(embed=_reponse("Modération par IA", 'Action : `alert`, `delete` ou `timeout`.', kind="warning"))
+        enabled = mode.casefold() in {"on","enable","1","true"}; await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_ai_mod(guild_id,enabled,action,confidence) VALUES(?,?,?,0.88)", (ctx.guild.id, int(enabled), action)); await self._set_module(ctx.guild.id, "ai_moderation", enabled); await ctx.send(embed=_reponse("Modération par IA", f"IA de modération {('activée' if enabled else 'désactivée')} • action : {action}.", kind="brand"))
 
     @sentrixpro.command(name="ticket-summary")
     @commands.has_guild_permissions(manage_channels=True)
     async def pro_ticket_summary(self, ctx, ticket_id: int):
         row = await self.bot.db.fetchone("SELECT summary FROM ultimate_ticket_summaries WHERE guild_id=? AND ticket_id=?", (ctx.guild.id, ticket_id))
-        if not row: return await ctx.send("Aucun résumé enregistré pour ce ticket.")
+        if not row: return await ctx.send(embed=_reponse("Résumé de ticket", 'Aucun résumé enregistré pour ce ticket.', kind="warning"))
         await ctx.send(embed=_panneau(f'Résumé ticket #{ticket_id}', str(_get(row, 'summary'))[:4000], kind="brand"))
 
     @sentrixpro.command(name="digest")
     @commands.has_guild_permissions(manage_guild=True)
     async def pro_digest(self, ctx, target: str):
-        if target.casefold() == "off": await self.bot.db.execute("DELETE FROM ultimate_staff_digest WHERE guild_id=?", (ctx.guild.id,)); await self._set_module(ctx.guild.id, "staff_digest", False); return await ctx.send("Résumé quotidien staff désactivé.")
+        if target.casefold() == "off": await self.bot.db.execute("DELETE FROM ultimate_staff_digest WHERE guild_id=?", (ctx.guild.id,)); await self._set_module(ctx.guild.id, "staff_digest", False); return await ctx.send(embed=_reponse("Résumé d activité", 'Résumé quotidien staff désactivé.', kind="success"))
         match = re.search(r"(\d{15,22})", target); channel = ctx.guild.get_channel(int(match.group(1))) if match else None
-        if not isinstance(channel, discord.TextChannel): return await ctx.send("Mentionne un salon texte.")
-        await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_staff_digest(guild_id,channel_id,last_day) VALUES(?,?,NULL)", (ctx.guild.id, channel.id)); await self._set_module(ctx.guild.id, "staff_digest", True); await ctx.send(f"Résumé staff activé dans {channel.mention} vers 18:00 UTC.")
+        if not isinstance(channel, discord.TextChannel): return await ctx.send(embed=_reponse("Résumé d activité", 'Mentionne un salon texte.', kind="warning"))
+        await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_staff_digest(guild_id,channel_id,last_day) VALUES(?,?,NULL)", (ctx.guild.id, channel.id)); await self._set_module(ctx.guild.id, "staff_digest", True); await ctx.send(embed=_reponse("Résumé d activité", f'Résumé staff activé dans {channel.mention} vers 18:00 UTC.', kind="success"))
 
     @sentrixpro.command(name="status")
     async def pro_status(self, ctx):
@@ -783,9 +795,9 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     @commands.has_guild_permissions(manage_guild=True)
     async def pro_module(self, ctx, action: str, module: str):
         module = module.casefold(); action = action.casefold()
-        if module not in MODULES: return await ctx.send("Module inconnu. Utilise `+sentrixpro modules`.")
-        if action not in {"enable","on","1","true","disable","off","0","false"}: return await ctx.send("Utilise `module enable <nom>` ou `module disable <nom>`.")
-        enabled = action in {"enable","on","1","true"}; await self._set_module(ctx.guild.id, module, enabled); await ctx.send(f"Module **{MODULES[module][0]}** {'activé' if enabled else 'désactivé'}.")
+        if module not in MODULES: return await ctx.send(embed=_reponse("Modules SentriX Pro", 'Module inconnu. Utilise `+sentrixpro modules`.', kind="warning"))
+        if action not in {"enable","on","1","true","disable","off","0","false"}: return await ctx.send(embed=_reponse("Modules SentriX Pro", 'Utilise `module enable <nom>` ou `module disable <nom>`.', kind="warning"))
+        enabled = action in {"enable","on","1","true"}; await self._set_module(ctx.guild.id, module, enabled); await ctx.send(embed=_reponse("Modules SentriX Pro", f"Module **{MODULES[module][0]}** {('activé' if enabled else 'désactivé')}.", kind="brand"))
 
 
 async def setup(bot: commands.Bot):

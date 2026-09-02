@@ -120,6 +120,16 @@ async def _report_ui_error(interaction: discord.Interaction, error: Exception, w
 
 # ---------------------------------------------------------------- MODÈLE DE BROUILLON
 
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse au format canonique SentriX.
+
+    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
+    ni barre d'identite, alors que le reste du bot en porte.
+    """
+    return embeds._base(titre, description, kind=kind)
+
+
 class EmbedDraft:
     """État en mémoire d'un embed en cours de construction. Rien n'est persisté tant que
     l'utilisateur ne clique pas sur "Sauvegarder" (ou "Envoyer" pour un envoi direct)."""

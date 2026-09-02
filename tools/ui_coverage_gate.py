@@ -127,23 +127,53 @@ def chemins_trouves(source: str) -> set[str]:
 PROFONDEUR_MAX = 6
 
 
-def suivre_delegation(depart: str, fns: dict, profondeur: int = PROFONDEUR_MAX) -> set[str]:
-    """Chemins de rendu atteignables depuis `depart` en suivant les appels du module."""
+def suivre_delegation(depart: str, fns: dict, profondeur: int = PROFONDEUR_MAX,
+                      globales: dict | None = None) -> set[str]:
+    """Chemins de rendu atteignables depuis `depart` en suivant les appels.
+
+    Le suivi franchit les frontieres de module : `+diagnostic` appelle
+    `cog.send_report(ctx)` sur un AUTRE cog, `+help` passe par
+    `help_cog.send_help()` puis `_home()`. Sans cela, des commandes parfaitement
+    conformes restaient signalees.
+
+    Le saut hors du module n'est autorise que si le nom est defini UNE SEULE FOIS
+    dans tout le depot (`globales`) : une homonymie declarerait conforme a tort.
+    Le module courant reste prioritaire, et la profondeur borne la recherche.
+    """
+    globales = globales or {}
     trouves: set[str] = set()
     vus: set[str] = set()
+
+    def source_de(nom: str) -> str | None:
+        if nom in fns:
+            return ast.unparse(fns[nom])
+        return globales.get(nom)
+
     file = [(depart, profondeur)]
     while file:
         nom, reste = file.pop()
-        if nom in vus or reste <= 0 or nom not in fns:
+        if nom in vus or reste <= 0:
+            continue
+        source = source_de(nom)
+        if source is None:
             continue
         vus.add(nom)
-        source = ast.unparse(fns[nom])
         trouves |= chemins_trouves(source)
-        for n in ast.walk(fns[nom]):
-            if isinstance(n, ast.Call):
-                appele = ast.unparse(n.func).split(".")[-1]
-                if appele in fns and appele not in vus:
-                    file.append((appele, reste - 1))
+        try:
+            arbre = ast.parse(source)
+        except SyntaxError:
+            continue
+        for n in ast.walk(arbre):
+            if not isinstance(n, ast.Call):
+                continue
+            morceaux = ast.unparse(n.func).split(".")
+            appele = morceaux[-1]
+            # `self.autre_commande.callback(self, ctx)` delegue a `autre_commande` :
+            # sans ce cas, `+embedconfig list` paraissait ne rien afficher.
+            if appele == "callback" and len(morceaux) >= 2:
+                appele = morceaux[-2]
+            if appele not in vus:
+                file.append((appele, reste - 1))
     return trouves
 
 
@@ -173,6 +203,23 @@ async def analyser() -> list[dict]:
 
     arbres: dict[str, dict] = {}
 
+    # Index inter-modules des fonctions dont le nom n'apparait qu'une fois dans le
+    # depot. Il sert uniquement de dernier recours, pour les appels qui traversent
+    # une frontiere de module (`bot.get_cog(...).methode(...)`).
+    compte: dict[str, int] = {}
+    sources: dict[str, str] = {}
+    for dossier in ("cogs", "utils"):
+        for fichier in sorted((RACINE / dossier).glob("*.py")):
+            try:
+                arbre = ast.parse(fichier.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            for n in ast.walk(arbre):
+                if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                    compte[n.name] = compte.get(n.name, 0) + 1
+                    sources[n.name] = ast.unparse(n)
+    globales = {nom: src for nom, src in sources.items() if compte[nom] == 1}
+
     def fonctions(module: str) -> dict:
         if module not in arbres:
             chemin = RACINE / "cogs" / f"{module}.py"
@@ -196,7 +243,23 @@ async def analyser() -> list[dict]:
             continue
         module = rappel.__module__.split(".")[-1]
         fns = fonctions(module)
-        noeud = fns.get(rappel.__name__)
+        depart = rappel.__name__
+        noeud = fns.get(depart)
+        if noeud is None:
+            # Beaucoup de commandes sont installees au demarrage sous forme de
+            # fermeture, avec __name__ reecrit (les ponts +serverinfo et +leaderboard
+            # par exemple). Le qualname garde la trace de la fonction englobante :
+            # « _install_bridge.<locals>.bridge ». On analyse celle-ci, qui contient
+            # bien le rendu reellement utilise.
+            qualname = getattr(rappel, "__qualname__", "")
+            if "<locals>" in qualname:
+                englobante = qualname.split(".<locals>.")[0].split(".")[-1]
+                if englobante in fns:
+                    depart, noeud = englobante, fns[englobante]
+            if noeud is None:
+                dernier = qualname.split(".")[-1]
+                if dernier in fns:
+                    depart, noeud = dernier, fns[dernier]
         if noeud is None:
             resultats.append({
                 "nom": commande.qualified_name, "module": module,
@@ -208,7 +271,7 @@ async def analyser() -> list[dict]:
         # fishing -> _run_solo -> _embed -> design_system.create_embed. S'arreter au
         # premier niveau declarerait a tort 13 commandes de jeu « sans rendu ».
         # On suit donc la chaine transitivement, avec garde-fou contre les cycles.
-        trouves = suivre_delegation(rappel.__name__, fns)
+        trouves = suivre_delegation(depart, fns, globales=globales)
 
         nom = commande.qualified_name
         if nom in TEXTE_VOLONTAIRE:

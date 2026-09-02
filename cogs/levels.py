@@ -32,6 +32,16 @@ xp_for_level = stats_service.xp_required_for_level
 # Boutons de navigation sous /stats
 # =============================================================================
 
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse au format canonique SentriX.
+
+    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
+    ni barre d'identite, alors que le reste du bot en porte.
+    """
+    return embeds._base(titre, description, kind=kind)
+
+
 class StatsView(discord.ui.View):
     """Vue à 4 boutons (Statistiques / Niveau / Économie / Classement) affichée sous
     /stats. Édite toujours le MÊME message (jamais de nouvel embed envoyé), n'accepte
@@ -65,10 +75,7 @@ class StatsView(discord.ui.View):
             is_staff = True
         if is_staff:
             return True
-        await interaction.response.send_message(
-            "○ Ce menu n'est pas pour vous — utilisez `/stats` de votre côté pour consulter vos propres statistiques.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message(embed=_reponse("Niveaux", "○ Ce menu n'est pas pour vous — utilisez `/stats` de votre côté pour consulter vos propres statistiques.", kind="danger"), ephemeral=True)
         return False
 
     async def on_timeout(self):
@@ -415,7 +422,7 @@ class StatsConfigView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.author_id:
             return True
-        await interaction.response.send_message("○ Seule la personne ayant ouvert ce panneau peut l'utiliser.", ephemeral=True)
+        await interaction.response.send_message(embed=_reponse("Niveaux", "○ Seule la personne ayant ouvert ce panneau peut l'utiliser.", kind="danger"), ephemeral=True)
         return False
 
     async def on_timeout(self):
@@ -514,7 +521,9 @@ class StatsConfigView(discord.ui.View):
 
     def build_summary_embed(self) -> discord.Embed:
         p = self.pending
-        e = discord.Embed(title="⚙️ Configuration de /stats et /level", color=p["color"])
+        # La couleur est celle configuree par le serveur : on la conserve et on passe
+        # par le constructeur canonique pour le pied de page et la barre d'identite.
+        e = embeds._base("⚙️ Configuration de /stats et /level", None, colour=int(p["color"]))
         e.add_field(name="🎨 Apparence", value=f"Titre : {p['title_stats']}\nFooter : {p['footer']}\nCouleur : #{p['color']:06X}", inline=False)
         visible = ", ".join(label for key, label in VISIBILITY_OPTIONS if p.get(key, True)) or "Aucun"
         e.add_field(name="👁️ Champs visibles", value=visible, inline=False)

@@ -1,37 +1,4 @@
 {
  "_lisez_moi": "Commandes qui ne passent pas encore par le renderer canonique. Cette liste ne peut que retrecir : la porte echoue si une commande absente d'ici devient non conforme. Retirez une entree quand la commande est migree ; n'en ajoutez pas sans raison ecrite.",
- "commandes": [
-  "design-theme",
-  "designsetup",
-  "diagnostic",
-  "embedconfig list",
-  "gameseason",
-  "help",
-  "iconsetup",
-  "leaderboard",
-  "levelroles",
-  "panic",
-  "panic off",
-  "panic status",
-  "rolepanel",
-  "rolepanel-refresh",
-  "security access",
-  "security evidence",
-  "security infra",
-  "security readiness",
-  "security retention",
-  "security risk",
-  "security-repair",
-  "sentrixpro aimod",
-  "sentrixpro digest",
-  "sentrixpro lockdown",
-  "sentrixpro module",
-  "sentrixpro quarantine-setup",
-  "sentrixpro welcome",
-  "serverinfo",
-  "statsconfig",
-  "suivi-bot",
-  "verification-calibration",
-  "verification-review"
- ]
+ "commandes": []
 }

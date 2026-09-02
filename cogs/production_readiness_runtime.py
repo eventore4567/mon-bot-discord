@@ -21,6 +21,8 @@ import time
 from typing import Any
 
 import discord
+
+from utils import embeds
 from discord.ext import commands, tasks
 
 from database.db import now
@@ -428,22 +430,22 @@ async def _privacy_purge(bot: commands.Bot, guild_id: int, user_id: int) -> int:
 
 async def _require_admin(ctx: commands.Context) -> bool:
     if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-        await ctx.send("Cette commande est disponible uniquement sur un serveur.")
+        await ctx.send(embed=_reponse("Accès refusé", 'Cette commande est disponible uniquement sur un serveur.', kind="danger"))
         return False
     if ctx.author.id == ctx.guild.owner_id or ctx.author.guild_permissions.administrator:
         return True
-    await ctx.send("Seul le propriétaire du serveur ou un administrateur peut utiliser cette commande.")
+    await ctx.send(embed=_reponse("Accès refusé", 'Seul le propriétaire du serveur ou un administrateur peut utiliser cette commande.', kind="danger"))
     return False
 
 
 async def _require_owner(ctx: commands.Context) -> bool:
     if ctx.guild is None:
-        await ctx.send("Cette commande est disponible uniquement sur un serveur.")
+        await ctx.send(embed=_reponse("Accès refusé", 'Cette commande est disponible uniquement sur un serveur.', kind="danger"))
         return False
     import config
     if ctx.author.id == ctx.guild.owner_id or ctx.author.id in config.OWNER_IDS:
         return True
-    await ctx.send("Cette action de confidentialité est réservée au propriétaire du serveur ou du bot.")
+    await ctx.send(embed=_reponse("Accès refusé", 'Cette action de confidentialité est réservée au propriétaire du serveur ou du bot.', kind="danger"))
     return False
 
 
@@ -502,10 +504,10 @@ async def _security_retention(
     if action in {"run", "purge", "nettoyer"}:
         async with ctx.typing():
             result = await run_retention(ctx.bot, ctx.guild.id)
-        return await ctx.send(f"Rétention terminée : {result['deleted_rows']} ligne(s) temporaire(s) supprimée(s).")
+        return await ctx.send(embed=_reponse("Rétention des données", f"Rétention terminée : {result['deleted_rows']} ligne(s) temporaire(s) supprimée(s).", kind="success"))
     if action in {"set", "regler", "régler"}:
         if not category or category not in RETENTION_DEFAULTS or days is None:
-            return await ctx.send("Utilisation : +security retention set <transcripts|evidence|diagnostics|analytics|appeals> <jours>.")
+            return await ctx.send(embed=_reponse("Rétention des données", 'Utilisation : +security retention set <transcripts|evidence|diagnostics|analytics|appeals> <jours>.', kind="warning"))
         days = max(1, min(3650, int(days)))
         await _ensure_schema(ctx.bot)
         await ctx.bot.db.execute(
@@ -513,8 +515,8 @@ async def _security_retention(
             "ON CONFLICT(guild_id,category) DO UPDATE SET days=excluded.days,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
             (ctx.guild.id, category, days, ctx.author.id, now()),
         )
-        return await ctx.send(f"Conservation {category} réglée sur {days} jours.")
-    await ctx.send("Action inconnue. Utilisez status, set ou run.")
+        return await ctx.send(embed=_reponse("Rétention des données", f'Conservation {category} réglée sur {days} jours.', kind="success"))
+    await ctx.send(embed=_reponse("Rétention des données", 'Action inconnue. Utilisez status, set ou run.', kind="warning"))
 
 
 async def _security_privacy(
@@ -526,7 +528,7 @@ async def _security_privacy(
     if not await _require_owner(ctx):
         return
     if action not in {"export", "purge"} or not user_id or not str(user_id).isdigit():
-        return await ctx.send("Utilisation : +security privacy export <ID> ou +security privacy purge <ID> CONFIRMER.")
+        return await ctx.send(embed=_reponse("Confidentialité", 'Utilisation : +security privacy export <ID> ou +security privacy purge <ID> CONFIRMER.', kind="warning"))
     target_id = int(user_id)
     if action == "export":
         async with ctx.typing():
@@ -542,7 +544,7 @@ async def _security_privacy(
             file=discord.File(io.BytesIO(raw), filename=f"sentrix-data-{ctx.guild.id}-{target_id}.json"),
         )
     if str(confirmation or "").upper() != "CONFIRMER":
-        return await ctx.send(f"Suppression non exécutée. Retapez : +security privacy purge {target_id} CONFIRMER")
+        return await ctx.send(embed=_reponse("Confidentialité", f'Suppression non exécutée. Retapez : +security privacy purge {target_id} CONFIRMER', kind="warning"))
     async with ctx.typing():
         affected = await _privacy_purge(ctx.bot, ctx.guild.id, target_id)
     await _ensure_schema(ctx.bot)
@@ -550,10 +552,7 @@ async def _security_privacy(
         "INSERT INTO privacy_actions (guild_id,target_user_id,actor_id,action,affected_rows,created_at) VALUES (?,?,?,?,?,?)",
         (ctx.guild.id, target_id, ctx.author.id, "purge", affected, now()),
     )
-    await ctx.send(
-        f"Suppression terminée : {affected} ligne(s) de données communautaires/personnelles supprimée(s) ou nettoyée(s). "
-        "Les dossiers de sanction restent conservés pour l'intégrité de la modération."
-    )
+    await ctx.send(embed=_reponse("Confidentialité", f"Suppression terminée : {affected} ligne(s) de données communautaires/personnelles supprimée(s) ou nettoyée(s). Les dossiers de sanction restent conservés pour l'intégrité de la modération.", kind="success"))
 
 
 def _install_security_subcommands(bot: commands.Bot) -> None:
@@ -571,6 +570,16 @@ def _install_security_subcommands(bot: commands.Bot) -> None:
         if root.get_command(name) is None:
             root.add_command(commands.Command(callback, name=name, help=help_text))
     _SUBCOMMANDS_READY = True
+
+
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse au format canonique SentriX.
+
+    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
+    ni barre d'identite, alors que le reste du bot en porte.
+    """
+    return embeds._base(titre, description, kind=kind)
 
 
 class ProductionReadinessRuntime(commands.Cog, name=_COG_NAME):

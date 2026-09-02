@@ -3,6 +3,8 @@
 from datetime import datetime, timezone
 
 import discord
+
+from utils import embeds
 from discord.ext import commands
 
 from database.db import now
@@ -117,6 +119,16 @@ def _install_reward_hook(bot):
     _PATCHED = True
 
 
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse au format canonique SentriX.
+
+    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
+    ni barre d'identite, alors que le reste du bot en porte.
+    """
+    return embeds._base(titre, description, kind=kind)
+
+
 class GameSeasonsV9(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -128,7 +140,7 @@ class GameSeasonsV9(commands.Cog):
     @commands.command(name="gameseason", aliases=["saison-jeux", "gamesaison"])
     async def season(self, ctx):
         if not ctx.guild:
-            return await ctx.send("Cette commande doit être utilisée sur un serveur.")
+            return await ctx.send(embed=_reponse("Saison de jeu", 'Cette commande doit être utilisée sur un serveur.', kind="danger"))
         season = _season_key()
         rows = await self.bot.db.fetchall(
             "SELECT user_id,score,wins FROM game_season_scores_v2 WHERE season_key=? AND guild_id=? "

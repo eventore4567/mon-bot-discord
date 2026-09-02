@@ -14,6 +14,8 @@ est déjà très serré (96/100), et ce panneau n'a pas besoin d'être une comma
 """
 
 import discord
+
+from utils import embeds
 from discord.ext import commands
 
 from utils import checks, design_system, visual_v5
@@ -23,6 +25,16 @@ from database.db import DEFAULT_DESIGN_SETTINGS
 # =============================================================================
 # Modals
 # =============================================================================
+
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse au format canonique SentriX.
+
+    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
+    ni barre d'identite, alors que le reste du bot en porte.
+    """
+    return embeds._base(titre, description, kind=kind)
+
 
 class DesignColorsModal(discord.ui.Modal, title="Couleurs du système de design"):
     def __init__(self, view: "DesignSetupView"):
@@ -177,7 +189,10 @@ class DesignSetupView(design_system.SentriXView):
         p = self.pending
         theme_key = visual_v5.resolve_theme(p.get("theme_preset")) or "sentrix"
         theme = visual_v5.THEME_PRESETS[theme_key]
-        e = discord.Embed(title="SentriX • Apparence", colour=discord.Colour(p["primary_color"]))
+        # Apercu de la couleur que le serveur est en train de choisir : la teinte est
+        # volontairement celle du serveur, pas une intention. On passe quand meme par
+        # le constructeur canonique pour recuperer le pied de page et la barre.
+        e = embeds._base("SentriX • Apparence", None, colour=int(p["primary_color"]))
         e.description = (
             "Choisis une identité complète ou règle chaque couleur. "
             "Les nouveaux panneaux utilisent ces préférences automatiquement."

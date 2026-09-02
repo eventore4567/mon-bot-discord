@@ -350,6 +350,16 @@ def _install_member_presence_mentions(bot: commands.Bot) -> None:
     logger.info("Accueil/départ : vraie mention membre, alias {user} et anti-doublon activés.")
 
 
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse au format canonique SentriX.
+
+    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
+    ni barre d'identite, alors que le reste du bot en porte.
+    """
+    return embeds._base(titre, description, kind=kind)
+
+
 class BotTracker(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -430,7 +440,7 @@ class BotTracker(commands.Cog):
                     old_message = await old_channel.fetch_message(int(row["message_id"]))
                     if old_channel.id == ctx.channel.id:
                         await old_message.edit(embed=self.build_embed(ctx.guild))
-                        return await ctx.send("Le panneau de suivi SentriX a été actualisé.")
+                        return await ctx.send(embed=_reponse("Suivi des bots", 'Le panneau de suivi SentriX a été actualisé.', kind="success"))
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     pass
 

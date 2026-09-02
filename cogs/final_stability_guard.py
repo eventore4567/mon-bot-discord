@@ -24,6 +24,8 @@ import types
 from typing import Any
 
 import discord
+
+from utils import embeds
 from discord.ext import commands, tasks
 
 from utils import checks
@@ -373,11 +375,14 @@ class StabilityDiagnostic(commands.Cog, name="StabilityDiagnostic"):
             else 0xF0B232 if core_ok
             else 0xED4245
         )
-        embed = discord.Embed(
-            title="🩺 Diagnostic SentriX",
-            description="Contrôle en direct des éléments essentiels de ce serveur.",
-            colour=discord.Colour(colour),
-            timestamp=discord.utils.utcnow(),
+        # La couleur est calculee plus haut selon la gravite du diagnostic : on la
+        # conserve telle quelle et on passe par le constructeur canonique pour le
+        # pied de page et la barre d'identite.
+        embed = embeds._base(
+            "🩺 Diagnostic SentriX",
+            "Contrôle en direct des éléments essentiels de ce serveur.",
+            colour=int(colour),
+            timestamp=True,
         )
         embed.add_field(
             name="Services",

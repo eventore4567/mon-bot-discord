@@ -18,6 +18,8 @@ import time
 from collections import defaultdict
 
 import discord
+
+from utils import embeds
 from discord import app_commands
 from discord.ext import commands
 
@@ -250,6 +252,16 @@ async def apply_recommended_security(bot: commands.Bot, guild: discord.Guild) ->
     return {"missing_permissions": [name for name, ok in required.items() if not ok]}
 
 
+
+def _panneau(titre: str, description: str = "", *, kind: str = "brand") -> discord.Embed:
+    """Panneau de securite au format canonique.
+
+    Ce module construisait ses embeds a la main avec des couleurs en dur : ni pied
+    de page, ni barre d'identite, et des teintes qui ne suivaient pas la palette.
+    """
+    return embeds._base(titre, description or None, kind=kind)
+
+
 class SecurityHardening(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -469,11 +481,7 @@ class SecurityHardening(commands.Cog):
         async with lock:
             if await self._panic_row(guild.id):
                 return await ctx.send(
-                    embed=discord.Embed(
-                        title="PANIC déjà actif",
-                        description="Le serveur est déjà verrouillé. Utilisez `+panic status` ou `+panic off`.",
-                        color=0xFEE75C,
-                    )
+                    embed=_panneau('PANIC déjà actif', 'Le serveur est déjà verrouillé. Utilisez `+panic status` ou `+panic off`.', kind="warning")
                 )
 
             state = {}
@@ -513,15 +521,7 @@ class SecurityHardening(commands.Cog):
                 detail=f"{locked} salon(s) verrouillé(s); {len(failed)} échec(s)",
             )
 
-            embed = discord.Embed(
-                title="PANIC ACTIVÉ",
-                description=(
-                    "Le serveur est placé en mode d'urgence. Les protections recommandées "
-                    "sont actives et l'écriture @everyone a été verrouillée dans les salons textuels."
-                ),
-                color=0xED4245,
-                timestamp=discord.utils.utcnow(),
-            )
+            embed = _panneau('PANIC ACTIVÉ', "Le serveur est placé en mode d'urgence. Les protections recommandées sont actives et l'écriture @everyone a été verrouillée dans les salons textuels.", kind="danger")
             embed.add_field(name="Salons verrouillés", value=str(locked), inline=True)
             embed.add_field(name="Échecs", value=str(len(failed)), inline=True)
             missing = result.get("missing_permissions", [])
@@ -543,11 +543,7 @@ class SecurityHardening(commands.Cog):
             row = await self._panic_row(guild.id)
             if not row:
                 return await ctx.send(
-                    embed=discord.Embed(
-                        title="PANIC inactif",
-                        description="Aucun snapshot d'urgence actif n'a besoin d'être restauré.",
-                        color=0x5865F2,
-                    )
+                    embed=_panneau('PANIC inactif', "Aucun snapshot d'urgence actif n'a besoin d'être restauré.", kind="brand")
                 )
 
             try:
@@ -555,11 +551,7 @@ class SecurityHardening(commands.Cog):
             except (TypeError, ValueError):
                 logger.exception("Snapshot PANIC illisible sur %s.", guild.id)
                 return await ctx.send(
-                    embed=discord.Embed(
-                        title="Restauration impossible",
-                        description="Le snapshot PANIC est illisible. Aucune permission n'a été modifiée.",
-                        color=0xED4245,
-                    )
+                    embed=_panneau('Restauration impossible', "Le snapshot PANIC est illisible. Aucune permission n'a été modifiée.", kind="danger")
                 )
 
             restored = 0
@@ -599,16 +591,16 @@ class SecurityHardening(commands.Cog):
                 detail=f"{restored} restauré(s); {len(failed)} échec(s)",
             )
 
-            embed = discord.Embed(
-                title="PANIC RESTAURÉ" if not failed else "PANIC PARTIELLEMENT RESTAURÉ",
-                description=(
+            embed = _panneau(
+                "PANIC RESTAURÉ" if not failed else "PANIC PARTIELLEMENT RESTAURÉ",
+                (
                     "Les valeurs d'écriture @everyone précédentes ont été remises exactement."
                     if not failed
                     else "Certains salons n'ont pas pu être restaurés. Corrigez les permissions du bot puis relancez `+panic off`."
                 ),
-                color=0x57F287 if not failed else 0xFEE75C,
-                timestamp=discord.utils.utcnow(),
+                kind="success" if not failed else "warning",
             )
+            embed.timestamp = discord.utils.utcnow()
             embed.add_field(name="Salons restaurés", value=str(restored), inline=True)
             embed.add_field(name="Échecs", value=str(len(failed)), inline=True)
             if failed:
@@ -636,20 +628,9 @@ class SecurityHardening(commands.Cog):
         row = await self._panic_row(ctx.guild.id)
         if not row:
             return await ctx.send(
-                embed=discord.Embed(
-                    title="PANIC inactif",
-                    description="Le serveur n'est pas en mode d'urgence.",
-                    color=0x57F287,
-                )
+                embed=_panneau('PANIC inactif', "Le serveur n'est pas en mode d'urgence.", kind="success")
             )
-        embed = discord.Embed(
-            title="PANIC actif",
-            description=(
-                f"Activé <t:{row['created_at']}:R> par <@{row['created_by']}>.\n"
-                "Utilisez `+panic off` pour restaurer le snapshot."
-            ),
-            color=0xED4245,
-        )
+        embed = _panneau('PANIC actif', f"Activé <t:{row['created_at']}:R> par <@{row['created_by']}>.\nUtilisez `+panic off` pour restaurer le snapshot.", kind="danger")
         await ctx.send(embed=embed)
 
     @commands.command(name="security-repair", aliases=["securite-repair", "security-fix"])
@@ -658,15 +639,15 @@ class SecurityHardening(commands.Cog):
     async def security_repair(self, ctx: commands.Context):
         result = await apply_recommended_security(self.bot, ctx.guild)
         missing = result["missing_permissions"]
-        e = discord.Embed(
-            title="Sécurité SentriX réparée",
-            description=(
+        e = _panneau(
+            "Sécurité SentriX réparée",
+            (
                 "Anti-spam, anti-liens, anti-invitations, anti-mentions, anti-caps, "
                 "anti-émojis, anti-raid, anti-scam, anti-nuke et escalade automatique sont actifs.\n\n"
                 "Anti-bot et anti-comptes récents restent désactivés par défaut pour éviter "
                 "les expulsions de membres légitimes."
             ),
-            color=0x57F287 if not missing else 0xFEE75C,
+            kind="success" if not missing else "warning",
         )
         if missing:
             e.add_field(name="Permissions manquantes", value="- " + "\n- ".join(missing), inline=False)

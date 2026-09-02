@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 
 import discord
+
+from utils import embeds
 from discord.ext import commands
 
 from database.db import PRIMARY_CREATOR_DISPLAY_NAME
@@ -28,8 +30,16 @@ def _avatar(bot: commands.Bot) -> str | None:
     return str(url) if url else None
 
 
-def _base(bot: commands.Bot, title: str, description: str = "", colour: int = 0x6C5CE7) -> discord.Embed:
-    embed = discord.Embed(title=f"SentriX • {title}", description=description or None, colour=discord.Colour(colour))
+def _base(bot: commands.Bot, title: str, description: str = "", colour: int | None = None) -> discord.Embed:
+    """Panneau d'experience visuelle au format canonique.
+
+    Ce module avait son propre constructeur, avec un violet a lui (0x6C5CE7) et un
+    pied de page different : un quatrieme style visuel dans le meme bot. Il delegue
+    desormais, tout en gardant ce qui lui est propre — la ligne d'auteur et le
+    numero de version, qui portent une information reelle.
+    """
+    embed = embeds._base(f"SentriX • {title}", description or None,
+                         colour=int(colour) if colour is not None else None)
     avatar = _avatar(bot)
     if avatar:
         embed.set_author(name="SentriX", icon_url=avatar)
@@ -106,6 +116,16 @@ def build_updates_embed(bot: commands.Bot) -> discord.Embed:
     return embed
 
 
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse au format canonique SentriX.
+
+    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
+    ni barre d'identite, alors que le reste du bot en porte.
+    """
+    return embeds._base(titre, description, kind=kind)
+
+
 class StatusHubView(discord.ui.View):
     def __init__(self, bot: commands.Bot, guild: discord.Guild | None, owner_id: int, page: str = "status"):
         super().__init__(timeout=180)
@@ -125,7 +145,7 @@ class StatusHubView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.owner_id:
             return True
-        await interaction.response.send_message("Ouvre ton propre panneau avec `+status`.", ephemeral=True)
+        await interaction.response.send_message(embed=_reponse("Expérience visuelle", 'Ouvre ton propre panneau avec `+status`.', kind="warning"), ephemeral=True)
         return False
 
     @discord.ui.button(label="Statut", custom_id="sx:v5:status")
@@ -215,7 +235,7 @@ class ThemeView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.owner_id or interaction.user.guild_permissions.manage_guild:
             return True
-        await interaction.response.send_message("Ce panneau est réservé au staff.", ephemeral=True)
+        await interaction.response.send_message(embed=_reponse("Expérience visuelle", 'Ce panneau est réservé au staff.', kind="danger"), ephemeral=True)
         return False
 
     def embed(self, *, saved: bool = False) -> discord.Embed:

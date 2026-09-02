@@ -95,6 +95,50 @@ async def orpheline(self, ctx):
         self.assertNotIn("canonique", porte.suivre_delegation("n0", _fns(chaine)))
 
 
+class FranchirLesModules(unittest.TestCase):
+    """`+help` et `+diagnostic` rendent via une methode d'un AUTRE cog."""
+
+    LOCAL = """
+async def prefix_help_entry(ctx, commande=None):
+    help_cog = bot.get_cog('SentriXHelp')
+    await help_cog.send_help(ctx, commande)
+
+async def orpheline(ctx):
+    await ctx.send('texte nu')
+"""
+    # Ce que la porte connait du reste du depot : uniquement les noms definis une
+    # seule fois. `send_help` puis `_home` reproduisent la vraie chaine de +help.
+    GLOBALES = {
+        "send_help": "async def send_help(self, target, query=None):\n    panel = _home(self.bot, target.author)\n    await target.send(embed=panel)",
+        "_home": "def _home(bot, member):\n    return embeds.standard('Aide', 'Corps')",
+    }
+
+    def setUp(self):
+        self.fns = _fns(self.LOCAL)
+
+    def test_suit_l_appel_vers_un_autre_cog(self):
+        trouves = porte.suivre_delegation("prefix_help_entry", self.fns, globales=self.GLOBALES)
+        self.assertIn("canonique", trouves)
+
+    def test_ne_franchit_pas_sans_index_global(self):
+        """Sans la table des noms uniques, le saut n'a pas lieu : pas de devinette."""
+        trouves = porte.suivre_delegation("prefix_help_entry", self.fns)
+        self.assertNotIn("canonique", trouves)
+
+    def test_un_nom_absent_de_l_index_n_est_pas_suivi(self):
+        """L'index exclut les noms ambigus ; un homonyme ne doit rien conclure."""
+        trouves = porte.suivre_delegation("orpheline", self.fns, globales=self.GLOBALES)
+        self.assertNotIn("canonique", trouves)
+
+    def test_le_module_local_reste_prioritaire(self):
+        """Un nom defini localement ne doit pas etre lu depuis l'index global."""
+        fns = _fns("def rendu():\n    pass\ndef commande():\n    rendu()\n")
+        trouves = porte.suivre_delegation(
+            "commande", fns, globales={"rendu": "def rendu():\n    return embeds.success('x')"}
+        )
+        self.assertNotIn("canonique", trouves)
+
+
 class DetteDeReference(unittest.TestCase):
     def test_le_fichier_de_dette_existe_et_est_lisible(self):
         donnees = json.loads(porte.DETTE.read_text(encoding="utf-8"))

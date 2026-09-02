@@ -16,6 +16,8 @@ import time
 from typing import Any
 
 import discord
+
+from utils import embeds
 from discord.ext import commands
 
 from . import automatic_verification_v5 as v5
@@ -84,6 +86,16 @@ def _factors_payload(factors: list[v5.Signal]) -> str:
         ensure_ascii=False,
         separators=(",", ":"),
     )
+
+
+
+def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
+    """Reponse au format canonique SentriX.
+
+    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
+    ni barre d'identite, alors que le reste du bot en porte.
+    """
+    return embeds._base(titre, description, kind=kind)
 
 
 class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
@@ -224,7 +236,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
     async def verification_calibration(self, ctx: commands.Context) -> None:
         """Affiche l'avancement et la précision réellement mesurée de V5."""
         if not await self._staff_allowed(ctx):
-            return await ctx.send("Tu n'as pas la permission de consulter la calibration.")
+            return await ctx.send(embed=_reponse("Calibration de la vérification", "Tu n'as pas la permission de consulter la calibration.", kind="danger"))
         data = await self.stats()
         accuracy = (
             f"{data['accuracy']:.2f} %"
@@ -277,7 +289,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
     ) -> None:
         """Ajoute la vérité terrain staff : legit ou suspect."""
         if not await self._staff_allowed(ctx):
-            return await ctx.send("Tu n'as pas la permission de valider un échantillon.")
+            return await ctx.send(embed=_reponse("Relecture d échantillon", "Tu n'as pas la permission de valider un échantillon.", kind="danger"))
 
         normalized = verdict.casefold().strip()
         aliases = {
@@ -292,7 +304,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
         }
         label = aliases.get(normalized)
         if label is None:
-            return await ctx.send("Verdict invalide : utilise `legit` ou `suspect`.")
+            return await ctx.send(embed=_reponse("Relecture d échantillon", 'Verdict invalide : utilise `legit` ou `suspect`.', kind="danger"))
 
         row = await self.bot.db.fetchone(
             "SELECT predicted_status,score FROM automatic_verification_calibration_v5 "
@@ -300,9 +312,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
             (ctx.guild.id, member.id),
         )
         if row is None:
-            return await ctx.send(
-                "Ce membre ne fait pas partie des 1 000 échantillons collectés sur ce serveur."
-            )
+            return await ctx.send(embed=_reponse("Relecture d échantillon", 'Ce membre ne fait pas partie des 1 000 échantillons collectés sur ce serveur.', kind="warning"))
 
         await self.bot.db.execute(
             "UPDATE automatic_verification_calibration_v5 SET "
@@ -312,11 +322,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
         )
         status = str(_get(row, "predicted_status", 0, "") or "")
         predicted = _prediction(status) or "en attente du second contrôle"
-        await ctx.send(
-            f"Échantillon validé : {member.mention} = **{label}**. "
-            f"Verdict SentriX : **{predicted}**.",
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        await ctx.send(embed=_reponse("Relecture d échantillon", f'Échantillon validé : {member.mention} = **{label}**. Verdict SentriX : **{predicted}**.', kind="success"), allowed_mentions=discord.AllowedMentions.none())
 
 
 async def install(bot: commands.Bot) -> None:
