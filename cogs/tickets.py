@@ -1089,9 +1089,45 @@ class Tickets(commands.Cog):
         content = user.mention
         if ticket_type["mention_staff"] and staff_role:
             content += f" {staff_role.mention}"
+        # Ce message DOIT pinguer le membre et le role support : Discord refuse un
+        # `content` sur un message Components V2, donc il reste un embed. Le ping
+        # prime sur la banniere — c'est une exception assumee, pas un oubli.
         await channel.send(content=content, embed=e, view=TicketControlView(button_settings))
 
-        await interaction.followup.send(embed=embeds.success(f"Votre ticket a été créé : {channel.mention}"), ephemeral=True)
+        await sx_panels.envoyer(
+            interaction,
+            sx_panels.Panneau(
+                titre="SentriX — Ticket ouvert",
+                sous_titre=f"Votre ticket est prêt dans {channel.mention}.",
+                kind="success",
+                sections=[
+                    sx_panels.Section(
+                        "Votre ticket",
+                        [
+                            sx_panels.Ligne("Salon", channel.mention),
+                            sx_panels.Ligne("Numéro", f"#{number}"),
+                            sx_panels.Ligne("Type", str(ticket_type["name"])),
+                        ],
+                    ),
+                    sx_panels.Section(
+                        "Ce qui suit",
+                        [
+                            sx_panels.Ligne(
+                                "Le support a été prévenu",
+                                "Décrivez votre demande dans le salon, un membre du staff répondra",
+                            ),
+                            sx_panels.Ligne(
+                                "Fermeture",
+                                "Le bouton **Fermer** du salon met fin au ticket",
+                                indice="Un transcript peut vous être envoyé en message privé.",
+                            ),
+                        ],
+                    ),
+                ],
+                pied="SentriX • Tickets",
+            ),
+            ephemere=True,
+        )
 
         log_e = embeds.log_entry(
             "🎫 Ticket ouvert", 0x5865F2, cible=user,

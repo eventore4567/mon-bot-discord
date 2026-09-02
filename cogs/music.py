@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, design_system, premium_style
+from utils import sentrix_panels as panels
 
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamretries 5 -reconnect_delay_max 5",
@@ -174,38 +175,126 @@ class Music(commands.Cog, name="Music"):
 
     @commands.hybrid_command(name="queue", description="Afficher la file d'attente musicale.")
     async def queue(self, ctx: commands.Context):
+        """File d'attente composee : ce qui joue, ce qui suit, et la duree restante."""
         state = self.get_state(ctx.guild.id)
         if not state.queue and not state.current:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="File d'attente vide"))
-        lines = []
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre="SentriX — File d'attente",
+                    sous_titre="Rien n'est en lecture et la file est vide.",
+                    kind="info",
+                    sections=[
+                        panels.Section(
+                            "Lancer la musique",
+                            [
+                                panels.Ligne("`+play <titre ou lien>`", "Ajoute un titre et démarre la lecture"),
+                                panels.Ligne("`+join`", "Fait rejoindre SentriX dans votre salon vocal"),
+                            ],
+                        )
+                    ],
+                    pied="SentriX • Musique",
+                ),
+            )
+
+        sections = []
         if state.current:
-            lines.append(f"**En cours :** {state.current['title']}")
-        for i, track in enumerate(state.queue[:8], 1):
-            lines.append(f"{i}. {track['title']}")
-        hidden = max(0, len(state.queue) - 8)
-        if hidden:
-            lines.append(f"+{hidden} titre{'s' if hidden > 1 else ''} dans la file")
-        await ctx.send(embed=await self._embed(
-            ctx.guild.id,
-            title="File d'attente",
-            description="\n".join(lines),
-        ))
+            en_cours = [panels.Ligne("Titre", str(state.current["title"]))]
+            if state.current.get("duration"):
+                en_cours.append(
+                    panels.Ligne("Durée", premium_style.format_duration(state.current["duration"]))
+                )
+            en_cours.append(panels.Ligne("Boucle", "activée" if state.loop else "désactivée"))
+            sections.append(panels.Section("En lecture", en_cours))
+
+        if state.queue:
+            sections.append(
+                panels.Section(
+                    f"À suivre ({len(state.queue)})",
+                    [
+                        panels.Ligne(f"{i}", str(piste["title"])[:70])
+                        for i, piste in enumerate(state.queue[:8], 1)
+                    ],
+                    aligne=True,
+                )
+            )
+            restants = max(0, len(state.queue) - 8)
+            # La duree totale n'etait nulle part : on ne savait pas si la file
+            # tenait dix minutes ou trois heures.
+            duree = sum(int(p.get("duration") or 0) for p in state.queue)
+            recap = []
+            if restants:
+                recap.append(
+                    panels.Ligne("Non affichés", f"{restants} titre{'s' if restants > 1 else ''}")
+                )
+            if duree:
+                recap.append(panels.Ligne("Durée totale", premium_style.format_duration(duree)))
+            if recap:
+                sections.append(panels.Section("Résumé", recap))
+
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — File d'attente",
+                sous_titre=f"**{len(state.queue)}** titre(s) en attente.",
+                kind="info",
+                sections=sections,
+                pied="SentriX • Musique",
+            ),
+        )
 
     @commands.hybrid_command(name="nowplaying", description="Afficher la musique en cours.")
     async def nowplaying(self, ctx: commands.Context):
+        """Lecture en cours, avec sa pochette et l'etat reel du lecteur."""
         state = self.get_state(ctx.guild.id)
         if not state.current:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucune lecture en cours"))
-        track = state.current
-        title = track["title"]
-        url = track.get("webpage_url")
-        description = f"[{title}]({url})" if url else title
-        if track.get("duration"):
-            description += f"\nDurée • {premium_style.format_duration(track['duration'])}"
-        embed = await self._embed(ctx.guild.id, title="En cours", description=description)
-        if track.get("thumbnail"):
-            embed.set_thumbnail(url=track["thumbnail"])
-        await ctx.send(embed=embed)
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre="SentriX — Lecture",
+                    sous_titre="Aucune lecture en cours.",
+                    kind="info",
+                    sections=[
+                        panels.Section(
+                            "Démarrer",
+                            [panels.Ligne("`+play <titre ou lien>`", "Lance la lecture dans votre salon vocal")],
+                        )
+                    ],
+                    pied="SentriX • Musique",
+                ),
+            )
+
+        piste = state.current
+        titre = str(piste["title"])
+        lien = piste.get("webpage_url")
+        details = [panels.Ligne("Titre", f"[{titre}]({lien})" if lien else titre)]
+        if piste.get("duration"):
+            details.append(
+                panels.Ligne("Durée", premium_style.format_duration(piste["duration"]))
+            )
+        if piste.get("uploader"):
+            details.append(panels.Ligne("Chaîne", str(piste["uploader"])))
+
+        lecteur = [
+            panels.Ligne("Volume", f"{round(state.volume * 100)} %"),
+            panels.Ligne("Boucle", "activée" if state.loop else "désactivée"),
+            panels.Ligne("En attente", f"{len(state.queue)} titre(s)"),
+        ]
+
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — En lecture",
+                sous_titre=titre[:180],
+                kind="info",
+                vignette=piste.get("thumbnail"),
+                sections=[
+                    panels.Section("Piste", details),
+                    panels.Section("Lecteur", lecteur, aligne=True),
+                ],
+                pied="SentriX • Musique",
+            ),
+        )
 
     @commands.hybrid_command(name="volume", description="Régler le volume (0 à 100).")
     @app_commands.describe(niveau="Le niveau de volume entre 0 et 100")
