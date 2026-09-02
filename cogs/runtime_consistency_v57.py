@@ -124,8 +124,20 @@ def _install_mute_duration_compat(bot: commands.Bot) -> None:
     # déjà réparé par V18 pour ne pas réintroduire des inspect.Parameter sans displayed_name.
     cached_params = dict(getattr(command, "params", {}) or {})
 
+    # Les valeurs par defaut sont LUES sur la commande d'origine plutot que
+    # recopiees : le wrapper declarait `duree` obligatoire alors que +mute
+    # l'accepte optionnelle, et un defaut de `raison` different de celui du cog.
+    # discord.py remplit ces parametres lui-meme, donc rien ne cassait a
+    # l'usage — mais tout appel direct du callback echouait, et les deux
+    # defauts pouvaient diverger en silence a la prochaine modification.
+    _signature = inspect.signature(original)
+    _duree_defaut = _signature.parameters["duree"].default
+    _raison_defaut = _signature.parameters["raison"].default
+
     @functools.wraps(original)
-    async def mute_with_human_duration(cog, ctx, membre, duree, *, raison="Aucune raison"):
+    async def mute_with_human_duration(
+        cog, ctx, membre, duree=_duree_defaut, *, raison=_raison_defaut
+    ):
         if getattr(ctx, "interaction", None) is None:
             duree, raison = _normalise_prefix_duration(duree, raison)
         result = original(cog, ctx, membre, duree, raison=raison)

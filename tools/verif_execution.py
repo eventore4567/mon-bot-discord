@@ -136,6 +136,8 @@ class _Salon:
 
 
 class _Message:
+    guild = None
+    channel = None
     _n = [0]
     def __init__(self):
         self._n[0] += 1
@@ -171,6 +173,11 @@ class _Guild:
         self.verification_level = discord.VerificationLevel.low
         self.explicit_content_filter = discord.ContentFilter.disabled
         self.mfa_level = 0
+
+    async def fetch_members(self, *a, **k):
+        """Itere les membres comme le fait la vraie passerelle."""
+        for membre in self.members:
+            yield membre
         self.afk_channel, self.afk_timeout = None, 0
         self.voice_client = None
         self.system_channel = None
@@ -405,6 +412,8 @@ async def main(fichiers: list[str]) -> int:
         # Une extension chargee plus tard peut reinitialiser _ready ; en production
         # une commande ne s'execute que sur un bot pret, donc on fige la reponse.
         type(bot).is_ready = lambda self: True
+        bot._connection.loop = asyncio.get_event_loop()
+        type(bot).loop = property(lambda self: asyncio.get_event_loop())
         # is_owner() interroge application_info() par HTTP quand owner_id est
         # inconnu. On le renseigne avec un identifiant qui n'est PAS celui de
         # l'auteur simule : la garde « proprietaire du bot » reste donc fausse,
@@ -470,18 +479,25 @@ async def main(fichiers: list[str]) -> int:
             etiquette = f"{commande.qualified_name}  [{DERNIERE_VUE}]"
         if verdict == "aucun" and cause:
             etiquette = f"{commande.qualified_name}  ←  {cause}"
+        elif cause:
+            # Elle a repondu, puis a plante. L'utilisateur voit un debut de
+            # reponse et rien apres : c'est un bug, pas un succes.
+            resultats.setdefault("repond puis plante", []).append(
+                f"{commande.qualified_name}  ←  {cause}"
+            )
         resultats.setdefault(verdict, []).append(etiquette)
 
     await bot.db.close()
 
     ordre = ("panneau+sections", "panneau", "texte volontaire", "embed", "aucun",
-             "argument non synthétisable")
+             "argument non synthétisable", "repond puis plante")
     total = sum(len(v) for v in resultats.values())
     print(f"commandes examinées dans {sorted(vises)} : {total}\n")
     for verdict in ordre:
         lot = resultats.get(verdict, [])
         print(f"  {verdict:20} {len(lot):>4}")
-        if verdict in ("embed", "aucun", "texte volontaire", "argument non synthétisable") and lot:
+        if verdict in ("embed", "aucun", "texte volontaire",
+                       "argument non synthétisable", "repond puis plante") and lot:
             for nom in sorted(lot):
                 print(f"       {nom}")
     return 0

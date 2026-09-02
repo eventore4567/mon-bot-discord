@@ -321,6 +321,27 @@ def _rangee(boutons: Sequence[Bouton]) -> discord.ui.ActionRow | None:
 _MENTIONS_SURES = discord.AllowedMentions(everyone=False, roles=False, users=True, replied_user=False)
 
 
+def _message_envoye(resultat: Any):
+    """Ramene toujours un Message, quelle que soit la surface d'envoi.
+
+    ``interaction.response.send_message`` ne renvoie pas un Message mais un
+    ``InteractionCallbackResponse``. Cinquante-neuf appels exploitent pourtant
+    le retour d'``envoyer`` — ``message.id`` pour enregistrer un panneau de
+    roles, ``message.edit`` pour une barre de progression, ``message.delete``
+    pour un avertissement temporaire. Toutes ces lignes echouaient des que la
+    commande etait lancee en slash plutot qu'en prefixe.
+
+    La reponse porte deja le message dans ``resource`` : aucun appel
+    supplementaire a l'API n'est necessaire.
+    """
+    if isinstance(resultat, discord.InteractionCallbackResponse):
+        ressource = getattr(resultat, "resource", None)
+        if isinstance(ressource, discord.Message):
+            return ressource
+        return None
+    return resultat
+
+
 async def envoyer(
     destination: Any,
     panneau: Panneau,
@@ -381,7 +402,7 @@ async def envoyer(
         if ephemere:
             kwargs["ephemeral"] = True
         if not destination.is_done():
-            return await destination.send_message(**kwargs)
+            return _message_envoye(await destination.send_message(**kwargs))
         # Reponse deja consommee : seul le followup peut encore parler. On passe
         # par l'interaction parente, faute d'accesseur public.
         parent = getattr(destination, "_parent", None)
@@ -398,7 +419,7 @@ async def envoyer(
         if ephemere:
             kwargs["ephemeral"] = True
         if not interaction.response.is_done():
-            return await interaction.response.send_message(**kwargs)
+            return _message_envoye(await interaction.response.send_message(**kwargs))
         return await interaction.followup.send(**kwargs)
 
     # Webhook (interaction.followup), Messageable (ctx, salon, membre).

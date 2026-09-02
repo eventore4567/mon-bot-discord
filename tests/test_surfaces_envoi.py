@@ -146,3 +146,41 @@ def test_un_fichier_unique_est_accepte_aussi():
     )
     noms = [f.filename for f in cible.appels[0][1]["files"]]
     assert "carte.png" in noms and "banner_info.webp" in noms
+
+
+def test_envoyer_ramene_toujours_un_message():
+    """59 appels exploitent le retour d'envoyer : message.id pour enregistrer un
+    panneau de roles, message.edit pour une barre de progression, message.delete
+    pour un avertissement temporaire.
+
+    interaction.response.send_message ne renvoie pas un Message mais un
+    InteractionCallbackResponse : toutes ces lignes echouaient des que la
+    commande etait lancee en / plutot qu'en +.
+    """
+
+    class _Faux(discord.Message):
+        pass
+
+    message = _Faux.__new__(_Faux)
+    message.id = 4242
+
+    class _ReponseAvecMessage(_Reponse):
+        async def send_message(self, **kw):
+            reponse = discord.InteractionCallbackResponse.__new__(
+                discord.InteractionCallbackResponse
+            )
+            reponse.resource = message
+            return reponse
+
+    obtenu = asyncio.run(panels.envoyer(_ReponseAvecMessage(), _panneau()))
+    assert obtenu is message
+    assert obtenu.id == 4242
+
+
+def test_un_salon_renvoie_son_message_inchange():
+    class _SalonQuiRepond(_Salon):
+        async def send(self, **kw):
+            self.appels.append(("send", kw))
+            return "message-reel"
+
+    assert asyncio.run(panels.envoyer(_SalonQuiRepond(), _panneau())) == "message-reel"
