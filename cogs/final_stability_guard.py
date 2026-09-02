@@ -26,6 +26,7 @@ from typing import Any
 import discord
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from discord.ext import commands, tasks
 
 from utils import checks
@@ -429,7 +430,7 @@ class StabilityDiagnostic(commands.Cog, name="StabilityDiagnostic"):
             summary = "❌ Un élément essentiel demande une correction."
         embed.add_field(name="Résultat", value=summary, inline=False)
         embed.set_footer(text="SentriX • Diagnostic staff • aucune donnée sensible affichée")
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
 
 def install(bot: commands.Bot) -> dict[str, Any]:

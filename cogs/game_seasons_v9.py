@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import discord
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from database.db import now
@@ -140,7 +141,7 @@ class GameSeasonsV9(commands.Cog):
     @commands.command(name="gameseason", aliases=["saison-jeux", "gamesaison"])
     async def season(self, ctx):
         if not ctx.guild:
-            return await ctx.send(embed=_reponse("Saison de jeu", 'Cette commande doit être utilisée sur un serveur.', kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Saison de jeu', 'Cette commande doit être utilisée sur un serveur.', kind='danger')))
         season = _season_key()
         rows = await self.bot.db.fetchall(
             "SELECT user_id,score,wins FROM game_season_scores_v2 WHERE season_key=? AND guild_id=? "
@@ -178,7 +179,7 @@ class GameSeasonsV9(commands.Cog):
         )
         if _multiplier() == 2:
             embed.add_field(name="Événement actif", value="Week-end: **x2 points de saison**.", inline=False)
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
 
 async def setup(bot):

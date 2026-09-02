@@ -34,6 +34,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.member-data-retention-v17")
 
@@ -179,19 +180,14 @@ class ResetConfirmationView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.requester_id:
-            await interaction.response.send_message(
-                embed=embeds.error("Cette confirmation appartient à un autre utilisateur."),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Cette confirmation appartient à un autre utilisateur.')), ephemere=True)
             return False
         return True
 
     @discord.ui.button(label="Confirmer le reset", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.used:
-            return await interaction.response.send_message(
-                embed=embeds.error("Ce reset a déjà été traité."), ephemeral=True
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ce reset a déjà été traité.')), ephemere=True)
         self.used = True
         for child in self.children:
             child.disabled = True

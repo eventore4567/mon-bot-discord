@@ -15,6 +15,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds, checks, game_rewards
+from utils import sentrix_panels as panels
 from cogs.games_economy import GAME_CATALOG
 
 CATEGORY_LABELS = {"rapide": "Rapides", "duel": "Duels", "communautaire": "Communautaires", "solo": "Solo"}
@@ -69,7 +70,7 @@ class GamesSetupView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if self.author_id is not None and interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=embeds.error("Vous n'êtes pas autorisé à utiliser ce panneau."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'êtes pas autorisé à utiliser ce panneau.")), ephemere=True)
             return False
         return True
 
@@ -373,7 +374,7 @@ class GeneralSettingsModal(discord.ui.Modal, title="Réglages généraux des min
             maxi = float(str(self.maxi.value).strip())
             assert limite >= 0 and multi >= 0 and mini >= 0 and maxi >= 0
         except (ValueError, AssertionError):
-            return await interaction.response.send_message(embed=embeds.error("Valeurs invalides — entrez des nombres positifs."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Valeurs invalides — entrez des nombres positifs.')), ephemere=True)
         await game_rewards.set_settings(self.outer.cog.bot, interaction.guild.id, {
             "daily_limit": limite, "event_multiplier": multi, "min_reward_multiplier": mini, "max_reward_multiplier": maxi,
         })

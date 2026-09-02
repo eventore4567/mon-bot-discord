@@ -233,7 +233,7 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mémoire', description=err, kind='warning')))
         pool = ["🍒", "🍋", "🍊", "🍇", "💎", "⭐", "🔥", "🌙"]
         sequence = [game_rewards.secure_pick(pool) for _ in range(5)]
-        await ctx.send(embed=await _embed(guild_id and self.bot, guild_id, title="Mémoire", description="Mémorisez cette séquence :\n" + " ".join(sequence)))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(guild_id and self.bot, guild_id, title='Mémoire', description='Mémorisez cette séquence :\n' + ' '.join(sequence))))
         await asyncio.sleep(5)
         await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mémoire', description="À vous ! Retapez la séquence dans l'ordre, séparée par des espaces (30 secondes).")))
 

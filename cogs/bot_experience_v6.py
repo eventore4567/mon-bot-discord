@@ -21,6 +21,8 @@ from collections import Counter
 from typing import Any
 
 import discord
+
+from utils import sentrix_panels as panels
 from discord.ext import commands
 
 import config
@@ -205,7 +207,7 @@ class QuickHomeView(discord.ui.View):
             user_id=interaction.user.id,
             guild_id=guild_id,
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
 
     @discord.ui.button(label="Commandes", style=discord.ButtonStyle.primary, row=0)
     async def commands_button(self, interaction: discord.Interaction, _button: discord.ui.Button):

@@ -483,7 +483,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
                 channel = guild.get_channel(int(fallback)) if fallback else None
             except Exception: channel = None
         if isinstance(channel, discord.TextChannel):
-            try: await channel.send(embed=discord.Embed(description=text[:4000], colour=discord.Colour(colour)))
+            try: await panels.envoyer(channel, panels.depuis_embed(discord.Embed(description=text[:4000], colour=discord.Colour(colour))))
             except Exception: pass
 
     async def _ai_moderate(self, message: discord.Message):
@@ -612,7 +612,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
                 guild = self.bot.get_guild(gid); channel = guild.get_channel(int(_get(row, "channel_id", 0))) if guild else None
                 if isinstance(channel, discord.TextChannel):
                     try:
-                        await channel.send(embed=await self._digest_embed(guild))
+                        await panels.envoyer(channel, panels.depuis_embed(await self._digest_embed(guild)))
                         await self.bot.db.execute("UPDATE ultimate_staff_digest SET last_day=? WHERE guild_id=?", (today, gid))
                     except Exception: pass
         self._patch_ticket_summary()

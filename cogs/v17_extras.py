@@ -12,6 +12,7 @@ from discord.ext import commands
 import config
 from database.db import now
 from utils import ai_service, checks, embeds, helpers
+from utils import sentrix_panels as panels
 from .v17_shared import ensure_schema, register_command_policy, state
 
 logger = logging.getLogger("bot.v17-extras")
@@ -29,25 +30,23 @@ class V17Extras(commands.Cog, name="V17Extras"):
     async def shopwindow(self, ctx: commands.Context, item_id: int, debut: str = "now", duree: str = "7j"):
         item = await self.bot.db.fetchone("SELECT name FROM shop_items WHERE guild_id=? AND id=?", (ctx.guild.id, item_id))
         if not item:
-            return await ctx.send(embed=embeds.error("Article introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Article introuvable.')))
         start_at = now()
         if debut.casefold() not in {"now", "maintenant", "0"}:
             start_delay = helpers.parse_duration(debut)
             if start_delay is None or start_delay < 0:
-                return await ctx.send(embed=embeds.error("Début invalide. Exemples : `now`, `1h`, `2j`."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Début invalide. Exemples : `now`, `1h`, `2j`.')))
             start_at += start_delay
         duration = helpers.parse_duration(duree)
         if duration is None or duration <= 0:
-            return await ctx.send(embed=embeds.error("Durée invalide. Exemples : `12h`, `7j`, `30j`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide. Exemples : `12h`, `7j`, `30j`.')))
         end_at = start_at + duration
         await self.bot.db.execute(
             "INSERT INTO v17_shop_rules (guild_id,item_id,stock,available_from,available_until,updated_at) VALUES (?,?,-1,?,?,?) "
             "ON CONFLICT(guild_id,item_id) DO UPDATE SET available_from=excluded.available_from,available_until=excluded.available_until,updated_at=excluded.updated_at",
             (ctx.guild.id, item_id, start_at, end_at, now()),
         )
-        await ctx.send(embed=embeds.success(
-            f"**{item['name']}** sera disponible de <t:{start_at}:F> à <t:{end_at}:F>."
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"**{item['name']}** sera disponible de <t:{start_at}:F> à <t:{end_at}:F>.")))
 
     @commands.hybrid_command(name="shopwindowclear", description="Retirer la période de disponibilité d'un article.", with_app_command=False)
     @checks.is_owner_or_admin_for("economie")
@@ -56,7 +55,7 @@ class V17Extras(commands.Cog, name="V17Extras"):
             "UPDATE v17_shop_rules SET available_from=NULL,available_until=NULL,updated_at=? WHERE guild_id=? AND item_id=?",
             (now(), ctx.guild.id, item_id),
         )
-        await ctx.send(embed=embeds.success("Fenêtre de disponibilité supprimée pour cet article."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Fenêtre de disponibilité supprimée pour cet article.')))
 
 
 def install_image_role_quota(bot: commands.Bot) -> None:
@@ -75,27 +74,27 @@ def install_image_role_quota(bot: commands.Bot) -> None:
         if guild_id:
             settings = await ai_service.get_settings(self.bot, guild_id)
             if not settings["enabled"]:
-                return await ctx.send(embed=embeds.error("L'IA est désactivée sur ce serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'IA est désactivée sur ce serveur.")))
             if not ai_service.is_channel_allowed(settings, channel_id):
-                return await ctx.send(embed=embeds.error("L'IA n'est pas autorisée dans ce salon."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'IA n'est pas autorisée dans ce salon.")))
             role_ids = [role.id for role in getattr(ctx.author, "roles", ())]
             if not ai_service.is_role_allowed(settings, role_ids):
-                return await ctx.send(embed=embeds.error("Vous n'avez pas le rôle nécessaire pour utiliser l'IA dans ce serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas le rôle nécessaire pour utiliser l'IA dans ce serveur.")))
             problem = ai_service.moderate_input(description, max_length=settings["max_question_length"])
             if problem:
-                return await ctx.send(embed=embeds.error(problem))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(problem)))
             role_policy = await _role_ai_policy(self.bot, guild_id, ctx.author.id)
             daily_limit = int(role_policy["daily_limit"] if role_policy else settings["daily_limit"])
             priority = int(role_policy["priority"] if role_policy else 0)
             used_today = await ai_service.get_daily_usage(self.bot, guild_id, ctx.author.id)
             if used_today >= daily_limit:
-                return await ctx.send(embed=embeds.error(f"Limite IA quotidienne atteinte (**{daily_limit}/jour** pour votre niveau d'accès)."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Limite IA quotidienne atteinte (**{daily_limit}/jour** pour votre niveau d'accès).")))
 
         thinking = None
         if ctx.interaction:
             await ctx.defer()
         else:
-            thinking = await ctx.send(embed=embeds.info("Génération rapide de l'image 4K en cours…"))
+            thinking = await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Génération rapide de l'image 4K en cours…")))
 
         async with ctx.typing():
             async with _ai_gate(self.bot).slot(priority):
@@ -111,16 +110,11 @@ def install_image_role_quota(bot: commands.Bot) -> None:
             except discord.HTTPException:
                 pass
         if not result.ok:
-            return await ctx.send(embed=await self._embed(
-                guild_id,
-                title=ai_service.error_title(result.error),
-                description=ai_service.error_message(result.error),
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title=ai_service.error_title(result.error), description=ai_service.error_message(result.error), kind='danger')))
         try:
             image_bytes = self._prepare_4k_discord_jpeg(result.data)
         except (OSError, ValueError):
-            return await ctx.send(embed=embeds.error("L'image a été générée mais son fichier est trop lourd pour Discord."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'image a été générée mais son fichier est trop lourd pour Discord.")))
         if guild_id:
             await ai_service.record_usage(self.bot, guild_id, ctx.author.id, tokens_estimate=0)
         filename = "sentrix-image-4k.jpg"

@@ -13,6 +13,8 @@ import logging
 import types
 
 import discord
+
+from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from . import finalize_runtime
@@ -161,12 +163,7 @@ def _install_clear_error_guard(bot: commands.Bot) -> None:
         if root_name == "clear" and conversion_errors and isinstance(base, conversion_errors):
             from utils import embeds
 
-            return await ctx.send(
-                embed=embeds.warning(
-                    'Le nombre doit être un entier entre **1 et 100**.\n\nUtilisez : `+clear <nombre>`',
-                    title="Nombre invalide",
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Le nombre doit être un entier entre **1 et 100**.\n\nUtilisez : `+clear <nombre>`', title='Nombre invalide')))
 
         result = current(ctx, error)
         if inspect.isawaitable(result):

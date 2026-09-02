@@ -255,7 +255,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
                 )
 
         try:
-            sent = await board_channel.send(content, embed=embed)
+            sent = await panels.envoyer(board_channel, panels.depuis_embed(embed))
         except (discord.Forbidden, discord.HTTPException):
             return
         await self.bot.db.execute(

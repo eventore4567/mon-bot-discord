@@ -10,6 +10,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.afk")
 _INSTALLED = False
@@ -110,7 +111,7 @@ async def _afk_callback(self, ctx: commands.Context, *, raison: str = "Absent"):
         + (f"\n**Pseudo temporaire :** `{afk_nick}`" if renamed else "")
         + rename_note
     )
-    await ctx.send(embed=embeds.info(description, title="Mode AFK activé"))
+    await panels.envoyer(ctx, panels.depuis_embed(embeds.info(description, title='Mode AFK activé')))
 
 
 async def _restore_member(self, member: discord.Member, state: dict) -> bool:
@@ -157,7 +158,7 @@ async def _afk_on_message(self, message: discord.Message):
         if state.get("renamed") and not restored:
             text += "\n⚠️ Le pseudo n'a pas pu être restauré automatiquement."
         try:
-            await message.channel.send(embed=embeds.success(text, title="Retour détecté"), delete_after=6)
+            await panels.envoyer(message.channel, panels.depuis_embed(embeds.success(text, title='Retour détecté')))
         except discord.HTTPException:
             pass
 
@@ -180,13 +181,7 @@ async def _afk_on_message(self, message: discord.Message):
             continue
         reason = mentioned_state.get("reason") or "Absent"
         try:
-            await message.channel.send(
-                embed=embeds.info(
-                    f"{mention.mention} est actuellement absent.\n**Raison :** {reason}",
-                    title="Membre AFK",
-                ),
-                delete_after=8,
-            )
+            await panels.envoyer(message.channel, panels.depuis_embed(embeds.info(f'{mention.mention} est actuellement absent.\n**Raison :** {reason}', title='Membre AFK')))
         except discord.HTTPException:
             pass
 

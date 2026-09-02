@@ -17,6 +17,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds, log_service
+from utils import sentrix_panels as panels
 from . import runtime_finish_v84 as v84
 from . import runtime_finish_v88 as v88
 from . import setup_experience_v74 as v74
@@ -108,12 +109,7 @@ def _patch_setup_logs_final() -> None:
                         self.backend.selected_log = str(_select.values[0])
                     if not await _best_effort_refresh(self, interaction):
                         try:
-                            await interaction.followup.send(
-                                embed=embeds.success(
-                                    "Catégorie sélectionnée. Utilisez **Actualiser** si le panneau ne s'est pas redessiné."
-                                ),
-                                ephemeral=True,
-                            )
+                            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success("Catégorie sélectionnée. Utilisez **Actualiser** si le panneau ne s'est pas redessiné.")), ephemere=True)
                         except discord.HTTPException:
                             pass
 
@@ -152,12 +148,7 @@ def _patch_setup_logs_final() -> None:
                             channel_id,
                         )
                         try:
-                            await interaction.followup.send(
-                                embed=embeds.error(
-                                    f"Erreur de sauvegarde réelle : `{type(exc).__name__}: {str(exc)[:160]}`"
-                                ),
-                                ephemeral=True,
-                            )
+                            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(f'Erreur de sauvegarde réelle : `{type(exc).__name__}: {str(exc)[:160]}`')), ephemere=True)
                         except discord.HTTPException:
                             pass
                         return
@@ -180,7 +171,7 @@ def _patch_setup_logs_final() -> None:
                                 if channel_id
                                 else "Cette catégorie de logs est maintenant désactivée."
                             )
-                            await interaction.followup.send(embed=embeds.success(text), ephemeral=True)
+                            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(text)), ephemere=True)
                         except discord.HTTPException:
                             pass
 
@@ -201,12 +192,7 @@ def _patch_setup_logs_final() -> None:
                         setting = await log_service.get_log_setting(self.bot, self.guild.id, log_type)
                         new_enabled = not bool(setting.get("enabled"))
                         if new_enabled and not setting.get("dedicated_channel_id"):
-                            await interaction.followup.send(
-                                embed=embeds.warning(
-                                    "Choisissez d'abord **le salon exact** de cette catégorie avec le deuxième menu."
-                                ),
-                                ephemeral=True,
-                            )
+                            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.warning("Choisissez d'abord **le salon exact** de cette catégorie avec le deuxième menu.")), ephemere=True)
                             return
                         await log_service.set_log_enabled(
                             self.bot,
@@ -217,12 +203,7 @@ def _patch_setup_logs_final() -> None:
                     except Exception as exc:
                         logger.exception("Toggle log V89 impossible guild=%s type=%s", self.guild.id, log_type)
                         try:
-                            await interaction.followup.send(
-                                embed=embeds.error(
-                                    f"Impossible de modifier cette catégorie : `{type(exc).__name__}: {str(exc)[:150]}`"
-                                ),
-                                ephemeral=True,
-                            )
+                            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(f'Impossible de modifier cette catégorie : `{type(exc).__name__}: {str(exc)[:150]}`')), ephemere=True)
                         except discord.HTTPException:
                             pass
                         return
@@ -237,12 +218,7 @@ def _patch_setup_logs_final() -> None:
                         pass
                     if not await _best_effort_refresh(self, interaction):
                         try:
-                            await interaction.followup.send(
-                                embed=embeds.success(
-                                    "Catégorie activée." if new_enabled else "Catégorie désactivée."
-                                ),
-                                ephemeral=True,
-                            )
+                            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('Catégorie activée.' if new_enabled else 'Catégorie désactivée.')), ephemere=True)
                         except discord.HTTPException:
                             pass
 

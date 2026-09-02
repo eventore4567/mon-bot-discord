@@ -20,6 +20,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import checks, embeds
+from utils import sentrix_panels as panels
 from utils.system_features import ensure_feature_table, get_system_features, is_system_enabled, set_system_feature
 
 logger = logging.getLogger("bot.feature-systems")
@@ -88,18 +89,18 @@ class SystemFeatureCommands(commands.Cog, name="SystemFeatures"):
 
     async def _show_or_set(self, ctx: commands.Context, feature: str, etat: str | None):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
 
         current = await get_system_features(self.bot.db, ctx.guild.id, fresh=True)
         key = "economy_enabled" if feature == "economy" else "levels_enabled"
         requested = _state_from_text(etat)
         if etat is not None and requested is None:
-            return await ctx.send(embed=embeds.warning("Utilisez `on` ou `off`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Utilisez `on` ou `off`.')))
 
         if requested is None:
             label = "argent + boutiques" if feature == "economy" else "niveaux + XP"
             state = "activé" if current[key] else "désactivé"
-            return await ctx.send(embed=embeds.info(f"Le système **{label}** est actuellement **{state}**."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f'Le système **{label}** est actuellement **{state}**.')))
 
         values = await set_system_feature(self.bot.db, ctx.guild.id, feature, requested)
         active = values[key]
@@ -115,7 +116,7 @@ class SystemFeatureCommands(commands.Cog, name="SystemFeatures"):
                 if active else
                 "📈 Le système de niveaux est **désactivé**. Les gains d'XP, classements et paliers de niveau sont bloqués. Les niveaux existants sont conservés."
             )
-        await ctx.send(embed=embeds.success(description) if active else embeds.info(description))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(description) if active else embeds.info(description)))
 
     @commands.hybrid_command(
         name="economy-system",

@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from utils import checks, design_system, embeds, stats_service
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.economy.drop")
 
@@ -151,12 +152,7 @@ class MoneyDrops(commands.Cog, name="MoneyDrops"):
     async def drop(self, ctx: commands.Context, montant: int):
         """Drop de l'argent : +drop 1000. Le premier clic gagne le montant."""
         if montant < 1 or montant > MAX_DROP_AMOUNT:
-            return await ctx.send(
-                embed=embeds.error(
-                    "Le montant du drop doit être compris entre **1** et "
-                    f"**{stats_service.format_number(MAX_DROP_AMOUNT)}**."
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Le montant du drop doit être compris entre **1** et **{stats_service.format_number(MAX_DROP_AMOUNT)}**.')))
 
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
         design = await self.bot.db.get_design_settings(ctx.guild.id)

@@ -96,6 +96,16 @@ class _Salon:
     async def send(self, *a, **k):
         CAPTURES.append({"voie": "channel.send", "kwargs": k, "args": a}); return _Message()
     async def purge(self, **k): return []
+    def history(self, **k):
+        # Certaines commandes lisent l'historique avant de repondre (+clear). Sans
+        # lui, elles echouaient avant l'envoi et la mesure etait fausse.
+        async def _vide():
+            for _ in ():
+                yield None
+        return _vide()
+    async def fetch_message(self, *a, **k): return _Message()
+    async def set_permissions(self, *a, **k): return None
+    async def edit(self, *a, **k): return None
 
 
 class _Message:
@@ -168,9 +178,19 @@ class _Rien:
     async def __aexit__(self, *a): return False
 
 
+# Un envoi vers `channel.send` peut viser un AUTRE salon que celui de la commande —
+# un journal, une annonce. Les journaux gardent volontairement leur rendu grand
+# format : les compter comme la reponse de la commande donnerait un faux negatif.
+VOIES_REPONSE = ("ctx.send", "ctx.reply")
+
+
 def _classer(captures) -> tuple[str, int]:
-    """Ce qui partirait vraiment vers Discord."""
-    for c in captures:
+    """Ce que l'UTILISATEUR verrait, pas ce qui part dans un salon de logs."""
+    # Un journal n'est JAMAIS la reponse d'une commande. S'il n'y a aucun envoi
+    # vers l'appelant, le verdict est « aucun » — pas le rendu du journal, qui
+    # garde volontairement son format grand large.
+    reponses = [c for c in captures if c.get("voie") in VOIES_REPONSE]
+    for c in reponses:
         kw = c.get("kwargs", {})
         vue = kw.get("view")
         if vue is not None and hasattr(vue, "to_components"):
@@ -283,8 +303,9 @@ async def main(fichiers: list[str]) -> int:
     for verdict in ordre:
         lot = resultats.get(verdict, [])
         print(f"  {verdict:20} {len(lot):>4}")
-        if verdict in ("embed", "panneau") and lot:
-            print(f"       {', '.join(sorted(lot)[:12])}")
+        if verdict == "embed" and lot:
+            for nom in sorted(lot):
+                print(f"       {nom}")
     return 0
 
 

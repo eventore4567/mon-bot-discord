@@ -18,6 +18,7 @@ from discord.ext import commands, tasks
 
 from database.db import now
 from utils import checks, embeds, helpers
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.v10")
 
@@ -203,17 +204,17 @@ class BotV10(commands.Cog, name="BotV10"):
 
  async def run_auto_setup(self, ctx: commands.Context, profile: str = "community"):
   profile = (profile or "community").casefold()
-  if profile not in VALID_PROFILES: return await ctx.send(embed=embeds.error("Profil inconnu: community, gaming, support ou creator."))
+  if profile not in VALID_PROFILES: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Profil inconnu: community, gaming, support ou creator.')))
   platform = self.bot.get_cog("PlatformV4")
-  if platform is None: return await ctx.send(embed=embeds.error("Platform V4 se charge encore."))
+  if platform is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Platform V4 se charge encore.')))
   try:
    result = await platform.quick_setup(ctx.guild, ctx.author.id, profile); audit = await self.server_audit_data(ctx.guild, actor_id=ctx.author.id, persist=True); missing = self.missing_bot_permissions(ctx.guild)
    e = embeds.success(f"Configuration automatique **{profile}** terminée.\nScore serveur: **{audit['total_score']}/100**.")
    result = result or {}; e.add_field(name="Créé", value=f"Salons: **{result.get('created_channels',0)}**\nCatégories: **{result.get('created_categories',0)}**\nRôles: **{result.get('created_roles',0)}**", inline=True)
    e.add_field(name="Permissions", value="OK" if not missing else "Manquantes: " + ", ".join(missing[:6]), inline=True)
    if audit["recommendations"]: e.add_field(name="À terminer", value="\n".join(f"• {item}" for item in audit["recommendations"][:5]), inline=False)
-   await ctx.send(embed=e)
-  except (ValueError, discord.Forbidden, discord.HTTPException) as exc: await ctx.send(embed=embeds.error(str(exc)[:900]))
+   await panels.envoyer(ctx, panels.depuis_embed(e))
+  except (ValueError, discord.Forbidden, discord.HTTPException) as exc: await panels.envoyer(ctx, panels.depuis_embed(embeds.error(str(exc)[:900])))
 
  @commands.command(name="setup-auto", aliases=["autosetup"])
  @checks.is_owner_or_admin_for("configuration")
@@ -242,7 +243,7 @@ class BotV10(commands.Cog, name="BotV10"):
   state = await self.health_data(ctx.guild); db = state.get("database") or {}; command_state = state.get("commands") or {}
   lines = [f"Discord: **{'OK' if state['discord'].get('ready') else 'ERREUR'}** — {state['discord'].get('latency_ms','?')} ms", f"SQLite: **{db.get('sqlite','inconnu')}** · PostgreSQL: **{db.get('postgres','inconnu')}** · Redis: **{db.get('redis','inconnu')}**", f"IA: **{(state.get('openai') or {}).get('state','inconnu')}**", f"Commandes: **{command_state.get('prefix_roots',len(self.bot.commands))}** préfixées · **{command_state.get('slash_roots',len(self.bot.tree.get_commands()))}** slash", f"Sauvegardes: **{state['backups']}**"]
   if state["missing_permissions"]: lines.append("Permissions manquantes: " + ", ".join(state["missing_permissions"]))
-  await ctx.send(embed=embeds.brand("Diagnostic complet — Bot V10", "\n".join(lines)))
+  await panels.envoyer(ctx, panels.depuis_embed(embeds.brand('Diagnostic complet — Bot V10', '\n'.join(lines))))
 
  async def server_audit_data(self, guild: discord.Guild, actor_id: int | None = None, *, persist: bool = False) -> dict:
   conf = await self.bot.db.get_guild_config(guild.id); automod = await self.bot.db.get_automod(guild.id); missing = self.missing_bot_permissions(guild)
@@ -269,7 +270,7 @@ class BotV10(commands.Cog, name="BotV10"):
   data=await self.server_audit_data(ctx.guild,actor_id=ctx.author.id,persist=True); e=embeds.brand(f"Audit serveur — {data['total_score']}/100","Évaluation factuelle de la configuration; elle n'évalue pas les personnes.")
   for label,key in (("Sécurité","security_score"),("Configuration","configuration_score"),("Modération","moderation_score"),("Exploitation","operations_score"),("Économie","economy_score"),("Engagement","engagement_score")): e.add_field(name=label,value=f"**{data[key]}/100**",inline=True)
   if data["recommendations"]: e.add_field(name="Corrections recommandées",value="\n".join(f"• {x}" for x in data["recommendations"]),inline=False)
-  await ctx.send(embed=e)
+  await panels.envoyer(ctx, panels.depuis_embed(e))
 
  async def economy_insights(self,guild_id:int)->dict:
   rows=await self.bot.db.fetchall("SELECT cash,bank FROM economy WHERE guild_id=? ORDER BY (cash+bank) DESC",(guild_id,)); wealth=[max(0,int(r["cash"] or 0)+int(r["bank"] or 0)) for r in rows]; supply=sum(wealth); accounts=len(wealth); concentration=round((sum(wealth[:10])/supply)*100,1) if supply else 0.0; cutoff=now()-86400; ledger_available=True
@@ -281,7 +282,7 @@ class BotV10(commands.Cog, name="BotV10"):
  @commands.command(name="economy-audit", aliases=["eco-audit"])
  @checks.is_owner_or_admin_for("economie")
  async def economy_audit(self,ctx:commands.Context):
-  d=await self.economy_insights(ctx.guild.id); e=embeds.brand("Économie V3 — contrôle","Indicateurs factuels; aucune sanction automatique."); e.add_field(name="Masse monétaire",value=f"**{d['total_supply']:,}**",inline=True); e.add_field(name="Comptes",value=f"**{d['accounts']}**",inline=True); e.add_field(name="Médiane",value=f"**{d['median_wealth']:,}**",inline=True); e.add_field(name="Top 10",value=f"**{d['top10_concentration_pct']}%**",inline=True); e.add_field(name="24 h",value=f"**{d['transactions_24h']}** transactions\nVolume **{d['volume_24h']:,}**",inline=True); e.add_field(name="Émission nette 24 h",value=f"**{d['net_issuance_24h']:,}**",inline=True); e.add_field(name="Anti-abus",value=f"**{d['blocked_accounts']}** limitation(s) active(s)",inline=False); await ctx.send(embed=e)
+  d=await self.economy_insights(ctx.guild.id); e=embeds.brand("Économie V3 — contrôle","Indicateurs factuels; aucune sanction automatique."); e.add_field(name="Masse monétaire",value=f"**{d['total_supply']:,}**",inline=True); e.add_field(name="Comptes",value=f"**{d['accounts']}**",inline=True); e.add_field(name="Médiane",value=f"**{d['median_wealth']:,}**",inline=True); e.add_field(name="Top 10",value=f"**{d['top10_concentration_pct']}%**",inline=True); e.add_field(name="24 h",value=f"**{d['transactions_24h']}** transactions\nVolume **{d['volume_24h']:,}**",inline=True); e.add_field(name="Émission nette 24 h",value=f"**{d['net_issuance_24h']:,}**",inline=True); e.add_field(name="Anti-abus",value=f"**{d['blocked_accounts']}** limitation(s) active(s)",inline=False); await panels.envoyer(ctx, panels.depuis_embed(e))
 
  async def get_privacy_policy(self,guild_id:int)->dict:
   await self.bot.db.execute("INSERT OR IGNORE INTO v10_privacy_policy (guild_id,retention_days,updated_at) VALUES (?,?,?)",(guild_id,DEFAULT_RETENTION_DAYS,now())); row=await self.bot.db.fetchone("SELECT * FROM v10_privacy_policy WHERE guild_id=?",(guild_id,)); return dict(row) if row else {"guild_id":guild_id,"retention_days":DEFAULT_RETENTION_DAYS}
@@ -292,7 +293,7 @@ class BotV10(commands.Cog, name="BotV10"):
  @commands.command(name="privacy-policy")
  @checks.is_owner_or_admin_for("configuration")
  async def privacy_policy(self,ctx:commands.Context,days:int|None=None):
-  policy=await self.set_privacy_policy(ctx.guild.id,ctx.author.id,days) if days is not None else await self.get_privacy_policy(ctx.guild.id); await ctx.send(embed=embeds.brand("Politique de confidentialité V10",f"Télémétrie et mémoire IA non sensible: **{policy['retention_days']} jours**.\nLes sanctions, avertissements, journaux d'audit et transactions économiques ne sont pas purgés automatiquement."))
+  policy=await self.set_privacy_policy(ctx.guild.id,ctx.author.id,days) if days is not None else await self.get_privacy_policy(ctx.guild.id); await panels.envoyer(ctx, panels.depuis_embed(embeds.brand('Politique de confidentialité V10', f"Télémétrie et mémoire IA non sensible: **{policy['retention_days']} jours**.\nLes sanctions, avertissements, journaux d'audit et transactions économiques ne sont pas purgés automatiquement.")))
 
  @tasks.loop(hours=6)
  async def privacy_cleanup_loop(self):
@@ -325,11 +326,11 @@ class BotV10(commands.Cog, name="BotV10"):
 
  async def _operational_signals(self,ctx:commands.Context,limit:int=10):
   rows=await self.recent_signals(ctx.guild.id,limit)
-  if not rows: return await ctx.send(embed=embeds.info("Aucun signal V10 enregistré."))
-  await ctx.send(embed=embeds.brand("Signaux sécurité V10","\n".join(f"**#{r['id']} · {r['severity'].upper()} · {r['signal_type']}** — score {r['score']}/100 — <t:{r['created_at']}:R>" for r in rows)))
+  if not rows: return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucun signal V10 enregistré.')))
+  await panels.envoyer(ctx, panels.depuis_embed(embeds.brand('Signaux sécurité V10', '\n'.join((f"**#{r['id']} · {r['severity'].upper()} · {r['signal_type']}** — score {r['score']}/100 — <t:{r['created_at']}:R>" for r in rows)))))
 
  async def _security_overview(self,ctx:commands.Context):
-  automod=await self.bot.db.get_automod(ctx.guild.id); fields=("antispam","antilink","antiinvite","antimention","anticaps","antiemoji","antiraid","antibot","antiaccount","antiscam","antinuke"); active=sum(1 for f in fields if automod and f in automod.keys() and automod[f]); count=await _count(self.bot,"SELECT COUNT(*) c FROM v10_operational_signals WHERE guild_id=? AND created_at>=?",(ctx.guild.id,now()-86400)); await ctx.send(embed=embeds.brand("Sécurité V10 — vue globale",f"Protections AutoMod: **{active}/{len(fields)}**\nSignaux 24 h: **{count}**\nV10 ajoute des signaux et recommandations; la revue staff reste humaine."))
+  automod=await self.bot.db.get_automod(ctx.guild.id); fields=("antispam","antilink","antiinvite","antimention","anticaps","antiemoji","antiraid","antibot","antiaccount","antiscam","antinuke"); active=sum(1 for f in fields if automod and f in automod.keys() and automod[f]); count=await _count(self.bot,"SELECT COUNT(*) c FROM v10_operational_signals WHERE guild_id=? AND created_at>=?",(ctx.guild.id,now()-86400)); await panels.envoyer(ctx, panels.depuis_embed(embeds.brand('Sécurité V10 — vue globale', f'Protections AutoMod: **{active}/{len(fields)}**\nSignaux 24 h: **{count}**\nV10 ajoute des signaux et recommandations; la revue staff reste humaine.')))
 
 
 async def setup(bot: commands.Bot):

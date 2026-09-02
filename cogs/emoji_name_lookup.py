@@ -24,6 +24,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 EMOJI_GG_API_URL = "https://emoji.gg/api"
 CATALOG_TTL_SECONDS = 15 * 60
@@ -188,20 +189,10 @@ async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str
         return None
 
     if ctx.guild is None:
-        return await ctx.send(embed=await cog_self._embed(
-            None,
-            title="Commande indisponible",
-            description="Cette commande doit etre utilisee sur un serveur.",
-            kind="danger",
-        ))
+        return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(None, title='Commande indisponible', description='Cette commande doit etre utilisee sur un serveur.', kind='danger')))
 
     if not ctx.guild.me or not ctx.guild.me.guild_permissions.manage_emojis_and_stickers:
-        return await ctx.send(embed=await cog_self._embed(
-            ctx.guild.id,
-            title="Permission manquante",
-            description="Le bot doit avoir la permission **Gerer les emojis et stickers**.",
-            kind="danger",
-        ))
+        return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Permission manquante', description='Le bot doit avoir la permission **Gerer les emojis et stickers**.', kind='danger')))
 
     animated = bool(match.group(1))
     emoji_name = _discord_name(match.group(2), fallback="emoji")
@@ -209,12 +200,7 @@ async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str
 
     existing = discord.utils.find(lambda item: item.name.casefold() == emoji_name.casefold(), ctx.guild.emojis)
     if existing is not None:
-        return await ctx.send(embed=await cog_self._embed(
-            ctx.guild.id,
-            title="Emoji deja present",
-            description=f"{existing} existe deja sous le nom `:{existing.name}:`.",
-            kind="warning",
-        ))
+        return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Emoji deja present', description=f'{existing} existe deja sous le nom `:{existing.name}:`.', kind='warning')))
 
     extension = "gif" if animated else "png"
     candidates = [
@@ -249,12 +235,7 @@ async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str
 
     if data is None:
         detail = f" (HTTP {last_status})" if last_status else ""
-        return await ctx.send(embed=await cog_self._embed(
-            ctx.guild.id,
-            title="Emoji inaccessible",
-            description=f"SentriX n'a pas pu recuperer cet emoji depuis Discord{detail}.",
-            kind="danger",
-        ))
+        return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Emoji inaccessible', description=f"SentriX n'a pas pu recuperer cet emoji depuis Discord{detail}.", kind='danger')))
 
     try:
         created = await ctx.guild.create_custom_emoji(
@@ -263,29 +244,11 @@ async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str
             reason=f"Emoji Nitro copie par {ctx.author} avec +addemogi",
         )
     except discord.Forbidden:
-        return await ctx.send(embed=await cog_self._embed(
-            ctx.guild.id,
-            title="Creation refusee",
-            description="Discord refuse la creation. Verifiez la permission **Gerer les emojis et stickers** et la position du role du bot.",
-            kind="danger",
-        ))
+        return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Creation refusee', description='Discord refuse la creation. Verifiez la permission **Gerer les emojis et stickers** et la position du role du bot.', kind='danger')))
     except discord.HTTPException as exc:
-        return await ctx.send(embed=await cog_self._embed(
-            ctx.guild.id,
-            title="Creation impossible",
-            description=f"Discord a refuse cet emoji : {exc}",
-            kind="danger",
-        ))
+        return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Creation impossible', description=f'Discord a refuse cet emoji : {exc}', kind='danger')))
 
-    return await ctx.send(embed=await cog_self._embed(
-        ctx.guild.id,
-        title="Emoji ajoute",
-        description=(
-            f"{created} a ete copie directement sous le nom `:{created.name}:`.\n"
-            f"Type : **{'anime' if created.animated else 'statique'}**."
-        ),
-        kind="success",
-    ))
+    return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Emoji ajoute', description=f"{created} a ete copie directement sous le nom `:{created.name}:`.\nType : **{('anime' if created.animated else 'statique')}**.", kind='success')))
 
 
 def install(bot: commands.Bot) -> bool:
@@ -311,30 +274,20 @@ def install(bot: commands.Bot) -> bool:
 
         query = (nom or "").strip().strip(":").strip()
         if not query:
-            return await ctx.send(embed=embeds.error(
-                "Indiquez un nom d'emoji, par exemple `+addemogi :tete:`, ou envoyez directement un emoji."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Indiquez un nom d'emoji, par exemple `+addemogi :tete:`, ou envoyez directement un emoji.")))
 
         if ctx.guild is not None:
             wanted = _search_key(query)
             existing = next((emoji for emoji in ctx.guild.emojis if _search_key(emoji.name) == wanted), None)
             if existing is not None:
-                return await ctx.send(embed=embeds.warning(
-                    f"{existing} existe deja sur ce serveur sous le nom `:{existing.name}:`."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'{existing} existe deja sur ce serveur sous le nom `:{existing.name}:`.')))
 
         try:
             source, matched_title = await _resolve_by_name(bot, query)
         except LookupError:
-            return await ctx.send(embed=embeds.error(
-                f"Aucun emoji assez proche de **{query}** n'a ete trouve. "
-                "Vous pouvez aussi envoyer directement l'emoji Discord/Nitro ou joindre une image."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Aucun emoji assez proche de **{query}** n'a ete trouve. Vous pouvez aussi envoyer directement l'emoji Discord/Nitro ou joindre une image.")))
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-            return await ctx.send(embed=embeds.error(
-                "La recherche automatique d'emojis est momentanement indisponible. "
-                "Reessayez dans quelques secondes."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("La recherche automatique d'emojis est momentanement indisponible. Reessayez dans quelques secondes.")))
 
         final_name = _discord_name(query, fallback=matched_title)
         return await original(cog_self, ctx, final_name, source)

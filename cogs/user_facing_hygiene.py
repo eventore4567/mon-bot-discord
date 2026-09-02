@@ -23,6 +23,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.user-facing-hygiene")
 
@@ -252,9 +253,9 @@ async def _send_slash_cooldown(interaction: discord.Interaction, retry_after: fl
     )
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embed), ephemere=True)
         else:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
     except (discord.HTTPException, discord.InteractionResponded):
         logger.debug("Impossible d'envoyer le cooldown slash.", exc_info=True)
 
@@ -278,8 +279,8 @@ def _patch_slash_error_ux(bot: commands.Bot) -> None:
             )
             try:
                 if interaction.response.is_done():
-                    return await interaction.followup.send(embed=embed, ephemeral=True)
-                return await interaction.response.send_message(embed=embed, ephemeral=True)
+                    return await panels.envoyer(interaction.followup, panels.depuis_embed(embed), ephemere=True)
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
             except (discord.HTTPException, discord.InteractionResponded):
                 return None
 
@@ -302,20 +303,10 @@ def _patch_prefix_error_ux(bot: commands.Bot) -> None:
         original = getattr(error, "original", error)
 
         if isinstance(original, commands.CommandOnCooldown):
-            return await ctx.send(
-                embed=embeds.warning(
-                    f'Vous pourrez réutiliser cette commande dans **{_cooldown_text(original.retry_after)}**.',
-                    title="Cooldown actif",
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Vous pourrez réutiliser cette commande dans **{_cooldown_text(original.retry_after)}**.', title='Cooldown actif')))
 
         if isinstance(original, commands.MaxConcurrencyReached):
-            return await ctx.send(
-                embed=embeds.warning(
-                    'Une partie ou une action identique est déjà en cours. Terminez-la avant de recommencer.',
-                    title="Action déjà en cours",
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Une partie ou une action identique est déjà en cours. Terminez-la avant de recommencer.', title='Action déjà en cours')))
 
         # Les convertisseurs spécialisés savent déjà produire de meilleurs messages dans
         # les handlers existants : ne pas les réduire à un simple BadArgument générique.
@@ -344,13 +335,13 @@ def _patch_prefix_error_ux(bot: commands.Bot) -> None:
                     description = "Le montant indiqué n'est pas valide. Utilise un nombre positif."
                 if usage:
                     description += f"\nUtilise : `{usage}`"
-                return await ctx.send(embed=embeds.warning(description, title="Montant invalide"))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(description, title='Montant invalide')))
 
             if root_name in _ID_COMMANDS:
                 description = "L'identifiant doit être un nombre entier valide."
                 if usage:
                     description += f"\nUtilise : `{usage}`"
-                return await ctx.send(embed=embeds.warning(description, title="Identifiant invalide"))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(description, title='Identifiant invalide')))
 
         return await current(ctx, error)
 

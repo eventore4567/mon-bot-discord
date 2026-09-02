@@ -468,7 +468,7 @@ async def _security_readiness(ctx: commands.Context):
         color=0x57F287 if result["score"] >= 85 else (0xFEE75C if result["score"] >= 65 else 0xED4245),
     )
     embed.set_footer(text="Score déterministe : chaque retrait de points est affiché ci-dessus.")
-    await ctx.send(embed=embed)
+    await panels.envoyer(ctx, panels.depuis_embed(embed))
 
 
 async def _security_infra(ctx: commands.Context):
@@ -486,7 +486,7 @@ async def _security_infra(ctx: commands.Context):
     ]
     if durable.get("last_snapshot_at"):
         lines.append(f"Dernier snapshot PostgreSQL : <t:{int(durable['last_snapshot_at'])}:R>")
-    await ctx.send(embed=discord.Embed(title="Infrastructure SentriX", description="\n".join(lines), color=0x5865F2))
+    await panels.envoyer(ctx, panels.depuis_embed(discord.Embed(title='Infrastructure SentriX', description='\n'.join(lines), color=5793266)))
 
 
 async def _security_retention(
@@ -501,7 +501,7 @@ async def _security_retention(
     if action in {"status", "show", "voir"}:
         values = await _policies(ctx.bot, ctx.guild.id)
         text = "\n".join(f"{key} : {value} jours" for key, value in values.items())
-        return await ctx.send(embed=discord.Embed(title="Conservation des données", description=text, color=0x5865F2))
+        return await panels.envoyer(ctx, panels.depuis_embed(discord.Embed(title='Conservation des données', description=text, color=5793266)))
     if action in {"run", "purge", "nettoyer"}:
         async with ctx.typing():
             result = await run_retention(ctx.bot, ctx.guild.id)

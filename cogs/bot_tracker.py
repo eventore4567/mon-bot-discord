@@ -9,6 +9,7 @@ import discord
 from discord.ext import commands, tasks
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.tracker")
 
@@ -440,11 +441,11 @@ class BotTracker(commands.Cog):
                     old_message = await old_channel.fetch_message(int(row["message_id"]))
                     if old_channel.id == ctx.channel.id:
                         await old_message.edit(embed=self.build_embed(ctx.guild))
-                        return await ctx.send(embed=_reponse("Suivi des bots", 'Le panneau de suivi SentriX a été actualisé.', kind="success"))
+                        return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Suivi des bots', 'Le panneau de suivi SentriX a été actualisé.', kind='success')))
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     pass
 
-        message = await ctx.send(embed=self.build_embed(ctx.guild))
+        message = await panels.envoyer(ctx, panels.depuis_embed(self.build_embed(ctx.guild)))
         await self._save_panel(ctx.guild.id, ctx.channel.id, message.id, ctx.author.id)
 
     @tasks.loop(minutes=1)

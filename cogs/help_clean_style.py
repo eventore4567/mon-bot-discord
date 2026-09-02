@@ -13,6 +13,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.help-clean-style")
 
@@ -397,7 +398,7 @@ async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = No
             f"**{'Access' if language == 'en' else 'Accès'} :** {access}"
         ).strip()
         embed.set_footer(text="SentriX • Command")
-        return await ctx.send(embed=embed)
+        return await panels.envoyer(ctx, panels.depuis_embed(embed))
     home = _help_home(bot, ctx.guild, prefix, is_staff, language)
     view = CleanHelpHomeView(bot, prefix, is_staff, language, ctx.author.id)
     message = await ctx.send(embed=home, view=view)

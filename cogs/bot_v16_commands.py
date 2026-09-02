@@ -23,6 +23,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.v16-commands")
 
@@ -174,7 +175,7 @@ async def _send_prefix_error(ctx: commands.Context, title: str, description: str
     if getattr(ctx, "_sentrix_v16_error_sent", False):
         return None
     ctx._sentrix_v16_error_sent = True
-    return await ctx.send(embed=embeds.error(description, title=title))
+    return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(description, title=title)))
 
 
 def _prefix_special_error(error: commands.CommandError):
@@ -306,7 +307,7 @@ def _install_unknown_command_listener(bot: commands.Bot) -> None:
         else:
             text = f"La commande `{prefix}{typed}` n'existe pas.\nOuvre `{prefix}help` pour voir les commandes disponibles."
         try:
-            await ctx.send(embed=embeds.warning(text, title="Commande introuvable"))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(text, title='Commande introuvable')))
         except (discord.Forbidden, discord.HTTPException):
             pass
 
@@ -346,9 +347,9 @@ def _install_slash_error_handler(bot: commands.Bot) -> None:
             return await current(interaction, error)
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                await panels.envoyer(interaction.followup, panels.depuis_embed(embed), ephemere=True)
             else:
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
         except discord.HTTPException:
             logger.debug("V16 : impossible d'envoyer l'erreur slash améliorée.", exc_info=True)
 

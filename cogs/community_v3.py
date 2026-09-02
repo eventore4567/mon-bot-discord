@@ -33,6 +33,7 @@ from discord.ext import commands
 
 import config
 from utils import design_system, embeds, stats_service
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.community-v3")
 
@@ -404,7 +405,7 @@ def _install_rich_profile(bot: commands.Bot) -> None:
 
     async def rich_profile(cog, ctx: commands.Context, membre: discord.Member = None):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande fonctionne uniquement sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande fonctionne uniquement sur un serveur.')))
         if ctx.interaction:
             await ctx.defer()
         member = membre or ctx.author
@@ -474,7 +475,7 @@ def _install_rich_profile(bot: commands.Bot) -> None:
             value=(bio_row["bio"] if bio_row and bio_row["bio"] else "Aucune bio définie — utilise `+set-bio` pour en ajouter une."),
             inline=False,
         )
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     _replace_command_callback(command, rich_profile, "_sentrix_v3_rich_profile")
 
@@ -648,7 +649,7 @@ async def _notify_mission_rewards(ctx: commands.Context, rewards: list[tuple[str
     total = sum(xp for _, xp in rewards)
     names = "\n".join(f"✅ {label} — **+{xp} XP saison**" for label, xp in rewards)
     try:
-        await ctx.send(embed=embeds.success(f"🎯 Mission terminée !\n{names}\n\nTotal gagné : **+{total} XP saison**"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🎯 Mission terminée !\n{names}\n\nTotal gagné : **+{total} XP saison**')))
     except discord.HTTPException:
         pass
 
@@ -687,11 +688,7 @@ async def _on_command_completion(bot: commands.Bot, ctx: commands.Context) -> No
             if last_daily and abs(int(time.time()) - last_daily) <= 30:
                 streak = await register_daily_claim(bot, ctx.guild.id, ctx.author.id, claimed_at=last_daily)
                 if streak.get("new"):
-                    await ctx.send(embed=embeds.success(
-                        f"🔥 **Streak quotidien : {streak['streak']} jour(s)**\n"
-                        f"Bonus de série : **+{stats_service.format_number(streak['bonus'])} 🪙**\n"
-                        f"Record : **{streak['longest']} jour(s)**"
-                    ))
+                    await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"🔥 **Streak quotidien : {streak['streak']} jour(s)**\nBonus de série : **+{stats_service.format_number(streak['bonus'])} 🪙**\nRecord : **{streak['longest']} jour(s)**")))
         except Exception:
             logger.exception("V3 : impossible de mettre à jour le streak daily.")
     await _notify_mission_rewards(ctx, rewards)
@@ -718,7 +715,7 @@ async def _on_guild_join(bot: commands.Bot, guild: discord.Guild) -> None:
     if config.DASHBOARD_PUBLIC_URL:
         embed.add_field(name="🌐 Dashboard", value=config.DASHBOARD_PUBLIC_URL, inline=False)
     try:
-        await channel.send(embed=embed)
+        await panels.envoyer(channel, panels.depuis_embed(embed))
     except discord.HTTPException:
         pass
 

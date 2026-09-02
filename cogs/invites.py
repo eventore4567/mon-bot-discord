@@ -31,6 +31,7 @@ from discord.ext import commands
 
 import config
 from utils import embeds, helpers, checks, design_system
+from utils import sentrix_panels as panels
 from database.db import FAKE_INVITE_ACCOUNT_AGE_DAYS
 
 # Fenêtre et seuil de l'heuristique "comptes suspects" : si le même invitant amène au
@@ -167,14 +168,14 @@ class Invites(commands.Cog, name="Invites"):
             + " • Fake = compte de moins de "
             + f"{FAKE_INVITE_ACCOUNT_AGE_DAYS} jours à l'arrivée. Ce n'est qu'une estimation, pas une preuve."
         ))
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="invite-leaderboard", description="Classement des membres ayant le plus invité (invitations créditées).")
     async def invite_leaderboard(self, ctx: commands.Context):
         design = await self.bot.db.get_design_settings(ctx.guild.id)
         rows = await self.bot.db.get_invite_leaderboard_credited(ctx.guild.id, 10)
         if not rows:
-            return await ctx.send(embed=embeds.info("Personne n'a encore d'invitation enregistrée sur ce serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Personne n'a encore d'invitation enregistrée sur ce serveur.")))
         style = design_system.CATEGORY_STYLES["invites"]
         lines = []
         for i, (inviter_id, b) in enumerate(rows, start=1):
@@ -189,18 +190,15 @@ class Invites(commands.Cog, name="Invites"):
             colour=design.get("primary_color", style["colour"]),
             footer=design.get("footer"),
         )
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="invited-by", description="Voir qui a invité un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à consulter")
     async def invited_by(self, ctx: commands.Context, membre: discord.Member):
         row = await self.bot.db.get_invited_by(ctx.guild.id, membre.id)
         if not row or not row["inviter_id"]:
-            return await ctx.send(embed=embeds.info(f"Je ne sais pas qui a invité {membre.mention} (invitation inconnue ou lien de vanité)."))
-        await ctx.send(embed=embeds.neutral(
-            "🔗 Origine de l'invitation",
-            f"{membre.mention} a été invité par <@{row['inviter_id']}> le <t:{row['joined_at']}:D>.",
-        ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f'Je ne sais pas qui a invité {membre.mention} (invitation inconnue ou lien de vanité).')))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral("🔗 Origine de l'invitation", f"{membre.mention} a été invité par <@{row['inviter_id']}> le <t:{row['joined_at']}:D>.")))
 
     # -------------------------------------------------------------- Bonus (staff)
 
@@ -213,14 +211,11 @@ class Invites(commands.Cog, name="Invites"):
     @app_commands.describe(membre="Le membre à créditer", montant="Nombre d'invitations bonus (peut être négatif pour retirer)", raison="Raison de cet ajustement")
     async def addbonusinvites(self, ctx: commands.Context, membre: discord.Member, montant: int, *, raison: str = "Non précisée"):
         if montant == 0:
-            return await ctx.send(embed=embeds.error("Le montant ne peut pas être zéro."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant ne peut pas être zéro.')))
         await self.bot.db.grant_invite_bonus(ctx.guild.id, membre.id, montant, ctx.author.id, raison)
         b = await self.bot.db.get_invite_breakdown(ctx.guild.id, membre.id)
         verbe = "accordé" if montant > 0 else "retiré"
-        await ctx.send(embed=embeds.success(
-            f"🎁 {abs(montant)} invitation(s) bonus {verbe}(s) à {membre.mention} — raison : {raison}\n"
-            f"Total bonus de {membre.mention} : **{design_system.format_number(b['bonus'])}** • Total crédité : **{design_system.format_number(b['credited'])}**"
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"🎁 {abs(montant)} invitation(s) bonus {verbe}(s) à {membre.mention} — raison : {raison}\nTotal bonus de {membre.mention} : **{design_system.format_number(b['bonus'])}** • Total crédité : **{design_system.format_number(b['credited'])}**")))
 
     @commands.hybrid_command(
         name="removebonusinvites",
@@ -231,13 +226,10 @@ class Invites(commands.Cog, name="Invites"):
     @app_commands.describe(membre="Le membre concerné", montant="Nombre d'invitations bonus à retirer (positif)", raison="Raison de ce retrait")
     async def removebonusinvites(self, ctx: commands.Context, membre: discord.Member, montant: int, *, raison: str = "Non précisée"):
         if montant <= 0:
-            return await ctx.send(embed=embeds.error("Indiquez un montant positif à retirer (ex: `10`)."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Indiquez un montant positif à retirer (ex: `10`).')))
         await self.bot.db.grant_invite_bonus(ctx.guild.id, membre.id, -montant, ctx.author.id, raison)
         b = await self.bot.db.get_invite_breakdown(ctx.guild.id, membre.id)
-        await ctx.send(embed=embeds.success(
-            f"🎁 {montant} invitation(s) bonus retirée(s) à {membre.mention} — raison : {raison}\n"
-            f"Total bonus de {membre.mention} : **{design_system.format_number(b['bonus'])}** • Total crédité : **{design_system.format_number(b['credited'])}**"
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"🎁 {montant} invitation(s) bonus retirée(s) à {membre.mention} — raison : {raison}\nTotal bonus de {membre.mention} : **{design_system.format_number(b['bonus'])}** • Total crédité : **{design_system.format_number(b['credited'])}**")))
 
     @commands.hybrid_command(
         name="invitebonushistory",
@@ -249,12 +241,12 @@ class Invites(commands.Cog, name="Invites"):
     async def invitebonushistory(self, ctx: commands.Context, membre: discord.Member):
         rows = await self.bot.db.get_invite_bonus_history(ctx.guild.id, membre.id, 10)
         if not rows:
-            return await ctx.send(embed=embeds.info(f"Aucun ajustement bonus enregistré pour {membre.mention}."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f'Aucun ajustement bonus enregistré pour {membre.mention}.')))
         lines = [
             f"<t:{r['created_at']}:d> — **{'+' if r['amount'] >= 0 else ''}{r['amount']}** par <@{r['granted_by']}> — {r['reason'] or 'Non précisée'}"
             for r in rows
         ]
-        await ctx.send(embed=embeds.neutral(f"🎁 Historique bonus de {membre.display_name}", "\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral(f'🎁 Historique bonus de {membre.display_name}', '\n'.join(lines))))
 
 
 async def setup(bot: commands.Bot):

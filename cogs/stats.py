@@ -12,6 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, design_system, checks
+from utils import sentrix_panels as panels
 from database.db import now
 
 START_TIME = time.time()
@@ -75,7 +76,7 @@ class Stats(commands.Cog, name="Stats"):
             )
         except Exception:
             pass
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(
         name="diagnostic",
@@ -204,7 +205,7 @@ class Stats(commands.Cog, name="Stats"):
                 value="La base répond et les permissions indispensables sont disponibles dans ce salon.",
                 inline=False,
             )
-        await ctx.send(embed=e, ephemeral=True if ctx.interaction else False)
+        await panels.envoyer(ctx, panels.depuis_embed(e), ephemere=True if ctx.interaction else False)
 
     @commands.hybrid_command(name="server-growth", description="Afficher la croissance des membres du serveur.", with_app_command=False)
     async def server_growth(self, ctx: commands.Context):
@@ -212,9 +213,9 @@ class Stats(commands.Cog, name="Stats"):
             "SELECT * FROM growth_snapshots WHERE guild_id = ? ORDER BY timestamp DESC LIMIT 7", (ctx.guild.id,)
         )
         if not rows:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Pas assez de données", description="Pas encore assez de données de croissance."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Pas assez de données', description='Pas encore assez de données de croissance.')))
         lines = [f"<t:{r['timestamp']}:D> — {r['member_count']} membres" for r in reversed(rows)]
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Croissance du serveur", description="\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Croissance du serveur', description='\n'.join(lines))))
 
     @commands.hybrid_command(name="command-stats", description="Afficher les commandes les plus utilisées.", with_app_command=False)
     async def command_stats(self, ctx: commands.Context):
@@ -223,15 +224,15 @@ class Stats(commands.Cog, name="Stats"):
             (ctx.guild.id,),
         )
         if not rows:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucune statistique", description="Aucune statistique de commande pour l'instant."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Aucune statistique', description="Aucune statistique de commande pour l'instant.")))
         lines = [f"`{r['command_name']}` — {r['c']} utilisations" for r in rows]
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Commandes les plus utilisées", description="\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Commandes les plus utilisées', description='\n'.join(lines))))
 
     @commands.hybrid_command(name="latency", description="Afficher la latence détaillée du bot.", with_app_command=False)
     async def latency(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         start = time.perf_counter()
-        msg = await ctx.send(embed=await self._embed(guild_id, title="Latence", description="Calcul en cours..."))
+        msg = await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Latence', description='Calcul en cours...')))
         elapsed = (time.perf_counter() - start) * 1000
         e = await self._embed(guild_id, title="Latence", description=f"🏓 Latence API : **{round(self.bot.latency * 1000)}ms**\n📨 Latence message : **{round(elapsed)}ms**")
         if ctx.interaction:
@@ -284,7 +285,7 @@ class Stats(commands.Cog, name="Stats"):
             ),
             inline=False,
         )
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="feedback", description="Envoyer un retour aux développeurs du bot.", with_app_command=False)
     @app_commands.describe(texte="Votre retour")
@@ -293,7 +294,7 @@ class Stats(commands.Cog, name="Stats"):
             "INSERT INTO bug_reports (guild_id, user_id, content, created_at) VALUES (?, ?, ?, ?)",
             (ctx.guild.id if ctx.guild else None, ctx.author.id, f"[FEEDBACK] {texte}", now()),
         )
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Merci !", description="Merci pour votre retour !", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Merci !', description='Merci pour votre retour !', kind='success')))
 
     @commands.hybrid_command(name="botinfo", description="Afficher des informations générales sur le bot.")
     async def botinfo(self, ctx: commands.Context):
@@ -358,7 +359,7 @@ class Stats(commands.Cog, name="Stats"):
             inline=False,
         )
         e.set_footer(text=f"{ctx.clean_prefix}help pour la liste complète des commandes")
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
 
 async def setup(bot: commands.Bot):

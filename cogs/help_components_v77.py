@@ -13,6 +13,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from utils.command_permissions import command_example, command_requirement
 from . import help as legacy
 from . import setup_components_v73 as setup_v73
@@ -189,9 +190,9 @@ def _link_buttons(bot: commands.Bot) -> list[discord.ui.Button]:
 async def _private_error(interaction: discord.Interaction, text: str) -> None:
     panel = embeds.error(text)
     if interaction.response.is_done():
-        await interaction.followup.send(embed=panel, ephemeral=True)
+        await panels.envoyer(interaction.followup, panels.depuis_embed(panel), ephemere=True)
     else:
-        await interaction.response.send_message(embed=panel, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
 
 
 class HelpSearchModalV77(discord.ui.Modal, title="Rechercher une commande"):

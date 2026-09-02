@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 
 _DURATION_RE = re.compile(r"^\[(\d{1,3})h\]\s*", re.IGNORECASE)
@@ -354,7 +355,7 @@ class PollUI(commands.Cog, name="PollUI"):
     )
     async def poll(self, ctx: commands.Context, *, question: str = None):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
 
         raw = str(question or "").strip()
         if raw:
@@ -368,9 +369,7 @@ class PollUI(commands.Cog, name="PollUI"):
             answers = _clean_answers(parts[1:] if len(parts) > 1 else ["Oui", "Non"])
             error = _answers_error(answers)
             if not poll_question or len(poll_question) > 300 or not 1 <= duration_hours <= 168 or error:
-                return await ctx.send(embed=embeds.error(
-                    "Le sondage écrit est invalide. Utilisez simplement `+poll` pour ouvrir le créateur interactif."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le sondage écrit est invalide. Utilisez simplement `+poll` pour ouvrir le créateur interactif.')))
 
             poll = discord.Poll(
                 question=poll_question,
@@ -386,9 +385,7 @@ class PollUI(commands.Cog, name="PollUI"):
             try:
                 return await ctx.send(**kwargs)
             except (discord.Forbidden, discord.HTTPException, ValueError):
-                return await ctx.send(embed=embeds.error(
-                    "Discord a refusé ce sondage. Vérifiez les permissions du bot."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Discord a refusé ce sondage. Vérifiez les permissions du bot.')))
 
         if ctx.interaction is not None:
             return await ctx.interaction.response.send_modal(

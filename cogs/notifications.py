@@ -10,6 +10,7 @@ import discord
 from discord.ext import commands, tasks
 
 from utils import checks, embeds
+from utils import sentrix_panels as panels
 
 
 logger = logging.getLogger("bot.notifications")
@@ -244,32 +245,27 @@ class Notifications(commands.Cog, name="Notifications"):
     ):
         """+notifs-ping @Rôle lien_de_chaine [texte] [--image URL]."""
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée dans un serveur.')))
         if role.is_default():
-            return await ctx.send(embed=embeds.error("Choisissez un rôle précis : @everyone est interdit."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Choisissez un rôle précis : @everyone est interdit.')))
         if not _is_supported_social_url(lien):
-            return await ctx.send(embed=embeds.error(
-                "Utilisez le lien HTTPS public d'une chaîne YouTube, TikTok, Twitch, Instagram, X, "
-                "Facebook, Dailymotion, Vimeo ou Kick."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Utilisez le lien HTTPS public d'une chaîne YouTube, TikTok, Twitch, Instagram, X, Facebook, Dailymotion, Vimeo ou Kick.")))
 
         me = ctx.guild.me
         permissions = ctx.channel.permissions_for(me)
         if not role.mentionable and not permissions.mention_everyone:
-            return await ctx.send(embed=embeds.error(
-                f"Le rôle {role.mention} n'est pas mentionnable. Rendez-le mentionnable ou autorisez SentriX à mentionner les rôles."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Le rôle {role.mention} n'est pas mentionnable. Rendez-le mentionnable ou autorisez SentriX à mentionner les rôles.")))
 
         texte, image_flag = _extract_image_flag(texte)
         image_url = _attachment_image(ctx) or image_flag
         if image_url and not _valid_https_url(image_url):
-            return await ctx.send(embed=embeds.error("L'image doit être jointe au message ou utiliser une URL HTTPS."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'image doit être jointe au message ou utiliser une URL HTTPS.")))
         if len(texte) > 600:
-            return await ctx.send(embed=embeds.error("Le texte de notification est limité à 600 caractères."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le texte de notification est limité à 600 caractères.')))
 
         source_url = _normalize_source_url(lien)
         platform, _ = _platform_details(source_url)
-        status = await ctx.send(embed=embeds.info(f"Vérification de la chaîne {platform}…"))
+        status = await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f'Vérification de la chaîne {platform}…')))
         try:
             latest = await _extract_latest(source_url)
         except asyncio.TimeoutError:
@@ -309,36 +305,36 @@ class Notifications(commands.Cog, name="Notifications"):
     @checks.is_owner_or_admin_for("configuration")
     async def notifs_list(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée dans un serveur.')))
         rows = await self.bot.db.fetchall(
             "SELECT * FROM social_notifications WHERE guild_id = ? ORDER BY id ASC",
             (ctx.guild.id,),
         )
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucune chaîne sociale n'est surveillée sur ce serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Aucune chaîne sociale n'est surveillée sur ce serveur.")))
         lines = [
             f"**#{row['id']} • {row['platform']}** — <#{row['discord_channel_id']}> — <@&{row['role_id']}> — "
             f"{'active' if row['enabled'] else 'inactive'}\n{row['source_url']}"
             for row in rows
         ]
-        await ctx.send(embed=embeds.info("\n\n".join(lines)[:4000], title="Notifications automatiques"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info('\n\n'.join(lines)[:4000], title='Notifications automatiques')))
 
     @commands.hybrid_command(name="notifs-remove", description="Supprimer une surveillance sociale.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")
     async def notifs_remove(self, ctx: commands.Context, identifiant: int):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée dans un serveur.')))
         row = await self.bot.db.fetchone(
             "SELECT id FROM social_notifications WHERE id = ? AND guild_id = ?",
             (identifiant, ctx.guild.id),
         )
         if not row:
-            return await ctx.send(embed=embeds.error("Surveillance introuvable. Utilisez `+notifs-list`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Surveillance introuvable. Utilisez `+notifs-list`.')))
         await self.bot.db.execute(
             "DELETE FROM social_notifications WHERE id = ? AND guild_id = ?",
             (identifiant, ctx.guild.id),
         )
-        await ctx.send(embed=embeds.success(f"La surveillance **#{identifiant}** a été supprimée."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'La surveillance **#{identifiant}** a été supprimée.')))
 
     @commands.hybrid_command(
         name="welcome-config",
@@ -355,16 +351,16 @@ class Notifications(commands.Cog, name="Notifications"):
     ):
         """+welcome-config #salon texte [--image URL], ou joignez directement l'image."""
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée dans un serveur.')))
 
         message, image_flag = _extract_image_flag(message)
         image_url = _attachment_image(ctx) or image_flag
         if not message:
-            return await ctx.send(embed=embeds.error("Écrivez le message d'arrivée après le salon."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Écrivez le message d'arrivée après le salon.")))
         if len(message) > 1000:
-            return await ctx.send(embed=embeds.error("Le message d'arrivée est limité à 1 000 caractères."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Le message d'arrivée est limité à 1 000 caractères.")))
         if image_url and not _valid_https_url(image_url):
-            return await ctx.send(embed=embeds.error("L'image doit être jointe au message ou utiliser une URL HTTPS."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'image doit être jointe au message ou utiliser une URL HTTPS.")))
 
         await self.bot.db.set_guild_config(ctx.guild.id, "welcome_channel", salon.id)
         await self.bot.db.set_guild_config(ctx.guild.id, "welcome_message", message)
@@ -386,7 +382,7 @@ class Notifications(commands.Cog, name="Notifications"):
             + ("L'image d'arrivée est activée." if image_url else "Aucune image d'arrivée ne sera affichée."),
             inline=False,
         )
-        await ctx.send(embed=preview)
+        await panels.envoyer(ctx, panels.depuis_embed(preview))
 
 
 async def setup(bot: commands.Bot):

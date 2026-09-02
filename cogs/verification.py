@@ -307,7 +307,7 @@ class Verification(commands.Cog, name="Verification"):
     @checks.is_owner_or_admin()
     async def verify_setup(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.set_guild_config(ctx.guild.id, "verify_role", role.id)
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Rôle défini", description=f"Rôle de vérification défini sur {role.mention}.", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle défini', description=f'Rôle de vérification défini sur {role.mention}.', kind='success')))
 
     @commands.hybrid_command(name="verify-panel", description="Poster le panneau de vérification dans ce salon.")
     @checks.is_owner_or_admin()
@@ -399,15 +399,11 @@ class Verification(commands.Cog, name="Verification"):
     ):
         role_error = _self_role_error(ctx.guild, role)
         if role_error:
-            return await ctx.send(embed=await self._embed(
-                ctx.guild.id, title="Rôle refusé", description=role_error, kind="danger"
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle refusé', description=role_error, kind='danger')))
         try:
             emoji_key, emoji_display, emoji = _emoji_parts(emoji_text)
         except ValueError:
-            return await ctx.send(embed=await self._embed(
-                ctx.guild.id, title="Emoji invalide", description="Utilisez un emoji Unicode ou un emoji personnalisé du serveur.", kind="danger"
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Emoji invalide', description='Utilisez un emoji Unicode ou un emoji personnalisé du serveur.', kind='danger')))
         count_row = await self.bot.db.fetchone(
             "SELECT COUNT(*) AS total FROM reaction_roles WHERE guild_id = ? AND message_id = ?",
             (ctx.guild.id, message.id),
@@ -417,18 +413,11 @@ class Verification(commands.Cog, name="Verification"):
             (ctx.guild.id, message.id, emoji_key),
         )
         if not existing and count_row and count_row["total"] >= 20:
-            return await ctx.send(embed=await self._embed(
-                ctx.guild.id, title="Limite atteinte", description="Un panneau Discord accepte au maximum 20 réactions différentes.", kind="danger"
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Limite atteinte', description='Un panneau Discord accepte au maximum 20 réactions différentes.', kind='danger')))
         try:
             await message.add_reaction(emoji)
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
-            return await ctx.send(embed=await self._embed(
-                ctx.guild.id,
-                title="Emoji refusé",
-                description=f"Discord refuse cet emoji. Vérifiez qu'il appartient à un serveur accessible au bot et qu'il n'a pas été supprimé. (`{exc}`)",
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Emoji refusé', description=f"Discord refuse cet emoji. Vérifiez qu'il appartient à un serveur accessible au bot et qu'il n'a pas été supprimé. (`{exc}`)", kind='danger')))
         panel = await self._register_panel_if_needed(ctx, message)
         await self.bot.db.execute(
             "DELETE FROM reaction_roles WHERE guild_id = ? AND message_id = ? AND "
@@ -451,12 +440,7 @@ class Verification(commands.Cog, name="Verification"):
             ),
         )
         await self._refresh_role_panel(ctx.guild, panel, message)
-        await ctx.send(embed=await self._embed(
-            ctx.guild.id,
-            title="Rôle ajouté au panneau",
-            description=f"{emoji_display} donnera ou retirera automatiquement {role.mention}.",
-            kind="success",
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle ajouté au panneau', description=f'{emoji_display} donnera ou retirera automatiquement {role.mention}.', kind='success')))
 
     @commands.group(name="rolepanel", aliases=["rolespanel", "role-menu"], invoke_without_command=True)
     @checks.is_owner_or_admin()
@@ -494,13 +478,9 @@ class Verification(commands.Cog, name="Verification"):
     ):
         panel, message = await self._panel_and_message(ctx.guild, message_id)
         if not panel:
-            return await ctx.send(embed=await self._embed(
-                ctx.guild.id, title="Panneau inconnu", description="Créez d'abord le panneau avec `+rolepanel create`.", kind="danger"
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Panneau inconnu', description="Créez d'abord le panneau avec `+rolepanel create`.", kind='danger')))
         if message is None:
-            return await ctx.send(embed=await self._embed(
-                ctx.guild.id, title="Message introuvable", description="Le message du panneau a été supprimé ou n'est plus accessible.", kind="danger"
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Message introuvable', description="Le message du panneau a été supprimé ou n'est plus accessible.", kind='danger')))
         await self._add_reaction_role(ctx, message, emoji, role, label)
 
     @rolepanel.command(name="remove", aliases=["retirer"])
@@ -509,24 +489,24 @@ class Verification(commands.Cog, name="Verification"):
         try:
             emoji_key, emoji_display, parsed_emoji = _emoji_parts(emoji)
         except ValueError:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Emoji invalide", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Emoji invalide', kind='danger')))
         panel, message = await self._panel_and_message(ctx.guild, message_id)
         if not panel:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Panneau inconnu", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Panneau inconnu', kind='danger')))
         cursor = await self.bot.db.execute(
             "DELETE FROM reaction_roles WHERE guild_id = ? AND message_id = ? AND "
             "(emoji_key = ? OR (emoji_key IS NULL AND emoji = ?))",
             (ctx.guild.id, message_id, emoji_key, emoji_display),
         )
         if cursor.rowcount < 1:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Association introuvable", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Association introuvable', kind='danger')))
         if message:
             try:
                 await message.clear_reaction(parsed_emoji)
             except (discord.Forbidden, discord.NotFound, discord.HTTPException):
                 pass
             await self._refresh_role_panel(ctx.guild, panel, message)
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Association retirée", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Association retirée', kind='success')))
 
     @rolepanel.command(name="list", aliases=["liste"])
     @checks.is_owner_or_admin()
@@ -538,19 +518,19 @@ class Verification(commands.Cog, name="Verification"):
             (ctx.guild.id,),
         )
         if not panels:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucun panneau configuré"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Aucun panneau configuré')))
         lines = [
             f"<#{panel['channel_id']}> — **{panel['title']}** — `{panel['message_id']}` — {panel['role_count']} rôle(s)"
             for panel in panels
         ]
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Panneaux de rôles", description="\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Panneaux de rôles', description='\n'.join(lines))))
 
     @rolepanel.command(name="delete", aliases=["supprimer"])
     @checks.is_owner_or_admin()
     async def rolepanel_delete(self, ctx: commands.Context, message_id: int):
         panel, message = await self._panel_and_message(ctx.guild, message_id)
         if not panel:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Panneau inconnu", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Panneau inconnu', kind='danger')))
         await self.bot.db.execute(
             "DELETE FROM reaction_roles WHERE guild_id = ? AND message_id = ?",
             (ctx.guild.id, message_id),
@@ -564,7 +544,7 @@ class Verification(commands.Cog, name="Verification"):
                 await message.delete()
             except (discord.Forbidden, discord.NotFound, discord.HTTPException):
                 pass
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Panneau supprimé", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Panneau supprimé', kind='success')))
 
     @commands.hybrid_command(name="reactionrole-add", description="Ajouter un rôle sur réaction à un message.")
     @app_commands.describe(message_id="L'identifiant du message", emoji="L'emoji à utiliser", role="Le rôle à attribuer")
@@ -573,11 +553,11 @@ class Verification(commands.Cog, name="Verification"):
         try:
             mid = int(message_id)
         except ValueError:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Identifiant invalide", description="Identifiant de message invalide.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Identifiant invalide', description='Identifiant de message invalide.', kind='danger')))
         try:
             msg = await ctx.channel.fetch_message(mid)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Message introuvable", description="Message introuvable dans ce salon.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Message introuvable', description='Message introuvable dans ce salon.', kind='danger')))
         await self._add_reaction_role(ctx, msg, emoji, role)
 
     @commands.hybrid_command(name="reactionrole-remove", description="Retirer une association rôle/réaction.", with_app_command=False)
@@ -587,29 +567,29 @@ class Verification(commands.Cog, name="Verification"):
         try:
             mid = int(message_id)
         except ValueError:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Identifiant invalide", description="Identifiant de message invalide.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Identifiant invalide', description='Identifiant de message invalide.', kind='danger')))
         try:
             emoji_key, emoji_display, _ = _emoji_parts(emoji)
         except ValueError:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Emoji invalide", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Emoji invalide', kind='danger')))
         await self.bot.db.execute(
             "DELETE FROM reaction_roles WHERE guild_id = ? AND message_id = ? AND "
             "(emoji_key = ? OR (emoji_key IS NULL AND emoji = ?))",
             (ctx.guild.id, mid, emoji_key, emoji_display),
         )
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Association retirée", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Association retirée', kind='success')))
 
     @commands.hybrid_command(name="reactionrole-list", description="Lister les rôles sur réaction configurés.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")
     async def reactionrole_list(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM reaction_roles WHERE guild_id = ?", (ctx.guild.id,))
         if not rows:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucune association", description="Aucun rôle sur réaction configuré."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Aucune association', description='Aucun rôle sur réaction configuré.')))
         lines = []
         for r in rows:
             role = ctx.guild.get_role(r["role_id"])
             lines.append(f"{r['emoji']} → {role.mention if role else 'Rôle supprimé'} (msg `{r['message_id']}`)")
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Rôles sur réaction", description="\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôles sur réaction', description='\n'.join(lines))))
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -682,12 +662,12 @@ class Verification(commands.Cog, name="Verification"):
         if not error and isinstance(ctx.author, discord.Member):
             error = checks.check_role_target(ctx.author, role)
         if error and ctx.author.id != ctx.guild.owner_id:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Action refusée", description=error, kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Action refusée', description=error, kind='danger')))
         try:
             await membre.add_roles(role, reason=f"Ajouté par {ctx.author}")
         except discord.Forbidden:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Je n'ai pas la permission d'attribuer ce rôle.", kind="danger"))
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Rôle attribué", description=f"Rôle {role.mention} donné à {membre.mention}.", kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Permission manquante', description="Je n'ai pas la permission d'attribuer ce rôle.", kind='danger')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle attribué', description=f'Rôle {role.mention} donné à {membre.mention}.', kind='success')))
 
     @commands.hybrid_command(name="removerole", aliases=["delrole"], description="Retirer un rôle à un membre.")
     @app_commands.describe(membre="Le membre visé", role="Le rôle à retirer")
@@ -702,13 +682,12 @@ class Verification(commands.Cog, name="Verification"):
         if not error and isinstance(ctx.author, discord.Member):
             error = checks.check_role_target(ctx.author, role)
         if error and ctx.author.id != ctx.guild.owner_id:
-            return await ctx.send(embed=await self._embed(
-                ctx.guild.id, title="Action refusée", description=error, kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Action refusée', description=error, kind='danger')))
         try:
             await membre.remove_roles(role, reason=f"Retiré par {ctx.author}")
         except discord.Forbidden:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Je n'ai pas la permission de retirer ce rôle.", kind="danger"))
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Rôle retiré", description=f"Rôle {role.mention} retiré à {membre.mention}.", kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Permission manquante', description="Je n'ai pas la permission de retirer ce rôle.", kind='danger')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle retiré', description=f'Rôle {role.mention} retiré à {membre.mention}.', kind='success')))
 
     @commands.hybrid_command(name="roleall", description="Donner un rôle à tous les membres du serveur.", with_app_command=False)
     @app_commands.describe(role="Le rôle à attribuer à tout le monde")
@@ -721,14 +700,7 @@ class Verification(commands.Cog, name="Verification"):
         # mais son limiteur interne (discord.py) répartit ces lots bien plus efficacement
         # qu'une file strictement séquentielle.
         BATCH_SIZE = 15
-        progress_msg = await ctx.send(embed=await self._embed(
-            ctx.guild.id, title="Attribution en cours",
-            description=(
-                f"⏳ Attribution du rôle {role.mention} à ~{ctx.guild.member_count} membres en cours. "
-                "Sur un très gros serveur, ça peut prendre un moment — un message de progression "
-                "s'affichera régulièrement, merci de patienter..."
-            ),
-        ))
+        progress_msg = await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Attribution en cours', description=f"⏳ Attribution du rôle {role.mention} à ~{ctx.guild.member_count} membres en cours. Sur un très gros serveur, ça peut prendre un moment — un message de progression s'affichera régulièrement, merci de patienter...")))
         count = 0
         failed = 0
         processed = 0
@@ -775,7 +747,7 @@ class Verification(commands.Cog, name="Verification"):
     @checks.is_owner_or_admin()
     async def massrole(self, ctx: commands.Context, role: discord.Role, action: str, membres: commands.Greedy[discord.Member]):
         if not membres:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Membres manquants", description="Mentionnez au moins un membre.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Membres manquants', description='Mentionnez au moins un membre.', kind='danger')))
         count = 0
         for m in membres:
             try:
@@ -787,7 +759,7 @@ class Verification(commands.Cog, name="Verification"):
             except discord.Forbidden:
                 pass
         verb = "ajouté" if action == "add" else "retiré"
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Massrole terminé", description=f"Rôle {role.mention} {verb} pour **{count}** membre(s).", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Massrole terminé', description=f'Rôle {role.mention} {verb} pour **{count}** membre(s).', kind='success')))
 
 
 async def setup(bot: commands.Bot):

@@ -18,6 +18,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from . import setup_experience_v74 as v74
 from . import setup_control_center as setup_ui
 from . import setup_v2_core as core
@@ -350,18 +351,9 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
             async def on_submit(modal_self, modal_interaction: discord.Interaction):
                 text = str(modal_self.message_input.value).strip()
                 if not text:
-                    return await modal_interaction.response.send_message(
-                        embed=embeds.error("Le message ne peut pas être vide."),
-                        ephemeral=True,
-                    )
+                    return await panels.envoyer(modal_interaction.response, panels.depuis_embed(embeds.error('Le message ne peut pas être vide.')), ephemere=True)
                 await _set_dm_custom(self, action, text)
-                await modal_interaction.response.send_message(
-                    embed=embeds.success(
-                        f"Le MP de **{label}** est maintenant personnalisé. "
-                        "Le nouveau texte sera utilisé dès la prochaine sanction."
-                    ),
-                    ephemeral=True,
-                )
+                await panels.envoyer(modal_interaction.response, panels.depuis_embed(embeds.success(f'Le MP de **{label}** est maintenant personnalisé. Le nouveau texte sera utilisé dès la prochaine sanction.')), ephemere=True)
 
         await interaction.response.send_modal(SanctionDMModal())
 

@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from . import runtime_finish_v91 as v91
 from . import setup_experience_v74 as v74
 
@@ -109,16 +110,12 @@ class MoveTypeView(discord.ui.View):
             target = await self.cog.get_panel(target_id)
             t = await self.cog.get_type(self.type_id)
             if not target or not t or int(target["guild_id"]) != interaction.guild.id:
-                return await interaction.response.send_message(
-                    embed=embeds.error("Le type ou le panel n'existe plus."), ephemeral=True
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Le type ou le panel n'existe plus.")), ephemere=True)
             count = await self.cog.bot.db.fetchone(
                 "SELECT COUNT(*) c FROM ticket_types WHERE panel_id=?", (target_id,)
             )
             if int(count["c"]) >= 25:
-                return await interaction.response.send_message(
-                    embed=embeds.error("Ce panel contient déjà 25 types de tickets."), ephemeral=True
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ce panel contient déjà 25 types de tickets.')), ephemere=True)
             await self.cog.bot.db.execute(
                 "UPDATE ticket_types SET panel_id=?, position=? WHERE id=?",
                 (target_id, int(count["c"]), self.type_id),
@@ -147,15 +144,13 @@ class MoveTypeView(discord.ui.View):
 async def _move_flow(cog, type_id: int, author_id: int, interaction: discord.Interaction):
     t = await cog.get_type(type_id)
     if not t:
-        return await interaction.response.send_message(embed=embeds.error("Type introuvable."), ephemeral=True)
+        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Type introuvable.')), ephemere=True)
     panels = await cog.bot.db.fetchall(
         "SELECT * FROM ticket_panels_v2 WHERE guild_id=? ORDER BY id", (interaction.guild.id,)
     )
     others = [p for p in panels if int(p["id"]) != int(t["panel_id"] or 0)]
     if not others:
-        return await interaction.response.send_message(
-            embed=embeds.info("Il n'y a aucun autre panel vers lequel déplacer ce type."), ephemeral=True
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.info("Il n'y a aucun autre panel vers lequel déplacer ce type.")), ephemere=True)
     await interaction.response.send_message(
         embed=embeds.neutral("Modifier le panel", f"Nouveau panel pour **{t['name']}** :"),
         view=MoveTypeView(cog, t, panels, author_id),
@@ -178,7 +173,7 @@ class TypeActionsView(discord.ui.View):
     async def edit(self, interaction: discord.Interaction, button: discord.ui.Button):
         t = await self.cog.get_type(self.type_id)
         if not t:
-            return await interaction.response.send_message(embed=embeds.error("Type introuvable."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Type introuvable.')), ephemere=True)
         await interaction.response.send_message(
             embed=embeds.neutral(f"Modifier « {t['name']} »", "Choisissez le réglage à modifier."),
             view=_tickets().TypeEditView(self.cog, self.type_id, self.author_id),
@@ -193,7 +188,7 @@ class TypeActionsView(discord.ui.View):
     async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
         t = await self.cog.get_type(self.type_id)
         if not t:
-            return await interaction.response.send_message(embed=embeds.error("Type introuvable."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Type introuvable.')), ephemere=True)
         await interaction.response.send_message(
             embed=embeds.warning(f"Supprimer **{t['name']}** et son formulaire ?"),
             view=DeleteTypeView(self.cog, self.type_id, self.author_id),
@@ -220,7 +215,7 @@ class TypeManagerView(discord.ui.View):
             type_id = int(select.values[0])
             t = await self.cog.get_type(type_id)
             if not t:
-                return await interaction.response.send_message(embed=embeds.error("Type introuvable."), ephemeral=True)
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Type introuvable.')), ephemere=True)
             panel = await self.cog.get_panel(t["panel_id"])
             panel_name = panel["name"] if panel else "introuvable"
             await interaction.response.send_message(
@@ -252,21 +247,17 @@ class CreateTypeModal(discord.ui.Modal, title="Créer un type de ticket"):
     async def on_submit(self, interaction: discord.Interaction):
         name = self.name.value.strip()
         if not name:
-            return await interaction.response.send_message(embed=embeds.error("Nom vide."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Nom vide.')), ephemere=True)
         if await self.cog.get_type_by_name(interaction.guild.id, name):
-            return await interaction.response.send_message(
-                embed=embeds.error(f"Un type nommé « {name} » existe déjà."), ephemeral=True
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(f'Un type nommé « {name} » existe déjà.')), ephemere=True)
         panel = await self.cog.get_panel(self.panel_id)
         if not panel:
-            return await interaction.response.send_message(embed=embeds.error("Panel introuvable."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Panel introuvable.')), ephemere=True)
         count = await self.cog.bot.db.fetchone(
             "SELECT COUNT(*) c FROM ticket_types WHERE panel_id=?", (self.panel_id,)
         )
         if int(count["c"]) >= 25:
-            return await interaction.response.send_message(
-                embed=embeds.error("Ce panel contient déjà 25 types."), ephemeral=True
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ce panel contient déjà 25 types.')), ephemere=True)
         type_id = await self.cog.add_type(interaction.guild.id, self.panel_id, name)
         await _refresh_panel(self.cog, interaction.guild, self.panel_id)
         await interaction.response.send_message(
@@ -305,9 +296,7 @@ async def _create_flow(cog, interaction: discord.Interaction):
         "SELECT * FROM ticket_panels_v2 WHERE guild_id=? ORDER BY id", (interaction.guild.id,)
     )
     if not panels:
-        return await interaction.response.send_message(
-            embed=embeds.warning("Créez d'abord un panel : un type doit appartenir à un panel."), ephemeral=True
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Créez d'abord un panel : un type doit appartenir à un panel.")), ephemere=True)
     if len(panels) == 1:
         return await interaction.response.send_modal(
             CreateTypeModal(cog, panels[0]["id"], interaction.user.id)
@@ -324,7 +313,7 @@ async def _manage_flow(cog, interaction: discord.Interaction):
         "SELECT * FROM ticket_types WHERE guild_id=? ORDER BY panel_id,position,id", (interaction.guild.id,)
     )
     if not types:
-        return await interaction.response.send_message(embed=embeds.info("Aucun type créé."), ephemeral=True)
+        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.info('Aucun type créé.')), ephemere=True)
     await interaction.response.send_message(
         embed=embeds.neutral(
             "Types de tickets",
@@ -396,7 +385,7 @@ def _patch_type_editor() -> None:
         async def delete_cb(interaction: discord.Interaction):
             t = await cog.get_type(type_id)
             if not t:
-                return await interaction.response.send_message(embed=embeds.error("Type introuvable."), ephemeral=True)
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Type introuvable.')), ephemere=True)
             await interaction.response.send_message(
                 embed=embeds.warning(f"Supprimer **{t['name']}** et son formulaire ?"),
                 view=DeleteTypeView(cog, type_id, author_id),

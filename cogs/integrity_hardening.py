@@ -29,6 +29,7 @@ from discord.ext import commands
 
 from database.db import now
 from utils import embeds, stats_service
+from utils import sentrix_panels as panels
 from utils.v22_rules import clean_reason, parse_friendly_amount, parse_friendly_duration
 
 logger = logging.getLogger("bot.integrity-hardening")
@@ -260,19 +261,15 @@ def _install_economy(bot: commands.Bot) -> bool:
 
     async def safe_deposit(this, ctx: commands.Context, montant: str):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Disponible uniquement sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
         status, amount = await _atomic_bank_transfer(
             bot.db, ctx.guild.id, ctx.author.id, montant, deposit=True
         )
         if status == "ok":
-            return await ctx.send(
-                embed=embeds.success(
-                    f"**{stats_service.format_number(amount)}** 🪙 déposés en banque."
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{stats_service.format_number(amount)}** 🪙 déposés en banque.')))
         if status in {"invalid", "changed"}:
-            return await ctx.send(embed=embeds.error("Montant invalide ou solde insuffisant."))
-        return await ctx.send(embed=embeds.error("Banque temporairement indisponible."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide ou solde insuffisant.')))
+        return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Banque temporairement indisponible.')))
 
     safe_deposit._sentrix_integrity = True
     economy._deposit_to_bank = types.MethodType(safe_deposit, economy)
@@ -281,58 +278,50 @@ def _install_economy(bot: commands.Bot) -> bool:
     if withdraw is not None:
         async def safe_withdraw(cog, ctx: commands.Context, montant: str):
             if ctx.guild is None:
-                return await ctx.send(embed=embeds.error("Disponible uniquement sur un serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
             status, amount = await _atomic_bank_transfer(
                 bot.db, ctx.guild.id, ctx.author.id, montant, deposit=False
             )
             if status == "ok":
-                return await ctx.send(
-                    embed=embeds.success(
-                        f"**{stats_service.format_number(amount)}** 🪙 retirés de la banque."
-                    )
-                )
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{stats_service.format_number(amount)}** 🪙 retirés de la banque.')))
             if status in {"invalid", "changed"}:
-                return await ctx.send(embed=embeds.error("Montant invalide ou solde insuffisant."))
-            return await ctx.send(embed=embeds.error("Banque temporairement indisponible."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide ou solde insuffisant.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Banque temporairement indisponible.')))
         _replace_callback(withdraw, safe_withdraw, "_sentrix_integrity_atomic")
 
     sell = bot.get_command("sell")
     if sell is not None:
         async def safe_sell(cog, ctx: commands.Context, *, objet: str):
             if ctx.guild is None:
-                return await ctx.send(embed=embeds.error("Disponible uniquement sur un serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
             item_name = str(objet or "").strip()
             if not item_name:
-                return await ctx.send(embed=embeds.error("Indiquez l'objet à vendre."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Indiquez l'objet à vendre.")))
             status, price = await _atomic_sell(bot.db, ctx.guild.id, ctx.author.id, item_name)
             if status == "ok":
-                return await ctx.send(
-                    embed=embeds.success(
-                        f"**{item_name}** vendu pour **{stats_service.format_number(price)}** 🪙."
-                    )
-                )
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{item_name}** vendu pour **{stats_service.format_number(price)}** 🪙.')))
             if status in {"missing", "changed"}:
-                return await ctx.send(embed=embeds.error('Vous ne possèdes pas cet objet.'))
-            return await ctx.send(embed=embeds.error("Vente temporairement indisponible."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne possèdes pas cet objet.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vente temporairement indisponible.')))
         _replace_callback(sell, safe_sell, "_sentrix_integrity_atomic")
 
     gamble = bot.get_command("gamble")
     if gamble is not None:
         async def safe_gamble(cog, ctx: commands.Context, montant: int):
             if ctx.guild is None:
-                return await ctx.send(embed=embeds.error("Disponible uniquement sur un serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
             if int(montant) <= 0:
-                return await ctx.send(embed=embeds.error("Le montant doit être positif."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant doit être positif.')))
             win = secrets.randbelow(2) == 0
             status = await _atomic_gamble(bot.db, ctx.guild.id, ctx.author.id, int(montant), win=win)
             if status == "insufficient":
-                return await ctx.send(embed=embeds.error("Solde insuffisant."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Solde insuffisant.')))
             if status != "ok":
-                return await ctx.send(embed=embeds.error("Casino temporairement indisponible."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Casino temporairement indisponible.')))
             amount_text = stats_service.format_number(int(montant))
             if win:
-                return await ctx.send(embed=embeds.success(f'Vous gagnez **{amount_text}** 🪙.'))
-            return await ctx.send(embed=embeds.error(f'Vous perds **{amount_text}** 🪙.'))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous gagnez **{amount_text}** 🪙.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Vous perds **{amount_text}** 🪙.')))
         _replace_callback(gamble, safe_gamble, "_sentrix_integrity_atomic")
 
     give_money = bot.get_command("give-money")
@@ -341,7 +330,7 @@ def _install_economy(bot: commands.Bot) -> bool:
 
         async def positive_grant(cog, ctx: commands.Context, membre: discord.Member, montant: int):
             if int(montant) <= 0:
-                return await ctx.send(embed=embeds.error("Le montant doit être supérieur à 0."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant doit être supérieur à 0.')))
             return await original_give(cog, ctx, membre, int(montant))
 
         _replace_callback(give_money, positive_grant, "_sentrix_integrity_positive_grant")
@@ -355,9 +344,9 @@ def _install_economy(bot: commands.Bot) -> bool:
                 ctx.guild.id, ctx.author.id, item["id"]
             )
             if status == "not_found":
-                return await ctx.send(embed=embeds.error("Article introuvable ou prix invalide."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Article introuvable ou prix invalide.')))
             if status == "insufficient_funds":
-                return await ctx.send(embed=embeds.error("Solde insuffisant."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Solde insuffisant.')))
             try:
                 await bot.db.execute(
                     "INSERT INTO inventory (guild_id,user_id,item_name,quantity) VALUES (?,?,?,1) "
@@ -375,20 +364,9 @@ def _install_economy(bot: commands.Bot) -> bool:
                     )
                 except Exception:
                     logger.exception("Remboursement automatique impossible après échec inventaire.")
-                    return await ctx.send(
-                        embed=embeds.error(
-                            "Achat interrompu. Le staff doit vérifier cette transaction."
-                        )
-                    )
-                return await ctx.send(
-                    embed=embeds.error("Achat annulé et automatiquement remboursé.")
-                )
-            return await ctx.send(
-                embed=embeds.success(
-                    f"**{purchased['name']}** acheté pour "
-                    f"**{stats_service.format_number(purchased['price'])}** 🪙."
-                )
-            )
+                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Achat interrompu. Le staff doit vérifier cette transaction.')))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Achat annulé et automatiquement remboursé.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"**{purchased['name']}** acheté pour **{stats_service.format_number(purchased['price'])}** 🪙.")))
 
         safe_purchase._sentrix_integrity_refund = True
         economy._purchase_item = types.MethodType(safe_purchase, economy)
@@ -419,14 +397,12 @@ def _install_moderation(bot: commands.Bot) -> bool:
         ):
             await cog._ack(ctx)
             if ctx.guild is None:
-                return await ctx.send(embed=embeds.error("Disponible uniquement sur un serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
             if not await cog.check_targetable(ctx, membre):
                 return
             seconds = parse_friendly_duration(duree)
             if seconds is None or int(seconds) <= 0:
-                return await ctx.send(
-                    embed=embeds.error("Durée invalide. Exemple : `30m`, `2h`, `1j`.")
-                )
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide. Exemple : `30m`, `2h`, `1j`.')))
             reason = clean_reason(raison)
             key = (ctx.guild.id, membre.id)
             async with target_locks[key]:
@@ -436,9 +412,7 @@ def _install_moderation(bot: commands.Bot) -> bool:
                     (ctx.guild.id, membre.id, now()),
                 )
                 if existing:
-                    return await ctx.send(
-                        embed=embeds.warning("Un bannissement temporaire actif existe déjà.")
-                    )
+                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Un bannissement temporaire actif existe déjà.')))
                 cur = await bot.db.execute(
                     "INSERT INTO tempactions (guild_id,user_id,action,expires_at) "
                     "VALUES (?,?,'ban',?)",
@@ -454,9 +428,7 @@ def _install_moderation(bot: commands.Bot) -> bool:
                     )
                 except discord.HTTPException:
                     await bot.db.execute("DELETE FROM tempactions WHERE id=?", (tempaction_id,))
-                    return await ctx.send(
-                        embed=embeds.error("Discord a refusé le bannissement. Aucune durée n'a été enregistrée.")
-                    )
+                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Discord a refusé le bannissement. Aucune durée n'a été enregistrée.")))
                 result = await cog.log_sanction(
                     ctx,
                     "tempban",
@@ -595,14 +567,9 @@ def _install_tickets(bot: commands.Bot) -> bool:
         async def staff_only_controls(this, interaction: discord.Interaction, key: str):
             ticket = await this.get_ticket_by_channel(interaction.channel.id)
             if not ticket:
-                return await interaction.response.send_message(
-                    embed=embeds.error("Ce salon n'est plus un ticket."), ephemeral=True
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Ce salon n'est plus un ticket.")), ephemere=True)
             if not await _ticket_staff_allowed(bot, interaction, ticket):
-                return await interaction.response.send_message(
-                    embed=embeds.error("Cette action est réservée au staff du ticket."),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Cette action est réservée au staff du ticket.')), ephemere=True)
             return await original_handle(interaction, key)
 
         staff_only_controls._sentrix_integrity_staff = True
@@ -617,27 +584,20 @@ def _install_tickets(bot: commands.Bot) -> bool:
                 member = select.values[0]
                 proxy = types.SimpleNamespace(guild=inter.guild, user=member)
                 if not await _ticket_staff_allowed(bot, proxy, ticket):
-                    return await inter.response.send_message(
-                        embed=embeds.error("Ce membre n'est pas autorisé à gérer les tickets."),
-                        ephemeral=True,
-                    )
+                    return await panels.envoyer(inter.response, panels.depuis_embed(embeds.error("Ce membre n'est pas autorisé à gérer les tickets.")), ephemere=True)
                 cur = await bot.db.execute(
                     "UPDATE tickets SET claimed_by=? WHERE id=? AND guild_id=? AND status='ouvert'",
                     (member.id, ticket["id"], inter.guild.id),
                 )
                 if cur.rowcount < 1:
-                    return await inter.response.send_message(
-                        embed=embeds.warning("Ce ticket n'est plus ouvert."), ephemeral=True
-                    )
+                    return await panels.envoyer(inter.response, panels.depuis_embed(embeds.warning("Ce ticket n'est plus ouvert.")), ephemere=True)
                 await inter.channel.set_permissions(
                     member,
                     view_channel=True,
                     send_messages=True,
                     read_message_history=True,
                 )
-                await inter.response.send_message(
-                    embed=embeds.success(f"Ticket transféré à {member.mention}.")
-                )
+                await panels.envoyer(inter.response, panels.depuis_embed(embeds.success(f'Ticket transféré à {member.mention}.')))
 
             select.callback = cb
             view.add_item(select)

@@ -24,6 +24,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.setup-auto-fix")
 VALID_PROFILES = frozenset({"community", "gaming", "support", "creator"})
@@ -91,7 +92,7 @@ async def _fallback_auto_setup(bot: commands.Bot, ctx: commands.Context, profile
             if platform is not None:
                 break
     if platform is None or not hasattr(platform, "quick_setup"):
-        await ctx.send(embed=embeds.error("La configuration automatique se charge encore. Réessayez dans quelques secondes."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error('La configuration automatique se charge encore. Réessayez dans quelques secondes.')))
         return
 
     try:
@@ -101,7 +102,7 @@ async def _fallback_auto_setup(bot: commands.Bot, ctx: commands.Context, profile
         # Les erreurs attendues de permissions sont déjà formulées clairement par
         # PlatformV4. On n'expose jamais de trace technique dans Discord.
         message = str(exc).strip() or "La configuration automatique a échoué."
-        await ctx.send(embed=embeds.error(message[:900]))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error(message[:900])))
         return
 
     created = result.get("created_channels", []) if isinstance(result, dict) else []
@@ -110,14 +111,12 @@ async def _fallback_auto_setup(bot: commands.Bot, ctx: commands.Context, profile
     text = f"Configuration automatique **{profile}** terminée.\n**{created_count}** salon(s) créé(s)."
     if missing:
         text += "\nPermissions à vérifier : " + ", ".join(str(item) for item in missing[:6])
-    await ctx.send(embed=embeds.success(text))
+    await panels.envoyer(ctx, panels.depuis_embed(embeds.success(text)))
 
 
 async def _run_auto_setup(bot: commands.Bot, ctx: commands.Context, profile: str) -> None:
     if profile not in VALID_PROFILES:
-        await ctx.send(embed=embeds.error(
-            "Profil inconnu. Utilisez `community`, `gaming`, `support` ou `creator`."
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Profil inconnu. Utilisez `community`, `gaming`, `support` ou `creator`.')))
         return
 
     runtime = bot.get_cog("BotV10")

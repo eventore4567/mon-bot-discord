@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from . import runtime_finish_v84 as v84
 from . import runtime_finish_v85 as v85
 from . import setup_security_choice_v75 as v75
@@ -63,12 +64,7 @@ def _patch_v75_builder() -> None:
                     )
                     detail = str(exc).strip() or type(exc).__name__
                     try:
-                        await interaction.followup.send(
-                            embed=embeds.error(
-                                f"Le salon n'a pas pu être enregistré en base. Détail : `{detail[:180]}`"
-                            ),
-                            ephemeral=True,
-                        )
+                        await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(f"Le salon n'a pas pu être enregistré en base. Détail : `{detail[:180]}`")), ephemere=True)
                     except discord.HTTPException:
                         pass
                     return
@@ -91,7 +87,7 @@ def _patch_v75_builder() -> None:
                             text = "Cette catégorie de logs a bien été désactivée."
                         else:
                             text = f"Salon enregistré : {channel.mention}."
-                        await interaction.followup.send(embed=embeds.success(text), ephemeral=True)
+                        await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(text)), ephemere=True)
                     except discord.HTTPException:
                         pass
 

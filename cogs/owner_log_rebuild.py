@@ -18,6 +18,7 @@ from discord.ext import commands
 import config
 from database.db import PRIMARY_CREATOR_ID
 from utils import checks, embeds, log_service
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.owner-log-rebuild")
 
@@ -557,18 +558,10 @@ class OwnerLogRebuild(commands.Cog):
         """Reconstruit les logs de tous les serveurs où SentriX est présent."""
         guilds = list(self.bot.guilds)
         if not guilds:
-            return await ctx.send(embed=embeds.warning("SentriX n'est actuellement présent sur aucun serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("SentriX n'est actuellement présent sur aucun serveur.")))
 
         started = time.monotonic()
-        await ctx.send(
-            embed=embeds.warning(
-                (
-                    f"Reconstruction des logs lancée sur **{len(guilds)} serveur(s)**.\n"
-                    "Les anciens salons ne seront supprimés qu'après création, configuration "
-                    "et test réussi des nouveaux."
-                )
-            )
-        )
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"Reconstruction des logs lancée sur **{len(guilds)} serveur(s)**.\nLes anciens salons ne seront supprimés qu'après création, configuration et test réussi des nouveaux.")))
 
         results: list[RebuildResult] = []
         for guild in guilds:
@@ -615,7 +608,7 @@ class OwnerLogRebuild(commands.Cog):
             )
 
         final.set_footer(text=f"SentriX • reset-logs-all • {elapsed:.1f} s")
-        await ctx.send(embed=final)
+        await panels.envoyer(ctx, panels.depuis_embed(final))
 
 
 async def setup(bot: commands.Bot):

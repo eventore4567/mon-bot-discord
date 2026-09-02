@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from utils import checks, embeds, log_service
+from utils import sentrix_panels as panels
 from . import permission_guard
 
 logger = logging.getLogger("bot.setup-v2-core")
@@ -624,10 +625,7 @@ def _patch_feature_runtimes(bot: commands.Bot) -> None:
 
         async def create_ticket_v2(_self, interaction, ticket_type, answers):
             if not await module_enabled(bot, interaction.guild.id, "tickets"):
-                return await interaction.followup.send(
-                    embed=embeds.error("Le module **Tickets** est désactivé sur ce serveur."),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Le module **Tickets** est désactivé sur ce serveur.')), ephemere=True)
             return await original_create(interaction, ticket_type, answers)
 
         tickets.create_ticket = MethodType(create_ticket_v2, tickets)
@@ -846,7 +844,7 @@ def _install_whitelist_commands(bot: commands.Bot) -> None:
             action: str = "add",
         ):
             if ctx.guild is None:
-                return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée dans un serveur.')))
             await ensure_schema(bot)
             if membre is None:
                 rows = await bot.db.fetchall(
@@ -854,20 +852,18 @@ def _install_whitelist_commands(bot: commands.Bot) -> None:
                     (ctx.guild.id,),
                 )
                 if not rows:
-                    return await ctx.send(embed=embeds.info("Aucun membre ou bot n’est dans la whitelist globale SentriX."))
+                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucun membre ou bot n’est dans la whitelist globale SentriX.')))
                 lines = []
                 for row in rows[:40]:
                     actor = f"<@{row['added_by']}>" if row["added_by"] else "migration anti-nuke"
                     lines.append(f"<@{row['user_id']}> — ajouté par {actor}")
-                return await ctx.send(embed=embeds.info("\n".join(lines), title="Whitelist globale SentriX"))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('\n'.join(lines), title='Whitelist globale SentriX')))
             normalized = str(action or "add").casefold()
             if normalized in {"remove", "delete", "retirer", "supprimer", "off"}:
                 await remove_trusted(bot, ctx.guild.id, membre.id)
-                return await ctx.send(embed=embeds.success(f"{membre.mention} a été retiré de la whitelist globale SentriX."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} a été retiré de la whitelist globale SentriX.')))
             await add_trusted(bot, ctx.guild.id, membre.id, ctx.author.id)
-            return await ctx.send(embed=embeds.success(
-                f"{membre.mention} est maintenant whitelisté pour les protections automatiques SentriX."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} est maintenant whitelisté pour les protections automatiques SentriX.')))
 
         whitelist_callback = checks.is_owner_or_admin_for("securite")(whitelist_callback)
         whitelist_command = commands.hybrid_command(
@@ -880,11 +876,9 @@ def _install_whitelist_commands(bot: commands.Bot) -> None:
 
         async def unwhitelist_callback(ctx: commands.Context, membre: discord.Member):
             if ctx.guild is None:
-                return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée dans un serveur.')))
             await remove_trusted(bot, ctx.guild.id, membre.id)
-            return await ctx.send(embed=embeds.success(
-                f"{membre.mention} a été retiré de la whitelist globale SentriX."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} a été retiré de la whitelist globale SentriX.')))
 
         unwhitelist_callback = checks.is_owner_or_admin_for("securite")(unwhitelist_callback)
         unwhitelist_command = commands.hybrid_command(

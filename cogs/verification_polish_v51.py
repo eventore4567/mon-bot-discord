@@ -7,6 +7,8 @@ import time
 
 import discord
 
+from utils import sentrix_panels as panels
+
 from . import honeypot_verification_v48 as legacy
 
 logger = logging.getLogger("bot.security.verification-polish-v51")
@@ -162,20 +164,10 @@ class StyledSequenceView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.state.user_id:
-            await interaction.response.send_message(
-                embed=_status_embed(
-                    "Challenge réservé",
-                    "Cette vérification appartient à un autre membre.",
-                    state="error",
-                ),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Challenge réservé', 'Cette vérification appartient à un autre membre.', state='error')), ephemere=True)
             return False
         if interaction.guild is None or interaction.guild.id != self.state.guild_id:
-            await interaction.response.send_message(
-                embed=_status_embed("Session invalide", "Cette session ne correspond plus au serveur.", state="error"),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Session invalide', 'Cette session ne correspond plus au serveur.', state='error')), ephemere=True)
             return False
         return True
 
@@ -236,14 +228,7 @@ class VerificationPanelView(discord.ui.View):
     async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog = interaction.client.get_cog(legacy._COG_NAME)
         if cog is None:
-            return await interaction.response.send_message(
-                embed=_status_embed(
-                    "Service indisponible",
-                    "La vérification SentriX n'est pas chargée pour le moment.",
-                    state="error",
-                ),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Service indisponible', "La vérification SentriX n'est pas chargée pour le moment.", state='error')), ephemere=True)
         await cog.start_human_verification(interaction)
 
     @discord.ui.button(
@@ -255,10 +240,7 @@ class VerificationPanelView(discord.ui.View):
     async def restart(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog = interaction.client.get_cog(legacy._COG_NAME)
         if cog is None or interaction.guild is None:
-            return await interaction.response.send_message(
-                embed=_status_embed("Impossible de relancer", "La vérification est indisponible.", state="error"),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Impossible de relancer', 'La vérification est indisponible.', state='error')), ephemere=True)
         key = (interaction.guild.id, interaction.user.id)
         cog._challenges.pop(key, None)
         cog._last_start.pop(key, None)
@@ -271,56 +253,33 @@ class VerificationPanelView(discord.ui.View):
         custom_id="sentrix:verification:v51:help",
     )
     async def help(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(embed=_info_embed(), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(_info_embed()), ephemere=True)
 
 
 async def _patched_start(self, interaction: discord.Interaction):
     if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-        return await interaction.response.send_message(
-            embed=_status_embed("Serveur requis", "Cette vérification fonctionne uniquement dans un serveur.", state="error"),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Serveur requis', 'Cette vérification fonctionne uniquement dans un serveur.', state='error')), ephemere=True)
 
     guild = interaction.guild
     member = interaction.user
     conf = await self.config(guild.id)
     if not conf:
-        return await interaction.response.send_message(
-            embed=_status_embed("Vérification désactivée", "Le portail n'est pas activé sur ce serveur.", state="warn"),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Vérification désactivée', "Le portail n'est pas activé sur ce serveur.", state='warn')), ephemere=True)
 
     unverified = guild.get_role(conf["unverified_role_id"])
     verified = guild.get_role(conf["verified_role_id"])
     if unverified is None or verified is None:
-        return await interaction.response.send_message(
-            embed=_status_embed(
-                "Configuration incomplète",
-                "Les rôles de vérification sont introuvables. Préviens un administrateur.",
-                state="error",
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Configuration incomplète', 'Les rôles de vérification sont introuvables. Préviens un administrateur.', state='error')), ephemere=True)
 
     if verified in member.roles and unverified not in member.roles:
-        return await interaction.response.send_message(
-            embed=_status_embed("Déjà vérifié", 'Votre accès au serveur est déjà validé.', state="ok"),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Déjà vérifié', 'Votre accès au serveur est déjà validé.', state='ok')), ephemere=True)
 
     pending = await self._pending(guild.id, member.id)
     if unverified not in member.roles:
         try:
             await member.add_roles(unverified, reason="SentriX : démarrage manuel de la vérification")
         except (discord.Forbidden, discord.HTTPException):
-            return await interaction.response.send_message(
-                embed=_status_embed(
-                    "Rôle impossible à appliquer",
-                    'SentriX ne peut pas placer votre compte en attente. Vérifiez la hiérarchie des rôles.',
-                    state="error",
-                ),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Rôle impossible à appliquer', 'SentriX ne peut pas placer votre compte en attente. Vérifiez la hiérarchie des rôles.', state='error')), ephemere=True)
     if not pending:
         await self._mark_pending(
             guild.id,
@@ -330,14 +289,7 @@ async def _patched_start(self, interaction: discord.Interaction):
         pending = await self._pending(guild.id, member.id)
 
     if bool(getattr(member, "pending", False)):
-        return await interaction.response.send_message(
-            embed=_status_embed(
-                "Règles Discord requises",
-                "Acceptez d'abord les **règles du serveur Discord**, puis relancez la vérification.",
-                state="warn",
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Règles Discord requises', "Acceptez d'abord les **règles du serveur Discord**, puis relancez la vérification.", state='warn')), ephemere=True)
 
     account_age = max(0, int((discord.utils.utcnow() - member.created_at).total_seconds()))
     if account_age < legacy.MIN_ACCOUNT_AGE_SECONDS:
@@ -349,50 +301,22 @@ async def _patched_start(self, interaction: discord.Interaction):
             f"{member.mention} (`{member.id}`) — compte âgé de seulement {account_age // 60} minute(s).",
             danger=True,
         )
-        return await interaction.response.send_message(
-            embed=_status_embed(
-                "Compte trop récent",
-                f'Réessayez dans environ **{minutes} min**. Cette limite réduit les comptes de raid jetables.',
-                state="warn",
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Compte trop récent', f'Réessayez dans environ **{minutes} min**. Cette limite réduit les comptes de raid jetables.', state='warn')), ephemere=True)
 
     joined_at = int(pending["joined_at"] if pending else time.time())
     joined_for = int(time.time()) - joined_at
     if joined_for < legacy.MIN_JOIN_DELAY_SECONDS:
-        return await interaction.response.send_message(
-            embed=_status_embed(
-                'Patientez quelques secondes',
-                f'Vous pourrez commencer dans **{legacy.MIN_JOIN_DELAY_SECONDS - joined_for}s**.',
-                state="info",
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Patientez quelques secondes', f'Vous pourrez commencer dans **{legacy.MIN_JOIN_DELAY_SECONDS - joined_for}s**.', state='info')), ephemere=True)
 
     locked = self._seconds_locked(guild.id, member.id)
     if locked > 0:
         minutes = max(1, (locked + 59) // 60)
-        return await interaction.response.send_message(
-            embed=_status_embed(
-                "Vérification temporairement verrouillée",
-                f'Trop de tentatives incorrectes. Réessayez dans environ **{minutes} min**.',
-                state="error",
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Vérification temporairement verrouillée', f'Trop de tentatives incorrectes. Réessayez dans environ **{minutes} min**.', state='error')), ephemere=True)
 
     key = (guild.id, member.id)
     now_ts = time.time()
     if now_ts - self._last_start.get(key, 0.0) < legacy.START_COOLDOWN_SECONDS:
-        return await interaction.response.send_message(
-            embed=_status_embed(
-                "Challenge déjà généré",
-                "Une session vient d'être créée. Utilisez-la ou attendez quelques secondes avant de relancer.",
-                state="info",
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Challenge déjà généré', "Une session vient d'être créée. Utilisez-la ou attendez quelques secondes avant de relancer.", state='info')), ephemere=True)
     self._last_start[key] = now_ts
 
     sequence = tuple(secrets.SystemRandom().sample(legacy.VerificationSequenceView.SYMBOLS, 3))
@@ -424,10 +348,7 @@ async def _patched_start(self, interaction: discord.Interaction):
 
 async def _patched_complete(self, interaction, token: str, typed_code: str, typed_math: str):
     if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-        return await interaction.response.send_message(
-            embed=_status_embed("Session invalide", "Impossible de valider cette vérification.", state="error"),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Session invalide', 'Impossible de valider cette vérification.', state='error')), ephemere=True)
 
     guild = interaction.guild
     member = interaction.user
@@ -442,14 +363,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
         or not state.sequence_done
     ):
         self._challenges.pop(key, None)
-        return await interaction.response.send_message(
-            embed=_status_embed(
-                "Challenge expiré",
-                "La session n'est plus valide. Recommencez depuis le panneau de vérification.",
-                state="warn",
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Challenge expiré', "La session n'est plus valide. Recommencez depuis le panneau de vérification.", state='warn')), ephemere=True)
 
     if typed_code.strip().upper() != state.code or typed_math.strip() != state.math_answer:
         await self._record_failure(guild.id, member.id)
@@ -459,51 +373,28 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
             description = "Réponse incorrecte. Trop d'échecs : la vérification est temporairement verrouillée."
         else:
             description = "Le code ou le calcul est incorrect. Utilise **Relancer** et recommence."
-        return await interaction.response.send_message(
-            embed=_status_embed("Réponse incorrecte", description, state="error"),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Réponse incorrecte', description, state='error')), ephemere=True)
 
     conf = await self.config(guild.id)
     if not conf:
         self._challenges.pop(key, None)
-        return await interaction.response.send_message(
-            embed=_status_embed("Vérification désactivée", 'Le portail a été désactivé pendant votre session.', state="warn"),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Vérification désactivée', 'Le portail a été désactivé pendant votre session.', state='warn')), ephemere=True)
 
     if bool(getattr(member, "pending", False)):
         self._challenges.pop(key, None)
-        return await interaction.response.send_message(
-            embed=_status_embed(
-                "Règles Discord non validées",
-                'Acceptez les règles natives Discord puis recommencez.',
-                state="warn",
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Règles Discord non validées', 'Acceptez les règles natives Discord puis recommencez.', state='warn')), ephemere=True)
 
     unverified = guild.get_role(conf["unverified_role_id"])
     verified = guild.get_role(conf["verified_role_id"])
     pending = await self._pending(guild.id, member.id)
     if unverified is None or verified is None or unverified not in member.roles or not pending:
         self._challenges.pop(key, None)
-        return await interaction.response.send_message(
-            embed=_status_embed(
-                "État de sécurité incohérent",
-                "SentriX a refusé l'ouverture du serveur. Relancez une nouvelle session.",
-                state="error",
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('État de sécurité incohérent', "SentriX a refusé l'ouverture du serveur. Relancez une nouvelle session.", state='error')), ephemere=True)
 
     account_age = max(0, int((discord.utils.utcnow() - member.created_at).total_seconds()))
     if account_age < legacy.MIN_ACCOUNT_AGE_SECONDS:
         self._challenges.pop(key, None)
-        return await interaction.response.send_message(
-            embed=_status_embed("Compte trop récent", 'Votre compte ne remplit pas encore le délai minimum.', state="warn"),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Compte trop récent', 'Votre compte ne remplit pas encore le délai minimum.', state='warn')), ephemere=True)
 
     self._verification_in_progress.add(key)
     try:
@@ -512,14 +403,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
         if unverified in member.roles:
             await member.remove_roles(unverified, reason="SentriX : vérification renforcée V51 réussie")
     except (discord.Forbidden, discord.HTTPException):
-        return await interaction.response.send_message(
-            embed=_status_embed(
-                "Impossible d'ouvrir l'accès",
-                'SentriX ne peut pas modifier vos rôles. Vérifiez la hiérarchie des rôles.',
-                state="error",
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed("Impossible d'ouvrir l'accès", 'SentriX ne peut pas modifier vos rôles. Vérifiez la hiérarchie des rôles.', state='error')), ephemere=True)
     finally:
         self._verification_in_progress.discard(key)
 

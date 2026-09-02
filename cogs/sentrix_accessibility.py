@@ -17,6 +17,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from utils.accessibility import closest_commands, human_parameter, match_quick_intent, usage_line
 
 from . import bot_experience_v6
@@ -79,7 +80,7 @@ async def _safe_send(ctx: commands.Context, *, title: str, description: str):
     """Embed textuel + fallback texte brut si Discord refuse l'embed."""
     embed = embeds.warning(description, title=title)
     try:
-        return await ctx.send(embed=embed)
+        return await panels.envoyer(ctx, panels.depuis_embed(embed))
     except discord.HTTPException:
         try:
             return await ctx.send(f"**{title}**\n{description}")

@@ -19,6 +19,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from . import security_verification_v71 as security_v71
 from . import setup_components_v73 as v73
 from . import setup_control_center as setup_ui
@@ -495,23 +496,14 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                     except discord.HTTPException:
                         logger.debug("Impossible d'attribuer le rôle Support au configurateur", exc_info=True)
                 await self.refresh(interaction)
-                await interaction.followup.send(
-                    embed=embeds.success(
-                        "Tickets prêts. Le panel par défaut a été créé/réparé et publié. "
-                        "Vous pouvez maintenant le personnaliser sans repartir de zéro."
-                    ),
-                    ephemeral=True,
-                )
+                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('Tickets prêts. Le panel par défaut a été créé/réparé et publié. Vous pouvez maintenant le personnaliser sans repartir de zéro.')), ephemere=True)
             except v72.TicketBootstrapError as exc:
-                await interaction.followup.send(embed=embeds.error(str(exc)), ephemeral=True)
+                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(str(exc))), ephemere=True)
 
         async def full_config(interaction: discord.Interaction):
             ticket_cog = self.bot.get_cog("Tickets")
             if ticket_cog is None:
-                return await interaction.response.send_message(
-                    embed=embeds.error("Le module Tickets n’est pas chargé."),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Le module Tickets n’est pas chargé.')), ephemere=True)
             ticket_runtime = v72._tickets_module()
             panel_embed = embeds.neutral(
                 "Configuration complète des tickets",
@@ -546,7 +538,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                     )
                     await self.refresh(interaction)
                 except v72.TicketBootstrapError as exc:
-                    await interaction.followup.send(embed=embeds.error(str(exc)), ephemeral=True)
+                    await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(str(exc))), ephemere=True)
 
         quick.callback = quick_config
         full.callback = full_config
@@ -669,21 +661,12 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         async def apply_moderation_profile(interaction: discord.Interaction):
             role = self.guild.get_role(self.moderation_role_id) if self.moderation_role_id else None
             if role is None or role.is_default() or role.managed:
-                return await interaction.response.send_message(
-                    embed=embeds.error("Choisissez un rôle Discord modifiable."),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Choisissez un rôle Discord modifiable.')), ephemere=True)
             me = self.guild.me
             if me is None or not me.guild_permissions.manage_roles:
-                return await interaction.response.send_message(
-                    embed=embeds.error("SentriX a besoin de **Gérer les rôles** pour faire cela."),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('SentriX a besoin de **Gérer les rôles** pour faire cela.')), ephemere=True)
             if role >= me.top_role:
-                return await interaction.response.send_message(
-                    embed=embeds.error("Placez le rôle SentriX au-dessus du rôle à configurer."),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Placez le rôle SentriX au-dessus du rôle à configurer.')), ephemere=True)
 
             _label, flags = MODERATION_PROFILES.get(
                 self.moderation_profile,
@@ -691,13 +674,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             )
             missing_for_bot = [flag for flag in flags if not getattr(me.guild_permissions, flag, False)]
             if missing_for_bot:
-                return await interaction.response.send_message(
-                    embed=embeds.error(
-                        "SentriX ne peut pas accorder des permissions qu’il ne possède pas lui-même : "
-                        + ", ".join(missing_for_bot)
-                    ),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('SentriX ne peut pas accorder des permissions qu’il ne possède pas lui-même : ' + ', '.join(missing_for_bot))), ephemere=True)
 
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
@@ -715,19 +692,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                     if member is not None and role not in member.roles:
                         await member.add_roles(role, reason="SentriX V74 : attribution du rôle de modération")
                         assigned = True
-                await interaction.followup.send(
-                    embed=embeds.success(
-                        f"Le rôle **{role.name}** utilise maintenant le profil "
-                        f"**{MODERATION_PROFILES[self.moderation_profile][0]}**."
-                        + (" Il a aussi été attribué au membre choisi." if assigned else "")
-                    ),
-                    ephemeral=True,
-                )
+                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(f'Le rôle **{role.name}** utilise maintenant le profil **{MODERATION_PROFILES[self.moderation_profile][0]}**.' + (' Il a aussi été attribué au membre choisi.' if assigned else ''))), ephemere=True)
             except discord.HTTPException:
-                await interaction.followup.send(
-                    embed=embeds.error("Discord a refusé la modification du rôle. Vérifiez la hiérarchie."),
-                    ephemeral=True,
-                )
+                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Discord a refusé la modification du rôle. Vérifiez la hiérarchie.')), ephemere=True)
 
         apply_profile.callback = apply_moderation_profile
         container.add_item(discord.ui.ActionRow(apply_profile))

@@ -11,6 +11,7 @@ import discord
 from discord.ext import commands
 
 from utils import helpers
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.security.honeypot-v50")
 _COG_NAME = "HoneypotVerification"
@@ -441,7 +442,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             colour=discord.Color.red(),
         )
         trap_embed.set_footer(text="SentriX • Honeypot anti-bot")
-        await trap_channel.send(embed=trap_embed)
+        await panels.envoyer(trap_channel, panels.depuis_embed(trap_embed))
 
         await self.bot.db.execute(
             "INSERT INTO honeypot_verification "

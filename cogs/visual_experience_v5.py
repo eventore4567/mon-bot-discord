@@ -10,6 +10,7 @@ from pathlib import Path
 import discord
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from database.db import PRIMARY_CREATOR_DISPLAY_NAME
@@ -145,7 +146,7 @@ class StatusHubView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.owner_id:
             return True
-        await interaction.response.send_message(embed=_reponse("Expérience visuelle", 'Ouvrez votre propre panneau avec `+status`.', kind="warning"), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(_reponse('Expérience visuelle', 'Ouvrez votre propre panneau avec `+status`.', kind='warning')), ephemere=True)
         return False
 
     @discord.ui.button(label="Statut", custom_id="sx:v5:status")
@@ -235,7 +236,7 @@ class ThemeView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.owner_id or interaction.user.guild_permissions.manage_guild:
             return True
-        await interaction.response.send_message(embed=_reponse("Expérience visuelle", 'Ce panneau est réservé au staff.', kind="danger"), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(_reponse('Expérience visuelle', 'Ce panneau est réservé au staff.', kind='danger')), ephemere=True)
         return False
 
     def embed(self, *, saved: bool = False) -> discord.Embed:
@@ -342,7 +343,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
         resolved = visual_v5.resolve_theme(preset) if preset else None
         if preset and resolved is None:
             choices = ", ".join(visual_v5.THEME_PRESETS)
-            return await ctx.send(embed=_base(self.bot, "Thème introuvable", f"Choix disponibles : `{choices}`.", 0xED4245))
+            return await panels.envoyer(ctx, panels.depuis_embed(_base(self.bot, 'Thème introuvable', f'Choix disponibles : `{choices}`.', 15548997)))
         if resolved:
             settings = await self.bot.db.set_design_settings(ctx.guild.id, visual_v5.theme_settings(resolved))
         view = ThemeView(self.bot, ctx.guild, ctx.author.id, settings)
@@ -355,14 +356,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
         member = member or ctx.author
         permissions = ctx.channel.permissions_for(ctx.guild.me)
         if not permissions.attach_files:
-            return await ctx.send(
-                embed=_base(
-                    self.bot,
-                    "Permission requise",
-                    'Ajoutez la permission **Joindre des fichiers** au rôle du bot pour générer les cartes.',
-                    0xED4245,
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(_base(self.bot, 'Permission requise', 'Ajoutez la permission **Joindre des fichiers** au rôle du bot pour générer les cartes.', 15548997)))
         loading = _base(self.bot, "Carte de profil", "Préparation de la carte.")
         message = await ctx.send(embed=loading)
         task = asyncio.create_task(self._render_profile(ctx.guild, member))
@@ -454,15 +448,15 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
     async def iconsetup(self, ctx: commands.Context, category: str = "all"):
         """Installe les petites icônes SentriX comme emojis personnalisés du serveur."""
         if not ctx.guild.me.guild_permissions.manage_emojis_and_stickers:
-            return await ctx.send(embed=_base(self.bot, "Permission requise", 'Donnez au bot la permission **Gérer les expressions**.', 0xED4245))
+            return await panels.envoyer(ctx, panels.depuis_embed(_base(self.bot, 'Permission requise', 'Donnez au bot la permission **Gérer les expressions**.', 15548997)))
         selected = list(ICON_CATEGORIES) if category.casefold() == "all" else [category.casefold()]
         selected = [item for item in selected if item in ICON_CATEGORIES]
         if not selected:
-            return await ctx.send(embed=_base(self.bot, "Catégorie inconnue", f"Choisissez : `{', '.join(ICON_CATEGORIES)}` ou `all`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(_base(self.bot, 'Catégorie inconnue', f"Choisissez : `{', '.join(ICON_CATEGORIES)}` ou `all`.")))
 
         existing = {emoji.name for emoji in ctx.guild.emojis}
         created, skipped, failed = [], [], []
-        progress = await ctx.send(embed=_base(self.bot, "Icônes", f"Installation de {len(selected)} icône(s)…"))
+        progress = await panels.envoyer(ctx, panels.depuis_embed(_base(self.bot, 'Icônes', f'Installation de {len(selected)} icône(s)…')))
         for name in selected:
             emoji_name = f"sx_{name}"
             if emoji_name in existing:

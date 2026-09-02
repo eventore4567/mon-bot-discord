@@ -22,6 +22,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from . import server_builder
 
 
@@ -926,22 +927,16 @@ class OfficialServerRuntime:
 
     async def run_official_command(self, ctx: commands.Context) -> None:
         if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-            await ctx.send(embed=embeds.error("Cette commande doit être lancée dans le serveur officiel SentriX."))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être lancée dans le serveur officiel SentriX.')))
             return
         if not await self.is_official_guild(ctx.guild):
-            await ctx.send(embed=embeds.error(
-                "Cette commande est réservée au serveur officiel SentriX lié à l'invitation configurée."
-            ))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Cette commande est réservée au serveur officiel SentriX lié à l'invitation configurée.")))
             return
         builder = self.bot.get_cog("ServerBuilder")
         if builder is None:
-            await ctx.send(embed=embeds.error("Le module de création de serveur n'est pas encore chargé."))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Le module de création de serveur n'est pas encore chargé.")))
             return
-        progress = await ctx.send(embed=embeds.neutral(
-            "Installation SentriX en cours",
-            "Je configure les rôles, permissions, salons, tickets, guides, statut, compteur de serveurs et automatisations. "
-            "Ne supprimez aucun salon pendant l'installation."
-        ))
+        progress = await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('Installation SentriX en cours', "Je configure les rôles, permissions, salons, tickets, guides, statut, compteur de serveurs et automatisations. Ne supprimez aucun salon pendant l'installation.")))
         try:
             summary = await self.build_official_server(ctx.guild, ctx.author, builder)
         except discord.Forbidden:
@@ -965,7 +960,7 @@ class OfficialServerRuntime:
         try:
             await progress.edit(embed=summary, view=None)
         except discord.HTTPException:
-            await ctx.send(embed=summary)
+            await panels.envoyer(ctx, panels.depuis_embed(summary))
 
     def patch_create_server_alias(self) -> None:
         command = self.bot.get_command("create-server")

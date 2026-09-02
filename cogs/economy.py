@@ -693,7 +693,7 @@ class Economy(commands.Cog, name="Economy"):
         if accepted:
             await self._refresh_shop_panels(ctx.guild)
         kind = "success" if accepted else "danger"
-        await ctx.send(embed=await self._shop_config_embed(ctx.guild.id, "Boutique mise à jour", "\n\n".join(description_lines), kind))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._shop_config_embed(ctx.guild.id, 'Boutique mise à jour', '\n\n'.join(description_lines), kind)))
 
     @shoprole.command(name="remove", aliases=["delete", "retirer"])
     @checks.is_owner_or_admin()

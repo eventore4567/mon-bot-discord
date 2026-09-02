@@ -21,6 +21,8 @@ import unicodedata
 
 import aiohttp
 import discord
+
+from utils import sentrix_panels as panels
 from PIL import Image, UnidentifiedImageError
 from discord.ext import commands
 
@@ -155,12 +157,7 @@ def _safe_static_png(data: bytes) -> bytes:
 
 
 async def _send_embed(cog_self, ctx: commands.Context, *, title: str, description: str, kind: str):
-    return await ctx.send(embed=await cog_self._embed(
-        ctx.guild.id if ctx.guild else None,
-        title=title,
-        description=description,
-        kind=kind,
-    ))
+    return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id if ctx.guild else None, title=title, description=description, kind=kind)))
 
 
 async def _create_unicode_emoji(cog_self, ctx: commands.Context, sequence: str, emoji_name: str):

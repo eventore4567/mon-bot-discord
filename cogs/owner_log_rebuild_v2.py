@@ -13,6 +13,7 @@ import discord
 from discord.ext import commands
 
 from utils import checks, embeds, log_service
+from utils import sentrix_panels as panels
 from . import owner_log_rebuild as v1
 
 logger = logging.getLogger("bot.owner-log-rebuild-v2")
@@ -396,18 +397,15 @@ class OwnerLogRebuildV2(commands.Cog):
             lock = asyncio.Lock()
             setattr(self.bot, _LOCAL_LOCK_ATTR, lock)
         if lock.locked():
-            return await ctx.send(embed=embeds.warning("Une reconstruction des logs est déjà en cours sur cette instance."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Une reconstruction des logs est déjà en cours sur cette instance.')))
 
         async with lock:
             guilds = list(self.bot.guilds)
             if not guilds:
-                return await ctx.send(embed=embeds.warning("SentriX n'est présent sur aucun serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("SentriX n'est présent sur aucun serveur.")))
 
             started = time.monotonic()
-            await ctx.send(embed=embeds.warning(
-                f"Vérification/réparation des logs lancée sur **{len(guilds)} serveur(s)**. "
-                "Les serveurs déjà sains sont conservés sans recréation."
-            ))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Vérification/réparation des logs lancée sur **{len(guilds)} serveur(s)**. Les serveurs déjà sains sont conservés sans recréation.')))
 
             results: list[v1.RebuildResult] = []
             for guild in guilds:
@@ -442,7 +440,7 @@ class OwnerLogRebuildV2(commands.Cog):
                 )
 
             final.set_footer(text=f"SentriX • reset-logs-all V2 • {elapsed:.1f} s")
-            await ctx.send(embed=final)
+            await panels.envoyer(ctx, panels.depuis_embed(final))
 
 
 async def install(bot: commands.Bot) -> None:

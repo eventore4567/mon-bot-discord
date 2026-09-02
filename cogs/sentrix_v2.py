@@ -16,6 +16,7 @@ from discord.ext import commands
 
 import config
 from utils import checks, design_system, embeds, stats_service
+from utils import sentrix_panels as panels
 
 
 V2_PUBLIC_COMMANDS = frozenset({
@@ -127,9 +128,7 @@ class HomeButton(discord.ui.Button):
         }
         if self.page == "staff":
             if not await view.cog.can_staff_interaction(interaction, "moderate_members"):
-                return await interaction.response.send_message(
-                    embed=embeds.error("Vous n'avez pas accès au centre staff."), ephemeral=True
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'avez pas accès au centre staff.")), ephemere=True)
             embed = await view.cog.build_mod_embed(view.guild, view.member)
         else:
             builder = builders.get(self.page, view.cog.build_home_embed)
@@ -149,7 +148,7 @@ class CheckinButton(discord.ui.Button):
             embed = embeds.success(message)
         else:
             embed = embeds.warning(f"Déjà récupéré aujourd'hui · série **{result['streak']} j**.")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
 
 
 class HomeView(design_system.SentriXView):
@@ -222,7 +221,7 @@ class MemberPicker(discord.ui.UserSelect):
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 member = None
         if member is None:
-            return await interaction.response.send_message(embed=embeds.error("Membre introuvable."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Membre introuvable.')), ephemere=True)
         view.target_id = member.id
         view.sync()
         await interaction.response.edit_message(
@@ -240,9 +239,9 @@ class ModAction(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         view: ModView = self.view
         if view.target_id is None:
-            return await interaction.response.send_message(embed=embeds.warning("Choisissez un membre."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('Choisissez un membre.')), ephemere=True)
         if not await view.cog.can_staff_interaction(interaction, self.PERMS[self.action]):
-            return await interaction.response.send_message(embed=embeds.error("Permission insuffisante."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Permission insuffisante.')), ephemere=True)
         await interaction.response.send_modal(SanctionModal(view.cog, view, self.action, view.target_id))
 
 
@@ -254,7 +253,7 @@ class ModRefresh(discord.ui.Button):
         view: ModView = self.view
         member = interaction.guild.get_member(view.target_id) if view.target_id else None
         if member is None:
-            return await interaction.response.send_message(embed=embeds.error("Membre introuvable."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Membre introuvable.')), ephemere=True)
         await interaction.response.edit_message(embed=await view.cog.build_member_mod_embed(interaction.guild, member), view=view)
 
 
@@ -566,14 +565,14 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
         guild = interaction.guild
         member = guild.get_member(target_id) if guild else None
         if member is None:
-            return await interaction.response.send_message(embed=embeds.error("Membre introuvable."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Membre introuvable.')), ephemere=True)
         permission = ModAction.PERMS[action]
         if not await self.can_staff_interaction(interaction, permission):
-            return await interaction.response.send_message(embed=embeds.error("Permission insuffisante."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Permission insuffisante.')), ephemere=True)
         command = self.bot.get_command(action)
         cog = self.bot.get_cog("Moderation")
         if command is None or cog is None:
-            return await interaction.response.send_message(embed=embeds.error("Module de modération indisponible."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Module de modération indisponible.')), ephemere=True)
         ctx = InteractionContext(interaction, command)
         try:
             if action == "mute":
@@ -581,11 +580,11 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
             else:
                 await command.callback(cog, ctx, member, raison=reason or "Aucune raison fournie")
         except discord.Forbidden:
-            if interaction.response.is_done(): await interaction.followup.send(embed=embeds.error("Discord refuse cette sanction. Vérifiez la hiérarchie."), ephemeral=True)
-            else: await interaction.response.send_message(embed=embeds.error("Discord refuse cette sanction. Vérifiez la hiérarchie."), ephemeral=True)
+            if interaction.response.is_done(): await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Discord refuse cette sanction. Vérifiez la hiérarchie.')), ephemere=True)
+            else: await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Discord refuse cette sanction. Vérifiez la hiérarchie.')), ephemere=True)
         except discord.HTTPException:
-            if interaction.response.is_done(): await interaction.followup.send(embed=embeds.error("Discord a refusé l'action."), ephemeral=True)
-            else: await interaction.response.send_message(embed=embeds.error("Discord a refusé l'action."), ephemeral=True)
+            if interaction.response.is_done(): await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error("Discord a refusé l'action.")), ephemere=True)
+            else: await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Discord a refusé l'action.")), ephemere=True)
         finally:
             try:
                 if interaction.message:
@@ -606,62 +605,62 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
 
     @commands.hybrid_command(name="home", aliases=["sentrixhome"], description="Ouvrir le centre de contrôle SentriX V2.", with_app_command=False)
     async def home(self, ctx):
-        if ctx.guild is None or not isinstance(ctx.author, discord.Member): return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+        if ctx.guild is None or not isinstance(ctx.author, discord.Member): return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         view = HomeView(self, ctx.guild, ctx.author, await self.can_staff_context(ctx))
         view.message = await ctx.send(embed=await self.build_home_embed(ctx.guild, ctx.author), view=view)
 
     @commands.hybrid_command(name="profilecard", description="Afficher une carte de profil V2.", with_app_command=False)
     async def profilecard(self, ctx, membre: discord.Member = None):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
-        await ctx.send(embed=await self.build_profile_embed(ctx.guild, membre or ctx.author))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self.build_profile_embed(ctx.guild, membre or ctx.author)))
 
     @commands.hybrid_command(name="economyhub", description="Ouvrir le hub économie V2.", with_app_command=False)
     async def economyhub(self, ctx):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
-        await ctx.send(embed=await self.build_economy_embed(ctx.guild, ctx.author))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self.build_economy_embed(ctx.guild, ctx.author)))
 
     @commands.hybrid_command(name="gamehub", description="Ouvrir le hub interactif des jeux.", with_app_command=False)
     async def gamehub(self, ctx):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         view = GameView(self, ctx.author)
         view.message = await ctx.send(embed=await self.build_games_embed(ctx.guild, ctx.author), view=view)
 
     @commands.hybrid_command(name="aicenter", description="Afficher le centre IA.", with_app_command=False)
     async def aicenter(self, ctx):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
-        await ctx.send(embed=await self.build_ai_embed(ctx.guild, ctx.author))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self.build_ai_embed(ctx.guild, ctx.author)))
 
     @commands.hybrid_command(name="ticketcenter", description="Afficher le centre de tickets.", with_app_command=False)
     async def ticketcenter(self, ctx):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
-        await ctx.send(embed=await self.build_ticket_embed(ctx.guild, ctx.author))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self.build_ticket_embed(ctx.guild, ctx.author)))
 
     @commands.hybrid_command(name="progress", description="Afficher la progression globale et les badges.", with_app_command=False)
     async def progress(self, ctx, membre: discord.Member = None):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
-        await ctx.send(embed=await self.build_progress_embed(ctx.guild, membre or ctx.author))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self.build_progress_embed(ctx.guild, membre or ctx.author)))
 
     @commands.hybrid_command(name="checkin", description="Récupérer le check-in quotidien V2.", with_app_command=False)
     async def checkin(self, ctx):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         result = await self.claim_checkin(ctx.guild, ctx.author)
-        if result["claimed"]: await ctx.send(embed=embeds.success(f"**+{_fmt(result['reward'])}** pièces · série **{result['streak']} j**."))
-        else: await ctx.send(embed=embeds.warning(f"Déjà récupéré aujourd'hui · série **{result['streak']} j**."))
+        if result["claimed"]: await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"**+{_fmt(result['reward'])}** pièces · série **{result['streak']} j**.")))
+        else: await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"Déjà récupéré aujourd'hui · série **{result['streak']} j**.")))
 
     @commands.hybrid_command(name="market", description="Afficher le marché entre membres.", with_app_command=False)
     async def market(self, ctx):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         view = MarketView(self, ctx.author)
         view.message = await ctx.send(embed=await self.build_market_embed(ctx.guild, ctx.author), view=view)
 
     @commands.hybrid_command(name="market-sell", description="Vendre un objet de votre inventaire.", with_app_command=False)
     async def market_sell(self, ctx, quantity: int, unit_price: int, *, item: str):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         item = item.strip()
         if not item or len(item) > 100 or quantity < 1 or quantity > 1000 or unit_price < 1 or unit_price > 1_000_000_000:
-            return await ctx.send(embed=embeds.error("Objet, quantité ou prix invalide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Objet, quantité ou prix invalide.')))
         cursor = await self.bot.db.execute("UPDATE inventory SET quantity=quantity-? WHERE guild_id=? AND user_id=? AND lower(item_name)=lower(?) AND quantity>=?", (quantity, ctx.guild.id, ctx.author.id, item, quantity))
-        if getattr(cursor, "rowcount", 0) == 0: return await ctx.send(embed=embeds.error("Vous n'avez pas assez de cet objet."))
+        if getattr(cursor, "rowcount", 0) == 0: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas assez de cet objet.")))
         try:
             row = await self.bot.db.fetchone("SELECT item_name FROM inventory WHERE guild_id=? AND user_id=? AND lower(item_name)=lower(?)", (ctx.guild.id, ctx.author.id, item))
             canonical = row["item_name"] if row else item
@@ -671,43 +670,43 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
         except Exception:
             await self.bot.db.execute("INSERT INTO inventory (guild_id,user_id,item_name,quantity) VALUES (?,?,?,?) ON CONFLICT(guild_id,user_id,item_name) DO UPDATE SET quantity=inventory.quantity+excluded.quantity", (ctx.guild.id, ctx.author.id, item, quantity))
             raise
-        await ctx.send(embed=embeds.success(f"Annonce **#{listing_id}** : **{quantity}× {canonical}** à **{_fmt(unit_price)}**/u."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Annonce **#{listing_id}** : **{quantity}× {canonical}** à **{_fmt(unit_price)}**/u.')))
 
     @commands.hybrid_command(name="market-buy", description="Acheter une annonce du marché.", with_app_command=False)
     async def market_buy(self, ctx, listing_id: int):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         row = await self.bot.db.fetchone("SELECT * FROM v2_market_listings WHERE id=? AND guild_id=? AND status='active'", (listing_id, ctx.guild.id))
-        if row is None: return await ctx.send(embed=embeds.error("Annonce indisponible."))
-        if int(row["seller_id"]) == ctx.author.id: return await ctx.send(embed=embeds.error("Vous ne pouvez pas acheter votre propre annonce."))
+        if row is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Annonce indisponible.')))
+        if int(row["seller_id"]) == ctx.author.id: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas acheter votre propre annonce.')))
         lock = await self.bot.db.execute("UPDATE v2_market_listings SET status='processing' WHERE id=? AND guild_id=? AND status='active'", (listing_id, ctx.guild.id))
-        if getattr(lock, "rowcount", 0) == 0: return await ctx.send(embed=embeds.warning("Cette annonce vient d'être prise."))
+        if getattr(lock, "rowcount", 0) == 0: return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("Cette annonce vient d'être prise.")))
         total = int(row["quantity"]) * int(row["unit_price"])
         paid = await self.bot.db.pay_member(ctx.guild.id, ctx.author.id, int(row["seller_id"]), total, reason=f"Marché V2 #{listing_id}")
         if not paid:
             await self.bot.db.execute("UPDATE v2_market_listings SET status='active' WHERE id=? AND status='processing'", (listing_id,))
-            return await ctx.send(embed=embeds.error("Pas assez d'argent liquide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Pas assez d'argent liquide.")))
         try:
             await self.bot.db.execute("INSERT INTO inventory (guild_id,user_id,item_name,quantity) VALUES (?,?,?,?) ON CONFLICT(guild_id,user_id,item_name) DO UPDATE SET quantity=inventory.quantity+excluded.quantity", (ctx.guild.id, ctx.author.id, row["item_name"], int(row["quantity"])))
             await self.bot.db.execute("UPDATE v2_market_listings SET status='sold',buyer_id=?,sold_at=? WHERE id=?", (ctx.author.id, int(time.time()), listing_id))
         except Exception:
             await self.bot.db.execute("UPDATE v2_market_listings SET status='error' WHERE id=?", (listing_id,))
             raise
-        await ctx.send(embed=embeds.success(f"Achat terminé : **{row['quantity']}× {row['item_name']}** pour **{_fmt(total)}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Achat terminé : **{row['quantity']}× {row['item_name']}** pour **{_fmt(total)}**.")))
 
     @commands.hybrid_command(name="market-cancel", description="Annuler une de vos annonces.", with_app_command=False)
     async def market_cancel(self, ctx, listing_id: int):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         row = await self.bot.db.fetchone("SELECT * FROM v2_market_listings WHERE id=? AND guild_id=? AND seller_id=? AND status='active'", (listing_id, ctx.guild.id, ctx.author.id))
-        if row is None: return await ctx.send(embed=embeds.error("Annonce introuvable ou non annulable."))
+        if row is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Annonce introuvable ou non annulable.')))
         cur = await self.bot.db.execute("UPDATE v2_market_listings SET status='cancelled' WHERE id=? AND guild_id=? AND seller_id=? AND status='active'", (listing_id, ctx.guild.id, ctx.author.id))
-        if getattr(cur, "rowcount", 0) == 0: return await ctx.send(embed=embeds.warning("Annonce déjà indisponible."))
+        if getattr(cur, "rowcount", 0) == 0: return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Annonce déjà indisponible.')))
         await self.bot.db.execute("INSERT INTO inventory (guild_id,user_id,item_name,quantity) VALUES (?,?,?,?) ON CONFLICT(guild_id,user_id,item_name) DO UPDATE SET quantity=inventory.quantity+excluded.quantity", (ctx.guild.id, ctx.author.id, row["item_name"], int(row["quantity"])))
-        await ctx.send(embed=embeds.success(f"Annonce **#{listing_id}** annulée et objets rendus."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Annonce **#{listing_id}** annulée et objets rendus.')))
 
     @commands.hybrid_command(name="modcenter", description="Ouvrir le centre de modération interactif.", with_app_command=False)
     @checks.has_permission_or_modrole("moderate_members")
     async def modcenter(self, ctx, membre: discord.Member = None):
-        if ctx.guild is None or not isinstance(ctx.author, discord.Member): return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+        if ctx.guild is None or not isinstance(ctx.author, discord.Member): return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         view = ModView(self, ctx.author)
         if membre:
             view.target_id = membre.id

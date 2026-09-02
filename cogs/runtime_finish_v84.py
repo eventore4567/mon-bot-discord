@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from utils import checks, embeds, log_service
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.runtime-finish-v84")
 
@@ -551,12 +552,7 @@ def _install_setup_log_channel_resilience() -> None:
                     )
                     detail = str(exc).strip() or type(exc).__name__
                     try:
-                        await interaction.followup.send(
-                            embed=embeds.error(
-                                f"Le salon n'a pas pu être enregistré en base. Détail : `{detail[:180]}`"
-                            ),
-                            ephemeral=True,
-                        )
+                        await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(f"Le salon n'a pas pu être enregistré en base. Détail : `{detail[:180]}`")), ephemere=True)
                     except discord.HTTPException:
                         pass
                     return
@@ -581,7 +577,7 @@ def _install_setup_log_channel_resilience() -> None:
                             text = "Le salon de cette catégorie de logs a bien été désactivé."
                         else:
                             text = f"Salon enregistré : {channel.mention}. Le panneau sera actualisé au prochain rafraîchissement."
-                        await interaction.followup.send(embed=embeds.success(text), ephemeral=True)
+                        await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(text)), ephemere=True)
                     except discord.HTTPException:
                         pass
 
@@ -609,26 +605,17 @@ def _install_manox_command(bot: commands.Bot) -> None:
             )
         guild = ctx.guild
         if guild is None or not isinstance(ctx.author, discord.Member):
-            return await ctx.send(embed=embeds.error('Utilisez `+create manox` dans un serveur Discord.'))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez `+create manox` dans un serveur Discord.')))
 
         me = guild.me
         if me is None or not me.guild_permissions.manage_channels:
-            return await ctx.send(
-                embed=embeds.error(
-                    "SentriX a besoin au minimum de **Gérer les salons** pour construire ce serveur."
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('SentriX a besoin au minimum de **Gérer les salons** pour construire ce serveur.')))
 
         lock = _lock(guild.id)
         if lock.locked():
-            return await ctx.send(embed=embeds.info("La création/réparation **manox** est déjà en cours."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('La création/réparation **manox** est déjà en cours.')))
 
-        progress = await ctx.send(
-            embed=embeds.info(
-                "Je crée ou répare les catégories, salons, vocaux, logs et tickets du preset **manox**. "
-                "Les éléments déjà présents sont réutilisés."
-            )
-        )
+        progress = await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Je crée ou répare les catégories, salons, vocaux, logs et tickets du preset **manox**. Les éléments déjà présents sont réutilisés.')))
         async with lock:
             try:
                 result = await build_manox_server(bot, guild, ctx.author)
@@ -658,7 +645,7 @@ def _install_manox_command(bot: commands.Bot) -> None:
         try:
             await progress.edit(content=None, embed=panel, view=None)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException, TypeError):
-            await ctx.send(embed=panel)
+            await panels.envoyer(ctx, panels.depuis_embed(panel))
 
     command = commands.Command(manox_callback, name="manox", help="Preset privé complet du serveur manox.")
     command.extras["sentrix_permission"] = "Propriétaire global SentriX"

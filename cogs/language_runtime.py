@@ -24,6 +24,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.language-runtime")
 
@@ -777,7 +778,7 @@ async def _localized_help_callback(cog, ctx: commands.Context, *, commande: str 
                 text = f"I can't find `{commande}` or you don't have access to it. Use `{prefix}help` to return to the command center."
             else:
                 text = f"Je ne trouve pas `{commande}` ou tu n'as pas acces a cette commande. Utilise `{prefix}aide` pour revenir au catalogue."
-            return await ctx.send(embed=embeds.error(text))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(text)))
 
         category = help_complete._category_for(cmd)
         category_name, _ = _category_text(category, language)
@@ -802,7 +803,7 @@ async def _localized_help_callback(cog, ctx: commands.Context, *, commande: str 
             e.add_field(name="🧩 Parametres", value="\n".join(params) if params else "Aucun parametre.", inline=False)
             e.add_field(name="🔐 Acces", value=f"{category.emoji} {category_name} • {'Staff uniquement' if utility.is_staff_command(cmd) else 'Membres'}", inline=False)
             e.set_footer(text="Un seul nom est affiche pour chaque commande selon la langue du serveur.")
-        return await ctx.send(embed=e)
+        return await panels.envoyer(ctx, panels.depuis_embed(e))
 
     home = _help_home(bot, ctx.guild, prefix, is_staff, language)
     return await ctx.send(embed=home, view=LanguageHelpHomeView(bot, prefix, is_staff, language, ctx.author.id))

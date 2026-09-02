@@ -20,6 +20,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds, log_service
+from utils import sentrix_panels as panels
 from utils.checks import BotBlacklistedError, BotPermissionError
 from utils.helpers import parse_duration
 
@@ -79,15 +80,10 @@ def _install_prefix_error_detail(bot: commands.Bot) -> None:
     ):
         base = getattr(error, "original", error)
         if isinstance(base, BotPermissionError):
-            await ctx.send(embed=embeds.error(base.message, title="Permission insuffisante"))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(base.message, title='Permission insuffisante')))
             return
         if isinstance(base, BotBlacklistedError):
-            await ctx.send(
-                embed=embeds.error(
-                    f"Vous n'êtes pas autorisé à utiliser SentriX.\n\nRaison : {base.reason}",
-                    title="Accès refusé",
-                )
-            )
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Vous n'êtes pas autorisé à utiliser SentriX.\n\nRaison : {base.reason}", title='Accès refusé')))
             return
 
         result = current(ctx, error)

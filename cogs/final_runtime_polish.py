@@ -13,6 +13,8 @@ import os
 from collections import OrderedDict
 
 import discord
+
+from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from . import bot_experience_v5, bot_experience_v6
@@ -282,13 +284,7 @@ def _patch_canary_readiness(bot: commands.Bot) -> None:
             ]
             if durable.get("last_snapshot_at"):
                 lines.append(f"Dernier snapshot PostgreSQL : <t:{int(durable['last_snapshot_at'])}:R>")
-            await ctx.send(
-                embed=discord.Embed(
-                    title="Infrastructure SentriX",
-                    description="\n".join(lines),
-                    color=0x5865F2,
-                )
-            )
+            await panels.envoyer(ctx, panels.depuis_embed(discord.Embed(title='Infrastructure SentriX', description='\n'.join(lines), color=5793266)))
 
         infra_external_callback._sentrix_external_canary = True
         infra_command.callback = infra_external_callback

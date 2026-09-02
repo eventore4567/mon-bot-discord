@@ -26,6 +26,7 @@ import discord
 from discord.ext import commands, tasks
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.security.v2")
 _COG_NAME = "SecurityV2Runtime"
@@ -716,7 +717,7 @@ async def _is_security_staff(ctx: commands.Context) -> bool:
 
 async def _send_health(bot: commands.Bot, ctx: commands.Context) -> None:
     if not await _is_security_staff(ctx):
-        return await ctx.send(embed=embeds.error("Cette commande est réservée au propriétaire ou aux administrateurs."))
+        return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande est réservée au propriétaire ou aux administrateurs.')))
     db_ok = True
     try:
         await bot.db.fetchone("SELECT 1 AS ok")
@@ -760,7 +761,7 @@ async def _send_health(bot: commands.Bot, ctx: commands.Context) -> None:
             value=f"#{last_backup['id']} · <t:{int(last_backup['created_at'])}:R>",
             inline=False,
         )
-    await ctx.send(embed=e)
+    await panels.envoyer(ctx, panels.depuis_embed(e))
 
 
 def _install_commands(bot: commands.Bot) -> None:
@@ -785,7 +786,7 @@ def _install_commands(bot: commands.Bot) -> None:
         @commands.command(name="incidents", aliases=["incident"])
         async def incidents(ctx: commands.Context, limit: int = 10):
             if not await _is_security_staff(ctx):
-                return await ctx.send(embed=embeds.error("Accès administrateur requis."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Accès administrateur requis.')))
             limit = max(1, min(20, int(limit)))
             rows = await bot.db.fetchall(
                 "SELECT id, actor_id, reason, summary_json, created_at FROM security_incidents "
@@ -793,14 +794,14 @@ def _install_commands(bot: commands.Bot) -> None:
                 (ctx.guild.id, limit),
             )
             if not rows:
-                return await ctx.send(embed=embeds.info("Aucun incident anti-nuke enregistré."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucun incident anti-nuke enregistré.')))
             lines = []
             for row in rows:
                 lines.append(
                     f"**#{row['id']}** · <t:{int(row['created_at'])}:R> · <@{row['actor_id']}>\n"
                     f"╰ {str(row['reason'])[:180]}"
                 )
-            await ctx.send(embed=embeds.neutral("Incidents anti-nuke", "\n\n".join(lines)[:4000]))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('Incidents anti-nuke', '\n\n'.join(lines)[:4000])))
         root.add_command(incidents)
 
     if root.get_command("antinuke-config") is None:
@@ -809,33 +810,28 @@ def _install_commands(bot: commands.Bot) -> None:
             if ctx.guild is None:
                 return
             if ctx.author.id != ctx.guild.owner_id:
-                return await ctx.send(embed=embeds.error("Seul le propriétaire du serveur peut modifier le seuil anti-nuke."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Seul le propriétaire du serveur peut modifier le seuil anti-nuke.')))
             current = await get_policy(bot, ctx.guild.id)
             if threshold is None and window is None:
-                return await ctx.send(embed=embeds.neutral(
-                    "Configuration anti-nuke",
-                    f"Seuil actuel : **{current['action_threshold']} actions en {current['window_seconds']} secondes**.\nUtilisez `+security antinuke-config 3 30`.\nLimites : {MIN_THRESHOLD}-{MAX_THRESHOLD} actions, {MIN_WINDOW}-{MAX_WINDOW} secondes.",
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('Configuration anti-nuke', f"Seuil actuel : **{current['action_threshold']} actions en {current['window_seconds']} secondes**.\nUtilisez `+security antinuke-config 3 30`.\nLimites : {MIN_THRESHOLD}-{MAX_THRESHOLD} actions, {MIN_WINDOW}-{MAX_WINDOW} secondes.")))
             threshold = current["action_threshold"] if threshold is None else threshold
             window = current["window_seconds"] if window is None else window
             saved = await set_policy(
                 bot, ctx.guild.id, threshold=threshold, window=window, updated_by=ctx.author.id
             )
-            await ctx.send(embed=embeds.success(
-                f"Anti-nuke réglé sur **{saved['action_threshold']} actions en {saved['window_seconds']} secondes**."
-            ))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Anti-nuke réglé sur **{saved['action_threshold']} actions en {saved['window_seconds']} secondes**.")))
         root.add_command(antinuke_config)
 
     if root.get_command("backup-now") is None:
         @commands.command(name="backup-now", aliases=["backup-auto"])
         async def backup_now(ctx: commands.Context):
             if not await _is_security_staff(ctx):
-                return await ctx.send(embed=embeds.error("Accès administrateur requis."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Accès administrateur requis.')))
             runtime = bot.get_cog(_COG_NAME)
             if runtime is None:
-                return await ctx.send(embed=embeds.error("Moteur de sauvegarde indisponible."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Moteur de sauvegarde indisponible.')))
             backup_id = await runtime.create_auto_backup(ctx.guild)
-            await ctx.send(embed=embeds.success(f"Sauvegarde de sécurité **#{backup_id}** créée."))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Sauvegarde de sécurité **#{backup_id}** créée.')))
         root.add_command(backup_now)
 
 

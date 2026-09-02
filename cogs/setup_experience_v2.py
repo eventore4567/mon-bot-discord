@@ -20,6 +20,7 @@ from discord.ext import commands
 
 import config
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.setup-experience-v2")
 
@@ -43,10 +44,7 @@ async def _can_use_setup(view, interaction: discord.Interaction) -> bool:
     if isinstance(member, discord.Member) and member.guild_permissions.administrator:
         return True
     if not interaction.response.is_done():
-        await interaction.response.send_message(
-            embed=embeds.error("Vous n'êtes pas autorisé à modifier cette configuration."),
-            ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'êtes pas autorisé à modifier cette configuration.")), ephemere=True)
     return False
 
 
@@ -79,10 +77,7 @@ class AutoSetupConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.requester_id:
-            await interaction.response.send_message(
-                embed=embeds.error("Cette confirmation appartient à un autre administrateur."),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Cette confirmation appartient à un autre administrateur.')), ephemere=True)
             return False
         return True
 
@@ -93,15 +88,12 @@ class AutoSetupConfirmView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=True)
         platform = self.parent_view.bot.get_cog("PlatformV4")
         if platform is None or not hasattr(platform, "quick_setup"):
-            await interaction.followup.send(
-                embed=embeds.error("La configuration automatique se charge encore. Réessayez dans quelques secondes."),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('La configuration automatique se charge encore. Réessayez dans quelques secondes.')), ephemere=True)
             return
 
         guild = self.parent_view.bot.get_guild(self.parent_view.guild_id)
         if guild is None:
-            await interaction.followup.send(embed=embeds.error("Serveur introuvable."), ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Serveur introuvable.')), ephemere=True)
             return
 
         try:
@@ -109,7 +101,7 @@ class AutoSetupConfirmView(discord.ui.View):
         except Exception as exc:
             logger.exception("Echec setup auto depuis le panneau: %s", self.profile)
             detail = str(exc).strip() or "La configuration automatique a échoué."
-            await interaction.followup.send(embed=embeds.error(detail[:900]), ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(detail[:900])), ephemere=True)
             return
 
         created = result.get("created_channels", []) if isinstance(result, dict) else []
@@ -121,7 +113,7 @@ class AutoSetupConfirmView(discord.ui.View):
         )
         if missing:
             description += "\n\nPermissions à vérifier : " + ", ".join(str(item) for item in missing[:6])
-        await interaction.followup.send(embed=embeds.success(description), ephemeral=True)
+        await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(description)), ephemere=True)
         await _refresh_setup_message(self.parent_view)
         self.stop()
 
@@ -139,9 +131,7 @@ async def _show_diagnostic(view, interaction: discord.Interaction) -> None:
         return
     guild = view.bot.get_guild(view.guild_id)
     if guild is None or guild.me is None:
-        return await interaction.response.send_message(
-            embed=embeds.error("Impossible de lire l'état du serveur."), ephemeral=True
-        )
+        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Impossible de lire l'état du serveur.")), ephemere=True)
 
     perms = guild.me.guild_permissions
     checks = [
@@ -193,7 +183,7 @@ async def _show_diagnostic(view, interaction: discord.Interaction) -> None:
         ),
         inline=False,
     )
-    await interaction.response.send_message(embed=e, ephemeral=True)
+    await panels.envoyer(interaction.response, panels.depuis_embed(e), ephemere=True)
 
 
 def install() -> bool:

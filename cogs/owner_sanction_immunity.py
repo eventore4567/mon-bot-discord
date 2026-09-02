@@ -17,6 +17,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from utils.owner_access import is_bot_owner_id
 
 logger = logging.getLogger("bot.owner-immunity")
@@ -153,7 +154,7 @@ def install(bot: commands.Bot) -> None:
 
         async def check_targetable_protected(self, ctx, membre):
             if is_bot_owner_id(getattr(membre, "id", None)):
-                await ctx.send(embed=embeds.error("Ce compte est protégé : SentriX ne peut pas le sanctionner."))
+                await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Ce compte est protégé : SentriX ne peut pas le sanctionner.')))
                 return False
             return await original_targetable(self, ctx, membre)
 

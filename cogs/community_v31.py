@@ -18,6 +18,7 @@ import discord
 from discord.ext import commands
 
 from utils import design_system, embeds, stats_service
+from utils import sentrix_panels as panels
 from . import community_v3
 
 logger = logging.getLogger("bot.community-v31")
@@ -364,7 +365,7 @@ def _install_interactive_profile(bot: commands.Bot) -> None:
 
     async def interactive_profile(cog, ctx: commands.Context, membre: discord.Member = None):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande fonctionne uniquement sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande fonctionne uniquement sur un serveur.')))
         if ctx.interaction:
             await ctx.defer()
         member = membre or ctx.author
@@ -430,7 +431,7 @@ def _install_ticket_status(bot: commands.Bot) -> None:
             await bot.db.execute("UPDATE tickets SET claimed_by = ? WHERE id = ?", (member.id, ticket["id"]))
             await inter.channel.set_permissions(member, view_channel=True, send_messages=True, read_message_history=True)
             await _set_ticket_topic(inter.channel, int(ticket["id"]), ticket["priority"], getattr(member, "display_name", str(member)))
-            await inter.response.send_message(embed=embeds.success(f"🔀 Ticket transféré à {member.mention}."))
+            await panels.envoyer(inter.response, panels.depuis_embed(embeds.success(f'🔀 Ticket transféré à {member.mention}.')))
 
         select.callback = cb
         view.add_item(select)
@@ -490,7 +491,7 @@ def _install_mission_reward_card(bot: commands.Bot) -> None:
             title="🎯 Mission terminée",
         )
         try:
-            await ctx.send(embed=embed)
+            await panels.envoyer(ctx, panels.depuis_embed(embed))
         except discord.HTTPException:
             pass
 

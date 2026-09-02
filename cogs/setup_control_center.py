@@ -120,8 +120,8 @@ async def _permission_error(target):
     if isinstance(target, commands.Context):
         return await target.send(embed=panel)
     if target.response.is_done():
-        return await target.followup.send(embed=panel, ephemeral=True)
-    return await target.response.send_message(embed=panel, ephemeral=True)
+        return await panels.envoyer(target.followup, panels.depuis_embed(panel), ephemere=True)
+    return await panels.envoyer(target.response, panels.depuis_embed(panel), ephemere=True)
 
 
 async def module_statuses(bot, guild, conf):
@@ -351,12 +351,7 @@ class LogChannelSelect(discord.ui.ChannelSelect):
                 needs_file=True,
             )
             if not ok:
-                return await interaction.response.send_message(
-                    embed=embeds.error(
-                        f"Ce salon ne peut pas recevoir les logs SentriX : **{reason}**."
-                    ),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(f'Ce salon ne peut pas recevoir les logs SentriX : **{reason}**.')), ephemere=True)
 
         await log_service.set_log_config(
             self.owner.bot,
@@ -373,12 +368,7 @@ class LogChannelSelect(discord.ui.ChannelSelect):
         if channel_id is not None and (
             saved is None or int(saved.get("channel_id") or 0) != int(channel_id)
         ):
-            return await interaction.response.send_message(
-                embed=embeds.error(
-                    "La configuration du salon de logs n’a pas été enregistrée correctement."
-                ),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('La configuration du salon de logs n’a pas été enregistrée correctement.')), ephemere=True)
         await self.owner.audit(interaction.user.id, category, channel_id)
         await self.owner.refresh(interaction)
 
@@ -494,7 +484,7 @@ class AiModal(discord.ui.Modal, title="Limites IA"):
                 max(1, min(100000, int(str(self.daily.value)))),
             )
         except ValueError:
-            return await interaction.response.send_message(embed=embeds.error("Utilisez uniquement des nombres."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Utilisez uniquement des nombres.')), ephemere=True)
         await self.owner.ensure_ai()
         await self.owner.bot.db.execute(
             "UPDATE ai_settings SET cooldown_seconds = ?, per_minute_limit = ?, daily_limit = ?, "
@@ -530,9 +520,7 @@ class SetupView(discord.ui.LayoutView):
 
     async def interaction_check(self, interaction):
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                embed=embeds.error("Ce panneau appartient à une autre personne."), ephemeral=True
-            )
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ce panneau appartient à une autre personne.')), ephemere=True)
             return False
         if not await _can_setup(self.bot, interaction.user, interaction.guild):
             await _permission_error(interaction)
@@ -673,10 +661,7 @@ class SetupView(discord.ui.LayoutView):
                     setting = await log_service.get_log_setting(self.bot, self.guild.id, self.selected_log)
                     channel_id = setting.get("channel_id")
                     if not setting.get("enabled") and not channel_id:
-                        return await interaction.response.send_message(
-                            embed=embeds.error("Choisissez d’abord un salon pour cette catégorie de logs."),
-                            ephemeral=True,
-                        )
+                        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Choisissez d’abord un salon pour cette catégorie de logs.')), ephemere=True)
                     await log_service.set_log_config(
                         self.bot, self.guild.id, self.selected_log,
                         channel_id=channel_id, enabled=not bool(setting.get("enabled")),

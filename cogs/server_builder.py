@@ -18,6 +18,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import access_matrix, checks, embeds
+from utils import sentrix_panels as panels
 
 
 logger = logging.getLogger("bot.server_builder")
@@ -1928,18 +1929,12 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
     @checks.is_owner_or_admin_for("configuration")
     async def create_server(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être lancée dans un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être lancée dans un serveur.')))
         if ctx.interaction:
             await ctx.defer()
         me = ctx.guild.me
         if not me.guild_permissions.administrator:
-            return await ctx.send(
-                embed=embeds.error(
-                    "Pour installer plus de 50 rôles avec leurs permissions, les salons privés "
-                    "et les tickets, SentriX doit avoir la permission **Administrateur**. Placez "
-                    "aussi son rôle au-dessus des rôles qu'il doit gérer, puis relancez +create-server."
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Pour installer plus de 50 rôles avec leurs permissions, les salons privés et les tickets, SentriX doit avoir la permission **Administrateur**. Placez aussi son rôle au-dessus des rôles qu'il doit gérer, puis relancez +create-server.")))
         view = ServerBuilderView(self.bot, ctx.author.id)
         await ctx.send(embed=view.build_preview_embed(), view=view)
 
@@ -1957,19 +1952,13 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         raison: str = "Aucune raison fournie",
     ):
         if salon.id == ctx.channel.id:
-            return await ctx.send(
-                embed=embeds.error(
-                    "Vous ne pouvez pas supprimer le salon depuis lequel vous lancez cette commande."
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas supprimer le salon depuis lequel vous lancez cette commande.')))
         name = salon.name
         try:
             await salon.delete(reason=f"{ctx.author} : {raison}")
         except discord.Forbidden:
-            return await ctx.send(embed=embeds.error("Je n'ai pas la permission de supprimer ce salon."))
-        await ctx.send(
-            embed=embeds.success(f"Le salon **{name}** a été supprimé.\nRaison : {raison}")
-        )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Je n'ai pas la permission de supprimer ce salon.")))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le salon **{name}** a été supprimé.\nRaison : {raison}')))
 
     @commands.hybrid_command(
         name="wipe-server",
@@ -1980,14 +1969,11 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
     @checks.is_owner_or_admin_for("complete")
     async def wipe_server(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être lancée dans un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être lancée dans un serveur.')))
         guild = ctx.guild
         me = guild.me
         if not me.guild_permissions.manage_channels or not me.guild_permissions.manage_roles:
-            return await ctx.send(embed=embeds.error(
-                "SentriX doit avoir les permissions **Gérer les salons** et **Gérer les rôles**. "
-                "Placez aussi son rôle suffisamment haut avant de relancer la commande."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('SentriX doit avoir les permissions **Gérer les salons** et **Gérer les rôles**. Placez aussi son rôle suffisamment haut avant de relancer la commande.')))
 
         bot_role_ids = {role.id for role in me.roles}
         deletable_roles = [
@@ -2003,7 +1989,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         protected_roles = len(guild.roles) - len(deletable_roles)
         total_channels = len(guild.channels)
         if total_channels == 0 and not deletable_roles:
-            return await ctx.send(embed=embeds.info("Il n'y a aucun salon ni rôle supprimable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Il n'y a aucun salon ni rôle supprimable.")))
         warning = embeds.error(
             f"Vous êtes sur le point de supprimer **{total_channels}** salon(s)/catégorie(s) "
             f"et **{len(deletable_roles)}** rôle(s) sur "
@@ -2114,9 +2100,7 @@ class WipeConfirmModal(discord.ui.Modal, title="Confirmation de suppression tota
             "\n\nLe salon actuel et les rôles indispensables au bot ont été conservés "
             "pour terminer l'opération et afficher ce résultat."
         )
-        await interaction.followup.send(
-            embed=embeds.success(description, title="Suppression terminée")
-        )
+        await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(description, title='Suppression terminée')))
 
 
 class WipeConfirmView(discord.ui.View):

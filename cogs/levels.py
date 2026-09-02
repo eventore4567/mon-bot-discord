@@ -76,7 +76,7 @@ class StatsView(discord.ui.View):
             is_staff = True
         if is_staff:
             return True
-        await interaction.response.send_message(embed=_reponse("Niveaux", "○ Ce menu n'est pas pour vous — utilisez `/stats` de votre côté pour consulter vos propres statistiques.", kind="danger"), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(_reponse('Niveaux', "○ Ce menu n'est pas pour vous — utilisez `/stats` de votre côté pour consulter vos propres statistiques.", kind='danger')), ephemere=True)
         return False
 
     async def on_timeout(self):
@@ -421,7 +421,7 @@ class StatsConfigView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.author_id:
             return True
-        await interaction.response.send_message(embed=_reponse("Niveaux", "○ Seule la personne ayant ouvert ce panneau peut l'utiliser.", kind="danger"), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(_reponse('Niveaux', "○ Seule la personne ayant ouvert ce panneau peut l'utiliser.", kind='danger')), ephemere=True)
         return False
 
     async def on_timeout(self):

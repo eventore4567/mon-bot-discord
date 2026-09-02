@@ -18,6 +18,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from . import control_center_v3
 from . import setup_control_center as setup_ui
 from . import setup_polish_v70 as v70
@@ -552,12 +553,7 @@ class TicketModuleButton(discord.ui.Button):
             )
             await self.owner.audit(interaction.user.id, "module:tickets", "off")
             await self.owner.refresh(interaction)
-            return await interaction.followup.send(
-                embed=embeds.warning(
-                    "Le module **Tickets** est désactivé. La configuration est conservée et pourra être réactivée sans recréer les salons."
-                ),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.warning('Le module **Tickets** est désactivé. La configuration est conservée et pourra être réactivée sans recréer les salons.')), ephemere=True)
 
         try:
             result = await ensure_ticket_configuration(
@@ -566,34 +562,17 @@ class TicketModuleButton(discord.ui.Button):
                 actor_id=interaction.user.id,
             )
         except TicketBootstrapError as exc:
-            return await interaction.followup.send(embed=embeds.error(str(exc)), ephemeral=True)
+            return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(str(exc))), ephemere=True)
         except (discord.Forbidden, discord.HTTPException):
             logger.exception("Discord a refusé la configuration automatique Tickets V72.")
-            return await interaction.followup.send(
-                embed=embeds.error(
-                    "Discord a refusé une étape. Vérifiez **Gérer les salons**, **Gérer les rôles**, **Voir les salons** et **Envoyer des messages** pour SentriX."
-                ),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Discord a refusé une étape. Vérifiez **Gérer les salons**, **Gérer les rôles**, **Voir les salons** et **Envoyer des messages** pour SentriX.')), ephemere=True)
         except Exception:
             logger.exception("Configuration automatique Tickets V72 impossible.")
-            return await interaction.followup.send(
-                embed=embeds.error("La configuration automatique des tickets a rencontré une erreur technique."),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('La configuration automatique des tickets a rencontré une erreur technique.')), ephemere=True)
 
         await self.owner.audit(interaction.user.id, "module:tickets", "on+autoconfig")
         await self.owner.refresh(interaction)
-        return await interaction.followup.send(
-            embed=embeds.success(
-                "**Tickets configurés et activés.**\n"
-                f"Panel : {result['panel_channel'].mention}\n"
-                f"Catégorie : **{result['category'].name}**\n"
-                f"Rôle support : {result['role'].mention}\n"
-                f"Logs : {result['log_channel'].mention}"
-            ),
-            ephemeral=True,
-        )
+        return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(f"**Tickets configurés et activés.**\nPanel : {result['panel_channel'].mention}\nCatégorie : **{result['category'].name}**\nRôle support : {result['role'].mention}\nLogs : {result['log_channel'].mention}")), ephemere=True)
 
 
 def _install_setup_render() -> None:
@@ -635,8 +614,8 @@ def _install_ticket_runtime_guard() -> None:
         if guild is not None and not await core.module_enabled(self.bot, guild.id, "tickets"):
             panel = embeds.warning("Le système de tickets est actuellement désactivé sur ce serveur.")
             if interaction.response.is_done():
-                return await interaction.followup.send(embed=panel, ephemeral=True)
-            return await interaction.response.send_message(embed=panel, ephemeral=True)
+                return await panels.envoyer(interaction.followup, panels.depuis_embed(panel), ephemere=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
         return await current(self, interaction, type_id)
 
     start_ticket_flow_v72._sentrix_ticket_module_guard_v72 = True

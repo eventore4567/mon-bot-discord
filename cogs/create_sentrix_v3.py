@@ -26,6 +26,7 @@ import discord
 from discord.ext import commands
 
 from utils import checks, embeds, log_categories, log_service
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.create-sentrix-v3")
 
@@ -819,21 +820,11 @@ def _patch_addemoji_direct_copy(bot: commands.Bot) -> None:
         if match is None:
             return None
         if ctx.guild is None:
-            return await ctx.send(embed=await cog_self._embed(
-                None,
-                title="Commande indisponible",
-                description="Cette commande doit être utilisée sur un serveur.",
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(None, title='Commande indisponible', description='Cette commande doit être utilisée sur un serveur.', kind='danger')))
 
         me = ctx.guild.me
         if me is None or not me.guild_permissions.manage_emojis_and_stickers:
-            return await ctx.send(embed=await cog_self._embed(
-                ctx.guild.id,
-                title="Permission manquante",
-                description="Le bot doit avoir la permission **Gérer les emojis et stickers**.",
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Permission manquante', description='Le bot doit avoir la permission **Gérer les emojis et stickers**.', kind='danger')))
 
         animated = bool(match.group(1))
         emoji_name = lookup._discord_name(match.group(2), fallback="emoji")
@@ -844,22 +835,12 @@ def _patch_addemoji_direct_copy(bot: commands.Bot) -> None:
             ctx.guild.emojis,
         )
         if existing is not None:
-            return await ctx.send(embed=await cog_self._embed(
-                ctx.guild.id,
-                title="Emoji déjà présent",
-                description=f"{existing} existe déjà sous le nom `:{existing.name}:`.",
-                kind="warning",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Emoji déjà présent', description=f'{existing} existe déjà sous le nom `:{existing.name}:`.', kind='warning')))
 
         used = sum(1 for item in ctx.guild.emojis if bool(item.animated) == animated)
         if used >= ctx.guild.emoji_limit:
             kind_label = "animés" if animated else "statiques"
-            return await ctx.send(embed=await cog_self._embed(
-                ctx.guild.id,
-                title="Limite atteinte",
-                description=f"Le serveur n'a plus de place pour les emojis {kind_label}.",
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Limite atteinte', description=f"Le serveur n'a plus de place pour les emojis {kind_label}.", kind='danger')))
 
         extension = "gif" if animated else "png"
         # Le fichier brut est prioritaire. Les URLs avec paramètres passent ensuite.
@@ -909,15 +890,7 @@ def _patch_addemoji_direct_copy(bot: commands.Bot) -> None:
         if data is None:
             detail = f" (HTTP {last_status})" if last_status else ""
             expected = "GIF animé" if animated else "image statique"
-            return await ctx.send(embed=await cog_self._embed(
-                ctx.guild.id,
-                title="Emoji inaccessible",
-                description=(
-                    f"SentriX n'a pas pu récupérer le vrai {expected} depuis Discord{detail}. "
-                    "Aucun emoji statique de remplacement n'a été créé."
-                ),
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Emoji inaccessible', description=f"SentriX n'a pas pu récupérer le vrai {expected} depuis Discord{detail}. Aucun emoji statique de remplacement n'a été créé.", kind='danger')))
 
         try:
             created = await ctx.guild.create_custom_emoji(
@@ -926,19 +899,9 @@ def _patch_addemoji_direct_copy(bot: commands.Bot) -> None:
                 reason=f"Emoji copié par {ctx.author} avec +addemoji",
             )
         except discord.Forbidden:
-            return await ctx.send(embed=await cog_self._embed(
-                ctx.guild.id,
-                title="Création refusée",
-                description="Vérifiez la permission **Gérer les emojis et stickers** du bot.",
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Création refusée', description='Vérifiez la permission **Gérer les emojis et stickers** du bot.', kind='danger')))
         except discord.HTTPException as exc:
-            return await ctx.send(embed=await cog_self._embed(
-                ctx.guild.id,
-                title="Création impossible",
-                description=f"Discord a refusé cet emoji (`{exc.code}`).",
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Création impossible', description=f'Discord a refusé cet emoji (`{exc.code}`).', kind='danger')))
 
         if bool(created.animated) != animated:
             # Garde-fou final : ne jamais laisser un mauvais emoji créé par erreur.
@@ -946,25 +909,9 @@ def _patch_addemoji_direct_copy(bot: commands.Bot) -> None:
                 await created.delete(reason="SentriX V3 : type animé/statique incorrect")
             except discord.HTTPException:
                 pass
-            return await ctx.send(embed=await cog_self._embed(
-                ctx.guild.id,
-                title="Type d'emoji incorrect",
-                description=(
-                    "Discord n'a pas conservé le type de l'emoji. "
-                    "L'emoji incorrect a été retiré au lieu de rester en statique."
-                ),
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title="Type d'emoji incorrect", description="Discord n'a pas conservé le type de l'emoji. L'emoji incorrect a été retiré au lieu de rester en statique.", kind='danger')))
 
-        return await ctx.send(embed=await cog_self._embed(
-            ctx.guild.id,
-            title="Emoji ajouté",
-            description=(
-                f"{created} a été copié sous le nom `:{created.name}:`.\n"
-                f"Type vérifié : **{'animé' if created.animated else 'statique'}**."
-            ),
-            kind="success",
-        ))
+        return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Emoji ajouté', description=f"{created} a été copié sous le nom `:{created.name}:`.\nType vérifié : **{('animé' if created.animated else 'statique')}**.", kind='success')))
 
     strict_copy._sentrix_v3_keep_animation = True
     strict_copy._sentrix_previous = current

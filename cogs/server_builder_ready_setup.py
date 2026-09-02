@@ -10,6 +10,8 @@ import logging
 import time
 
 import discord
+
+from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from .security_runtime_hardening import apply_recommended_security
@@ -261,7 +263,7 @@ async def _ensure_announcements(bot: commands.Bot, builder_cog, guild: discord.G
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             message = None
     if message is None:
-        message = await channel.send(embed=tracker.build_embed(guild))
+        message = await panels.envoyer(channel, panels.depuis_embed(tracker.build_embed(guild)))
     else:
         await message.edit(embed=tracker.build_embed(guild))
     await tracker._save_panel(guild.id, channel.id, message.id, creator_id)

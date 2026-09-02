@@ -1,13 +1,14 @@
 """Administration du serveur: activer tous les filtres AutoMod configurables."""
 from discord.ext import commands
 from utils import checks, embeds
+from utils import sentrix_panels as panels
 
 _INSTALLED = False
 
 @checks.is_owner_or_admin_for("securite")
 async def enable_all(ctx: commands.Context):
     if ctx.guild is None:
-        return await ctx.send(embed=embeds.error("Commande disponible uniquement sur un serveur."))
+        return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Commande disponible uniquement sur un serveur.')))
     from .automod import TOGGLE_FIELDS, AUTOMOD_TOGGLE_LABELS
     for field in TOGGLE_FIELDS:
         await ctx.bot.db.set_automod(ctx.guild.id, field, 1)
@@ -22,11 +23,7 @@ async def enable_all(ctx: commands.Context):
     if isinstance(cache, dict):
         cache.pop(ctx.guild.id, None)
     labels = [AUTOMOD_TOGGLE_LABELS.get(field, field) for field in TOGGLE_FIELDS]
-    await ctx.send(embed=embeds.success(
-        "Toutes les protections configurables sont maintenant **ACTIVES**.\n\n"
-        + "\n".join(f"• {label}" for label in labels)
-        + "\n• Escalade automatique des sanctions\n\nNiveau global : **ÉLEVÉ**."
-    ))
+    await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Toutes les protections configurables sont maintenant **ACTIVES**.\n\n' + '\n'.join((f'• {label}' for label in labels)) + '\n• Escalade automatique des sanctions\n\nNiveau global : **ÉLEVÉ**.')))
 
 def install(bot: commands.Bot):
     global _INSTALLED

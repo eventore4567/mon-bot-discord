@@ -16,6 +16,8 @@ import re
 
 import discord
 
+from utils import sentrix_panels as panels
+
 logger = logging.getLogger("bot.media-upload-runtime")
 
 _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
@@ -120,24 +122,13 @@ def _install_ticket_uploads() -> bool:
                 try:
                     color_value = int(raw_color, 16)
                 except ValueError:
-                    return await interaction.response.send_message(
-                        embed=tickets_mod.embeds.error(
-                            'Couleur invalide. Utilisez un code hexadécimal comme `5865F2`.'
-                        ),
-                        ephemeral=True,
-                    )
+                    return await panels.envoyer(interaction.response, panels.depuis_embed(tickets_mod.embeds.error('Couleur invalide. Utilisez un code hexadécimal comme `5865F2`.')), ephemere=True)
 
             image = _one_upload(self.image_upload)
             thumbnail = _one_upload(self.thumbnail_upload)
             for attachment, label in ((image, "grande image"), (thumbnail, "miniature")):
                 if attachment is not None and not _is_image(attachment):
-                    return await interaction.response.send_message(
-                        embed=tickets_mod.embeds.error(
-                            f"Le fichier choisi pour **{label}** n'est pas une image. "
-                            "Formats acceptés : PNG, JPG, WEBP ou GIF."
-                        ),
-                        ephemeral=True,
-                    )
+                    return await panels.envoyer(interaction.response, panels.depuis_embed(tickets_mod.embeds.error(f"Le fichier choisi pour **{label}** n'est pas une image. Formats acceptés : PNG, JPG, WEBP ou GIF.")), ephemere=True)
 
             image_url = _stable_url(image) if image else self.old_image
             thumbnail_url = _stable_url(thumbnail) if thumbnail else self.old_thumbnail
@@ -162,13 +153,7 @@ def _install_ticket_uploads() -> bool:
                     self.panel_id,
                 ),
             )
-            await interaction.response.send_message(
-                embed=tickets_mod.embeds.success(
-                    "Apparence mise à jour. Les images sont maintenant importées directement "
-                    "depuis Discord : aucune URL à copier."
-                ),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.depuis_embed(tickets_mod.embeds.success('Apparence mise à jour. Les images sont maintenant importées directement depuis Discord : aucune URL à copier.')), ephemere=True)
 
     tickets_mod.PanelMediaModal = PanelMediaUploadModal
     logger.info("Tickets : URL image/miniature remplacées par FileUpload Discord.")
@@ -227,12 +212,7 @@ def _install_embed_uploads() -> bool:
             }
             for attachment in uploads.values():
                 if attachment is not None and not _is_image(attachment):
-                    return await interaction.response.send_message(
-                        embed=embed_mod.embeds.error(
-                            "Tous les fichiers doivent être des images PNG, JPG, WEBP ou GIF."
-                        ),
-                        ephemeral=True,
-                    )
+                    return await panels.envoyer(interaction.response, panels.depuis_embed(embed_mod.embeds.error('Tous les fichiers doivent être des images PNG, JPG, WEBP ou GIF.')), ephemere=True)
 
             draft = self.view_ref.draft
             for attr, attachment in uploads.items():

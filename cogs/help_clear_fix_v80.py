@@ -17,6 +17,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds, log_service
+from utils import sentrix_panels as panels
 from . import help_complete_v79 as help_v79
 from . import premium_ui_v81 as premium_v81
 from . import premium_ui_v82 as premium_v82
@@ -269,9 +270,9 @@ async def _clear_v80(self, ctx: commands.Context, nombre: int):
 
     response = embeds.success(f"{len(messages)} message(s) supprimé(s).")
     if ctx.interaction:
-        await ctx.send(embed=response, ephemeral=True)
+        await panels.envoyer(ctx, panels.depuis_embed(response), ephemere=True)
     else:
-        await ctx.send(embed=response, delete_after=5)
+        await panels.envoyer(ctx, panels.depuis_embed(response))
 
 
 def _install_clear_command(bot: commands.Bot) -> None:

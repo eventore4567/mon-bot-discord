@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from . import setup_control_center as setup_ui
 from . import setup_ticket_autoconfig_v72 as v72
 
@@ -213,10 +214,7 @@ class V73AiLimitsModal(discord.ui.Modal, title="Limites de l’IA"):
                 max(1, int(self.daily.value)),
             ]
         except ValueError:
-            return await interaction.response.send_message(
-                embed=embeds.error("Les limites doivent être des nombres entiers."),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Les limites doivent être des nombres entiers.')), ephemere=True)
 
         backend = self.shell.backend
         await backend.ensure_ai()
@@ -257,10 +255,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if int(interaction.user.id) != self.author_id:
-            await interaction.response.send_message(
-                embed=embeds.error("Ce panneau appartient à une autre personne."),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ce panneau appartient à une autre personne.')), ephemere=True)
             return False
         return True
 
@@ -499,9 +494,9 @@ class SentriXSetupV73(discord.ui.LayoutView):
         try:
             panel = embeds.error("Une erreur est survenue dans le panneau de configuration SentriX.")
             if interaction.response.is_done():
-                await interaction.followup.send(embed=panel, ephemeral=True)
+                await panels.envoyer(interaction.followup, panels.depuis_embed(panel), ephemere=True)
             else:
-                await interaction.response.send_message(embed=panel, ephemeral=True)
+                await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
         except discord.HTTPException:
             pass
 

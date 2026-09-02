@@ -12,6 +12,7 @@ from discord.ext import commands, tasks
 import config
 from database.db import now
 from utils import checks, embeds, log_service
+from utils import sentrix_panels as panels
 from .v17_shared import ensure_schema, register_command_policy, state
 
 logger = logging.getLogger("bot.v17-health")
@@ -278,9 +279,9 @@ class V17Health(commands.Cog, name="V17Health"):
 
     async def send_report(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Diagnostic disponible uniquement sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Diagnostic disponible uniquement sur un serveur.')))
         e = await build_health_embed(self.bot, ctx.guild)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="healthcheck", description="Diagnostic complet de SentriX sur ce serveur.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")

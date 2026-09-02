@@ -15,6 +15,7 @@ import discord
 from discord.ext import commands
 
 from utils import design_system, embeds, stats_service
+from utils import sentrix_panels as panels
 from utils.v21_rules import (
     MARKET_MAX_ACTIVE_PER_USER,
     achievement_rows,
@@ -56,13 +57,13 @@ class MarketConfirmView(design_system.SentriXView):
         await interaction.response.defer(ephemeral=True)
         await self._disable(interaction)
         embed = await self.cog.execute_purchase(interaction.guild, interaction.user, self.listing_id)
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await panels.envoyer(interaction.followup, panels.depuis_embed(embed), ephemere=True)
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.finished = True
         await self._disable(interaction)
-        await interaction.response.send_message(embed=embeds.warning("Achat annulé."), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('Achat annulé.')), ephemere=True)
 
 
 class SentriXV21(commands.Cog):
@@ -201,16 +202,13 @@ class SentriXV21(commands.Cog):
             try:
                 market_totals(quantity, unit_price, fee_bps=0)
             except ValueError as exc:
-                return await ctx.send(embed=embeds.error(f"Annonce refusée : {exc}."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Annonce refusée : {exc}.')))
             count = await self.bot.db.fetchone(
                 "SELECT COUNT(*) AS n FROM v2_market_listings WHERE guild_id=? AND seller_id=? AND status='active'",
                 (ctx.guild.id, ctx.author.id),
             )
             if count and int(count["n"] or 0) >= MARKET_MAX_ACTIVE_PER_USER:
-                return await ctx.send(embed=embeds.warning(
-                    f"Vous avez déjà **{MARKET_MAX_ACTIVE_PER_USER} annonces actives**. "
-                    "Vendez ou annulez-en une avant d'en créer une autre."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"Vous avez déjà **{MARKET_MAX_ACTIVE_PER_USER} annonces actives**. Vendez ou annulez-en une avant d'en créer une autre.")))
             return await original_sell(v2_cog, ctx, quantity, unit_price, item=item)
 
         sell.callback = guarded_sell
@@ -221,19 +219,19 @@ class SentriXV21(commands.Cog):
 
         async def confirmed_buy(v2_cog, ctx: commands.Context, listing_id: int):
             if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-                return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
             row = await self.bot.db.fetchone(
                 "SELECT * FROM v2_market_listings WHERE id=? AND guild_id=? AND status='active'",
                 (listing_id, ctx.guild.id),
             )
             if row is None:
-                return await ctx.send(embed=embeds.error("Annonce indisponible."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Annonce indisponible.')))
             if int(row["seller_id"]) == ctx.author.id:
-                return await ctx.send(embed=embeds.error("Vous ne pouvez pas acheter votre propre annonce."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas acheter votre propre annonce.')))
             try:
                 totals = market_totals(int(row["quantity"]), int(row["unit_price"]), fee_bps=0)
             except ValueError:
-                return await ctx.send(embed=embeds.error("Cette annonce contient des valeurs invalides."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette annonce contient des valeurs invalides.')))
             embed = discord.Embed(
                 title="Confirmer l'achat",
                 description=(
@@ -336,7 +334,7 @@ class SentriXV21(commands.Cog):
     @commands.cooldown(2, 5, commands.BucketType.user)
     async def achievements(self, ctx: commands.Context, membre: discord.Member = None):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         member = membre or ctx.author
         stats, row, joined_days = await self._member_stats_and_checkin(ctx.guild, member)
         achievements = achievement_rows(
@@ -364,13 +362,13 @@ class SentriXV21(commands.Cog):
             value="\n".join(f"**{a['name']}** — {a['description']}" for a in locked[:7]) or "Tous les succès sont débloqués.",
             inline=False,
         )
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="challenges", aliases=["defis"], description="Afficher les défis de progression V2.1.", with_app_command=False)
     @commands.cooldown(2, 5, commands.BucketType.user)
     async def challenges(self, ctx: commands.Context, membre: discord.Member = None):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         member = membre or ctx.author
         stats, row, _ = await self._member_stats_and_checkin(ctx.guild, member)
         challenges = challenge_rows(stats, streak=int(row["streak"] if row else 0))
@@ -386,17 +384,17 @@ class SentriXV21(commands.Cog):
             description="\n\n".join(lines),
             colour=discord.Colour.blurple(),
         )
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="market-find", aliases=["market-search"], description="Rechercher un objet sur le marché.", with_app_command=False)
     @commands.cooldown(2, 5, commands.BucketType.user)
     async def market_find(self, ctx: commands.Context, *, recherche: str):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         try:
             query = clean_market_query(recherche)
         except ValueError:
-            return await ctx.send(embed=embeds.error("Indiquez le nom d'un objet à rechercher."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Indiquez le nom d'un objet à rechercher.")))
         rows = await self.bot.db.fetchall(
             "SELECT id,seller_id,item_name,quantity,unit_price FROM v2_market_listings "
             "WHERE guild_id=? AND status='active' AND lower(item_name) LIKE lower(?) "
@@ -419,12 +417,12 @@ class SentriXV21(commands.Cog):
             )
         else:
             embed.add_field(name="Résultat", value="Aucune annonce correspondante.", inline=False)
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="market-my", description="Afficher vos annonces actives.", with_app_command=False)
     async def market_my(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         rows = await self.bot.db.fetchall(
             "SELECT id,item_name,quantity,unit_price,created_at FROM v2_market_listings "
             "WHERE guild_id=? AND seller_id=? AND status='active' ORDER BY id DESC LIMIT 20",
@@ -438,12 +436,12 @@ class SentriXV21(commands.Cog):
             ) if rows else "Vous n'avez aucune annonce active."
         )
         embed.set_footer(text=f"Maximum {MARKET_MAX_ACTIVE_PER_USER} annonces actives par membre")
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="market-history", description="Afficher votre historique du marché.", with_app_command=False)
     async def market_history(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         rows = await self.bot.db.fetchall(
             "SELECT id,seller_id,buyer_id,item_name,quantity,unit_price,status,sold_at,created_at "
             "FROM v2_market_listings WHERE guild_id=? AND (seller_id=? OR buyer_id=?) "
@@ -462,7 +460,7 @@ class SentriXV21(commands.Cog):
             description="\n".join(lines) if lines else "Aucun historique de marché.",
             colour=discord.Colour.blurple(),
         )
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="systemstatus", aliases=["botstatus"], description="Afficher la santé technique de SentriX.", with_app_command=False)
     @commands.has_permissions(manage_guild=True)
@@ -525,4 +523,4 @@ class SentriXV21(commands.Cog):
             value="\n".join(f"• {problem}" for problem in problems[:6]) if problems else "Aucun problème critique détecté.",
             inline=False,
         )
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))

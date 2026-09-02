@@ -18,6 +18,7 @@ from discord.ext import commands
 
 import config
 from utils import checks
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.create-sentrix")
 
@@ -212,7 +213,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
             if existing is not None:
                 await existing.edit(content=None, embed=embed)
             else:
-                await channel.send(embed=embed)
+                await panels.envoyer(channel, panels.depuis_embed(embed))
             return True
         except discord.HTTPException:
             logger.warning("Message d'introduction impossible dans #%s", channel.name, exc_info=True)

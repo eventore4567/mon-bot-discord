@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any
 
 import discord
+
+from utils import sentrix_panels as panels
 from discord.ext import commands, tasks
 
 logger = logging.getLogger("bot.v13-production")
@@ -257,7 +259,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                         title=f"Forme de jeu — {target.display_name}",
                         description=description,
                     )
-                    await ctx.send(embed=embed)
+                    await panels.envoyer(ctx, panels.depuis_embed(embed))
                 except Exception:
                     logger.debug("V13: unable to display game form stats.", exc_info=True)
                 return result

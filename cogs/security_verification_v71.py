@@ -28,6 +28,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from . import setup_control_center as setup_ui
 from . import setup_polish_v70 as v70
 
@@ -784,19 +785,13 @@ class SecurityVerificationRuntimeV71:
                 if interaction.guild is not None:
                     cfg = await settings(runtime.bot, interaction.guild.id)
                     if not cfg["verification_enabled"]:
-                        return await interaction.response.send_message(
-                            embed=embeds.warning("La vérification SentriX est désactivée sur ce serveur."),
-                            ephemeral=True,
-                        )
+                        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('La vérification SentriX est désactivée sur ce serveur.')), ephemere=True)
                     if isinstance(interaction.user, discord.Member):
                         age = max(0, int((discord.utils.utcnow() - interaction.user.created_at).total_seconds()))
                         required = cfg["verification_min_account_age_minutes"] * 60
                         if age < required:
                             minutes = max(1, (required - age + 59) // 60)
-                            return await interaction.response.send_message(
-                                embed=embeds.warning(f'Compte trop récent. Réessayez dans environ **{minutes} min**.'),
-                                ephemeral=True,
-                            )
+                            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning(f'Compte trop récent. Réessayez dans environ **{minutes} min**.')), ephemere=True)
                 return await original_start(interaction)
 
             engine.start_human_verification = types.MethodType(start_v71, engine)
@@ -827,10 +822,7 @@ class SecurityVerificationRuntimeV71:
                 cfg = await settings(runtime.bot, interaction.guild.id)
                 if not cfg["verification_enabled"]:
                     getattr(_self, "_challenges", {}).pop(key, None)
-                    return await interaction.response.send_message(
-                        embed=embeds.warning("La vérification a été désactivée pendant cette session."),
-                        ephemeral=True,
-                    )
+                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('La vérification a été désactivée pendant cette session.')), ephemere=True)
 
                 score, checks = runtime._score(_self, interaction.user, state, code, math_answer, cfg)
                 if score < cfg["verification_threshold"]:
@@ -839,13 +831,7 @@ class SecurityVerificationRuntimeV71:
                         await record_failure(interaction.guild.id, interaction.user.id)
                     getattr(_self, "_challenges", {}).pop(key, None)
                     failed = [name for name, passed in checks.items() if not passed and name not in {"age_7d", "avatar"}]
-                    await interaction.response.send_message(
-                        embed=embeds.warning(
-                            f"Vérification incomplète : **{score}/{SCORE_MAX}** (seuil **{cfg['verification_threshold']}**).\nVotre accès reste verrouillé. Relancez une nouvelle session après avoir rempli les conditions Discord."
-                            + (f"\nContrôles à revoir : `{', '.join(failed[:5])}`" if failed else "")
-                        ),
-                        ephemeral=True,
-                    )
+                    await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning(f"Vérification incomplète : **{score}/{SCORE_MAX}** (seuil **{cfg['verification_threshold']}**).\nVotre accès reste verrouillé. Relancez une nouvelle session après avoir rempli les conditions Discord." + (f"\nContrôles à revoir : `{', '.join(failed[:5])}`" if failed else ''))), ephemere=True)
                     return
 
                 # Le moteur historique effectue encore ses validations finales et attribue

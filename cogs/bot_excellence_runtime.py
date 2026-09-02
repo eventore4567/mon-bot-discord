@@ -30,6 +30,7 @@ from discord.ext import commands, tasks
 
 from database.db import now
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.excellence-runtime")
 
@@ -665,30 +666,22 @@ def _install_economy_atomicity(bot: commands.Bot) -> None:
     if rob_command is not None and not getattr(rob_command.callback, "_sentrix_atomic", False):
         async def robust_rob(self, ctx: commands.Context, membre: discord.Member):
             if membre.id == ctx.author.id:
-                return await ctx.send(embed=embeds.error("Vous ne pouvez pas vous voler vous-même."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas vous voler vous-même.')))
             if membre.bot:
-                return await ctx.send(embed=embeds.error("Vous ne pouvez pas voler un bot."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
             status, remaining, amount = await _atomic_rob(
                 self.bot, ctx.guild.id, ctx.author.id, membre.id, economy_mod.ROB_COOLDOWN
             )
             if status == "cooldown":
                 minutes = max(1, (remaining + 59) // 60)
-                return await ctx.send(embed=embeds.warning(
-                    f"Vous devez attendre encore {minutes} minute(s) avant de retenter un vol."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Vous devez attendre encore {minutes} minute(s) avant de retenter un vol.')))
             if status == "target_poor":
-                return await ctx.send(embed=embeds.warning(
-                    f"{membre.display_name} n'a pas assez d'argent liquide à voler."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")))
             if status == "success":
-                return await ctx.send(embed=embeds.success(
-                    f"Vous avez volé **{stats_service.format_number(amount)}** crédits à {membre.display_name}."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous avez volé **{stats_service.format_number(amount)}** crédits à {membre.display_name}.')))
             if amount > 0:
-                return await ctx.send(embed=embeds.error(
-                    f"Vous avez été attrapé et payé **{stats_service.format_number(amount)}** crédits d'amende."
-                ))
-            return await ctx.send(embed=embeds.error("Vous avez été attrapé, mais votre portefeuille était vide."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Vous avez été attrapé et payé **{stats_service.format_number(amount)}** crédits d'amende.")))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous avez été attrapé, mais votre portefeuille était vide.')))
 
         robust_rob._sentrix_atomic = True
         rob_command.callback = robust_rob
@@ -697,7 +690,7 @@ def _install_economy_atomicity(bot: commands.Bot) -> None:
     if gamble_command is not None and not getattr(gamble_command.callback, "_sentrix_atomic", False):
         async def robust_gamble(self, ctx: commands.Context, montant: int):
             if montant <= 0:
-                return await ctx.send(embed=embeds.error("Le montant doit être positif."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant doit être positif.')))
             db = self.bot.db
             conn = db._conn
             async with db._economy_lock:
@@ -732,7 +725,7 @@ def _install_economy_atomicity(bot: commands.Bot) -> None:
                     )
                     await conn.commit()
             if not enough:
-                return await ctx.send(embed=embeds.error("Vous n'avez pas assez d'argent."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent.")))
             text = "gagné" if won else "perdu"
             response = embeds.success if won else embeds.error
             await ctx.send(embed=response(f"Vous avez {text} **{stats_service.format_number(montant)}** crédits."))
@@ -761,10 +754,8 @@ def _install_economy_atomicity(bot: commands.Bot) -> None:
                     )
                     await conn.commit()
             if not valid:
-                return await ctx.send(embed=embeds.error("Montant invalide. Utilisez un nombre positif ou `all`."))
-            await ctx.send(embed=embeds.success(
-                f"{stats_service.format_number(amount)} crédits transférés dans votre banque."
-            ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide. Utilisez un nombre positif ou `all`.')))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{stats_service.format_number(amount)} crédits transférés dans votre banque.')))
 
         atomic_deposit._sentrix_atomic = True
         cls._deposit_to_bank = atomic_deposit
@@ -790,8 +781,8 @@ def _install_economy_atomicity(bot: commands.Bot) -> None:
                     )
                     await conn.commit()
             if not valid:
-                return await ctx.send(embed=embeds.error("Montant invalide."))
-            await ctx.send(embed=embeds.success(f"{stats_service.format_number(amount)} crédits retirés de la banque."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide.')))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{stats_service.format_number(amount)} crédits retirés de la banque.')))
 
         atomic_withdraw._sentrix_atomic = True
         withdraw_command.callback = atomic_withdraw
@@ -839,10 +830,8 @@ def _install_economy_atomicity(bot: commands.Bot) -> None:
                         await conn.commit()
                         sale = price
             if sale is None:
-                return await ctx.send(embed=embeds.error("Vous ne possédez pas cet objet."))
-            await ctx.send(embed=embeds.success(
-                f"Vous avez vendu **{objet}** pour {stats_service.format_number(sale)} crédits."
-            ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne possédez pas cet objet.')))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous avez vendu **{objet}** pour {stats_service.format_number(sale)} crédits.')))
 
         atomic_sell._sentrix_atomic = True
         sell_command.callback = atomic_sell
@@ -1455,15 +1444,15 @@ def _install_asyncio_exception_handler(bot: commands.Bot) -> None:
 async def _matchmake_tictactoe(ctx: commands.Context) -> None:
     bot = ctx.bot
     if ctx.guild is None:
-        return await ctx.send(embed=embeds.error("Le matchmaking fonctionne uniquement sur un serveur."))
+        return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le matchmaking fonctionne uniquement sur un serveur.')))
     cog = bot.get_cog("Minigames")
     if cog is None:
-        return await ctx.send(embed=embeds.error("Les mini-jeux sont temporairement indisponibles."))
+        return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Les mini-jeux sont temporairement indisponibles.')))
     from utils import game_rewards
     role_ids = {role.id for role in getattr(ctx.author, "roles", [])}
     allowed, reason = await game_rewards.is_game_enabled(bot, ctx.guild.id, "tictactoe", ctx.channel.id, role_ids)
     if not allowed:
-        return await ctx.send(embed=embeds.warning(reason))
+        return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(reason)))
 
     queue = getattr(bot, "_sentrix_tictactoe_matchmaking", None)
     if queue is None:
@@ -1476,13 +1465,13 @@ async def _matchmake_tictactoe(ctx: commands.Context) -> None:
         queue.pop(key, None)
         waiting = None
     if waiting and waiting[0] == ctx.author.id:
-        return await ctx.send(embed=embeds.info("Vous êtes déjà en attente d'un adversaire dans ce salon."))
+        return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Vous êtes déjà en attente d'un adversaire dans ce salon.")))
     if waiting:
         first = ctx.guild.get_member(waiting[0])
         queue.pop(key, None)
         if first is None or first.bot:
             queue[key] = (ctx.author.id, stamp)
-            return await ctx.send(embed=embeds.info("Recherche d'un adversaire dans ce salon. Un autre membre peut taper `+tictactoe`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Recherche d'un adversaire dans ce salon. Un autre membre peut taper `+tictactoe`.")))
         from .minigames import TicTacToeView
         session_id = game_rewards.new_session_id("tictactoe")
         view = TicTacToeView(first, ctx.author, cog=cog, session_id=session_id)
@@ -1493,9 +1482,7 @@ async def _matchmake_tictactoe(ctx: commands.Context) -> None:
         )
         return await ctx.send(embed=embed, view=view)
     queue[key] = (ctx.author.id, stamp)
-    await ctx.send(embed=embeds.info(
-        "Recherche d'un adversaire dans ce salon. Un autre membre peut taper `+tictactoe` sans mention pour rejoindre la partie."
-    ))
+    await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Recherche d'un adversaire dans ce salon. Un autre membre peut taper `+tictactoe` sans mention pour rejoindre la partie.")))
 
 
 def _install_error_handler(bot: commands.Bot) -> None:
@@ -1510,9 +1497,7 @@ def _install_error_handler(bot: commands.Bot) -> None:
         original_error = getattr(error, "original", error)
         if isinstance(original_error, RuntimeRateLimitError):
             seconds = max(1, round(original_error.retry_after))
-            return await ctx.send(embed=embeds.warning(
-                f"Cette fonction est temporairement limitée pour protéger SentriX. Réessayez dans environ {seconds} seconde(s)."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Cette fonction est temporairement limitée pour protéger SentriX. Réessayez dans environ {seconds} seconde(s).')))
         if (
             isinstance(original_error, commands.MissingRequiredArgument)
             and ctx.command is not None

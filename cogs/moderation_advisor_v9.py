@@ -5,6 +5,7 @@ import json
 import discord
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from database.db import now
@@ -101,9 +102,9 @@ async def calculate_risk(bot, guild_id: int, user_id: int) -> dict:
 
 async def security_risk(ctx: commands.Context, member: discord.Member = None):
     if not ctx.guild:
-        return await ctx.send(embed=_reponse("Analyse de risque", 'Cette analyse doit être utilisée sur un serveur.', kind="danger"))
+        return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Analyse de risque', 'Cette analyse doit être utilisée sur un serveur.', kind='danger')))
     if member is None:
-        return await ctx.send(embed=_reponse("Analyse de risque", 'Utilisation : `+security risk @membre`.', kind="warning"))
+        return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Analyse de risque', 'Utilisation : `+security risk @membre`.', kind='warning')))
     result = await calculate_risk(ctx.bot, ctx.guild.id, member.id)
     reasons = "\n".join(f"- {reason}" for reason in result["reasons"]) or "- Aucun signal récent significatif."
     embed = discord.Embed(

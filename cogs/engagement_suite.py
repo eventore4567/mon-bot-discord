@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import discord
+
+from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from database.db import now
@@ -770,7 +772,7 @@ class EngagementSuite(commands.Cog):
                 star_message = None
         if star_message is None:
             try:
-                star_message = await starboard_channel.send(embed=embed)
+                star_message = await panels.envoyer(starboard_channel, panels.depuis_embed(embed))
             except discord.HTTPException:
                 return
         await self.bot.db.execute(

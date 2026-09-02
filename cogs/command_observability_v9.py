@@ -5,6 +5,8 @@ import json
 import time
 
 import discord
+
+from utils import sentrix_panels as panels
 from discord.ext import commands, tasks
 
 import config
@@ -291,7 +293,7 @@ async def security_health(ctx):
         description="\n".join(lines),
         colour=discord.Colour.green() if state["status"] == "healthy" else discord.Colour.orange(),
     )
-    await ctx.send(embed=embed)
+    await panels.envoyer(ctx, panels.depuis_embed(embed))
 
 
 def _install_security_health(bot):

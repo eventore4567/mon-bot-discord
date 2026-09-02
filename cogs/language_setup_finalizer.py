@@ -16,6 +16,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from . import language_runtime
 
 logger = logging.getLogger("bot.language-setup-finalizer")
@@ -122,16 +123,13 @@ def _patch_syncguild(bot: commands.Bot) -> None:
 
     async def safe_syncguild(cog, ctx: commands.Context):
         if not ctx.guild:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée dans un serveur.')))
         removed = await _purge_local_slash_for_guild(bot, ctx.guild)
         try:
             await bot.tree.sync()
         except discord.HTTPException as exc:
-            return await ctx.send(embed=embeds.error(f"Discord a refusé la synchronisation globale : `{exc}`"))
-        await ctx.send(embed=embeds.success(
-            f"Synchronisation terminée. **{removed}** ancienne(s) commande(s) locale(s) supprimée(s). "
-            "SentriX utilise uniquement ses commandes slash globales."
-        ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Discord a refusé la synchronisation globale : `{exc}`')))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Synchronisation terminée. **{removed}** ancienne(s) commande(s) locale(s) supprimée(s). SentriX utilise uniquement ses commandes slash globales.')))
 
     command.callback = safe_syncguild
     command.description = "Nettoyer les anciens slash locaux et resynchroniser SentriX."
@@ -385,7 +383,7 @@ def install(bot: commands.Bot) -> None:
             description="Ouverture…",
             color=_SETUP_COLOR,
         )
-        message = await ctx_or_channel.send(embed=placeholder)
+        message = await panels.envoyer(ctx_or_channel, panels.depuis_embed(placeholder))
         view = SetupViewV6(
             self.bot,
             guild.id,

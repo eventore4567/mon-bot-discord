@@ -16,6 +16,7 @@ est déjà très serré (96/100), et ce panneau n'a pas besoin d'être une comma
 import discord
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from utils import checks, design_system, visual_v5
@@ -62,10 +63,7 @@ class DesignColorsModal(discord.ui.Modal, title="Couleurs du système de design"
             try:
                 parsed[key] = int(str(raw).strip().lstrip("#"), 16)
             except ValueError:
-                return await interaction.response.send_message(
-                    embed=design_system.error_embed(f"Couleur invalide pour « {key} » — utilisez un code hexadécimal comme `5865F2`.", interaction.user),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(design_system.error_embed(f'Couleur invalide pour « {key} » — utilisez un code hexadécimal comme `5865F2`.', interaction.user)), ephemere=True)
         self.view_ref.pending.update(parsed)
         await self.view_ref.refresh(interaction)
 
@@ -236,7 +234,7 @@ class DesignSetupView(design_system.SentriXView):
             user=interaction.user if p.get("show_avatars", True) else None,
             footer=p["footer"],
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
 
     async def _save(self, interaction: discord.Interaction):
         await self.cog.bot.db.set_design_settings(self.guild.id, self.pending)

@@ -21,6 +21,7 @@ import discord
 from discord.ext import commands
 
 from utils import log_service
+from utils import sentrix_panels as panels
 from . import security_verification_v71 as security_v71
 from . import setup_control_center as setup_ui
 from . import setup_experience_v74 as v74
@@ -472,14 +473,7 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    embed=discord.Embed(
-                        title="Action impossible",
-                        description="Impossible de charger cette catégorie de logs. Réessayez après un instant.",
-                        colour=discord.Colour.red(),
-                    ),
-                    ephemeral=True,
-                )
+                await panels.envoyer(interaction.response, panels.depuis_embed(discord.Embed(title='Action impossible', description='Impossible de charger cette catégorie de logs. Réessayez après un instant.', colour=discord.Colour.red())), ephemere=True)
 
     category_select.callback = choose_category
     container.add_item(discord.ui.ActionRow(category_select))
@@ -530,14 +524,7 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
                 "Impossible d'enregistrer ce salon. Vérifiez que SentriX peut le voir et y envoyer des messages."
             )
             try:
-                await interaction.followup.send(
-                    embed=discord.Embed(
-                        title="Salon non enregistré",
-                        description=message,
-                        colour=discord.Colour.red(),
-                    ),
-                    ephemeral=True,
-                )
+                await panels.envoyer(interaction.followup, panels.depuis_embed(discord.Embed(title='Salon non enregistré', description=message, colour=discord.Colour.red())), ephemere=True)
             except discord.HTTPException:
                 pass
 
@@ -565,14 +552,7 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
             current = await log_service.get_log_setting(self.bot, self.guild.id, log_type)
             new_enabled = not bool(current.get("enabled"))
             if new_enabled and not current.get("channel_id"):
-                await interaction.followup.send(
-                    embed=discord.Embed(
-                        title="Choisissez d'abord un salon",
-                        description="Sélectionnez le salon de cette catégorie avec le deuxième menu, puis activez-la.",
-                        colour=discord.Colour.orange(),
-                    ),
-                    ephemeral=True,
-                )
+                await panels.envoyer(interaction.followup, panels.depuis_embed(discord.Embed(title="Choisissez d'abord un salon", description='Sélectionnez le salon de cette catégorie avec le deuxième menu, puis activez-la.', colour=discord.Colour.orange())), ephemere=True)
                 return
             await log_service.set_log_enabled(
                 self.bot,
@@ -596,14 +576,7 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             try:
-                await interaction.followup.send(
-                    embed=discord.Embed(
-                        title="Action impossible",
-                        description="Impossible de modifier l'état de cette catégorie de logs.",
-                        colour=discord.Colour.red(),
-                    ),
-                    ephemeral=True,
-                )
+                await panels.envoyer(interaction.followup, panels.depuis_embed(discord.Embed(title='Action impossible', description="Impossible de modifier l'état de cette catégorie de logs.", colour=discord.Colour.red())), ephemere=True)
             except discord.HTTPException:
                 pass
 

@@ -27,6 +27,7 @@ from discord.ext import commands
 
 from database.db import PRIMARY_CREATOR_ID
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.command-integrity-v18")
 
@@ -330,7 +331,7 @@ def _install_unexpected_error_handler(bot: commands.Bot) -> None:
                 "Cette commande a rencontré un problème technique. L'erreur a été "
                 f"journalisée avec la référence `{reference}`."
             )
-        return await ctx.send(embed=embeds.error(description, title="Erreur de commande"))
+        return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(description, title='Erreur de commande')))
 
     on_command_error_v18._sentrix_v18_unexpected_errors = True
     on_command_error_v18._sentrix_original = function

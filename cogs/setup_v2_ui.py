@@ -10,6 +10,7 @@ import time
 import discord
 
 from utils import embeds, log_service
+from utils import sentrix_panels as panels
 from . import permission_guard
 from . import setup_control_center as setup_ui
 from . import setup_v2_core as core
@@ -181,7 +182,7 @@ class CurrencyModal(discord.ui.Modal, title="Nom de la monnaie"):
             str(self.symbol.value),
             actor_id=interaction.user.id,
         )
-        await interaction.response.send_message(embed=embeds.success("Nom de la monnaie mis à jour."), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Nom de la monnaie mis à jour.')), ephemere=True)
 
 
 class EconomyManageView(discord.ui.View):
@@ -202,10 +203,7 @@ class EconomyManageView(discord.ui.View):
     async def toggle(self, interaction, _button):
         current = await core.module_enabled(self.bot, self.guild.id, "economy")
         await core.set_module_enabled(self.bot, self.guild.id, "economy", not current, actor_id=interaction.user.id)
-        await interaction.response.send_message(
-            embed=embeds.success(f"Économie {'activée' if not current else 'désactivée'}. Les soldes sont conservés."),
-            ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(f"Économie {('activée' if not current else 'désactivée')}. Les soldes sont conservés.")), ephemere=True)
 
     @discord.ui.button(label="Changer le nom de l’argent", style=discord.ButtonStyle.secondary, row=0)
     async def currency(self, interaction, _button):
@@ -262,7 +260,7 @@ class RewardRoleView(discord.ui.View):
             "ON CONFLICT(guild_id, level) DO UPDATE SET role_id=excluded.role_id",
             (self.owner.guild.id, self.level, self.role_id),
         )
-        await interaction.response.send_message(embed=embeds.success(f"Récompense du niveau {self.level} enregistrée."), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(f'Récompense du niveau {self.level} enregistrée.')), ephemere=True)
 
     @discord.ui.button(label="Supprimer ce palier", style=discord.ButtonStyle.danger, row=1)
     async def delete(self, interaction, _button):
@@ -270,7 +268,7 @@ class RewardRoleView(discord.ui.View):
             "DELETE FROM level_roles WHERE guild_id=? AND level=?",
             (self.owner.guild.id, self.level),
         )
-        await interaction.response.send_message(embed=embeds.success(f"Palier niveau {self.level} supprimé."), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(f'Palier niveau {self.level} supprimé.')), ephemere=True)
 
 
 class WelcomeTextModal(discord.ui.Modal, title="Messages de bienvenue et départ"):
@@ -304,10 +302,7 @@ class WelcomeTextModal(discord.ui.Modal, title="Messages de bienvenue et départ
         await self.owner.bot.db.set_guild_config(gid, "welcome_message", welcome)
         await self.owner.bot.db.set_guild_config(gid, "goodbye_message", goodbye)
         await self.owner.bot.db.set_guild_config(gid, "welcome_image_url", image)
-        await interaction.response.send_message(
-            embed=embeds.success("Messages enregistrés. Un modèle propre reste utilisé quand un champ est vide."),
-            ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Messages enregistrés. Un modèle propre reste utilisé quand un champ est vide.')), ephemere=True)
 
 
 class AiFeatureView(discord.ui.View):
@@ -377,7 +372,7 @@ class NotificationSourceModal(discord.ui.Modal, title="Source de notification"):
                 "UPDATE social_notifications SET source_url=?, platform=?, custom_text=?, image_url=? WHERE guild_id=? AND id=?",
                 (source_url, platform, text, image, self.owner.guild.id, self.owner.selected_notification),
             )
-            return await interaction.response.send_message(embed=embeds.success("Source modifiée sans toucher aux autres notifications."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Source modifiée sans toucher aux autres notifications.')), ephemere=True)
         await interaction.response.send_message(
             embed=embeds.info("Choisissez maintenant le salon et le rôle. La nouvelle source sera ajoutée sans remplacer les autres."),
             view=NotificationDraftView(self.owner, interaction.user.id, source_url, text, image),
@@ -447,7 +442,7 @@ class NotificationDraftView(discord.ui.View):
                 self.text, self.image, latest_id or None, latest_url, now, now,
             ),
         )
-        await interaction.followup.send(embed=embeds.success("Nouvelle source ajoutée. Les sources précédentes sont inchangées."), ephemeral=True)
+        await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('Nouvelle source ajoutée. Les sources précédentes sont inchangées.')), ephemere=True)
 
 
 class NotificationManageView(discord.ui.View):
@@ -635,9 +630,7 @@ def _patch_render() -> None:
             test = discord.ui.Button(label="Tester ce log", style=discord.ButtonStyle.secondary, row=4)
             async def test_cb(interaction):
                 ok, text = await log_service.send_test_log(self.bot, self.guild, self.selected_log, interaction.user)
-                await interaction.response.send_message(
-                    embed=embeds.success(text) if ok else embeds.error(text), ephemeral=True,
-                )
+                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(text) if ok else embeds.error(text)), ephemere=True)
             test.callback = test_cb
             self.add_item(test)
 

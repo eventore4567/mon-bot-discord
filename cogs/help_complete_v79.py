@@ -23,6 +23,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from utils.command_permissions import (
     ADMIN_COGS,
     COMMAND_PERMISSION_FALLBACKS,
@@ -288,9 +289,9 @@ def _chunks(rows: list[HelpEntry]) -> list[list[HelpEntry]]:
 async def _private_error(interaction: discord.Interaction, text: str) -> None:
     panel = embeds.error(text)
     if interaction.response.is_done():
-        await interaction.followup.send(embed=panel, ephemeral=True)
+        await panels.envoyer(interaction.followup, panels.depuis_embed(panel), ephemere=True)
     else:
-        await interaction.response.send_message(embed=panel, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
 
 
 class SearchModalV79(discord.ui.Modal, title="Rechercher une commande"):

@@ -309,9 +309,9 @@ def _add_growth_links(view: discord.ui.View, bot: commands.Bot) -> None:
 async def _private_error(interaction: discord.Interaction, text: str) -> None:
     panel = embeds.error(text)
     if interaction.response.is_done():
-        await interaction.followup.send(embed=panel, ephemeral=True)
+        await panels.envoyer(interaction.followup, panels.depuis_embed(panel), ephemere=True)
     else:
-        await interaction.response.send_message(embed=panel, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
 
 
 def _exact_match(rows: list[commands.Command], query: str) -> commands.Command | None:

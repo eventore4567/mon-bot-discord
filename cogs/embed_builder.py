@@ -662,7 +662,7 @@ class EmbedFieldsManageView(discord.ui.View):
     async def refresh(self, interaction: discord.Interaction):
         e = embeds.neutral(f"📋 Champs ({len(self.draft.fields)}/{MAX_FIELDS})", self.list_text())
         if interaction.response.is_done():
-            await interaction.followup.send(embed=e, ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(e), ephemere=True)
         else:
             await interaction.response.edit_message(embeds=[e], view=self)
 
@@ -1052,7 +1052,7 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
             e.description = "Aucun modèle sauvegardé. Utilisez `+embed create <nom>` pour commencer."
         else:
             e.description = "\n".join(f"• **{r['name']}** (#{r['id']})" for r in rows[:25])
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @embed_group.command(name="edit", description="Rouvrir l'éditeur sur un modèle existant.")
     @app_commands.describe(nom="Le nom du modèle à modifier")
@@ -1176,9 +1176,9 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Ce fichier contient des données invalides :\n• ' + '\n• '.join(errors[:10]))))
         preview = draft.to_embed()
         e = embeds.warning(f"Importer le modèle **{name}** ?", "Vérifiez l'aperçu ci-dessous avant de confirmer.")
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
         if preview:
-            await ctx.send(embed=preview)
+            await panels.envoyer(ctx, panels.depuis_embed(preview))
         await ctx.send(view=EmbedImportConfirmView(self, ctx.author.id, draft, name))
 
     @embed_group.command(name="message", description="Éditer un message déjà envoyé par SentriX.")
@@ -1222,7 +1222,7 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
             "Gérer les messages, Gérer le serveur et les gestionnaires du bot ont TOUJOURS accès, "
             "en plus des rôles ci-dessous.\n\n" + ("\n".join(r.mention for r in roles) if roles else "Aucun rôle supplémentaire configuré."),
         )
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @embedconfig.command(name="addrole", description="Autoriser un rôle à utiliser +embed.")
     @app_commands.describe(role="Le rôle à autoriser")

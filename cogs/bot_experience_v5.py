@@ -27,6 +27,7 @@ from discord.ext import commands
 import config
 from database.db import PRIMARY_CREATOR_ID
 from utils import ai_service, embeds
+from utils import sentrix_panels as panels
 from utils.instance_identity import brand_label, wake_words
 
 logger = logging.getLogger("bot.experience-v5")
@@ -364,7 +365,7 @@ def _install_unknown_command_hints(bot: commands.Bot) -> None:
         else:
             text = f"Commande `{prefix}{requested}` inconnue. Utilise `{prefix}help` pour voir les commandes disponibles."
         try:
-            await ctx.send(embed=embeds.warning(text))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(text)))
         except discord.HTTPException:
             pass
 

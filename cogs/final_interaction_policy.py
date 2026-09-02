@@ -21,6 +21,7 @@ from discord.ext import commands
 
 from . import permission_guard
 from utils import embeds as sentrix_embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.final-interaction-policy")
 
@@ -624,9 +625,9 @@ async def _permission_denial(interaction: discord.Interaction, decision) -> None
             if response_type == discord.InteractionResponseType.deferred_channel_message:
                 await interaction.edit_original_response(content=None, embed=panel)
             else:
-                await interaction.followup.send(embed=panel, ephemeral=True)
+                await panels.envoyer(interaction.followup, panels.depuis_embed(panel), ephemere=True)
         else:
-            await interaction.response.send_message(embed=panel, ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
     except (discord.Forbidden, discord.HTTPException, discord.InteractionResponded):
         logger.debug("Impossible d'envoyer un refus slash.", exc_info=True)
 
@@ -655,7 +656,7 @@ def _install_errors(bot: commands.Bot) -> None:
         panel = _slash_error_embed(error)
         try:
             if not interaction.response.is_done():
-                await interaction.response.send_message(embed=panel, ephemeral=True)
+                await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
                 return
             response_type = getattr(interaction.response, "type", None)
             if response_type in {

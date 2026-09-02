@@ -13,6 +13,7 @@ import discord
 from discord.ext import commands
 
 from utils import checks, embeds, log_service
+from utils import sentrix_panels as panels
 from . import setup_control_center as setup_ui
 from . import setup_v2_core as core
 from . import setup_v2_ui as v2ui
@@ -229,7 +230,7 @@ class WelcomeTestView(discord.ui.View):
         if not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Membre Discord introuvable.", ephemeral=True)
         ok, message = await _send_welcome(self.bot, interaction.user, test=True)
-        await interaction.response.send_message(embed=embeds.success(message) if ok else embeds.error(message), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(message) if ok else embeds.error(message)), ephemere=True)
 
 
 class PaginatedNotificationSelect(discord.ui.Select):
@@ -420,29 +421,13 @@ class ResetConfigModal(discord.ui.Modal, title="Réinitialiser une configuration
 
     async def on_submit(self, interaction):
         if str(self.confirm.component.value).strip().upper() != "RESET":
-            return await interaction.response.send_message(
-                embed=embeds.warning(
-                    "Rien n'a été réinitialisé. Tapez RESET en majuscules pour confirmer.",
-                    title="Confirmation incorrecte",
-                ),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Rien n'a été réinitialisé. Tapez RESET en majuscules pour confirmer.", title='Confirmation incorrecte')), ephemere=True)
         choisis = list(getattr(self.target.component, "values", ()) or ())
         if not choisis:
-            return await interaction.response.send_message(
-                embed=embeds.warning("Sélectionnez le module à réinitialiser.", title="Aucun module choisi"),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('Sélectionnez le module à réinitialiser.', title='Aucun module choisi')), ephemere=True)
         target = await _reset_config(self.owner.bot, self.owner.guild, str(choisis[0]))
         libelle = next((l for c, l, _ in CIBLES_RESET if c == target), target)
-        await interaction.response.send_message(
-            embed=embeds.success(
-                f"Configuration **{libelle}** réinitialisée. "
-                "Les données des membres (XP, argent, sanctions) sont conservées.",
-                title="Réinitialisation effectuée",
-            ),
-            ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(f'Configuration **{libelle}** réinitialisée. Les données des membres (XP, argent, sanctions) sont conservées.', title='Réinitialisation effectuée')), ephemere=True)
 
 
 def _patch_setup_render() -> None:
@@ -458,7 +443,7 @@ def _patch_setup_render() -> None:
                         enabled = await core.module_enabled(self.bot, self.guild.id, _module)
                         if not enabled:
                             errors = await _module_enable_errors(self.bot, self.guild, _category)
-                            if errors: return await interaction.response.send_message(embed=embeds.error("\n".join(f"• {line}" for line in errors)[:3900], title="Impossible d’activer ce module"), ephemeral=True)
+                            if errors: return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('\n'.join((f'• {line}' for line in errors))[:3900], title='Impossible d’activer ce module')), ephemere=True)
                         await core.set_module_enabled(self.bot, self.guild.id, _module, not enabled, actor_id=interaction.user.id)
                         await self.audit(interaction.user.id, f"module:{_module}", "on" if not enabled else "off"); await self.refresh(interaction)
                     item.callback = toggle_checked; break
@@ -520,14 +505,14 @@ def _install_server_builder_minimal_profile() -> None:
 def _install_managed_mode_command(bot) -> None:
     if bot.get_command("server-managed") is not None: return
     async def callback(ctx: commands.Context, mode: str = "status"):
-        if ctx.guild is None: return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée dans un serveur.')))
         normalized = str(mode or "status").casefold().strip()
         if normalized in {"status","etat","état"}:
             enabled = await managed_builder.is_managed(bot, ctx.guild.id)
-            return await ctx.send(embed=embeds.info(f"Maintenance automatique create-server : **{'ACTIVE' if enabled else 'INACTIVE'}**.\nINACTIVE signifie qu’aucun redémarrage de SentriX ne modifiera la structure du serveur.", title="Mode serveur géré"))
-        if normalized not in {"on","off","actif","inactif","enable","disable"}: return await ctx.send(embed=embeds.error("Utilisez `+server-managed on`, `off` ou `status`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"Maintenance automatique create-server : **{('ACTIVE' if enabled else 'INACTIVE')}**.\nINACTIVE signifie qu’aucun redémarrage de SentriX ne modifiera la structure du serveur.", title='Mode serveur géré')))
+        if normalized not in {"on","off","actif","inactif","enable","disable"}: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez `+server-managed on`, `off` ou `status`.')))
         enabled = normalized in {"on","actif","enable"}; await managed_builder.set_managed(bot, ctx.guild.id, enabled, actor_id=ctx.author.id)
-        await ctx.send(embed=embeds.success(f"Maintenance automatique : **{'ACTIVE' if enabled else 'INACTIVE'}**.\n" + ("SentriX pourra entretenir uniquement sa structure déjà créée." if enabled else "Aucun redémarrage ne modifiera automatiquement les salons/rôles.")))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Maintenance automatique : **{('ACTIVE' if enabled else 'INACTIVE')}**.\n" + ('SentriX pourra entretenir uniquement sa structure déjà créée.' if enabled else 'Aucun redémarrage ne modifiera automatiquement les salons/rôles.'))))
     callback = checks.is_owner_or_admin_for("configuration")(callback)
     bot.add_command(commands.hybrid_command(name="server-managed", description="Activer ou couper la maintenance automatique d’une structure SentriX.")(callback))
 

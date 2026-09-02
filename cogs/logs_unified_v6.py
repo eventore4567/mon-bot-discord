@@ -23,6 +23,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds, log_compact_final, log_service
+from utils import sentrix_panels as panels
 from . import generated_logs_sync
 from . import log_transport_v52
 from . import logs as logs_mod
@@ -707,15 +708,9 @@ class UnifiedLogsV6(commands.Cog, name="UnifiedLogsV6"):
             (ticket_id,),
         )
         if not row:
-            return await interaction.response.send_message(
-                embed=embeds.error("Cette transcript n'est plus disponible."),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Cette transcript n'est plus disponible.")), ephemere=True)
         if interaction.guild is None or int(row["guild_id"]) != interaction.guild.id:
-            return await interaction.response.send_message(
-                embed=embeds.error("Cette transcript appartient à un autre serveur."),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Cette transcript appartient à un autre serveur.')), ephemere=True)
 
         ticket = await self.bot.db.fetchone("SELECT * FROM tickets WHERE id = ?", (ticket_id,))
         member = interaction.user if isinstance(interaction.user, discord.Member) else None
@@ -729,10 +724,7 @@ class UnifiedLogsV6(commands.Cog, name="UnifiedLogsV6"):
             )
         )
         if not allowed:
-            return await interaction.response.send_message(
-                embed=embeds.error("Vous n'avez pas accès à cette transcript."),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'avez pas accès à cette transcript.")), ephemere=True)
 
         name = _clean_channel_name(row["channel_name"])
         payload = io.BytesIO(str(row["transcript_text"] or "Aucun message.").encode("utf-8"))

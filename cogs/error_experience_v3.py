@@ -10,6 +10,7 @@ from types import MethodType
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from cogs.command_response_guard import _command_suggestions
 
 logger = logging.getLogger("bot.errors")
@@ -121,61 +122,58 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
         if suggestions:
             proposed = ", ".join(f"`{prefix}{name}`" for name in suggestions)
             description += f"\n\nCommandes proches : {proposed}"
-        await ctx.send(embed=embeds.error(description, title="Commande introuvable"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error(description, title='Commande introuvable')))
         return True
 
     if isinstance(base, commands.MissingRequiredArgument):
-        await ctx.send(embed=embeds.warning(
-            f"Il manque **{_param_label(getattr(base, 'param', None))}**.\n\nUtilisation : `{_safe_usage(ctx)}`",
-            title="Argument manquant",
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"Il manque **{_param_label(getattr(base, 'param', None))}**.\n\nUtilisation : `{_safe_usage(ctx)}`", title='Argument manquant')))
         return True
 
     if isinstance(base, commands.TooManyArguments):
-        await ctx.send(embed=embeds.warning(f"Utilisation : `{_safe_usage(ctx)}`", title="Trop d’arguments"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Utilisation : `{_safe_usage(ctx)}`', title='Trop d’arguments')))
         return True
 
     if isinstance(base, (commands.MemberNotFound, commands.UserNotFound)):
-        await ctx.send(embed=embeds.error("Vérifiez la mention, le nom ou l’ID.", title="Utilisateur introuvable"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vérifiez la mention, le nom ou l’ID.', title='Utilisateur introuvable')))
         return True
     if isinstance(base, commands.RoleNotFound):
-        await ctx.send(embed=embeds.error("Vérifiez la mention, le nom ou l’ID du rôle.", title="Rôle introuvable"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vérifiez la mention, le nom ou l’ID du rôle.', title='Rôle introuvable')))
         return True
     if isinstance(base, commands.ChannelNotFound):
-        await ctx.send(embed=embeds.error("Vérifiez la mention, le nom ou l’ID du salon.", title="Salon introuvable"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vérifiez la mention, le nom ou l’ID du salon.', title='Salon introuvable')))
         return True
     if isinstance(base, commands.MessageNotFound):
-        await ctx.send(embed=embeds.error("Vérifiez l’ID ou le lien du message.", title="Message introuvable"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vérifiez l’ID ou le lien du message.', title='Message introuvable')))
         return True
 
     if isinstance(base, (commands.BadUnionArgument, commands.BadArgument, commands.ConversionError)):
-        await ctx.send(embed=embeds.warning(f"Utilisation : `{_safe_usage(ctx)}`", title="Argument invalide"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Utilisation : `{_safe_usage(ctx)}`', title='Argument invalide')))
         return True
 
     if isinstance(base, commands.CommandOnCooldown):
-        await ctx.send(embed=embeds.warning(f"Réessayez dans **{base.retry_after:.1f} s**.", title="Commande en cooldown"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Réessayez dans **{base.retry_after:.1f} s**.', title='Commande en cooldown')))
         return True
 
     if isinstance(base, commands.MissingPermissions):
         required = ", ".join(permission.replace("_", " ") for permission in base.missing_permissions)
-        await ctx.send(embed=embeds.error(f"Permission requise : **{required}**.", title="Permission insuffisante"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Permission requise : **{required}**.', title='Permission insuffisante')))
         return True
 
     if isinstance(base, commands.BotMissingPermissions):
         required = ", ".join(permission.replace("_", " ") for permission in base.missing_permissions)
-        await ctx.send(embed=embeds.error(f"SentriX a besoin de : **{required}**.", title="Permission du bot insuffisante"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'SentriX a besoin de : **{required}**.', title='Permission du bot insuffisante')))
         return True
 
     if isinstance(base, commands.NoPrivateMessage):
-        await ctx.send(embed=embeds.warning("Cette commande doit être utilisée dans un serveur.", title="Serveur requis"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Cette commande doit être utilisée dans un serveur.', title='Serveur requis')))
         return True
 
     if isinstance(base, commands.PrivateMessageOnly):
-        await ctx.send(embed=embeds.warning("Cette commande doit être utilisée en message privé.", title="Message privé requis"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Cette commande doit être utilisée en message privé.', title='Message privé requis')))
         return True
 
     if isinstance(base, commands.CheckFailure):
-        await ctx.send(embed=embeds.error("Vous n’êtes pas autorisé à utiliser cette commande.", title="Accès refusé"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous n’êtes pas autorisé à utiliser cette commande.', title='Accès refusé')))
         return True
 
     return False

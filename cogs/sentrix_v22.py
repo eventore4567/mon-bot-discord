@@ -20,6 +20,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds, stats_service
+from utils import sentrix_panels as panels
 from utils.v22_rules import (
     clean_reason,
     parse_friendly_amount,
@@ -140,16 +141,16 @@ class SentriXV22(commands.Cog):
 
         async def atomic_rob(economy_cog, ctx: commands.Context, membre: discord.Member):
             if ctx.guild is None:
-                return await ctx.send(embed=embeds.error("Utilisez cette commande sur un serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
             if membre.id == ctx.author.id:
-                return await ctx.send(embed=embeds.error("Vous ne pouvez pas vous voler vous-même."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas vous voler vous-même.')))
             if membre.bot:
-                return await ctx.send(embed=embeds.error("Vous ne pouvez pas voler un bot."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
 
             db = self.bot.db
             conn = getattr(db, "_conn", None)
             if conn is None:
-                return await ctx.send(embed=embeds.error("L'économie est temporairement indisponible."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'économie est temporairement indisponible.")))
 
             result = ("error", 0)
             async with db._economy_lock:
@@ -235,22 +236,18 @@ class SentriXV22(commands.Cog):
             kind, value = result
             if kind == "cooldown":
                 minutes = max(1, (int(value) + 59) // 60)
-                return await ctx.send(embed=embeds.warning(f"Vous devez attendre encore **{minutes} min** avant de retenter un vol."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Vous devez attendre encore **{minutes} min** avant de retenter un vol.')))
             if kind == "poor":
-                return await ctx.send(embed=embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")))
             if kind == "retry":
-                return await ctx.send(embed=embeds.warning("Le solde de la cible vient de changer. Réessayez."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Le solde de la cible vient de changer. Réessayez.')))
             if kind == "success":
-                return await ctx.send(embed=embeds.success(
-                    f"Vous avez volé **{stats_service.format_number(value)} 🪙** à {membre.display_name}."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous avez volé **{stats_service.format_number(value)} 🪙** à {membre.display_name}.')))
             if kind == "failed":
                 if value:
-                    return await ctx.send(embed=embeds.error(
-                        f"Vous avez été attrapé : **{stats_service.format_number(value)} 🪙** d'amende."
-                    ))
-                return await ctx.send(embed=embeds.error("Vous avez été attrapé, mais votre portefeuille était déjà vide."))
-            return await ctx.send(embed=embeds.error("Le vol n'a pas pu être traité. Réessayez."))
+                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Vous avez été attrapé : **{stats_service.format_number(value)} 🪙** d'amende.")))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous avez été attrapé, mais votre portefeuille était déjà vide.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Le vol n'a pas pu être traité. Réessayez.")))
 
         self._replace_command_callback(command, atomic_rob, "_sentrix_v22_atomic_rob")
 
@@ -398,12 +395,9 @@ class SentriXV22(commands.Cog):
                         (ticket["id"], interaction.guild.id),
                     )
                     if current and current["status"] == "ouvert" and current["claimed_by"]:
-                        return await interaction.response.send_message(
-                            embed=embeds.warning(f"Ce ticket est déjà pris en charge par <@{int(current['claimed_by'])}>."),
-                            ephemeral=True,
-                        )
-                    return await interaction.response.send_message(embed=embeds.warning("Ce ticket n'est plus disponible."), ephemeral=True)
-                await interaction.response.send_message(embed=embeds.success(f"{interaction.user.mention} a pris en charge ce ticket."))
+                        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning(f"Ce ticket est déjà pris en charge par <@{int(current['claimed_by'])}>.")), ephemere=True)
+                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Ce ticket n'est plus disponible.")), ephemere=True)
+                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(f'{interaction.user.mention} a pris en charge ce ticket.')))
             atomic_claim._sentrix_v22 = True
             tickets_cog.btn_claim = types.MethodType(atomic_claim, tickets_cog)
 
@@ -414,26 +408,21 @@ class SentriXV22(commands.Cog):
                     (ticket["id"], interaction.guild.id),
                 )
                 if not current or current["status"] != "ouvert":
-                    return await interaction.response.send_message(embed=embeds.warning("Ce ticket n'est plus ouvert."), ephemeral=True)
+                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Ce ticket n'est plus ouvert.")), ephemere=True)
                 claimed_by = current["claimed_by"]
                 if not claimed_by:
-                    return await interaction.response.send_message(embed=embeds.warning("Ce ticket n'est pas claim."), ephemeral=True)
+                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Ce ticket n'est pas claim.")), ephemere=True)
                 member = interaction.user
                 can_force = bool(member.guild_permissions.manage_channels or member.id == interaction.guild.owner_id)
                 if int(claimed_by) != member.id and not can_force:
-                    return await interaction.response.send_message(
-                        embed=embeds.error("Seul le staff qui a claim ce ticket (ou un responsable) peut l'abandonner."),
-                        ephemeral=True,
-                    )
+                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Seul le staff qui a claim ce ticket (ou un responsable) peut l'abandonner.")), ephemere=True)
                 cursor = await self.bot.db.execute(
                     "UPDATE tickets SET claimed_by=NULL WHERE id=? AND guild_id=? AND status='ouvert' AND claimed_by=?",
                     (ticket["id"], interaction.guild.id, claimed_by),
                 )
                 if getattr(cursor, "rowcount", 0) < 1:
-                    return await interaction.response.send_message(
-                        embed=embeds.warning("La prise en charge vient de changer. Actualisez le ticket."), ephemeral=True
-                    )
-                await interaction.response.send_message(embed=embeds.success("Prise en charge annulée."))
+                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('La prise en charge vient de changer. Actualisez le ticket.')), ephemere=True)
+                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Prise en charge annulée.')))
             guarded_unclaim._sentrix_v22 = True
             tickets_cog.btn_unclaim = types.MethodType(guarded_unclaim, tickets_cog)
 

@@ -18,6 +18,7 @@ import discord
 from discord.ext import commands
 
 from utils import log_service
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.tickets.claim-security")
 _INSTALLED = False
@@ -235,18 +236,12 @@ def install(bot: commands.Bot) -> None:
 
         if key in _STAFF_ONLY_KEYS:
             if not await _authorized_staff(self, interaction, ticket, key):
-                return await interaction.response.send_message(
-                    embed=tickets.embeds.error("Ce bouton est réservé au staff autorisé de ce ticket."),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.error('Ce bouton est réservé au staff autorisé de ce ticket.')), ephemere=True)
         elif key == "close":
             # Le créateur peut fermer son propre ticket. Pour tous les autres membres,
             # il faut être staff autorisé.
             if interaction.user.id != ticket["user_id"] and not await _authorized_staff(self, interaction, ticket, key):
-                return await interaction.response.send_message(
-                    embed=tickets.embeds.error("Vous n'êtes pas autorisé à fermer ce ticket."),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.error("Vous n'êtes pas autorisé à fermer ce ticket.")), ephemere=True)
 
         return await original_handle(self, interaction, key)
 
@@ -419,24 +414,15 @@ def install(bot: commands.Bot) -> None:
         guild = interaction.guild
         member = interaction.user
         if not isinstance(channel, discord.TextChannel) or guild is None or not isinstance(member, discord.Member):
-            return await interaction.response.send_message(
-                embed=tickets.embeds.error("Impossible de prendre en charge ce ticket."), ephemeral=True
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.error('Impossible de prendre en charge ce ticket.')), ephemere=True)
 
         current_id = ticket["claimed_by"]
         if current_id:
             if int(current_id) == member.id:
-                return await interaction.response.send_message(
-                    embed=tickets.embeds.warning("Vous avez déjà pris en charge ce ticket."), ephemeral=True
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.warning('Vous avez déjà pris en charge ce ticket.')), ephemere=True)
             if not member.guild_permissions.administrator and member.id != guild.owner_id:
                 current = guild.get_member(int(current_id))
-                return await interaction.response.send_message(
-                    embed=tickets.embeds.warning(
-                        f"Ce ticket est déjà pris en charge par {current.mention if current else 'un autre membre du staff'}."
-                    ),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.warning(f"Ce ticket est déjà pris en charge par {(current.mention if current else 'un autre membre du staff')}.")), ephemere=True)
 
         await interaction.response.defer()
 
@@ -448,38 +434,26 @@ def install(bot: commands.Bot) -> None:
         try:
             await _grant_claimant(channel, member)
         except discord.Forbidden:
-            return await interaction.followup.send(
-                embed=tickets.embeds.error("SentriX n'a pas la permission de modifier les accès de ce ticket."),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.followup, panels.depuis_embed(tickets.embeds.error("SentriX n'a pas la permission de modifier les accès de ce ticket.")), ephemere=True)
 
         await self.bot.db.execute(
             "UPDATE tickets SET claimed_by = ?, last_activity_at = ? WHERE id = ?",
             (member.id, tickets.now(), ticket["id"]),
         )
-        await interaction.followup.send(
-            embed=tickets.embeds.success(
-                f"{member.mention} a pris en charge ce ticket. L'accès est maintenant réservé au créateur, au membre en charge et aux Administrateurs."
-            )
-        )
+        await panels.envoyer(interaction.followup, panels.depuis_embed(tickets.embeds.success(f"{member.mention} a pris en charge ce ticket. L'accès est maintenant réservé au créateur, au membre en charge et aux Administrateurs.")))
 
     async def secure_unclaim(self, interaction: discord.Interaction, ticket):
         guild = interaction.guild
         channel = interaction.channel
         member = interaction.user
         if guild is None or not isinstance(channel, discord.TextChannel) or not isinstance(member, discord.Member):
-            return await interaction.response.send_message(embed=tickets.embeds.error("Action impossible."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.error('Action impossible.')), ephemere=True)
 
         current_id = ticket["claimed_by"]
         if not current_id:
-            return await interaction.response.send_message(
-                embed=tickets.embeds.warning("Ce ticket n'est pas actuellement pris en charge."), ephemeral=True
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.warning("Ce ticket n'est pas actuellement pris en charge.")), ephemere=True)
         if int(current_id) != member.id and not member.guild_permissions.administrator and member.id != guild.owner_id:
-            return await interaction.response.send_message(
-                embed=tickets.embeds.error("Seul le membre en charge ou un Administrateur peut abandonner ce ticket."),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.error('Seul le membre en charge ou un Administrateur peut abandonner ce ticket.')), ephemere=True)
 
         await interaction.response.defer()
         claimant = guild.get_member(int(current_id))
@@ -489,7 +463,7 @@ def install(bot: commands.Bot) -> None:
             "UPDATE tickets SET claimed_by = NULL, last_activity_at = ? WHERE id = ?",
             (tickets.now(), ticket["id"]),
         )
-        await interaction.followup.send(embed=tickets.embeds.success("Prise en charge annulée. L'accès du rôle staff a été rétabli."))
+        await panels.envoyer(interaction.followup, panels.depuis_embed(tickets.embeds.success("Prise en charge annulée. L'accès du rôle staff a été rétabli.")))
 
     # Important : ``create_ticket`` appelle ``self.log_action`` dynamiquement. Installer
     # d'abord le transport sûr suffit donc à empêcher le faux message rouge après succès.

@@ -17,6 +17,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.command-clarity")
 _INSTALLED = False
@@ -347,9 +348,7 @@ def install(bot: commands.Bot) -> None:
                 suggestion_text = "\n\nTu voulais peut-être dire : " + ", ".join(
                     f"`{prefix}{name}`" for name in suggestions[:3]
                 )
-            return await ctx.send(embed=embeds.error(
-                f"Je ne trouve pas la commande `{commande}` ou vous n'avez pas accès à son aide.{suggestion_text}\n\nTapez `{prefix}help` pour revenir au catalogue."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Je ne trouve pas la commande `{commande}` ou vous n'avez pas accès à son aide.{suggestion_text}\n\nTapez `{prefix}help` pour revenir au catalogue.")))
 
         slash_names = utility.slash_command_names(bot)
         title = friendly_title(cmd)
@@ -397,7 +396,7 @@ def install(bot: commands.Bot) -> None:
             )
 
         e.set_footer(text=f"Astuce : {prefix}help <commande> donne toujours une fiche comme celle-ci.")
-        return await ctx.send(embed=e)
+        return await panels.envoyer(ctx, panels.depuis_embed(e))
 
     clearer_help_callback.__name__ = getattr(original_callback, "__name__", "help_cmd")
     clearer_help_callback.__doc__ = getattr(original_callback, "__doc__", None)
