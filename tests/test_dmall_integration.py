@@ -38,6 +38,10 @@ def test_dmall_cog_keeps_the_required_safety_controls():
     assert "if not member.bot" in source
     assert "active_guilds" in source
     assert "await asyncio.sleep(SEND_DELAY_SECONDS)" in source
+    assert "sentrix_embeds.SENTRIX_BANNER_URL" in source
+    assert "dm_embed.set_image" in source
+    assert "Message de SentriX" in source
+    assert "ralentie ou refusée" not in source
     assert any(
         isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "setup"
         for node in ast.walk(tree)
