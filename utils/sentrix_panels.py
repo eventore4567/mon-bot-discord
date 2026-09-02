@@ -393,10 +393,32 @@ def _titre_propre(nom: object) -> str:
     return _EMOJI_DE_TETE.sub("", str(nom or "").strip()).strip() or "Détail"
 
 
+_PAR_COULEUR: dict[int, str] = {
+    int(_config.COLOR_SUCCESS): "success",
+    int(_config.COLOR_ERROR): "danger",
+    int(_config.COLOR_WARNING): "warning",
+    int(_config.COLOR_INFO): "info",
+    int(_config.COLOR_BRAND): "brand",
+    int(_config.COLOR_NEUTRAL): "neutral",
+}
+
+
+def intention_de(embed: discord.Embed, defaut: str = "info") -> str:
+    """Intention d'un embed deja construit, d'apres sa couleur.
+
+    Les modules qui passent par un constructeur commun choisissent deja leur
+    intention appel par appel — succes, avertissement, refus. Elle est encodee
+    dans la couleur : la relire evite de la redemander au site d'envoi, et evite
+    surtout qu'un « succes » reparte en banniere neutre.
+    """
+    valeur = getattr(getattr(embed, "colour", None), "value", None)
+    return _PAR_COULEUR.get(valeur, defaut)
+
+
 def depuis_embed(
     embed: discord.Embed,
     *,
-    kind: str = "info",
+    kind: str | None = None,
     titre: str | None = None,
     sous_titre: str | None = None,
     pied: str | None = None,
@@ -418,6 +440,8 @@ def depuis_embed(
         for champ in getattr(embed, "fields", ())
         if str(champ.value or "").strip()
     ]
+    if kind is None:
+        kind = intention_de(embed)
     vignette = getattr(getattr(embed, "thumbnail", None), "url", None)
     pied_embed = getattr(getattr(embed, "footer", None), "text", None)
     return Panneau(
@@ -463,6 +487,7 @@ __all__ = [
     "Panneau",
     "Section",
     "depuis_embed",
+    "intention_de",
     "envoyer",
     "texte_complet",
     "fichier_banniere",

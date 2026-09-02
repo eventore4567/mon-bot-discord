@@ -765,7 +765,7 @@ class Utility(commands.Cog, name="Utility"):
 
     @commands.hybrid_command(name="ping", description="Afficher la latence du bot.")
     async def ping(self, ctx: commands.Context):
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Pong !", description=f"Latence : **{round(self.bot.latency * 1000)}ms**"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Pong !', description=f'Latence : **{round(self.bot.latency * 1000)}ms**')))
 
     @commands.hybrid_command(name="avatar", description="Afficher l'avatar d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
@@ -883,17 +883,7 @@ class Utility(commands.Cog, name="Utility"):
     )
     async def info(self, ctx: commands.Context):
         if ctx.invoked_subcommand is None:
-            await ctx.send(
-                embed=await self._embed(
-                    ctx.guild.id if ctx.guild else None,
-                    title="Informations",
-                    description=(
-                        "Utilisez `+info serveur` pour le serveur ou "
-                        "`+info role @Rôle` pour un rôle.\n"
-                        "Ces commandes existent aussi en slash : `/info serveur` et `/info role`."
-                    ),
-                )
-            )
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Informations', description='Utilisez `+info serveur` pour le serveur ou `+info role @Rôle` pour un rôle.\nCes commandes existent aussi en slash : `/info serveur` et `/info role`.')))
 
     @info.command(name="serveur", description="Afficher la fiche complète du serveur.")
     async def info_serveur(self, ctx: commands.Context):
@@ -905,7 +895,7 @@ class Utility(commands.Cog, name="Utility"):
         """
         guild = ctx.guild
         if guild is None:
-            return await ctx.send(embed=await self._embed(None, title="Serveur requis", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(None, title='Serveur requis', kind='danger')))
 
         total = guild.member_count or len(guild.members)
         bots = sum(1 for m in guild.members if m.bot)
@@ -1394,9 +1384,9 @@ class Utility(commands.Cog, name="Utility"):
     @checks.has_permission("manage_emojis_and_stickers")
     async def addemoji(self, ctx: commands.Context, nom: str, url: str = None):
         if not ctx.guild:
-            return await ctx.send(embed=await self._embed(None, title="Commande indisponible", description="Cette commande doit être utilisée sur un serveur.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(None, title='Commande indisponible', description='Cette commande doit être utilisée sur un serveur.', kind='danger')))
         if not ctx.guild.me.guild_permissions.manage_emojis_and_stickers:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Le bot doit avoir la permission **Gérer les emojis et stickers**.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Permission manquante', description='Le bot doit avoir la permission **Gérer les emojis et stickers**.', kind='danger')))
 
         nom = nom.strip()
         source = (url or "").strip()
@@ -1436,15 +1426,7 @@ class Utility(commands.Cog, name="Utility"):
                 requires_animation = urlparse(source).path.lower().endswith(".gif")
 
         if not re.fullmatch(r"[A-Za-z0-9_]{2,32}", nom):
-            return await ctx.send(embed=await self._embed(
-                ctx.guild.id,
-                title="Nom invalide",
-                description=(
-                    "Le nom doit contenir 2 à 32 caractères : lettres, chiffres ou tiret bas.\n"
-                    "Exemple : +addemoji danse <a:emoji:identifiant>"
-                ),
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Nom invalide', description='Le nom doit contenir 2 à 32 caractères : lettres, chiffres ou tiret bas.\nExemple : +addemoji danse <a:emoji:identifiant>', kind='danger')))
 
         async def validate_public_https(candidate: str) -> str:
             parsed = urlparse(candidate)
@@ -1595,23 +1577,15 @@ class Utility(commands.Cog, name="Utility"):
                         ) from retry_exc
                     raise
         except ValueError as exc:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Image refusée", description=str(exc), kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Image refusée', description=str(exc), kind='danger')))
         except asyncio.TimeoutError:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Téléchargement impossible", description="Le serveur de l'image met trop de temps à répondre.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Téléchargement impossible', description="Le serveur de l'image met trop de temps à répondre.", kind='danger')))
         except discord.Forbidden:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Création refusée", description="Discord refuse la création. Vérifiez la permission et la position du rôle du bot.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Création refusée', description='Discord refuse la création. Vérifiez la permission et la position du rôle du bot.', kind='danger')))
         except (aiohttp.ClientError, discord.HTTPException) as exc:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Création impossible", description=f"Discord ou le serveur de l'image a refusé la demande : {exc}", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Création impossible', description=f"Discord ou le serveur de l'image a refusé la demande : {exc}", kind='danger')))
 
-        await ctx.send(embed=await self._embed(
-            ctx.guild.id,
-            title="Emoji ajouté",
-            description=(
-                f"{emoji} a été créé sous le nom `:{emoji.name}:`.\n"
-                f"Type : **{'animé' if emoji.animated else 'statique'}**."
-            ),
-            kind="success",
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Emoji ajouté', description=f"{emoji} a été créé sous le nom `:{emoji.name}:`.\nType : **{('animé' if emoji.animated else 'statique')}**.", kind='success')))
 
     @commands.hybrid_command(
         name="deleteemoji",
@@ -1623,9 +1597,9 @@ class Utility(commands.Cog, name="Utility"):
     @checks.has_permission("manage_emojis_and_stickers")
     async def deleteemoji(self, ctx: commands.Context, *, emoji: str):
         if not ctx.guild:
-            return await ctx.send(embed=await self._embed(None, title="Commande indisponible", description="Cette commande doit être utilisée sur un serveur.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(None, title='Commande indisponible', description='Cette commande doit être utilisée sur un serveur.', kind='danger')))
         if not ctx.guild.me.guild_permissions.manage_emojis_and_stickers:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Le bot doit avoir la permission **Gérer les emojis et stickers**.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Permission manquante', description='Le bot doit avoir la permission **Gérer les emojis et stickers**.', kind='danger')))
 
         value = emoji.strip()
         pasted = re.fullmatch(r"<a?:([A-Za-z0-9_]{2,32}):([0-9]+)>", value)
@@ -1637,34 +1611,24 @@ class Utility(commands.Cog, name="Utility"):
             target = discord.utils.find(lambda item: item.name.lower() == name, ctx.guild.emojis)
 
         if target is None:
-            return await ctx.send(embed=await self._embed(
-                ctx.guild.id,
-                title="Emoji introuvable",
-                description="Collez un emoji de ce serveur ou indiquez exactement son nom.",
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Emoji introuvable', description='Collez un emoji de ce serveur ou indiquez exactement son nom.', kind='danger')))
 
         emoji_name = target.name
         try:
             await target.delete(reason=f"Emoji supprimé par {ctx.author} avec +deleteemoji")
         except discord.Forbidden:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Suppression refusée", description="Le bot n'a pas la permission de supprimer cet emoji.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Suppression refusée', description="Le bot n'a pas la permission de supprimer cet emoji.", kind='danger')))
         except discord.HTTPException as exc:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Suppression impossible", description=f"Discord a refusé la demande : {exc}", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Suppression impossible', description=f'Discord a refusé la demande : {exc}', kind='danger')))
 
-        await ctx.send(embed=await self._embed(
-            ctx.guild.id,
-            title="Emoji supprimé",
-            description=f"L'emoji `:{emoji_name}:` a été supprimé du serveur.",
-            kind="success",
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Emoji supprimé', description=f"L'emoji `:{emoji_name}:` a été supprimé du serveur.", kind='success')))
 
     @commands.hybrid_command(name="emoji-list", description="Lister les emojis du serveur.", with_app_command=False)
     async def emoji_list(self, ctx: commands.Context):
         if not ctx.guild.emojis:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucun emoji", description="Ce serveur n'a aucun emoji personnalisé.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Aucun emoji', description="Ce serveur n'a aucun emoji personnalisé.", kind='warning')))
         text = " ".join(str(e) for e in ctx.guild.emojis)[:4000]
-        await ctx.send(embed=await self._embed(ctx.guild.id, title=f"Emojis ({len(ctx.guild.emojis)})", description=text))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title=f'Emojis ({len(ctx.guild.emojis)})', description=text)))
 
     @commands.hybrid_command(name="poll", description="Créer un sondage rapide (réactions 👍/👎).")
     @app_commands.describe(question="La question du sondage")
@@ -1680,30 +1644,30 @@ class Utility(commands.Cog, name="Utility"):
     async def remind(self, ctx: commands.Context, duree: str, *, texte: str):
         seconds = helpers.parse_duration(duree)
         if not seconds:
-            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Durée invalide", description="Exemple : `10m`, `2h`, `1j`.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Durée invalide', description='Exemple : `10m`, `2h`, `1j`.', kind='danger')))
         trigger_at = now() + seconds
         await self.bot.db.execute(
             "INSERT INTO reminders (user_id, channel_id, guild_id, text, trigger_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (ctx.author.id, ctx.channel.id, ctx.guild.id if ctx.guild else None, texte, trigger_at, now()),
         )
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Rappel défini", description=f"⏰ Rappel défini dans {helpers.format_duration(seconds)}.", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Rappel défini', description=f'⏰ Rappel défini dans {helpers.format_duration(seconds)}.', kind='success')))
 
     @commands.hybrid_command(name="reminder-list", description="Lister vos rappels en cours.", with_app_command=False)
     async def reminder_list(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM reminders WHERE user_id = ? ORDER BY trigger_at ASC", (ctx.author.id,))
         if not rows:
-            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Aucun rappel", description="Vous n'avez aucun rappel en cours."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Aucun rappel', description="Vous n'avez aucun rappel en cours.")))
         lines = [f"`#{r['id']}` <t:{r['trigger_at']}:R> — {r['text'][:50]}" for r in rows[:15]]
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Vos rappels", description="\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Vos rappels', description='\n'.join(lines))))
 
     @commands.hybrid_command(name="reminder-cancel", description="Annuler un rappel.", with_app_command=False)
     @app_commands.describe(id="L'identifiant du rappel (voir /reminder-list)")
     async def reminder_cancel(self, ctx: commands.Context, id: int):
         row = await self.bot.db.fetchone("SELECT * FROM reminders WHERE id = ? AND user_id = ?", (id, ctx.author.id))
         if not row:
-            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Rappel introuvable", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Rappel introuvable', kind='danger')))
         await self.bot.db.execute("DELETE FROM reminders WHERE id = ?", (id,))
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Rappel annulé", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Rappel annulé', kind='success')))
 
     @commands.hybrid_command(name="say", description="Faire répéter un message par le bot.", with_app_command=False)
     @app_commands.describe(texte="Le texte à faire répéter")
@@ -1728,22 +1692,22 @@ class Utility(commands.Cog, name="Utility"):
         try:
             from deep_translator import GoogleTranslator
             result = GoogleTranslator(source="auto", target=langue).translate(texte)
-            await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title=f"Traduction ({langue})", description=result))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title=f'Traduction ({langue})', description=result)))
         except Exception:
-            await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Traduction échouée", description="Vérifiez le code de langue.", kind="danger"))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Traduction échouée', description='Vérifiez le code de langue.', kind='danger')))
 
     @commands.hybrid_command(name="weather", description="Afficher la météo d'une ville.")
     @app_commands.describe(ville="Le nom de la ville")
     async def weather(self, ctx: commands.Context, *, ville: str):
         import config
         if not config.WEATHER_API_KEY:
-            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Météo indisponible", description="Aucune clé météo n'est configurée sur ce bot.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Météo indisponible', description="Aucune clé météo n'est configurée sur ce bot.", kind='danger')))
         import aiohttp
         url = f"https://api.openweathermap.org/data/2.5/weather?q={ville}&appid={config.WEATHER_API_KEY}&units=metric&lang=fr"
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Ville introuvable", description=f"Ville `{ville}` introuvable.", kind="danger"))
+                    return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Ville introuvable', description=f'Ville `{ville}` introuvable.', kind='danger')))
                 data = await resp.json()
         e = await self._embed(ctx.guild.id if ctx.guild else None, title=f"Météo à {data['name']}")
         e.add_field(name="Température", value=f"{data['main']['temp']}°C", inline=True)
@@ -1766,7 +1730,7 @@ class Utility(commands.Cog, name="Utility"):
             (ctx.guild.id, ctx.author.id, msg.id, texte, now()),
         )
         if channel != ctx.channel:
-            await ctx.send(embed=await self._embed(ctx.guild.id, title="Suggestion envoyée", description=f"Suggestion envoyée dans {channel.mention} !", kind="success"))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Suggestion envoyée', description=f'Suggestion envoyée dans {channel.mention} !', kind='success')))
 
     @commands.hybrid_command(name="report-bug", description="Signaler un bug du bot aux développeurs.", with_app_command=False)
     @app_commands.describe(texte="Description du bug")
@@ -1775,13 +1739,13 @@ class Utility(commands.Cog, name="Utility"):
             "INSERT INTO bug_reports (guild_id, user_id, content, created_at) VALUES (?, ?, ?, ?)",
             (ctx.guild.id if ctx.guild else None, ctx.author.id, texte, now()),
         )
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Signalement enregistré", description="🐛 Merci, votre signalement a été enregistré.", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Signalement enregistré', description='🐛 Merci, votre signalement a été enregistré.', kind='success')))
 
     @commands.hybrid_command(name="afk", description="Se mettre en mode AFK (absent).")
     @app_commands.describe(raison="La raison de votre absence (optionnel)")
     async def afk(self, ctx: commands.Context, *, raison: str = "Absent"):
         self.afk_users[ctx.author.id] = raison
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Mode AFK activé", description=f"😴 {ctx.author.mention} est maintenant AFK : {raison}"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Mode AFK activé', description=f'😴 {ctx.author.mention} est maintenant AFK : {raison}')))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -1791,13 +1755,13 @@ class Utility(commands.Cog, name="Utility"):
         if message.author.id in self.afk_users:
             del self.afk_users[message.author.id]
             try:
-                await message.channel.send(embed=await self._embed(guild_id, title="De retour", description=f"👋 Bon retour {message.author.mention}, votre statut AFK a été retiré."), delete_after=5)
+                await panels.envoyer(message.channel, panels.depuis_embed(await self._embed(guild_id, title='De retour', description=f'👋 Bon retour {message.author.mention}, votre statut AFK a été retiré.')))
             except discord.HTTPException:
                 pass
         for mention in message.mentions:
             if mention.id in self.afk_users:
                 try:
-                    await message.channel.send(embed=await self._embed(guild_id, title="Membre AFK", description=f"💤 {mention.display_name} est AFK : {self.afk_users[mention.id]}"), delete_after=5)
+                    await panels.envoyer(message.channel, panels.depuis_embed(await self._embed(guild_id, title='Membre AFK', description=f'💤 {mention.display_name} est AFK : {self.afk_users[mention.id]}')))
                 except discord.HTTPException:
                     pass
 
@@ -1806,7 +1770,7 @@ class Utility(commands.Cog, name="Utility"):
     async def roll(self, ctx: commands.Context, max: int = 100):
         import random
         result = random.randint(1, max)
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Lancer de dé", description=f"🎲 Vous avez obtenu : **{result}** (sur {max})"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Lancer de dé', description=f'🎲 Vous avez obtenu : **{result}** (sur {max})')))
 
     @commands.hybrid_command(name="choose", description="Faire choisir le bot parmi plusieurs options.")
     @app_commands.describe(options="Options séparées par des virgules")
@@ -1814,8 +1778,8 @@ class Utility(commands.Cog, name="Utility"):
         import random
         choices = [c.strip() for c in options.split(",") if c.strip()]
         if len(choices) < 2:
-            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Options manquantes", description="Donnez au moins deux options séparées par des virgules.", kind="danger"))
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Choix du bot", description=f"🤔 Je choisis : **{random.choice(choices)}**"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Options manquantes', description='Donnez au moins deux options séparées par des virgules.', kind='danger')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Choix du bot', description=f'🤔 Je choisis : **{random.choice(choices)}**')))
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Utility(bot))

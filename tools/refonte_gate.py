@@ -58,7 +58,13 @@ EMBED = ("embeds.", "design_system.", "discord.Embed(", "create_embed", "_embed(
 # Une SECTION est ce qui distingue une interface recomposee d'une interface qui a
 # seulement recu l'identite. Banniere et accent changent l'aspect ; les sections
 # changent la lecture. Les deux comptent, mais pas pareil.
-SECTIONS = ("panels.Section", "sx_panels.Section", "P.Section(", "depuis_embed")
+SECTIONS = ("panels.Section", "sx_panels.Section", "P.Section(")
+
+# depuis_embed ne cree des sections que si l'embed en porte : un champ egale une
+# section, aucun champ egale aucune section. Le pont seul vaut donc l'IDENTITE ;
+# il ne vaut une recomposition que si le meme chemin ajoute des champs.
+PONT = ("panels.depuis_embed", "sx_panels.depuis_embed")
+CHAMPS = ("add_field",)
 
 
 def classer(source: str) -> str:
@@ -71,6 +77,8 @@ def classer(source: str) -> str:
     """
     if any(m in source for m in RECOMPOSE):
         if any(m in source for m in SECTIONS):
+            return "recomposé"
+        if any(m in source for m in PONT) and any(m in source for m in CHAMPS):
             return "recomposé"
         return "identité"
     if any(m in source for m in EMBED):

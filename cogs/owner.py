@@ -18,6 +18,7 @@ import discord
 from discord.ext import commands, tasks
 
 from utils import embeds, checks, design_system
+from utils import sentrix_panels as panels
 
 HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
 ACTIVITY_TYPES = {
@@ -84,12 +85,12 @@ class Owner(commands.Cog, name="Owner"):
         if utilisateur is None:
             rows = await self.bot.db.blacklist_list()
             if not rows:
-                return await ctx.send(embed=await self._embed(guild_id, title="Liste noire vide", description="Aucun utilisateur sur la liste noire du bot."))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Liste noire vide', description='Aucun utilisateur sur la liste noire du bot.')))
             lines = [f"`{r['user_id']}` — {r['reason'] or 'Aucune raison'}" for r in rows[:25]]
-            return await ctx.send(embed=await self._embed(guild_id, title="Liste noire d'utilisation du bot", description="\n".join(lines)))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title="Liste noire d'utilisation du bot", description='\n'.join(lines))))
 
         if utilisateur.id == ctx.author.id:
-            return await ctx.send(embed=await self._embed(guild_id, title="Action refusée", description="Vous ne pouvez pas vous blacklister vous-même.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Action refusée', description='Vous ne pouvez pas vous blacklister vous-même.', kind='danger')))
         await self.bot.db.blacklist_add(utilisateur.id, raison, ctx.author.id)
         self.bot.blacklist_cache[utilisateur.id] = raison
 
@@ -128,7 +129,7 @@ class Owner(commands.Cog, name="Owner"):
             "\n🛡️ S'il essaie de rejoindre un autre serveur où je suis présent (avec la permission "
             "Bannir et un rôle assez haut), il sera banni automatiquement dès son arrivée."
         )
-        await ctx.send(embed=await self._embed(guild_id, title="Ajouté à la liste noire", description=description, kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Ajouté à la liste noire', description=description, kind='success')))
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -150,7 +151,7 @@ class Owner(commands.Cog, name="Owner"):
         guild_id = ctx.guild.id if ctx.guild else None
         row = await self.bot.db.blacklist_get(utilisateur.id)
         if not row:
-            return await ctx.send(embed=await self._embed(guild_id, title="Pas sur liste noire", description=f"**{utilisateur}** n'est pas sur la liste noire du bot."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pas sur liste noire', description=f"**{utilisateur}** n'est pas sur la liste noire du bot.")))
         e = await self._embed(guild_id, title=f"Liste noire — {utilisateur}")
         e.add_field(name="Raison", value=row["reason"] or "Aucune raison", inline=False)
         e.add_field(name="Ajouté par", value=f"<@{row['blacklisted_by']}>" if row["blacklisted_by"] else "Inconnu", inline=True)
@@ -162,7 +163,7 @@ class Owner(commands.Cog, name="Owner"):
     async def unbl(self, ctx: commands.Context, utilisateur: discord.User):
         await self.bot.db.blacklist_remove(utilisateur.id)
         self.bot.blacklist_cache.pop(utilisateur.id, None)
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Retiré de la liste noire", description=f"**{utilisateur}** peut de nouveau utiliser le bot.", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Retiré de la liste noire', description=f'**{utilisateur}** peut de nouveau utiliser le bot.', kind='success')))
 
     @commands.hybrid_command(name="editbl", description="Modifier la raison de liste noire d'un utilisateur.", with_app_command=False)
     @checks.is_bot_owner()
@@ -170,10 +171,10 @@ class Owner(commands.Cog, name="Owner"):
         guild_id = ctx.guild.id if ctx.guild else None
         row = await self.bot.db.blacklist_get(utilisateur.id)
         if not row:
-            return await ctx.send(embed=await self._embed(guild_id, title="Pas sur liste noire", description=f"**{utilisateur}** n'est pas sur la liste noire.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pas sur liste noire', description=f"**{utilisateur}** n'est pas sur la liste noire.", kind='danger')))
         await self.bot.db.blacklist_add(utilisateur.id, raison, row["blacklisted_by"] or ctx.author.id)
         self.bot.blacklist_cache[utilisateur.id] = raison
-        await ctx.send(embed=await self._embed(guild_id, title="Raison mise à jour", description=f"Raison mise à jour pour **{utilisateur}** : {raison}", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Raison mise à jour', description=f'Raison mise à jour pour **{utilisateur}** : {raison}', kind='success')))
 
     @commands.hybrid_command(
         name="syncbl",
@@ -183,10 +184,10 @@ class Owner(commands.Cog, name="Owner"):
     @checks.is_owner_or_admin()
     async def syncbl(self, ctx: commands.Context):
         if not ctx.guild.me.guild_permissions.ban_members:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Il me manque la permission **Bannir des membres** pour faire ça.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Permission manquante', description='Il me manque la permission **Bannir des membres** pour faire ça.', kind='danger')))
         rows = await self.bot.db.blacklist_list()
         if not rows:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Rien à synchroniser", description="La liste noire du bot est vide, rien à synchroniser."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rien à synchroniser', description='La liste noire du bot est vide, rien à synchroniser.')))
         banned = []
         for row in rows:
             member = ctx.guild.get_member(row["user_id"])
@@ -199,8 +200,8 @@ class Owner(commands.Cog, name="Owner"):
             except discord.HTTPException:
                 continue
         if not banned:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucun membre trouvé", description="Aucun membre de la liste noire n'a été trouvé sur ce serveur."))
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Synchronisation terminée", description=f"**{len(banned)}** membre(s) banni(s) :\n" + "\n".join(banned), kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Aucun membre trouvé', description="Aucun membre de la liste noire n'a été trouvé sur ce serveur.")))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Synchronisation terminée', description=f'**{len(banned)}** membre(s) banni(s) :\n' + '\n'.join(banned), kind='success')))
 
     @commands.hybrid_command(
         name="unsyncbl",
@@ -210,11 +211,11 @@ class Owner(commands.Cog, name="Owner"):
     @checks.is_owner_or_admin()
     async def unsyncbl(self, ctx: commands.Context):
         if not ctx.guild.me.guild_permissions.ban_members:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Il me manque la permission **Bannir des membres** pour faire ça.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Permission manquante', description='Il me manque la permission **Bannir des membres** pour faire ça.', kind='danger')))
         rows = await self.bot.db.blacklist_list()
         blacklisted_ids = {r["user_id"] for r in rows}
         if not blacklisted_ids:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Liste noire vide", description="La liste noire du bot est vide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Liste noire vide', description='La liste noire du bot est vide.')))
         unbanned = []
         async for ban_entry in ctx.guild.bans():
             if ban_entry.user.id in blacklisted_ids:
@@ -225,8 +226,8 @@ class Owner(commands.Cog, name="Owner"):
                 except discord.HTTPException:
                     continue
         if not unbanned:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucun membre trouvé", description="Aucun membre banni via la liste noire n'a été trouvé sur ce serveur."))
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Désynchronisation terminée", description=f"**{len(unbanned)}** membre(s) débanni(s) :\n" + "\n".join(unbanned), kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Aucun membre trouvé', description="Aucun membre banni via la liste noire n'a été trouvé sur ce serveur.")))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Désynchronisation terminée', description=f'**{len(unbanned)}** membre(s) débanni(s) :\n' + '\n'.join(unbanned), kind='success')))
 
     # ---------------------------------------------------------------- SYNCHRONISATION DES COMMANDES SLASH
 
@@ -244,10 +245,7 @@ class Owner(commands.Cog, name="Owner"):
         # (au démarrage du bot) peut aussi échouer silencieusement (rate limit Discord) : cette
         # commande permet de relancer la synchro à la demande, sans redémarrer tout le bot.
         guild_id = ctx.guild.id if ctx.guild else None
-        msg = await ctx.send(embed=await self._embed(
-            guild_id, title="Synchronisation en cours…",
-            description="Synchronisation globale des commandes slash. Cela peut prendre jusqu'à **1 heure** pour se propager sur tous les serveurs Discord (limite de Discord, pas du bot).",
-        ))
+        msg = await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Synchronisation en cours…', description="Synchronisation globale des commandes slash. Cela peut prendre jusqu'à **1 heure** pour se propager sur tous les serveurs Discord (limite de Discord, pas du bot).")))
         try:
             synced = await self.bot.tree.sync()
         except discord.HTTPException as e:
@@ -266,7 +264,7 @@ class Owner(commands.Cog, name="Owner"):
     @checks.is_bot_owner()
     async def syncguild_cmd(self, ctx: commands.Context):
         if not ctx.guild:
-            return await ctx.send(embed=await self._embed(None, title="Commande de serveur", description="Cette commande doit être utilisée dans un serveur.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(None, title='Commande de serveur', description='Cette commande doit être utilisée dans un serveur.', kind='danger')))
         # copy_global_to() + sync(guild=...) : pattern recommandé par discord.py pour tester
         # instantanément des commandes globales sur UN serveur, sans attendre la propagation
         # globale (jusqu'à 1h). Discord fusionne ensuite proprement avec la version globale —
@@ -275,12 +273,8 @@ class Owner(commands.Cog, name="Owner"):
         try:
             synced = await self.bot.tree.sync(guild=ctx.guild)
         except discord.HTTPException as e:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Échec de la synchronisation", description=f"Discord a refusé la synchronisation : `{e}`", kind="danger"))
-        await ctx.send(embed=await self._embed(
-            ctx.guild.id, title="Synchronisation locale terminée",
-            description=f"**{len(synced)}** commande(s) slash synchronisée(s) sur **{ctx.guild.name}** (visibles quasi immédiatement).",
-            kind="success",
-        ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Échec de la synchronisation', description=f'Discord a refusé la synchronisation : `{e}`', kind='danger')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Synchronisation locale terminée', description=f'**{len(synced)}** commande(s) slash synchronisée(s) sur **{ctx.guild.name}** (visibles quasi immédiatement).', kind='success')))
 
     # ---------------------------------------------------------------- PRÉSENCE / STATUT
 
@@ -294,14 +288,10 @@ class Owner(commands.Cog, name="Owner"):
         guild_id = ctx.guild.id if ctx.guild else None
         activity_type = ACTIVITY_TYPES.get(type.lower())
         if not activity_type:
-            return await ctx.send(embed=await self._embed(
-                guild_id, title="Type invalide",
-                description="Type invalide. Utilisez : `playing`, `streaming`, `listening`, `watching` ou `competing`.",
-                kind="danger",
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Type invalide', description='Type invalide. Utilisez : `playing`, `streaming`, `listening`, `watching` ou `competing`.', kind='danger')))
         await self.bot.db.set_setting("rotate_enabled", "0")
         await self.bot.change_presence(activity=discord.Activity(type=activity_type, name=texte))
-        await ctx.send(embed=await self._embed(guild_id, title="Statut changé", description=f"Statut changé : **{type}** {texte}", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Statut changé', description=f'Statut changé : **{type}** {texte}', kind='success')))
 
     @commands.hybrid_command(
         name="status-rotate",
@@ -318,41 +308,37 @@ class Owner(commands.Cog, name="Owner"):
         if action == "add":
             activity_type = ACTIVITY_TYPES.get((type or "").lower())
             if not activity_type or not texte:
-                return await ctx.send(embed=await self._embed(
-                    guild_id, title="Usage invalide",
-                    description="Utilisez : `+status-rotate add <playing|streaming|listening|watching|competing> <texte>`.",
-                    kind="danger",
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Usage invalide', description='Utilisez : `+status-rotate add <playing|streaming|listening|watching|competing> <texte>`.', kind='danger')))
             statuses.append({"type": type.lower(), "text": texte})
             await self.bot.db.set_setting("rotate_statuses", json.dumps(statuses))
-            return await ctx.send(embed=await self._embed(guild_id, title="Statut ajouté", description=f"Statut ajouté à la rotation ({len(statuses)} au total).", kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Statut ajouté', description=f'Statut ajouté à la rotation ({len(statuses)} au total).', kind='success')))
 
         if action == "remove":
             try:
                 index = int(type) - 1
                 removed = statuses.pop(index)
             except (TypeError, ValueError, IndexError):
-                return await ctx.send(embed=await self._embed(guild_id, title="Index invalide", description="Index invalide. Utilisez `+status-rotate list` pour voir les numéros.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Index invalide', description='Index invalide. Utilisez `+status-rotate list` pour voir les numéros.', kind='danger')))
             await self.bot.db.set_setting("rotate_statuses", json.dumps(statuses))
-            return await ctx.send(embed=await self._embed(guild_id, title="Statut retiré", description=f"Statut retiré : {removed['type']} {removed['text']}", kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Statut retiré', description=f"Statut retiré : {removed['type']} {removed['text']}", kind='success')))
 
         if action == "list":
             if not statuses:
-                return await ctx.send(embed=await self._embed(guild_id, title="Rotation vide", description="Aucun statut configuré pour la rotation."))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Rotation vide', description='Aucun statut configuré pour la rotation.')))
             lines = [f"**{i+1}.** {s['type']} — {s['text']}" for i, s in enumerate(statuses)]
-            return await ctx.send(embed=await self._embed(guild_id, title="Rotation de statuts", description="\n".join(lines)))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Rotation de statuts', description='\n'.join(lines))))
 
         if action == "start":
             if not statuses:
-                return await ctx.send(embed=await self._embed(guild_id, title="Rotation vide", description="Ajoutez au moins un statut avec `+status-rotate add` avant de démarrer.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Rotation vide', description='Ajoutez au moins un statut avec `+status-rotate add` avant de démarrer.', kind='danger')))
             await self.bot.db.set_setting("rotate_enabled", "1")
-            return await ctx.send(embed=await self._embed(guild_id, title="Rotation démarrée", description=f"Rotation démarrée entre **{len(statuses)}** statut(s) (change toutes les 60s).", kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Rotation démarrée', description=f'Rotation démarrée entre **{len(statuses)}** statut(s) (change toutes les 60s).', kind='success')))
 
         if action == "stop":
             await self.bot.db.set_setting("rotate_enabled", "0")
-            return await ctx.send(embed=await self._embed(guild_id, title="Rotation arrêtée", kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Rotation arrêtée', kind='success')))
 
-        await ctx.send(embed=await self._embed(guild_id, title="Action invalide", description="Action invalide. Utilisez `add`, `remove`, `list`, `start` ou `stop`.", kind="danger"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Action invalide', description='Action invalide. Utilisez `add`, `remove`, `list`, `start` ou `stop`.', kind='danger')))
 
     @tasks.loop(seconds=60)
     async def rotate_task(self):
@@ -382,7 +368,7 @@ class Owner(commands.Cog, name="Owner"):
     async def footer(self, ctx: commands.Context, *, texte: str):
         await self.bot.db.set_setting("footer_text", texte)
         embeds.set_footer_text(texte)
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Footer changé", description=f"Footer changé pour : **{texte}**", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Footer changé', description=f'Footer changé pour : **{texte}**', kind='success')))
 
     @commands.hybrid_command(name="theme", description="Changer la couleur d'accent des embeds (code hex, ex: #5847EB).", with_app_command=False)
     @checks.is_bot_owner()
@@ -390,10 +376,10 @@ class Owner(commands.Cog, name="Owner"):
         guild_id = ctx.guild.id if ctx.guild else None
         color = parse_color(couleur)
         if color is None:
-            return await ctx.send(embed=await self._embed(guild_id, title="Couleur invalide", description="Couleur invalide. Utilisez un code hex, ex : `#5847EB`.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Couleur invalide', description='Couleur invalide. Utilisez un code hex, ex : `#5847EB`.', kind='danger')))
         await self.bot.db.set_setting("brand_color", str(color))
         embeds.set_brand_color(color)
-        await ctx.send(embed=await self._embed(guild_id, title="Couleur mise à jour", description="Thème changé.", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Couleur mise à jour', description='Thème changé.', kind='success')))
 
     @commands.hybrid_command(
         name="set-bot",
@@ -406,39 +392,32 @@ class Owner(commands.Cog, name="Owner"):
         champ = champ.lower()
         if champ == "name":
             if not valeur:
-                return await ctx.send(embed=await self._embed(guild_id, title="Nom manquant", description="Précisez le nouveau nom : `+set-bot name <nom>`.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Nom manquant', description='Précisez le nouveau nom : `+set-bot name <nom>`.', kind='danger')))
             try:
                 await self.bot.user.edit(username=valeur)
             except discord.HTTPException as exc:
-                return await ctx.send(embed=await self._embed(guild_id, title="Échec", description=f"Impossible de changer le nom (Discord limite les changements fréquents) : {exc}", kind="danger"))
-            return await ctx.send(embed=await self._embed(guild_id, title="Nom changé", description=f"Nom du bot changé pour **{valeur}**.", kind="success"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Échec', description=f'Impossible de changer le nom (Discord limite les changements fréquents) : {exc}', kind='danger')))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Nom changé', description=f'Nom du bot changé pour **{valeur}**.', kind='success')))
 
         if champ in ("avatar", "banner"):
             url = valeur
             if ctx.message.attachments:
                 url = ctx.message.attachments[0].url
             if not url:
-                return await ctx.send(embed=await self._embed(guild_id, title="Image manquante", description=f"Fournissez une image en pièce jointe, ou une URL : `+set-bot {champ} <url>`.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Image manquante', description=f'Fournissez une image en pièce jointe, ou une URL : `+set-bot {champ} <url>`.', kind='danger')))
             data = await fetch_image_bytes(url)
             if not data:
-                return await ctx.send(embed=await self._embed(guild_id, title="Téléchargement impossible", description="Impossible de télécharger cette image.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Téléchargement impossible', description='Impossible de télécharger cette image.', kind='danger')))
             try:
                 if champ == "avatar":
                     await self.bot.user.edit(avatar=data)
                 else:
                     await self.bot.user.edit(banner=data)
             except discord.HTTPException as exc:
-                return await ctx.send(embed=await self._embed(
-                    guild_id, title="Échec",
-                    description=(
-                        f"Échec du changement ({exc}). Pour la bannière, il faut parfois passer par le "
-                        "Developer Portal si le compte du bot n'a pas le niveau requis."
-                    ),
-                    kind="danger",
-                ))
-            return await ctx.send(embed=await self._embed(guild_id, title="Identité mise à jour", description=f"{champ.capitalize()} du bot mis à jour.", kind="success"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Échec', description=f"Échec du changement ({exc}). Pour la bannière, il faut parfois passer par le Developer Portal si le compte du bot n'a pas le niveau requis.", kind='danger')))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Identité mise à jour', description=f'{champ.capitalize()} du bot mis à jour.', kind='success')))
 
-        await ctx.send(embed=await self._embed(guild_id, title="Champ invalide", description="Champ invalide. Utilisez `name`, `avatar` ou `banner`.", kind="danger"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Champ invalide', description='Champ invalide. Utilisez `name`, `avatar` ou `banner`.', kind='danger')))
 
     @commands.hybrid_command(name="set-nickname", description="Changer le pseudo du bot sur ce serveur.", with_app_command=False)
     @checks.is_owner_or_admin()
@@ -446,8 +425,8 @@ class Owner(commands.Cog, name="Owner"):
         try:
             await ctx.guild.me.edit(nick=pseudo)
         except discord.Forbidden:
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Permission manquante", description="Je n'ai pas la permission de changer mon pseudo sur ce serveur.", kind="danger"))
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Pseudo changé", description=f"Pseudo changé pour **{pseudo}**." if pseudo else "Pseudo réinitialisé.", kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Permission manquante', description="Je n'ai pas la permission de changer mon pseudo sur ce serveur.", kind='danger')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Pseudo changé', description=f'Pseudo changé pour **{pseudo}**.' if pseudo else 'Pseudo réinitialisé.', kind='success')))
 
     # ---------------------------------------------------------------- SERVEURS DU BOT
 
@@ -463,39 +442,39 @@ class Owner(commands.Cog, name="Owner"):
 
         if action == "list":
             lines = [f"`{g.id}` — **{g.name}** ({g.member_count} membres)" for g in self.bot.guilds[:25]]
-            return await ctx.send(embed=await self._embed(guild_id, title=f"Serveurs du bot ({len(self.bot.guilds)})", description="\n".join(lines) or "Aucun."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title=f'Serveurs du bot ({len(self.bot.guilds)})', description='\n'.join(lines) or 'Aucun.')))
 
         if action == "invite":
             url = discord.utils.oauth_url(self.bot.user.id, permissions=discord.Permissions(administrator=True))
-            return await ctx.send(embed=await self._embed(guild_id, title="Lien d'invitation du bot", description=url))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title="Lien d'invitation du bot", description=url)))
 
         if action in ("icon", "pic", "banner"):
             if not serveur_id or not serveur_id.isdigit():
-                return await ctx.send(embed=await self._embed(guild_id, title="ID manquant", description=f"Précisez l'ID du serveur : `+bot-servers {action} <id>`.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='ID manquant', description=f"Précisez l'ID du serveur : `+bot-servers {action} <id>`.", kind='danger')))
             guild = self.bot.get_guild(int(serveur_id))
             if not guild:
-                return await ctx.send(embed=await self._embed(guild_id, title="Serveur introuvable", description="Je ne suis pas sur ce serveur.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Serveur introuvable', description='Je ne suis pas sur ce serveur.', kind='danger')))
             asset = guild.icon if action in ("icon", "pic") else guild.banner
             if not asset:
-                return await ctx.send(embed=await self._embed(guild_id, title="Aucune image", description=f"Ce serveur n'a pas de {'icône' if action != 'banner' else 'bannière'}."))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Aucune image', description=f"Ce serveur n'a pas de {('icône' if action != 'banner' else 'bannière')}.")))
             e = await self._embed(guild_id, title=guild.name)
             e.set_image(url=asset.url)
             return await ctx.send(embed=e)
 
-        await ctx.send(embed=await self._embed(guild_id, title="Action invalide", description="Action invalide. Utilisez `list`, `invite`, `icon` ou `banner`.", kind="danger"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Action invalide', description='Action invalide. Utilisez `list`, `invite`, `icon` ou `banner`.', kind='danger')))
 
     @commands.hybrid_command(name="bot-leave", description="Faire quitter le bot d'un serveur (par ID).", with_app_command=False)
     @checks.is_bot_owner()
     async def make_bot_leave(self, ctx: commands.Context, serveur_id: str):
         guild_id = ctx.guild.id if ctx.guild else None
         if not serveur_id.isdigit():
-            return await ctx.send(embed=await self._embed(guild_id, title="ID invalide", description="ID de serveur invalide.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='ID invalide', description='ID de serveur invalide.', kind='danger')))
         guild = self.bot.get_guild(int(serveur_id))
         if not guild:
-            return await ctx.send(embed=await self._embed(guild_id, title="Serveur introuvable", description="Je ne suis pas sur ce serveur.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Serveur introuvable', description='Je ne suis pas sur ce serveur.', kind='danger')))
         name = guild.name
         await guild.leave()
-        await ctx.send(embed=await self._embed(guild_id, title="Serveur quitté", description=f"J'ai quitté **{name}**.", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Serveur quitté', description=f"J'ai quitté **{name}**.", kind='success')))
 
     # ---------------------------------------------------------------- ALIAS DE COMMANDES (préfixe)
 
@@ -510,29 +489,29 @@ class Owner(commands.Cog, name="Owner"):
 
         if action == "add":
             if not alias or not commande:
-                return await ctx.send(embed=await self._embed(ctx.guild.id, title="Usage invalide", description="Utilisez : `+alias add <alias> <commande>`.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Usage invalide', description='Utilisez : `+alias add <alias> <commande>`.', kind='danger')))
             real_command = self.bot.get_command(commande)
             if not real_command:
-                return await ctx.send(embed=await self._embed(ctx.guild.id, title="Commande introuvable", description=f"La commande `{commande}` n'existe pas.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Commande introuvable', description=f"La commande `{commande}` n'existe pas.", kind='danger')))
             if self.bot.get_command(alias.lower()):
-                return await ctx.send(embed=await self._embed(ctx.guild.id, title="Alias déjà pris", description=f"`{alias}` est déjà le nom d'une commande existante.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Alias déjà pris', description=f"`{alias}` est déjà le nom d'une commande existante.", kind='danger')))
             await self.bot.db.add_alias(ctx.guild.id, alias.lower(), real_command.qualified_name)
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Alias créé", description=f"Alias `{ctx.prefix}{alias}` → `{ctx.prefix}{real_command.qualified_name}` créé.", kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Alias créé', description=f'Alias `{ctx.prefix}{alias}` → `{ctx.prefix}{real_command.qualified_name}` créé.', kind='success')))
 
         if action == "remove":
             if not alias:
-                return await ctx.send(embed=await self._embed(ctx.guild.id, title="Usage invalide", description="Utilisez : `+alias remove <alias>`.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Usage invalide', description='Utilisez : `+alias remove <alias>`.', kind='danger')))
             await self.bot.db.remove_alias(ctx.guild.id, alias.lower())
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Alias supprimé", description=f"Alias `{alias}` supprimé (s'il existait).", kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Alias supprimé', description=f"Alias `{alias}` supprimé (s'il existait).", kind='success')))
 
         if action == "list":
             rows = await self.bot.db.list_aliases(ctx.guild.id)
             if not rows:
-                return await ctx.send(embed=await self._embed(ctx.guild.id, title="Aucun alias", description="Aucun alias configuré sur ce serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Aucun alias', description='Aucun alias configuré sur ce serveur.')))
             lines = [f"`{ctx.prefix}{r['alias']}` → `{ctx.prefix}{r['command_name']}`" for r in rows]
-            return await ctx.send(embed=await self._embed(ctx.guild.id, title="Alias de commandes", description="\n".join(lines)))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Alias de commandes', description='\n'.join(lines))))
 
-        await ctx.send(embed=await self._embed(ctx.guild.id, title="Action invalide", description="Action invalide. Utilisez `add`, `remove` ou `list`.", kind="danger"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Action invalide', description='Action invalide. Utilisez `add`, `remove` ou `list`.', kind='danger')))
 
 
 async def setup(bot: commands.Bot):

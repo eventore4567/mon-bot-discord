@@ -161,48 +161,48 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         guild_id = ctx.guild.id if ctx.guild else None
         cote = cote.strip().lower()
         if cote not in ("pile", "face"):
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Pile ou face", description="Précisez `pile` ou `face`.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pile ou face', description='Précisez `pile` ou `face`.', kind='warning')))
         started, err, sid = await _precheck(self.bot, ctx, "coinflip", 10)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Pile ou face", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pile ou face', description=err, kind='warning')))
         result = game_rewards.secure_pick(["pile", "face"])
         if result == cote:
             reward = await _finish(self.bot, ctx, "coinflip", sid, "win", 12)
             desc = f"🪙 **{result.upper()}** ! Vous aviez raison." + _reward_line(reward)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Pile ou face", description=desc, kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pile ou face', description=desc, kind='success')))
         await _finish(self.bot, ctx, "coinflip", sid, "loss", 0)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Pile ou face", description=f"🪙 **{result.upper()}** — perdu, vous aviez dit {cote}.", kind="danger"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pile ou face', description=f'🪙 **{result.upper()}** — perdu, vous aviez dit {cote}.', kind='danger')))
 
     @commands.hybrid_command(name="dice", description="Pariez sur le résultat d'un dé à 6 faces.", with_app_command=False)
     @app_commands.describe(nombre="Votre pari, entre 1 et 6")
     async def dice(self, ctx: commands.Context, nombre: int):
         guild_id = ctx.guild.id if ctx.guild else None
         if not 1 <= nombre <= 6:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Pari sur un dé", description="Choisissez un nombre entre 1 et 6.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pari sur un dé', description='Choisissez un nombre entre 1 et 6.', kind='warning')))
         started, err, sid = await _precheck(self.bot, ctx, "dice", 10)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Pari sur un dé", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pari sur un dé', description=err, kind='warning')))
         result = game_rewards.secure_pick([1, 2, 3, 4, 5, 6])
         if result == nombre:
             reward = await _finish(self.bot, ctx, "dice", sid, "win", 35)
             desc = f"🎲 Le dé tombe sur **{result}** ! Pari gagné." + _reward_line(reward)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Pari sur un dé", description=desc, kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pari sur un dé', description=desc, kind='success')))
         await _finish(self.bot, ctx, "dice", sid, "loss", 0)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Pari sur un dé", description=f"🎲 Le dé tombe sur **{result}** — perdu, vous aviez parié {nombre}.", kind="danger"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pari sur un dé', description=f'🎲 Le dé tombe sur **{result}** — perdu, vous aviez parié {nombre}.', kind='danger')))
 
     @commands.hybrid_command(name="luckyroll", description="Lancez deux dés — un double rapporte un petit bonus. (+roll existant reste inchangé)", with_app_command=False)
     async def luckyroll(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, "luckyroll", 8)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Lancer de dés chanceux", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Lancer de dés chanceux', description=err, kind='warning')))
         d1, d2 = game_rewards.secure_pick(range(1, 7)), game_rewards.secure_pick(range(1, 7))
         if d1 == d2:
             reward = await _finish(self.bot, ctx, "luckyroll", sid, "win", 20)
             desc = f"🎲🎲 **{d1} - {d2}** — DOUBLE !" + _reward_line(reward)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Lancer de dés chanceux", description=desc, kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Lancer de dés chanceux', description=desc, kind='success')))
         await _finish(self.bot, ctx, "luckyroll", sid, "loss", 0)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Lancer de dés chanceux", description=f"🎲🎲 **{d1} - {d2}**, pas de double cette fois."))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Lancer de dés chanceux', description=f'🎲🎲 **{d1} - {d2}**, pas de double cette fois.')))
 
     @commands.hybrid_command(name="highlow", description="Le bot tire une carte (1-13). Devinez si la suivante sera plus haute ou plus basse.", with_app_command=False)
     @app_commands.describe(pari="plus_haut ou plus_bas")
@@ -211,31 +211,31 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, "highlow", 12)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Plus haut ou plus bas", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Plus haut ou plus bas', description=err, kind='warning')))
         first = game_rewards.secure_pick(range(1, 14))
         second = game_rewards.secure_pick(range(1, 14))
         if second == first:
             await _finish(self.bot, ctx, "highlow", sid, "draw", 0)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Plus haut ou plus bas", description=f"🃏 {first} puis 🃏 {second} — égalité, personne ne gagne."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Plus haut ou plus bas', description=f'🃏 {first} puis 🃏 {second} — égalité, personne ne gagne.')))
         won = (pari == "plus_haut" and second > first) or (pari == "plus_bas" and second < first)
         if won:
             reward = await _finish(self.bot, ctx, "highlow", sid, "win", 18)
             desc = f"🃏 {first} → 🃏 **{second}** — bien vu !" + _reward_line(reward)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Plus haut ou plus bas", description=desc, kind="success"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Plus haut ou plus bas', description=desc, kind='success')))
         await _finish(self.bot, ctx, "highlow", sid, "loss", 0)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Plus haut ou plus bas", description=f"🃏 {first} → 🃏 **{second}** — perdu.", kind="danger"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Plus haut ou plus bas', description=f'🃏 {first} → 🃏 **{second}** — perdu.', kind='danger')))
 
     @commands.hybrid_command(name="memory", description="Mémorisez une séquence d'emojis puis retapez-la dans l'ordre.", with_app_command=False)
     async def memory(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, "memory", 20)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Mémoire", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mémoire', description=err, kind='warning')))
         pool = ["🍒", "🍋", "🍊", "🍇", "💎", "⭐", "🔥", "🌙"]
         sequence = [game_rewards.secure_pick(pool) for _ in range(5)]
         await ctx.send(embed=await _embed(guild_id and self.bot, guild_id, title="Mémoire", description="Mémorisez cette séquence :\n" + " ".join(sequence)))
         await asyncio.sleep(5)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Mémoire", description="À vous ! Retapez la séquence dans l'ordre, séparée par des espaces (30 secondes)."))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mémoire', description="À vous ! Retapez la séquence dans l'ordre, séparée par des espaces (30 secondes).")))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
@@ -244,21 +244,21 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             msg = await self.bot.wait_for("message", check=check, timeout=30)
         except asyncio.TimeoutError:
             await _finish(self.bot, ctx, "memory", sid, "loss", 0)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Temps écoulé", description=f"⏱️ La séquence était : {' '.join(sequence)}", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Temps écoulé', description=f"⏱️ La séquence était : {' '.join(sequence)}", kind='warning')))
         if msg.content.split() == sequence:
             reward = await _finish(self.bot, ctx, "memory", sid, "win", 30)
-            await ctx.send(embed=await _embed(self.bot, guild_id, title="Bravo !", description="🧠 Séquence parfaite !" + _reward_line(reward), kind="success"))
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Bravo !', description='🧠 Séquence parfaite !' + _reward_line(reward), kind='success')))
         else:
             await _finish(self.bot, ctx, "memory", sid, "loss", 0)
-            await ctx.send(embed=await _embed(self.bot, guild_id, title="Raté", description=f"❌ La séquence était : {' '.join(sequence)}", kind="danger"))
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Raté', description=f"❌ La séquence était : {' '.join(sequence)}", kind='danger')))
 
     @commands.hybrid_command(name="reaction", description="Cliquez sur le bouton dès qu'il apparaît, le plus vite possible.", with_app_command=False)
     async def reaction(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, "reaction", 15)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Réaction rapide", description=err, kind="warning"))
-        msg = await ctx.send(embed=await _embed(self.bot, guild_id, title="Réaction rapide", description="⏳ Préparez-vous... le bouton va apparaître."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Réaction rapide', description=err, kind='warning')))
+        msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Réaction rapide', description='⏳ Préparez-vous... le bouton va apparaître.')))
         await asyncio.sleep(random.uniform(2.0, 5.0))
         view = _ReactionSoloView(author_id=ctx.author.id)
         start_time = time.monotonic()
@@ -285,9 +285,9 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, "emojiquiz", 15)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Quiz emoji", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz emoji', description=err, kind='warning')))
         emojis, answer = game_rewards.secure_pick(EMOJI_QUIZ)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Quiz emoji", description=f"🧩 {emojis}\nVous avez 20 secondes."))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz emoji', description=f'🧩 {emojis}\nVous avez 20 secondes.')))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
@@ -296,20 +296,20 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             msg = await self.bot.wait_for("message", check=check, timeout=20)
         except asyncio.TimeoutError:
             await _finish(self.bot, ctx, "emojiquiz", sid, "loss", 0)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Temps écoulé", description=f"⏱️ La réponse était **{answer}**.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Temps écoulé', description=f'⏱️ La réponse était **{answer}**.', kind='warning')))
         if msg.content.strip().lower() == answer:
             reward = await _finish(self.bot, ctx, "emojiquiz", sid, "win", 20)
-            await ctx.send(embed=await _embed(self.bot, guild_id, title="Bonne réponse !", description="✅" + _reward_line(reward), kind="success"))
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Bonne réponse !', description='✅' + _reward_line(reward), kind='success')))
         else:
             await _finish(self.bot, ctx, "emojiquiz", sid, "loss", 0)
-            await ctx.send(embed=await _embed(self.bot, guild_id, title="Mauvaise réponse", description=f"❌ La réponse était **{answer}**.", kind="danger"))
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mauvaise réponse', description=f'❌ La réponse était **{answer}**.', kind='danger')))
 
     @commands.hybrid_command(name="colorquiz", description="Cliquez sur la bonne couleur.", with_app_command=False)
     async def colorquiz(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, "colorquiz", 10)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Quiz couleur", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz couleur', description=err, kind='warning')))
         options = list(COLOR_EMOJIS.items())
         random.shuffle(options)
         options = options[:4]
@@ -321,19 +321,19 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             await _finish(self.bot, ctx, "colorquiz", sid, "loss", 0)
         elif view.correct:
             reward = await _finish(self.bot, ctx, "colorquiz", sid, "win", 15)
-            await ctx.send(embed=await _embed(self.bot, guild_id, title="Quiz couleur", description="✅ Bonne couleur !" + _reward_line(reward), kind="success"))
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz couleur', description='✅ Bonne couleur !' + _reward_line(reward), kind='success')))
         else:
             await _finish(self.bot, ctx, "colorquiz", sid, "loss", 0)
-            await ctx.send(embed=await _embed(self.bot, guild_id, title="Quiz couleur", description="❌ Mauvaise couleur.", kind="danger"))
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz couleur', description='❌ Mauvaise couleur.', kind='danger')))
 
     @commands.hybrid_command(name="fasttype", description="Retapez la phrase affichée le plus vite et le plus précisément possible.", with_app_command=False)
     async def fasttype(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, "fasttype", 15)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Retape vite", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Retape vite', description=err, kind='warning')))
         phrase = game_rewards.secure_pick(FASTTYPE_PHRASES)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Retape vite", description=f"⌨️ Retapez exactement :\n```{phrase}```"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Retape vite', description=f'⌨️ Retapez exactement :\n```{phrase}```')))
         start_time = time.monotonic()
 
         def check(m):
@@ -343,14 +343,14 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             msg = await self.bot.wait_for("message", check=check, timeout=25)
         except asyncio.TimeoutError:
             await _finish(self.bot, ctx, "fasttype", sid, "loss", 0)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Temps écoulé", description="⏱️ Trop lent.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Temps écoulé', description='⏱️ Trop lent.', kind='warning')))
         if msg.content != phrase:
             await _finish(self.bot, ctx, "fasttype", sid, "loss", 0)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Raté", description="❌ Ce n'était pas exact.", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Raté', description="❌ Ce n'était pas exact.", kind='danger')))
         elapsed = time.monotonic() - start_time
         amount = 30 if elapsed < 5 else 20 if elapsed < 10 else 12
         reward = await _finish(self.bot, ctx, "fasttype", sid, "win", amount)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Retape vite", description=f"⚡ Retapé en **{elapsed:.1f}s** !" + _reward_line(reward), kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Retape vite', description=f'⚡ Retapé en **{elapsed:.1f}s** !' + _reward_line(reward), kind='success')))
 
 
 WORDGAME_CLUES = [
@@ -383,7 +383,7 @@ async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cool
     guild_id = ctx.guild.id if ctx.guild else None
     started, err, sid = await _precheck(bot, ctx, game_name, cooldown)
     if not started:
-        return await ctx.send(embed=await _embed(bot, guild_id, title="Devine le mot", description=err, kind="warning"))
+        return await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Devine le mot', description=err, kind='warning')))
     if mode == "scramble":
         word = game_rewards.secure_pick(pool)
         letters = list(word)
@@ -394,7 +394,7 @@ async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cool
     else:
         clue, answer = game_rewards.secure_pick(pool)
         prompt = f"📖 {clue}"
-    await ctx.send(embed=await _embed(bot, guild_id, title="Devine le mot", description=f"{prompt}\nVous avez 20 secondes."))
+    await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Devine le mot', description=f'{prompt}\nVous avez 20 secondes.')))
 
     def check(m):
         return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
@@ -403,13 +403,13 @@ async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cool
         msg = await bot.wait_for("message", check=check, timeout=20)
     except asyncio.TimeoutError:
         await _finish(bot, ctx, game_name, sid, "loss", 0)
-        return await ctx.send(embed=await _embed(bot, guild_id, title="Temps écoulé", description=f"⏱️ La réponse était **{answer}**.", kind="warning"))
+        return await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Temps écoulé', description=f'⏱️ La réponse était **{answer}**.', kind='warning')))
     if msg.content.strip().lower() == answer:
         reward = await _finish(bot, ctx, game_name, sid, "win", 20)
-        await ctx.send(embed=await _embed(bot, guild_id, title="Bonne réponse !", description="✅" + _reward_line(reward), kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Bonne réponse !', description='✅' + _reward_line(reward), kind='success')))
     else:
         await _finish(bot, ctx, game_name, sid, "loss", 0)
-        await ctx.send(embed=await _embed(bot, guild_id, title="Mauvaise réponse", description=f"❌ La réponse était **{answer}**.", kind="danger"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Mauvaise réponse', description=f'❌ La réponse était **{answer}**.', kind='danger')))
 
 
 class _ReactionSoloView(discord.ui.View):
@@ -484,10 +484,10 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         guild_id = ctx.guild.id if ctx.guild else None
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Duel", description=invalid, kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel', description=invalid, kind='danger')))
         started, err, sid = await _precheck(self.bot, ctx, "duel", 15)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Duel", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel', description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "duel")  # le verrou individuel ne s'applique pas aux duels à 2
         view = _RPSDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
         msg = await ctx.send(
@@ -503,10 +503,10 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         guild_id = ctx.guild.id if ctx.guild else None
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Duel du nombre secret", description=invalid, kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel du nombre secret', description=invalid, kind='danger')))
         started, err, sid = await _precheck(self.bot, ctx, "numberduel", 15)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Duel du nombre secret", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel du nombre secret', description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "numberduel")
         view = _NumberDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
         msg = await ctx.send(
@@ -522,10 +522,10 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         guild_id = ctx.guild.id if ctx.guild else None
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Duel de quiz", description=invalid, kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de quiz', description=invalid, kind='danger')))
         started, err, sid = await _precheck(self.bot, ctx, "quizduel", 15)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Duel de quiz", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de quiz', description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "quizduel")
         question, answer = game_rewards.secure_pick(WORDGAME_CLUES)
         view = _QuizDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid, answer=answer)
@@ -542,13 +542,12 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         guild_id = ctx.guild.id if ctx.guild else None
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Duel de réaction", description=invalid, kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=invalid, kind='danger')))
         started, err, sid = await _precheck(self.bot, ctx, "reactionduel", 15)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Duel de réaction", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "reactionduel")
-        msg = await ctx.send(embed=await _embed(self.bot, guild_id, title="Duel de réaction",
-                                                  description=f"⚡ {ctx.author.mention} vs {adversaire.mention}\n⏳ Préparez-vous..."))
+        msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=f'⚡ {ctx.author.mention} vs {adversaire.mention}\n⏳ Préparez-vous...')))
         await asyncio.sleep(random.uniform(2.0, 6.0))
         view = _ReactionDuelView(p1=ctx.author, p2=adversaire)
         await msg.edit(embed=await _embed(self.bot, guild_id, title="Duel de réaction", description="🔴 **MAINTENANT !**"), view=view)
@@ -565,10 +564,10 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         guild_id = ctx.guild.id if ctx.guild else None
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Puissance 4", description=invalid, kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Puissance 4', description=invalid, kind='danger')))
         started, err, sid = await _precheck(self.bot, ctx, "connect4", 15)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Puissance 4", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Puissance 4', description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "connect4")
         view = ConnectFourView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
         msg = await ctx.send(embed=await _embed(self.bot, guild_id, title="Puissance 4", description=view.render(f"Au tour de {ctx.author.mention} (🔴)")), view=view)
@@ -967,9 +966,9 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await self._start_community(ctx, game_name)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title=title, description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, game_name)
-        await ctx.send(embed=await _embed(self.bot, guild_id, title=title, description=f"{prompt}\n🏁 Premier(e) à répondre correctement dans ce salon gagne ! ({window}s)"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f'{prompt}\n🏁 Premier(e) à répondre correctement dans ce salon gagne ! ({window}s)')))
 
         def check(m):
             return m.channel.id == ctx.channel.id and not m.author.bot and m.content.strip().lower() == answer
@@ -978,10 +977,10 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
             msg = await self.bot.wait_for("message", check=check, timeout=window)
         except asyncio.TimeoutError:
             await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, game_name)
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title=title, description=f"⏱️ Personne n'a trouvé. La réponse était **{answer}**.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f"⏱️ Personne n'a trouvé. La réponse était **{answer}**.", kind='warning')))
         await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, game_name)
         game_reward = await game_rewards.reward_game_winner(self.bot, guild_id, msg.author.id, game_name, reward, sid, result="win")
-        await ctx.send(embed=await _embed(self.bot, guild_id, title=title, description=f"🏆 {msg.author.mention} a trouvé en premier !" + _reward_line(game_reward), kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f'🏆 {msg.author.mention} a trouvé en premier !' + _reward_line(game_reward), kind='success')))
 
     @commands.hybrid_command(name="triviastart", description="Lancer une question de culture générale communautaire.", with_app_command=False)
     async def triviastart(self, ctx: commands.Context):
@@ -1012,9 +1011,9 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await self._start_community(ctx, "reactionevent")
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Évènement réaction", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "reactionevent")
-        msg = await ctx.send(embed=await _embed(self.bot, guild_id, title="Évènement réaction", description="⚡ Un bouton va apparaître, soyez le/la plus rapide !"))
+        msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description='⚡ Un bouton va apparaître, soyez le/la plus rapide !')))
         await asyncio.sleep(random.uniform(3.0, 8.0))
         view = _CommunityRaceButtonView()
         await msg.edit(embed=await _embed(self.bot, guild_id, title="Évènement réaction", description="🔴 **CLIQUEZ MAINTENANT !**"), view=view)
@@ -1030,7 +1029,7 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await self._start_community(ctx, "emoji-race")
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Course à l'emoji", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "emoji-race")
         pool = ["🍒", "🍋", "🍊", "🍇", "💎"]
         target = game_rewards.secure_pick(pool)
@@ -1039,9 +1038,9 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         await view.wait()
         await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, "emoji-race")
         if view.winner is None:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Course à l'emoji", description="⏱️ Personne n'a trouvé à temps."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description="⏱️ Personne n'a trouvé à temps.")))
         reward = await game_rewards.reward_game_winner(self.bot, guild_id, view.winner.id, "emoji-race", 20, sid, result="win")
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Course à l'emoji", description=f"🏆 {view.winner.mention} a trouvé le bon emoji en premier !" + _reward_line(reward), kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description=f'🏆 {view.winner.mention} a trouvé le bon emoji en premier !' + _reward_line(reward), kind='success')))
 
     @commands.hybrid_command(name="lastmessage", description="Lancer un défi 'dernier message gagne' dans ce salon.", with_app_command=False)
     @app_commands.describe(duree="Durée en secondes (30 à 120, défaut 45)")
@@ -1050,21 +1049,21 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         duree = max(30, min(duree, 120))
         started, err, sid = await self._start_community(ctx, "lastmessage", cooldown=90)
         if not started:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Dernier message gagne", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=err, kind='warning')))
         game_rewards.release_play_lock(guild_id, ctx.author.id, "lastmessage")
         if ctx.channel.id in self._lastmessage_state:
             await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, "lastmessage")
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Dernier message gagne", description="⚠️ Un défi est déjà en cours dans ce salon.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description='⚠️ Un défi est déjà en cours dans ce salon.', kind='warning')))
         self._lastmessage_state[ctx.channel.id] = {"last_author": None}
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Dernier message gagne", description=f"💬 Le dernier membre à écrire dans ce salon d'ici **{duree}s** remporte la récompense !"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=f"💬 Le dernier membre à écrire dans ce salon d'ici **{duree}s** remporte la récompense !")))
         await asyncio.sleep(duree)
         state = self._lastmessage_state.pop(ctx.channel.id, {})
         await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, "lastmessage")
         winner = state.get("last_author")
         if winner is None:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Dernier message gagne", description="⏱️ Personne n'a écrit — pas de gagnant."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description="⏱️ Personne n'a écrit — pas de gagnant.")))
         reward = await game_rewards.reward_game_winner(self.bot, guild_id, winner.id, "lastmessage", 25, sid, result="win")
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Dernier message gagne", description=f"🏆 {winner.mention} a écrit le dernier message !" + _reward_line(reward), kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=f'🏆 {winner.mention} a écrit le dernier message !' + _reward_line(reward), kind='success')))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -1326,17 +1325,17 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
         if membre and membre.id != ctx.author.id:
             allowed = ctx.author.guild_permissions.administrator if isinstance(ctx.author, discord.Member) else False
             if not allowed:
-                return await ctx.send(embed=await _embed(self.bot, guild_id, title="Historique", description="❌ Seul le staff peut consulter l'historique d'un autre membre.", kind="danger"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Historique', description="❌ Seul le staff peut consulter l'historique d'un autre membre.", kind='danger')))
         target = membre or ctx.author
         rows = await self.bot.db.get_game_history(guild_id, target.id, limit=10)
         if not rows:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Historique des jeux", description=f"Aucune manche enregistrée pour {target.mention}."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Historique des jeux', description=f'Aucune manche enregistrée pour {target.mention}.')))
         lines = []
         for row in rows:
             label = GAME_CATALOG.get(row["game_name"], (row["game_name"], ""))[0]
             amount = f"+{row['reward_amount']} 🪙" if row["reward_amount"] > 0 else "0"
             lines.append(f"`{row['game_session_id'][:8]}…` **{label}** — {row['result']} — {amount} — <t:{row['created_at']}:R>")
-        await ctx.send(embed=await _embed(self.bot, guild_id, title=f"Historique des jeux — {target.display_name}", description="\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=f'Historique des jeux — {target.display_name}', description='\n'.join(lines))))
 
     @commands.hybrid_command(name="gameprofile", description="Profil de jeu complet d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à afficher")
@@ -1376,29 +1375,29 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
             f"**Taux de victoire :** {win_rate}%\n"
             f"**Total gagné :** {stats['total_earned']} 🪙"
         )
-        await ctx.send(embed=await _embed(self.bot, guild_id, title=f"Statistiques de jeu — {target.display_name}", description=description))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=f'Statistiques de jeu — {target.display_name}', description=description)))
 
     @commands.hybrid_command(name="gametop", description="Classement des joueurs par gains de mini-jeux.", with_app_command=False)
     async def gametop(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         settings = await game_rewards.get_settings(self.bot, guild_id)
         if not settings.get("leaderboard_enabled", True):
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Classement des jeux", description="🎮 Le classement des mini-jeux est désactivé sur ce serveur.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Classement des jeux', description='🎮 Le classement des mini-jeux est désactivé sur ce serveur.', kind='warning')))
         rows = await self.bot.db.get_game_leaderboard(guild_id, limit=10)
         if not rows:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Classement des jeux", description="Aucune donnée pour le moment."))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Classement des jeux', description='Aucune donnée pour le moment.')))
         medals = ["🥇", "🥈", "🥉"]
         lines = []
         for i, row in enumerate(rows):
             rank = medals[i] if i < 3 else f"**#{i + 1}**"
             lines.append(f"{rank} <@{row['user_id']}> — {row['total_earned']} 🪙 ({row['games_played']} manches)")
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="🏆 Classement des mini-jeux", description="\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='🏆 Classement des mini-jeux', description='\n'.join(lines))))
 
     @commands.hybrid_command(name="dailygames", description="Votre activité de mini-jeux aujourd'hui et vos cooldowns en cours.", with_app_command=False)
     async def dailygames(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         if guild_id is None:
-            return await ctx.send(embed=await _embed(self.bot, guild_id, title="Mini-jeux du jour", description="🎮 Disponible uniquement sur un serveur.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mini-jeux du jour', description='🎮 Disponible uniquement sur un serveur.', kind='warning')))
         allowed, played, limit = await game_rewards.check_daily_limit(self.bot, guild_id, ctx.author.id)
         limit_text = f"{played} / {limit}" if limit > 0 else f"{played} (illimité)"
         active_cooldowns = []
@@ -1411,7 +1410,7 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
                 active_cooldowns.append(f"• {GAME_CATALOG[game_name][0]} — encore {remaining}s")
         cooldowns_text = "\n".join(active_cooldowns) if active_cooldowns else "Aucun cooldown en cours."
         description = f"**Manches récompensées aujourd'hui :** {limit_text}\n\n**Cooldowns en cours :**\n{cooldowns_text}"
-        await ctx.send(embed=await _embed(self.bot, guild_id, title="Mini-jeux du jour", description=description))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mini-jeux du jour', description=description)))
 
 
 async def setup(bot: commands.Bot):

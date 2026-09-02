@@ -48,6 +48,7 @@ from discord.ext import commands, tasks
 
 import config
 from utils import embeds, checks, design_system, ai_service
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.ai")
 
@@ -683,7 +684,7 @@ class Ai(commands.Cog, name="Ai"):
             answer = await self.ask_ai(question, history, guild_id=guild_id, channel_id=ctx.channel.id,
                                         user_id=ctx.author.id, command="ask")
         if ai_service.is_error_code(answer):
-            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind='danger')))
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
         self.histories[ctx.author.id] = history[-10:]
@@ -694,7 +695,7 @@ class Ai(commands.Cog, name="Ai"):
     @commands.hybrid_command(name="chat-reset", description="Réinitialiser votre historique de conversation avec l'IA.", with_app_command=False)
     async def chat_reset(self, ctx: commands.Context):
         self.histories.pop(ctx.author.id, None)
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Historique réinitialisé", description="🧹 Votre historique de conversation a été réinitialisé.", kind="success"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Historique réinitialisé', description='🧹 Votre historique de conversation a été réinitialisé.', kind='success')))
 
     @commands.hybrid_command(name="summarize", description="Résumer un texte avec l'IA.")
     @app_commands.describe(texte="Le texte à résumer")
@@ -706,8 +707,8 @@ class Ai(commands.Cog, name="Ai"):
             answer = await self.ask_ai(f"Résume ce texte en 3-4 phrases maximum :\n\n{texte}",
                                         guild_id=guild_id, channel_id=ctx.channel.id, user_id=ctx.author.id, command="summarize")
         if ai_service.is_error_code(answer):
-            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
-        await ctx.send(embed=await self._embed(guild_id, title="Résumé", description=answer[:4000]))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind='danger')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Résumé', description=answer[:4000])))
 
     @commands.hybrid_command(name="image-prompt", description="Générer une idée détaillée de prompt d'image avec l'IA.", with_app_command=False)
     @app_commands.describe(sujet="Le sujet de l'image souhaitée")
@@ -719,8 +720,8 @@ class Ai(commands.Cog, name="Ai"):
             answer = await self.ask_ai(f"Génère un prompt détaillé et créatif en anglais pour un générateur d'images IA, sur ce sujet : {sujet}",
                                         guild_id=guild_id, channel_id=ctx.channel.id, user_id=ctx.author.id, command="image-prompt")
         if ai_service.is_error_code(answer):
-            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
-        await ctx.send(embed=await self._embed(guild_id, title="Prompt généré", description=answer[:4000]))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind='danger')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Prompt généré', description=answer[:4000])))
 
     @staticmethod
     def _prepare_4k_discord_jpeg(data: bytes, max_bytes: int = 7_500_000) -> bytes:
@@ -788,14 +789,7 @@ class Ai(commands.Cog, name="Ai"):
                 pass
 
         if not result.ok:
-            return await ctx.send(
-                embed=await self._embed(
-                    guild_id,
-                    title=ai_service.error_title(result.error),
-                    description=ai_service.error_message(result.error),
-                    kind="danger",
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title=ai_service.error_title(result.error), description=ai_service.error_message(result.error), kind='danger')))
 
         try:
             image_bytes = self._prepare_4k_discord_jpeg(result.data)
@@ -828,8 +822,8 @@ class Ai(commands.Cog, name="Ai"):
             answer = await self.ask_ai(f"Explique ce concept simplement, comme à un débutant : {sujet}",
                                         guild_id=guild_id, channel_id=ctx.channel.id, user_id=ctx.author.id, command="explain")
         if ai_service.is_error_code(answer):
-            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
-        await ctx.send(embed=await self._embed(guild_id, title="Explication", description=answer[:4000]))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind='danger')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Explication', description=answer[:4000])))
 
     @commands.hybrid_command(name="rewrite", description="Demander à l'IA de reformuler un texte.", with_app_command=False)
     @app_commands.describe(texte="Le texte à reformuler")
@@ -841,8 +835,8 @@ class Ai(commands.Cog, name="Ai"):
             answer = await self.ask_ai(f"Reformule ce texte de façon plus claire, en gardant le sens original :\n\n{texte}",
                                         guild_id=guild_id, channel_id=ctx.channel.id, user_id=ctx.author.id, command="rewrite")
         if ai_service.is_error_code(answer):
-            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
-        await ctx.send(embed=await self._embed(guild_id, title="Reformulation", description=answer[:4000]))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind='danger')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Reformulation', description=answer[:4000])))
 
     @commands.hybrid_command(name="fact-check", description="Demander à l'IA de vérifier une affirmation (à titre indicatif).", with_app_command=False)
     @app_commands.describe(affirmation="L'affirmation à vérifier")
@@ -856,7 +850,7 @@ class Ai(commands.Cog, name="Ai"):
                 guild_id=guild_id, channel_id=ctx.channel.id, user_id=ctx.author.id, command="fact-check",
             )
         if ai_service.is_error_code(answer):
-            return await ctx.send(embed=await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind='danger')))
         e = await self._embed(guild_id, title="Vérification (indicative)", description=answer[:4000])
         e.set_footer(text="⚠️ Réponse générée par IA, à vérifier par vous-même.")
         await ctx.send(embed=e)

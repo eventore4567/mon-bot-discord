@@ -19,6 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, helpers, design_system, game_rewards
+from utils import sentrix_panels as panels
 
 MATH_OPS = {
     "+": lambda a, b: a + b,
@@ -125,7 +126,7 @@ class Minigames(commands.Cog, name="Minigames"):
     async def rps(self, ctx: commands.Context, choix: str):
         started, err, session_id = await self._start(ctx, "rps")
         if not started:
-            return await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Pierre-feuille-ciseaux", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Pierre-feuille-ciseaux', description=err, kind='warning')))
 
         options = ["pierre", "feuille", "ciseaux"]
         bot_choice = random.choice(options)
@@ -138,7 +139,7 @@ class Minigames(commands.Cog, name="Minigames"):
 
         reward = await self._finish(ctx, "rps", session_id, game_result, REWARD_RPS)
         description = f"Vous : **{choix}** | Bot : **{bot_choice}**\n{result}" + self._reward_line(reward)
-        await ctx.send(embed=await self._embed(ctx.guild.id if ctx.guild else None, title="Pierre-feuille-ciseaux", description=description, kind=kind))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Pierre-feuille-ciseaux', description=description, kind=kind)))
 
     async def _finish_guess_number_round(
         self,
@@ -199,23 +200,12 @@ class Minigames(commands.Cog, name="Minigames"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, session_id = await self._start(ctx, "guess-number", cooldown=15)
         if not started:
-            return await ctx.send(
-                embed=await self._embed(
-                    guild_id, title="Devine le nombre", description=err, kind="warning"
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Devine le nombre', description=err, kind='warning')))
 
         channel_key = (ctx.guild.id, ctx.channel.id)
         if channel_key in self._guess_number_channels:
             game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "guess-number")
-            return await ctx.send(
-                embed=await self._embed(
-                    guild_id,
-                    title="Partie déjà active",
-                    description="Une partie collective est déjà en cours dans ce salon. Rejoignez-la en envoyant un nombre.",
-                    kind="warning",
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Partie déjà active', description='Une partie collective est déjà en cours dans ce salon. Rejoignez-la en envoyant un nombre.', kind='warning')))
 
         self._guess_number_channels.add(channel_key)
         target = random.randint(1, 100)
@@ -228,18 +218,7 @@ class Minigames(commands.Cog, name="Minigames"):
             allowed_roles = set(settings.get("allowed_role_ids", []))
             blocked_roles = set(settings.get("blocked_role_ids", []))
 
-            await ctx.send(
-                embed=await self._embed(
-                    guild_id,
-                    title="Devine le nombre — partie collective",
-                    description=(
-                        "J'ai choisi un nombre entre **1 et 100**.\n"
-                        "Tout le monde peut participer : **essais illimités** et **aucune limite de temps**.\n"
-                        "Le premier qui trouve gagne. Une réaction vers le haut signifie « plus grand », "
-                        "et une réaction vers le bas signifie « plus petit »."
-                    ),
-                )
-            )
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Devine le nombre — partie collective', description="J'ai choisi un nombre entre **1 et 100**.\nTout le monde peut participer : **essais illimités** et **aucune limite de temps**.\nLe premier qui trouve gagne. Une réaction vers le haut signifie « plus grand », et une réaction vers le bas signifie « plus petit ».")))
         except Exception:
             self._guess_number_channels.discard(channel_key)
             game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "guess-number")
@@ -292,14 +271,7 @@ class Minigames(commands.Cog, name="Minigames"):
                         + self._reward_line(reward)
                         + reward_note
                     )
-                    return await ctx.send(
-                        embed=await self._embed(
-                            guild_id,
-                            title="Nombre trouvé",
-                            description=description,
-                            kind="success",
-                        )
-                    )
+                    return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Nombre trouvé', description=description, kind='success')))
 
                 reaction = "⬆️" if guess < target else "⬇️"
                 try:
@@ -319,10 +291,10 @@ class Minigames(commands.Cog, name="Minigames"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, session_id = await self._start(ctx, "trivia", cooldown=12)
         if not started:
-            return await ctx.send(embed=await self._embed(guild_id, title="Question de culture générale", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Question de culture générale', description=err, kind='warning')))
 
         question, answer = random.choice(TRIVIA_QUESTIONS)
-        await ctx.send(embed=await self._embed(guild_id, title="Question de culture générale", description=f"❓ {question}\nVous avez 15 secondes."))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Question de culture générale', description=f'❓ {question}\nVous avez 15 secondes.')))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
@@ -331,13 +303,13 @@ class Minigames(commands.Cog, name="Minigames"):
             msg = await self.bot.wait_for("message", check=check, timeout=15)
         except asyncio.TimeoutError:
             await self._finish(ctx, "trivia", session_id, "loss", 0)
-            return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", description=f"⏱️ La réponse était **{answer}**.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Temps écoulé', description=f'⏱️ La réponse était **{answer}**.', kind='warning')))
         if msg.content.strip().lower() == answer:
             reward = await self._finish(ctx, "trivia", session_id, "win", REWARD_TRIVIA)
-            await ctx.send(embed=await self._embed(guild_id, title="Bonne réponse !", description="●" + self._reward_line(reward), kind="success"))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Bonne réponse !', description='●' + self._reward_line(reward), kind='success')))
         else:
             await self._finish(ctx, "trivia", session_id, "loss", 0)
-            await ctx.send(embed=await self._embed(guild_id, title="Mauvaise réponse", description=f"○ La bonne réponse était **{answer}**.", kind="danger"))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Mauvaise réponse', description=f'○ La bonne réponse était **{answer}**.', kind='danger')))
 
     @commands.hybrid_command(name="tictactoe", description="Jouer au morpion contre un autre membre.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre contre qui jouer")
@@ -345,12 +317,12 @@ class Minigames(commands.Cog, name="Minigames"):
         guild_id = ctx.guild.id if ctx.guild else None
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
-            return await ctx.send(embed=await self._embed(guild_id, title="Adversaire invalide", description=invalid, kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Adversaire invalide', description=invalid, kind='danger')))
         if ctx.guild is None:
-            return await ctx.send(embed=await self._embed(guild_id, title="Morpion", description="🎮 Les mini-jeux ne sont disponibles que sur un serveur.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Morpion', description='🎮 Les mini-jeux ne sont disponibles que sur un serveur.', kind='warning')))
         ok, reason = await game_rewards.is_game_enabled(self.bot, ctx.guild.id, "tictactoe", ctx.channel.id)
         if not ok:
-            return await ctx.send(embed=await self._embed(guild_id, title="Morpion", description=reason, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Morpion', description=reason, kind='warning')))
         session_id = game_rewards.new_session_id("tictactoe")
         view = TicTacToeView(ctx.author, adversaire, cog=self, session_id=session_id)
         e = await self._embed(guild_id, title="Morpion", description=f"{ctx.author.mention} (○) vs {adversaire.mention} (⭕)\nAu tour de {ctx.author.mention}")
@@ -361,14 +333,14 @@ class Minigames(commands.Cog, name="Minigames"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, session_id = await self._start(ctx, "hangman", cooldown=20)
         if not started:
-            return await ctx.send(embed=await self._embed(guild_id, title="Pendu", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=err, kind='warning')))
 
         words = ["python", "discord", "ordinateur", "clavier", "programmation", "serveur"]
         word = random.choice(words)
         guessed = set()
         tries = 6
         display = "".join(c if c in guessed else "_" for c in word)
-        await ctx.send(embed=await self._embed(guild_id, title="Pendu", description=f"🎯 `{display}`\nEssais restants : {tries}"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=f'🎯 `{display}`\nEssais restants : {tries}')))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id and len(m.content) == 1
@@ -378,33 +350,33 @@ class Minigames(commands.Cog, name="Minigames"):
                 m = await self.bot.wait_for("message", check=check, timeout=30)
             except asyncio.TimeoutError:
                 await self._finish(ctx, "hangman", session_id, "loss", 0)
-                return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", description=f"⏱️ Le mot était **{word}**.", kind="warning"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Temps écoulé', description=f'⏱️ Le mot était **{word}**.', kind='warning')))
             letter = m.content.lower()
             if letter in word:
                 guessed.add(letter)
                 display = "".join(c if c in guessed else "_" for c in word)
             else:
                 tries -= 1
-            await ctx.send(embed=await self._embed(guild_id, title="Pendu", description=f"🎯 `{display}`\nEssais restants : {tries}"))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=f'🎯 `{display}`\nEssais restants : {tries}')))
 
         if "_" not in display:
             reward = await self._finish(ctx, "hangman", session_id, "win", REWARD_HANGMAN)
-            await ctx.send(embed=await self._embed(guild_id, title="Gagné !", description=f"🎉 Le mot était **{word}** !" + self._reward_line(reward), kind="success"))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Gagné !', description=f'🎉 Le mot était **{word}** !' + self._reward_line(reward), kind='success')))
         else:
             await self._finish(ctx, "hangman", session_id, "loss", 0)
-            await ctx.send(embed=await self._embed(guild_id, title="Perdu", description=f"○ Le mot était **{word}**.", kind="danger"))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Perdu', description=f'○ Le mot était **{word}**.', kind='danger')))
 
     @commands.hybrid_command(name="math-quiz", description="Répondre à une opération mathématique rapide.", with_app_command=False)
     async def math_quiz(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, session_id = await self._start(ctx, "math-quiz")
         if not started:
-            return await ctx.send(embed=await self._embed(guild_id, title="Quiz mathématique", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Quiz mathématique', description=err, kind='warning')))
 
         a, b = random.randint(2, 50), random.randint(2, 50)
         op = random.choice(list(MATH_OPS))
         answer = MATH_OPS[op](a, b)
-        await ctx.send(embed=await self._embed(guild_id, title="Quiz mathématique", description=f"🧮 Combien font **{a} {'×' if op == '*' else op} {b}** ? (10 secondes)"))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Quiz mathématique', description=f"🧮 Combien font **{a} {('×' if op == '*' else op)} {b}** ? (10 secondes)")))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
@@ -413,31 +385,31 @@ class Minigames(commands.Cog, name="Minigames"):
             msg = await self.bot.wait_for("message", check=check, timeout=10)
         except asyncio.TimeoutError:
             await self._finish(ctx, "math-quiz", session_id, "loss", 0)
-            return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", description=f"⏱️ La réponse était **{answer}**.", kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Temps écoulé', description=f'⏱️ La réponse était **{answer}**.', kind='warning')))
         try:
             if int(msg.content.strip()) == answer:
                 reward = await self._finish(ctx, "math-quiz", session_id, "win", REWARD_MATH_QUIZ)
-                await ctx.send(embed=await self._embed(guild_id, title="Bonne réponse !", description="●" + self._reward_line(reward), kind="success"))
+                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Bonne réponse !', description='●' + self._reward_line(reward), kind='success')))
             else:
                 await self._finish(ctx, "math-quiz", session_id, "loss", 0)
-                await ctx.send(embed=await self._embed(guild_id, title="Faux", description=f"○ La réponse était **{answer}**.", kind="danger"))
+                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Faux', description=f'○ La réponse était **{answer}**.', kind='danger')))
         except ValueError:
             await self._finish(ctx, "math-quiz", session_id, "loss", 0)
-            await ctx.send(embed=await self._embed(guild_id, title="Réponse invalide", description=f"○ Ce n'est pas un nombre. La réponse était **{answer}**.", kind="danger"))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Réponse invalide', description=f"○ Ce n'est pas un nombre. La réponse était **{answer}**.", kind='danger')))
 
     @commands.hybrid_command(name="blackjack", description="Jouer au blackjack simplifié contre le bot.", with_app_command=False)
     async def blackjack(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, session_id = await self._start(ctx, "blackjack", cooldown=15)
         if not started:
-            return await ctx.send(embed=await self._embed(guild_id, title="Blackjack", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Blackjack', description=err, kind='warning')))
 
         def draw():
             return random.randint(1, 11)
 
         player = [draw(), draw()]
         bot_hand = [draw(), draw()]
-        await ctx.send(embed=await self._embed(guild_id, title="Blackjack", description=f"🃏 Votre main : {player} (total {sum(player)})\nTapez `hit` pour tirer ou `stand` pour rester."))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Blackjack', description=f'🃏 Votre main : {player} (total {sum(player)})\nTapez `hit` pour tirer ou `stand` pour rester.')))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id and m.content.lower() in ("hit", "stand")
@@ -447,16 +419,16 @@ class Minigames(commands.Cog, name="Minigames"):
                 m = await self.bot.wait_for("message", check=check, timeout=20)
             except asyncio.TimeoutError:
                 await self._finish(ctx, "blackjack", session_id, "loss", 0)
-                return await ctx.send(embed=await self._embed(guild_id, title="Temps écoulé", kind="warning"))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Temps écoulé', kind='warning')))
             if m.content.lower() == "hit":
                 player.append(draw())
-                await ctx.send(embed=await self._embed(guild_id, title="Blackjack", description=f"🃏 Votre main : {player} (total {sum(player)})"))
+                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Blackjack', description=f'🃏 Votre main : {player} (total {sum(player)})')))
             else:
                 break
 
         if sum(player) > 21:
             await self._finish(ctx, "blackjack", session_id, "loss", 0)
-            return await ctx.send(embed=await self._embed(guild_id, title="Perdu", description=f"💥 Vous avez dépassé 21 ({sum(player)}). Vous perdez !", kind="danger"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Perdu', description=f'💥 Vous avez dépassé 21 ({sum(player)}). Vous perdez !', kind='danger')))
 
         while sum(bot_hand) < 17:
             bot_hand.append(draw())
@@ -476,20 +448,20 @@ class Minigames(commands.Cog, name="Minigames"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, session_id = await self._start(ctx, "slots", cooldown=10)
         if not started:
-            return await ctx.send(embed=await self._embed(guild_id, title="Machine à sous", description=err, kind="warning"))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Machine à sous', description=err, kind='warning')))
 
         symbols = ["🍒", "🍋", "🍊", "🍇", "💎", "7️⃣"]
         result = [game_rewards.secure_pick(symbols) for _ in range(3)]
         text = " | ".join(result)
         if result[0] == result[1] == result[2]:
             reward = await self._finish(ctx, "slots", session_id, "win", REWARD_SLOTS_JACKPOT)
-            await ctx.send(embed=await self._embed(guild_id, title="Machine à sous", description=f"🎰 {text}\n🎉 JACKPOT !" + self._reward_line(reward), kind="success"))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Machine à sous', description=f'🎰 {text}\n🎉 JACKPOT !' + self._reward_line(reward), kind='success')))
         elif len(set(result)) == 2:
             reward = await self._finish(ctx, "slots", session_id, "win", REWARD_SLOTS_PARTIAL)
-            await ctx.send(embed=await self._embed(guild_id, title="Machine à sous", description=f"🎰 {text}\n👍 Presque !" + self._reward_line(reward)))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Machine à sous', description=f'🎰 {text}\n👍 Presque !' + self._reward_line(reward))))
         else:
             await self._finish(ctx, "slots", session_id, "loss", 0)
-            await ctx.send(embed=await self._embed(guild_id, title="Machine à sous", description=f"🎰 {text}\n○ Perdu !", kind="danger"))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Machine à sous', description=f'🎰 {text}\n○ Perdu !', kind='danger')))
 
 
 class TicTacToeButton(discord.ui.Button):
