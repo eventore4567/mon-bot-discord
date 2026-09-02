@@ -298,18 +298,45 @@ def _rangee(boutons: Sequence[Bouton]) -> discord.ui.ActionRow | None:
 _MENTIONS_SURES = discord.AllowedMentions(everyone=False, roles=False, users=True, replied_user=False)
 
 
-async def envoyer(destination: Any, panneau: Panneau, *, ephemere: bool = False, **extra: Any):
+async def envoyer(
+    destination: Any,
+    panneau: Panneau,
+    *,
+    ephemere: bool = False,
+    mentionner: Any = None,
+    **extra: Any,
+):
     """Envoie un panneau, avec sa bannière, dans le MÊME message.
 
     ``destination`` peut être un Context, une Interaction ou un salon. Un panneau
     Components V2 ne peut pas cohabiter avec ``embed=`` : c'est la vue qui porte
     tout le contenu, donc rien ne peut se retrouver dans un second message.
+
+    ``mentionner`` autorise nommément une personne à être notifiée. Discord refuse
+    un ``content`` sur un message Components V2 — discord.py y pose le drapeau
+    ``components_v2`` et l'API renvoie 400 —, donc la mention doit vivre DANS le
+    texte du panneau. C'est ``allowed_mentions`` qui décide si elle notifie, et il
+    reste fermé sur @everyone et sur les rôles : consulter une fiche ne doit jamais
+    pouvoir alerter le serveur entier.
     """
     fichiers = panneau.fichiers()
-    kwargs: dict[str, Any] = {"view": panneau, "allowed_mentions": _MENTIONS_SURES}
+    autorisees = _MENTIONS_SURES
+    if mentionner is not None:
+        autorisees = discord.AllowedMentions(
+            users=[mentionner], roles=False, everyone=False, replied_user=False
+        )
+    kwargs: dict[str, Any] = {"view": panneau, "allowed_mentions": autorisees}
     if fichiers:
         kwargs["files"] = fichiers
     kwargs.update(extra)
+
+    # Garde-fou : un content glissé ici ferait échouer l'envoi côté Discord, et
+    # l'erreur (400 Bad Request) ne dirait pas pourquoi.
+    if kwargs.pop("content", None) is not None:
+        logger.warning(
+            "content ignoré : un message Components V2 n'en accepte pas. "
+            "Placez le texte dans une section du panneau."
+        )
 
     interaction = getattr(destination, "interaction", None) or (
         destination if isinstance(destination, discord.Interaction) else None

@@ -20,7 +20,7 @@ from PIL import Image, ImageSequence, UnidentifiedImageError
 from discord import app_commands
 from discord.ext import commands
 
-from utils import access_matrix, embeds, helpers, checks, design_system
+from utils import access_matrix, embeds, helpers, checks, design_system, sentrix_panels as panels, stats_service
 from database.db import now
 
 logger = logging.getLogger("bot")
@@ -897,292 +897,362 @@ class Utility(commands.Cog, name="Utility"):
 
     @info.command(name="serveur", description="Afficher la fiche complète du serveur.")
     async def info_serveur(self, ctx: commands.Context):
+        """Fiche serveur composée : présentation, structure, sécurité, capacités.
+
+        L'ancienne version alignait dix champs de même poids. Ici l'ordre suit ce
+        qu'on cherche vraiment : qui tient le serveur, comment il est bâti, ce qui
+        le protège, et ce qui approche des limites Discord.
+        """
         guild = ctx.guild
         if guild is None:
             return await ctx.send(embed=await self._embed(None, title="Serveur requis", kind="danger"))
 
-        total_members = guild.member_count or len(guild.members)
-        bot_count = sum(1 for member in guild.members if member.bot)
-        human_count = max(0, total_members - bot_count)
-        thread_count = len(guild.threads)
-        shard_text = f"Shard #{guild.shard_id}" if guild.shard_id is not None else "Shard inconnu"
+        total = guild.member_count or len(guild.members)
+        bots = sum(1 for m in guild.members if m.bot)
+        humains = max(0, total - bots)
+        cree = int(guild.created_at.timestamp())
 
-        e = await self._embed(
-            guild.id,
-            title=f"{guild.name} ({guild.id})",
-            description=(
-                f"Informations et statistiques de **{guild.name}**\n"
-                f"**{shard_text} • {len(guild.channels)} salons • {thread_count} fils "
-                f"• {len(guild.roles)} rôles • {bot_count} bots**"
+        proprietaire = guild.owner
+        identite = [
+            panels.Ligne(
+                "Propriétaire",
+                proprietaire.mention if proprietaire else f"<@{guild.owner_id}>",
             ),
-        )
-        if guild.icon:
-            e.set_thumbnail(url=guild.icon.url)
+            panels.Ligne("Identifiant", f"`{guild.id}`"),
+            panels.Ligne("Création", f"<t:{cree}:D> · <t:{cree}:R>"),
+        ]
+        moi = guild.me
+        if moi is not None and moi.joined_at is not None:
+            identite.append(
+                panels.Ligne("Arrivée de SentriX", f"<t:{int(moi.joined_at.timestamp())}:R>")
+            )
 
-        owner = guild.owner
-        owner_value = (
-            f"{owner.mention}\n`{owner}`"
-            if owner is not None
-            else f"<@{guild.owner_id}>\n`ID : {guild.owner_id}`"
-        )
-        e.add_field(name="Propriétaire", value=owner_value, inline=True)
-        e.add_field(
-            name="Membres",
-            value=f"**{total_members}** membres\n{human_count} humains • {bot_count} bots",
-            inline=True,
-        )
+        # --- POPULATION et STRUCTURE : des nombres, donc en colonnes -----------
+        population = [
+            panels.Ligne("Membres", stats_service.format_number(total)),
+            panels.Ligne("Humains", stats_service.format_number(humains)),
+            panels.Ligne("Bots", stats_service.format_number(bots)),
+            panels.Ligne("Rôles", str(len(guild.roles))),
+        ]
 
-        e.add_field(name="Boosts", value=_marge_boosts(guild), inline=True)
+        structure = [
+            panels.Ligne("Catégories", str(len(guild.categories))),
+            panels.Ligne("Textuels", str(len(guild.text_channels))),
+            panels.Ligne("Vocaux", str(len(guild.voice_channels))),
+        ]
+        if getattr(guild, "forums", None):
+            structure.append(panels.Ligne("Forums", str(len(guild.forums))))
+        if guild.stage_channels:
+            structure.append(panels.Ligne("Conférences", str(len(guild.stage_channels))))
+        if guild.threads:
+            structure.append(panels.Ligne("Fils actifs", str(len(guild.threads))))
 
-        # Repartition des salons : « 42 salons » ne disait pas s'il manquait un type.
-        e.add_field(name="Salons", value=_detail_salons(guild), inline=True)
-
-        # Reglages de securite du serveur, invisibles autrement sans ouvrir les
-        # parametres Discord — et ce sont eux qui decident qui peut ecrire.
+        # --- SÉCURITÉ : les réglages qui décident qui peut écrire --------------
         niveau, explication = NIVEAUX_VERIFICATION.get(
             guild.verification_level.name, (guild.verification_level.name, "")
         )
-        moderation = [f"Vérification : **{niveau}** — {explication}"]
-        moderation.append(
-            "Filtre média : "
-            + FILTRES_CONTENU.get(guild.explicit_content_filter.name, guild.explicit_content_filter.name)
-        )
-        if guild.mfa_level:
-            moderation.append("Double authentification exigée du staff")
-        if guild.afk_channel is not None:
-            minutes = (guild.afk_timeout or 0) // 60
-            moderation.append(f"Salon inactif : {guild.afk_channel.mention} après {minutes} min")
-        e.add_field(name="Modération du serveur", value="\n".join(moderation), inline=False)
-
-        # @everyone est exclu : tous les serveurs l'ont, il n'apprend rien, et son
-        # role.name vaut litteralement "@everyone" — ce qui produisait un "@@everyone"
-        # a l'affichage des qu'une couche prefixait la mention.
-        roles = [
-            role.mention for role in reversed(guild.roles)
-            if role != guild.default_role
-        ]
-        e.add_field(
-            name=f"Rôles [{len(roles)}]",
-            value=self._limited_list(roles, empty="Aucun rôle en dehors de @everyone"),
-            inline=False,
-        )
-
-        emojis = [str(emoji) for emoji in guild.emojis]
-        e.add_field(
-            name=f"Émojis [{len(emojis)}/{guild.emoji_limit}]",
-            value=self._limited_list(emojis, empty="Aucun emoji personnalisé"),
-            inline=False,
-        )
-        # Quotas : savoir qu'il reste de la place evite de decouvrir la limite au
-        # moment d'ajouter un emoji.
-        e.add_field(
-            name="Capacités",
-            value=(
-                f"Émojis : **{len(guild.emojis)}/{guild.emoji_limit}**\n"
-                f"Autocollants : **{len(guild.stickers)}/{guild.sticker_limit}**\n"
-                f"Fichiers : **{guild.filesize_limit // (1024 * 1024)} Mo** par envoi"
+        securite = [
+            panels.Ligne("Vérification", f"**{niveau}**", indice=explication),
+            panels.Ligne(
+                "Filtre des médias",
+                FILTRES_CONTENU.get(
+                    guild.explicit_content_filter.name, guild.explicit_content_filter.name
+                ),
             ),
-            inline=True,
+        ]
+        if guild.mfa_level:
+            securite.append(
+                panels.Ligne("Double authentification", "**Exigée du staff**")
+            )
+        if guild.afk_channel is not None:
+            securite.append(
+                panels.Ligne(
+                    "Salon inactif",
+                    guild.afk_channel.mention,
+                    indice=f"Après {(guild.afk_timeout or 0) // 60} minutes sans activité.",
+                )
+            )
+
+        # --- CAPACITÉS : savoir avant de heurter une limite --------------------
+        capacites = [
+            panels.Ligne("Émojis", f"{len(guild.emojis)} / {guild.emoji_limit}"),
+            panels.Ligne("Autocollants", f"{len(guild.stickers)} / {guild.sticker_limit}"),
+            panels.Ligne("Fichiers", f"{guild.filesize_limit // (1024 * 1024)} Mo par envoi"),
+            panels.Ligne("Boosts", _marge_boosts(guild).replace("\n", " — ")),
+        ]
+
+        sections = [
+            panels.Section("Identité", identite),
+            panels.Section("Population", population, aligne=True),
+            panels.Section("Structure", structure, aligne=True),
+            panels.Section("Sécurité", securite),
+            panels.Section("Capacités", capacites, aligne=True),
+        ]
+
+        roles = [role.mention for role in reversed(guild.roles) if role != guild.default_role]
+        sections.append(
+            panels.Section(
+                f"Rôles ({len(roles)})",
+                texte=self._limited_list(roles, empty="Aucun rôle en dehors de @everyone"),
+            )
         )
 
-        created_at = int(guild.created_at.timestamp())
-        e.add_field(
-            name="Création du serveur",
-            value=f"<t:{created_at}:F>\n<t:{created_at}:R>",
-            inline=True,
+        panneau = panels.Panneau(
+            titre="SentriX — Informations serveur",
+            sous_titre=f"**{guild.name}**",
+            kind="brand",
+            vignette=guild.icon.url if guild.icon else None,
+            sections=sections,
+            pied=f"SentriX • Serveur · demandé par {ctx.author.display_name}",
         )
+        await panels.envoyer(ctx, panneau)
 
-        bot_member = guild.me
-        if bot_member is not None and bot_member.joined_at is not None:
-            joined_at = int(bot_member.joined_at.timestamp())
-            joined_value = f"<t:{joined_at}:F>\n<t:{joined_at}:R>"
-        else:
-            joined_value = "Date inconnue"
-        e.add_field(name=f"Arrivée de {self.bot.user.name}", value=joined_value, inline=True)
-
-        await ctx.send(embed=e)
 
     @commands.hybrid_command(name="userinfo", description="Afficher les informations d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def userinfo(self, ctx: commands.Context, membre: discord.Member = None):
+        """Fiche membre composée : bannière, identité, serveur, pouvoirs, activité.
+
+        L'ancienne version tenait dans un embed à cinq champs. Les informations y
+        étaient toutes présentes mais de même poids : rien ne distinguait
+        « compte créé il y a trois jours » d'un nom d'utilisateur. Chaque famille
+        a maintenant sa section, son filet, et son ordre de lecture.
+        """
         membre = membre or ctx.author
         maintenant = discord.utils.utcnow()
-
-        # --- phrase d'ouverture : qui, depuis quand, avec quel role ----------
         cree = int(membre.created_at.timestamp())
         arrive = int(membre.joined_at.timestamp()) if membre.joined_at else None
         anciennete = (maintenant - membre.created_at).days
-        plus_haut = membre.top_role if membre.top_role.name != "@everyone" else None
+        plus_haut = membre.top_role if membre.top_role != ctx.guild.default_role else None
 
-        ouverture = f"{membre.mention} · `{membre.id}`"
+        # --- résumé : qui, depuis quand, avec quel rôle ----------------------
+        resume = f"{membre.mention} · `{membre.id}`"
         if arrive:
-            ouverture += f"\nMembre du serveur depuis <t:{arrive}:R>"
+            resume += f"\nMembre du serveur depuis <t:{arrive}:R>"
         if plus_haut is not None:
-            ouverture += f", rôle le plus élevé {plus_haut.mention}"
-        ouverture += "."
+            resume += f", rôle le plus élevé {plus_haut.mention}"
 
-        e = await self._embed(
-            ctx.guild.id,
-            title=membre.display_name,
-            description=ouverture,
-        )
-        e.set_thumbnail(url=membre.display_avatar.url)
-        if membre.colour.value:
-            e.colour = membre.colour
+        sections: list[panels.Section] = []
 
-        # --- compte ----------------------------------------------------------
-        compte = [f"Nom d'utilisateur **{membre.name}**"]
-        compte.append(f"Créé <t:{cree}:D> · <t:{cree}:R>")
+        # --- IDENTITÉ ---------------------------------------------------------
+        identite = [
+            panels.Ligne("Utilisateur", f"**{membre.name}**"),
+            panels.Ligne("Identifiant", f"`{membre.id}`"),
+            panels.Ligne("Création du compte", f"<t:{cree}:D> · <t:{cree}:R>"),
+        ]
         if anciennete < 7:
-            compte.append(f"⚠️ Compte récent : **{anciennete} jour{'s' if anciennete > 1 else ''}**")
+            identite.append(
+                panels.Ligne(
+                    "Compte récent",
+                    f"**{anciennete} jour{'s' if anciennete > 1 else ''}**",
+                    indice="Les comptes très récents sont un signal de raid fréquent.",
+                )
+            )
         if membre.bot:
-            compte.append("Ce compte est un **bot**")
-        e.add_field(name="Compte", value="\n".join(compte), inline=True)
+            identite.append(panels.Ligne("Nature", "Ce compte est un **bot**"))
+        sections.append(panels.Section("Identité", identite))
 
-        # --- presence sur le serveur ------------------------------------------
-        serveur = []
+        # --- SERVEUR ----------------------------------------------------------
+        serveur: list[panels.Ligne] = []
         if arrive:
-            serveur.append(f"Arrivé <t:{arrive}:D>")
+            serveur.append(panels.Ligne("Arrivée", f"<t:{arrive}:D> · <t:{arrive}:R>"))
+        serveur.append(panels.Ligne("Rôle principal", plus_haut.mention if plus_haut else "Aucun"))
         if membre.premium_since:
-            serveur.append(f"Booste depuis <t:{int(membre.premium_since.timestamp())}:R>")
+            serveur.append(
+                panels.Ligne("Boost", f"Depuis <t:{int(membre.premium_since.timestamp())}:R>")
+            )
         if ctx.guild.owner_id == membre.id:
-            serveur.append("**Propriétaire du serveur**")
+            serveur.append(panels.Ligne("Statut", "**Propriétaire du serveur**"))
         timeout = getattr(membre, "timed_out_until", None)
         if timeout and timeout > maintenant:
-            serveur.append(f"🔇 En timeout jusqu'à <t:{int(timeout.timestamp())}:R>")
-        e.add_field(name="Sur ce serveur", value="\n".join(serveur) or "Aucune information", inline=True)
+            serveur.append(
+                panels.Ligne(
+                    "Exclusion temporaire",
+                    f"Jusqu'à <t:{int(timeout.timestamp())}:R>",
+                    indice="Ce membre ne peut ni écrire ni parler pendant ce délai.",
+                )
+            )
+        sections.append(panels.Section("Sur ce serveur", serveur))
 
-        # --- pouvoirs reels, pas la liste des 40 permissions -------------------
+        # --- ACTIVITÉ SENTRIX : uniquement de vraies valeurs ------------------
+        # Aligné en chasse fixe : ce sont des nombres, ils gagnent à être en colonnes,
+        # et aucune mention ne s'y perd.
+        try:
+            stats = await stats_service.get_member_statistics(self.bot, ctx.guild, membre)
+        except Exception:
+            stats = None
+        if stats:
+            activite = [
+                panels.Ligne("Niveau", str(stats.get("current_level", 0))),
+                panels.Ligne("Messages", stats_service.format_number(stats.get("message_count", 0))),
+                panels.Ligne("Argent", stats_service.format_number(stats.get("total_money", 0))),
+            ]
+            if stats.get("is_ranked"):
+                activite.append(panels.Ligne("Classement", f"#{stats.get('rank', 0)}"))
+            sections.append(panels.Section("Activité SentriX", activite, aligne=True))
+
+        # --- POUVOIRS : ce que la personne peut faire, pas 40 permissions ------
         perms = membre.guild_permissions
-        notables = [
+        notables = (
             ("administrator", "Administrateur"),
             ("manage_guild", "Gérer le serveur"),
             ("manage_roles", "Gérer les rôles"),
             ("manage_channels", "Gérer les salons"),
             ("ban_members", "Bannir"),
             ("kick_members", "Expulser"),
-            ("moderate_members", "Timeout"),
+            ("moderate_members", "Exclure temporairement"),
             ("manage_messages", "Gérer les messages"),
-        ]
-        pouvoirs = [libelle for attribut, libelle in notables if getattr(perms, attribut, False)]
+        )
         if perms.administrator:
-            pouvoirs = ["**Administrateur** — toutes les permissions"]
-        e.add_field(
-            name="Pouvoirs",
-            value=" · ".join(pouvoirs) if pouvoirs else "Aucune permission de modération",
-            inline=False,
+            pouvoirs = panels.Section(
+                "Pouvoirs",
+                [
+                    panels.Ligne(
+                        "Administrateur",
+                        "**Toutes les permissions**",
+                        indice="Ce rôle contourne tous les réglages de salon.",
+                    )
+                ],
+            )
+        else:
+            actifs = [libelle for attribut, libelle in notables if getattr(perms, attribut, False)]
+            pouvoirs = panels.Section(
+                "Pouvoirs",
+                [panels.Ligne("Modération", " · ".join(actifs) if actifs else "Aucune")],
+            )
+        sections.append(pouvoirs)
+
+        # --- RÔLES -------------------------------------------------------------
+        roles = [r.mention for r in reversed(membre.roles) if r != ctx.guild.default_role]
+        sections.append(
+            panels.Section(
+                f"Rôles ({len(roles)})",
+                texte=self._limited_list(roles, empty="Aucun rôle en dehors de @everyone"),
+            )
         )
 
-        # --- roles -------------------------------------------------------------
-        roles = [r.mention for r in reversed(membre.roles) if r.name != "@everyone"]
-        e.add_field(
-            name=f"Rôles ({len(roles)})",
-            value=self._limited_list(roles, empty="Aucun rôle"),
-            inline=False,
+        panneau = panels.Panneau(
+            titre=f"SentriX — Informations membre",
+            sous_titre=resume,
+            kind="info",
+            vignette=membre.display_avatar.url,
+            sections=sections,
+            pied=f"SentriX • Informations · demandé par {ctx.author.display_name}",
         )
-
-        e.set_footer(text=f"Demandé par {ctx.author.display_name}")
-
-        # Une mention placee dans un EMBED ne ping jamais : c'est une regle Discord.
-        # Pour que la personne soit reellement notifiee, la mention doit etre dans le
-        # content du message, et allowed_mentions doit l'autoriser explicitement.
-        # On ne ping que si une cible a ete demandee : lancer +userinfo sur soi-meme
-        # ne doit pas s'auto-notifier.
-        await ctx.send(**self._envoi_cible(ctx, membre, e))
+        # On ne notifie que si une cible a été demandée : consulter sa propre fiche
+        # ne doit pas s'auto-notifier, et un bot n'est jamais mentionné.
+        cible = membre if (membre.id != ctx.author.id and not membre.bot) else None
+        await panels.envoyer(ctx, panneau, mentionner=cible)
 
     @info.command(name="role", description="Afficher la fiche complète d'un rôle.")
     @app_commands.describe(role="Le rôle à inspecter")
     async def info_role(self, ctx: commands.Context, role: discord.Role):
-        e = await self._embed(ctx.guild.id, title=f"{role.name} ({role.id})")
-        if role.color.value:
-            e.color = role.color
-        if role.icon:
-            e.set_thumbnail(url=role.icon.url)
-
-        e.add_field(name="Mention", value=role.mention, inline=True)
-        e.add_field(name="Couleur", value=str(role.color), inline=True)
-        e.add_field(name="Membres", value=len(role.members), inline=True)
-
-        # La position brute ne dit rien a personne. Ce qui compte, c'est si SentriX
-        # peut attribuer ou retirer ce role — c'est la cause de la plupart des echecs
-        # « je n'ai pas pu donner le rôle ».
+        """Fiche rôle composée. La question qu'on se pose devant un rôle est
+        « SentriX peut-il l'attribuer ? » — elle a donc sa propre section, avant
+        la liste des permissions."""
+        cree = int(role.created_at.timestamp())
         moi = ctx.guild.me
-        rang = [f"Position **{role.position}** sur {len(ctx.guild.roles)}"]
+
+        # --- HIÉRARCHIE : la cause de la plupart des échecs d'attribution ------
+        rang: list[panels.Ligne] = [
+            panels.Ligne("Position", f"**{role.position}** sur {len(ctx.guild.roles)}")
+        ]
         if role == ctx.guild.default_role:
-            rang.append("Rôle par défaut : tout le monde l'a.")
+            rang.append(panels.Ligne("Portée", "Rôle par défaut — tout le monde l'a"))
         elif moi is None:
-            rang.append("Hiérarchie inconnue.")
+            rang.append(panels.Ligne("Gestion", "Hiérarchie inconnue"))
         elif not moi.guild_permissions.manage_roles:
-            rang.append("SentriX ne peut pas le gérer : permission **Gérer les rôles** manquante.")
+            rang.append(
+                panels.Ligne(
+                    "SentriX", "**Ne peut pas le gérer**",
+                    indice="Permission « Gérer les rôles » manquante.",
+                )
+            )
         elif role >= moi.top_role:
             rang.append(
-                f"SentriX ne peut pas le gérer : il est au-dessus de {moi.top_role.mention}. "
-                "Remontez le rôle de SentriX au-dessus."
+                panels.Ligne(
+                    "SentriX", "**Ne peut pas le gérer**",
+                    indice=f"Ce rôle est au-dessus de {moi.top_role.name}. Remontez le rôle SentriX.",
+                )
             )
         elif role.managed:
-            rang.append("Géré par Discord ou une intégration : personne ne peut l'attribuer.")
+            rang.append(
+                panels.Ligne(
+                    "Gestion", "Géré par une intégration",
+                    indice="Personne ne peut l'attribuer manuellement.",
+                )
+            )
         else:
-            rang.append("SentriX peut l'attribuer et le retirer.")
-        e.add_field(name="Hiérarchie", value="\n".join(rang), inline=False)
+            rang.append(panels.Ligne("SentriX", "Peut l'attribuer et le retirer"))
 
-        nature = []
+        # --- PARTICULARITÉS ----------------------------------------------------
+        nature: list[panels.Ligne] = [
+            panels.Ligne("Membres", str(len(role.members))),
+            panels.Ligne("Couleur", str(role.color) if role.color.value else "Aucune"),
+            panels.Ligne("Création", f"<t:{cree}:D> · <t:{cree}:R>"),
+        ]
+        traits = []
         if role.hoist:
-            nature.append("Affiché séparément dans la liste des membres")
+            traits.append("Affiché séparément")
         if role.mentionable:
-            nature.append("Mentionnable par tout le monde")
+            traits.append("Mentionnable")
         if role.is_premium_subscriber():
-            nature.append("Rôle des boosteurs du serveur")
+            traits.append("Rôle des boosteurs")
         if role.is_bot_managed():
-            nature.append("Rôle d'intégration d'un bot")
-        if role.is_integration():
-            nature.append("Rôle géré par une intégration")
-        e.add_field(
-            name="Particularités",
-            value="\n".join(f"• {ligne}" for ligne in nature) or "Rôle ordinaire, sans réglage particulier.",
-            inline=False,
-        )
+            traits.append("Rôle d'un bot")
+        nature.append(panels.Ligne("Particularités", " · ".join(traits) if traits else "Aucune"))
 
-        created_at = int(role.created_at.timestamp())
-        e.add_field(
-            name="Création du rôle",
-            value=f"<t:{created_at}:F>\n<t:{created_at}:R>",
-            inline=True,
-        )
+        sections = [
+            panels.Section("Hiérarchie", rang),
+            panels.Section("Caractéristiques", nature),
+        ]
 
-        # Les permissions s'affichaient en anglais avec des tirets bas
-        # (« manage guild », « moderate members »). access_matrix les traduit.
+        # --- PERMISSIONS : les sensibles d'abord, séparées du reste ------------
         actives = [nom for nom, activee in role.permissions if activee]
-        sensibles = [nom for nom in actives if nom in access_matrix.PERMISSIONS_SENSIBLES]
-        ordinaires = [nom for nom in actives if nom not in access_matrix.PERMISSIONS_SENSIBLES]
+        sensibles = [n for n in actives if n in access_matrix.PERMISSIONS_SENSIBLES]
+        ordinaires = [n for n in actives if n not in access_matrix.PERMISSIONS_SENSIBLES]
 
         if role.permissions.administrator:
-            e.add_field(
-                name="Pouvoirs sensibles",
-                value=(
-                    "**Administrateur** — ce rôle contourne toutes les autres "
-                    "permissions et tous les réglages de salon."
-                ),
-                inline=False,
+            sections.append(
+                panels.Section(
+                    "Pouvoirs sensibles",
+                    [
+                        panels.Ligne(
+                            "Administrateur", "**Toutes les permissions**",
+                            indice="Contourne chaque autre permission et tous les réglages de salon.",
+                        )
+                    ],
+                )
             )
         elif sensibles:
-            e.add_field(
-                name=f"Pouvoirs sensibles [{len(sensibles)}]",
-                value=self._limited_list(
-                    [access_matrix.permission_label(nom) for nom in sensibles],
-                    empty="Aucun",
-                ),
-                inline=False,
+            sections.append(
+                panels.Section(
+                    f"Pouvoirs sensibles ({len(sensibles)})",
+                    texte=self._limited_list(
+                        [access_matrix.permission_label(n) for n in sensibles], empty="Aucun"
+                    ),
+                )
             )
 
-        e.add_field(
-            name=f"Autres permissions [{len(ordinaires)}]",
-            value=self._limited_list(
-                [access_matrix.permission_label(nom) for nom in ordinaires],
-                empty="Aucune",
-            ),
-            inline=False,
+        sections.append(
+            panels.Section(
+                f"Autres permissions ({len(ordinaires)})",
+                texte=self._limited_list(
+                    [access_matrix.permission_label(n) for n in ordinaires], empty="Aucune"
+                ),
+            )
         )
-        await ctx.send(embed=e)
+
+        panneau = panels.Panneau(
+            titre="SentriX — Informations rôle",
+            sous_titre=f"{role.mention} · `{role.id}`",
+            kind="brand",
+            vignette=role.icon.url if role.icon else None,
+            sections=sections,
+            pied=f"SentriX • Rôles · demandé par {ctx.author.display_name}",
+        )
+        await panels.envoyer(ctx, panneau)
+
 
     @commands.hybrid_command(name="channelinfo", description="Afficher les informations d'un salon.", with_app_command=False)
     @app_commands.describe(salon="Le salon visé (optionnel)")
