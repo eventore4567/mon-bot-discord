@@ -21,6 +21,7 @@ from discord.ext import commands
 
 from utils import helpers
 from . import setup_v2_core
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.security.auto-verification-v4")
 _COG_NAME = "HoneypotVerification"  # compatibilité avec Control Center V3
@@ -317,7 +318,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
         )
         info.set_footer(text="SentriX • Aucun captcha, aucun calcul, aucun code")
         try:
-            await verify.send(embed=info)
+            await panels.envoyer(verify, panels.depuis_embed(info))
         except discord.HTTPException:
             pass
 
@@ -334,7 +335,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             colour=discord.Color.red(),
         )
         try:
-            await trap.send(embed=trap_embed)
+            await panels.envoyer(trap, panels.depuis_embed(trap_embed))
         except discord.HTTPException:
             pass
 
@@ -463,7 +464,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
         channel = member.guild.get_channel(settings.get("log_channel_id") or 0)
         if isinstance(channel, discord.TextChannel):
             try:
-                await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+                await panels.envoyer(channel, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions.none())
                 return
             except discord.HTTPException:
                 pass

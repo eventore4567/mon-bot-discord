@@ -371,8 +371,8 @@ async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = No
         command = language_runtime.resolve_localized_command(bot, commande, language)
         if command is None or (utility.is_staff_command(command) and not is_staff):
             if language == "en":
-                return await ctx.send(embed=_brand("SENTRIX / COMMAND NOT FOUND", f"Command `{commande}` was not found or you do not have access. Use `{prefix}help` to return."))
-            return await ctx.send(embed=_brand("SENTRIX / COMMANDE INTROUVABLE", f"La commande `{commande}` est introuvable ou vous n'y as pas acces. Utilisez `{prefix}aide` pour revenir."))
+                return await panels.envoyer(ctx, panels.depuis_embed(_brand('SENTRIX / COMMAND NOT FOUND', f'Command `{commande}` was not found or you do not have access. Use `{prefix}help` to return.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(_brand('SENTRIX / COMMANDE INTROUVABLE', f"La commande `{commande}` est introuvable ou vous n'y as pas acces. Utilisez `{prefix}aide` pour revenir.")))
         category = help_complete._category_for(command)
         category_name, _ = _category_text(category, language)
         command_title = language_runtime._title(command, language).upper()

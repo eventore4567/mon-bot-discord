@@ -183,9 +183,9 @@ async def _remove_claimant_override(channel: discord.TextChannel, member: discor
 async def _private_reply(interaction: discord.Interaction, embed: discord.Embed) -> None:
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embed), ephemere=True)
         else:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
     except discord.HTTPException:
         pass
 

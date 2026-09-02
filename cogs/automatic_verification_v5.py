@@ -28,6 +28,7 @@ from discord.ext import commands
 from utils import helpers
 from . import automatic_verification_v4 as v4
 from . import setup_control_center as setup_ui
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.security.auto-verification-v5")
 
@@ -437,10 +438,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         channel = member.guild.get_channel(settings.get("log_channel_id") or 0)
         if isinstance(channel, discord.TextChannel):
             try:
-                await channel.send(
-                    embed=embed,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
+                await panels.envoyer(channel, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions.none())
                 return
             except discord.HTTPException:
                 pass
@@ -630,7 +628,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             text="SentriX • 40 signaux • aucun captcha • score faible = revue, jamais ban"
         )
         try:
-            await verify.send(embed=info)
+            await panels.envoyer(verify, panels.depuis_embed(info))
         except discord.HTTPException:
             pass
         return result, None

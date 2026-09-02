@@ -826,7 +826,7 @@ def _install_welcome_listeners(bot: commands.Bot) -> None:
         panel = embeds.neutral("Départ d’un membre", text)
         panel.set_thumbnail(url=member.display_avatar.url)
         try:
-            await channel.send(embed=panel, allowed_mentions=discord.AllowedMentions.none())
+            await panels.envoyer(channel, panels.depuis_embed(panel), allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
             pass
 

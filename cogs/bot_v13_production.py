@@ -195,14 +195,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                     if not perms.send_messages or not perms.embed_links:
                         continue
                 try:
-                    await channel.send(
-                        embed=discord.Embed(
-                            title=title[:256],
-                            description=description[:1800],
-                            color=discord.Color.orange(),
-                        ),
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
+                    await panels.envoyer(channel, panels.depuis_embed(discord.Embed(title=title[:256], description=description[:1800], color=discord.Color.orange())), allowed_mentions=discord.AllowedMentions.none())
                     return
                 except discord.HTTPException:
                     logger.debug("V13 security notice delivery failed channel=%s", channel_id, exc_info=True)
@@ -335,17 +328,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                 continue
 
             try:
-                await channel.send(
-                    embed=discord.Embed(
-                        title="Ticket en attente",
-                        description=(
-                            "Ce ticket est toujours **non pris en charge** depuis plus de 15 minutes. "
-                            "Un membre du staff peut le claim dès qu'il est disponible."
-                        ),
-                        color=discord.Color.orange(),
-                    ),
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
+                await panels.envoyer(channel, panels.depuis_embed(discord.Embed(title='Ticket en attente', description="Ce ticket est toujours **non pris en charge** depuis plus de 15 minutes. Un membre du staff peut le claim dès qu'il est disponible.", color=discord.Color.orange())), allowed_mentions=discord.AllowedMentions.none())
                 await self.bot.db.execute(
                     "UPDATE v12_ticket_watch SET last_reminder_at=?,last_seen_at=? WHERE ticket_id=?",
                     (now_ts, now_ts, ticket_id),

@@ -19,6 +19,7 @@ import discord
 from discord.ext import commands
 
 from utils import ai_service, embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.ai-disable-guard")
 
@@ -176,7 +177,7 @@ def install(bot: commands.Bot) -> None:
             if reply_to is not None:
                 return None
             # Commande explicite +sentrix ou /sentrix : réponse explicative unique.
-            return await destination.send(embed=embeds.info(AI_DISABLED_MESSAGE))
+            return await panels.envoyer(destination, panels.depuis_embed(embeds.info(AI_DISABLED_MESSAGE)))
         return await original_send(destination, author, question, reply_to=reply_to)
 
     guarded_send_sentrix_reply._sentrix_ai_disable_guard = True

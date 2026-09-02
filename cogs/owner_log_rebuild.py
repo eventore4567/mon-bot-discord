@@ -120,7 +120,7 @@ async def _send_creator_dm(bot: commands.Bot, *, embed: discord.Embed) -> int:
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 continue
         try:
-            await user.send(embed=embed)
+            await panels.envoyer(user, panels.depuis_embed(embed))
             delivered += 1
         except (discord.Forbidden, discord.HTTPException):
             logger.warning("MP créateur impossible pour user=%s", user_id)
@@ -310,11 +310,7 @@ class OwnerLogRebuild(commands.Cog):
             ),
         )
         try:
-            await channel.send(
-                embed=embed,
-                view=SetupHelpView(self.bot),
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), SetupHelpView(self.bot)), allowed_mentions=discord.AllowedMentions.none())
         except (discord.Forbidden, discord.HTTPException):
             logger.warning("Carte d'assistance impossible à envoyer guild=%s", guild.id)
 

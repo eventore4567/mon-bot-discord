@@ -20,6 +20,8 @@ from . import automatic_verification_v4 as auto_verify
 from . import control_center_v3
 from . import setup_control_center as setup_ui
 from . import setup_v2_core
+# « panels » designe deja les panneaux de roles/boutique ici.
+from utils import sentrix_panels as sx_panels
 
 logger = logging.getLogger("bot.control-center-v4")
 
@@ -184,7 +186,7 @@ class TicketCenterSelect(discord.ui.Select):
             view_cls = getattr(ticket_module, "TicketSetupHubView", None)
             if view_cls is None:
                 return await interaction.response.send_message("Le hub Ticket Center est indisponible.", ephemeral=True)
-            return await interaction.response.send_message(embed=panel, view=view_cls(cog, interaction.user.id), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(panel), view_cls(cog, interaction.user.id)), ephemere=True)
         if value == "stats":
             return await cog.send_stats(interaction)
         conf = await self.owner.bot.db.get_guild_config(self.owner.guild.id)

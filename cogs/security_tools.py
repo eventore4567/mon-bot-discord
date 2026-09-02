@@ -155,10 +155,7 @@ class Security(commands.Cog):
         )
 
         try:
-            await membre.send(embed=embeds.warning(
-                f"Vous avez été placé en **quarantaine** sur **{ctx.guild.name}** pour {helpers.format_duration(seconds)}.\n"
-                f"Raison : {raison}\nVos rôles ont été sauvegardés et seront restaurés automatiquement à la fin de la quarantaine."
-            ))
+            await panels.envoyer(membre, panels.depuis_embed(embeds.warning(f'Vous avez été placé en **quarantaine** sur **{ctx.guild.name}** pour {helpers.format_duration(seconds)}.\nRaison : {raison}\nVos rôles ont été sauvegardés et seront restaurés automatiquement à la fin de la quarantaine.')))
         except discord.Forbidden:
             pass
 

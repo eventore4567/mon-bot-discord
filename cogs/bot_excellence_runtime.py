@@ -728,7 +728,7 @@ def _install_economy_atomicity(bot: commands.Bot) -> None:
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent.")))
             text = "gagné" if won else "perdu"
             response = embeds.success if won else embeds.error
-            await ctx.send(embed=response(f"Vous avez {text} **{stats_service.format_number(montant)}** crédits."))
+            await panels.envoyer(ctx, panels.depuis_embed(response(f'Vous avez {text} **{stats_service.format_number(montant)}** crédits.')))
 
         robust_gamble._sentrix_atomic = True
         gamble_command.callback = robust_gamble

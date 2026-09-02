@@ -9,6 +9,7 @@ import discord
 from discord.ext import commands
 
 import config
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.guild-arrival")
 
@@ -307,7 +308,7 @@ class GuildArrival(commands.Cog):
         allowed_mentions = discord.AllowedMentions(users=True, roles=False, everyone=False)
         try:
             if channel is not None:
-                message = await channel.send(embed=embed, view=view, allowed_mentions=allowed_mentions)
+                message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view), allowed_mentions=allowed_mentions)
                 logger.info("Accueil premium SentriX envoyé dans %s (%s).", guild.name, guild.id)
                 asyncio.create_task(
                     self._cleanup_legacy_welcome(channel, message.id),
@@ -315,7 +316,7 @@ class GuildArrival(commands.Cog):
                 )
                 return
             if guild.owner is not None:
-                await guild.owner.send(embed=embed, view=view, allowed_mentions=allowed_mentions)
+                await panels.envoyer(guild.owner, panels.avec_composants(panels.depuis_embed(embed), view), allowed_mentions=allowed_mentions)
                 logger.info("Accueil premium SentriX envoyé en MP au propriétaire de %s.", guild.id)
         except (discord.Forbidden, discord.HTTPException):
             logger.exception("Impossible d'envoyer l'accueil sur %s (%s).", guild.name, guild.id)

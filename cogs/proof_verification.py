@@ -433,7 +433,7 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
                 if target.response.is_done():
                     return await panels.envoyer(target.followup, panels.depuis_embed(panel), ephemere=True)
                 return await panels.envoyer(target.response, panels.depuis_embed(panel), ephemere=True)
-            return await target.send(embed=panel)
+            return await panels.envoyer(target, panels.depuis_embed(panel))
         channel = guild.get_channel(int(_get(settings, "submission_channel_id")))
         embeds_list, files = await self.build_public_panel(guild)
         try:
@@ -444,7 +444,7 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
                 if target.response.is_done():
                     return await panels.envoyer(target.followup, panels.depuis_embed(panel), ephemere=True)
                 return await panels.envoyer(target.response, panels.depuis_embed(panel), ephemere=True)
-            return await target.send(embed=panel)
+            return await panels.envoyer(target, panels.depuis_embed(panel))
         actor = getattr(target, "user", None) or getattr(target, "author", None)
         await proof_service.update_settings(self.bot, guild.id, actor.id, panel_message_id=message.id)
         panel = embeds.success(f"Panel publié dans {channel.mention}.")
@@ -452,7 +452,7 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
             if target.response.is_done():
                 return await panels.envoyer(target.followup, panels.depuis_embed(panel), ephemere=True)
             return await panels.envoyer(target.response, panels.depuis_embed(panel), ephemere=True)
-        return await target.send(embed=panel)
+        return await panels.envoyer(target, panels.depuis_embed(panel))
 
     @commands.hybrid_command(name="proofsetup", description="Configurer la vérification automatique par preuve")
     async def proofsetup(self, ctx: commands.Context):

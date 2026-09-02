@@ -118,7 +118,7 @@ async def security_risk(ctx: commands.Context, member: discord.Member = None):
         colour=discord.Colour.orange() if result["score"] >= 50 else discord.Colour.blurple(),
     )
     embed.set_footer(text="Aucune sanction automatique — décision humaine obligatoire")
-    await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+    await panels.envoyer(ctx, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions.none())
 
 
 def install(bot):

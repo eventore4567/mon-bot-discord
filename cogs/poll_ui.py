@@ -118,7 +118,7 @@ class PollSetupModal(discord.ui.Modal, title="Créer un sondage"):
         )
         embed = _builder_embed(view.question, view.answers, view.duration_hours, view.multiple)
         if self.direct_from_slash:
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), view), ephemere=True)
         else:
             await interaction.response.edit_message(embed=embed, view=view)
 
@@ -247,10 +247,7 @@ class PollBuilderView(discord.ui.View):
 
     async def refresh(self, interaction: discord.Interaction):
         self._update_buttons()
-        await interaction.response.edit_message(
-            embed=_builder_embed(self.question, self.answers, self.duration_hours, self.multiple),
-            view=self,
-        )
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(_builder_embed(self.question, self.answers, self.duration_hours, self.multiple)), self))
 
     @discord.ui.button(label="Ajouter des réponses", emoji="➕", style=discord.ButtonStyle.secondary, row=2)
     async def add_answers(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -308,15 +305,12 @@ class PollBuilderView(discord.ui.View):
         success = embeds.success(
             f"Sondage publié dans {channel.mention}.\n[Voir le sondage]({message.jump_url})"
         )
-        await interaction.response.edit_message(embed=success, view=None)
+        await panels.editer(interaction.response, panels.depuis_embed(success))
         self.stop()
 
     @discord.ui.button(label="Annuler", emoji="✖️", style=discord.ButtonStyle.danger, row=2)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            embed=embeds.error("Création du sondage annulée."),
-            view=None,
-        )
+        await panels.editer(interaction.response, panels.depuis_embed(embeds.error('Création du sondage annulée.')))
         self.stop()
 
 

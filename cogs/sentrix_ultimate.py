@@ -458,7 +458,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
                         if isinstance(log, discord.TextChannel):
                             e = _panneau(f'Résumé ticket #{ticket_id}', summary, kind="brand")
                             e.add_field(name="Fermeture", value=reason[:1000] or "Aucune raison", inline=False)
-                            await log.send(embed=e)
+                            await panels.envoyer(log, panels.depuis_embed(e))
                     except Exception: pass
             except Exception:
                 logger.exception("Résumé ticket automatique impossible")

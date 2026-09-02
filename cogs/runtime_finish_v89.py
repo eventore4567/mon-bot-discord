@@ -476,7 +476,7 @@ async def _seed_message(bot: commands.Bot, channel: Any, title: str, description
     )
     panel.set_footer(text="SentriX • Configuration manox")
     try:
-        await channel.send(embed=panel, allowed_mentions=discord.AllowedMentions.none())
+        await panels.envoyer(channel, panels.depuis_embed(panel), allowed_mentions=discord.AllowedMentions.none())
         return True
     except (discord.Forbidden, discord.HTTPException):
         return False

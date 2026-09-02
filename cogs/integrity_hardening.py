@@ -436,7 +436,7 @@ def _install_moderation(bot: commands.Bot) -> bool:
                     reason,
                     duration_seconds=int(seconds),
                 )
-                return await ctx.send(embed=result)
+                return await panels.envoyer(ctx, panels.depuis_embed(result))
 
         _replace_callback(tempban, safe_tempban, "_sentrix_integrity_tempban")
 

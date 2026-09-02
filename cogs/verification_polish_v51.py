@@ -175,15 +175,7 @@ class StyledSequenceView(discord.ui.View):
         current = self.cog._challenges.get((self.state.guild_id, self.state.user_id))
         if current is None or current.token != self.state.token or time.time() > current.expires_at:
             self.stop()
-            return await interaction.response.edit_message(
-                embed=_status_embed(
-                    "Session expirée",
-                    'Cliquez de nouveau sur **Commencer** dans le panneau de vérification.',
-                    state="warn",
-                ),
-                view=None,
-                content=None,
-            )
+            return await panels.editer(interaction.response, panels.depuis_embed(_status_embed('Session expirée', 'Cliquez de nouveau sur **Commencer** dans le panneau de vérification.', state='warn')))
 
         expected = current.sequence[self.position]
         if symbol != expected:
@@ -192,23 +184,11 @@ class StyledSequenceView(discord.ui.View):
             for child in self.children:
                 child.disabled = True
             self.stop()
-            return await interaction.response.edit_message(
-                embed=_status_embed(
-                    "Ordre incorrect",
-                    'La tentative a été annulée. Utilisez **Relancer** pour obtenir un nouveau challenge.',
-                    state="error",
-                ),
-                view=self,
-                content=None,
-            )
+            return await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(_status_embed('Ordre incorrect', 'La tentative a été annulée. Utilisez **Relancer** pour obtenir un nouveau challenge.', state='error')), self))
 
         self.position += 1
         if self.position < len(current.sequence):
-            return await interaction.response.edit_message(
-                embed=_challenge_embed(current, self.account_age_days, self.position),
-                view=self,
-                content=None,
-            )
+            return await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(_challenge_embed(current, self.account_age_days, self.position)), self))
 
         current.sequence_done = True
         self.stop()
@@ -339,11 +319,7 @@ async def _patched_start(self, interaction: discord.Interaction):
     self._challenges[key] = state
     age_days = account_age // 86400
     view = StyledSequenceView(self, state, math_question, age_days)
-    await interaction.response.send_message(
-        embed=_challenge_embed(state, age_days, 0),
-        view=view,
-        ephemeral=True,
-    )
+    await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(_challenge_embed(state, age_days, 0)), view), ephemere=True)
 
 
 async def _patched_complete(self, interaction, token: str, typed_code: str, typed_math: str):
@@ -435,17 +411,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
     self._lock_until.pop(key, None)
     elapsed = max(1, int(time.time() - state.created_at))
 
-    await interaction.response.send_message(
-        embed=_status_embed(
-            "Vérification réussie",
-            (
-                f"{member.mention}, votre compte a été validé en **{elapsed}s**.\nLe rôle `Non vérifié` a été retiré et le rôle `Vérifié` vient d'être attribué.\n\n### ✅ Accès au serveur débloqué"
-            ),
-            state="ok",
-        ),
-        ephemeral=True,
-        allowed_mentions=discord.AllowedMentions.none(),
-    )
+    await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Vérification réussie', f"{member.mention}, votre compte a été validé en **{elapsed}s**.\nLe rôle `Non vérifié` a été retiré et le rôle `Vérifié` vient d'être attribué.\n\n### ✅ Accès au serveur débloqué", state='ok')), ephemere=True, allowed_mentions=discord.AllowedMentions.none())
     await self._log(
         guild,
         "Membre vérifié — contrôle renforcé réussi",
@@ -480,11 +446,7 @@ def install(bot) -> None:
                 )
             except (discord.Forbidden, discord.HTTPException):
                 pass
-            await verify_channel.send(
-                embed=_panel_embed(self.bot, guild),
-                view=VerificationPanelView(),
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            await panels.envoyer(verify_channel, panels.avec_composants(panels.depuis_embed(_panel_embed(self.bot, guild)), VerificationPanelView()), allowed_mentions=discord.AllowedMentions.none())
 
             try:
                 await trap_channel.purge(
@@ -493,10 +455,7 @@ def install(bot) -> None:
                 )
             except (discord.Forbidden, discord.HTTPException):
                 pass
-            await trap_channel.send(
-                embed=_trap_embed(self.bot, verify_channel, sanction),
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            await panels.envoyer(trap_channel, panels.depuis_embed(_trap_embed(self.bot, verify_channel, sanction)), allowed_mentions=discord.AllowedMentions.none())
             return result, error
 
         cls.create_or_refresh_system = create_or_refresh_system_v51

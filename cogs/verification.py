@@ -180,7 +180,7 @@ class Verification(commands.Cog, name="Verification"):
             # donc une fois les anciens panneaux créés comme réponses afin que la
             # suppression de la commande n'affiche plus « message original supprimé ».
             if message.reference is not None:
-                replacement = await channel.send(embed=embed, view=view)
+                replacement = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view))
                 await self.bot.db.execute(
                     "INSERT INTO self_role_panels (guild_id, channel_id, message_id, title, created_by, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?)",

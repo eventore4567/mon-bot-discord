@@ -9,6 +9,7 @@ import logging
 
 import discord
 from discord.ext import commands
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.server-choice-roles")
 _INSTALLED = False
@@ -242,7 +243,7 @@ async def publish_or_refresh(
 
     view = ServerSelfRoleView()
     if message is None:
-        message = await channel.send(embed=build_embed(), view=view)
+        message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(build_embed()), view))
     else:
         await message.edit(embed=build_embed(), view=view)
     return message

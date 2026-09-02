@@ -511,11 +511,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 "Vous pouvez modifier le texte, l’image, la couleur, les boutons, "
                 "les formulaires, les salons et les rôles.",
             )
-            await interaction.response.send_message(
-                embed=panel_embed,
-                view=ticket_runtime.TicketSetupHubView(ticket_cog, interaction.user.id),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(panel_embed), ticket_runtime.TicketSetupHubView(ticket_cog, interaction.user.id)), ephemere=True)
 
         async def toggle_tickets(interaction: discord.Interaction):
             if not interaction.response.is_done():

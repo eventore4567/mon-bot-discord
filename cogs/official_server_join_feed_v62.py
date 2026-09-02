@@ -13,6 +13,7 @@ import logging
 
 import discord
 from discord.ext import commands
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.official-server-join-feed-v62")
 
@@ -111,10 +112,7 @@ def install(bot: commands.Bot) -> None:
             if channel is None:
                 return
             try:
-                await channel.send(
-                    embed=_join_embed(bot),
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
+                await panels.envoyer(channel, panels.depuis_embed(_join_embed(bot)), allowed_mentions=discord.AllowedMentions.none())
             except (discord.Forbidden, discord.HTTPException):
                 logger.exception("V62: annonce d'ajout impossible guild=%s.", joined_guild.id)
 

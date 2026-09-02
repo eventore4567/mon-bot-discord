@@ -29,6 +29,8 @@ from . import honeypot_verification_v48 as honeypot_v50
 from . import setup_control_center as setup_ui
 from . import setup_v2_core
 from . import verification as verification_module
+# « panels » designe deja les panneaux de roles ici.
+from utils import sentrix_panels as sx_panels
 
 logger = logging.getLogger("bot.control-center-v3")
 
@@ -195,7 +197,7 @@ def _install_presence_renderer(bot: commands.Bot) -> None:
         try:
             # La mention reste lisible/clickable dans l'embed mais aucun second ping n'est
             # ajouté au-dessus du panneau.
-            await channel.send(embed=panel, allowed_mentions=discord.AllowedMentions.none())
+            await sx_panels.envoyer(channel, sx_panels.depuis_embed(panel), allowed_mentions=discord.AllowedMentions.none())
         except (discord.Forbidden, discord.HTTPException):
             pass
 
@@ -214,7 +216,7 @@ def _install_presence_renderer(bot: commands.Bot) -> None:
         panel = embeds.neutral("Départ d’un membre", text)
         panel.set_thumbnail(url=member.display_avatar.url)
         try:
-            await channel.send(embed=panel, allowed_mentions=discord.AllowedMentions.none())
+            await sx_panels.envoyer(channel, sx_panels.depuis_embed(panel), allowed_mentions=discord.AllowedMentions.none())
         except (discord.Forbidden, discord.HTTPException):
             pass
 
@@ -282,10 +284,7 @@ async def _publish_or_refresh_role_panel(bot: commands.Bot, guild: discord.Guild
 
     options = await cog._self_role_options(guild, 0)
     panel_data = {"title": "Choisissez vos rôles"}
-    message = await channel.send(
-        embed=await cog._self_role_embed(guild, panel_data, options),
-        view=verification_module.SelfRolePublicView(options),
-    )
+    message = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(await cog._self_role_embed(guild, panel_data, options)), verification_module.SelfRolePublicView(options)))
     await bot.db.execute(
         "INSERT INTO self_role_panels (guild_id,channel_id,message_id,title,created_by,created_at) "
         "VALUES (?,?,?,?,?,strftime('%s','now'))",

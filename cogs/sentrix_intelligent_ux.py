@@ -23,6 +23,7 @@ import config
 from database.db import now
 from utils import embeds
 from utils.instance_identity import wake_words
+from utils import sentrix_panels as panels
 from utils.intelligent_ux import (
     NaturalAction,
     classify_ticket_priority,
@@ -48,11 +49,7 @@ async def _send_reply(
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except discord.HTTPException:
-        sent = await message.channel.send(
-            embed=embed,
-            view=view,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        sent = await panels.envoyer(message.channel, panels.avec_composants(panels.depuis_embed(embed), view), allowed_mentions=discord.AllowedMentions.none())
     if view is not None and hasattr(view, "message"):
         view.message = sent
     return sent

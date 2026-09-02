@@ -119,10 +119,7 @@ class AutoSetupConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            embed=embeds.neutral("Configuration automatique annulée", "Aucune modification n'a été appliquée."),
-            view=None,
-        )
+        await panels.editer(interaction.response, panels.depuis_embed(embeds.neutral('Configuration automatique annulée', "Aucune modification n'a été appliquée.")))
         self.stop()
 
 
@@ -396,11 +393,7 @@ def install() -> bool:
                     "Confirmez pour continuer ou annulez sans rien modifier."
                 ),
             )
-            await interaction.response.send_message(
-                embed=e,
-                view=AutoSetupConfirmView(self, profile, interaction.user.id),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(e), AutoSetupConfirmView(self, profile, interaction.user.id)), ephemere=True)
 
         auto_select.callback = auto_callback
         self.add_item(auto_select)

@@ -289,7 +289,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
             ),
             inline=True,
         )
-        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        await panels.envoyer(ctx, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions.none())
 
     @commands.command(name="verification-review", aliases=["verif-review"])
     @commands.guild_only()

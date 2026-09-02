@@ -224,11 +224,7 @@ class LevelRewardModal(discord.ui.Modal, title="Récompense de niveau"):
             return await interaction.response.send_message("Le niveau doit être un nombre entier.", ephemeral=True)
         if not 1 <= level <= 100000:
             return await interaction.response.send_message("Choisissez un niveau entre 1 et 100000.", ephemeral=True)
-        await interaction.response.send_message(
-            embed=embeds.info(f"Choisissez le rôle à donner au **niveau {level}**."),
-            view=RewardRoleView(self.owner, interaction.user.id, level),
-            ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.info(f'Choisissez le rôle à donner au **niveau {level}**.')), RewardRoleView(self.owner, interaction.user.id, level)), ephemere=True)
 
 
 class RewardRoleView(discord.ui.View):
@@ -373,11 +369,7 @@ class NotificationSourceModal(discord.ui.Modal, title="Source de notification"):
                 (source_url, platform, text, image, self.owner.guild.id, self.owner.selected_notification),
             )
             return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Source modifiée sans toucher aux autres notifications.')), ephemere=True)
-        await interaction.response.send_message(
-            embed=embeds.info("Choisissez maintenant le salon et le rôle. La nouvelle source sera ajoutée sans remplacer les autres."),
-            view=NotificationDraftView(self.owner, interaction.user.id, source_url, text, image),
-            ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.info('Choisissez maintenant le salon et le rôle. La nouvelle source sera ajoutée sans remplacer les autres.')), NotificationDraftView(self.owner, interaction.user.id, source_url, text, image)), ephemere=True)
 
 
 class NotificationDraftView(discord.ui.View):
@@ -652,7 +644,7 @@ def _patch_render() -> None:
                     "Désactiver l’économie ne supprime aucun solde, aucune banque et aucun achat.",
                     title="Économie SentriX",
                 )
-                await interaction.response.send_message(embed=panel, view=EconomyManageView(self, interaction.user.id), ephemeral=True)
+                await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(panel), EconomyManageView(self, interaction.user.id)), ephemere=True)
             economy.callback = economy_cb
             self.add_item(economy)
 
@@ -666,10 +658,7 @@ def _patch_render() -> None:
         elif category == "notifications":
             manage = discord.ui.Button(label="Ajouter / modifier des sources", style=discord.ButtonStyle.secondary, row=1)
             async def manage_cb(interaction):
-                await interaction.response.send_message(
-                    embed=embeds.info("Ajoutez une nouvelle source ou modifiez uniquement celle sélectionnée. Aucune autre source n’est écrasée."),
-                    view=NotificationManageView(self, interaction.user.id), ephemeral=True,
-                )
+                await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.info('Ajoutez une nouvelle source ou modifiez uniquement celle sélectionnée. Aucune autre source n’est écrasée.')), NotificationManageView(self, interaction.user.id)), ephemere=True)
             manage.callback = manage_cb
             self.add_item(manage)
 
@@ -686,7 +675,7 @@ def _patch_render() -> None:
                     ]),
                     title="Fonctions IA",
                 )
-                await interaction.response.send_message(embed=panel, view=AiFeatureView(self, interaction.user.id), ephemeral=True)
+                await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(panel), AiFeatureView(self, interaction.user.id)), ephemere=True)
             features.callback = features_cb
             self.add_item(features)
 

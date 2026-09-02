@@ -340,10 +340,7 @@ class V17Health(commands.Cog, name="V17Health"):
             channel_id = conf["error_channel"] if conf else None
             channel = guild.get_channel(channel_id) if channel_id else None
             if isinstance(channel, discord.TextChannel):
-                await channel.send(
-                    embed=embeds.warning(text, title="Santé SentriX : commande à surveiller"),
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
+                await panels.envoyer(channel, panels.depuis_embed(embeds.warning(text, title='Santé SentriX : commande à surveiller')), allowed_mentions=discord.AllowedMentions.none())
         except Exception:
             pass
 

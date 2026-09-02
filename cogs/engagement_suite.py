@@ -662,7 +662,7 @@ class EngagementSuite(commands.Cog):
         )
         embed.set_author(name=message.author.display_name, icon_url=message.author.display_avatar.url)
         embed.set_footer(text=f"{brand_label()} / Suggestions")
-        sent = await message.channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        sent = await panels.envoyer(message.channel, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions.none())
         await self.bot.db.execute("UPDATE engagement_suggestions SET message_id=? WHERE id=?", (sent.id, suggestion_id))
         for emoji in ("👍", "👎"):
             try:
@@ -727,7 +727,7 @@ class EngagementSuite(commands.Cog):
                 color=discord.Color.orange(),
             )
             try:
-                await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+                await panels.envoyer(channel, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions.none())
             except discord.HTTPException:
                 pass
 

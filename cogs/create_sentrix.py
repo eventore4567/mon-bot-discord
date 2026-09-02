@@ -455,10 +455,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
 
             from .tickets import TicketPanelView
 
-            message = await panel_channel.send(
-                embed=cog.build_panel_embed(panel),
-                view=TicketPanelView(panel, types),
-            )
+            message = await panels.envoyer(panel_channel, panels.avec_composants(panels.depuis_embed(cog.build_panel_embed(panel)), TicketPanelView(panel, types)))
             await self.bot.db.execute(
                 "UPDATE ticket_panels_v2 SET message_id=?,channel_id=? WHERE id=?",
                 (message.id, panel_channel.id, panel_id),

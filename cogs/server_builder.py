@@ -1541,7 +1541,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
                     return False
         except discord.HTTPException:
             logger.warning("Impossible de parcourir l'historique de %s", channel.id)
-        await channel.send(embed=embed)
+        await panels.envoyer(channel, panels.depuis_embed(embed))
         return True
 
     async def _publish_welcome_content(
@@ -1794,10 +1794,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
                     await old_message.delete()
                 except discord.HTTPException:
                     pass
-            message = await panel_channel.send(
-                embed=ticket_cog.build_panel_embed(panel),
-                view=view,
-            )
+            message = await panels.envoyer(panel_channel, panels.avec_composants(panels.depuis_embed(ticket_cog.build_panel_embed(panel)), view))
         await self.bot.db.execute(
             "UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?",
             (message.id, panel_channel.id, panel_id),

@@ -928,7 +928,7 @@ class LanguageChoiceView(discord.ui.View):
                 e = embeds.success("English is now the server language. Command names in `+help` and the setup interface are displayed in English.", title="🇬🇧 Language selected")
             else:
                 e = embeds.success("Le francais est maintenant la langue du serveur. Les noms dans `+help` et l'interface de configuration sont affiches en francais.", title="🇫🇷 Langue selectionnee")
-            await interaction.response.edit_message(embed=e, view=None)
+            await panels.editer(interaction.response, panels.depuis_embed(e))
 
         async def fr_callback(interaction: discord.Interaction): await choose(interaction, LANG_FR)
         async def en_callback(interaction: discord.Interaction): await choose(interaction, LANG_EN)
@@ -971,7 +971,7 @@ async def _send_initial_language_prompt(bot: commands.Bot, guild: discord.Guild)
         "**English** → command names and the main interfaces will be in English.\n\n"
         "Ce choix est modifiable plus tard dans `+setup`. / You can change it later in `+setup`.",
     )
-    await channel.send(embed=e, view=LanguageChoiceView(bot), allowed_mentions=discord.AllowedMentions.none())
+    await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(e), LanguageChoiceView(bot)), allowed_mentions=discord.AllowedMentions.none())
 
 
 async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
@@ -1002,7 +1002,7 @@ async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
         title = "👋 Besoin d'aide ?"
         text = f"Mon prefixe ici est **`{prefix}`**. Utilise **`{prefix}{help_name}`** pour les commandes ou **`{prefix}{setup_name}`** pour configurer le serveur."
     try:
-        await message.channel.send(embed=embeds.neutral(title, text), allowed_mentions=discord.AllowedMentions.none())
+        await panels.envoyer(message.channel, panels.depuis_embed(embeds.neutral(title, text)), allowed_mentions=discord.AllowedMentions.none())
     except (discord.Forbidden, discord.HTTPException):
         pass
 

@@ -1213,13 +1213,7 @@ class LevelRoleModal(discord.ui.Modal, title="Ajouter un rôle de niveau"):
         if existing and existing["role_id"] != role.id:
             old_role = interaction.guild.get_role(existing["role_id"])
             confirm = helpers.ConfirmView(interaction.user.id, timeout=30)
-            await interaction.response.send_message(
-                embed=embeds.warning(
-                    f"Le niveau **{level}** est déjà associé à {old_role.mention if old_role else 'un rôle supprimé'}. "
-                    f"Voulez-vous le remplacer par {role.mention} ?"
-                ),
-                view=confirm, ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.warning(f"Le niveau **{level}** est déjà associé à {(old_role.mention if old_role else 'un rôle supprimé')}. Voulez-vous le remplacer par {role.mention} ?")), confirm), ephemere=True)
             await confirm.wait()
             if not confirm.value:
                 return
@@ -1379,7 +1373,7 @@ class CreateRoleModal(discord.ui.Modal, title="➕ Créer un nouveau rôle"):
             "**● Créer le rôle**.",
             color=SETUP_COLOR_MAIN,
         )
-        await interaction.response.send_message(embed=e, view=perms_view, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(e), perms_view), ephemere=True)
 
 
 class RoleCreatorPermsView(discord.ui.View):
@@ -1442,9 +1436,7 @@ class RoleCreatorPermsView(discord.ui.View):
     async def _cancel_clicked(self, interaction: discord.Interaction):
         for item in self.children:
             item.disabled = True
-        await interaction.response.edit_message(
-            embed=embeds.neutral("○ Création annulée", "Aucun rôle n'a été créé.", color=SETUP_COLOR_MAIN), view=self,
-        )
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.neutral('○ Création annulée', "Aucun rôle n'a été créé.", color=SETUP_COLOR_MAIN)), self))
 
     async def _create_clicked(self, interaction: discord.Interaction):
         guild = interaction.guild
@@ -1487,7 +1479,7 @@ class RoleCreatorPermsView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         e = embeds.success(f"● Le rôle {role.mention} a été créé avec succès.")
-        await interaction.response.edit_message(embed=e, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(e), self))
 
 
 class SetupNavButton(
@@ -2330,10 +2322,7 @@ class SetupView(discord.ui.View):
             return False
         if role.permissions.administrator:
             confirm = helpers.ConfirmView(interaction.user.id, timeout=30)
-            await interaction.response.send_message(
-                embed=embeds.warning(f"{role.mention} a la permission **Administrateur**. Continuer quand même ?"),
-                view=confirm, ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.warning(f'{role.mention} a la permission **Administrateur**. Continuer quand même ?')), confirm), ephemere=True)
             await confirm.wait()
             if not confirm.value:
                 return False
@@ -2418,14 +2407,7 @@ class SetupView(discord.ui.View):
 
     async def _clear_channels_clicked(self, interaction: discord.Interaction):
         confirm = helpers.ConfirmView(interaction.user.id, timeout=30)
-        await interaction.response.send_message(
-            embed=embeds.warning(
-                "Voulez-vous vraiment retirer TOUS les salons configurés sur cette page ? "
-                "Les salons Discord eux-mêmes ne seront **pas** supprimés — seul le lien avec SentriX le sera.",
-                title="🧹 Effacer les salons configurés ?",
-            ),
-            view=confirm, ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.warning('Voulez-vous vraiment retirer TOUS les salons configurés sur cette page ? Les salons Discord eux-mêmes ne seront **pas** supprimés — seul le lien avec SentriX le sera.', title='🧹 Effacer les salons configurés ?')), confirm), ephemere=True)
         await confirm.wait()
         if not confirm.value:
             return
@@ -2616,15 +2598,7 @@ class SetupView(discord.ui.View):
 
     async def _ask_cancel(self, interaction: discord.Interaction):
         confirm = helpers.ConfirmView(interaction.user.id, timeout=30)
-        await interaction.response.send_message(
-            embed=embeds.warning(
-                "Voulez-vous vraiment annuler ? Les choix **non enregistrés** (rôles/salons pas encore "
-                "sauvegardés avec 💾) seront perdus. Ce qui est déjà enregistré (rôles de niveau, logs, "
-                "gestionnaires, sécurité) ne sera **pas** supprimé.",
-                title="○ Annuler la configuration ?",
-            ),
-            view=confirm, ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.warning('Voulez-vous vraiment annuler ? Les choix **non enregistrés** (rôles/salons pas encore sauvegardés avec 💾) seront perdus. Ce qui est déjà enregistré (rôles de niveau, logs, gestionnaires, sécurité) ne sera **pas** supprimé.', title='○ Annuler la configuration ?')), confirm), ephemere=True)
         await confirm.wait()
         if not confirm.value:
             return

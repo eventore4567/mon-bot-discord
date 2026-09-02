@@ -68,9 +68,7 @@ class DeleteTypeView(discord.ui.View):
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         t = await self.cog.get_type(self.type_id)
         if not t:
-            return await interaction.response.edit_message(
-                embed=embeds.warning("Ce type n'existe déjà plus."), view=None
-            )
+            return await panels.editer(interaction.response, panels.depuis_embed(embeds.warning("Ce type n'existe déjà plus.")))
         panel_id, name = t["panel_id"], t["name"]
         await self.cog.bot.db.execute(
             "DELETE FROM ticket_form_questions WHERE ticket_type_id=?", (self.type_id,)
@@ -78,14 +76,12 @@ class DeleteTypeView(discord.ui.View):
         await self.cog.bot.db.execute("DELETE FROM ticket_types WHERE id=?", (self.type_id,))
         await _renumber(self.cog, panel_id)
         await _refresh_panel(self.cog, interaction.guild, panel_id)
-        await interaction.response.edit_message(
-            embed=embeds.success(f"Type **{name}** supprimé et panel mis à jour."), view=None
-        )
+        await panels.editer(interaction.response, panels.depuis_embed(embeds.success(f'Type **{name}** supprimé et panel mis à jour.')))
         self.stop()
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(embed=embeds.info("Suppression annulée."), view=None)
+        await panels.editer(interaction.response, panels.depuis_embed(embeds.info('Suppression annulée.')))
         self.stop()
 
 
@@ -123,12 +119,7 @@ class MoveTypeView(discord.ui.View):
             await _renumber(self.cog, self.old_panel_id)
             await _refresh_panel(self.cog, interaction.guild, self.old_panel_id)
             await _refresh_panel(self.cog, interaction.guild, target_id)
-            await interaction.response.edit_message(
-                embed=embeds.success(
-                    f"Type **{t['name']}** déplacé vers **{target['name']}**. Les panels sont à jour."
-                ),
-                view=None,
-            )
+            await panels.editer(interaction.response, panels.depuis_embed(embeds.success(f"Type **{t['name']}** déplacé vers **{target['name']}**. Les panels sont à jour.")))
             self.stop()
 
         select.callback = chosen
@@ -151,11 +142,7 @@ async def _move_flow(cog, type_id: int, author_id: int, interaction: discord.Int
     others = [p for p in panneaux if int(p["id"]) != int(t["panel_id"] or 0)]
     if not others:
         return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.info("Il n'y a aucun autre panel vers lequel déplacer ce type.")), ephemere=True)
-    await interaction.response.send_message(
-        embed=embeds.neutral("Modifier le panel", f"Nouveau panel pour **{t['name']}** :"),
-        view=MoveTypeView(cog, t, panneaux, author_id),
-        ephemeral=True,
-    )
+    await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.neutral('Modifier le panel', f"Nouveau panel pour **{t['name']}** :")), MoveTypeView(cog, t, panneaux, author_id)), ephemere=True)
 
 
 class TypeActionsView(discord.ui.View):
@@ -174,11 +161,7 @@ class TypeActionsView(discord.ui.View):
         t = await self.cog.get_type(self.type_id)
         if not t:
             return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Type introuvable.')), ephemere=True)
-        await interaction.response.send_message(
-            embed=embeds.neutral(f"Modifier « {t['name']} »", "Choisissez le réglage à modifier."),
-            view=_tickets().TypeEditView(self.cog, self.type_id, self.author_id),
-            ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.neutral(f"Modifier « {t['name']} »", 'Choisissez le réglage à modifier.')), _tickets().TypeEditView(self.cog, self.type_id, self.author_id)), ephemere=True)
 
     @discord.ui.button(label="Modifier le panel", style=discord.ButtonStyle.secondary, emoji="📋")
     async def move(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -189,11 +172,7 @@ class TypeActionsView(discord.ui.View):
         t = await self.cog.get_type(self.type_id)
         if not t:
             return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Type introuvable.')), ephemere=True)
-        await interaction.response.send_message(
-            embed=embeds.warning(f"Supprimer **{t['name']}** et son formulaire ?"),
-            view=DeleteTypeView(self.cog, self.type_id, self.author_id),
-            ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.warning(f"Supprimer **{t['name']}** et son formulaire ?")), DeleteTypeView(self.cog, self.type_id, self.author_id)), ephemere=True)
 
 
 class TypeManagerView(discord.ui.View):
@@ -218,14 +197,7 @@ class TypeManagerView(discord.ui.View):
                 return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Type introuvable.')), ephemere=True)
             panel = await self.cog.get_panel(t["panel_id"])
             panel_name = panel["name"] if panel else "introuvable"
-            await interaction.response.send_message(
-                embed=embeds.neutral(
-                    f"🎫 {t['name']}",
-                    f"Panel actuel : **{panel_name}**\nChoisissez une action.",
-                ),
-                view=TypeActionsView(self.cog, type_id, self.author_id),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.neutral(f"🎫 {t['name']}", f'Panel actuel : **{panel_name}**\nChoisissez une action.')), TypeActionsView(self.cog, type_id, self.author_id)), ephemere=True)
 
         select.callback = chosen
         self.add_item(select)
@@ -260,11 +232,7 @@ class CreateTypeModal(discord.ui.Modal, title="Créer un type de ticket"):
             return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ce panel contient déjà 25 types.')), ephemere=True)
         type_id = await self.cog.add_type(interaction.guild.id, self.panel_id, name)
         await _refresh_panel(self.cog, interaction.guild, self.panel_id)
-        await interaction.response.send_message(
-            embed=embeds.success(f"Type **{name}** créé dans **{panel['name']}**."),
-            view=TypeActionsView(self.cog, type_id, self.author_id),
-            ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.success(f"Type **{name}** créé dans **{panel['name']}**.")), TypeActionsView(self.cog, type_id, self.author_id)), ephemere=True)
 
 
 class CreateTypePanelView(discord.ui.View):
@@ -301,11 +269,7 @@ async def _create_flow(cog, interaction: discord.Interaction):
         return await interaction.response.send_modal(
             CreateTypeModal(cog, panneaux[0]["id"], interaction.user.id)
         )
-    await interaction.response.send_message(
-        embed=embeds.neutral("Créer un type", "Choisissez le panel dans lequel il apparaîtra."),
-        view=CreateTypePanelView(cog, panneaux, interaction.user.id),
-        ephemeral=True,
-    )
+    await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.neutral('Créer un type', 'Choisissez le panel dans lequel il apparaîtra.')), CreateTypePanelView(cog, panneaux, interaction.user.id)), ephemere=True)
 
 
 async def _manage_flow(cog, interaction: discord.Interaction):
@@ -314,14 +278,7 @@ async def _manage_flow(cog, interaction: discord.Interaction):
     )
     if not types:
         return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.info('Aucun type créé.')), ephemere=True)
-    await interaction.response.send_message(
-        embed=embeds.neutral(
-            "Types de tickets",
-            "Choisissez un type puis utilisez **Modifier**, **Modifier le panel** ou **Supprimer**.",
-        ),
-        view=TypeManagerView(cog, types, interaction.user.id),
-        ephemeral=True,
-    )
+    await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.neutral('Types de tickets', 'Choisissez un type puis utilisez **Modifier**, **Modifier le panel** ou **Supprimer**.')), TypeManagerView(cog, types, interaction.user.id)), ephemere=True)
 
 
 def _patch_setup() -> None:
@@ -386,11 +343,7 @@ def _patch_type_editor() -> None:
             t = await cog.get_type(type_id)
             if not t:
                 return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Type introuvable.')), ephemere=True)
-            await interaction.response.send_message(
-                embed=embeds.warning(f"Supprimer **{t['name']}** et son formulaire ?"),
-                view=DeleteTypeView(cog, type_id, author_id),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.warning(f"Supprimer **{t['name']}** et son formulaire ?")), DeleteTypeView(cog, type_id, author_id)), ephemere=True)
 
         move.callback, delete.callback = move_cb, delete_cb
         self.add_item(move)

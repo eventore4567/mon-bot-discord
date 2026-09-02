@@ -40,9 +40,9 @@ TICKET_BUTTON_SETTINGS_TTL = 15.0
 async def _safe_interaction_message(interaction: discord.Interaction, embed: discord.Embed):
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embed), ephemere=True)
         else:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
     except discord.HTTPException:
         pass
 

@@ -342,7 +342,10 @@ def test_guild_arrival_opens_the_real_setup_and_has_safe_fallbacks():
     # test casse a chaque revision du panneau d'accueil.
     assert re.search(r'custom_id="sentrix:guild-arrival:setup:v\d+"', source)
     assert 'configuration._open_setup_panel(interaction.channel, author=member)' in source
-    assert 'await guild.owner.send(' in source
+    # Repli en message prive au proprietaire quand aucun salon n'est ecrivable.
+    # Il passe desormais par le systeme compose : c'est la DESTINATION qui compte,
+    # pas la methode d'envoi.
+    assert 'panels.envoyer(guild.owner,' in source
     assert 'title="SentriX • Installation réussie"' in source
     assert 'Placez le rôle **SentriX** au-dessus' in source
     assert 'name="Liens officiels"' in source

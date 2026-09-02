@@ -232,11 +232,7 @@ class PanelAddTypeModal(discord.ui.Modal, title="➕ Ajouter un type de ticket")
         if await self.cog.get_type_by_name(self.guild_id, name):
             return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error(f'Un type nommé « {name} » existe déjà sur ce serveur.')), ephemere=True)
         type_id = await self.cog.add_type(self.guild_id, self.panel_id, name)
-        await interaction.response.send_message(
-            embed=embeds.success(f"Type **{name}** créé (#{type_id}). Configurez-le ci-dessous, puis revenez sur l'éditeur du panel pour l'envoyer."),
-            view=TypeEditView(self.cog, type_id, interaction.user.id),
-            ephemeral=True,
-        )
+        await sx_panels.envoyer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(embeds.success(f"Type **{name}** créé (#{type_id}). Configurez-le ci-dessous, puis revenez sur l'éditeur du panel pour l'envoyer.")), TypeEditView(self.cog, type_id, interaction.user.id)), ephemere=True)
 
 
 class TypeTextModal(discord.ui.Modal, title="📝 Type de ticket — Texte"):
@@ -744,7 +740,7 @@ class ButtonSettingsView(discord.ui.View):
 
         state_text = "● Activé" if cfg["enabled"] else "○ Désactivé"
         e = embeds.neutral(f"{cfg.get('emoji') or default_emoji} {cfg.get('label') or default_label}", f"État actuel : {state_text}")
-        await interaction.response.send_message(embed=e, view=view, ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(e), view), ephemere=True)
 
 
 class TicketSetupHubView(discord.ui.View):
@@ -772,7 +768,7 @@ class TicketSetupHubView(discord.ui.View):
     @discord.ui.button(label="Boutons staff", style=discord.ButtonStyle.primary, emoji="🔘", row=0)
     async def buttons_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         e = embeds.neutral("🔘 Boutons staff", "Choisissez un bouton dans le menu pour l'activer/désactiver ou le personnaliser.")
-        await interaction.response.send_message(embed=e, view=ButtonSettingsView(self.cog, interaction.guild.id, interaction.user.id), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(e), ButtonSettingsView(self.cog, interaction.guild.id, interaction.user.id)), ephemere=True)
 
     @discord.ui.button(label="Statistiques", style=discord.ButtonStyle.secondary, emoji="📊", row=1)
     async def stats_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -877,7 +873,7 @@ class Tickets(commands.Cog):
             channel = guild.get_channel(log_channel_id)
             if channel:
                 try:
-                    await channel.send(embed=embed)
+                    await sx_panels.envoyer(channel, sx_panels.depuis_embed(embed))
                     return
                 except discord.HTTPException:
                     pass
@@ -903,7 +899,7 @@ class Tickets(commands.Cog):
         types = await self.get_panel_types(panel_id)
         if not types:
             return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning("Ce panel n'a aucun type de ticket — ajoutez-en avec `+tickettype add`.")), ephemere=True)
-        await interaction.response.send_message(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemere=True)
 
     async def send_panel(self, interaction: discord.Interaction, panel_id: int):
         panel = await self.get_panel(panel_id)
@@ -924,7 +920,7 @@ class Tickets(commands.Cog):
                 await old.delete()
             except discord.HTTPException:
                 pass
-        msg = await channel.send(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types))
+        msg = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)))
         await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?", (msg.id, channel.id, panel_id))
         await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')), ephemere=True)
 
@@ -1523,9 +1519,9 @@ class Tickets(commands.Cog):
         if view is not None:
             if isinstance(target, discord.Interaction):
                 if target.response.is_done():
-                    return await target.followup.send(embed=embed, view=view, ephemeral=True)
-                return await target.response.send_message(embed=embed, view=view, ephemeral=True)
-            return await target.send(embed=embed, view=view)
+                    return await sx_panels.envoyer(target.followup, sx_panels.avec_composants(sx_panels.depuis_embed(embed), view), ephemere=True)
+                return await sx_panels.envoyer(target.response, sx_panels.avec_composants(sx_panels.depuis_embed(embed), view), ephemere=True)
+            return await sx_panels.envoyer(target, sx_panels.avec_composants(sx_panels.depuis_embed(embed), view))
 
         panneau = sx_panels.depuis_embed(embed)
         return await sx_panels.envoyer(
@@ -1606,7 +1602,7 @@ class Tickets(commands.Cog):
             if not types:
                 return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce panel n'a aucun type de ticket.")))
             channel = ctx.guild.get_channel(panel["channel_id"])
-            msg = await channel.send(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types))
+            msg = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)))
             await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ? WHERE id = ?", (msg.id, panel["id"]))
             await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')))
 

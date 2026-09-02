@@ -23,6 +23,7 @@ from discord.ext import commands, tasks
 
 from database.db import now
 from utils.instance_identity import brand_label
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.platform-v4")
 
@@ -458,7 +459,7 @@ class PlatformV4(commands.Cog):
                 try:
                     if row["title"]:
                         embed = discord.Embed(title=row["title"], description=row["content"], color=0x7D8CFF)
-                        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+                        await panels.envoyer(channel, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions.none())
                     else:
                         await channel.send(row["content"], allowed_mentions=discord.AllowedMentions.none())
                     sent = True
@@ -541,7 +542,7 @@ class PlatformV4(commands.Cog):
         try:
             if row["embed_title"]:
                 embed = discord.Embed(title=row["embed_title"], description=response, color=int(row["embed_color"] or 8228095))
-                await message.channel.send(embed=embed, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
+                await panels.envoyer(message.channel, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
             else:
                 await message.channel.send(response, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
         except discord.HTTPException:
@@ -581,7 +582,7 @@ class PlatformV4(commands.Cog):
             )
         view = RoleMenuView(self, menu_id, items)
         embed = discord.Embed(title=title, description=description, color=0x7D8CFF)
-        message = await channel.send(embed=embed, view=view)
+        message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view))
         await self.bot.db.execute("UPDATE platform_role_menus SET message_id=? WHERE id=?", (message.id, menu_id))
         self.bot.add_view(RoleMenuView(self, menu_id, items), message_id=message.id)
         await self.audit(guild.id, actor_id, "Menu de rôles publié", target_type="role_menu", target_id=menu_id, new={"channel_id": channel.id, "roles": items})
@@ -796,7 +797,7 @@ class PlatformV4(commands.Cog):
         embed.add_field(name="Début", value=f"<t:{start_at}:F>\n<t:{start_at}:R>", inline=True)
         embed.add_field(name="Récompense", value=f"{reward:,} pièces".replace(",", " ") if reward else "Aucune", inline=True)
         view = EventSignupView(self, event_id)
-        message = await channel.send(embed=embed, view=view)
+        message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view))
         await self.bot.db.execute("UPDATE events SET message_id=? WHERE id=?", (message.id, event_id))
         self.bot.add_view(EventSignupView(self, event_id), message_id=message.id)
         await self.audit(guild.id, actor_id, "Événement dashboard créé", target_type="event", target_id=event_id, new={"name": name, "start_at": start_at, "reward": reward})
@@ -832,7 +833,7 @@ class PlatformV4(commands.Cog):
         if min_member:
             embed.add_field(name="Ancienneté serveur", value=f"{min_member} jour(s)", inline=True)
         view = PlatformGiveawayView(self, giveaway_id)
-        message = await channel.send(embed=embed, view=view)
+        message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view))
         await self.bot.db.execute("UPDATE giveaways SET message_id=? WHERE id=?", (message.id, giveaway_id))
         self.bot.add_view(PlatformGiveawayView(self, giveaway_id), message_id=message.id)
         await self.audit(guild.id, actor_id, "Giveaway V2 créé", target_type="giveaway", target_id=giveaway_id, new={"prize": prize, "end_at": end_at, "min_account": min_account, "min_member": min_member})

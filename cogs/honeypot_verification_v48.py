@@ -424,7 +424,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             colour=discord.Color.blurple(),
         )
         verify_embed.set_footer(text="SentriX • Vérification renforcée")
-        await verify_channel.send(embed=verify_embed, view=HoneypotVerifyView())
+        await panels.envoyer(verify_channel, panels.avec_composants(panels.depuis_embed(verify_embed), HoneypotVerifyView()))
 
         try:
             await trap_channel.purge(limit=20, check=lambda message: message.author.id == self.bot.user.id)

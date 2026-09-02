@@ -24,7 +24,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, checks, stats_service, design_system
-from utils import sentrix_panels as panels
+# « panels » designe deja les panneaux de roles/boutique ici.
+from utils import sentrix_panels as sx_panels
 from database.db import now
 
 DAILY_AMOUNT = 200
@@ -146,13 +147,13 @@ class ShopCatalogueView(discord.ui.View):
     async def previous(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self.index = max(0, self.index - 1)
         self._refresh()
-        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.pages[self.index]), self))
+        await sx_panels.editer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(self.pages[self.index]), self))
 
     @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self.index = min(len(self.pages) - 1, self.index + 1)
         self._refresh()
-        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.pages[self.index]), self))
+        await sx_panels.editer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(self.pages[self.index]), self))
 
     @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger)
     async def close(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -198,7 +199,7 @@ class Economy(commands.Cog, name="Economy"):
         resume: str,
         montant: int,
         cooldown: int,
-        details: "list[panels.Ligne] | None" = None,
+        details: "list[sx_panels.Ligne] | None" = None,
     ) -> None:
         """Panneau commun a toutes les recompenses.
 
@@ -211,24 +212,24 @@ class Economy(commands.Cog, name="Economy"):
         nombre = stats_service.format_number
         prochain = int(time.time()) + cooldown
 
-        gain = [panels.Ligne("Gagné", f"**+{nombre(montant)}** {emoji}")]
+        gain = [sx_panels.Ligne("Gagné", f"**+{nombre(montant)}** {emoji}")]
         gain.extend(details or [])
-        gain.append(panels.Ligne("Nouveau solde", f"{nombre(stats['total_money'])} {emoji}"))
+        gain.append(sx_panels.Ligne("Nouveau solde", f"{nombre(stats['total_money'])} {emoji}"))
 
-        await panels.envoyer(
+        await sx_panels.envoyer(
             ctx,
-            panels.Panneau(
+            sx_panels.Panneau(
                 titre=titre,
                 sous_titre=resume,
                 kind="economie",
                 vignette=ctx.author.display_avatar.url,
                 sections=[
-                    panels.Section("Récompense", gain),
-                    panels.Section(
+                    sx_panels.Section("Récompense", gain),
+                    sx_panels.Section(
                         "Prochaine fois",
                         [
-                            panels.Ligne("Disponible", f"<t:{prochain}:R>"),
-                            panels.Ligne("Soit", f"<t:{prochain}:t>"),
+                            sx_panels.Ligne("Disponible", f"<t:{prochain}:R>"),
+                            sx_panels.Ligne("Soit", f"<t:{prochain}:t>"),
                         ],
                     ),
                 ],
@@ -245,25 +246,25 @@ class Economy(commands.Cog, name="Economy"):
         Discord s'affiche dans le fuseau de chacun et se met a jour tout seul.
         """
         pret = int(time.time()) + max(0, int(restant))
-        await panels.envoyer(
+        await sx_panels.envoyer(
             ctx,
-            panels.Panneau(
+            sx_panels.Panneau(
                 titre=titre,
                 sous_titre="Cette récompense n'est pas encore disponible.",
                 kind="warning",
                 sections=[
-                    panels.Section(
+                    sx_panels.Section(
                         "Disponible",
                         [
-                            panels.Ligne("Dans", f"<t:{pret}:R>"),
-                            panels.Ligne("À", f"<t:{pret}:t>"),
+                            sx_panels.Ligne("Dans", f"<t:{pret}:R>"),
+                            sx_panels.Ligne("À", f"<t:{pret}:t>"),
                         ],
                     ),
-                    panels.Section(
+                    sx_panels.Section(
                         "En attendant",
                         [
-                            panels.Ligne("`+balance`", "Voir votre solde et votre classement"),
-                            panels.Ligne("`+shop`", "Dépenser ce que vous avez déjà"),
+                            sx_panels.Ligne("`+balance`", "Voir votre solde et votre classement"),
+                            sx_panels.Ligne("`+shop`", "Dépenser ce que vous avez déjà"),
                         ],
                     ),
                 ],
@@ -284,32 +285,32 @@ class Economy(commands.Cog, name="Economy"):
         nombre = stats_service.format_number
 
         avoirs = [
-            panels.Ligne("Portefeuille", f"{nombre(stats['wallet'])} {emoji}"),
-            panels.Ligne("Banque", f"{nombre(stats['bank'])} {emoji}"),
-            panels.Ligne("Total", f"{nombre(stats['total_money'])} {emoji}"),
+            sx_panels.Ligne("Portefeuille", f"{nombre(stats['wallet'])} {emoji}"),
+            sx_panels.Ligne("Banque", f"{nombre(stats['bank'])} {emoji}"),
+            sx_panels.Ligne("Total", f"{nombre(stats['total_money'])} {emoji}"),
         ]
 
         # Ce que le montant vaut sur CE serveur : sans repère, un chiffre ne dit rien.
-        situation: list[panels.Ligne] = []
+        situation: list[sx_panels.Ligne] = []
         if stats.get("is_ranked"):
-            situation.append(panels.Ligne("Classement", f"#{stats.get('rank', 0)}"))
-        situation.append(panels.Ligne("Niveau", str(stats.get("current_level", 0))))
-        situation.append(panels.Ligne("Messages", nombre(stats.get("message_count", 0))))
+            situation.append(sx_panels.Ligne("Classement", f"#{stats.get('rank', 0)}"))
+        situation.append(sx_panels.Ligne("Niveau", str(stats.get("current_level", 0))))
+        situation.append(sx_panels.Ligne("Messages", nombre(stats.get("message_count", 0))))
 
         sections = [
-            panels.Section("Avoirs", avoirs, aligne=True),
-            panels.Section("Sur ce serveur", situation, aligne=True),
-            panels.Section(
+            sx_panels.Section("Avoirs", avoirs, aligne=True),
+            sx_panels.Section("Sur ce serveur", situation, aligne=True),
+            sx_panels.Section(
                 "Gagner plus",
                 [
-                    panels.Ligne("`+daily`", "Récompense quotidienne"),
-                    panels.Ligne("`+work`", "Travailler, avec un délai entre deux fois"),
-                    panels.Ligne("`+shop`", "Dépenser dans la boutique du serveur"),
+                    sx_panels.Ligne("`+daily`", "Récompense quotidienne"),
+                    sx_panels.Ligne("`+work`", "Travailler, avec un délai entre deux fois"),
+                    sx_panels.Ligne("`+shop`", "Dépenser dans la boutique du serveur"),
                 ],
             ),
         ]
 
-        panneau = panels.Panneau(
+        panneau = sx_panels.Panneau(
             titre="SentriX — Économie",
             sous_titre=f"{membre.mention} · **{nombre(stats['total_money'])} {emoji}** au total",
             kind="warning" if stats["total_money"] == 0 else "success",
@@ -317,7 +318,7 @@ class Economy(commands.Cog, name="Economy"):
             sections=sections,
             pied=f"SentriX • Économie · demandé par {ctx.author.display_name}",
         )
-        await panels.envoyer(ctx, panneau)
+        await sx_panels.envoyer(ctx, panneau)
 
     @commands.hybrid_command(name="balance", description="Afficher votre solde ou celui d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
@@ -376,54 +377,54 @@ class Economy(commands.Cog, name="Economy"):
             resume=f"{ctx.author.mention} a travaillé comme **{metier}**.",
             montant=amount,
             cooldown=WORK_COOLDOWN,
-            details=[panels.Ligne("Métier", metier.capitalize())],
+            details=[sx_panels.Ligne("Métier", metier.capitalize())],
         )
 
     @commands.hybrid_command(name="rob", description="Tenter de voler un autre membre.")
     @app_commands.describe(membre="Le membre à voler")
     async def rob(self, ctx: commands.Context, membre: discord.Member):
         if membre.id == ctx.author.id:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas vous voler vous-même.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne pouvez pas vous voler vous-même.')))
         if membre.bot:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
         last = self.rob_cooldowns.get(ctx.author.id, 0)
         if now() - last < ROB_COOLDOWN:
             remaining = ROB_COOLDOWN - (now() - last)
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Vous devez attendre {remaining // 60} minutes avant de retenter un vol.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning(f'Vous devez attendre {remaining // 60} minutes avant de retenter un vol.')))
         await self.bot.db.ensure_economy(ctx.guild.id, membre.id)
         target_bal = await self.bot.db.get_balance(ctx.guild.id, membre.id)
         self.rob_cooldowns[ctx.author.id] = now()
         if target_bal["cash"] < 50:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")))
         success = random.random() < 0.4
         if success:
             amount = random.randint(1, min(target_bal["cash"], 300))
             await self.bot.db.add_balance(ctx.guild.id, membre.id, -amount)
             await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, amount)
             await self.bot.db.log_transaction(ctx.guild.id, membre.id, ctx.author.id, "rob", amount, "Vol réussi")
-            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🕵️ Vous avez volé **{stats_service.format_number(amount)} 🪙** à {membre.display_name} !')))
+            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'🕵️ Vous avez volé **{stats_service.format_number(amount)} 🪙** à {membre.display_name} !')))
         else:
             penalty = random.randint(20, 100)
             await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, -penalty)
             await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, None, "rob_fail", penalty, "Vol raté, amende")
-            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"🚨 Vous avez été attrapé et payé **{stats_service.format_number(penalty)} 🪙** d'amende !")))
+            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f"🚨 Vous avez été attrapé et payé **{stats_service.format_number(penalty)} 🪙** d'amende !")))
 
     @commands.hybrid_command(name="pay", description="Transférer de l'argent à un autre membre.")
     @app_commands.describe(membre="Le membre à qui envoyer", montant="Le montant à envoyer (ou 'all' pour tout envoyer)")
     async def pay(self, ctx: commands.Context, membre: discord.Member, montant: str):
         if membre.id == ctx.author.id:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas vous payer vous-même.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne pouvez pas vous payer vous-même.')))
         if membre.bot:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas payer un bot.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne pouvez pas payer un bot.')))
         await self.bot.db.ensure_economy(ctx.guild.id, ctx.author.id)
         bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
         amount = _parse_amount(montant, bal["cash"])
         if amount is None or amount <= 0:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide — utilisez un nombre positif ou `all`.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide — utilisez un nombre positif ou `all`.')))
         ok = await self.bot.db.pay_member(ctx.guild.id, ctx.author.id, membre.id, amount, reason="Paiement entre membres")
         if not ok:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent liquide (ou le montant est invalide).")))
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'💸 Vous avez envoyé **{stats_service.format_number(amount)} 🪙** à {membre.mention}.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent liquide (ou le montant est invalide).")))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'💸 Vous avez envoyé **{stats_service.format_number(amount)} 🪙** à {membre.mention}.')))
 
     @commands.hybrid_command(name="economyleaderboard", description="Afficher le classement des plus riches.")
     async def economyleaderboard(self, ctx: commands.Context):
@@ -447,18 +448,18 @@ class Economy(commands.Cog, name="Economy"):
             classement.append((row["user_id"], nom, int(row["cash"] + row["bank"])))
 
         if not classement:
-            return await panels.envoyer(
+            return await sx_panels.envoyer(
                 ctx,
-                panels.Panneau(
+                sx_panels.Panneau(
                     titre="SentriX — Classement économique",
                     sous_titre="Personne n'a encore de solde sur ce serveur.",
                     kind="economie",
                     sections=[
-                        panels.Section(
+                        sx_panels.Section(
                             "Comment démarrer",
                             [
-                                panels.Ligne("`+daily`", "Récompense quotidienne"),
-                                panels.Ligne("`+work`", "Travailler pour gagner"),
+                                sx_panels.Ligne("`+daily`", "Récompense quotidienne"),
+                                sx_panels.Ligne("`+work`", "Travailler pour gagner"),
                             ],
                         )
                     ],
@@ -469,17 +470,17 @@ class Economy(commands.Cog, name="Economy"):
         nombre = stats_service.format_number
         medailles = ("1er", "2e", "3e")
         podium = [
-            panels.Ligne(medailles[i], f"**{nom}**", indice=f"{nombre(total)} {emoji}")
+            sx_panels.Ligne(medailles[i], f"**{nom}**", indice=f"{nombre(total)} {emoji}")
             for i, (_uid, nom, total) in enumerate(classement[:3])
         ]
         suite = [
-            panels.Ligne(f"{i}", f"{nom} · {nombre(total)}")
+            sx_panels.Ligne(f"{i}", f"{nom} · {nombre(total)}")
             for i, (_uid, nom, total) in enumerate(classement[3:10], start=4)
         ]
 
-        sections = [panels.Section("Podium", podium)]
+        sections = [sx_panels.Section("Podium", podium)]
         if suite:
-            sections.append(panels.Section("Suivants", suite, aligne=True))
+            sections.append(sx_panels.Section("Suivants", suite, aligne=True))
 
         rang = next(
             (i for i, (uid, *_r) in enumerate(classement, start=1) if uid == ctx.author.id), None
@@ -488,23 +489,23 @@ class Economy(commands.Cog, name="Economy"):
             _uid, _nom, total = classement[rang - 1]
             ecart = classement[rang - 2][2] - total if rang > 1 else 0
             lignes = [
-                panels.Ligne("Rang", f"**#{rang}** sur {len(classement)}"),
-                panels.Ligne("Fortune", f"{nombre(total)} {emoji}"),
+                sx_panels.Ligne("Rang", f"**#{rang}** sur {len(classement)}"),
+                sx_panels.Ligne("Fortune", f"{nombre(total)} {emoji}"),
             ]
             if ecart > 0:
-                lignes.append(panels.Ligne("Pour passer devant", f"{nombre(ecart + 1)} {emoji}"))
-            sections.append(panels.Section("Votre position", lignes, aligne=True))
+                lignes.append(sx_panels.Ligne("Pour passer devant", f"{nombre(ecart + 1)} {emoji}"))
+            sections.append(sx_panels.Section("Votre position", lignes, aligne=True))
         else:
             sections.append(
-                panels.Section(
+                sx_panels.Section(
                     "Votre position",
-                    [panels.Ligne("Non classé", "`+daily` puis `+work` pour démarrer")],
+                    [sx_panels.Ligne("Non classé", "`+daily` puis `+work` pour démarrer")],
                 )
             )
 
-        await panels.envoyer(
+        await sx_panels.envoyer(
             ctx,
-            panels.Panneau(
+            sx_panels.Panneau(
                 titre="SentriX — Classement économique",
                 sous_titre=f"**{len(classement)}** membre(s) classé(s) sur {ctx.guild.name}.",
                 kind="economie",
@@ -525,7 +526,7 @@ class Economy(commands.Cog, name="Economy"):
         await self._send_shop_setup(ctx)
 
     async def _send_shop_setup(self, ctx: commands.Context):
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.info('**Configurer la boutique de rôles**\n`+shoprole add @VIP 500` — ajoute un rôle au prix choisi\n`+shoprole add @VIP @Booster 500` — ajoute plusieurs rôles au même prix\n`+shoprole price @VIP 750` — change le prix\n`+shoprole remove @VIP` — retire le rôle de la boutique\n`+shoprole list` — affiche la configuration\n`+shoppanel` — publie le menu interactif dans le salon\n\nAprès cela, les membres choisissent directement un rôle dans le menu : aucune commande à taper.')))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.info('**Configurer la boutique de rôles**\n`+shoprole add @VIP 500` — ajoute un rôle au prix choisi\n`+shoprole add @VIP @Booster 500` — ajoute plusieurs rôles au même prix\n`+shoprole price @VIP 750` — change le prix\n`+shoprole remove @VIP` — retire le rôle de la boutique\n`+shoprole list` — affiche la configuration\n`+shoppanel` — publie le menu interactif dans le salon\n\nAprès cela, les membres choisissent directement un rôle dans le menu : aucune commande à taper.')))
 
     async def _shop_role_options(self, guild: discord.Guild) -> list[list[discord.SelectOption]]:
         rows = await self.bot.db.fetchall(
@@ -581,7 +582,7 @@ class Economy(commands.Cog, name="Economy"):
                 message = await channel.fetch_message(panel["message_id"])
                 view = ShopRoleView(chunks)
                 if message.reference is not None:
-                    replacement = await channel.send(embed=embed, view=view)
+                    replacement = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(embed), view))
                     await self.bot.db.execute(
                         "INSERT INTO shop_panels (guild_id, channel_id, message_id, created_by, created_at) "
                         "VALUES (?, ?, ?, ?, ?)",
@@ -616,7 +617,7 @@ class Economy(commands.Cog, name="Economy"):
     async def shoppanel(self, ctx: commands.Context):
         """Publie la boutique que les membres utilisent sans commande."""
         chunks = await self._shop_role_options(ctx.guild)
-        message = await panels.envoyer(ctx.channel, panels.avec_composants(panels.depuis_embed(await self._shop_panel_embed(ctx.guild)), ShopRoleView(chunks)))
+        message = await sx_panels.envoyer(ctx.channel, sx_panels.avec_composants(sx_panels.depuis_embed(await self._shop_panel_embed(ctx.guild)), ShopRoleView(chunks)))
         await self.bot.db.execute(
             "INSERT INTO shop_panels (guild_id, channel_id, message_id, created_by, created_at) "
             "VALUES (?, ?, ?, ?, ?) ON CONFLICT(guild_id, message_id) DO NOTHING",
@@ -638,7 +639,7 @@ class Economy(commands.Cog, name="Economy"):
             return await interaction.response.send_message("Ce rôle n'est plus dans la boutique.", ephemeral=True)
         await interaction.response.defer(ephemeral=True, thinking=True)
         result = await self._purchase_role_result(interaction.guild, interaction.user, item)
-        await interaction.followup.send(embed=result, ephemeral=True)
+        await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(result), ephemere=True)
 
     @commands.group(name="shoprole", aliases=["boutiquerole"], invoke_without_command=True)
     @checks.is_owner_or_admin_for("economie")
@@ -657,9 +658,9 @@ class Economy(commands.Cog, name="Economy"):
         description: str = "",
     ):
         if not roles:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Mentionnez au moins un rôle à ajouter.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Mentionnez au moins un rôle à ajouter.')))
         if price < 1 or price > 1_000_000_000_000:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le prix doit être compris entre 1 et 1 000 000 000 000.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Le prix doit être compris entre 1 et 1 000 000 000 000.')))
         accepted = []
         refused = []
         for role in roles:
@@ -693,7 +694,7 @@ class Economy(commands.Cog, name="Economy"):
         if accepted:
             await self._refresh_shop_panels(ctx.guild)
         kind = "success" if accepted else "danger"
-        await panels.envoyer(ctx, panels.depuis_embed(await self._shop_config_embed(ctx.guild.id, 'Boutique mise à jour', '\n\n'.join(description_lines), kind)))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(await self._shop_config_embed(ctx.guild.id, 'Boutique mise à jour', '\n\n'.join(description_lines), kind)))
 
     @shoprole.command(name="remove", aliases=["delete", "retirer"])
     @checks.is_owner_or_admin()
@@ -703,23 +704,23 @@ class Economy(commands.Cog, name="Economy"):
             (ctx.guild.id, role.id),
         )
         if cursor.rowcount < 1:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
         await self._refresh_shop_panels(ctx.guild)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{role.mention} a été retiré de la boutique.')))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'{role.mention} a été retiré de la boutique.')))
 
     @shoprole.command(name="price", aliases=["prix"])
     @checks.is_owner_or_admin()
     async def shoprole_price(self, ctx: commands.Context, role: discord.Role, price: int):
         if price < 1 or price > 1_000_000_000_000:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le prix doit être compris entre 1 et 1 000 000 000 000.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Le prix doit être compris entre 1 et 1 000 000 000 000.')))
         cursor = await self.bot.db.execute(
             "UPDATE shop_items SET price = ?, name = ? WHERE guild_id = ? AND role_id = ?",
             (price, role.name, ctx.guild.id, role.id),
         )
         if cursor.rowcount < 1:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
         await self._refresh_shop_panels(ctx.guild)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le prix de {role.mention} est maintenant de **{stats_service.format_number(price)} 🪙**.')))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'Le prix de {role.mention} est maintenant de **{stats_service.format_number(price)} 🪙**.')))
 
     @shoprole.command(name="list", aliases=["liste"])
     @checks.is_owner_or_admin()
@@ -749,7 +750,7 @@ class Economy(commands.Cog, name="Economy"):
             (ctx.guild.id,),
         )
         if not items:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("La boutique est vide pour l'instant.")))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.info("La boutique est vide pour l'instant.")))
 
         chunks = [items[index:index + 6] for index in range(0, len(items), 6)]
         pages: list[discord.Embed] = []
@@ -774,7 +775,7 @@ class Economy(commands.Cog, name="Economy"):
             pages.append(embed)
 
         view = ShopCatalogueView(pages, ctx.author.id)
-        message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(pages[0]), view))
+        message = await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(pages[0]), view))
         view.message = message
 
     @commands.hybrid_command(name="buy", description="Acheter un article de la boutique.")
@@ -782,7 +783,7 @@ class Economy(commands.Cog, name="Economy"):
     async def buy(self, ctx: commands.Context, id: int):
         item = await self.bot.db.fetchone("SELECT * FROM shop_items WHERE id = ? AND guild_id = ?", (id, ctx.guild.id))
         if not item:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Article introuvable.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Article introuvable.')))
         await self._purchase_item(ctx, item)
 
     @commands.command(name="buyrole", aliases=["acheterrole"])
@@ -792,25 +793,25 @@ class Economy(commands.Cog, name="Economy"):
             (ctx.guild.id, role.id),
         )
         if not item:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
         await self._purchase_item(ctx, item)
 
     async def _purchase_item(self, ctx: commands.Context, item):
         if item["role_id"]:
             result = await self._purchase_role_result(ctx.guild, ctx.author, item)
-            return await ctx.send(embed=result)
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(result))
 
         status, purchased_item = await self.bot.db.purchase_shop_item(ctx.guild.id, ctx.author.id, item["id"])
         if status == "not_found":
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Article introuvable ou prix invalide.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Article introuvable ou prix invalide.')))
         if status == "insufficient_funds":
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent dans votre portefeuille. Utilisez `+withdraw` pour retirer de la banque.")))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent dans votre portefeuille. Utilisez `+withdraw` pour retirer de la banque.")))
         await self.bot.db.execute(
             "INSERT INTO inventory (guild_id, user_id, item_name, quantity) VALUES (?, ?, ?, 1) "
             "ON CONFLICT(guild_id, user_id, item_name) DO UPDATE SET quantity = quantity + 1",
             (ctx.guild.id, ctx.author.id, purchased_item["name"]),
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Vous avez acheté **{purchased_item['name']}** pour {stats_service.format_number(purchased_item['price'])} 🪙.")))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f"Vous avez acheté **{purchased_item['name']}** pour {stats_service.format_number(purchased_item['price'])} 🪙.")))
 
     async def _purchase_role_result(self, guild: discord.Guild, member: discord.Member, item) -> discord.Embed:
         role = guild.get_role(item["role_id"]) if item["role_id"] else None
@@ -865,19 +866,19 @@ class Economy(commands.Cog, name="Economy"):
         emoji = await self._emoji_monnaie(ctx.guild.id)
         nombre = stats_service.format_number
         if not rows:
-            return await panels.envoyer(
+            return await sx_panels.envoyer(
                 ctx,
-                panels.Panneau(
+                sx_panels.Panneau(
                     titre="SentriX — Inventaire",
                     sous_titre=f"L'inventaire de {ctx.author.mention} est vide.",
                     kind="economie",
                     vignette=ctx.author.display_avatar.url,
                     sections=[
-                        panels.Section(
+                        sx_panels.Section(
                             "Comment le remplir",
                             [
-                                panels.Ligne("`+shop`", "Voir ce que le serveur propose"),
-                                panels.Ligne("`+buy <objet>`", "Acheter avec votre solde"),
+                                sx_panels.Ligne("`+shop`", "Voir ce que le serveur propose"),
+                                sx_panels.Ligne("`+buy <objet>`", "Acheter avec votre solde"),
                             ],
                         )
                     ],
@@ -887,28 +888,28 @@ class Economy(commands.Cog, name="Economy"):
 
         objets = sorted(rows, key=lambda r: int(r["quantity"]), reverse=True)
         total_objets = sum(int(r["quantity"]) for r in objets)
-        await panels.envoyer(
+        await sx_panels.envoyer(
             ctx,
-            panels.Panneau(
+            sx_panels.Panneau(
                 titre="SentriX — Inventaire",
                 sous_titre=f"{ctx.author.mention} possède **{nombre(total_objets)}** objet(s), "
                            f"en **{len(objets)}** type(s).",
                 kind="economie",
                 vignette=ctx.author.display_avatar.url,
                 sections=[
-                    panels.Section(
+                    sx_panels.Section(
                         f"Objets ({len(objets)})",
                         [
-                            panels.Ligne(str(r["item_name"]), nombre(r["quantity"]))
+                            sx_panels.Ligne(str(r["item_name"]), nombre(r["quantity"]))
                             for r in objets[:20]
                         ],
                         aligne=True,
                     ),
-                    panels.Section(
+                    sx_panels.Section(
                         "Que faire",
                         [
-                            panels.Ligne("`+sell <objet>`", "Revendre un objet"),
-                            panels.Ligne("`+balance`", "Voir votre solde"),
+                            sx_panels.Ligne("`+sell <objet>`", "Revendre un objet"),
+                            sx_panels.Ligne("`+balance`", "Voir votre solde"),
                         ],
                     ),
                 ],
@@ -923,7 +924,7 @@ class Economy(commands.Cog, name="Economy"):
             "SELECT * FROM inventory WHERE guild_id = ? AND user_id = ? AND item_name = ?", (ctx.guild.id, ctx.author.id, objet)
         )
         if not row or row["quantity"] < 1:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne possédez pas cet objet.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne possédez pas cet objet.')))
         item = await self.bot.db.fetchone("SELECT * FROM shop_items WHERE guild_id = ? AND name = ?", (ctx.guild.id, objet))
         price = int(item["price"] * 0.5) if item else 10
         await self.bot.db.execute(
@@ -932,25 +933,25 @@ class Economy(commands.Cog, name="Economy"):
         )
         await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, price)
         await self.bot.db.log_transaction(ctx.guild.id, None, ctx.author.id, "sell", price, f"Vente : {objet}")
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous avez vendu **{objet}** pour {stats_service.format_number(price)} 🪙.')))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'Vous avez vendu **{objet}** pour {stats_service.format_number(price)} 🪙.')))
 
     @commands.hybrid_command(name="gamble", description="Miser de l'argent au casino (50% de chance).")
     @app_commands.describe(montant="Le montant à miser")
     async def gamble(self, ctx: commands.Context, montant: int):
         if montant <= 0:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant doit être positif.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Le montant doit être positif.')))
         await self.bot.db.ensure_economy(ctx.guild.id, ctx.author.id)
         bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
         if bal["cash"] < montant:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent.")))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent.")))
         if random.random() < 0.5:
             await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, montant)
             await self.bot.db.log_transaction(ctx.guild.id, None, ctx.author.id, "gamble_win", montant, "Casino")
-            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🎰 Vous avez gagné **{stats_service.format_number(montant)} 🪙** !')))
+            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'🎰 Vous avez gagné **{stats_service.format_number(montant)} 🪙** !')))
         else:
             await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, -montant)
             await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, None, "gamble_loss", montant, "Casino")
-            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'🎰 Vous avez perdu **{stats_service.format_number(montant)} 🪙**.')))
+            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'🎰 Vous avez perdu **{stats_service.format_number(montant)} 🪙**.')))
 
     async def _deposit_to_bank(self, ctx: commands.Context, montant: str):
         """Transfère un montant du portefeuille vers la banque."""
@@ -958,12 +959,12 @@ class Economy(commands.Cog, name="Economy"):
         bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
         amount = _parse_amount(montant, bal["cash"])
         if amount is None or amount <= 0 or amount > bal["cash"]:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide. Utilisez un nombre positif ou `all`.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide. Utilisez un nombre positif ou `all`.')))
         await self.bot.db.execute(
             "UPDATE economy SET cash = cash - ?, bank = bank + ? WHERE guild_id = ? AND user_id = ?",
             (amount, amount, ctx.guild.id, ctx.author.id),
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{stats_service.format_number(amount)} 🪙 transférés dans votre banque. Cet argent ne peut pas être volé.')))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'{stats_service.format_number(amount)} 🪙 transférés dans votre banque. Cet argent ne peut pas être volé.')))
 
     @commands.hybrid_command(name="deposit", description="Déposer de l'argent à la banque (ou 'all').", with_app_command=False)
     @app_commands.describe(montant="Le montant à déposer (ou 'all')")
@@ -977,12 +978,12 @@ class Economy(commands.Cog, name="Economy"):
         bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
         amount = _parse_amount(montant, bal["bank"])
         if amount is None or amount <= 0 or amount > bal["bank"]:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide.')))
         await self.bot.db.execute(
             "UPDATE economy SET cash = cash + ?, bank = bank - ? WHERE guild_id = ? AND user_id = ?",
             (amount, amount, ctx.guild.id, ctx.author.id),
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'💵 {stats_service.format_number(amount)} 🪙 retirés de la banque.')))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'💵 {stats_service.format_number(amount)} 🪙 retirés de la banque.')))
 
     @commands.hybrid_command(
         name="banque",
@@ -1006,7 +1007,7 @@ class Economy(commands.Cog, name="Economy"):
         e.add_field(name="👛 Espèces", value=f"{stats_service.format_number(stats['wallet'])} 🪙", inline=True)
         e.add_field(name="🏦 Banque", value=f"{stats_service.format_number(stats['bank'])} 🪙", inline=True)
         e.add_field(name="💎 Total", value=f"**{stats_service.format_number(stats['total_money'])}** 🪙", inline=True)
-        await panels.envoyer(ctx, panels.depuis_embed(e))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(e))
 
     @commands.hybrid_command(name="give-money", description="[Admin] Donner de l'argent à un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé", montant="Le montant à donner")
@@ -1015,13 +1016,13 @@ class Economy(commands.Cog, name="Economy"):
         await self.bot.db.ensure_economy(ctx.guild.id, membre.id)
         await self.bot.db.add_balance(ctx.guild.id, membre.id, montant)
         await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, membre.id, "admin_grant", montant, "Ajout manuel (staff)")
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{stats_service.format_number(montant)} 🪙 ajoutés au compte de {membre.mention}.')))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'{stats_service.format_number(montant)} 🪙 ajoutés au compte de {membre.mention}.')))
 
     @commands.hybrid_command(name="reset-economy", description="[Admin] Réinitialiser l'économie du serveur.", with_app_command=False)
     @checks.is_owner_or_admin_for("economie")
     async def reset_economy(self, ctx: commands.Context):
         await self.bot.db.execute("DELETE FROM economy WHERE guild_id = ?", (ctx.guild.id,))
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success("L'économie du serveur a été réinitialisée. (L'historique des transactions est conservé pour l'audit.)")))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success("L'économie du serveur a été réinitialisée. (L'historique des transactions est conservé pour l'audit.)")))
 
 
 async def setup(bot: commands.Bot):

@@ -16,6 +16,7 @@ from typing import Any
 
 import discord
 from discord.ext import commands, tasks
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.v12-machine")
 
@@ -520,14 +521,7 @@ class BotV12Machine(commands.Cog, name="BotV12Machine"):
         if channel is None:
             return
         try:
-            await channel.send(
-                embed=discord.Embed(
-                    title=title[:256],
-                    description=description[:1800],
-                    color=discord.Color.orange(),
-                ),
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            await panels.envoyer(channel, panels.depuis_embed(discord.Embed(title=title[:256], description=description[:1800], color=discord.Color.orange())), allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
             logger.debug("V12 notice sécurité non envoyée.", exc_info=True)
 
@@ -684,17 +678,7 @@ class BotV12Machine(commands.Cog, name="BotV12Machine"):
                 continue
 
             try:
-                await channel.send(
-                    embed=discord.Embed(
-                        title="Ticket en attente",
-                        description=(
-                            "Ce ticket est toujours **non pris en charge**. "
-                            "Un membre du staff peut le claim dès qu'il est disponible."
-                        ),
-                        color=discord.Color.orange(),
-                    ),
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
+                await panels.envoyer(channel, panels.depuis_embed(discord.Embed(title='Ticket en attente', description="Ce ticket est toujours **non pris en charge**. Un membre du staff peut le claim dès qu'il est disponible.", color=discord.Color.orange())), allowed_mentions=discord.AllowedMentions.none())
                 await self.bot.db.execute(
                     "UPDATE v12_ticket_watch SET last_reminder_at=? WHERE ticket_id=?",
                     (now_ts, ticket_id),

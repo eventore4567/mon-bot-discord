@@ -896,7 +896,7 @@ class SecurityVerificationRuntimeV71:
                 if message:
                     await message.edit(embed=panel, view=view)
                 else:
-                    await verify.send(embed=panel, view=view)
+                    await panels.envoyer(verify, panels.avec_composants(panels.depuis_embed(panel), view))
             except (discord.Forbidden, discord.HTTPException):
                 pass
 
@@ -919,7 +919,7 @@ class SecurityVerificationRuntimeV71:
                 if message:
                     await message.edit(embed=panel, view=None)
                 else:
-                    await trap.send(embed=panel)
+                    await panels.envoyer(trap, panels.depuis_embed(panel))
             except (discord.Forbidden, discord.HTTPException):
                 pass
 

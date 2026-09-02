@@ -444,7 +444,7 @@ class OfficialServerRuntime:
                         return None
             except discord.HTTPException:
                 pass
-        message = await channel.send(embed=embed, view=view)
+        message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view))
         try:
             await self._save_message_pointer(key, channel.id, message.id)
         except Exception:
@@ -588,7 +588,7 @@ class OfficialServerRuntime:
                     await old_message.delete()
                 except discord.HTTPException:
                     pass
-            message = await panel_channel.send(embed=ticket_cog.build_panel_embed(panel), view=view)
+            message = await panels.envoyer(panel_channel, panels.avec_composants(panels.depuis_embed(ticket_cog.build_panel_embed(panel)), view))
         await self.bot.db.execute(
             "UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?",
             (message.id, panel_channel.id, panel_id),
@@ -1062,10 +1062,7 @@ class OfficialServerRuntime:
                     colour=discord.Color.from_rgb(244, 114, 182),
                 )
                 try:
-                    await channel.send(
-                        embed=embed,
-                        allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
-                    )
+                    await panels.envoyer(channel, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
                 except discord.HTTPException:
                     logger.exception("Impossible de publier le remerciement Booster.")
 

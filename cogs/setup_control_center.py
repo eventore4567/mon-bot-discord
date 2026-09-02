@@ -118,7 +118,7 @@ async def _permission_error(target):
         "**Permission requise :** Administrateur"
     )
     if isinstance(target, commands.Context):
-        return await target.send(embed=panel)
+        return await panels.envoyer(target, panels.depuis_embed(panel))
     if target.response.is_done():
         return await panels.envoyer(target.followup, panels.depuis_embed(panel), ephemere=True)
     return await panels.envoyer(target.response, panels.depuis_embed(panel), ephemere=True)

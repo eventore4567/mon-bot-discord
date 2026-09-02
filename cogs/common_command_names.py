@@ -16,6 +16,7 @@ from discord.ext import commands
 
 import config
 from utils import embeds
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.common-command-names")
 _HELP_PATCHED = False
@@ -304,13 +305,7 @@ async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
                 pass
 
     try:
-        await message.channel.send(
-            embed=embeds.neutral(
-                "👋 Besoin d'aide ?",
-                f'Mon préfixe sur ce serveur est **`{prefix}`**.\nTapez **`{prefix}help`** pour voir les commandes ou **`{prefix}setup`** pour configurer le serveur.',
-            ),
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        await panels.envoyer(message.channel, panels.depuis_embed(embeds.neutral("👋 Besoin d'aide ?", f'Mon préfixe sur ce serveur est **`{prefix}`**.\nTapez **`{prefix}help`** pour voir les commandes ou **`{prefix}setup`** pour configurer le serveur.')), allowed_mentions=discord.AllowedMentions.none())
     except (discord.Forbidden, discord.HTTPException):
         pass
 

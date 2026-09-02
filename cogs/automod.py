@@ -1008,7 +1008,7 @@ class AutoMod(commands.Cog, name="Automod"):
         try:
             owner = guild.owner or await guild.fetch_member(guild.owner_id)
             if owner:
-                await owner.send(embed=e)
+                await panels.envoyer(owner, panels.depuis_embed(e))
         except (discord.Forbidden, discord.HTTPException, AttributeError):
             pass
 

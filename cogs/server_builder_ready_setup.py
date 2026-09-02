@@ -141,7 +141,7 @@ async def _ensure_role_panels(bot: commands.Bot, guild: discord.Guild, channel: 
     view = rolepanel_notifications.NotificationRoleView(guild, role_ids)
     embed = rolepanel_notifications._panel_embed(guild, role_ids)
     if message is None:
-        message = await channel.send(embed=embed, view=view)
+        message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view))
     else:
         await message.edit(embed=embed, view=view)
 
@@ -192,7 +192,7 @@ async def _ensure_shop(bot: commands.Bot, guild: discord.Guild, channel: discord
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             message = None
     if message is None:
-        message = await channel.send(embed=embed, view=ShopRoleView(chunks))
+        message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), ShopRoleView(chunks)))
         await bot.db.execute(
             "INSERT INTO shop_panels (guild_id, channel_id, message_id, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
             (guild.id, channel.id, message.id, creator_id, int(time.time())),

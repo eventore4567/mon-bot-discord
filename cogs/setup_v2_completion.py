@@ -148,7 +148,7 @@ async def _send_goodbye(bot, member: discord.Member) -> None:
     if presentation["show_avatar"]:
         panel.set_thumbnail(url=member.display_avatar.url)
     try:
-        await channel.send(embed=panel, allowed_mentions=discord.AllowedMentions.none())
+        await panels.envoyer(channel, panels.depuis_embed(panel), allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
         pass
 
@@ -212,10 +212,7 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
             show_member_count=not ("membres=off" in options or "members=off" in options),
             actor_id=interaction.user.id,
         )
-        await interaction.response.send_message(
-            embed=embeds.success("Bienvenue enregistrée. Le test n’effectue aucun ping.", title="Configuration bienvenue"),
-            view=WelcomeTestView(self.owner.bot, self.owner.guild, interaction.user.id), ephemeral=True,
-        )
+        await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.success('Bienvenue enregistrée. Le test n’effectue aucun ping.', title='Configuration bienvenue')), WelcomeTestView(self.owner.bot, self.owner.guild, interaction.user.id)), ephemere=True)
 
 
 class WelcomeTestView(discord.ui.View):

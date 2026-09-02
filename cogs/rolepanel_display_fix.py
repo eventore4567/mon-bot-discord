@@ -19,6 +19,7 @@ import logging
 
 import discord
 from discord.ext import commands
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.rolepanel.display-fix")
 _INSTALLED = False
@@ -286,7 +287,7 @@ def install(bot: commands.Bot) -> None:
             )
             return message
 
-        return await channel.send(embed=server_choice_roles.build_embed(), view=view)
+        return await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(server_choice_roles.build_embed()), view))
 
     async def ensure_role_panels_fixed(
         bot_obj: commands.Bot,
@@ -329,10 +330,7 @@ def install(bot: commands.Bot) -> None:
                 roles = await cog._ensure_roles(guild)
                 role_ids = [role.id for role in roles]
                 view = rolepanel_notifications.NotificationRoleView(guild, role_ids)
-                message = await channel.send(
-                    embed=rolepanel_notifications._panel_embed(guild, role_ids),
-                    view=view,
-                )
+                message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(rolepanel_notifications._panel_embed(guild, role_ids)), view))
                 await cog._save_panel(message, creator_id, role_ids)
                 bot_obj.add_view(
                     rolepanel_notifications.NotificationRoleView(guild, role_ids),

@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 import discord
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.feature-suite-v37")
 _BOT = None
@@ -455,7 +456,7 @@ class RecruitmentModal(discord.ui.Modal):
             embed = discord.Embed(title=f"Candidature — {self.item['name']}", description=description[:3900], color=0x5865F2)
             embed.add_field(name="Membre", value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=False)
             try:
-                await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+                await panels.envoyer(channel, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions.none())
             except discord.HTTPException:
                 pass
         await interaction.response.send_message("Votre candidature a bien été envoyée au staff.", ephemeral=True)
@@ -469,7 +470,7 @@ async def publish_recruitment(guild: discord.Guild, item: dict) -> int:
     view = discord.ui.View(timeout=None)
     view.add_item(discord.ui.Button(label=str(data.get("button_label") or "Postuler")[:80], style=discord.ButtonStyle.primary, custom_id=f"sentrix:v37:recruit:{item['id']}"))
     embed = discord.Embed(title=str(item["name"])[:256], description=str(data.get("description") or "Les candidatures sont ouvertes.")[:4000], color=0x5865F2)
-    sent = await channel.send(embed=embed, view=view)
+    sent = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view))
     return sent.id
 
 
@@ -486,7 +487,7 @@ async def publish_event(guild: discord.Guild, item: dict) -> int:
     view.add_item(discord.ui.Button(label="Participer", style=discord.ButtonStyle.success, custom_id=f"sentrix:v37:event:{item['id']}:join"))
     view.add_item(discord.ui.Button(label="Se retirer", style=discord.ButtonStyle.secondary, custom_id=f"sentrix:v37:event:{item['id']}:leave"))
     embed = discord.Embed(title=str(item["name"])[:256], description=desc[:4000], color=0x5865F2)
-    sent = await channel.send(embed=embed, view=view)
+    sent = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view))
     data["message_id"] = sent.id
     data["participants"] = data.get("participants") or []
     await save_item(guild.id, "event", item["name"], data, item_id=item["id"], enabled=item["enabled"])
@@ -507,7 +508,7 @@ async def publish_panel(guild: discord.Guild, item: dict) -> int:
         else:
             view.add_item(discord.ui.Button(label=str(button.get("label") or "Action")[:80], style=discord.ButtonStyle.secondary, custom_id=f"sentrix:v37:panel:{item['id']}:{idx}"))
     embed = discord.Embed(title=str(item["name"])[:256], description=str(data.get("description") or "")[:4000], color=int(data.get("color") or 0x5865F2))
-    sent = await channel.send(embed=embed, view=view)
+    sent = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view))
     return sent.id
 
 
