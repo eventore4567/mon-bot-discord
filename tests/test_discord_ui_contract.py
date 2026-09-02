@@ -39,6 +39,7 @@ class DiscordUiContractTests(unittest.TestCase):
         self.assertEqual(panel.image.url, embeds.SENTRIX_BANNER_URL)
 
     def test_small_boxes_do_not_use_log_banner(self):
+        """Les petites boites gardent leur taille : pas de banniere de log."""
         for panel in (
             embeds.error("x", title="Commande introuvable"),
             embeds.success("ok"),
@@ -46,7 +47,31 @@ class DiscordUiContractTests(unittest.TestCase):
             embeds.help_embed("SentriX — Centre d’aide", "Sélectionnez une catégorie."),
         ):
             self.assertFalse(panel.image.url)
-            self.assertEqual(panel.colour.value, embeds.SENTRIX_COLOR)
+
+    def test_each_state_has_its_own_colour(self):
+        """Un succes, une erreur et un avertissement ne doivent pas se ressembler.
+
+        Ces trois constructeurs passaient tous colour=SENTRIX_COLOR : sur les ~290
+        commandes qui utilisent utils/embeds, rien ne distinguait visuellement une
+        reussite d'un echec. Le test precedent exigeait meme cette confusion.
+        """
+        couleurs = {
+            "success": embeds.success("ok").colour.value,
+            "danger": embeds.error("x").colour.value,
+            "warning": embeds.warning("attention").colour.value,
+            "info": embeds.info("i").colour.value,
+        }
+        self.assertEqual(len(set(couleurs.values())), 4, couleurs)
+        self.assertEqual(couleurs["success"], embeds.COLOR_SUCCESS)
+        self.assertEqual(couleurs["danger"], embeds.COLOR_DANGER)
+        self.assertEqual(couleurs["warning"], embeds.COLOR_WARNING)
+        self.assertEqual(couleurs["info"], embeds.COLOR_INFO)
+
+    def test_an_explicit_success_wins_over_an_action_verb(self):
+        """« Message supprimé avec succès » sortait en rouge : « supprimé » gagnait."""
+        self.assertEqual(embeds._kind_from_text("Message supprimé avec succès"), "success")
+        self.assertEqual(embeds._kind_from_text("Salon supprimé"), "danger")
+        self.assertEqual(embeds._kind_from_text("Rôle créé"), "success")
 
     def test_log_mentions_are_native_markup_and_transport_blocks_pings(self):
         member = "<@1355855757991481475>"

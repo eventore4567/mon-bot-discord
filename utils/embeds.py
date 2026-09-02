@@ -116,7 +116,15 @@ def format_datetime_fr(value: datetime | None = None) -> str:
 
 
 def _kind_from_text(title: Any, description: Any = "") -> str:
+    """Repli utilise UNIQUEMENT quand l'appelant ne declare pas de kind.
+
+    L'ordre compte : un marqueur de reussite explicite est teste AVANT les verbes
+    d'action. Sans cela, « Message supprimé avec succès » sortait en rouge parce que
+    « supprimé » gagnait sur « succès » — le meme piege que « unban » contenant « ban ».
+    """
     text = f"{title or ''} {description or ''}".casefold()
+    if any(word in text for word in ("succès", "succes", "réussi", "reussi")):
+        return "success"
     if any(word in text for word in (
         "erreur", "impossible", "introuvable", "refus", "interdit", "échoué",
         "echoue", "banni", "bannissement", "supprimé", "supprime",
@@ -198,16 +206,20 @@ def standard(title: str, description: str = "", *, thumbnail: str | None = None,
     return _base(title, description or None, thumbnail=thumbnail, timestamp=timestamp)
 
 
+# Ces trois constructeurs passaient tous colour=SENTRIX_COLOR. Comme _colour() renvoie
+# le fallback en ignorant le kind, un succes, une erreur et un avertissement sortaient
+# EXACTEMENT de la meme couleur violette. Sur les ~290 commandes qui passent par ce
+# module, rien ne distinguait visuellement une reussite d'un echec.
 def success(description: str, title: str = "Action effectuée") -> discord.Embed:
-    return _base(title, description, colour=SENTRIX_COLOR)
+    return _base(title, description, kind="success")
 
 
 def error(description: str, title: str = "Erreur") -> discord.Embed:
-    return _base(title, description, colour=SENTRIX_COLOR)
+    return _base(title, description, kind="danger")
 
 
 def warning(description: str, title: str = "Vérification nécessaire") -> discord.Embed:
-    return _base(title, description, colour=SENTRIX_COLOR)
+    return _base(title, description, kind="warning")
 
 
 def info(description: str, title: str = "Information") -> discord.Embed:
