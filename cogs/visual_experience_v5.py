@@ -357,16 +357,25 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
         permissions = ctx.channel.permissions_for(ctx.guild.me)
         if not permissions.attach_files:
             return await panels.envoyer(ctx, panels.depuis_embed(_base(self.bot, 'Permission requise', 'Ajoutez la permission **Joindre des fichiers** au rôle du bot pour générer les cartes.', 15548997)))
-        loading = _base(self.bot, "Carte de profil", "Préparation de la carte.")
-        message = await ctx.send(embed=loading)
+        # Le message d'attente nait deja en Components V2 : un message cree en
+        # embed ne peut plus devenir un panneau par edition.
+        def _attente(etat: str):
+            return panels.Panneau(
+                titre="Carte de profil",
+                sous_titre=f"Profil de **{member.display_name}**",
+                kind="brand",
+                sections=[panels.Section("EN COURS", [panels.Ligne("État", etat)])],
+            )
+
+        panneau_attente = _attente("préparation de la carte")
+        message = await panels.envoyer(ctx, panneau_attente)
         task = asyncio.create_task(self._render_profile(ctx.guild, member))
         for step in ("Préparation de la carte..", "Préparation de la carte..."):
             await asyncio.sleep(0.35)
             if task.done():
                 break
-            loading.description = step
             try:
-                await message.edit(content=None, embed=loading)
+                await message.edit(view=_attente(step))
             except discord.HTTPException:
                 pass
         try:
@@ -377,21 +386,30 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
                 getattr(ctx.guild, "id", "?"),
                 getattr(member, "id", "?"),
             )
-            await message.edit(
-                content=None,
-                embed=_base(
-                    self.bot,
-                    "Carte indisponible",
-                    'Le moteur d’image n’a pas terminé. Réessayez dans quelques instants. `[R1]`',
-                    0xED4245,
-                ),
-                attachments=[],
+            echec = panels.Panneau(
+                titre="Carte indisponible",
+                sous_titre="Le moteur d’image n’a pas terminé.",
+                kind="danger",
+                sections=[
+                    panels.Section(
+                        "À FAIRE",
+                        [
+                            panels.Ligne("Action", "réessayer dans quelques instants"),
+                            panels.Ligne("Code", "`[R1]`"),
+                        ],
+                    )
+                ],
             )
+            await message.edit(view=echec, attachments=echec.fichiers())
             return
 
         file = discord.File(buffer, filename="sentrix-profile.png")
-        embed = _base(self.bot, "Carte de profil", f"Profil de **{member.display_name}**")
-        embed.set_image(url="attachment://sentrix-profile.png")
+        carte = panels.Panneau(
+            titre="Carte de profil",
+            sous_titre=f"Profil de **{member.display_name}**",
+            kind="brand",
+            image="attachment://sentrix-profile.png",
+        )
         try:
             # L'envoi d'un nouveau message avec ``file=`` est la voie Discord la plus
             # fiable. Ajouter un nouveau fichier via Message.edit/attachments provoquait
@@ -399,11 +417,16 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
             # Messageable.send ne passe pas par les anciennes conversions de Context.send :
             # la carte reste donc réellement dans son embed au lieu de devenir du texte
             # libre suivi d'une pièce jointe.
-            await ctx.channel.send(content=None, embed=embed, file=file)
+            await ctx.channel.send(view=carte, files=[*carte.fichiers(), file])
             try:
                 await message.delete()
             except discord.HTTPException:
-                await message.edit(content=None, embed=_base(self.bot, "Carte prête", "La carte est affichée ci-dessous."))
+                pret = panels.Panneau(
+                    titre="Carte prête",
+                    sous_titre="La carte est affichée ci-dessous.",
+                    kind="success",
+                )
+                await message.edit(view=pret, attachments=pret.fichiers())
         except (discord.Forbidden, discord.HTTPException):
             logger.exception(
                 "Envoi de +profile-card refusé par Discord (serveur=%s, membre=%s).",

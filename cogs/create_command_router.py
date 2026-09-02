@@ -17,6 +17,7 @@ import discord
 from discord.ext import commands
 
 from utils import checks, embeds
+from utils import sentrix_panels as panels
 from .create_sentrix import CreateSentrix as SentriXBuilder
 
 logger = logging.getLogger("bot.create-router")
@@ -52,7 +53,7 @@ class CreateRouter(commands.Cog, name="CreateRouter"):
                 return
             except (discord.NotFound, discord.Forbidden, discord.HTTPException, TypeError):
                 logger.warning("Édition du message +create impossible ; nouvel envoi.", exc_info=True)
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.group(name="create", invoke_without_command=True)
     @checks.is_owner_or_admin_for("configuration")
@@ -60,13 +61,7 @@ class CreateRouter(commands.Cog, name="CreateRouter"):
         """Choisir le constructeur à lancer."""
         if ctx.invoked_subcommand is not None:
             return
-        await ctx.send(
-            embed=self._info(
-                "`+create sentrix` — crée ou répare le serveur support professionnel SentriX.\n"
-                "`+create server` — ouvre le constructeur général de serveur.\n"
-                "`+create-server` — syntaxe historique, toujours disponible."
-            )
-        )
+        await panels.envoyer(ctx, panels.depuis_embed(self._info('`+create sentrix` — crée ou répare le serveur support professionnel SentriX.\n`+create server` — ouvre le constructeur général de serveur.\n`+create-server` — syntaxe historique, toujours disponible.')))
 
     @create.command(name="sentrix")
     @checks.is_owner_or_admin_for("configuration")
@@ -74,44 +69,24 @@ class CreateRouter(commands.Cog, name="CreateRouter"):
         """Créer ou réparer le serveur support professionnel SentriX."""
         guild = ctx.guild
         if guild is None or not isinstance(ctx.author, discord.Member):
-            return await ctx.send(
-                embed=self._error("Cette commande doit être utilisée dans un serveur Discord.")
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(self._error('Cette commande doit être utilisée dans un serveur Discord.')))
 
         try:
             if not await self.builder._authorized(ctx):
-                return await ctx.send(
-                    embed=self._error("Cette commande est réservée aux administrateurs du serveur.")
-                )
+                return await panels.envoyer(ctx, panels.depuis_embed(self._error('Cette commande est réservée aux administrateurs du serveur.')))
         except Exception as error:
             logger.exception("Vérification d'accès +create sentrix impossible guild=%s", guild.id)
-            return await ctx.send(
-                embed=self._error(
-                    f"La vérification des permissions a échoué : `{type(error).__name__}`."
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(self._error(f'La vérification des permissions a échoué : `{type(error).__name__}`.')))
 
         me = guild.me
         if me is None:
-            return await ctx.send(
-                embed=self._error("SentriX n'est pas correctement présent sur ce serveur.")
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(self._error("SentriX n'est pas correctement présent sur ce serveur.")))
         if not me.guild_permissions.administrator:
-            return await ctx.send(
-                embed=self._error(
-                    "Donnez temporairement la permission **Administrateur** à SentriX, placez son rôle "
-                    "assez haut, puis relancez `+create sentrix`."
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(self._error('Donnez temporairement la permission **Administrateur** à SentriX, placez son rôle assez haut, puis relancez `+create sentrix`.')))
 
         lock = self.builder._lock_for(guild.id)
         if lock.locked():
-            return await ctx.send(
-                embed=self._info(
-                    "Une création/réparation SentriX est déjà en cours sur ce serveur.",
-                    title="Installation déjà en cours",
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(self._info('Une création/réparation SentriX est déjà en cours sur ce serveur.', title='Installation déjà en cours')))
 
         progress: discord.Message | None = None
         async with lock:
@@ -119,13 +94,7 @@ class CreateRouter(commands.Cog, name="CreateRouter"):
                 # IMPORTANT : embed explicite. Le précédent chemin envoyait du texte brut,
                 # qui passait par plusieurs wrappers de rendu et pouvait lever un TypeError
                 # avant même l'entrée dans le try du constructeur historique.
-                progress = await ctx.send(
-                    embed=self._info(
-                        "Je vérifie les rôles, salons, permissions, logs, messages et tickets. "
-                        "La commande est relançable et réutilise les éléments déjà présents.",
-                        title="Installation SentriX en cours",
-                    )
-                )
+                progress = await panels.envoyer(ctx, panels.depuis_embed(self._info('Je vérifie les rôles, salons, permissions, logs, messages et tickets. La commande est relançable et réutilise les éléments déjà présents.', title='Installation SentriX en cours')))
 
                 # Appel du SERVICE, pas du callback d'une Command discord.py décorée.
                 result = await self.builder._build(guild, ctx.author)
@@ -200,11 +169,7 @@ class CreateRouter(commands.Cog, name="CreateRouter"):
         command = self.bot.get_command("create-server")
         if command is None:
             logger.error("+create server demandé mais +create-server est absent du registre.")
-            return await ctx.send(
-                embed=self._error(
-                    "Le constructeur général n'est pas chargé. Le module `ServerBuilder` est absent."
-                )
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(self._error("Le constructeur général n'est pas chargé. Le module `ServerBuilder` est absent.")))
 
         callback = getattr(command, "callback", None)
         cog = getattr(command, "cog", None)
@@ -214,9 +179,7 @@ class CreateRouter(commands.Cog, name="CreateRouter"):
                 bool(callback),
                 bool(cog),
             )
-            return await ctx.send(
-                embed=self._error("Le constructeur général est chargé mais son exécuteur est invalide.")
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(self._error('Le constructeur général est chargé mais son exécuteur est invalide.')))
 
         try:
             # Le routeur possède déjà le check configuration. Appeler directement le
@@ -231,11 +194,7 @@ class CreateRouter(commands.Cog, name="CreateRouter"):
                 str(error)[:500],
             )
             detail = str(error).replace("\n", " ")[:220] or "aucun détail fourni"
-            await ctx.send(
-                embed=self._error(
-                    f"Le constructeur général a rencontré `{type(error).__name__}: {detail}`."
-                )
-            )
+            await panels.envoyer(ctx, panels.depuis_embed(self._error(f'Le constructeur général a rencontré `{type(error).__name__}: {detail}`.')))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
