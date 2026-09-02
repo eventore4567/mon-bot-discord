@@ -451,6 +451,31 @@ async def install(bot: commands.Bot) -> None:
     old = bot.get_command("reset-logs-all")
     if old is not None:
         bot.remove_command(old.name)
+        # remove_command la retire du registre, mais le cog V1 continue de la
+        # DETENIR : walk_commands la voyait encore, et l'audit d'integrite
+        # signalait un nom duplique en CRITIQUE a chaque demarrage. On la
+        # detache donc de son cog — sans retirer le cog lui-meme, qui porte le
+        # listener on_guild_join prevenant le createur d'un nouveau serveur.
+        ancien_cog = getattr(old, "cog", None)
+        commandes = getattr(ancien_cog, "__cog_commands__", None)
+        if commandes:
+            ancien_cog.__cog_commands__ = tuple(c for c in commandes if c is not old)
+
+        # remove_command ne retire que les alias DECLARES. La couche de langue
+        # en ajoute d'autres au demarrage (« reinitialiser-logs-all ») : selon
+        # l'ordre de chargement, cet alias pouvait rester braque sur l'ANCIENNE
+        # implementation. Deux noms de la meme commande executaient alors deux
+        # codes differents. On purge donc toute entree pointant encore vers
+        # l'objet remplace, quel que soit l'ordre.
+        orphelins = [cle for cle, cmd in bot.all_commands.items() if cmd is old]
+        for cle in orphelins:
+            bot.all_commands.pop(cle, None)
+        if orphelins:
+            logger.info(
+                "OwnerLogRebuild V1 : %s alias orphelin(s) retire(s) — %s.",
+                len(orphelins),
+                ", ".join(sorted(orphelins)),
+            )
 
     await bot.add_cog(OwnerLogRebuildV2(bot))
     bot._sentrix_owner_log_rebuild_v2 = True
