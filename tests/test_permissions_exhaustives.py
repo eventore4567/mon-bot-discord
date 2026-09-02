@@ -39,3 +39,4 @@ def test_aucune_permission_incoherente_sur_les_commandes_reelles():
     assert "commandes auditees : 5" in sortie, sortie[-2000:]
     assert "aucune anomalie de permission" in sortie
     assert "aucune regle de configuration ne contourne la hierarchie" in sortie
+    assert "aucune commande slash non publique visible de tous" in sortie

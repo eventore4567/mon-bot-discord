@@ -482,6 +482,25 @@ class BotAllInOne(commands.Bot):
         self.add_check(self.global_cooldown_check)
         self.add_check(self.global_permission_check)
 
+        # Dernier alignement de l'AFFICHAGE slash, juste avant la synchronisation.
+        # permission_guard.install() fait deja cette passe, mais il tourne pendant
+        # le chargement : trois commandes enregistrees apres lui (+whitelist,
+        # +unwhitelist, +server-managed) restaient visibles de tous les membres.
+        # Le garde les refusait bien au runtime — c'est l'affichage qui mentait.
+        try:
+            from cogs.permission_guard import apply_slash_default_permissions
+
+            poses = apply_slash_default_permissions(self)
+            if poses:
+                logger.info(
+                    "Affichage slash complete avant synchronisation : %s commande(s).",
+                    poses,
+                )
+        except Exception:
+            logger.warning(
+                "Alignement final de l'affichage slash impossible :\n" + traceback.format_exc()
+            )
+
         try:
             synced = await self.tree.sync()
             logger.info(f"{len(synced)} commandes slash synchronisées globalement.")

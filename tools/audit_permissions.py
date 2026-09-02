@@ -47,7 +47,7 @@ def _decider(backend, auteur, nom):
     )
 
 
-async def _commandes_reelles() -> list[str]:
+async def _commandes_reelles(retourner_bot: bool = False):
     """Les noms qualifies effectivement enregistres par le bot."""
     import config
     import tempfile
@@ -75,6 +75,8 @@ async def _commandes_reelles() -> list[str]:
         except Exception:
             pass
     noms = sorted({c.qualified_name for c in bot.walk_commands()})
+    if retourner_bot:
+        return noms, bot
     await bot.db.close()
     return noms
 
@@ -193,9 +195,50 @@ def auditer_configuration_hostile(noms: list[str]) -> int:
     return 1
 
 
+def auditer_affichage_slash(bot) -> int:
+    """Ce que Discord MONTRE doit correspondre a ce que le garde autorise.
+
+    default_permissions ne decide rien — la decision reste prise au runtime —
+    mais une commande de securite affichee a tous les membres promet un acces
+    qu'ils n'ont pas. Trois d'entre elles etaient enregistrees APRES la passe
+    d'alignement de permission_guard et restaient donc visibles.
+    """
+    from cogs.permission_guard import apply_slash_default_permissions
+
+    # main.py rejoue cette passe juste avant tree.sync() ; on reproduit ce
+    # dernier etat, sinon l'audit jugerait un instantane intermediaire.
+    apply_slash_default_permissions(bot)
+
+    exposees = [
+        f"{c.qualified_name} ({M.access_tier(c.qualified_name)})"
+        for c in bot.tree.get_commands()
+        if getattr(c, "default_permissions", None) is None
+        and M.access_tier(c.qualified_name) != "public"
+    ]
+    if not exposees:
+        print("\nOK : aucune commande slash non publique visible de tous.")
+        return 0
+    print(f"\nECHEC : {len(exposees)} commande(s) slash visibles a tort\n")
+    for e in sorted(exposees):
+        print("   " + e)
+    return 1
+
+
 def main() -> int:
-    noms = asyncio.run(_commandes_reelles())
-    return auditer(noms) | auditer_configuration_hostile(noms)
+    bot = None
+
+    async def _preparer():
+        nonlocal bot
+        noms_, bot_ = await _commandes_reelles(retourner_bot=True)
+        bot = bot_
+        return noms_
+
+    noms = asyncio.run(_preparer())
+    return (
+        auditer(noms)
+        | auditer_configuration_hostile(noms)
+        | auditer_affichage_slash(bot)
+    )
 
 
 if __name__ == "__main__":
