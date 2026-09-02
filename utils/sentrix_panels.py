@@ -364,6 +364,24 @@ async def envoyer(
             "Placez le texte dans une section du panneau."
         )
 
+    # ``interaction.response`` est la surface la plus utilisee dans les
+    # callbacks de boutons, et c'est un InteractionResponse : il expose
+    # send_message, PAS send. Sans ce cas, chaque appel levait une
+    # AttributeError au clic — invisible pour un test d'import.
+    if isinstance(destination, discord.InteractionResponse):
+        if ephemere:
+            kwargs["ephemeral"] = True
+        if not destination.is_done():
+            return await destination.send_message(**kwargs)
+        # Reponse deja consommee : seul le followup peut encore parler. On passe
+        # par l'interaction parente, faute d'accesseur public.
+        parent = getattr(destination, "_parent", None)
+        if parent is not None:
+            return await parent.followup.send(**kwargs)
+        raise RuntimeError(
+            "Reponse d'interaction deja envoyee et followup inaccessible."
+        )
+
     interaction = getattr(destination, "interaction", None) or (
         destination if isinstance(destination, discord.Interaction) else None
     )
@@ -374,6 +392,13 @@ async def envoyer(
             return await interaction.response.send_message(**kwargs)
         return await interaction.followup.send(**kwargs)
 
+    # Webhook (interaction.followup), Messageable (ctx, salon, membre).
+    if ephemere and "ephemeral" not in kwargs:
+        try:
+            if isinstance(destination, discord.Webhook):
+                kwargs["ephemeral"] = True
+        except Exception:
+            pass
     return await destination.send(**kwargs)
 
 
