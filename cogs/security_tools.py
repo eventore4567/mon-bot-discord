@@ -25,6 +25,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from utils import embeds, checks, helpers, design_system
+from utils import sentrix_panels as panels
 from database.db import now
 
 SCORE_DEDUCTIONS = {"🔴 Critique": 30, "🟠 À surveiller": 15, "🟡 Information": 5}
@@ -113,23 +114,20 @@ class Security(commands.Cog):
     async def quarantine(self, ctx: commands.Context, membre: discord.Member, duree: str, *, raison: str = "Aucune raison fournie"):
         err = checks.check_hierarchy(ctx.author, membre)
         if err:
-            return await ctx.send(embed=embeds.error(err))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(err)))
         err = checks.check_bot_hierarchy(ctx.guild, membre)
         if err:
-            return await ctx.send(embed=embeds.error(err))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(err)))
 
         seconds = helpers.parse_duration(duree)
         if seconds is None or seconds > 2419200:
-            return await ctx.send(embed=embeds.error("Durée invalide (maximum 28 jours, limite du timeout Discord). Exemples : `7d`, `12h`, `30m`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide (maximum 28 jours, limite du timeout Discord). Exemples : `7d`, `12h`, `30m`.')))
 
         existing = await self.bot.db.fetchone(
             "SELECT * FROM quarantines WHERE guild_id = ? AND user_id = ? AND active = 1", (ctx.guild.id, membre.id)
         )
         if existing:
-            return await ctx.send(embed=embeds.warning(
-                f"{membre.mention} est déjà en quarantaine (jusqu'à <t:{existing['expires_at']}:R>).\n"
-                f"Pour la lever tout de suite : `+unquarantine @{membre.name}`."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"{membre.mention} est déjà en quarantaine (jusqu'à <t:{existing['expires_at']}:R>).\nPour la lever tout de suite : `+unquarantine @{membre.name}`.")))
 
         role_ids = [str(r.id) for r in membre.roles if r != ctx.guild.default_role]
         cur = await self.bot.db.execute(
@@ -142,7 +140,7 @@ class Security(commands.Cog):
             try:
                 await membre.edit(roles=[], reason=f"Quarantaine par {ctx.author} : {raison}")
             except discord.HTTPException:
-                return await ctx.send(embed=embeds.error("Impossible de retirer les rôles de ce membre (permissions)."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Impossible de retirer les rôles de ce membre (permissions).')))
 
         until = discord.utils.utcnow() + timedelta(seconds=seconds)
         try:
@@ -168,7 +166,7 @@ class Security(commands.Cog):
             "🔒 Quarantaine", 0xED4245, cible=membre, acteur=ctx.author, raison=raison,
             extra={"⏱️ Durée": helpers.format_duration(seconds), "📸 Rôles sauvegardés": f"{len(role_ids)} (snapshot #{snapshot_id})"},
         )
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
         await self.log_action(ctx.guild, e)
 
     @commands.hybrid_command(
@@ -183,10 +181,10 @@ class Security(commands.Cog):
             "SELECT * FROM quarantines WHERE guild_id = ? AND user_id = ? AND active = 1", (ctx.guild.id, membre.id)
         )
         if not row:
-            return await ctx.send(embed=embeds.error(f"{membre.mention} n'est pas en quarantaine."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"{membre.mention} n'est pas en quarantaine.")))
         await self._restore_from_quarantine(ctx.guild, membre, row)
         await self.bot.db.execute("UPDATE quarantines SET active = 0 WHERE id = ?", (row["id"],))
-        await ctx.send(embed=embeds.success(f"🔓 Quarantaine levée pour {membre.mention} — ses rôles lui ont été rendus."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🔓 Quarantaine levée pour {membre.mention} — ses rôles lui ont été rendus.')))
 
     # ---------------------------------------------------------------- SNAPSHOTS DE RÔLES
 
@@ -209,7 +207,7 @@ class Security(commands.Cog):
         if role_ids:
             roles_text = ", ".join(f"<@&{rid}>" for rid in role_ids[:20])
             e.add_field(name="Rôles sauvegardés", value=roles_text, inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(
         name="role-restore", description="Restaurer les rôles d'un membre depuis un snapshot précédent.",
@@ -222,9 +220,9 @@ class Security(commands.Cog):
             "SELECT * FROM role_snapshots WHERE id = ? AND guild_id = ?", (snapshot_id, ctx.guild.id)
         )
         if not snapshot:
-            return await ctx.send(embed=embeds.error(f"Aucun snapshot #{snapshot_id} trouvé sur ce serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun snapshot #{snapshot_id} trouvé sur ce serveur.')))
         if snapshot["user_id"] != membre.id:
-            return await ctx.send(embed=embeds.error(f"Le snapshot #{snapshot_id} appartient à un autre membre (protection anti-erreur)."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Le snapshot #{snapshot_id} appartient à un autre membre (protection anti-erreur).')))
 
         role_ids = [int(x) for x in snapshot["role_ids"].split(",") if x.strip().isdigit()]
         added, skipped = [], []
@@ -244,13 +242,13 @@ class Security(commands.Cog):
             try:
                 await membre.add_roles(*added, reason=f"Restauration du snapshot #{snapshot_id} par {ctx.author}")
             except discord.HTTPException:
-                return await ctx.send(embed=embeds.error("Échec lors de l'attribution des rôles (permissions)."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Échec lors de l'attribution des rôles (permissions).")))
 
         e = embeds.success(f"🔄 Snapshot **#{snapshot_id}** restauré pour {membre.mention}.")
         e.add_field(name="Rôles ajoutés", value=", ".join(r.mention for r in added) if added else "Aucun (déjà à jour)", inline=False)
         if skipped:
             e.add_field(name="Ignorés", value=", ".join(skipped), inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
         await self.log_action(ctx.guild, embeds.log_entry(
             "🔄 Restauration de rôles", 0x5865F2, cible=membre, acteur=ctx.author,
             extra={"📸 Snapshot": f"#{snapshot_id}", "● Rôles ajoutés": str(len(added))},
@@ -336,7 +334,7 @@ class Security(commands.Cog):
         else:
             for label, text in findings:
                 e.add_field(name=label, value=helpers.truncate(text, 1024), inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @staticmethod
     def _compute_security_score(findings: list[tuple[str, str]]) -> int:
@@ -419,7 +417,7 @@ class Security(commands.Cog):
             f"**{sum(len(c['channels']) for c in data['categories']) + len(data['uncategorized'])}** salons."
         )
         e.add_field(name="Restaurer plus tard", value=f"`+server-restore {cur.lastrowid}`", inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(
         name="server-restore",
@@ -431,7 +429,7 @@ class Security(commands.Cog):
     async def server_restore(self, ctx: commands.Context, backup_id: int):
         row = await self.bot.db.fetchone("SELECT * FROM server_backups WHERE id = ? AND guild_id = ?", (backup_id, ctx.guild.id))
         if not row:
-            return await ctx.send(embed=embeds.error(f"Aucune sauvegarde #{backup_id} trouvée sur ce serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucune sauvegarde #{backup_id} trouvée sur ce serveur.')))
         data = json.loads(row["data_json"])
 
         preview = embeds.warning(

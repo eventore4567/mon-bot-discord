@@ -74,10 +74,10 @@ class AiResponseView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=embeds.error("Seul l'auteur de la demande peut utiliser ces boutons."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Seul l'auteur de la demande peut utiliser ces boutons.")), ephemere=True)
             return False
         if self.busy:
-            await interaction.response.send_message(embed=embeds.warning("Une régénération est déjà en cours — patiente un instant."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('Une régénération est déjà en cours — patiente un instant.')), ephemere=True)
             return False
         return True
 
@@ -134,7 +134,7 @@ class AiResponseView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(view=self)
-        await interaction.followup.send(embed=embeds.success('🧹 Conversation réinitialisée — votre prochaine question repartira de zéro.'), ephemeral=True)
+        await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('🧹 Conversation réinitialisée — votre prochaine question repartira de zéro.')), ephemere=True)
 
     async def on_timeout(self):
         for item in self.children:
@@ -150,9 +150,9 @@ class AiResponseView(discord.ui.View):
         logger.error("Erreur bouton IA (+ai) :\n%s", traceback.format_exc())
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(embed=embeds.error(ai_service.GENERIC_ERROR), ephemeral=True)
+                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(ai_service.GENERIC_ERROR)), ephemere=True)
             else:
-                await interaction.response.send_message(embed=embeds.error(ai_service.GENERIC_ERROR), ephemeral=True)
+                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(ai_service.GENERIC_ERROR)), ephemere=True)
         except discord.HTTPException:
             pass
 
@@ -194,7 +194,7 @@ class AiLimitsModal(discord.ui.Modal, title="⏱️ Limites de l'IA"):
             daily = max(1, int(self.daily_input.value))
             max_len = max(50, int(self.max_len_input.value))
         except ValueError:
-            return await interaction.response.send_message(embed=embeds.error("Toutes les valeurs doivent être des nombres entiers."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Toutes les valeurs doivent être des nombres entiers.')), ephemere=True)
         bot = self.view_ref.cog.bot
         gid = self.view_ref.guild_id
         await ai_service.update_setting(bot, gid, "cooldown_seconds", cooldown)
@@ -207,9 +207,9 @@ class AiLimitsModal(discord.ui.Modal, title="⏱️ Limites de l'IA"):
         logger.error("Erreur modal limites IA (+aisetup) :\n%s", traceback.format_exc())
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(embed=embeds.error(ai_service.GENERIC_ERROR), ephemeral=True)
+                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(ai_service.GENERIC_ERROR)), ephemere=True)
             else:
-                await interaction.response.send_message(embed=embeds.error(ai_service.GENERIC_ERROR), ephemeral=True)
+                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(ai_service.GENERIC_ERROR)), ephemere=True)
         except discord.HTTPException:
             pass
 
@@ -227,7 +227,7 @@ class AiSetupView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=embeds.error("Seul l'auteur de la commande peut utiliser ce panneau."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Seul l'auteur de la commande peut utiliser ce panneau.")), ephemere=True)
             return False
         return True
 
@@ -303,9 +303,9 @@ class AiSetupView(discord.ui.View):
         logger.error("Erreur +aisetup :\n%s", traceback.format_exc())
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(embed=embeds.error(ai_service.GENERIC_ERROR), ephemeral=True)
+                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(ai_service.GENERIC_ERROR)), ephemere=True)
             else:
-                await interaction.response.send_message(embed=embeds.error(ai_service.GENERIC_ERROR), ephemeral=True)
+                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(ai_service.GENERIC_ERROR)), ephemere=True)
         except discord.HTTPException:
             pass
 
@@ -690,7 +690,7 @@ class Ai(commands.Cog, name="Ai"):
         self.histories[ctx.author.id] = history[-10:]
         e = await self._embed(guild_id, title="Réponse de l'IA", description=answer[:4000])
         e.set_footer(text=f"Demandé par {ctx.author}")
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="chat-reset", description="Réinitialiser votre historique de conversation avec l'IA.", with_app_command=False)
     async def chat_reset(self, ctx: commands.Context):
@@ -754,25 +754,21 @@ class Ai(commands.Cog, name="Ai"):
         if guild_id:
             settings = await ai_service.get_settings(self.bot, guild_id)
             if not settings["enabled"]:
-                return await ctx.send(embed=embeds.error("L'IA est désactivée sur ce serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'IA est désactivée sur ce serveur.")))
             if not ai_service.is_channel_allowed(settings, channel_id):
-                return await ctx.send(embed=embeds.error("L'IA n'est pas autorisée dans ce salon."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'IA n'est pas autorisée dans ce salon.")))
             problem = ai_service.moderate_input(description, max_length=settings["max_question_length"])
             if problem:
-                return await ctx.send(embed=embeds.error(problem))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(problem)))
             used_today = await ai_service.get_daily_usage(self.bot, guild_id, ctx.author.id)
             if used_today >= settings["daily_limit"]:
-                return await ctx.send(embed=embeds.error(
-                    f"Limite quotidienne atteinte ({settings['daily_limit']} demandes/jour)."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Limite quotidienne atteinte ({settings['daily_limit']} demandes/jour).")))
 
         thinking_message = None
         if ctx.interaction:
             await ctx.defer()
         else:
-            thinking_message = await ctx.send(
-                embed=embeds.info("Génération rapide de l'image 4K en cours…")
-            )
+            thinking_message = await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Génération rapide de l'image 4K en cours…")))
 
         async with ctx.typing():
             result = await ai_service.generate_image(
@@ -795,7 +791,7 @@ class Ai(commands.Cog, name="Ai"):
             image_bytes = self._prepare_4k_discord_jpeg(result.data)
         except (OSError, ValueError):
             logger.error("Impossible de préparer l'image 4K pour Discord\n%s", traceback.format_exc())
-            return await ctx.send(embed=embeds.error("L'image a été générée mais son fichier est trop lourd pour Discord."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'image a été générée mais son fichier est trop lourd pour Discord.")))
 
         if guild_id:
             await ai_service.record_usage(self.bot, guild_id, ctx.author.id, tokens_estimate=0)
@@ -853,7 +849,7 @@ class Ai(commands.Cog, name="Ai"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title=ai_service.error_title(answer), description=ai_service.error_message(answer), kind='danger')))
         e = await self._embed(guild_id, title="Vérification (indicative)", description=answer[:4000])
         e.set_footer(text="⚠️ Réponse générée par IA, à vérifier par vous-même.")
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     # ---------------------------------------------------------------- NOUVEAU MOTEUR : +ai / +chat / outils
 
@@ -946,10 +942,10 @@ class Ai(commands.Cog, name="Ai"):
         if guild_id:
             settings = await ai_service.get_settings(self.bot, guild_id)
             if not ai_service.is_channel_allowed(settings, channel_id):
-                return await ctx.send(embed=embeds.error("L'IA n'est pas autorisée dans ce salon sur ce serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'IA n'est pas autorisée dans ce salon sur ce serveur.")))
             role_ids = [r.id for r in getattr(ctx.author, "roles", [])]
             if not ai_service.is_role_allowed(settings, role_ids):
-                return await ctx.send(embed=embeds.error("Vous n'avez pas le rôle nécessaire pour utiliser l'IA sur ce serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas le rôle nécessaire pour utiliser l'IA sur ce serveur.")))
 
         # Indicateur de chargement immédiat (jamais "L'application ne répond plus") :
         # message "SentriX réfléchit…" + ctx.typing() côté préfixe, defer() côté slash.
@@ -957,7 +953,7 @@ class Ai(commands.Cog, name="Ai"):
         if ctx.interaction:
             await ctx.defer()
         else:
-            thinking_msg = await ctx.send(embed=embeds.info("🤖 SentriX réfléchit…"))
+            thinking_msg = await panels.envoyer(ctx, panels.depuis_embed(embeds.info('🤖 SentriX réfléchit…')))
 
         ctx_command = getattr(ctx, "command", None)
         command_name = ctx_command.qualified_name if ctx_command else "ai"
@@ -972,7 +968,7 @@ class Ai(commands.Cog, name="Ai"):
             error_embed = embeds.error(result["error"])
             if thinking_msg:
                 return await thinking_msg.edit(embed=error_embed)
-            return await ctx.send(embed=error_embed)
+            return await panels.envoyer(ctx, panels.depuis_embed(error_embed))
 
         await self._deliver_answer(ctx, question, result, thinking_msg)
 
@@ -1038,38 +1034,34 @@ class Ai(commands.Cog, name="Ai"):
     async def _ai_reset(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         if not guild_id:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
         await ai_service.reset_conversation(self.bot, guild_id, ctx.channel.id, ctx.author.id)
         self.histories.pop(ctx.author.id, None)
-        await ctx.send(embed=embeds.success("🧹 Votre conversation avec l'IA a été réinitialisée dans ce salon."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success("🧹 Votre conversation avec l'IA a été réinitialisée dans ce salon.")))
 
     async def _ai_memory(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         if not guild_id:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
         settings = await ai_service.get_settings(self.bot, guild_id)
         if not settings["memory_enabled"]:
-            return await ctx.send(embed=embeds.info("🧠 La mémoire de conversation est **désactivée** sur ce serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('🧠 La mémoire de conversation est **désactivée** sur ce serveur.')))
         active = await ai_service.has_active_memory(self.bot, guild_id, ctx.channel.id, ctx.author.id, settings["memory_minutes"])
         if active:
-            return await ctx.send(embed=embeds.success(f"🧠 Vous avez une conversation active dans ce salon (elle expire après {settings['memory_minutes']} min d'inactivité). Son contenu reste privé."))
-        await ctx.send(embed=embeds.info("🧠 Aucune conversation active dans ce salon pour l'instant."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"🧠 Vous avez une conversation active dans ce salon (elle expire après {settings['memory_minutes']} min d'inactivité). Son contenu reste privé.")))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info("🧠 Aucune conversation active dans ce salon pour l'instant.")))
 
     async def _ai_model(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         settings = await ai_service.get_settings(self.bot, guild_id) if guild_id else dict(ai_service.DEFAULT_AI_SETTINGS)
         label = ai_service.MODEL_LABELS.get(settings["default_model"], settings["default_model"])
-        await ctx.send(embed=embeds.info(
-            f"🤖 Modèle par défaut sur ce serveur : **{label}**.\n"
-            "Les demandes complexes (code, analyse détaillée, longs textes...) basculent "
-            "automatiquement sur **GPT-5.6 Sol**, sans surcoût sur les questions simples."
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f'🤖 Modèle par défaut sur ce serveur : **{label}**.\nLes demandes complexes (code, analyse détaillée, longs textes...) basculent automatiquement sur **GPT-5.6 Sol**, sans surcoût sur les questions simples.')))
 
     async def _ai_help(self, ctx: commands.Context):
         e = embeds.brand("🤖 Aide — Intelligence artificielle SentriX", (
             "**+ai <question>** / **/ai question:...** — poser une question à l'IA\n**+ai reset** — réinitialiser votre conversation dans ce salon\n**+ai memory** — voir si une conversation est active\n**+ai model** — voir le modèle utilisé par défaut\n**+chat <message>** — discuter avec mémoire de conversation\n**+improve <texte>** — améliorer un texte\n**+correct <texte>** — corriger l'orthographe et la grammaire\n**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n**+code <demande>** — générer du code\n**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n**+image <description>** — générer une image 4K (3840 × 2160)\n**SentriX fais-moi une image de...** — génération 4K en langage naturel\n**SentriX ouvre-moi setup/help** — exécuter une commande en langage naturel\n**SentriX ajoute cet emoji** — importer l'emoji collé ou l'image jointe\n**SentriX donne-moi le lien de...** — rechercher un lien public avec ses sources\n**+aisetup** *(admin)* — configurer l'IA sur ce serveur"
         ))
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="chat", description="Discuter avec l'IA de SentriX (avec mémoire de conversation).", with_app_command=False)
     @app_commands.describe(message='Votre message')
@@ -1107,7 +1099,7 @@ class Ai(commands.Cog, name="Ai"):
     @checks.is_owner_or_admin_for("ai")
     async def aisetup(self, ctx: commands.Context):
         if not ctx.guild:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
         settings = await ai_service.get_settings(self.bot, ctx.guild.id)
         view = AiSetupView(self, ctx.guild.id, ctx.author.id, settings)
         await ctx.send(embed=view.build_embed(), view=view)
@@ -1129,7 +1121,7 @@ class Ai(commands.Cog, name="Ai"):
             await ctx.defer()
         msg = None
         if not ctx.interaction:
-            msg = await ctx.send(embed=embeds.info("🔧 Test de connexion à l'IA en cours…"))
+            msg = await panels.envoyer(ctx, panels.depuis_embed(embeds.info("🔧 Test de connexion à l'IA en cours…")))
         async with ctx.typing():
             result = await ai_service.test_connection()
 
@@ -1161,7 +1153,7 @@ class Ai(commands.Cog, name="Ai"):
         if msg:
             await msg.edit(embed=e)
         else:
-            await ctx.send(embed=e)
+            await panels.envoyer(ctx, panels.depuis_embed(e))
 
 
 async def setup(bot: commands.Bot):

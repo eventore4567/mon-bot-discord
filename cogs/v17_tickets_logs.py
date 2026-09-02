@@ -14,6 +14,7 @@ from discord.ext import commands
 
 from database.db import now
 from utils import checks, embeds, helpers, log_service
+from utils import sentrix_panels as panels
 from .v17_shared import ensure_schema, register_command_policy, safe_discord_call, state
 
 logger = logging.getLogger("bot.v17-tickets-logs")
@@ -237,21 +238,15 @@ def install_ticket_patches(bot: commands.Bot) -> None:
             guild = interaction.guild
             member = interaction.user
             if not isinstance(channel, discord.TextChannel) or guild is None or not isinstance(member, discord.Member):
-                return await interaction.response.send_message(embed=embeds.error("Impossible de prendre en charge ce ticket."), ephemeral=True)
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Impossible de prendre en charge ce ticket.')), ephemere=True)
 
             fresh = await self.get_ticket_by_channel(channel.id)
             if not fresh or fresh["status"] != "ouvert":
-                return await interaction.response.send_message(embed=embeds.error("Ce ticket n'est plus ouvert."), ephemeral=True)
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Ce ticket n'est plus ouvert.")), ephemere=True)
             current_id = fresh["claimed_by"]
             if current_id:
                 current_member = guild.get_member(int(current_id))
-                return await interaction.response.send_message(
-                    embed=embeds.warning(
-                        "Vous avez déjà pris ce ticket en charge." if int(current_id) == member.id
-                        else f"Ce ticket est déjà pris en charge par {current_member.mention if current_member else 'un autre membre du staff'}."
-                    ),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('Vous avez déjà pris ce ticket en charge.' if int(current_id) == member.id else f"Ce ticket est déjà pris en charge par {(current_member.mention if current_member else 'un autre membre du staff')}.")), ephemere=True)
 
             reservation = await self.bot.db.execute(
                 "UPDATE tickets SET claimed_by=?,last_activity_at=? WHERE id=? AND status='ouvert' AND claimed_by IS NULL",
@@ -260,10 +255,7 @@ def install_ticket_patches(bot: commands.Bot) -> None:
             if reservation.rowcount < 1:
                 winner = await self.get_ticket_by_channel(channel.id)
                 current_member = guild.get_member(int(winner["claimed_by"])) if winner and winner["claimed_by"] else None
-                return await interaction.response.send_message(
-                    embed=embeds.warning(f"Un autre membre du staff a été plus rapide : {current_member.mention if current_member else 'ticket déjà pris'}."),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning(f"Un autre membre du staff a été plus rapide : {(current_member.mention if current_member else 'ticket déjà pris')}.")), ephemere=True)
 
             await interaction.response.defer()
             try:
@@ -272,15 +264,13 @@ def install_ticket_patches(bot: commands.Bot) -> None:
             except discord.HTTPException:
                 await self.bot.db.execute("UPDATE tickets SET claimed_by=NULL WHERE id=? AND claimed_by=?", (fresh["id"], member.id))
                 await claim_security._set_staff_role_visibility(self, channel, fresh, visible=True)
-                return await interaction.followup.send(embed=embeds.error("Discord a refusé la modification des accès ; le claim a été annulé."), ephemeral=True)
+                return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Discord a refusé la modification des accès ; le claim a été annulé.')), ephemere=True)
 
             await self.bot.db.execute(
                 "INSERT OR IGNORE INTO v17_ticket_claim_events (ticket_id,guild_id,staff_id,claimed_at) VALUES (?,?,?,?)",
                 (fresh["id"], guild.id, member.id, now()),
             )
-            await interaction.followup.send(embed=embeds.success(
-                f"{member.mention} a pris en charge ce ticket. Un seul membre du staff peut désormais le gérer, hors Administrateurs."
-            ))
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(f'{member.mention} a pris en charge ce ticket. Un seul membre du staff peut désormais le gérer, hors Administrateurs.')))
 
         atomic_claim._sentrix_v17_atomic_claim = True
         atomic_claim._sentrix_original = current_claim
@@ -359,33 +349,33 @@ class V17TicketsLogs(commands.Cog, name="V17TicketsLogs"):
             f"{'●' if saved.get(key, True) else '○'} **{EVENT_LABELS[key]}** — `{key}`"
             for key in EVENT_LABELS
         )
-        await ctx.send(embed=embeds.info(text, title="Logs par événement"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title='Logs par événement')))
 
     @logevent.command(name="on")
     async def logevent_on(self, ctx: commands.Context, evenement: str):
         key = evenement.casefold().strip()
         if key not in EVENT_LABELS:
-            return await ctx.send(embed=embeds.error("Événement inconnu. Lancez `+logevent` pour voir les clés."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Événement inconnu. Lancez `+logevent` pour voir les clés.')))
         await self.bot.db.execute(
             "INSERT INTO v17_log_event_settings (guild_id,event_key,enabled) VALUES (?,?,1) "
             "ON CONFLICT(guild_id,event_key) DO UPDATE SET enabled=1",
             (ctx.guild.id, key),
         )
         _invalidate_event_cache(self.bot, ctx.guild.id, key)
-        await ctx.send(embed=embeds.success(f"Log **{EVENT_LABELS[key]}** activé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Log **{EVENT_LABELS[key]}** activé.')))
 
     @logevent.command(name="off")
     async def logevent_off(self, ctx: commands.Context, evenement: str):
         key = evenement.casefold().strip()
         if key not in EVENT_LABELS:
-            return await ctx.send(embed=embeds.error("Événement inconnu. Lancez `+logevent` pour voir les clés."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Événement inconnu. Lancez `+logevent` pour voir les clés.')))
         await self.bot.db.execute(
             "INSERT INTO v17_log_event_settings (guild_id,event_key,enabled) VALUES (?,?,0) "
             "ON CONFLICT(guild_id,event_key) DO UPDATE SET enabled=0",
             (ctx.guild.id, key),
         )
         _invalidate_event_cache(self.bot, ctx.guild.id, key)
-        await ctx.send(embed=embeds.success(f"Log **{EVENT_LABELS[key]}** désactivé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Log **{EVENT_LABELS[key]}** désactivé.')))
 
     @commands.hybrid_command(name="logsearch", description="Rechercher l'historique enregistré d'un membre.", with_app_command=False)
     @checks.has_permission_or_modrole("moderate_members")
@@ -419,13 +409,13 @@ class V17TicketsLogs(commands.Cog, name="V17TicketsLogs"):
         e.add_field(name="Notes staff", value="\n".join(
             f"#{r['id']} par <@{r['author_id']}> — {r['note'][:120]}" for r in notes
         )[:1024] or "Aucun résultat", inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="ticketreopenwindow", description="Configurer la durée pendant laquelle un ticket fermé peut être rouvert.", with_app_command=False)
     @checks.is_owner_or_admin_for("tickets")
     async def ticketreopenwindow(self, ctx: commands.Context, minutes: int):
         if minutes < 0 or minutes > 10080:
-            return await ctx.send(embed=embeds.error("Choisissez entre 0 et 10080 minutes (7 jours)."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Choisissez entre 0 et 10080 minutes (7 jours).')))
         await self.bot.db.execute(
             "INSERT INTO v17_ticket_settings (guild_id,reopen_minutes,updated_at) VALUES (?,?,?) "
             "ON CONFLICT(guild_id) DO UPDATE SET reopen_minutes=excluded.reopen_minutes,updated_at=excluded.updated_at",
@@ -436,24 +426,22 @@ class V17TicketsLogs(commands.Cog, name="V17TicketsLogs"):
             current_delay = int(conf["ticket_delete_delay"] or 30) if conf else 30
             if current_delay < minutes * 60:
                 await self.bot.db.set_guild_config(ctx.guild.id, "ticket_delete_delay", minutes * 60)
-        await ctx.send(embed=embeds.success(
-            "Réouverture désactivée." if minutes == 0 else f"Les tickets fermés restent réouvrables pendant **{minutes} minute(s)**."
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Réouverture désactivée.' if minutes == 0 else f'Les tickets fermés restent réouvrables pendant **{minutes} minute(s)**.')))
 
     @commands.hybrid_command(name="reopenticket", description="Rouvrir le ticket fermé de ce salon.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def reopenticket(self, ctx: commands.Context):
         ticket = await self.bot.db.fetchone("SELECT * FROM tickets WHERE channel_id=?", (ctx.channel.id,))
         if not ticket:
-            return await ctx.send(embed=embeds.error("Ce salon n'est pas un ticket."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
         if ticket["status"] != "ferme":
-            return await ctx.send(embed=embeds.warning("Ce ticket n'est pas fermé."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("Ce ticket n'est pas fermé.")))
         setting = await self.bot.db.fetchone("SELECT reopen_minutes FROM v17_ticket_settings WHERE guild_id=?", (ctx.guild.id,))
         minutes = int(setting["reopen_minutes"] if setting else 0)
         if minutes <= 0:
-            return await ctx.send(embed=embeds.error("La réouverture n'est pas activée. Un administrateur peut utiliser `+ticketreopenwindow`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("La réouverture n'est pas activée. Un administrateur peut utiliser `+ticketreopenwindow`.")))
         if not ticket["closed_at"] or now() > int(ticket["closed_at"]) + minutes * 60:
-            return await ctx.send(embed=embeds.error("La fenêtre de réouverture est terminée."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('La fenêtre de réouverture est terminée.')))
         await self.bot.db.execute("UPDATE tickets SET status='ouvert',closed_at=NULL,locked=0,last_activity_at=? WHERE id=? AND status='ferme'", (now(), ticket["id"]))
         owner = ctx.guild.get_member(ticket["user_id"])
         if owner:
@@ -496,7 +484,7 @@ class V17TicketsLogs(commands.Cog, name="V17TicketsLogs"):
         e.add_field(name="Actuellement ouverts", value=str(int(active["c"] if active else 0)), inline=True)
         e.add_field(name="Temps moyen de résolution", value=helpers.format_duration(avg_seconds) if avg_seconds else "N/A", inline=True)
         e.add_field(name="Note moyenne", value=f"{rating:.1f}/5" if rating else "N/A", inline=True)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
 
 async def install(bot: commands.Bot, extension_name: str = "") -> None:

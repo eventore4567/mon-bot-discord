@@ -139,9 +139,7 @@ class StatsAppearanceModal(discord.ui.Modal, title="Apparence de /stats et /leve
         try:
             color_value = int(str(self.couleur.value).strip().lstrip("#"), 16)
         except ValueError:
-            return await interaction.response.send_message(
-                embed=embeds.error("Couleur invalide — utilisez un code hexadécimal comme `5865F2`."), ephemeral=True
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Couleur invalide — utilisez un code hexadécimal comme `5865F2`.')), ephemere=True)
         self.view_ref.pending.update({
             "title_stats": str(self.titre.value),
             "footer": str(self.footer.value),
@@ -167,11 +165,11 @@ class StatsXPModal(discord.ui.Modal, title="Réglages de l'XP"):
             xp_min = int(str(self.xp_min.value).strip())
             xp_max = int(str(self.xp_max.value).strip())
         except ValueError:
-            return await interaction.response.send_message(embed=embeds.error("Utilisez uniquement des nombres entiers."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Utilisez uniquement des nombres entiers.')), ephemere=True)
         if cooldown < 0 or xp_min < 0 or xp_max < 0:
-            return await interaction.response.send_message(embed=embeds.error("Ces valeurs ne peuvent pas être négatives."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ces valeurs ne peuvent pas être négatives.')), ephemere=True)
         if xp_min > xp_max:
-            return await interaction.response.send_message(embed=embeds.error("Le XP minimum ne peut pas dépasser le XP maximum."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Le XP minimum ne peut pas dépasser le XP maximum.')), ephemere=True)
         self.view_ref.pending.update({"xp_cooldown": cooldown, "xp_min": xp_min, "xp_max": xp_max})
         await self.view_ref.refresh(interaction)
 
@@ -304,7 +302,7 @@ class StatsEconomyModal(discord.ui.Modal, title="Économie et réputation"):
             if hours <= 0:
                 raise ValueError
         except ValueError:
-            return await interaction.response.send_message(embed=embeds.error("Le cooldown doit être un nombre d'heures positif."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Le cooldown doit être un nombre d'heures positif.")), ephemere=True)
         self.view_ref.pending["economy_emoji"] = str(self.emoji.value).strip() or "🪙"
         self.view_ref.pending["reputation_cooldown"] = hours * 3600
         await self.view_ref.refresh(interaction)
@@ -322,9 +320,9 @@ class LevelRoleLevelModal(discord.ui.Modal, title="Quel niveau ?"):
         try:
             level = int(str(self.niveau.value).strip())
         except ValueError:
-            return await interaction.response.send_message(embed=embeds.error("Le niveau doit être un nombre entier."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Le niveau doit être un nombre entier.')), ephemere=True)
         if level < 0:
-            return await interaction.response.send_message(embed=embeds.error("Le niveau ne peut pas être négatif."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Le niveau ne peut pas être négatif.')), ephemere=True)
         view = LevelRoleSelectView(self.cog, self.guild, level)
         await interaction.response.send_message(
             content=f"Quel rôle attribuer au niveau **{level}** ?", view=view, ephemeral=True
@@ -499,26 +497,26 @@ class StatsConfigView(discord.ui.View):
     async def _level_role_edit(self, interaction: discord.Interaction):
         rows = await self.cog.bot.db.fetchall("SELECT * FROM level_roles WHERE guild_id = ? ORDER BY level ASC", (self.guild.id,))
         if not rows:
-            return await interaction.response.send_message(embed=embeds.info("Aucun palier configuré à modifier."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.info('Aucun palier configuré à modifier.')), ephemere=True)
         view = LevelRoleTargetSelectView(self.cog, self.guild, rows, "edit")
         await interaction.response.send_message(content="Quel palier modifier ?", view=view, ephemeral=True)
 
     async def _level_role_delete(self, interaction: discord.Interaction):
         rows = await self.cog.bot.db.fetchall("SELECT * FROM level_roles WHERE guild_id = ? ORDER BY level ASC", (self.guild.id,))
         if not rows:
-            return await interaction.response.send_message(embed=embeds.info("Aucun palier configuré à supprimer."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.info('Aucun palier configuré à supprimer.')), ephemere=True)
         view = LevelRoleTargetSelectView(self.cog, self.guild, rows, "delete")
         await interaction.response.send_message(content="Quel palier supprimer ?", view=view, ephemeral=True)
 
     async def _level_role_list(self, interaction: discord.Interaction):
         rows = await self.cog.bot.db.fetchall("SELECT * FROM level_roles WHERE guild_id = ? ORDER BY level ASC", (self.guild.id,))
         if not rows:
-            return await interaction.response.send_message(embed=embeds.info("Aucun palier configuré."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.info('Aucun palier configuré.')), ephemere=True)
         lines = []
         for r in rows:
             role = self.guild.get_role(r["role_id"])
             lines.append(f"Niveau **{r['level']}** → {role.mention if role else '⚠️ rôle supprimé'}")
-        await interaction.response.send_message(embed=embeds.neutral("🎭 Paliers de niveau configurés", "\n".join(lines)), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.neutral('🎭 Paliers de niveau configurés', '\n'.join(lines))), ephemere=True)
 
     def build_summary_embed(self) -> discord.Embed:
         p = self.pending
@@ -607,7 +605,7 @@ class _LevelRepairConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=embeds.error("Seul l'auteur de la commande peut confirmer."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Seul l'auteur de la commande peut confirmer.")), ephemere=True)
             return False
         return True
 
@@ -1062,18 +1060,18 @@ class Levels(commands.Cog, name="Levels"):
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
         try:
             if not await self._can_view(ctx, membre, settings):
-                return await ctx.send(embed=embeds.error("La consultation des statistiques d'un autre membre est désactivée sur ce serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("La consultation des statistiques d'un autre membre est désactivée sur ce serveur.")))
             embed = await self.build_stats_embed(ctx.guild, membre)
         except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-            return await ctx.send(embed=embeds.error("Impossible de récupérer les statistiques pour le moment (erreur Discord)."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Impossible de récupérer les statistiques pour le moment (erreur Discord).')))
         except Exception:
-            return await ctx.send(embed=embeds.error("Une erreur est survenue en préparant ces statistiques."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Une erreur est survenue en préparant ces statistiques.')))
         if settings.get("buttons_visible", True):
             view = StatsView(self, ctx.guild, membre, ctx.author.id)
             msg = await ctx.send(embed=embed, view=view)
             view.message = msg
         else:
-            await ctx.send(embed=embed)
+            await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="stats", description="Afficher le profil complet et les statistiques d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
@@ -1095,12 +1093,12 @@ class Levels(commands.Cog, name="Levels"):
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
         try:
             if not await self._can_view(ctx, membre, settings):
-                return await ctx.send(embed=embeds.error("La consultation des statistiques d'un autre membre est désactivée sur ce serveur."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("La consultation des statistiques d'un autre membre est désactivée sur ce serveur.")))
             panneau = await self.build_level_panneau(ctx.guild, membre)
         except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-            return await ctx.send(embed=embeds.error("Impossible de récupérer le niveau pour le moment (erreur Discord)."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Impossible de récupérer le niveau pour le moment (erreur Discord).')))
         except Exception:
-            return await ctx.send(embed=embeds.error("Une erreur est survenue en préparant ce niveau."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Une erreur est survenue en préparant ce niveau.')))
         await panels.envoyer(ctx, panneau)
 
     @commands.hybrid_command(name="level", description="Afficher votre niveau ou celui d'un membre.")
@@ -1223,56 +1221,56 @@ class Levels(commands.Cog, name="Levels"):
             "ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id",
             (ctx.guild.id, niveau, role.id),
         )
-        await ctx.send(embed=embeds.success(f"Le rôle {role.mention} sera attribué au niveau **{niveau}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le rôle {role.mention} sera attribué au niveau **{niveau}**.')))
 
     @commands.hybrid_command(name="remove-level-role", description="[Admin] Retirer l'association d'un rôle de niveau.", with_app_command=False)
     @app_commands.describe(niveau="Le niveau concerné")
     @checks.is_owner_or_admin_for("configuration")
     async def remove_level_role(self, ctx: commands.Context, niveau: int):
         await self.bot.db.execute("DELETE FROM level_roles WHERE guild_id = ? AND level = ?", (ctx.guild.id, niveau))
-        await ctx.send(embed=embeds.success(f"Association de rôle retirée pour le niveau **{niveau}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Association de rôle retirée pour le niveau **{niveau}**.')))
 
     @commands.hybrid_command(name="level-roles", description="Lister les rôles de niveau configurés.", with_app_command=False)
     async def level_roles(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM level_roles WHERE guild_id = ? ORDER BY level ASC", (ctx.guild.id,))
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucun rôle de niveau configuré."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucun rôle de niveau configuré.')))
         lines = []
         for r in rows:
             role = ctx.guild.get_role(r["role_id"])
             lines.append(f"Niveau **{r['level']}** → {role.mention if role else 'Rôle supprimé'}")
-        await ctx.send(embed=embeds.neutral("🎖️ Rôles de niveau", "\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('🎖️ Rôles de niveau', '\n'.join(lines))))
 
     @commands.hybrid_command(name="set-xp", description="[Admin] Définir l'XP d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé", xp="La valeur d'XP")
     @checks.is_owner_or_admin_for("configuration")
     async def set_xp(self, ctx: commands.Context, membre: discord.Member, xp: int):
         if membre.bot:
-            return await ctx.send(embed=embeds.error("Un bot ne peut pas avoir d'XP."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Un bot ne peut pas avoir d'XP.")))
         await self.bot.db.ensure_level(ctx.guild.id, membre.id)
         await self.bot.db.execute(
             "UPDATE levels SET xp = ?, updated_at = ? WHERE guild_id = ? AND user_id = ?",
             (max(0, xp), now(), ctx.guild.id, membre.id),
         )
         stats_service.invalidate_rank_cache(self.bot, ctx.guild.id, membre.id)
-        await ctx.send(embed=embeds.success(f"XP de {membre.mention} défini à **{max(0, xp)}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'XP de {membre.mention} défini à **{max(0, xp)}**.')))
 
     @commands.hybrid_command(name="add-xp", description="[Admin] Ajouter de l'XP à un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé", xp="La quantité d'XP à ajouter")
     @checks.is_owner_or_admin_for("configuration")
     async def add_xp(self, ctx: commands.Context, membre: discord.Member, xp: int):
         if membre.bot:
-            return await ctx.send(embed=embeds.error("Un bot ne peut pas avoir d'XP."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Un bot ne peut pas avoir d'XP.")))
         new_xp, level, leveled_up = await self._apply_xp_delta(ctx.guild.id, membre.id, xp)
         suffix = f" — passe au niveau **{level}** 🎉" if leveled_up else ""
-        await ctx.send(embed=embeds.success(f"**{xp} XP** ajoutés à {membre.mention} (XP actuelle : {new_xp}, niveau {level}){suffix}."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{xp} XP** ajoutés à {membre.mention} (XP actuelle : {new_xp}, niveau {level}){suffix}.')))
 
     @commands.hybrid_command(name="reset-levels", description="[Admin] Réinitialiser tous les niveaux du serveur.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")
     async def reset_levels(self, ctx: commands.Context):
         await self.bot.db.execute("DELETE FROM levels WHERE guild_id = ?", (ctx.guild.id,))
         stats_service.invalidate_rank_cache(self.bot, ctx.guild.id)
-        await ctx.send(embed=embeds.success("Tous les niveaux du serveur ont été réinitialisés."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Tous les niveaux du serveur ont été réinitialisés.')))
 
     # ---------------------------------------------------------------- DIAGNOSTIC NIVEAUX
 
@@ -1343,7 +1341,7 @@ class Levels(commands.Cog, name="Levels"):
             e.add_field(name="Dernière mise à jour", value=f"<t:{diag['updated_at']}:R>", inline=True)
         else:
             e.add_field(name="Dernière mise à jour", value="Inconnue (ligne créée avant l'ajout de ce suivi, ou jamais mise à jour)", inline=True)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="levelrepair", description="[Admin] Réparer une incohérence certaine du niveau d'un membre (après confirmation).", with_app_command=False)
     @app_commands.describe(membre="Le membre à réparer")
@@ -1351,9 +1349,9 @@ class Levels(commands.Cog, name="Levels"):
     async def levelrepair(self, ctx: commands.Context, membre: discord.Member):
         diag = await self._level_diagnosis(ctx.guild.id, membre.id)
         if not diag["found"]:
-            return await ctx.send(embed=embeds.info("Aucune ligne de niveau pour ce membre — rien à réparer."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucune ligne de niveau pour ce membre — rien à réparer.')))
         if diag["db_coherent"]:
-            return await ctx.send(embed=embeds.success("Aucune incohérence détectée pour ce membre — rien à réparer."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Aucune incohérence détectée pour ce membre — rien à réparer.')))
 
         # Seule réparation possible : recalculer (niveau, xp du niveau) à partir de l'XP
         # TOTALE déjà accumulée (total_xp_for/calculate_level_from_total_xp), donc AUCUNE
@@ -1405,7 +1403,7 @@ class Levels(commands.Cog, name="Levels"):
         try:
             stats = await stats_service.get_member_statistics(self.bot, ctx.guild, membre)
         except Exception:
-            return await ctx.send(embed=embeds.error("Une erreur est survenue en préparant ce profil."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Une erreur est survenue en préparant ce profil.')))
         eco_emoji = settings.get("economy_emoji", "🪙")
         style = design_system.CATEGORY_STYLES["levels"]
         e = design_system.create_embed(
@@ -1433,7 +1431,7 @@ class Levels(commands.Cog, name="Levels"):
         if settings.get("show_reputation", True):
             e.add_field(name="⭐ Réputation", value=f"{stats_service.format_number(stats['reputation'])} point(s)", inline=True)
         e.add_field(name="📝 Bio", value=(bio_row["bio"] if bio_row and bio_row["bio"] else "Aucune bio définie."), inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="set-bio", description="Définir votre biographie de profil.", with_app_command=False)
     @app_commands.describe(texte="Votre biographie (200 caractères max)")
@@ -1444,7 +1442,7 @@ class Levels(commands.Cog, name="Levels"):
             "ON CONFLICT(guild_id, user_id) DO UPDATE SET bio = excluded.bio",
             (ctx.guild.id, ctx.author.id, texte),
         )
-        await ctx.send(embed=embeds.success("Votre bio a été mise à jour."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Votre bio a été mise à jour.')))
 
     # -------------------------------------------------------------- Réputation
 
@@ -1452,20 +1450,20 @@ class Levels(commands.Cog, name="Levels"):
     @app_commands.describe(membre="Le membre à qui donner un point de réputation", raison="Raison (optionnelle)")
     async def rep(self, ctx: commands.Context, membre: discord.Member, *, raison: str = ""):
         if membre.id == ctx.author.id:
-            return await ctx.send(embed=embeds.error("Vous ne pouvez pas vous donner de la réputation à vous-même."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas vous donner de la réputation à vous-même.')))
         if membre.bot:
-            return await ctx.send(embed=embeds.error("Vous ne pouvez pas donner de la réputation à un bot."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas donner de la réputation à un bot.')))
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
         cooldown = settings.get("reputation_cooldown", 86400)
         try:
             ok, remaining = await self.bot.db.give_reputation(ctx.guild.id, ctx.author.id, membre.id, cooldown, raison[:200])
         except Exception:
-            return await ctx.send(embed=embeds.error("Une erreur est survenue, réessayez."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Une erreur est survenue, réessayez.')))
         if not ok:
             h, m = remaining // 3600, (remaining % 3600) // 60
-            return await ctx.send(embed=embeds.warning(f"Vous devez attendre encore **{h}h{m:02d}m** avant de redonner un point de réputation."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Vous devez attendre encore **{h}h{m:02d}m** avant de redonner un point de réputation.')))
         total = await self.bot.db.get_reputation(ctx.guild.id, membre.id)
-        await ctx.send(embed=embeds.success(f"⭐ Vous avez donné un point de réputation à {membre.mention} (total : **{stats_service.format_number(total)}**)."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'⭐ Vous avez donné un point de réputation à {membre.mention} (total : **{stats_service.format_number(total)}**).')))
 
     @commands.hybrid_command(name="reputation", description="Afficher la réputation d'un membre et votre temps d'attente.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
@@ -1480,7 +1478,7 @@ class Levels(commands.Cog, name="Levels"):
             e.add_field(name="Votre prochain +rep disponible dans", value=f"{h}h{m:02d}m", inline=False)
         else:
             e.add_field(name="Votre prochain +rep", value="Disponible maintenant", inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="repleaderboard", description="Afficher le classement de réputation.")
     async def repleaderboard(self, ctx: commands.Context):
@@ -1490,7 +1488,7 @@ class Levels(commands.Cog, name="Levels"):
             "SELECT * FROM profiles WHERE guild_id = ? AND reputation > 0 ORDER BY reputation DESC LIMIT 15", (ctx.guild.id,)
         )
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucune donnée de réputation pour l'instant."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Aucune donnée de réputation pour l'instant.")))
         lines = []
         rank = 0
         for r in rows:
@@ -1503,42 +1501,42 @@ class Levels(commands.Cog, name="Levels"):
                 break
             lines.append(f"**{rank}.** {name} — {stats_service.format_number(r['reputation'])} point(s)")
         if not lines:
-            return await ctx.send(embed=embeds.info("Aucune donnée de réputation pour l'instant."))
-        await ctx.send(embed=embeds.neutral("⭐ Classement de réputation", "\n".join(lines)))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Aucune donnée de réputation pour l'instant.")))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('⭐ Classement de réputation', '\n'.join(lines))))
 
     @commands.hybrid_command(name="repconfig", description="[Admin] Configurer le cooldown de réputation (en heures).", with_app_command=False)
     @app_commands.describe(heures="Nombre d'heures entre deux +rep")
     @checks.is_owner_or_admin_for("configuration")
     async def repconfig(self, ctx: commands.Context, heures: int):
         if heures <= 0:
-            return await ctx.send(embed=embeds.error("Le cooldown doit être positif (en heures)."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le cooldown doit être positif (en heures).')))
         await self.bot.db.set_stats_settings(ctx.guild.id, {"reputation_cooldown": heures * 3600})
-        await ctx.send(embed=embeds.success(f"Cooldown de réputation défini à **{heures}h**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Cooldown de réputation défini à **{heures}h**.')))
 
     @commands.hybrid_command(name="repadd", description="[Staff] Ajouter des points de réputation à un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé", nombre="Le nombre de points à ajouter", raison="Raison (optionnelle)")
     @checks.is_owner_or_admin_for("configuration")
     async def repadd(self, ctx: commands.Context, membre: discord.Member, nombre: int, *, raison: str = ""):
         if nombre <= 0:
-            return await ctx.send(embed=embeds.error("Le nombre doit être positif."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le nombre doit être positif.')))
         total = await self.bot.db.adjust_reputation(ctx.guild.id, ctx.author.id, membre.id, nombre, raison[:200] or "Ajout manuel (staff)")
-        await ctx.send(embed=embeds.success(f"**+{nombre}** réputation pour {membre.mention} (total : **{stats_service.format_number(total)}**)."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**+{nombre}** réputation pour {membre.mention} (total : **{stats_service.format_number(total)}**).')))
 
     @commands.hybrid_command(name="repremove", description="[Staff] Retirer des points de réputation à un membre (abus).", with_app_command=False)
     @app_commands.describe(membre="Le membre visé", nombre="Le nombre de points à retirer", raison="Raison (optionnelle)")
     @checks.is_owner_or_admin_for("configuration")
     async def repremove(self, ctx: commands.Context, membre: discord.Member, nombre: int, *, raison: str = ""):
         if nombre <= 0:
-            return await ctx.send(embed=embeds.error("Le nombre doit être positif."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le nombre doit être positif.')))
         total = await self.bot.db.adjust_reputation(ctx.guild.id, ctx.author.id, membre.id, -nombre, raison[:200] or "Retrait manuel (staff, abus)")
-        await ctx.send(embed=embeds.success(f"**-{nombre}** réputation pour {membre.mention} (total : **{stats_service.format_number(total)}**)."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**-{nombre}** réputation pour {membre.mention} (total : **{stats_service.format_number(total)}**).')))
 
     @commands.hybrid_command(name="represet", description="[Staff] Réinitialiser la réputation d'un membre à zéro.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé")
     @checks.is_owner_or_admin_for("configuration")
     async def represet(self, ctx: commands.Context, membre: discord.Member):
         await self.bot.db.reset_reputation(ctx.guild.id, ctx.author.id, membre.id)
-        await ctx.send(embed=embeds.success(f"Réputation de {membre.mention} réinitialisée à **0**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Réputation de {membre.mention} réinitialisée à **0**.')))
 
     @commands.hybrid_command(name="rephistory", description="[Staff] Afficher l'historique de réputation d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé")
@@ -1546,7 +1544,7 @@ class Levels(commands.Cog, name="Levels"):
     async def rephistory(self, ctx: commands.Context, membre: discord.Member):
         rows = await self.bot.db.get_reputation_history(ctx.guild.id, membre.id)
         if not rows:
-            return await ctx.send(embed=embeds.info(f"Aucun historique de réputation pour {membre.display_name}."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f'Aucun historique de réputation pour {membre.display_name}.')))
         lines = []
         for r in rows:
             giver = ctx.guild.get_member(r["giver_id"])
@@ -1554,7 +1552,7 @@ class Levels(commands.Cog, name="Levels"):
             sign = "+" if r["amount"] >= 0 else ""
             reason = f" — {r['reason']}" if r["reason"] else ""
             lines.append(f"<t:{r['created_at']}:R> **{sign}{r['amount']}** par {giver_name}{reason}")
-        await ctx.send(embed=embeds.neutral(f"📜 Historique de réputation de {membre.display_name}", "\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral(f'📜 Historique de réputation de {membre.display_name}', '\n'.join(lines))))
 
     @commands.hybrid_command(name="voice-time", description="Afficher le temps passé en vocal par un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé (optionnel)")
@@ -1565,8 +1563,8 @@ class Levels(commands.Cog, name="Levels"):
         try:
             stats = await stats_service.get_member_statistics(self.bot, ctx.guild, membre)
         except Exception:
-            return await ctx.send(embed=embeds.error("Impossible de récupérer le temps vocal pour le moment."))
-        await ctx.send(embed=embeds.info(f"🔊 {membre.display_name} a passé **{stats_service.format_duration(stats['voice_time'])}** en vocal."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Impossible de récupérer le temps vocal pour le moment.')))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"🔊 {membre.display_name} a passé **{stats_service.format_duration(stats['voice_time'])}** en vocal.")))
 
     async def _open_statsconfig(self, ctx: commands.Context, category: str = "appearance"):
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)

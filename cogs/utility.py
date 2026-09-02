@@ -716,7 +716,7 @@ class Utility(commands.Cog, name="Utility"):
         if commande:
             cmd = self.bot.get_command(commande)
             if not cmd or (is_staff_command(cmd) and not is_staff):
-                return await ctx.send(embed=embeds.error(f"La commande `{commande}` est introuvable ou vous n’avez pas la permission de la consulter.\nUtilisez `{prefix}help` pour afficher uniquement les commandes disponibles pour vous."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'La commande `{commande}` est introuvable ou vous n’avez pas la permission de la consulter.\nUtilisez `{prefix}help` pour afficher uniquement les commandes disponibles pour vous.')))
             slash_names = slash_command_names(self.bot)
             is_slash = cmd.qualified_name in slash_names
             marker = f"/{cmd.qualified_name}" if is_slash else f"{prefix}{cmd.qualified_name}"
@@ -751,7 +751,7 @@ class Utility(commands.Cog, name="Utility"):
                 e.add_field(name="✏️ Exemple d'usage", value=f"`{marker}`", inline=False)
 
             e.set_footer(text=f"Utilisez {prefix}help pour revenir à la liste complète.")
-            return await ctx.send(embed=e)
+            return await panels.envoyer(ctx, panels.depuis_embed(e))
 
         e = build_help_home(self.bot, ctx.guild, prefix, is_staff)
         try:
@@ -761,7 +761,7 @@ class Utility(commands.Cog, name="Utility"):
             # L'aide textuelle reste disponible même si Discord refuse ponctuellement
             # un composant du menu. Le détail technique reste visible dans Railway.
             logger.exception("Impossible d'afficher le menu interactif de +help")
-            await ctx.send(embed=e)
+            await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="ping", description="Afficher la latence du bot.")
     async def ping(self, ctx: commands.Context):
@@ -1416,7 +1416,7 @@ class Utility(commands.Cog, name="Utility"):
         e.add_field(name="Total", value=guild.member_count, inline=True)
         e.add_field(name="Humains", value=humans, inline=True)
         e.add_field(name="Bots", value=bots, inline=True)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(
         name="addemoji",
@@ -1727,7 +1727,7 @@ class Utility(commands.Cog, name="Utility"):
     async def poll(self, ctx: commands.Context, *, question: str):
         e = await self._embed(ctx.guild.id if ctx.guild else None, title="Sondage", description=question)
         e.set_footer(text=f"Créé par {ctx.author}")
-        msg = await ctx.send(embed=e)
+        msg = await panels.envoyer(ctx, panels.depuis_embed(e))
         await msg.add_reaction("👍")
         await msg.add_reaction("👎")
 
@@ -1821,7 +1821,7 @@ class Utility(commands.Cog, name="Utility"):
     @commands.has_permissions(manage_messages=True)
     async def embed_create(self, ctx: commands.Context, titre: str, *, description: str):
         e = await self._embed(ctx.guild.id if ctx.guild else None, title=titre, description=description)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="translate", description="Traduire un texte vers une autre langue.")
     @app_commands.describe(langue="Code langue cible (ex: en, es, de)", texte="Le texte à traduire")
@@ -1850,7 +1850,7 @@ class Utility(commands.Cog, name="Utility"):
         e.add_field(name="Température", value=f"{data['main']['temp']}°C", inline=True)
         e.add_field(name="Ressenti", value=f"{data['main']['feels_like']}°C", inline=True)
         e.add_field(name="Condition", value=data["weather"][0]["description"], inline=True)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="suggest", description="Faire une suggestion pour le serveur.")
     @app_commands.describe(texte="Votre suggestion")
@@ -1859,7 +1859,7 @@ class Utility(commands.Cog, name="Utility"):
         channel = ctx.guild.get_channel(conf["suggest_channel"]) if conf and conf["suggest_channel"] else ctx.channel
         e = await self._embed(ctx.guild.id, title="Nouvelle suggestion", description=texte)
         e.set_footer(text=f"Proposé par {ctx.author}")
-        msg = await channel.send(embed=e)
+        msg = await panels.envoyer(channel, panels.depuis_embed(e))
         await msg.add_reaction("👍")
         await msg.add_reaction("👎")
         await self.bot.db.execute(

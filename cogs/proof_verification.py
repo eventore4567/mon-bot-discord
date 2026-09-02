@@ -18,6 +18,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, proof_service
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.proof")
 
@@ -101,14 +102,9 @@ class ProofSettingsModal(discord.ui.Modal, title="Paramètres de vérification")
             pass_threshold = max(70, min(100, int(str(self.pass_input.value))))
             manual_threshold = max(30, min(95, int(str(self.manual_input.value))))
         except ValueError:
-            return await interaction.response.send_message(
-                embed=embeds.error("Les seuils et le nombre d'images doivent être des nombres."), ephemeral=True
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Les seuils et le nombre d'images doivent être des nombres.")), ephemere=True)
         if manual_threshold >= pass_threshold:
-            return await interaction.response.send_message(
-                embed=embeds.error("Le seuil de vérification staff doit être inférieur au seuil de validation automatique."),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Le seuil de vérification staff doit être inférieur au seuil de validation automatique.')), ephemere=True)
         await proof_service.update_settings(
             self.owner.cog.bot,
             self.owner.guild.id,
@@ -192,10 +188,7 @@ class ProofSetupView(discord.ui.View):
             current = await proof_service.get_settings(self.cog.bot, self.guild.id)
             errors = await self.cog.configuration_errors(self.guild, current)
             if not _get(current, "enabled", 0) and errors:
-                return await interaction.response.send_message(
-                    embed=embeds.error("Impossible d'activer le système tant que la configuration n'est pas complète.\n\n" + "\n".join(f"- {x}" for x in errors)),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Impossible d'activer le système tant que la configuration n'est pas complète.\n\n" + '\n'.join((f'- {x}' for x in errors)))), ephemere=True)
             await proof_service.update_settings(
                 self.cog.bot, self.guild.id, interaction.user.id, enabled=0 if _get(current, "enabled", 0) else 1
             )
@@ -209,14 +202,7 @@ class ProofSetupView(discord.ui.View):
             await self.cog.publish_panel(interaction, self.guild)
 
         async def examples_callback(interaction: discord.Interaction):
-            await interaction.response.send_message(
-                embed=embeds.neutral(
-                    "SentriX — Ajouter un exemple",
-                    "Joignez une capture à `+proofexample [nom]` ou utilisez `/proofexample`.\n"
-                    "SentriX analyse l'exemple une seule fois puis conserve sa signature sémantique et une copie compressée pour le panel."
-                ),
-                ephemeral=True,
-            )
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.neutral('SentriX — Ajouter un exemple', "Joignez une capture à `+proofexample [nom]` ou utilisez `/proofexample`.\nSentriX analyse l'exemple une seule fois puis conserve sa signature sémantique et une copie compressée pour le panel.")), ephemere=True)
 
         async def refresh_callback(interaction: discord.Interaction):
             await self.refresh(interaction)
@@ -237,12 +223,10 @@ class ProofSetupView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=embeds.error("Ce panneau appartient à une autre personne."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ce panneau appartient à une autre personne.')), ephemere=True)
             return False
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message(
-                embed=embeds.error("Permission requise : Administrateur"), ephemeral=True
-            )
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Permission requise : Administrateur')), ephemere=True)
             return False
         return True
 
@@ -307,12 +291,12 @@ class ProofReviewView(discord.ui.View):
     @discord.ui.button(label="Valider", style=discord.ButtonStyle.success, custom_id="sentrix:proof:approve")
     async def approve(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if not await self._allowed(interaction):
-            return await interaction.response.send_message(embed=embeds.error("Permission requise : Gérer les rôles"), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Permission requise : Gérer les rôles')), ephemere=True)
         if interaction.guild is None or interaction.message is None:
             return
         verification = await proof_service.get_verification_by_review(self.cog.bot, interaction.guild.id, interaction.message.id)
         if not verification or _get(verification, "status") != "manual_pending":
-            return await interaction.response.send_message(embed=embeds.error("Cette vérification n'est plus en attente."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Cette vérification n'est plus en attente.")), ephemere=True)
         settings = await proof_service.get_settings(self.cog.bot, interaction.guild.id)
         role = interaction.guild.get_role(int(_get(settings, "role_id", 0) or 0))
         member = interaction.guild.get_member(int(_get(verification, "user_id", 0) or 0))
@@ -323,13 +307,11 @@ class ProofReviewView(discord.ui.View):
                 member = None
         error = self.cog.role_error(interaction.guild, role)
         if member is None or error:
-            return await interaction.response.send_message(
-                embed=embeds.error("Impossible de donner le rôle : " + (error or "le membre n'est plus sur le serveur.")), ephemeral=True
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Impossible de donner le rôle : ' + (error or "le membre n'est plus sur le serveur."))), ephemere=True)
         try:
             await member.add_roles(role, reason=f"Preuve validée manuellement par {interaction.user}")
         except discord.HTTPException:
-            return await interaction.response.send_message(embed=embeds.error("Discord a refusé l'ajout du rôle."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Discord a refusé l'ajout du rôle.")), ephemere=True)
         try:
             hashes = json.loads(_get(verification, "hashes_json", "[]") or "[]")
         except Exception:
@@ -346,12 +328,12 @@ class ProofReviewView(discord.ui.View):
     @discord.ui.button(label="Refuser", style=discord.ButtonStyle.danger, custom_id="sentrix:proof:reject")
     async def reject(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if not await self._allowed(interaction):
-            return await interaction.response.send_message(embed=embeds.error("Permission requise : Gérer les rôles"), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Permission requise : Gérer les rôles')), ephemere=True)
         if interaction.guild is None or interaction.message is None:
             return
         verification = await proof_service.get_verification_by_review(self.cog.bot, interaction.guild.id, interaction.message.id)
         if not verification or _get(verification, "status") != "manual_pending":
-            return await interaction.response.send_message(embed=embeds.error("Cette vérification n'est plus en attente."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Cette vérification n'est plus en attente.")), ephemere=True)
         await proof_service.finish_verification(self.cog.bot, int(_get(verification, "id")), "rejected", interaction.user.id)
         panel = interaction.message.embeds[0] if interaction.message.embeds else embeds.error("Preuve refusée.")
         panel.colour = discord.Colour.red()
@@ -449,8 +431,8 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
             panel = embeds.error("Le panel ne peut pas être publié.\n\n" + "\n".join(f"- {error}" for error in errors))
             if isinstance(target, discord.Interaction):
                 if target.response.is_done():
-                    return await target.followup.send(embed=panel, ephemeral=True)
-                return await target.response.send_message(embed=panel, ephemeral=True)
+                    return await panels.envoyer(target.followup, panels.depuis_embed(panel), ephemere=True)
+                return await panels.envoyer(target.response, panels.depuis_embed(panel), ephemere=True)
             return await target.send(embed=panel)
         channel = guild.get_channel(int(_get(settings, "submission_channel_id")))
         embeds_list, files = await self.build_public_panel(guild)
@@ -460,24 +442,24 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
             panel = embeds.error("Impossible de publier le panel dans le salon configuré.")
             if isinstance(target, discord.Interaction):
                 if target.response.is_done():
-                    return await target.followup.send(embed=panel, ephemeral=True)
-                return await target.response.send_message(embed=panel, ephemeral=True)
+                    return await panels.envoyer(target.followup, panels.depuis_embed(panel), ephemere=True)
+                return await panels.envoyer(target.response, panels.depuis_embed(panel), ephemere=True)
             return await target.send(embed=panel)
         actor = getattr(target, "user", None) or getattr(target, "author", None)
         await proof_service.update_settings(self.bot, guild.id, actor.id, panel_message_id=message.id)
         panel = embeds.success(f"Panel publié dans {channel.mention}.")
         if isinstance(target, discord.Interaction):
             if target.response.is_done():
-                return await target.followup.send(embed=panel, ephemeral=True)
-            return await target.response.send_message(embed=panel, ephemeral=True)
+                return await panels.envoyer(target.followup, panels.depuis_embed(panel), ephemere=True)
+            return await panels.envoyer(target.response, panels.depuis_embed(panel), ephemere=True)
         return await target.send(embed=panel)
 
     @commands.hybrid_command(name="proofsetup", description="Configurer la vérification automatique par preuve")
     async def proofsetup(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
         if not isinstance(ctx.author, discord.Member) or not ctx.author.guild_permissions.administrator:
-            return await ctx.send(embed=embeds.error("Permission requise : Administrateur"))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Permission requise : Administrateur')))
         await proof_service.ensure_settings(self.bot, ctx.guild.id, actor_id=ctx.author.id)
         view = ProofSetupView(self, ctx.guild, ctx.author.id)
         await ctx.send(embed=await view.build_embed(), view=view)
@@ -486,14 +468,14 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
     @app_commands.describe(image="Capture de référence", nom="Nom de l'exemple, par exemple Confirmation")
     async def proofexample(self, ctx: commands.Context, image: discord.Attachment, *, nom: str = "Exemple"):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
         if not isinstance(ctx.author, discord.Member) or not ctx.author.guild_permissions.administrator:
-            return await ctx.send(embed=embeds.error("Permission requise : Administrateur"))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Permission requise : Administrateur')))
         if not _is_image(image) or image.size > proof_service.MAX_IMAGE_BYTES:
-            return await ctx.send(embed=embeds.error("Utilisez une image PNG, JPG ou WEBP de 12 Mo maximum."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez une image PNG, JPG ou WEBP de 12 Mo maximum.')))
         references = await proof_service.list_references(self.bot, ctx.guild.id)
         if len(references) >= proof_service.MAX_REFERENCES:
-            return await ctx.send(embed=embeds.error(f"Maximum {proof_service.MAX_REFERENCES} exemples par serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Maximum {proof_service.MAX_REFERENCES} exemples par serveur.')))
         settings = await proof_service.get_settings(self.bot, ctx.guild.id)
         try:
             data = await image.read()
@@ -507,62 +489,62 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
                 self.bot, ctx.guild.id, ctx.author.id, label=nom, data=data, profile=profile
             )
         except ValueError:
-            return await ctx.send(embed=embeds.error("Cette image est invalide ou trop petite."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette image est invalide ou trop petite.')))
         except Exception:
             logger.exception("Impossible d'analyser l'exemple de preuve guild=%s", ctx.guild.id)
-            return await ctx.send(embed=embeds.error("L'analyse de l'image exemple est momentanément indisponible."))
-        await ctx.send(embed=embeds.success(f"Exemple `#{reference_id}` enregistré : **{nom[:80]}**."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'analyse de l'image exemple est momentanément indisponible.")))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Exemple `#{reference_id}` enregistré : **{nom[:80]}**.')))
 
     @commands.hybrid_command(name="proofexample-remove", description="Supprimer une capture exemple")
     async def proofexample_remove(self, ctx: commands.Context, reference_id: int):
         if ctx.guild is None or not isinstance(ctx.author, discord.Member) or not ctx.author.guild_permissions.administrator:
-            return await ctx.send(embed=embeds.error("Permission requise : Administrateur"))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Permission requise : Administrateur')))
         await proof_service.remove_reference(self.bot, ctx.guild.id, reference_id)
-        await ctx.send(embed=embeds.success(f"Exemple `#{reference_id}` supprimé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Exemple `#{reference_id}` supprimé.')))
 
     @commands.hybrid_command(name="proofexamples", description="Lister les captures exemples enregistrées")
     async def proofexamples(self, ctx: commands.Context):
         if ctx.guild is None or not isinstance(ctx.author, discord.Member) or not ctx.author.guild_permissions.administrator:
-            return await ctx.send(embed=embeds.error("Permission requise : Administrateur"))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Permission requise : Administrateur')))
         rows = await proof_service.list_references(self.bot, ctx.guild.id)
         text = "\n".join(f"`#{_get(row, 'id')}` — {_get(row, 'label', 'Exemple')}" for row in rows) or "Aucun exemple enregistré."
-        await ctx.send(embed=embeds.neutral("SentriX — Exemples de preuve", text[:4000]))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('SentriX — Exemples de preuve', text[:4000])))
 
     @commands.hybrid_command(name="proofpanel", description="Publier le panel de vérification par preuve")
     async def proofpanel(self, ctx: commands.Context):
         if ctx.guild is None or not isinstance(ctx.author, discord.Member) or not ctx.author.guild_permissions.administrator:
-            return await ctx.send(embed=embeds.error("Permission requise : Administrateur"))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Permission requise : Administrateur')))
         await self.publish_panel(ctx, ctx.guild)
 
     @commands.hybrid_command(name="proof", description="Afficher les instructions de vérification par preuve")
     async def proof(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
         settings = await proof_service.get_settings(self.bot, ctx.guild.id)
         if not _get(settings, "enabled", 0):
-            return await ctx.send(embed=embeds.warning("La vérification par preuve est désactivée sur ce serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('La vérification par preuve est désactivée sur ce serveur.')))
         panels, files = await self.build_public_panel(ctx.guild)
         await ctx.send(embeds=panels, files=files)
 
     @commands.hybrid_command(name="proofstatus", description="Voir votre dernière vérification par preuve")
     async def proofstatus(self, ctx: commands.Context):
         if ctx.guild is None:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée sur un serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
         row = await proof_service.get_latest_status(self.bot, ctx.guild.id, ctx.author.id)
         if not row:
-            return await ctx.send(embed=embeds.neutral("SentriX — Statut de preuve", "Aucune preuve envoyée pour le moment."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('SentriX — Statut de preuve', 'Aucune preuve envoyée pour le moment.')))
         status = STATUS_LABELS.get(str(_get(row, "status")), str(_get(row, "status")).upper())
         panel = embeds.neutral(
             "SentriX — Statut de preuve",
             f"**État :** {status}\n**Score :** {_get(row, 'score', 0)} %",
         )
-        await ctx.send(embed=panel)
+        await panels.envoyer(ctx, panels.depuis_embed(panel))
 
     @commands.hybrid_command(name="proofreset", description="Réinitialiser la vérification d'un membre")
     @app_commands.describe(membre="Membre à réinitialiser", retirer_role="Retirer aussi le rôle obtenu")
     async def proofreset(self, ctx: commands.Context, membre: discord.Member, retirer_role: bool = False):
         if ctx.guild is None or not isinstance(ctx.author, discord.Member) or not ctx.author.guild_permissions.administrator:
-            return await ctx.send(embed=embeds.error("Permission requise : Administrateur"))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Permission requise : Administrateur')))
         settings = await proof_service.get_settings(self.bot, ctx.guild.id)
         await proof_service.reset_user(self.bot, ctx.guild.id, membre.id)
         if retirer_role:
@@ -572,7 +554,7 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
                     await membre.remove_roles(role, reason=f"Réinitialisation preuve par {ctx.author}")
                 except discord.HTTPException:
                     pass
-        await ctx.send(embed=embeds.success(f"Vérification de {membre.mention} réinitialisée."), allowed_mentions=discord.AllowedMentions.none())
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vérification de {membre.mention} réinitialisée.')))
 
     async def _analyze_attachment(self, attachment: discord.Attachment, references, instructions: str):
         data = await attachment.read()

@@ -1358,7 +1358,7 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
         )
         e = await _embed(self.bot, guild_id, title=f"Profil de jeu — {target.display_name}", description=description)
         e.set_thumbnail(url=target.display_avatar.url)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="gamestats", description="Statistiques détaillées de mini-jeux d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à afficher")

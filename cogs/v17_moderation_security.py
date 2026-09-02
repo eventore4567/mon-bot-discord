@@ -15,6 +15,7 @@ from discord.ext import commands
 import config
 from database.db import now
 from utils import checks, embeds, helpers, log_service
+from utils import sentrix_panels as panels
 from .v17_shared import (
     create_snapshot,
     ensure_schema,
@@ -84,10 +85,7 @@ def install_moderation_guards(bot: commands.Bot) -> None:
             if ctx.author.id == ctx.guild.owner_id or await checks.is_verified_bot_owner(ctx):
                 return True
             detail = f" Raison : {reason}" if reason else ""
-            await ctx.send(embed=embeds.error(
-                f"Ce membre est protégé contre les sanctions SentriX.{detail}",
-                title="Membre protégé",
-            ))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Ce membre est protégé contre les sanctions SentriX.{detail}', title='Membre protégé')))
             return False
 
         targetable_v17._sentrix_v17_protected = True
@@ -110,10 +108,7 @@ def install_moderation_guards(bot: commands.Bot) -> None:
             mono = time.monotonic()
             previous = recent.get(key)
             if previous is not None and mono - float(previous) <= SANCTION_DUPLICATE_TTL:
-                return await ctx.send(embed=embeds.warning(
-                    "Cette sanction vient déjà d'être lancée sur la même cible. Le second appel a été annulé.",
-                    title="Double sanction bloquée",
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("Cette sanction vient déjà d'être lancée sur la même cible. Le second appel a été annulé.", title='Double sanction bloquée')))
             recent[key] = mono
             if len(recent) > 5000:
                 cutoff = mono - 30.0
@@ -372,7 +367,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             (ctx.guild.id,),
         )
         text = "\n".join(f"• <@{r['user_id']}> — {r['reason'] or 'Aucune raison'}" for r in rows) or "Aucun membre protégé."
-        await ctx.send(embed=embeds.info(text, title="Membres protégés"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title='Membres protégés')))
 
     @protectmember.command(name="add", description="Ajouter un membre protégé.")
     async def protectmember_add(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Membre protégé"):
@@ -381,7 +376,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             "ON CONFLICT(guild_id,user_id) DO UPDATE SET reason=excluded.reason,added_by=excluded.added_by,created_at=excluded.created_at",
             (ctx.guild.id, membre.id, raison[:500], ctx.author.id, now()),
         )
-        await ctx.send(embed=embeds.success(f"{membre.mention} est maintenant protégé contre les sanctions SentriX."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} est maintenant protégé contre les sanctions SentriX.')))
 
     @protectmember.command(name="remove", description="Retirer une protection.")
     async def protectmember_remove(self, ctx: commands.Context, membre: discord.Member):
@@ -389,27 +384,27 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             "DELETE FROM v17_protected_members WHERE guild_id=? AND user_id=?",
             (ctx.guild.id, membre.id),
         )
-        await ctx.send(embed=embeds.success(f"Protection retirée pour {membre.mention}."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Protection retirée pour {membre.mention}.')))
 
     @commands.hybrid_command(name="caseproof", description="Ajouter une preuve à un dossier de modération.", with_app_command=False)
     @checks.has_permission_or_modrole("moderate_members")
     async def caseproof(self, ctx: commands.Context, numero: int, *, preuve: str):
         case = await self.bot.db.get_sanction_by_case(ctx.guild.id, numero)
         if not case:
-            return await ctx.send(embed=embeds.error(f"Dossier #{numero} introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Dossier #{numero} introuvable.')))
         await self.bot.db.execute(
             "INSERT INTO v17_case_proofs (guild_id,case_number,proof,added_by,created_at) VALUES (?,?,?,?,?) "
             "ON CONFLICT(guild_id,case_number) DO UPDATE SET proof=excluded.proof,added_by=excluded.added_by,created_at=excluded.created_at",
             (ctx.guild.id, numero, preuve[:1800], ctx.author.id, now()),
         )
-        await ctx.send(embed=embeds.success(f"Preuve enregistrée sur le dossier **#{numero}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Preuve enregistrée sur le dossier **#{numero}**.')))
 
     @commands.hybrid_command(name="casefull", description="Afficher un dossier complet, preuve incluse.", with_app_command=False)
     @checks.has_permission_or_modrole("moderate_members")
     async def casefull(self, ctx: commands.Context, numero: int):
         row = await self.bot.db.get_sanction_by_case(ctx.guild.id, numero)
         if not row:
-            return await ctx.send(embed=embeds.error(f"Dossier #{numero} introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Dossier #{numero} introuvable.')))
         proof = await self.bot.db.fetchone(
             "SELECT * FROM v17_case_proofs WHERE guild_id=? AND case_number=?",
             (ctx.guild.id, numero),
@@ -428,12 +423,12 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
         e.add_field(name="Preuve", value=proof["proof"] if proof else "Aucune preuve enregistrée", inline=False)
         if undo:
             e.add_field(name="Annulation", value=f"Annulé par <@{undo['undone_by']}> <t:{undo['undone_at']}:R> — {undo['detail'] or ''}", inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_group(name="staffnote", description="Notes privées du staff sur un membre.")
     @checks.has_permission_or_modrole("moderate_members")
     async def staffnote(self, ctx: commands.Context):
-        await ctx.send(embed=embeds.info("Utilisez `+staffnote add`, `+staffnote list` ou `+staffnote remove`."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Utilisez `+staffnote add`, `+staffnote list` ou `+staffnote remove`.')))
 
     @staffnote.command(name="add")
     async def staffnote_add(self, ctx: commands.Context, membre: discord.Member, *, note: str):
@@ -441,7 +436,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             "INSERT INTO v17_staff_notes (guild_id,user_id,author_id,note,created_at) VALUES (?,?,?,?,?)",
             (ctx.guild.id, membre.id, ctx.author.id, note[:1800], now()),
         )
-        await ctx.send(embed=embeds.success(f"Note privée ajoutée pour {membre.mention}."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Note privée ajoutée pour {membre.mention}.')))
 
     @staffnote.command(name="list")
     async def staffnote_list(self, ctx: commands.Context, membre: discord.Member):
@@ -450,7 +445,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             (ctx.guild.id, membre.id),
         )
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucune note staff pour ce membre."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucune note staff pour ce membre.')))
         e = embeds.neutral(f"Notes staff — {membre.display_name}")
         for row in rows:
             e.add_field(
@@ -458,7 +453,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
                 value=f"Par <@{row['author_id']}>\n{row['note']}",
                 inline=False,
             )
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @staffnote.command(name="remove")
     async def staffnote_remove(self, ctx: commands.Context, note_id: int):
@@ -467,9 +462,9 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             (note_id, ctx.guild.id),
         )
         if not row:
-            return await ctx.send(embed=embeds.error("Note introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Note introuvable.')))
         await self.bot.db.execute("DELETE FROM v17_staff_notes WHERE id=?", (note_id,))
-        await ctx.send(embed=embeds.success(f"Note **#{note_id}** supprimée."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Note **#{note_id}** supprimée.')))
 
     @commands.hybrid_command(name="userhistory", description="Historique centralisé d'un membre.", with_app_command=False)
     @checks.has_permission_or_modrole("moderate_members")
@@ -498,16 +493,16 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
         e.add_field(name="Notes privées", value="\n".join(
             f"#{r['id']} par <@{r['author_id']}> — {r['note'][:180]}" for r in notes
         ) or "Aucune", inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="modundo", description="Annuler une sanction récente lorsque l'action est réversible.", with_app_command=False)
     @checks.has_permission_or_modrole("moderate_members")
     async def modundo(self, ctx: commands.Context, numero: int):
         row = await self.bot.db.get_sanction_by_case(ctx.guild.id, numero)
         if not row:
-            return await ctx.send(embed=embeds.error("Dossier introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Dossier introuvable.')))
         if await self.bot.db.fetchone("SELECT 1 FROM v17_mod_undo WHERE guild_id=? AND case_number=?", (ctx.guild.id, numero)):
-            return await ctx.send(embed=embeds.warning("Ce dossier a déjà été annulé."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Ce dossier a déjà été annulé.')))
         action = str(row["action"] or "")
         detail = ""
         try:
@@ -521,7 +516,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             elif action == "mute":
                 member = ctx.guild.get_member(row["user_id"])
                 if member is None:
-                    return await ctx.send(embed=embeds.error("Le membre n'est plus sur le serveur ; impossible de retirer son timeout."))
+                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Le membre n'est plus sur le serveur ; impossible de retirer son timeout.")))
                 await member.timeout(None, reason=f"Undo dossier #{numero} par {ctx.author}")
                 detail = "timeout retiré"
             elif action == "warn":
@@ -530,32 +525,24 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
                     (ctx.guild.id, row["user_id"], row["reason"], int(row["created_at"]) - 5, int(row["created_at"]) + 5),
                 )
                 if not warning:
-                    return await ctx.send(embed=embeds.error("L'avertissement d'origine n'a pas pu être retrouvé précisément."))
+                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'avertissement d'origine n'a pas pu être retrouvé précisément.")))
                 await self.bot.db.execute("DELETE FROM warnings WHERE id=?", (warning["id"],))
                 detail = f"avertissement #{warning['id']} supprimé"
             else:
-                return await ctx.send(embed=embeds.warning(
-                    f"L'action **{action}** n'est pas réversible automatiquement. Les kicks/unbans et actions similaires restent dans l'audit."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"L'action **{action}** n'est pas réversible automatiquement. Les kicks/unbans et actions similaires restent dans l'audit.")))
         except discord.HTTPException:
-            return await ctx.send(embed=embeds.error("Discord a refusé l'annulation. Vérifiez les permissions et l'état actuel de la cible."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Discord a refusé l'annulation. Vérifiez les permissions et l'état actuel de la cible.")))
         await self.bot.db.execute(
             "INSERT INTO v17_mod_undo (guild_id,case_number,undone_by,detail,undone_at) VALUES (?,?,?,?,?)",
             (ctx.guild.id, numero, ctx.author.id, detail, now()),
         )
-        await ctx.send(embed=embeds.success(f"Dossier **#{numero}** annulé : {detail}."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Dossier **#{numero}** annulé : {detail}.')))
 
     @commands.hybrid_group(name="sanctionpolicy", description="Configurer les sanctions progressives par nombre de warns.")
     @checks.is_owner_or_admin_for("moderation")
     async def sanctionpolicy(self, ctx: commands.Context):
         row = await self._policy(ctx.guild.id)
-        await ctx.send(embed=embeds.info(
-            f"État : **{'activé' if row['enabled'] else 'désactivé'}**\n"
-            f"Mute : **{row['mute_warns']} warns** pendant {helpers.format_duration(row['mute_seconds'])}\n"
-            f"Tempban : **{row['tempban_warns']} warns** pendant {helpers.format_duration(row['tempban_seconds'])}\n"
-            f"Ban : **{row['ban_warns']} warns**",
-            title="Sanctions progressives",
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"État : **{('activé' if row['enabled'] else 'désactivé')}**\nMute : **{row['mute_warns']} warns** pendant {helpers.format_duration(row['mute_seconds'])}\nTempban : **{row['tempban_warns']} warns** pendant {helpers.format_duration(row['tempban_seconds'])}\nBan : **{row['ban_warns']} warns**", title='Sanctions progressives')))
 
     async def _policy(self, guild_id: int):
         await self.bot.db.execute(
@@ -570,47 +557,47 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
         await self.bot.db.execute("UPDATE v17_sanction_policy SET enabled=1,updated_at=? WHERE guild_id=?", (now(), ctx.guild.id))
         # Empêche l'ancien seuil unique de bannissement de se déclencher en parallèle.
         await self.bot.db.set_guild_config(ctx.guild.id, "warn_ban_threshold", 0)
-        await ctx.send(embed=embeds.success("Sanctions progressives V17 activées. L'ancien seuil unique de ban a été désactivé pour éviter les doubles sanctions."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success("Sanctions progressives V17 activées. L'ancien seuil unique de ban a été désactivé pour éviter les doubles sanctions.")))
 
     @sanctionpolicy.command(name="disable")
     async def sanctionpolicy_disable(self, ctx: commands.Context):
         await self._policy(ctx.guild.id)
         await self.bot.db.execute("UPDATE v17_sanction_policy SET enabled=0,updated_at=? WHERE guild_id=?", (now(), ctx.guild.id))
-        await ctx.send(embed=embeds.success("Sanctions progressives V17 désactivées."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Sanctions progressives V17 désactivées.')))
 
     @sanctionpolicy.command(name="set")
     async def sanctionpolicy_set(self, ctx: commands.Context, action: str, warns: app_commands.Range[int, 1, 50], duree: str = "1h"):
         action = action.casefold().strip()
         row = await self._policy(ctx.guild.id)
         if action not in {"mute", "tempban", "ban"}:
-            return await ctx.send(embed=embeds.error("Action valide : `mute`, `tempban` ou `ban`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Action valide : `mute`, `tempban` ou `ban`.')))
         updates = {"mute": "mute_warns", "tempban": "tempban_warns", "ban": "ban_warns"}
         await self.bot.db.execute(f"UPDATE v17_sanction_policy SET {updates[action]}=?,updated_at=? WHERE guild_id=?", (warns, now(), ctx.guild.id))
         if action in {"mute", "tempban"}:
             seconds = helpers.parse_duration(duree)
             if seconds is None or seconds <= 0:
-                return await ctx.send(embed=embeds.error("Durée invalide, ex. `30m`, `2h`, `1j`."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide, ex. `30m`, `2h`, `1j`.')))
             field = "mute_seconds" if action == "mute" else "tempban_seconds"
             await self.bot.db.execute(f"UPDATE v17_sanction_policy SET {field}=?,updated_at=? WHERE guild_id=?", (seconds, now(), ctx.guild.id))
-        await ctx.send(embed=embeds.success(f"Palier **{action}** réglé sur **{warns} warn(s)**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Palier **{action}** réglé sur **{warns} warn(s)**.')))
 
     @commands.hybrid_group(name="serversnapshot", description="Snapshots de sécurité du serveur.")
     @checks.is_owner_or_admin_for("securite")
     async def serversnapshot(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT id,label,created_at FROM v17_snapshots WHERE guild_id=? ORDER BY created_at DESC LIMIT 10", (ctx.guild.id,))
         text = "\n".join(f"• **#{r['id']}** {r['label']} — <t:{r['created_at']}:R>" for r in rows) or "Aucun snapshot."
-        await ctx.send(embed=embeds.info(text, title="Snapshots V17"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title='Snapshots V17')))
 
     @serversnapshot.command(name="create")
     async def serversnapshot_create(self, ctx: commands.Context, *, nom: str = "manuel"):
         snapshot_id = await create_snapshot(self.bot, ctx.guild, nom, ctx.author.id)
-        await ctx.send(embed=embeds.success(f"Snapshot **#{snapshot_id}** créé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Snapshot **#{snapshot_id}** créé.')))
 
     @serversnapshot.command(name="restore")
     async def serversnapshot_restore(self, ctx: commands.Context, snapshot_id: int):
         row = await self.bot.db.fetchone("SELECT * FROM v17_snapshots WHERE id=? AND guild_id=?", (snapshot_id, ctx.guild.id))
         if not row:
-            return await ctx.send(embed=embeds.error("Snapshot introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Snapshot introuvable.')))
         view = helpers.ConfirmView(ctx.author.id, timeout=30)
         msg = await ctx.send(embed=embeds.warning("La restauration est **additive** : elle recrée ce qui manque sans supprimer les éléments actuels. Continuer ?"), view=view)
         await view.wait()
@@ -689,7 +676,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
     async def smartlockdown(self, ctx: commands.Context, mode: str):
         mode = mode.casefold().strip()
         if mode not in {"on", "off", "activer", "desactiver", "désactiver"}:
-            return await ctx.send(embed=embeds.error("Utilisez `+smartlockdown on` ou `+smartlockdown off`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez `+smartlockdown on` ou `+smartlockdown off`.')))
         enable = mode in {"on", "activer"}
         changed = 0
         if enable:
@@ -727,7 +714,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
                 except discord.HTTPException:
                     pass
             await self.bot.db.execute("DELETE FROM v17_lockdown_state WHERE guild_id=?", (ctx.guild.id,))
-        await ctx.send(embed=embeds.success(f"Smart lockdown {'activé' if enable else 'désactivé'} — **{changed} salon(s)** modifié(s)."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Smart lockdown {('activé' if enable else 'désactivé')} — **{changed} salon(s)** modifié(s).")))
 
     @commands.hybrid_group(name="nukewhitelist", description="Whitelist anti-nuke par utilisateur, rôle et action.")
     @checks.is_owner_or_admin_for("securite")
@@ -737,29 +724,29 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             f"• {('<@'+str(r['subject_id'])+'>') if r['subject_type']=='user' else ('<@&'+str(r['subject_id'])+'>')} — `{r['action']}`"
             for r in rows[:30]
         ) or "Aucune règle V17."
-        await ctx.send(embed=embeds.info(text, title="Whitelist anti-nuke V17"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title='Whitelist anti-nuke V17')))
 
     @nukewhitelist.command(name="user")
     async def nukewhitelist_user(self, ctx: commands.Context, membre: discord.Member, action: str = "all"):
         action = action.casefold()
         if action not in VALID_NUKE_ACTIONS:
-            return await ctx.send(embed=embeds.error("Action : `all`, `channel_delete` ou `role_delete`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Action : `all`, `channel_delete` ou `role_delete`.')))
         await self.bot.db.execute(
             "INSERT OR REPLACE INTO v17_antinuke_whitelist (guild_id,subject_type,subject_id,action,added_by,created_at) VALUES (?,'user',?,?,?,?)",
             (ctx.guild.id, membre.id, action, ctx.author.id, now()),
         )
-        await ctx.send(embed=embeds.success(f"{membre.mention} autorisé pour `{action}`."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} autorisé pour `{action}`.')))
 
     @nukewhitelist.command(name="role")
     async def nukewhitelist_role(self, ctx: commands.Context, role: discord.Role, action: str = "all"):
         action = action.casefold()
         if action not in VALID_NUKE_ACTIONS:
-            return await ctx.send(embed=embeds.error("Action : `all`, `channel_delete` ou `role_delete`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Action : `all`, `channel_delete` ou `role_delete`.')))
         await self.bot.db.execute(
             "INSERT OR REPLACE INTO v17_antinuke_whitelist (guild_id,subject_type,subject_id,action,added_by,created_at) VALUES (?,'role',?,?,?,?)",
             (ctx.guild.id, role.id, action, ctx.author.id, now()),
         )
-        await ctx.send(embed=embeds.success(f"{role.mention} autorisé pour `{action}`."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{role.mention} autorisé pour `{action}`.')))
 
     @nukewhitelist.command(name="remove")
     async def nukewhitelist_remove(self, ctx: commands.Context, identifiant: str, action: str = "all"):
@@ -767,12 +754,12 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
         try:
             subject_id = int(raw)
         except ValueError:
-            return await ctx.send(embed=embeds.error("Mention ou ID invalide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Mention ou ID invalide.')))
         await self.bot.db.execute(
             "DELETE FROM v17_antinuke_whitelist WHERE guild_id=? AND subject_id=? AND action=?",
             (ctx.guild.id, subject_id, action.casefold()),
         )
-        await ctx.send(embed=embeds.success("Règle supprimée."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Règle supprimée.')))
 
     @commands.hybrid_command(name="suspiciouslist", description="Afficher les comptes récents à surveiller.", with_app_command=False)
     @checks.is_owner_or_admin_for("securite")
@@ -785,7 +772,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             f"• <@{r['user_id']}> — **{r['score']}/9** — {', '.join(json.loads(r['reasons_json'] or '[]'))}"
             for r in rows
         ) or "Aucun compte signalé."
-        await ctx.send(embed=embeds.info(text[:4000], title="Comptes à surveiller — aucune sanction automatique"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text[:4000], title='Comptes à surveiller — aucune sanction automatique')))
 
     @commands.Cog.listener()
     async def on_command_completion(self, ctx: commands.Context):
@@ -824,7 +811,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
         error = checks.check_bot_hierarchy(ctx.guild, member)
         if error:
             await self.bot.db.execute("DELETE FROM v17_sanction_escalations WHERE guild_id=? AND user_id=? AND level=?", (ctx.guild.id, member.id, level))
-            return await ctx.send(embed=embeds.warning(f"Palier {level} atteint, mais action impossible : {error}"))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Palier {level} atteint, mais action impossible : {error}')))
         reason = f"Sanction progressive V17 : {count} avertissements (palier {threshold})"
         try:
             if level == "mute":
@@ -836,13 +823,10 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
                 await ctx.guild.ban(member, reason=reason, delete_message_seconds=0)
             action_name = "tempban" if level == "tempban" else level
             case_number = await self.bot.db.record_sanction(ctx.guild.id, member.id, self.bot.user.id, action_name, reason, seconds or None)
-            await ctx.send(embed=embeds.warning(
-                f"{member.mention} a atteint **{count} avertissements** : **{level}** appliqué automatiquement. Dossier **#{case_number}**.",
-                title="Sanction progressive",
-            ))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'{member.mention} a atteint **{count} avertissements** : **{level}** appliqué automatiquement. Dossier **#{case_number}**.', title='Sanction progressive')))
         except discord.HTTPException:
             await self.bot.db.execute("DELETE FROM v17_sanction_escalations WHERE guild_id=? AND user_id=? AND level=?", (ctx.guild.id, member.id, level))
-            await ctx.send(embed=embeds.error("Le palier a été atteint mais Discord a refusé la sanction automatique."))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le palier a été atteint mais Discord a refusé la sanction automatique.')))
 
 
 async def install(bot: commands.Bot, extension_name: str = "") -> None:

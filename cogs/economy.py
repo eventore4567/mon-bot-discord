@@ -383,47 +383,47 @@ class Economy(commands.Cog, name="Economy"):
     @app_commands.describe(membre="Le membre à voler")
     async def rob(self, ctx: commands.Context, membre: discord.Member):
         if membre.id == ctx.author.id:
-            return await ctx.send(embed=embeds.error("Vous ne pouvez pas vous voler vous-même."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas vous voler vous-même.')))
         if membre.bot:
-            return await ctx.send(embed=embeds.error("Vous ne pouvez pas voler un bot."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
         last = self.rob_cooldowns.get(ctx.author.id, 0)
         if now() - last < ROB_COOLDOWN:
             remaining = ROB_COOLDOWN - (now() - last)
-            return await ctx.send(embed=embeds.warning(f"Vous devez attendre {remaining // 60} minutes avant de retenter un vol."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Vous devez attendre {remaining // 60} minutes avant de retenter un vol.')))
         await self.bot.db.ensure_economy(ctx.guild.id, membre.id)
         target_bal = await self.bot.db.get_balance(ctx.guild.id, membre.id)
         self.rob_cooldowns[ctx.author.id] = now()
         if target_bal["cash"] < 50:
-            return await ctx.send(embed=embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")))
         success = random.random() < 0.4
         if success:
             amount = random.randint(1, min(target_bal["cash"], 300))
             await self.bot.db.add_balance(ctx.guild.id, membre.id, -amount)
             await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, amount)
             await self.bot.db.log_transaction(ctx.guild.id, membre.id, ctx.author.id, "rob", amount, "Vol réussi")
-            await ctx.send(embed=embeds.success(f"🕵️ Vous avez volé **{stats_service.format_number(amount)} 🪙** à {membre.display_name} !"))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🕵️ Vous avez volé **{stats_service.format_number(amount)} 🪙** à {membre.display_name} !')))
         else:
             penalty = random.randint(20, 100)
             await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, -penalty)
             await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, None, "rob_fail", penalty, "Vol raté, amende")
-            await ctx.send(embed=embeds.error(f"🚨 Vous avez été attrapé et payé **{stats_service.format_number(penalty)} 🪙** d'amende !"))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"🚨 Vous avez été attrapé et payé **{stats_service.format_number(penalty)} 🪙** d'amende !")))
 
     @commands.hybrid_command(name="pay", description="Transférer de l'argent à un autre membre.")
     @app_commands.describe(membre="Le membre à qui envoyer", montant="Le montant à envoyer (ou 'all' pour tout envoyer)")
     async def pay(self, ctx: commands.Context, membre: discord.Member, montant: str):
         if membre.id == ctx.author.id:
-            return await ctx.send(embed=embeds.error("Vous ne pouvez pas vous payer vous-même."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas vous payer vous-même.')))
         if membre.bot:
-            return await ctx.send(embed=embeds.error("Vous ne pouvez pas payer un bot."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas payer un bot.')))
         await self.bot.db.ensure_economy(ctx.guild.id, ctx.author.id)
         bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
         amount = _parse_amount(montant, bal["cash"])
         if amount is None or amount <= 0:
-            return await ctx.send(embed=embeds.error("Montant invalide — utilisez un nombre positif ou `all`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide — utilisez un nombre positif ou `all`.')))
         ok = await self.bot.db.pay_member(ctx.guild.id, ctx.author.id, membre.id, amount, reason="Paiement entre membres")
         if not ok:
-            return await ctx.send(embed=embeds.error("Vous n'avez pas assez d'argent liquide (ou le montant est invalide)."))
-        await ctx.send(embed=embeds.success(f"💸 Vous avez envoyé **{stats_service.format_number(amount)} 🪙** à {membre.mention}."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent liquide (ou le montant est invalide).")))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'💸 Vous avez envoyé **{stats_service.format_number(amount)} 🪙** à {membre.mention}.')))
 
     @commands.hybrid_command(name="economyleaderboard", description="Afficher le classement des plus riches.")
     async def economyleaderboard(self, ctx: commands.Context):
@@ -525,16 +525,7 @@ class Economy(commands.Cog, name="Economy"):
         await self._send_shop_setup(ctx)
 
     async def _send_shop_setup(self, ctx: commands.Context):
-        await ctx.send(embed=embeds.info(
-            "**Configurer la boutique de rôles**\n"
-            "`+shoprole add @VIP 500` — ajoute un rôle au prix choisi\n"
-            "`+shoprole add @VIP @Booster 500` — ajoute plusieurs rôles au même prix\n"
-            "`+shoprole price @VIP 750` — change le prix\n"
-            "`+shoprole remove @VIP` — retire le rôle de la boutique\n"
-            "`+shoprole list` — affiche la configuration\n"
-            "`+shoppanel` — publie le menu interactif dans le salon\n\n"
-            "Après cela, les membres choisissent directement un rôle dans le menu : aucune commande à taper."
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info('**Configurer la boutique de rôles**\n`+shoprole add @VIP 500` — ajoute un rôle au prix choisi\n`+shoprole add @VIP @Booster 500` — ajoute plusieurs rôles au même prix\n`+shoprole price @VIP 750` — change le prix\n`+shoprole remove @VIP` — retire le rôle de la boutique\n`+shoprole list` — affiche la configuration\n`+shoppanel` — publie le menu interactif dans le salon\n\nAprès cela, les membres choisissent directement un rôle dans le menu : aucune commande à taper.')))
 
     async def _shop_role_options(self, guild: discord.Guild) -> list[list[discord.SelectOption]]:
         rows = await self.bot.db.fetchall(
@@ -666,9 +657,9 @@ class Economy(commands.Cog, name="Economy"):
         description: str = "",
     ):
         if not roles:
-            return await ctx.send(embed=embeds.error("Mentionnez au moins un rôle à ajouter."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Mentionnez au moins un rôle à ajouter.')))
         if price < 1 or price > 1_000_000_000_000:
-            return await ctx.send(embed=embeds.error("Le prix doit être compris entre 1 et 1 000 000 000 000."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le prix doit être compris entre 1 et 1 000 000 000 000.')))
         accepted = []
         refused = []
         for role in roles:
@@ -712,25 +703,23 @@ class Economy(commands.Cog, name="Economy"):
             (ctx.guild.id, role.id),
         )
         if cursor.rowcount < 1:
-            return await ctx.send(embed=embeds.error("Ce rôle n'est pas dans la boutique."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
         await self._refresh_shop_panels(ctx.guild)
-        await ctx.send(embed=embeds.success(f"{role.mention} a été retiré de la boutique."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{role.mention} a été retiré de la boutique.')))
 
     @shoprole.command(name="price", aliases=["prix"])
     @checks.is_owner_or_admin()
     async def shoprole_price(self, ctx: commands.Context, role: discord.Role, price: int):
         if price < 1 or price > 1_000_000_000_000:
-            return await ctx.send(embed=embeds.error("Le prix doit être compris entre 1 et 1 000 000 000 000."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le prix doit être compris entre 1 et 1 000 000 000 000.')))
         cursor = await self.bot.db.execute(
             "UPDATE shop_items SET price = ?, name = ? WHERE guild_id = ? AND role_id = ?",
             (price, role.name, ctx.guild.id, role.id),
         )
         if cursor.rowcount < 1:
-            return await ctx.send(embed=embeds.error("Ce rôle n'est pas dans la boutique."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
         await self._refresh_shop_panels(ctx.guild)
-        await ctx.send(embed=embeds.success(
-            f"Le prix de {role.mention} est maintenant de **{stats_service.format_number(price)} 🪙**."
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le prix de {role.mention} est maintenant de **{stats_service.format_number(price)} 🪙**.')))
 
     @shoprole.command(name="list", aliases=["liste"])
     @checks.is_owner_or_admin()
@@ -760,7 +749,7 @@ class Economy(commands.Cog, name="Economy"):
             (ctx.guild.id,),
         )
         if not items:
-            return await ctx.send(embed=embeds.info("La boutique est vide pour l'instant."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("La boutique est vide pour l'instant.")))
 
         chunks = [items[index:index + 6] for index in range(0, len(items), 6)]
         pages: list[discord.Embed] = []
@@ -793,7 +782,7 @@ class Economy(commands.Cog, name="Economy"):
     async def buy(self, ctx: commands.Context, id: int):
         item = await self.bot.db.fetchone("SELECT * FROM shop_items WHERE id = ? AND guild_id = ?", (id, ctx.guild.id))
         if not item:
-            return await ctx.send(embed=embeds.error("Article introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Article introuvable.')))
         await self._purchase_item(ctx, item)
 
     @commands.command(name="buyrole", aliases=["acheterrole"])
@@ -803,7 +792,7 @@ class Economy(commands.Cog, name="Economy"):
             (ctx.guild.id, role.id),
         )
         if not item:
-            return await ctx.send(embed=embeds.error("Ce rôle n'est pas dans la boutique."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
         await self._purchase_item(ctx, item)
 
     async def _purchase_item(self, ctx: commands.Context, item):
@@ -813,19 +802,15 @@ class Economy(commands.Cog, name="Economy"):
 
         status, purchased_item = await self.bot.db.purchase_shop_item(ctx.guild.id, ctx.author.id, item["id"])
         if status == "not_found":
-            return await ctx.send(embed=embeds.error("Article introuvable ou prix invalide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Article introuvable ou prix invalide.')))
         if status == "insufficient_funds":
-            return await ctx.send(embed=embeds.error(
-                "Vous n'avez pas assez d'argent dans votre portefeuille. Utilisez `+withdraw` pour retirer de la banque."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent dans votre portefeuille. Utilisez `+withdraw` pour retirer de la banque.")))
         await self.bot.db.execute(
             "INSERT INTO inventory (guild_id, user_id, item_name, quantity) VALUES (?, ?, ?, 1) "
             "ON CONFLICT(guild_id, user_id, item_name) DO UPDATE SET quantity = quantity + 1",
             (ctx.guild.id, ctx.author.id, purchased_item["name"]),
         )
-        await ctx.send(embed=embeds.success(
-            f"Vous avez acheté **{purchased_item['name']}** pour {stats_service.format_number(purchased_item['price'])} 🪙."
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Vous avez acheté **{purchased_item['name']}** pour {stats_service.format_number(purchased_item['price'])} 🪙.")))
 
     async def _purchase_role_result(self, guild: discord.Guild, member: discord.Member, item) -> discord.Embed:
         role = guild.get_role(item["role_id"]) if item["role_id"] else None
@@ -938,7 +923,7 @@ class Economy(commands.Cog, name="Economy"):
             "SELECT * FROM inventory WHERE guild_id = ? AND user_id = ? AND item_name = ?", (ctx.guild.id, ctx.author.id, objet)
         )
         if not row or row["quantity"] < 1:
-            return await ctx.send(embed=embeds.error("Vous ne possédez pas cet objet."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne possédez pas cet objet.')))
         item = await self.bot.db.fetchone("SELECT * FROM shop_items WHERE guild_id = ? AND name = ?", (ctx.guild.id, objet))
         price = int(item["price"] * 0.5) if item else 10
         await self.bot.db.execute(
@@ -947,25 +932,25 @@ class Economy(commands.Cog, name="Economy"):
         )
         await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, price)
         await self.bot.db.log_transaction(ctx.guild.id, None, ctx.author.id, "sell", price, f"Vente : {objet}")
-        await ctx.send(embed=embeds.success(f"Vous avez vendu **{objet}** pour {stats_service.format_number(price)} 🪙."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous avez vendu **{objet}** pour {stats_service.format_number(price)} 🪙.')))
 
     @commands.hybrid_command(name="gamble", description="Miser de l'argent au casino (50% de chance).")
     @app_commands.describe(montant="Le montant à miser")
     async def gamble(self, ctx: commands.Context, montant: int):
         if montant <= 0:
-            return await ctx.send(embed=embeds.error("Le montant doit être positif."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant doit être positif.')))
         await self.bot.db.ensure_economy(ctx.guild.id, ctx.author.id)
         bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
         if bal["cash"] < montant:
-            return await ctx.send(embed=embeds.error("Vous n'avez pas assez d'argent."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent.")))
         if random.random() < 0.5:
             await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, montant)
             await self.bot.db.log_transaction(ctx.guild.id, None, ctx.author.id, "gamble_win", montant, "Casino")
-            await ctx.send(embed=embeds.success(f"🎰 Vous avez gagné **{stats_service.format_number(montant)} 🪙** !"))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🎰 Vous avez gagné **{stats_service.format_number(montant)} 🪙** !')))
         else:
             await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, -montant)
             await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, None, "gamble_loss", montant, "Casino")
-            await ctx.send(embed=embeds.error(f"🎰 Vous avez perdu **{stats_service.format_number(montant)} 🪙**."))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'🎰 Vous avez perdu **{stats_service.format_number(montant)} 🪙**.')))
 
     async def _deposit_to_bank(self, ctx: commands.Context, montant: str):
         """Transfère un montant du portefeuille vers la banque."""
@@ -973,14 +958,12 @@ class Economy(commands.Cog, name="Economy"):
         bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
         amount = _parse_amount(montant, bal["cash"])
         if amount is None or amount <= 0 or amount > bal["cash"]:
-            return await ctx.send(embed=embeds.error("Montant invalide. Utilisez un nombre positif ou `all`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide. Utilisez un nombre positif ou `all`.')))
         await self.bot.db.execute(
             "UPDATE economy SET cash = cash - ?, bank = bank + ? WHERE guild_id = ? AND user_id = ?",
             (amount, amount, ctx.guild.id, ctx.author.id),
         )
-        await ctx.send(embed=embeds.success(
-            f"{stats_service.format_number(amount)} 🪙 transférés dans votre banque. Cet argent ne peut pas être volé."
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{stats_service.format_number(amount)} 🪙 transférés dans votre banque. Cet argent ne peut pas être volé.')))
 
     @commands.hybrid_command(name="deposit", description="Déposer de l'argent à la banque (ou 'all').", with_app_command=False)
     @app_commands.describe(montant="Le montant à déposer (ou 'all')")
@@ -994,12 +977,12 @@ class Economy(commands.Cog, name="Economy"):
         bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
         amount = _parse_amount(montant, bal["bank"])
         if amount is None or amount <= 0 or amount > bal["bank"]:
-            return await ctx.send(embed=embeds.error("Montant invalide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide.')))
         await self.bot.db.execute(
             "UPDATE economy SET cash = cash + ?, bank = bank - ? WHERE guild_id = ? AND user_id = ?",
             (amount, amount, ctx.guild.id, ctx.author.id),
         )
-        await ctx.send(embed=embeds.success(f"💵 {stats_service.format_number(amount)} 🪙 retirés de la banque."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'💵 {stats_service.format_number(amount)} 🪙 retirés de la banque.')))
 
     @commands.hybrid_command(
         name="banque",
@@ -1023,7 +1006,7 @@ class Economy(commands.Cog, name="Economy"):
         e.add_field(name="👛 Espèces", value=f"{stats_service.format_number(stats['wallet'])} 🪙", inline=True)
         e.add_field(name="🏦 Banque", value=f"{stats_service.format_number(stats['bank'])} 🪙", inline=True)
         e.add_field(name="💎 Total", value=f"**{stats_service.format_number(stats['total_money'])}** 🪙", inline=True)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="give-money", description="[Admin] Donner de l'argent à un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé", montant="Le montant à donner")
@@ -1032,13 +1015,13 @@ class Economy(commands.Cog, name="Economy"):
         await self.bot.db.ensure_economy(ctx.guild.id, membre.id)
         await self.bot.db.add_balance(ctx.guild.id, membre.id, montant)
         await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, membre.id, "admin_grant", montant, "Ajout manuel (staff)")
-        await ctx.send(embed=embeds.success(f"{stats_service.format_number(montant)} 🪙 ajoutés au compte de {membre.mention}."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{stats_service.format_number(montant)} 🪙 ajoutés au compte de {membre.mention}.')))
 
     @commands.hybrid_command(name="reset-economy", description="[Admin] Réinitialiser l'économie du serveur.", with_app_command=False)
     @checks.is_owner_or_admin_for("economie")
     async def reset_economy(self, ctx: commands.Context):
         await self.bot.db.execute("DELETE FROM economy WHERE guild_id = ?", (ctx.guild.id,))
-        await ctx.send(embed=embeds.success("L'économie du serveur a été réinitialisée. (L'historique des transactions est conservé pour l'audit.)"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success("L'économie du serveur a été réinitialisée. (L'historique des transactions est conservé pour l'audit.)")))
 
 
 async def setup(bot: commands.Bot):

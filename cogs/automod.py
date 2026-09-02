@@ -42,6 +42,7 @@ from discord.ext import commands
 
 import config
 from utils import embeds, checks, helpers
+from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
 
 logger = logging.getLogger("bot")
@@ -272,7 +273,7 @@ class AutoMod(commands.Cog, name="Automod"):
         self.automod_cache.pop(ctx.guild.id, None)
         state_text = "ACTIF" if value else "INACTIF"
         label = "L'escalade automatique" if field == "escalation" else f"Le filtre **{AUTOMOD_TOGGLE_LABELS.get(field, field)}**"
-        await ctx.send(embed=embeds.success(f"{label} est maintenant {state_text}."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{label} est maintenant {state_text}.')))
 
     # ---------------------------------------------------------------- TOGGLES (10 commandes explicites)
 
@@ -360,7 +361,7 @@ class AutoMod(commands.Cog, name="Automod"):
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)", (ctx.guild.id, membre.id)
         )
-        await ctx.send(embed=embeds.success(f"{membre.mention} est maintenant exempté de l'anti-nuke."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{membre.mention} est maintenant exempté de l'anti-nuke.")))
 
     @commands.hybrid_command(name="antinuke-whitelist-remove", description="Retirer un membre de la liste blanche anti-nuke.", with_app_command=False)
     @app_commands.describe(membre="Le membre à retirer")
@@ -369,21 +370,21 @@ class AutoMod(commands.Cog, name="Automod"):
         await self.bot.db.execute(
             "DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
-        await ctx.send(embed=embeds.success(f"{membre.mention} a été retiré de la liste blanche anti-nuke."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} a été retiré de la liste blanche anti-nuke.')))
 
     @commands.hybrid_command(name="antinuke-whitelist-list", description="Afficher les membres exemptés de l'anti-nuke.", with_app_command=False)
     @checks.is_owner_or_admin_for("securite")
     async def antinuke_whitelist_list(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM antinuke_whitelist WHERE guild_id = ?", (ctx.guild.id,))
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucun membre exempté (seul le propriétaire du serveur est protégé par défaut)."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucun membre exempté (seul le propriétaire du serveur est protégé par défaut).')))
         lines = [f"<@{r['user_id']}>" for r in rows]
-        await ctx.send(embed=embeds.neutral("🛡️ Liste blanche anti-nuke", "\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('🛡️ Liste blanche anti-nuke', '\n'.join(lines))))
 
     @commands.hybrid_command(name="lockdown-server", description="[Sécurité] Verrouiller tous les salons textuels du serveur.")
     @checks.is_owner_or_admin_for("securite")
     async def lockdown_server(self, ctx: commands.Context):
-        await ctx.send(embed=embeds.warning("🔒 Verrouillage de tous les salons en cours, merci de patienter..."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('🔒 Verrouillage de tous les salons en cours, merci de patienter...')))
         count = 0
         for channel in ctx.guild.text_channels:
             try:
@@ -398,12 +399,12 @@ class AutoMod(commands.Cog, name="Automod"):
             acteur_label="🛠️ Verrouillé par", extra={"📊 Salons verrouillés": str(count)},
         )
         await self.log_action(ctx.guild, e)
-        await ctx.send(embed=embeds.success(f"🔒 {count} salon(s) verrouillé(s). Utilisez `/unlock-server` pour déverrouiller."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🔒 {count} salon(s) verrouillé(s). Utilisez `/unlock-server` pour déverrouiller.')))
 
     @commands.hybrid_command(name="unlock-server", description="[Sécurité] Déverrouiller tous les salons textuels du serveur.")
     @checks.is_owner_or_admin_for("securite")
     async def unlock_server(self, ctx: commands.Context):
-        await ctx.send(embed=embeds.info("🔓 Déverrouillage en cours, merci de patienter..."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info('🔓 Déverrouillage en cours, merci de patienter...')))
         count = 0
         for channel in ctx.guild.text_channels:
             try:
@@ -418,7 +419,7 @@ class AutoMod(commands.Cog, name="Automod"):
             acteur_label="🛠️ Déverrouillé par", extra={"📊 Salons déverrouillés": str(count)},
         )
         await self.log_action(ctx.guild, e)
-        await ctx.send(embed=embeds.success(f"🔓 {count} salon(s) déverrouillé(s)."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🔓 {count} salon(s) déverrouillé(s).')))
 
     @commands.hybrid_command(name="automod-status", description="Afficher l'état de tous les filtres automod, avec les statistiques des dernières 24h.")
     @checks.is_owner_or_admin_for("securite")
@@ -456,7 +457,7 @@ class AutoMod(commands.Cog, name="Automod"):
         if exempt_rows:
             mentions = ", ".join(f"<@&{r['role_id']}>" for r in exempt_rows)
             e.add_field(name="Rôles exemptés", value=mentions, inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(
         name="security-check",
@@ -498,7 +499,7 @@ class AutoMod(commands.Cog, name="Automod"):
             ),
             inline=False,
         )
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="automod-escalation", description="Activer/désactiver l'escalade automatique des sanctions AutoMod.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver l'escalade")
@@ -513,7 +514,7 @@ class AutoMod(commands.Cog, name="Automod"):
     async def automod_exempt_role_add(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.add_automod_exempt_role(ctx.guild.id, role.id)
         self.exempt_roles_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"Les membres avec le rôle {role.mention} ne seront plus jamais filtrés par AutoMod."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Les membres avec le rôle {role.mention} ne seront plus jamais filtrés par AutoMod.')))
 
     @commands.hybrid_command(name="automod-exempt-role-remove", description="Retirer un rôle de la liste des rôles exemptés d'AutoMod.", with_app_command=False)
     @app_commands.describe(role="Le rôle à retirer")
@@ -521,7 +522,7 @@ class AutoMod(commands.Cog, name="Automod"):
     async def automod_exempt_role_remove(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.remove_automod_exempt_role(ctx.guild.id, role.id)
         self.exempt_roles_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"Le rôle {role.mention} n'est plus exempté d'AutoMod."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Le rôle {role.mention} n'est plus exempté d'AutoMod.")))
 
     @commands.hybrid_command(name="automod-history", description="Afficher l'historique récent des actions AutoMod (globalement ou pour un membre).", with_app_command=False)
     @app_commands.describe(membre="Filtrer sur un membre précis (optionnel)")
@@ -534,12 +535,12 @@ class AutoMod(commands.Cog, name="Automod"):
             rows = await self.bot.db.automod_recent(ctx.guild.id, limit=10)
             title = "📜 Historique AutoMod — Serveur"
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucune action AutoMod enregistrée pour l'instant."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Aucune action AutoMod enregistrée pour l'instant.")))
         lines = []
         for r in rows:
             who = f"<@{r['user_id']}>" if r["user_id"] else "—"
             lines.append(f"<t:{r['timestamp']}:R> — {who} — `{r['filter_name']}` → **{r['action']}**\n╰ {r['reason']}")
-        await ctx.send(embed=embeds.neutral(title, "\n\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral(title, '\n\n'.join(lines))))
 
     @commands.hybrid_command(name="security-level", description="Définir le niveau de sécurité global du serveur.")
     @app_commands.describe(niveau="Niveau de sécurité")
@@ -554,7 +555,7 @@ class AutoMod(commands.Cog, name="Automod"):
         for field, value in SECURITY_PRESETS.get(niveau, {}).items():
             await self.bot.db.set_automod(ctx.guild.id, field, value)
         self.automod_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"Niveau de sécurité réglé sur **{niveau}**. Les filtres associés ont été ajustés."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Niveau de sécurité réglé sur **{niveau}**. Les filtres associés ont été ajustés.')))
 
     # ---------------------------------------------------------------- BLACKLIST MOTS
 
@@ -566,7 +567,7 @@ class AutoMod(commands.Cog, name="Automod"):
             "INSERT INTO blacklist_words (guild_id, word) VALUES (?, ?)", (ctx.guild.id, mot.lower())
         )
         self.blacklist_words_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"Le mot `{mot}` a été ajouté à la liste noire."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le mot `{mot}` a été ajouté à la liste noire.')))
 
     @commands.hybrid_command(name="blacklist-remove", description="Retirer un mot de la liste noire.", with_app_command=False)
     @app_commands.describe(mot="Le mot à retirer")
@@ -576,16 +577,16 @@ class AutoMod(commands.Cog, name="Automod"):
             "DELETE FROM blacklist_words WHERE guild_id = ? AND word = ?", (ctx.guild.id, mot.lower())
         )
         self.blacklist_words_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"Le mot `{mot}` a été retiré de la liste noire."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le mot `{mot}` a été retiré de la liste noire.')))
 
     @commands.hybrid_command(name="blacklist-list", description="Afficher la liste des mots interdits.")
     @checks.is_owner_or_admin_for("securite")
     async def blacklist_list(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT word FROM blacklist_words WHERE guild_id = ?", (ctx.guild.id,))
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucun mot interdit configuré."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucun mot interdit configuré.')))
         words = ", ".join(f"`{r['word']}`" for r in rows)
-        await ctx.send(embed=embeds.neutral("🚫 Mots interdits", words))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('🚫 Mots interdits', words)))
 
     # ---------------------------------------------------------------- BLACKLIST UTILISATEURS
 
@@ -595,13 +596,13 @@ class AutoMod(commands.Cog, name="Automod"):
     async def blacklist_user(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
         err = checks.check_hierarchy(ctx.author, membre)
         if err:
-            return await ctx.send(embed=embeds.error(err))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(err)))
         await self.bot.db.execute(
             "INSERT OR REPLACE INTO blacklist_users (guild_id, user_id, reason) VALUES (?, ?, ?)",
             (ctx.guild.id, membre.id, raison),
         )
         self.blacklist_users_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"{membre.mention} a été ajouté à la liste noire.\nRaison : {raison}"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} a été ajouté à la liste noire.\nRaison : {raison}')))
 
     @commands.hybrid_command(name="unblacklist-user", description="Retirer un utilisateur de la liste noire.", with_app_command=False)
     @app_commands.describe(membre="Le membre à retirer de la liste noire")
@@ -611,18 +612,18 @@ class AutoMod(commands.Cog, name="Automod"):
             "DELETE FROM blacklist_users WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
         self.blacklist_users_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"{membre.mention} a été retiré de la liste noire."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} a été retiré de la liste noire.')))
 
     @commands.hybrid_command(name="blacklist-users", description="Afficher tous les utilisateurs en liste noire.", with_app_command=False)
     @checks.is_owner_or_admin_for("securite")
     async def blacklist_users(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM blacklist_users WHERE guild_id = ?", (ctx.guild.id,))
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucun utilisateur en liste noire."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucun utilisateur en liste noire.')))
         e = embeds.neutral("🚫 Utilisateurs en liste noire")
         for row in rows[:20]:
             e.add_field(name=f"ID: {row['user_id']}", value=row["reason"] or "Aucune raison", inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     # ---------------------------------------------------------------- WHITELIST DOMAINES
 
@@ -635,7 +636,7 @@ class AutoMod(commands.Cog, name="Automod"):
             (ctx.guild.id, domaine.lower()),
         )
         self.whitelist_domains_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"Le domaine `{domaine}` est maintenant autorisé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le domaine `{domaine}` est maintenant autorisé.')))
 
     @commands.hybrid_command(name="unwhitelist-domain", description="Retirer un domaine de la liste blanche.", with_app_command=False)
     @app_commands.describe(domaine="Le domaine à retirer")
@@ -645,7 +646,7 @@ class AutoMod(commands.Cog, name="Automod"):
             "DELETE FROM whitelist_domains WHERE guild_id = ? AND domain = ?", (ctx.guild.id, domaine.lower())
         )
         self.whitelist_domains_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"Le domaine `{domaine}` a été retiré de la liste blanche."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le domaine `{domaine}` a été retiré de la liste blanche.')))
 
     # ---------------------------------------------------------------- ÉCOUTEURS
 
@@ -755,9 +756,7 @@ class AutoMod(commands.Cog, name="Automod"):
         except discord.HTTPException:
             pass
         try:
-            note = await message.channel.send(
-                embed=embeds.warning(f"{message.author.mention}, votre message a été supprimé.\nRaison : {reason}")
-            )
+            note = await panels.envoyer(message.channel, panels.depuis_embed(embeds.warning(f'{message.author.mention}, votre message a été supprimé.\nRaison : {reason}')))
             await note.delete(delay=6)
         except discord.HTTPException:
             pass
@@ -827,12 +826,7 @@ class AutoMod(commands.Cog, name="Automod"):
                  "Vérifiez la permission Modérer les membres et la hiérarchie des rôles."
         )
         try:
-            note = await message.channel.send(
-                embed=embeds.warning(
-                    f"{message.author.mention}, votre message a été supprimé.\n"
-                    f"Raison : contenu offensant détecté.\n{public_status}"
-                )
-            )
+            note = await panels.envoyer(message.channel, panels.depuis_embed(embeds.warning(f'{message.author.mention}, votre message a été supprimé.\nRaison : contenu offensant détecté.\n{public_status}')))
             await note.delete(delay=8)
         except discord.HTTPException:
             pass

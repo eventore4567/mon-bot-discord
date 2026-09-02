@@ -225,7 +225,7 @@ class Moderation(commands.Cog):
             + "\n\nConfiguration simple : +sanctiondm ban Votre texte\n"
               "Variables : {membre} {serveur} {raison} {duree} {moderateur} {action}",
         )
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.group(name="sanctiondm", aliases=["dm-sanction"], invoke_without_command=True)
     @checks.is_owner_or_admin()
@@ -241,15 +241,11 @@ class Moderation(commands.Cog):
             return await self._show_sanction_dm_status(ctx)
         normalised = self._normalise_dm_action(action)
         if normalised is None:
-            return await ctx.send(
-                embed=embeds.error("Action inconnue : ban, tempban, kick, mute, warn, unban ou unmute.")
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Action inconnue : ban, tempban, kick, mute, warn, unban ou unmute.')))
         if not message:
-            return await ctx.send(
-                embed=embeds.error(f"Ajoutez le texte. Exemple : +sanctiondm {normalised} Votre message")
-            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Ajoutez le texte. Exemple : +sanctiondm {normalised} Votre message')))
         if len(message) > 1900:
-            return await ctx.send(embed=embeds.error("Le message doit contenir au maximum 1 900 caractères."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le message doit contenir au maximum 1 900 caractères.')))
         await self.bot.db.execute(
             """
             INSERT INTO sanction_dm_templates (guild_id, action, message, enabled)
@@ -259,12 +255,7 @@ class Moderation(commands.Cog):
             """,
             (ctx.guild.id, normalised, message),
         )
-        await ctx.send(
-            embed=embeds.success(
-                f"Le MP de **{self.DM_ACTION_LABELS[normalised]}** est configuré.\n"
-                f"Aperçu :\n{message[:1000]}"
-            )
-        )
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le MP de **{self.DM_ACTION_LABELS[normalised]}** est configuré.\nAperçu :\n{message[:1000]}')))
 
     @sanctiondm.command(name="off", aliases=["disable", "desactiver"])
     @checks.is_owner_or_admin()
@@ -272,7 +263,7 @@ class Moderation(commands.Cog):
         """Désactiver le MP d'un type de sanction."""
         normalised = self._normalise_dm_action(action)
         if normalised is None:
-            return await ctx.send(embed=embeds.error("Action de sanction inconnue."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Action de sanction inconnue.')))
         await self.bot.db.execute(
             """
             INSERT INTO sanction_dm_templates (guild_id, action, message, enabled)
@@ -282,7 +273,7 @@ class Moderation(commands.Cog):
             """,
             (ctx.guild.id, normalised),
         )
-        await ctx.send(embed=embeds.success(f"Le MP de **{self.DM_ACTION_LABELS[normalised]}** est désactivé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le MP de **{self.DM_ACTION_LABELS[normalised]}** est désactivé.')))
 
     @sanctiondm.command(name="reset", aliases=["default", "defaut"])
     @checks.is_owner_or_admin()
@@ -290,12 +281,12 @@ class Moderation(commands.Cog):
         """Remettre le message par défaut d'un type de sanction."""
         normalised = self._normalise_dm_action(action)
         if normalised is None:
-            return await ctx.send(embed=embeds.error("Action de sanction inconnue."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Action de sanction inconnue.')))
         await self.bot.db.execute(
             "DELETE FROM sanction_dm_templates WHERE guild_id = ? AND action = ?",
             (ctx.guild.id, normalised),
         )
-        await ctx.send(embed=embeds.success(f"Le MP de **{self.DM_ACTION_LABELS[normalised]}** utilise le texte par défaut."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le MP de **{self.DM_ACTION_LABELS[normalised]}** utilise le texte par défaut.')))
 
     @sanctiondm.command(name="status", aliases=["liste", "list"])
     @checks.is_owner_or_admin()
@@ -306,11 +297,11 @@ class Moderation(commands.Cog):
     async def check_targetable(self, ctx: commands.Context, membre: discord.Member) -> bool:
         err = checks.check_hierarchy(ctx.author, membre)
         if err:
-            await ctx.send(embed=embeds.error(err))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(err)))
             return False
         err = checks.check_bot_hierarchy(ctx.guild, membre)
         if err:
-            await ctx.send(embed=embeds.error(err))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(err)))
             return False
         return True
 
@@ -339,7 +330,7 @@ class Moderation(commands.Cog):
             return
         seconds = helpers.parse_duration(duree)
         if seconds is None:
-            return await ctx.send(embed=embeds.error("Durée invalide. Exemples valides : `30m`, `2h`, `1j`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide. Exemples valides : `30m`, `2h`, `1j`.')))
         await self._send_sanction_dm(ctx, membre, "tempban", raison, seconds)
         await ctx.guild.ban(membre, reason=f"{ctx.author} (temporaire {duree}) : {raison}", delete_message_seconds=0)
         await self.bot.db.execute(
@@ -359,13 +350,13 @@ class Moderation(commands.Cog):
         try:
             uid = int(user_id)
         except ValueError:
-            return await ctx.send(embed=embeds.error("Identifiant Discord invalide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Identifiant Discord invalide.')))
         try:
             user = await self.bot.fetch_user(uid)
             await ctx.guild.unban(user, reason=f"{ctx.author} : {raison}")
             await self._send_sanction_dm(ctx, user, "unban", raison)
         except discord.NotFound:
-            return await ctx.send(embed=embeds.error("Cet utilisateur n'est pas banni ou n'existe pas."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Cet utilisateur n'est pas banni ou n'existe pas.")))
         e = await self.log_sanction(ctx, "unban", user, raison)
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
@@ -406,7 +397,7 @@ class Moderation(commands.Cog):
             return
         seconds = helpers.parse_duration(duree)
         if seconds is None or seconds > 2419200:
-            return await ctx.send(embed=embeds.error("Durée invalide (maximum 28 jours). Exemple : `10m`, `1h`, `1j`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide (maximum 28 jours). Exemple : `10m`, `1h`, `1j`.')))
         until = discord.utils.utcnow() + timedelta(seconds=seconds)
         await membre.timeout(until, reason=f"{ctx.author} : {raison}")
         await self._send_sanction_dm(ctx, membre, "mute", raison, seconds)
@@ -472,10 +463,7 @@ class Moderation(commands.Cog):
         if threshold and total >= threshold:
             err = checks.check_bot_hierarchy(ctx.guild, membre)
             if err:
-                await ctx.send(embed=embeds.warning(
-                    f"{membre.mention} a atteint **{total}** avertissements (seuil : {threshold}) mais n'a pas pu "
-                    f"être banni automatiquement : {err}"
-                ))
+                await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"{membre.mention} a atteint **{total}** avertissements (seuil : {threshold}) mais n'a pas pu être banni automatiquement : {err}")))
                 return
             await self._send_sanction_dm(
                 ctx, membre, "ban", f"Seuil de {threshold} avertissements atteint"
@@ -485,7 +473,7 @@ class Moderation(commands.Cog):
                     membre, reason=f"Ban automatique : {threshold} avertissements atteints", delete_message_seconds=0
                 )
             except discord.HTTPException:
-                await ctx.send(embed=embeds.error(f"Le bannissement automatique de {membre.mention} a échoué (permissions)."))
+                await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Le bannissement automatique de {membre.mention} a échoué (permissions).')))
                 return
             case_number = await self.bot.db.record_sanction(
                 ctx.guild.id, membre.id, self.bot.user.id, "ban",
@@ -502,7 +490,7 @@ class Moderation(commands.Cog):
             ban_e.add_field(name="🛡️ Modérateur", value=f"{self.bot.user.mention} (automatique)", inline=True)
             ban_e.add_field(name="📝 Raison", value=f"Seuil de {threshold} avertissements atteint", inline=False)
             ban_e.add_field(name="📌 Détails", value=f"Bannissement automatique — total d'avertissements : {total}", inline=False)
-            await ctx.send(embed=ban_e)
+            await panels.envoyer(ctx, panels.depuis_embed(ban_e))
             await self.log_action(ctx.guild, ban_e)
 
     @commands.hybrid_command(name="unwarn", description="Supprimer un avertissement précis via son identifiant.", with_app_command=False)
@@ -514,9 +502,9 @@ class Moderation(commands.Cog):
             "SELECT * FROM warnings WHERE id = ? AND guild_id = ?", (warn_id, ctx.guild.id)
         )
         if not row:
-            return await ctx.send(embed=embeds.error("Aucun avertissement trouvé avec cet identifiant."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Aucun avertissement trouvé avec cet identifiant.')))
         await self.bot.db.execute("DELETE FROM warnings WHERE id = ?", (warn_id,))
-        await ctx.send(embed=embeds.success(f"L'avertissement `#{warn_id}` a été supprimé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"L'avertissement `#{warn_id}` a été supprimé.")))
 
     @commands.hybrid_command(name="warnings", description="Afficher les avertissements d'un membre.")
     @app_commands.describe(membre="Le membre à consulter")
@@ -528,7 +516,7 @@ class Moderation(commands.Cog):
             (ctx.guild.id, membre.id),
         )
         if not rows:
-            return await ctx.send(embed=embeds.info(f"{membre.mention} n'a aucun avertissement."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"{membre.mention} n'a aucun avertissement.")))
         e = embeds.neutral(f"⚠️ Avertissements de {membre.display_name}", f"Total : {len(rows)}")
         for row in rows[:15]:
             mod = ctx.guild.get_member(row["moderator_id"])
@@ -537,7 +525,7 @@ class Moderation(commands.Cog):
                 value=f"Par {mod.mention if mod else 'Modérateur inconnu'}\n{row['reason']}",
                 inline=False,
             )
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="clearwarnings", description="Supprimer tous les avertissements d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre concerné")
@@ -547,7 +535,7 @@ class Moderation(commands.Cog):
         await self.bot.db.execute(
             "DELETE FROM warnings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
-        await ctx.send(embed=embeds.success(f"Tous les avertissements de {membre.mention} ont été supprimés."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Tous les avertissements de {membre.mention} ont été supprimés.')))
 
     # ---------------------------------------------------------------- DOSSIERS DE SANCTION
 
@@ -558,7 +546,7 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         row = await self.bot.db.get_sanction_by_case(ctx.guild.id, numero)
         if not row:
-            return await ctx.send(embed=embeds.error(f"Aucun dossier `#{numero}` trouvé sur ce serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun dossier `#{numero}` trouvé sur ce serveur.')))
         label = self.SANCTION_LABELS.get(row["action"], row["action"])
         kind = self.SANCTION_KIND.get(row["action"], "danger")
         colour = {"success": config.COLOR_SUCCESS, "warning": config.COLOR_WARNING, "danger": config.COLOR_ERROR}[kind]
@@ -570,7 +558,7 @@ class Moderation(commands.Cog):
         if row["duration_seconds"]:
             e.add_field(name="⏱️ Durée", value=helpers.format_duration(row["duration_seconds"]), inline=True)
         e.add_field(name="📝 Raison", value=row["reason"] or "Aucune raison fournie", inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="modhistory", description="Afficher l'historique complet des sanctions d'un membre (tous types confondus).", with_app_command=False)
     @app_commands.describe(membre="Le membre à consulter")
@@ -580,7 +568,7 @@ class Moderation(commands.Cog):
         rows = await self.bot.db.get_sanction_history(ctx.guild.id, membre.id, limit=15)
         total = await self.bot.db.get_sanction_count(ctx.guild.id, membre.id)
         if not rows:
-            return await ctx.send(embed=embeds.info(f"{membre.mention} n'a aucune sanction enregistrée sur ce serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"{membre.mention} n'a aucune sanction enregistrée sur ce serveur.")))
         style = design_system.CATEGORY_STYLES["moderation"]
         e = design_system.create_embed(
             title=f"{style['emoji']} Historique de sanctions — {membre.display_name}",
@@ -597,7 +585,7 @@ class Moderation(commands.Cog):
                 value=f"Par <@{row['moderator_id']}> — {row['reason'] or 'Aucune raison fournie'}",
                 inline=False,
             )
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     # ---------------------------------------------------------------- SALON
 
@@ -657,9 +645,7 @@ class Moderation(commands.Cog):
         else:
             secondes = helpers.parse_duration(raw)
             if secondes is None:
-                return await ctx.send(embed=embeds.error(
-                    "Durée invalide. Exemples valides : `5s`, `30s`, `1m`, `10m`, `1h`, ou `0` / `off` pour désactiver."
-                ))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide. Exemples valides : `5s`, `30s`, `1m`, `10m`, `1h`, ou `0` / `off` pour désactiver.')))
         secondes = max(0, min(21600, secondes))
         await ctx.channel.edit(slowmode_delay=secondes)
         if secondes == 0:
@@ -712,7 +698,7 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         error = checks.check_channel_target(ctx.author, ctx.channel)
         if error:
-            return await ctx.send(embed=embeds.error(error))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(error)))
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = False
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=raison)
@@ -752,7 +738,7 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         error = checks.check_channel_target(ctx.author, ctx.channel)
         if error:
-            return await ctx.send(embed=embeds.error(error))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(error)))
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = None
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
@@ -787,7 +773,7 @@ class Moderation(commands.Cog):
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.view_channel = False
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-        await ctx.send(embed=embeds.success("🙈 Salon caché."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('🙈 Salon caché.')))
 
     @commands.hybrid_command(name="show", description="Rendre le salon à nouveau visible.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
@@ -796,7 +782,7 @@ class Moderation(commands.Cog):
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.view_channel = None
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-        await ctx.send(embed=embeds.success("👁️ Salon à nouveau visible."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('👁️ Salon à nouveau visible.')))
 
     # ---------------------------------------------------------------- DIVERS
 
@@ -810,7 +796,7 @@ class Moderation(commands.Cog):
         if not await self.check_targetable(ctx, membre):
             return
         await membre.edit(nick=pseudo[:32])
-        await ctx.send(embed=embeds.success(f"Le pseudo de {membre.mention} est maintenant **{pseudo[:32]}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le pseudo de {membre.mention} est maintenant **{pseudo[:32]}**.')))
 
     @commands.hybrid_command(name="resetnick", description="Réinitialiser le pseudo d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre concerné")
@@ -822,7 +808,7 @@ class Moderation(commands.Cog):
         if not await self.check_targetable(ctx, membre):
             return
         await membre.edit(nick=None)
-        await ctx.send(embed=embeds.success(f"Le pseudo de {membre.mention} a été réinitialisé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le pseudo de {membre.mention} a été réinitialisé.')))
 
     @commands.hybrid_command(name="move", description="Déplacer un membre vers un autre salon vocal.", with_app_command=False)
     @app_commands.describe(membre="Le membre à déplacer", salon="Le salon vocal de destination")
@@ -830,9 +816,9 @@ class Moderation(commands.Cog):
     async def move(self, ctx: commands.Context, membre: discord.Member, salon: discord.VoiceChannel):
         await self._ack(ctx)
         if not membre.voice:
-            return await ctx.send(embed=embeds.error("Ce membre n'est pas en vocal."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce membre n'est pas en vocal.")))
         await membre.move_to(salon)
-        await ctx.send(embed=embeds.success(f"{membre.mention} a été déplacé vers **{salon.name}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} a été déplacé vers **{salon.name}**.')))
 
     @commands.hybrid_command(name="disconnect", description="Déconnecter un membre du vocal.", with_app_command=False)
     @app_commands.describe(membre="Le membre à déconnecter")
@@ -840,9 +826,9 @@ class Moderation(commands.Cog):
     async def disconnect(self, ctx: commands.Context, membre: discord.Member):
         await self._ack(ctx)
         if not membre.voice:
-            return await ctx.send(embed=embeds.error("Ce membre n'est pas en vocal."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce membre n'est pas en vocal.")))
         await membre.move_to(None)
-        await ctx.send(embed=embeds.success(f"{membre.mention} a été déconnecté du vocal."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} a été déconnecté du vocal.')))
 
 
 async def setup(bot: commands.Bot):

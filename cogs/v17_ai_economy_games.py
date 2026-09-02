@@ -17,6 +17,7 @@ from discord.ext import commands
 
 from database.db import now
 from utils import ai_service, checks, embeds, helpers, stats_service
+from utils import sentrix_panels as panels
 from .v17_shared import award_credits, ensure_schema, register_command_policy, state
 
 logger = logging.getLogger("bot.v17-ai-economy-games")
@@ -414,7 +415,7 @@ def install_ai_buttons(bot: commands.Bot) -> None:
 
     async def check_v17(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=embeds.error("Seul l'auteur de la demande peut utiliser ces boutons."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Seul l'auteur de la demande peut utiliser ces boutons.")), ephemere=True)
             return False
         custom_id = str((interaction.data or {}).get("custom_id", "")) if isinstance(interaction.data, dict) else ""
         if custom_id == "sentrix:v17:ai:stop":
@@ -671,7 +672,7 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
         channel = salon or ctx.channel
         mode = mode.casefold().strip()
         if mode not in {"on", "off", "activer", "desactiver", "désactiver"}:
-            return await ctx.send(embed=embeds.error("Mode valide : `on` ou `off`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Mode valide : `on` ou `off`.')))
         enabled = mode in {"on", "activer"}
         minutes = max(1, min(1440, int(minutes)))
         await self.bot.db.execute(
@@ -679,14 +680,14 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
             "ON CONFLICT(guild_id,channel_id) DO UPDATE SET enabled=excluded.enabled,memory_minutes=excluded.memory_minutes",
             (ctx.guild.id, channel.id, int(enabled), minutes),
         )
-        await ctx.send(embed=embeds.success(f"Mémoire IA {'activée' if enabled else 'désactivée'} dans {channel.mention} ({minutes} min)."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Mémoire IA {('activée' if enabled else 'désactivée')} dans {channel.mention} ({minutes} min).")))
 
     @commands.hybrid_group(name="airolequota", description="Quotas et priorité IA par rôle.")
     @checks.is_owner_or_admin_for("ai")
     async def airolequota(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM v17_ai_role_quotas WHERE guild_id=? ORDER BY priority DESC,daily_limit DESC", (ctx.guild.id,))
         text = "\n".join(f"• <@&{r['role_id']}> — **{r['daily_limit']}/jour** — priorité **{r['priority']}**" for r in rows) or "Aucun quota par rôle."
-        await ctx.send(embed=embeds.info(text, title="Quotas IA par rôle"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title='Quotas IA par rôle')))
 
     @airolequota.command(name="set")
     async def airolequota_set(self, ctx: commands.Context, role: discord.Role, daily_limit: app_commands.Range[int, 1, 10000], priority: app_commands.Range[int, 0, 100] = 0):
@@ -695,79 +696,79 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
             "ON CONFLICT(guild_id,role_id) DO UPDATE SET daily_limit=excluded.daily_limit,priority=excluded.priority",
             (ctx.guild.id, role.id, daily_limit, priority),
         )
-        await ctx.send(embed=embeds.success(f"{role.mention} : **{daily_limit} demandes/jour**, priorité **{priority}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{role.mention} : **{daily_limit} demandes/jour**, priorité **{priority}**.')))
 
     @airolequota.command(name="remove")
     async def airolequota_remove(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.execute("DELETE FROM v17_ai_role_quotas WHERE guild_id=? AND role_id=?", (ctx.guild.id, role.id))
-        await ctx.send(embed=embeds.success(f"Quota spécial retiré pour {role.mention}."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Quota spécial retiré pour {role.mention}.')))
 
     @commands.hybrid_group(name="aicontext", description="Règlement/FAQ/contexte officiel fourni à SentriX AI.")
     @checks.is_owner_or_admin_for("ai")
     async def aicontext(self, ctx: commands.Context):
         text = await self.bot.db.fetchone("SELECT context_text FROM v17_ai_context WHERE guild_id=?", (ctx.guild.id,))
-        await ctx.send(embed=embeds.info((text["context_text"] if text else "Aucun contexte configuré.")[:4000], title="Contexte IA du serveur"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info((text['context_text'] if text else 'Aucun contexte configuré.')[:4000], title='Contexte IA du serveur')))
 
     @aicontext.command(name="set")
     async def aicontext_set(self, ctx: commands.Context, *, texte: str):
         if len(texte) > 8000:
-            return await ctx.send(embed=embeds.error("Le contexte est limité à 8000 caractères."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le contexte est limité à 8000 caractères.')))
         await self.bot.db.execute(
             "INSERT INTO v17_ai_context (guild_id,context_text,updated_by,updated_at) VALUES (?,?,?,?) "
             "ON CONFLICT(guild_id) DO UPDATE SET context_text=excluded.context_text,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
             (ctx.guild.id, texte, ctx.author.id, now()),
         )
-        await ctx.send(embed=embeds.success("Contexte IA du serveur mis à jour."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Contexte IA du serveur mis à jour.')))
 
     @aicontext.command(name="clear")
     async def aicontext_clear(self, ctx: commands.Context):
         await self.bot.db.execute("DELETE FROM v17_ai_context WHERE guild_id=?", (ctx.guild.id,))
-        await ctx.send(embed=embeds.success("Contexte IA supprimé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Contexte IA supprimé.')))
 
     @commands.hybrid_command(name="transactions", description="Afficher l'historique des transactions économiques.", with_app_command=False)
     async def transactions(self, ctx: commands.Context, membre: discord.Member | None = None):
         target = membre or ctx.author
         if target.id != ctx.author.id and not ctx.author.guild_permissions.manage_guild:
-            return await ctx.send(embed=embeds.error("Il faut la permission Gérer le serveur pour voir les transactions d'un autre membre."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Il faut la permission Gérer le serveur pour voir les transactions d'un autre membre.")))
         rows = await self.bot.db.get_transactions(ctx.guild.id, target.id, limit=15)
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucune transaction enregistrée."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucune transaction enregistrée.')))
         lines = []
         for row in rows:
             direction = "+" if row["receiver_id"] == target.id else "-"
             lines.append(f"{direction} **{stats_service.format_number(row['amount'])}** — `{row['transaction_type']}` — <t:{row['created_at']}:R> — {row['reason'] or '—'}")
-        await ctx.send(embed=embeds.info("\n".join(lines)[:4000], title=f"Transactions — {target.display_name}"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info('\n'.join(lines)[:4000], title=f'Transactions — {target.display_name}')))
 
     @commands.hybrid_command(name="shopstock", description="Configurer le stock d'un article de boutique.", with_app_command=False)
     @checks.is_owner_or_admin_for("economie")
     async def shopstock(self, ctx: commands.Context, item_id: int, stock: int):
         if stock < -1:
-            return await ctx.send(embed=embeds.error("Utilisez `-1` pour un stock illimité, ou 0+ pour un stock précis."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez `-1` pour un stock illimité, ou 0+ pour un stock précis.')))
         item = await self.bot.db.fetchone("SELECT name FROM shop_items WHERE guild_id=? AND id=?", (ctx.guild.id, item_id))
         if not item:
-            return await ctx.send(embed=embeds.error("Article introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Article introuvable.')))
         await self.bot.db.execute(
             "INSERT INTO v17_shop_rules (guild_id,item_id,stock,updated_at) VALUES (?,?,?,?) "
             "ON CONFLICT(guild_id,item_id) DO UPDATE SET stock=excluded.stock,updated_at=excluded.updated_at",
             (ctx.guild.id, item_id, stock, now()),
         )
-        await ctx.send(embed=embeds.success(f"Stock de **{item['name']}** : **{'illimité' if stock == -1 else stock}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Stock de **{item['name']}** : **{('illimité' if stock == -1 else stock)}**.")))
 
     @commands.hybrid_command(name="shoppromo", description="Créer une promotion temporaire sur un article.", with_app_command=False)
     @checks.is_owner_or_admin_for("economie")
     async def shoppromo(self, ctx: commands.Context, item_id: int, prix: int, duree: str = "24h"):
         item = await self.bot.db.fetchone("SELECT name,price FROM shop_items WHERE guild_id=? AND id=?", (ctx.guild.id, item_id))
         if not item:
-            return await ctx.send(embed=embeds.error("Article introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Article introuvable.')))
         seconds = helpers.parse_duration(duree)
         if seconds is None or seconds <= 0 or prix <= 0 or prix >= int(item["price"]):
-            return await ctx.send(embed=embeds.error("Prix promo invalide ou durée invalide. Le prix doit être inférieur au prix normal."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Prix promo invalide ou durée invalide. Le prix doit être inférieur au prix normal.')))
         await self.bot.db.execute(
             "INSERT INTO v17_shop_rules (guild_id,item_id,stock,sale_price,sale_ends_at,updated_at) VALUES (?,?,-1,?,?,?) "
             "ON CONFLICT(guild_id,item_id) DO UPDATE SET sale_price=excluded.sale_price,sale_ends_at=excluded.sale_ends_at,updated_at=excluded.updated_at",
             (ctx.guild.id, item_id, prix, now() + seconds, now()),
         )
-        await ctx.send(embed=embeds.success(f"Promotion sur **{item['name']}** : **{prix}** jusqu'à <t:{now()+seconds}:R>."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Promotion sur **{item['name']}** : **{prix}** jusqu'à <t:{now() + seconds}:R>.")))
 
     @commands.hybrid_command(name="achievements", description="Afficher les succès débloqués.", with_app_command=False)
     async def achievements(self, ctx: commands.Context, membre: discord.Member | None = None):
@@ -783,7 +784,7 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
             "wealth_1000": "1000 pièces de patrimoine",
         }
         text = "\n".join(f"• **{labels.get(r['achievement_key'], r['achievement_key'])}** — +{r['reward']} 🪙 — <t:{r['unlocked_at']}:R>" for r in rows) or "Aucun succès débloqué."
-        await ctx.send(embed=embeds.info(text, title=f"Succès — {target.display_name}"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title=f'Succès — {target.display_name}')))
 
     @commands.hybrid_command(name="missions", description="Voir et réclamer automatiquement les missions quotidiennes/hebdomadaires.")
     async def missions(self, ctx: commands.Context):
@@ -816,53 +817,50 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
                 lines.append(f"{marker} {label} — **{min(current, target)}/{target}** — {reward} 🪙")
         if total_reward:
             lines.append(f"\n**Récompenses réclamées maintenant : +{total_reward} 🪙**")
-        await ctx.send(embed=embeds.info("\n".join(lines), title="Missions SentriX"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info('\n'.join(lines), title='Missions SentriX')))
 
     @commands.hybrid_group(name="season", description="Saisons temporaires sans réinitialiser l'économie ou les niveaux.")
     async def season(self, ctx: commands.Context):
         season = await self.bot.db.fetchone("SELECT * FROM v17_seasons WHERE guild_id=? AND active=1 AND ends_at>? ORDER BY id DESC LIMIT 1", (ctx.guild.id, now()))
         if not season:
-            return await ctx.send(embed=embeds.info("Aucune saison active."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucune saison active.')))
         points = await self.bot.db.fetchone("SELECT points FROM v17_season_points WHERE season_id=? AND user_id=?", (season["id"], ctx.author.id))
-        await ctx.send(embed=embeds.info(
-            f"**{season['name']}**\nFin : <t:{season['ends_at']}:R>\nVos points : **{int(points['points'] if points else 0)}**",
-            title="Saison active",
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"**{season['name']}**\nFin : <t:{season['ends_at']}:R>\nVos points : **{int(points['points'] if points else 0)}**", title='Saison active')))
 
     @season.command(name="start")
     @checks.is_owner_or_admin_for("economie")
     async def season_start(self, ctx: commands.Context, duree: str, *, nom: str = "Saison SentriX"):
         seconds = helpers.parse_duration(duree)
         if seconds is None or seconds < 3600:
-            return await ctx.send(embed=embeds.error("Durée minimale : 1 heure. Exemples : `7j`, `30j`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée minimale : 1 heure. Exemples : `7j`, `30j`.')))
         await self.bot.db.execute("UPDATE v17_seasons SET active=0 WHERE guild_id=? AND active=1", (ctx.guild.id,))
         await self.bot.db.execute(
             "INSERT INTO v17_seasons (guild_id,name,starts_at,ends_at,active,created_by,created_at) VALUES (?,?,?,?,1,?,?)",
             (ctx.guild.id, nom[:100], now(), now() + seconds, ctx.author.id, now()),
         )
-        await ctx.send(embed=embeds.success(f"Saison **{nom}** lancée jusqu'à <t:{now()+seconds}:F>. Les données permanentes ne sont pas réinitialisées."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Saison **{nom}** lancée jusqu'à <t:{now() + seconds}:F>. Les données permanentes ne sont pas réinitialisées.")))
 
     @season.command(name="top")
     async def season_top(self, ctx: commands.Context):
         season = await self.bot.db.fetchone("SELECT * FROM v17_seasons WHERE guild_id=? ORDER BY active DESC,id DESC LIMIT 1", (ctx.guild.id,))
         if not season:
-            return await ctx.send(embed=embeds.info("Aucune saison."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucune saison.')))
         rows = await self.bot.db.fetchall("SELECT user_id,points FROM v17_season_points WHERE season_id=? ORDER BY points DESC LIMIT 10", (season["id"],))
         text = "\n".join(f"**{i}.** <@{r['user_id']}> — {r['points']} pts" for i, r in enumerate(rows, 1)) or "Aucun point."
-        await ctx.send(embed=embeds.info(text, title=f"Classement — {season['name']}"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title=f"Classement — {season['name']}")))
 
     @season.command(name="end")
     @checks.is_owner_or_admin_for("economie")
     async def season_end(self, ctx: commands.Context):
         await self.bot.db.execute("UPDATE v17_seasons SET active=0,ends_at=? WHERE guild_id=? AND active=1", (now(), ctx.guild.id))
-        await ctx.send(embed=embeds.success("Saison terminée. Le classement reste archivé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Saison terminée. Le classement reste archivé.')))
 
     @commands.hybrid_command(name="gamelobby", description="Créer un lobby multijoueur avec joueurs et spectateurs.", with_app_command=False)
     async def gamelobby(self, ctx: commands.Context, jeu: str):
         game = jeu.casefold().strip()
         command = self.bot.get_command(game)
         if command is None or game not in GAME_COMMANDS:
-            return await ctx.send(embed=embeds.error("Mini-jeu inconnu ou non compatible avec les lobbies V17."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Mini-jeu inconnu ou non compatible avec les lobbies V17.')))
         view = GameLobbyView(self, ctx, game)
         message = await ctx.send(embed=view.embed(), view=view)
         view.message = message
@@ -872,7 +870,7 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
         game = jeu.casefold().strip()
         command = self.bot.get_command(game)
         if command is None or game not in GAME_COMMANDS:
-            return await ctx.send(embed=embeds.error("Jeu introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Jeu introuvable.')))
         key = (ctx.guild.id, game)
         queue = self.matchmaking.setdefault(key, [])
         mono = time.monotonic()
@@ -881,8 +879,8 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
             first_ctx, _stamp = queue.pop(0)
             first_member = ctx.guild.get_member(first_ctx.author.id)
             if first_member is None:
-                return await ctx.send(embed=embeds.warning("L'adversaire précédent n'est plus disponible. Relancez la recherche."))
-            await ctx.send(embed=embeds.success(f"Match trouvé : {first_member.mention} vs {ctx.author.mention}."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("L'adversaire précédent n'est plus disponible. Relancez la recherche.")))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Match trouvé : {first_member.mention} vs {ctx.author.mention}.')))
             try:
                 if "adversaire" in command.clean_params:
                     await first_ctx.invoke(command, adversaire=ctx.author)
@@ -892,7 +890,7 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
             prefix = getattr(ctx, "clean_prefix", "+") or "+"
             return await ctx.send(f"Lancez `{prefix}{game} {ctx.author.mention}` pour démarrer.")
         queue.append((ctx, mono))
-        await ctx.send(embed=embeds.info(f"Recherche d'un adversaire pour **{game}**… La file expire dans 3 minutes."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"Recherche d'un adversaire pour **{game}**… La file expire dans 3 minutes.")))
 
     @commands.Cog.listener()
     async def on_command_completion(self, ctx: commands.Context):
@@ -955,7 +953,7 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
                     if await _unlock_achievement(self.bot, ctx.guild.id, ctx.author.id, "wealth_1000", 100):
                         unlocked.append("1000 pièces de patrimoine (+100 🪙)")
             if unlocked:
-                await ctx.send(embed=embeds.success("\n".join(f"• {item}" for item in unlocked), title="Succès débloqué"))
+                await panels.envoyer(ctx, panels.depuis_embed(embeds.success('\n'.join((f'• {item}' for item in unlocked)), title='Succès débloqué')))
         except Exception:
             logger.debug("V17 : enregistrement progression impossible.", exc_info=True)
 

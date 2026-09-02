@@ -38,6 +38,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, checks, design_system
+from utils import sentrix_panels as panels
 from database.db import now
 
 logger = logging.getLogger("bot.embeds")
@@ -111,9 +112,9 @@ async def _report_ui_error(interaction: discord.Interaction, error: Exception, w
     message = f"Une erreur inattendue est survenue ({where}).\nDétail technique : `{type(error).__name__}: {error}`"[:300]
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(embed=embeds.error(message), ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(message)), ephemere=True)
         else:
-            await interaction.response.send_message(embed=embeds.error(message), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(message)), ephemere=True)
     except discord.HTTPException:
         pass
 
@@ -379,9 +380,7 @@ class EmbedColourModal(discord.ui.Modal, title="🎨 Couleur personnalisée"):
     async def on_submit(self, interaction: discord.Interaction):
         parsed = parse_colour(self.colour_input.value)
         if parsed is None:
-            return await interaction.response.send_message(
-                embed=embeds.error("Couleur invalide — exemples acceptés : `#5865F2`, `5865F2`, `0x5865F2`."), ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Couleur invalide — exemples acceptés : `#5865F2`, `5865F2`, `0x5865F2`.')), ephemere=True)
         self.view_ref.draft.colour = parsed
         self.view_ref.draft.dirty = True
         await self.view_ref.refresh(interaction)
@@ -405,10 +404,7 @@ class EmbedImagesModal(discord.ui.Modal, title="🖼️ Images"):
     async def on_submit(self, interaction: discord.Interaction):
         bad = [u for u in (self.image_input.value, self.thumb_input.value, self.author_icon_input.value, self.footer_icon_input.value) if u and not valid_url(u)]
         if bad:
-            return await interaction.response.send_message(
-                embed=embeds.error("Une ou plusieurs URLs ne commencent pas par `http://` ou `https://` — rien n'a été modifié, corrigez-les et réessayez."),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Une ou plusieurs URLs ne commencent pas par `http://` ou `https://` — rien n'a été modifié, corrigez-les et réessayez.")), ephemere=True)
         d = self.view_ref.draft
         d.image_url = self.image_input.value or None
         d.thumbnail_url = self.thumb_input.value or None
@@ -436,7 +432,7 @@ class EmbedFieldModal(discord.ui.Modal, title="➕ Champ personnalisé"):
     async def on_submit(self, interaction: discord.Interaction):
         d = self.view_ref.draft
         if self.index is None and len(d.fields) >= MAX_FIELDS:
-            return await interaction.response.send_message(embed=embeds.error(f"Limite atteinte : {MAX_FIELDS} champs maximum par embed."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(f'Limite atteinte : {MAX_FIELDS} champs maximum par embed.')), ephemere=True)
         field = {"name": self.name_input.value or "​", "value": self.value_input.value or "​", "inline": parse_yesno(self.inline_input.value, True)}
         if self.index is None:
             d.fields.append(field)
@@ -463,10 +459,10 @@ class EmbedButtonModal(discord.ui.Modal, title="🔘 Bouton lien"):
 
     async def on_submit(self, interaction: discord.Interaction):
         if not valid_url(self.url_input.value):
-            return await interaction.response.send_message(embed=embeds.error("URL invalide — elle doit commencer par `http://` ou `https://`."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('URL invalide — elle doit commencer par `http://` ou `https://`.')), ephemere=True)
         d = self.view_ref.draft
         if self.index is None and len(d.buttons) >= MAX_BUTTONS:
-            return await interaction.response.send_message(embed=embeds.error(f"Limite atteinte : {MAX_BUTTONS} boutons maximum."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(f'Limite atteinte : {MAX_BUTTONS} boutons maximum.')), ephemere=True)
         button = {"label": self.label_input.value or "Lien", "emoji": self.emoji_input.value or None, "url": self.url_input.value, "style": "link"}
         if self.index is None:
             d.buttons.append(button)
@@ -493,14 +489,14 @@ class EmbedSaveModal(discord.ui.Modal, title="💾 Sauvegarder le modèle"):
     async def on_submit(self, interaction: discord.Interaction):
         name = self.name_input.value.strip()
         if not name:
-            return await interaction.response.send_message(embed=embeds.error("Le nom ne peut pas être vide."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Le nom ne peut pas être vide.')), ephemere=True)
         d = self.view_ref.draft
         errors = d.validate()
         if errors:
-            return await interaction.response.send_message(embed=embeds.error("Corrigez d'abord :\n• " + "\n• ".join(errors[:10])), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Corrigez d'abord :\n• " + '\n• '.join(errors[:10]))), ephemere=True)
         existing = await self.cog.get_template(interaction.guild.id, name)
         if existing and existing["id"] != d.template_id:
-            return await interaction.response.send_message(embed=embeds.error(f"Un modèle nommé « {name} » existe déjà sur ce serveur."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(f'Un modèle nommé « {name} » existe déjà sur ce serveur.')), ephemere=True)
         if d.template_id and existing:
             await self.cog.update_template(d.template_id, d)
         else:
@@ -525,7 +521,7 @@ class EmbedAppearanceView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.parent.author_id:
-            await interaction.response.send_message(embed=embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur.")), ephemere=True)
             return False
         return True
 
@@ -575,7 +571,7 @@ class EmbedFieldsManageView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.parent.author_id:
-            await interaction.response.send_message(embed=embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur.")), ephemere=True)
             return False
         return True
 
@@ -611,13 +607,13 @@ class EmbedFieldsManageView(discord.ui.View):
     @discord.ui.button(label="Modifier", style=discord.ButtonStyle.primary, emoji="✏️", row=1)
     async def edit_field(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.selected is None:
-            return await interaction.response.send_message(embed=embeds.error("Choisissez d'abord un champ dans le menu."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Choisissez d'abord un champ dans le menu.")), ephemere=True)
         await interaction.response.send_modal(EmbedFieldModal(self.parent, index=self.selected))
 
     @discord.ui.button(label="Supprimer", style=discord.ButtonStyle.danger, emoji="🗑️", row=1)
     async def delete_field(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.selected is None:
-            return await interaction.response.send_message(embed=embeds.error("Choisissez d'abord un champ dans le menu."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Choisissez d'abord un champ dans le menu.")), ephemere=True)
         del self.draft.fields[self.selected]
         self.selected = None
         self.draft.dirty = True
@@ -627,7 +623,7 @@ class EmbedFieldsManageView(discord.ui.View):
     @discord.ui.button(label="Monter", style=discord.ButtonStyle.secondary, emoji="⬆️", row=2)
     async def move_up(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.selected is None or self.selected == 0:
-            return await interaction.response.send_message(embed=embeds.error("Impossible de monter ce champ."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Impossible de monter ce champ.')), ephemere=True)
         i = self.selected
         self.draft.fields[i - 1], self.draft.fields[i] = self.draft.fields[i], self.draft.fields[i - 1]
         self.selected -= 1
@@ -638,7 +634,7 @@ class EmbedFieldsManageView(discord.ui.View):
     @discord.ui.button(label="Descendre", style=discord.ButtonStyle.secondary, emoji="⬇️", row=2)
     async def move_down(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.selected is None or self.selected >= len(self.draft.fields) - 1:
-            return await interaction.response.send_message(embed=embeds.error("Impossible de descendre ce champ."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Impossible de descendre ce champ.')), ephemere=True)
         i = self.selected
         self.draft.fields[i + 1], self.draft.fields[i] = self.draft.fields[i], self.draft.fields[i + 1]
         self.selected += 1
@@ -649,7 +645,7 @@ class EmbedFieldsManageView(discord.ui.View):
     @discord.ui.button(label="Vider tous les champs", style=discord.ButtonStyle.danger, emoji="🧹", row=3)
     async def clear_all(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.draft.fields:
-            return await interaction.response.send_message(embed=embeds.warning("Il n'y a déjà aucun champ."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Il n'y a déjà aucun champ.")), ephemere=True)
         confirm = helpers_confirm_view(self.parent.author_id)
         await interaction.response.send_message(embed=embeds.warning(f"Supprimer les **{len(self.draft.fields)}** champ(s) ? Cette action est irréversible."), view=confirm, ephemeral=True)
         await confirm.wait()
@@ -686,7 +682,7 @@ class EmbedButtonsManageView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.parent.author_id:
-            await interaction.response.send_message(embed=embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur.")), ephemere=True)
             return False
         return True
 
@@ -718,19 +714,19 @@ class EmbedButtonsManageView(discord.ui.View):
     @discord.ui.button(label="Ajouter", style=discord.ButtonStyle.success, emoji="➕", row=1)
     async def add_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if len(self.draft.buttons) >= MAX_BUTTONS:
-            return await interaction.response.send_message(embed=embeds.error(f"Limite atteinte : {MAX_BUTTONS} boutons maximum."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(f'Limite atteinte : {MAX_BUTTONS} boutons maximum.')), ephemere=True)
         await interaction.response.send_modal(EmbedButtonModal(self.parent, index=None))
 
     @discord.ui.button(label="Modifier", style=discord.ButtonStyle.primary, emoji="✏️", row=1)
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.selected is None:
-            return await interaction.response.send_message(embed=embeds.error("Choisissez d'abord un bouton dans le menu."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Choisissez d'abord un bouton dans le menu.")), ephemere=True)
         await interaction.response.send_modal(EmbedButtonModal(self.parent, index=self.selected))
 
     @discord.ui.button(label="Supprimer", style=discord.ButtonStyle.danger, emoji="🗑️", row=1)
     async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.selected is None:
-            return await interaction.response.send_message(embed=embeds.error("Choisissez d'abord un bouton dans le menu."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Choisissez d'abord un bouton dans le menu.")), ephemere=True)
         del self.draft.buttons[self.selected]
         self.selected = None
         self.draft.dirty = True
@@ -768,7 +764,7 @@ class EmbedBuilderView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur.")), ephemere=True)
             return False
         return True
 
@@ -814,7 +810,7 @@ class EmbedBuilderView(discord.ui.View):
     @discord.ui.button(label="Ajouter un champ", style=discord.ButtonStyle.secondary, emoji="➕", row=1)
     async def add_field(self, interaction: discord.Interaction, button: discord.ui.Button):
         if len(self.draft.fields) >= MAX_FIELDS:
-            return await interaction.response.send_message(embed=embeds.error(f"Limite atteinte : {MAX_FIELDS} champs maximum par embed."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(f'Limite atteinte : {MAX_FIELDS} champs maximum par embed.')), ephemere=True)
         await interaction.response.send_modal(EmbedFieldModal(self, index=None))
 
     @discord.ui.button(label="Gérer les champs", style=discord.ButtonStyle.secondary, emoji="📋", row=1)
@@ -834,7 +830,7 @@ class EmbedBuilderView(discord.ui.View):
         preview_embed = self.draft.to_embed()
         link_view = self.draft.build_link_view()
         if not preview_embed:
-            return await interaction.response.send_message(embed=embeds.warning("L'embed est vide pour l'instant — rien à prévisualiser."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("L'embed est vide pour l'instant — rien à prévisualiser.")), ephemere=True)
         await interaction.response.send_message(
             content=self.draft.content or None, embed=preview_embed, view=link_view or discord.utils.MISSING, ephemeral=True,
         )
@@ -843,7 +839,7 @@ class EmbedBuilderView(discord.ui.View):
     async def save(self, interaction: discord.Interaction, button: discord.ui.Button):
         errors = self.draft.validate()
         if errors:
-            return await interaction.response.send_message(embed=embeds.error("Corrigez d'abord :\n• " + "\n• ".join(errors[:10])), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Corrigez d'abord :\n• " + '\n• '.join(errors[:10]))), ephemere=True)
         if self.draft.template_name:
             await self.cog.update_template(self.draft.template_id, self.draft)
             self.draft.dirty = False
@@ -854,7 +850,7 @@ class EmbedBuilderView(discord.ui.View):
     async def send(self, interaction: discord.Interaction, button: discord.ui.Button):
         errors = self.draft.validate()
         if errors:
-            return await interaction.response.send_message(embed=embeds.error("Corrigez d'abord :\n• " + "\n• ".join(errors[:10])), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Corrigez d'abord :\n• " + '\n• '.join(errors[:10]))), ephemere=True)
         if self.draft.target_message_id:
             # On édite un message déjà envoyé par le bot (+embed message <lien>), pas un
             # nouvel envoi — pas besoin de re-choisir un salon, juste une confirmation.
@@ -895,7 +891,7 @@ class EmbedImportConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=embeds.error("Vous n'êtes pas autorisé à confirmer cet import."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'êtes pas autorisé à confirmer cet import.")), ephemere=True)
             return False
         return True
 
@@ -1002,28 +998,28 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
         try:
             channel = interaction.guild.get_channel(draft.target_channel_id)
             if not channel:
-                return await interaction.followup.send(embed=embeds.error("Le salon d'origine n'existe plus."), ephemeral=True)
+                return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error("Le salon d'origine n'existe plus.")), ephemere=True)
             msg = await channel.fetch_message(draft.target_message_id)
             if msg.author.id != self.bot.user.id:
-                return await interaction.followup.send(embed=embeds.error("Ce message n'appartient pas à SentriX — impossible de le modifier."), ephemeral=True)
+                return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error("Ce message n'appartient pas à SentriX — impossible de le modifier.")), ephemere=True)
             embed = draft.to_embed()
             view = draft.build_link_view()
             await msg.edit(content=draft.content or None, embed=embed, view=view or discord.utils.MISSING)
-            await interaction.followup.send(embed=embeds.success("● Message mis à jour."), ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('● Message mis à jour.')), ephemere=True)
         except discord.NotFound:
-            await interaction.followup.send(embed=embeds.error("Le message a été supprimé entre-temps."), ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Le message a été supprimé entre-temps.')), ephemere=True)
         except discord.Forbidden:
-            await interaction.followup.send(embed=embeds.error("Permission refusée pour modifier ce message."), ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Permission refusée pour modifier ce message.')), ephemere=True)
         except discord.HTTPException as e:
-            await interaction.followup.send(embed=embeds.error(f"Discord a refusé la modification : `{e}`"), ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(f'Discord a refusé la modification : `{e}`')), ephemere=True)
         except Exception as e:
             logger.error("Exception non gérée lors de l'édition d'un message (guild=%s) :\n%s", interaction.guild.id if interaction.guild else None, traceback.format_exc())
-            await interaction.followup.send(embed=embeds.error(f"Une erreur inattendue est survenue.\nDétail technique : `{type(e).__name__}: {e}`"[:300]), ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(f'Une erreur inattendue est survenue.\nDétail technique : `{type(e).__name__}: {e}`'[:300])), ephemere=True)
 
     async def _safe_edit_error(self, interaction: discord.Interaction, message: str):
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(embed=embeds.error(message), ephemeral=True)
+                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(message)), ephemere=True)
             else:
                 await interaction.response.edit_message(embed=embeds.error(message), view=None)
         except discord.HTTPException:
@@ -1041,7 +1037,7 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     @checks.has_embed_permission()
     async def embed_create(self, ctx: commands.Context, *, nom: str):
         if await self.get_template(ctx.guild.id, nom):
-            return await ctx.send(embed=embeds.error(f"Un modèle nommé « {nom} » existe déjà sur ce serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Un modèle nommé « {nom} » existe déjà sur ce serveur.')))
         draft = EmbedDraft()
         draft.template_name = nom
         draft.template_id = await self.create_template(ctx.guild.id, ctx.author.id, nom, draft)
@@ -1064,7 +1060,7 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def embed_edit(self, ctx: commands.Context, *, nom: str):
         row = await self.get_template(ctx.guild.id, nom)
         if not row:
-            return await ctx.send(embed=embeds.error(f"Aucun modèle nommé « {nom} »."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun modèle nommé « {nom} ».')))
         draft = EmbedDraft.from_row(row)
         await self.open_builder(ctx, draft)
 
@@ -1074,11 +1070,11 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def embed_preview(self, ctx: commands.Context, *, nom: str):
         row = await self.get_template(ctx.guild.id, nom)
         if not row:
-            return await ctx.send(embed=embeds.error(f"Aucun modèle nommé « {nom} »."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun modèle nommé « {nom} ».')))
         draft = EmbedDraft.from_row(row)
         preview = draft.to_embed()
         if not preview:
-            return await ctx.send(embed=embeds.warning("Ce modèle est vide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Ce modèle est vide.')))
         await ctx.send(content=draft.content or None, embed=preview, view=draft.build_link_view() or discord.utils.MISSING, ephemeral=True if ctx.interaction else False)
 
     @embed_group.command(name="send", description="Envoyer un modèle sauvegardé dans un salon.")
@@ -1087,17 +1083,17 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def embed_send(self, ctx: commands.Context, nom: str, salon: discord.TextChannel = None):
         row = await self.get_template(ctx.guild.id, nom)
         if not row:
-            return await ctx.send(embed=embeds.error(f"Aucun modèle nommé « {nom} »."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun modèle nommé « {nom} ».')))
         channel = salon or ctx.channel
         draft = EmbedDraft.from_row(row)
         errors = draft.validate()
         if errors:
-            return await ctx.send(embed=embeds.error("Ce modèle contient des erreurs :\n• " + "\n• ".join(errors[:10])))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Ce modèle contient des erreurs :\n• ' + '\n• '.join(errors[:10]))))
         if not channel.permissions_for(ctx.guild.me).send_messages or not channel.permissions_for(ctx.guild.me).embed_links:
-            return await ctx.send(embed=embeds.error(f"Il me manque des permissions dans {channel.mention} (Envoyer des messages / Intégrer des liens)."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Il me manque des permissions dans {channel.mention} (Envoyer des messages / Intégrer des liens).')))
         allowed = discord.AllowedMentions(everyone=False, roles=False, users=True)
         await channel.send(content=draft.content or None, embed=draft.to_embed(), view=draft.build_link_view() or discord.utils.MISSING, allowed_mentions=allowed)
-        await ctx.send(embed=embeds.success(f"📨 Modèle **{nom}** envoyé dans {channel.mention}."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'📨 Modèle **{nom}** envoyé dans {channel.mention}.')))
 
     @embed_group.command(name="delete", description="Supprimer un modèle d'embed.")
     @app_commands.describe(nom="Le nom du modèle à supprimer")
@@ -1105,7 +1101,7 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def embed_delete(self, ctx: commands.Context, *, nom: str):
         row = await self.get_template(ctx.guild.id, nom)
         if not row:
-            return await ctx.send(embed=embeds.error(f"Aucun modèle nommé « {nom} »."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun modèle nommé « {nom} ».')))
         view = helpers_confirm_view(ctx.author.id)
         msg = await ctx.send(embed=embeds.warning(f"Supprimer le modèle **{nom}** ? Cette action est irréversible."), view=view)
         await view.wait()
@@ -1120,12 +1116,12 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def embed_duplicate(self, ctx: commands.Context, nom: str, *, nouveau_nom: str):
         row = await self.get_template(ctx.guild.id, nom)
         if not row:
-            return await ctx.send(embed=embeds.error(f"Aucun modèle nommé « {nom} »."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun modèle nommé « {nom} ».')))
         if await self.get_template(ctx.guild.id, nouveau_nom):
-            return await ctx.send(embed=embeds.error(f"Un modèle nommé « {nouveau_nom} » existe déjà."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Un modèle nommé « {nouveau_nom} » existe déjà.')))
         draft = EmbedDraft.from_row(row)
         await self.create_template(ctx.guild.id, ctx.author.id, nouveau_nom, draft)
-        await ctx.send(embed=embeds.success(f"Modèle **{nom}** dupliqué en **{nouveau_nom}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Modèle **{nom}** dupliqué en **{nouveau_nom}**.')))
 
     @embed_group.command(name="rename", description="Renommer un modèle d'embed.")
     @app_commands.describe(ancien_nom="Le nom actuel", nouveau_nom="Le nouveau nom")
@@ -1133,11 +1129,11 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def embed_rename(self, ctx: commands.Context, ancien_nom: str, *, nouveau_nom: str):
         row = await self.get_template(ctx.guild.id, ancien_nom)
         if not row:
-            return await ctx.send(embed=embeds.error(f"Aucun modèle nommé « {ancien_nom} »."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun modèle nommé « {ancien_nom} ».')))
         if await self.get_template(ctx.guild.id, nouveau_nom):
-            return await ctx.send(embed=embeds.error(f"Un modèle nommé « {nouveau_nom} » existe déjà."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Un modèle nommé « {nouveau_nom} » existe déjà.')))
         await self.bot.db.execute("UPDATE embed_templates SET name = ?, updated_at = ? WHERE id = ?", (nouveau_nom, now(), row["id"]))
-        await ctx.send(embed=embeds.success(f"Modèle **{ancien_nom}** renommé en **{nouveau_nom}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Modèle **{ancien_nom}** renommé en **{nouveau_nom}**.')))
 
     @embed_group.command(name="export", description="Exporter un modèle d'embed en fichier JSON.")
     @app_commands.describe(nom="Le nom du modèle à exporter")
@@ -1145,7 +1141,7 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def embed_export(self, ctx: commands.Context, *, nom: str):
         row = await self.get_template(ctx.guild.id, nom)
         if not row:
-            return await ctx.send(embed=embeds.error(f"Aucun modèle nommé « {nom} »."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun modèle nommé « {nom} ».')))
         draft = EmbedDraft.from_row(row)
         # Uniquement la configuration de l'embed — jamais de token, secret, ID interne de
         # base de données ou autre information privée du serveur.
@@ -1161,23 +1157,23 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def embed_import(self, ctx: commands.Context, fichier: discord.Attachment = None):
         attachment = fichier or (ctx.message.attachments[0] if ctx.message and ctx.message.attachments else None)
         if not attachment:
-            return await ctx.send(embed=embeds.error("Joignez un fichier JSON exporté avec `+embed export`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Joignez un fichier JSON exporté avec `+embed export`.')))
         if not attachment.filename.lower().endswith(".json") or attachment.size > 256_000:
-            return await ctx.send(embed=embeds.error("Fichier invalide — un fichier `.json` de moins de 256 Ko est attendu."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Fichier invalide — un fichier `.json` de moins de 256 Ko est attendu.')))
         try:
             raw = await attachment.read()
             data = json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
-            return await ctx.send(embed=embeds.error("Le fichier n'est pas un JSON valide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Le fichier n'est pas un JSON valide.")))
         if not isinstance(data, dict):
-            return await ctx.send(embed=embeds.error("Format invalide — un objet JSON est attendu."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Format invalide — un objet JSON est attendu.')))
         name = (data.get("_name") or "").strip()
         if not name:
-            return await ctx.send(embed=embeds.error("Ce fichier ne contient pas de nom de modèle (`_name`) — il ne vient probablement pas de `+embed export`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Ce fichier ne contient pas de nom de modèle (`_name`) — il ne vient probablement pas de `+embed export`.')))
         draft = EmbedDraft.from_dict(data)
         errors = draft.validate()
         if errors:
-            return await ctx.send(embed=embeds.error("Ce fichier contient des données invalides :\n• " + "\n• ".join(errors[:10])))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Ce fichier contient des données invalides :\n• ' + '\n• '.join(errors[:10]))))
         preview = draft.to_embed()
         e = embeds.warning(f"Importer le modèle **{name}** ?", "Vérifiez l'aperçu ci-dessous avant de confirmer.")
         await ctx.send(embed=e)
@@ -1191,23 +1187,23 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def embed_message(self, ctx: commands.Context, *, lien: str):
         m = MESSAGE_LINK_RE.search(lien)
         if not m:
-            return await ctx.send(embed=embeds.error("Lien de message invalide. Clic droit sur le message → Copier le lien."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Lien de message invalide. Clic droit sur le message → Copier le lien.')))
         guild_id, channel_id, message_id = (int(x) for x in m.groups())
         if guild_id != ctx.guild.id:
-            return await ctx.send(embed=embeds.error("Ce message appartient à un autre serveur."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Ce message appartient à un autre serveur.')))
         channel = ctx.guild.get_channel(channel_id)
         if not channel:
-            return await ctx.send(embed=embeds.error("Le salon de ce message n'existe plus (ou je ne le vois pas)."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Le salon de ce message n'existe plus (ou je ne le vois pas).")))
         try:
             message = await channel.fetch_message(message_id)
         except discord.NotFound:
-            return await ctx.send(embed=embeds.error("Message introuvable — il a peut-être été supprimé."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Message introuvable — il a peut-être été supprimé.')))
         except discord.Forbidden:
-            return await ctx.send(embed=embeds.error("Je n'ai pas la permission de lire ce salon."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Je n'ai pas la permission de lire ce salon.")))
         if message.author.id != self.bot.user.id:
-            return await ctx.send(embed=embeds.error("Je ne peux modifier que les messages envoyés par SentriX."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Je ne peux modifier que les messages envoyés par SentriX.')))
         if not message.embeds:
-            return await ctx.send(embed=embeds.error("Ce message ne contient aucun embed à éditer."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Ce message ne contient aucun embed à éditer.')))
         draft = EmbedDraft.from_discord_embed(message.embeds[0], message.content)
         draft.target_message_id = message.id
         draft.target_channel_id = channel.id
@@ -1233,14 +1229,14 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     @checks.is_owner_or_admin()
     async def embedconfig_addrole(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.execute("INSERT OR IGNORE INTO embed_allowed_roles (guild_id, role_id) VALUES (?, ?)", (ctx.guild.id, role.id))
-        await ctx.send(embed=embeds.success(f"{role.mention} peut désormais utiliser `+embed`."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{role.mention} peut désormais utiliser `+embed`.')))
 
     @embedconfig.command(name="removerole", description="Retirer l'autorisation d'utiliser +embed à un rôle.")
     @app_commands.describe(role="Le rôle à retirer")
     @checks.is_owner_or_admin()
     async def embedconfig_removerole(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.execute("DELETE FROM embed_allowed_roles WHERE guild_id = ? AND role_id = ?", (ctx.guild.id, role.id))
-        await ctx.send(embed=embeds.success(f"{role.mention} ne peut plus utiliser `+embed` (sauf s'il a Gérer les messages/le serveur)."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{role.mention} ne peut plus utiliser `+embed` (sauf s'il a Gérer les messages/le serveur).")))
 
     @embedconfig.command(name="list", description="Lister les rôles autorisés à utiliser +embed.")
     @checks.is_owner_or_admin()
@@ -1294,7 +1290,7 @@ class EmbedSendConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.parent.author_id:
-            await interaction.response.send_message(embed=embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur.")), ephemere=True)
             return False
         return True
 
@@ -1326,7 +1322,7 @@ class EmbedSendView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.parent.author_id:
-            await interaction.response.send_message(embed=embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'êtes pas autorisé à utiliser cet éditeur.")), ephemere=True)
             return False
         return True
 
@@ -1345,19 +1341,17 @@ class EmbedSendView(discord.ui.View):
     async def toggle_mentions(self, interaction: discord.Interaction, button: discord.ui.Button):
         member = interaction.user
         if not isinstance(member, discord.Member) or not member.guild_permissions.mention_everyone:
-            return await interaction.response.send_message(
-                embed=embeds.error("Seuls les membres ayant la permission **Mentionner tout le monde** peuvent activer ceci."), ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Seuls les membres ayant la permission **Mentionner tout le monde** peuvent activer ceci.')), ephemere=True)
         self.allow_mentions = not self.allow_mentions
         await interaction.response.edit_message(embeds=self.parent.build_panel_embeds(), view=self)
 
     @discord.ui.button(label="Continuer", style=discord.ButtonStyle.success, row=2)
     async def proceed(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.channel:
-            return await interaction.response.send_message(embed=embeds.error("Choisissez d'abord un salon dans le menu."), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Choisissez d'abord un salon dans le menu.")), ephemere=True)
         errors = self.draft.validate()
         if errors:
-            return await interaction.response.send_message(embed=embeds.error("Corrigez d'abord :\n• " + "\n• ".join(errors[:10])), ephemeral=True)
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Corrigez d'abord :\n• " + '\n• '.join(errors[:10]))), ephemere=True)
         summary = (
             f"**Salon :** {self.channel.mention}\n"
             f"**Titre :** {self.draft.title or 'Aucun'}\n"

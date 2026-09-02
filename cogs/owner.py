@@ -156,7 +156,7 @@ class Owner(commands.Cog, name="Owner"):
         e.add_field(name="Raison", value=row["reason"] or "Aucune raison", inline=False)
         e.add_field(name="Ajouté par", value=f"<@{row['blacklisted_by']}>" if row["blacklisted_by"] else "Inconnu", inline=True)
         e.add_field(name="Date", value=f"<t:{row['blacklisted_at']}:f>" if row["blacklisted_at"] else "Inconnue", inline=True)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="unbl", description="Retirer un utilisateur de la liste noire du bot.", with_app_command=False)
     @checks.is_bot_owner()
@@ -459,7 +459,7 @@ class Owner(commands.Cog, name="Owner"):
                 return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Aucune image', description=f"Ce serveur n'a pas de {('icône' if action != 'banner' else 'bannière')}.")))
             e = await self._embed(guild_id, title=guild.name)
             e.set_image(url=asset.url)
-            return await ctx.send(embed=e)
+            return await panels.envoyer(ctx, panels.depuis_embed(e))
 
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Action invalide', description='Action invalide. Utilisez `list`, `invite`, `icon` ou `banner`.', kind='danger')))
 

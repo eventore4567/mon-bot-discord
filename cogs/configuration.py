@@ -38,6 +38,7 @@ from discord.ext import commands
 
 import config
 from utils import embeds, checks, helpers, log_service
+from utils import sentrix_panels as panels
 from cogs.automod import AUTOMOD_TOGGLE_LABELS, SECURITY_PRESETS
 from database.db import MANAGER_CATEGORIES
 
@@ -171,6 +172,91 @@ def parse_role_input(guild: discord.Guild, value: str):
     return discord.utils.get(guild.roles, name=value)
 
 
+
+# Description de chaque reglage : son libelle, ce qu'il change concretement, et
+# ou le verifier. Ces trois informations manquaient a la confirmation d'une ligne.
+REGLAGES = {
+    "prefix": ("Préfixe des commandes", "Toutes les commandes préfixées répondent à ce caractère.", "`+setup`"),
+    "mod_role": ("Rôle staff", "Ce rôle peut utiliser les commandes de modération.", "`+setup` › Modération"),
+    "log_channel": ("Salon des logs de sanctions", "Chaque sanction y sera consignée.", "`+setup` › Logs"),
+    "welcome_channel": ("Salon de bienvenue", "Les arrivées y seront annoncées.", "`+setup` › Bienvenue"),
+    "goodbye_channel": ("Salon de départ", "Les départs y seront annoncés.", "`+setup` › Bienvenue"),
+    "welcome_message": ("Message de bienvenue", "Texte envoyé à chaque arrivée.", "`+setup` › Bienvenue"),
+    "goodbye_message": ("Message de départ", "Texte envoyé à chaque départ.", "`+setup` › Bienvenue"),
+    "ticket_log_channel": ("Salon des logs de tickets", "L'ouverture et la fermeture des tickets y sont consignées.", "`+setup` › Tickets"),
+    "autorole": ("Rôle automatique", "Chaque nouveau membre le recevra à son arrivée.", "`+setup` › Rôles"),
+    "warn_role": ("Rôle d'avertissement", "Appliqué aux membres avertis.", "`+setup` › Modération"),
+    "warn_ban_threshold": ("Seuil de bannissement", "Nombre d'avertissements avant bannissement automatique.", "`+setup` › Modération"),
+    "level_channel": ("Salon des montées de niveau", "Les passages de niveau y sont annoncés.", "`+setup` › Niveaux"),
+    "suggest_channel": ("Salon des suggestions", "`+suggest` y publiera les propositions.", "`+setup`"),
+    "announce_channel": ("Salon des annonces", "Utilisé par les annonces programmées.", "`+setup`"),
+    "giveaway_channel": ("Salon des giveaways", "Les tirages au sort y seront publiés.", "`+setup`"),
+}
+
+
+def _valeur_lisible(guild: discord.Guild, cle: str, brut) -> str:
+    """Rend une valeur de configuration lisible : un identifiant ne dit rien."""
+    # Un seuil a 0 n'est pas « aucune valeur », c'est une desactivation explicite.
+    if cle == "warn_ban_threshold":
+        return "Désactivé" if not brut else f"**{brut}** avertissement(s)"
+    if brut in (None, "", 0):
+        return "Aucune"
+    if cle.endswith("_channel"):
+        salon = guild.get_channel(int(brut)) if str(brut).isdigit() else None
+        return salon.mention if salon else f"Salon supprimé (`{brut}`)"
+    if cle.endswith("_role"):
+        role = guild.get_role(int(brut)) if str(brut).isdigit() else None
+        return role.mention if role else f"Rôle supprimé (`{brut}`)"
+    return f"`{brut}`"
+
+
+async def _appliquer_reglage(cog, ctx: commands.Context, cle: str, valeur) -> None:
+    """Ecrit un reglage et repond par un panneau compose.
+
+    La confirmation disait « Le salon de bienvenue a été défini sur #accueil ».
+    Elle ne disait pas ce que le reglage change, ni surtout quelle etait la valeur
+    PRECEDENTE — l'information qu'on cherche quand on se demande si on vient
+    d'ecraser quelque chose. Elle est lue avant l'ecriture.
+    """
+    libelle, effet, ou_verifier = REGLAGES.get(
+        cle, (cle.replace("_", " ").capitalize(), "Réglage enregistré.", "`+setup`")
+    )
+    conf = await cog.bot.db.get_guild_config(ctx.guild.id)
+    ancienne = _valeur_lisible(ctx.guild, cle, conf[cle] if conf is not None else None)
+
+    await cog.bot.db.set_guild_config(ctx.guild.id, cle, valeur)
+    nouvelle = _valeur_lisible(ctx.guild, cle, valeur)
+
+    reglage = [
+        panels.Ligne("Paramètre", libelle),
+        panels.Ligne("Nouvelle valeur", nouvelle),
+    ]
+    if ancienne != "Aucune":
+        reglage.append(
+            panels.Ligne("Valeur précédente", ancienne, indice="Elle vient d'être remplacée.")
+        )
+
+    await panels.envoyer(
+        ctx,
+        panels.Panneau(
+            titre="SentriX — Configuration",
+            sous_titre=f"**{libelle}** est maintenant {nouvelle}.",
+            kind="configuration",
+            sections=[
+                panels.Section("Réglage", reglage),
+                panels.Section(
+                    "Effet",
+                    [
+                        panels.Ligne("Ce qui change", effet),
+                        panels.Ligne("Vérifier", ou_verifier),
+                    ],
+                ),
+            ],
+            pied="SentriX • Configuration",
+        ),
+    )
+
+
 class Configuration(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -200,24 +286,21 @@ class Configuration(commands.Cog):
     @checks.is_owner_or_admin()
     async def setprefix(self, ctx: commands.Context, prefixe: str):
         if len(prefixe) > 5:
-            return await ctx.send(embed=embeds.error("Le préfixe doit faire 5 caractères maximum."))
-        await self.bot.db.set_guild_config(ctx.guild.id, "prefix", prefixe)
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le préfixe doit faire 5 caractères maximum.')))
         self.bot.prefix_cache[ctx.guild.id] = prefixe
-        await ctx.send(embed=embeds.success(f"Le préfixe a été changé pour `{prefixe}`."))
+        await _appliquer_reglage(self, ctx, "prefix", prefixe)
 
     @commands.hybrid_command(name="setmodrole", description="Définir le rôle du staff/modération.")
     @app_commands.describe(role="Le rôle à définir comme rôle staff")
     @checks.is_owner_or_admin()
     async def setmodrole(self, ctx: commands.Context, role: discord.Role):
-        await self.bot.db.set_guild_config(ctx.guild.id, "mod_role", role.id)
-        await ctx.send(embed=embeds.success(f"Le rôle staff a été défini sur {role.mention}."))
+        await _appliquer_reglage(self, ctx, "mod_role", role.id)
 
     @commands.hybrid_command(name="setlogchannel", description="Définir le salon de logs des sanctions.")
     @app_commands.describe(salon="Le salon où seront envoyés les logs")
     @checks.is_owner_or_admin()
     async def setlogchannel(self, ctx: commands.Context, salon: discord.TextChannel):
-        await self.bot.db.set_guild_config(ctx.guild.id, "log_channel", salon.id)
-        await ctx.send(embed=embeds.success(f"Le salon de logs a été défini sur {salon.mention}."))
+        await _appliquer_reglage(self, ctx, "log_channel", salon.id)
 
     async def create_log_channels(self, guild: discord.Guild, author: discord.Member) -> list[discord.TextChannel]:
         """Crée (une seule fois) toute la catégorie de logs SentriX : un salon dédié par
@@ -264,7 +347,7 @@ class Configuration(commands.Cog):
                         guild.id, category_key,
                     )
             created.append(channel)
-            await channel.send(embed=embeds.brand("📡 Journal SentriX", topic))
+            await panels.envoyer(channel, panels.depuis_embed(embeds.brand('📡 Journal SentriX', topic)))
 
         try:
             repaired = await repair_member_log_access(self.bot, guild, author)
@@ -293,7 +376,7 @@ class Configuration(commands.Cog):
         created = await self.create_log_channels(ctx.guild, ctx.author)
 
         if not created:
-            return await ctx.send(embed=embeds.warning("Tous les salons de logs étaient déjà configurés. Utilisez `/setup` pour les changer un par un."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Tous les salons de logs étaient déjà configurés. Utilisez `/setup` pour les changer un par un.')))
 
         e = embeds.brand(
             "📡 Système de logs créé",
@@ -301,7 +384,7 @@ class Configuration(commands.Cog):
             "rien d'autre à faire, le bot y écrit tout seul à partir de maintenant.",
         )
         e.add_field(name="Salons créés", value="\n".join(c.mention for c in created), inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(
         name="logs-status",
@@ -313,7 +396,7 @@ class Configuration(commands.Cog):
         e = embeds.neutral("📡 Diagnostic des logs")
         if not conf:
             e.description = "Aucune configuration définie pour l'instant. Utilisez `/create-logs` ou `/setup`."
-            return await ctx.send(embed=e)
+            return await panels.envoyer(ctx, panels.depuis_embed(e))
 
         def check_channel(channel_id: int):
             """Retourne (emoji, texte) pour un salon donné : introuvable, permissions
@@ -365,7 +448,7 @@ class Configuration(commands.Cog):
             )
         else:
             e.add_field(name="Résultat", value="Tous les logs configurés fonctionnent correctement. ●", inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     # ================================================================== LOGS INDÉPENDANTS (/logsetup)
     #
@@ -418,7 +501,7 @@ class Configuration(commands.Cog):
     @checks.is_owner_or_admin_for("configuration")
     async def logs_group(self, ctx: commands.Context):
         if ctx.invoked_subcommand is None:
-            await ctx.send(embed=embeds.info("Sous-commandes : `+logs enable`, `+logs disable`, `+logs channel`, `+logs test`, `+logs status`, `+logs list`, `+logs reset`. Ou utilisez `+logsetup` pour le panneau interactif."))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Sous-commandes : `+logs enable`, `+logs disable`, `+logs channel`, `+logs test`, `+logs status`, `+logs list`, `+logs reset`. Ou utilisez `+logsetup` pour le panneau interactif.')))
 
     def _resolve_log_type(self, value: str) -> str | None:
         value = value.strip().lower().replace("-", "_")
@@ -437,56 +520,53 @@ class Configuration(commands.Cog):
     async def logs_enable(self, ctx: commands.Context, type_log: str, salon: discord.TextChannel = None):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
         if salon:
             ok, reason = log_service.validate_channel(ctx.guild, salon.id)
             if not ok:
-                return await ctx.send(embed=embeds.error(f"Impossible d'utiliser {salon.mention} : {reason}."))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Impossible d'utiliser {salon.mention} : {reason}.")))
             await log_service.set_log_channel(self.bot, ctx.guild.id, log_type, salon.id)
         try:
             await log_service.set_log_enabled(self.bot, ctx.guild.id, log_type, True)
         except ValueError:
-            return await ctx.send(embed=embeds.error(
-                "○ Vous devez d'abord choisir un salon valide avant d'activer ce log "
-                f"(`+logs channel {type_log} #salon` ou `+logs enable {type_log} #salon`)."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"○ Vous devez d'abord choisir un salon valide avant d'activer ce log (`+logs channel {type_log} #salon` ou `+logs enable {type_log} #salon`).")))
         label = log_service.LOG_TYPES[log_type]["label"]
-        await ctx.send(embed=embeds.success(f"Log **{label}** activé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Log **{label}** activé.')))
 
     @logs_group.command(name="disable", description="Désactiver un type de log.", with_app_command=False)
     async def logs_disable(self, ctx: commands.Context, type_log: str):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
         await log_service.set_log_enabled(self.bot, ctx.guild.id, log_type, False)
         label = log_service.LOG_TYPES[log_type]["label"]
-        await ctx.send(embed=embeds.success(f"Log **{label}** désactivé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Log **{label}** désactivé.')))
 
     @logs_group.command(name="channel", description="Définir le salon d'un type de log (sans l'activer automatiquement).", with_app_command=False)
     async def logs_channel(self, ctx: commands.Context, type_log: str, salon: discord.TextChannel):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
         ok, reason = log_service.validate_channel(ctx.guild, salon.id)
         if not ok:
-            return await ctx.send(embed=embeds.error(f"Impossible d'utiliser {salon.mention} : {reason}."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Impossible d'utiliser {salon.mention} : {reason}.")))
         await log_service.set_log_channel(self.bot, ctx.guild.id, log_type, salon.id)
         label = log_service.LOG_TYPES[log_type]["label"]
-        await ctx.send(embed=embeds.success(f"Salon du log **{label}** défini sur {salon.mention}. Utilisez `+logs enable {type_log}` pour l'activer."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Salon du log **{label}** défini sur {salon.mention}. Utilisez `+logs enable {type_log}` pour l'activer.")))
 
     @logs_group.command(name="test", description="Envoyer un message de test dans le salon d'un type de log.", with_app_command=False)
     async def logs_test(self, ctx: commands.Context, type_log: str):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
         ok, message = await log_service.send_test_log(self.bot, ctx.guild, log_type, ctx.author)
-        await ctx.send(embed=(embeds.success(message) if ok else embeds.error(message)))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(message) if ok else embeds.error(message)))
 
     @logs_group.command(name="status", description="Voir l'état d'un type de log précis.", with_app_command=False)
     async def logs_status_one(self, ctx: commands.Context, type_log: str):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
         setting = await log_service.get_log_setting(self.bot, ctx.guild.id, log_type)
         meta = log_service.LOG_TYPES[log_type]
         e = embeds.neutral(f"📋 {meta['label']}")
@@ -494,7 +574,7 @@ class Configuration(commands.Cog):
         channel = ctx.guild.get_channel(setting["channel_id"]) if setting["channel_id"] else None
         e.add_field(name="Salon", value=channel.mention if channel else "Non configuré", inline=True)
         e.add_field(name="Émis actuellement par le bot", value="● Oui" if meta["emits"] else "⚠️ Pas encore (configuration prête, événement pas encore câblé)", inline=False)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @logs_group.command(name="list", description="Lister tous les types de logs disponibles et leur état.", with_app_command=False)
     async def logs_list(self, ctx: commands.Context):
@@ -506,45 +586,41 @@ class Configuration(commands.Cog):
                 status = "🟢" if s["enabled"] else "⚪"
                 lines.append(f"{status} `{log_type}` — {log_service.LOG_TYPES[log_type]['label']}")
         e = embeds.neutral("📋 Types de logs disponibles", "\n".join(lines))
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @logs_group.command(name="reset", description="[Admin] Réinitialiser un type de log (désactivé, sans salon).", with_app_command=False)
     async def logs_reset(self, ctx: commands.Context, type_log: str):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await ctx.send(embed=embeds.error(f"Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
         await log_service.set_log_enabled(self.bot, ctx.guild.id, log_type, False)
         await log_service.set_log_channel(self.bot, ctx.guild.id, log_type, None)
         label = log_service.LOG_TYPES[log_type]["label"]
-        await ctx.send(embed=embeds.success(f"Log **{label}** réinitialisé (désactivé, aucun salon)."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Log **{label}** réinitialisé (désactivé, aucun salon).')))
 
     @commands.hybrid_command(name="setwelcomechannel", description="Définir le salon de bienvenue.", with_app_command=False)
     @app_commands.describe(salon="Le salon de bienvenue")
     @checks.is_owner_or_admin()
     async def setwelcomechannel(self, ctx: commands.Context, salon: discord.TextChannel):
-        await self.bot.db.set_guild_config(ctx.guild.id, "welcome_channel", salon.id)
-        await ctx.send(embed=embeds.success(f"Le salon de bienvenue a été défini sur {salon.mention}."))
+        await _appliquer_reglage(self, ctx, "welcome_channel", salon.id)
 
     @commands.hybrid_command(name="setgoodbyechannel", description="Définir le salon des messages de départ.", with_app_command=False)
     @app_commands.describe(salon="Le salon de départ")
     @checks.is_owner_or_admin()
     async def setgoodbyechannel(self, ctx: commands.Context, salon: discord.TextChannel):
-        await self.bot.db.set_guild_config(ctx.guild.id, "goodbye_channel", salon.id)
-        await ctx.send(embed=embeds.success(f"Le salon de départ a été défini sur {salon.mention}."))
+        await _appliquer_reglage(self, ctx, "goodbye_channel", salon.id)
 
     @commands.hybrid_command(name="setwelcomemessage", description="Personnaliser le message de bienvenue ({member}, {server}).", with_app_command=False)
     @app_commands.describe(message="Le message (utilisez {member} et {server})")
     @checks.is_owner_or_admin()
     async def setwelcomemessage(self, ctx: commands.Context, *, message: str):
-        await self.bot.db.set_guild_config(ctx.guild.id, "welcome_message", message)
-        await ctx.send(embed=embeds.success("Message de bienvenue mis à jour."))
+        await _appliquer_reglage(self, ctx, "welcome_message", message)
 
     @commands.hybrid_command(name="setgoodbyemessage", description="Personnaliser le message de départ ({member}, {server}).", with_app_command=False)
     @app_commands.describe(message="Le message (utilisez {member} et {server})")
     @checks.is_owner_or_admin()
     async def setgoodbyemessage(self, ctx: commands.Context, *, message: str):
-        await self.bot.db.set_guild_config(ctx.guild.id, "goodbye_message", message)
-        await ctx.send(embed=embeds.success("Message de départ mis à jour."))
+        await _appliquer_reglage(self, ctx, "goodbye_message", message)
 
     @commands.hybrid_command(
         name="setticketlogchannel",
@@ -554,15 +630,13 @@ class Configuration(commands.Cog):
     @app_commands.describe(salon="Le salon de logs de repli pour les tickets")
     @checks.is_owner_or_admin()
     async def setticketlogchannel(self, ctx: commands.Context, salon: discord.TextChannel):
-        await self.bot.db.set_guild_config(ctx.guild.id, "ticket_log_channel", salon.id)
-        await ctx.send(embed=embeds.success(f"Salon de logs des tickets défini sur {salon.mention}."))
+        await _appliquer_reglage(self, ctx, "ticket_log_channel", salon.id)
 
     @commands.hybrid_command(name="setautorole", description="Définir un rôle attribué automatiquement à l'arrivée.")
     @app_commands.describe(role="Le rôle à attribuer automatiquement")
     @checks.is_owner_or_admin()
     async def setautorole(self, ctx: commands.Context, role: discord.Role):
-        await self.bot.db.set_guild_config(ctx.guild.id, "autorole", role.id)
-        await ctx.send(embed=embeds.success(f"Rôle automatique défini sur {role.mention}."))
+        await _appliquer_reglage(self, ctx, "autorole", role.id)
 
     @commands.hybrid_command(
         name="createrole",
@@ -583,12 +657,10 @@ class Configuration(commands.Cog):
         plutôt /setup → 🎭 Rôles → ➕ Créer un nouveau rôle."""
         await ctx.typing()
         if not ctx.guild.me.guild_permissions.manage_roles:
-            return await ctx.send(embed=embeds.error(
-                "⚠️ SentriX n'a pas la permission **Gérer les rôles** sur ce serveur — impossible de créer un rôle."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("⚠️ SentriX n'a pas la permission **Gérer les rôles** sur ce serveur — impossible de créer un rôle.")))
         texte = texte.strip()
         if not texte:
-            return await ctx.send(embed=embeds.error("Merci d'indiquer un nom de rôle. Exemple : `+createrole Middle Man bleu`"))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Merci d'indiquer un nom de rôle. Exemple : `+createrole Middle Man bleu`")))
 
         name = texte
         colour_value = 0
@@ -603,7 +675,7 @@ class Configuration(commands.Cog):
                 colour_label = candidate_colour.strip()
 
         if len(name) > 100:
-            return await ctx.send(embed=embeds.error("Le nom du rôle est trop long (100 caractères maximum)."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le nom du rôle est trop long (100 caractères maximum).')))
 
         try:
             role = await ctx.guild.create_role(
@@ -611,18 +683,12 @@ class Configuration(commands.Cog):
                 reason=f"Créé via +createrole par {ctx.author}",
             )
         except discord.HTTPException as exc:
-            return await ctx.send(embed=embeds.error(
-                f"○ La création du rôle a échoué (`{type(exc).__name__}`). Le serveur a peut-être atteint la "
-                "limite de 250 rôles, ou SentriX n'a plus la permission nécessaire."
-            ))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"○ La création du rôle a échoué (`{type(exc).__name__}`). Le serveur a peut-être atteint la limite de 250 rôles, ou SentriX n'a plus la permission nécessaire.")))
 
         await self.bot.db.log_setup_history(
             ctx.guild.id, ctx.author.id, "Rôles", "rôle créé (+createrole)", new_value=f"{role.name} (#{role.id})",
         )
-        await ctx.send(embed=embeds.success(
-            f"● Le rôle {role.mention} a été créé (couleur : {colour_label}).\n"
-            "Pour régler ses permissions, utilisez `/setup` → 🎭 Rôles, ou les paramètres du serveur Discord."
-        ))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'● Le rôle {role.mention} a été créé (couleur : {colour_label}).\nPour régler ses permissions, utilisez `/setup` → 🎭 Rôles, ou les paramètres du serveur Discord.')))
 
     @commands.hybrid_command(
         name="setwarnrole",
@@ -632,11 +698,7 @@ class Configuration(commands.Cog):
     @app_commands.describe(role="Le rôle à attribuer à chaque /warn (laisser vide pour désactiver)")
     @checks.is_owner_or_admin()
     async def setwarnrole(self, ctx: commands.Context, role: discord.Role = None):
-        await self.bot.db.set_guild_config(ctx.guild.id, "warn_role", role.id if role else None)
-        if role:
-            await ctx.send(embed=embeds.success(f"Le rôle {role.mention} sera désormais attribué automatiquement à chaque `/warn`."))
-        else:
-            await ctx.send(embed=embeds.success("Le rôle automatique d'avertissement a été désactivé."))
+        await _appliquer_reglage(self, ctx, "warn_role", role.id if role else None)
 
     @commands.hybrid_command(
         name="setwarnbanthreshold",
@@ -647,12 +709,8 @@ class Configuration(commands.Cog):
     @checks.is_owner_or_admin()
     async def setwarnbanthreshold(self, ctx: commands.Context, nombre: int):
         if nombre < 0:
-            return await ctx.send(embed=embeds.error("Le nombre doit être positif (0 pour désactiver)."))
-        await self.bot.db.set_guild_config(ctx.guild.id, "warn_ban_threshold", nombre)
-        if nombre == 0:
-            await ctx.send(embed=embeds.success("Le bannissement automatique après avertissements a été désactivé."))
-        else:
-            await ctx.send(embed=embeds.success(f"Un membre sera désormais banni automatiquement au **{nombre}ᵉ** avertissement."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le nombre doit être positif (0 pour désactiver).')))
+        await _appliquer_reglage(self, ctx, "warn_ban_threshold", nombre)
 
     @commands.hybrid_command(name="disablecommand", description="Désactiver une commande sur ce serveur.", with_app_command=False)
     @app_commands.describe(commande="Le nom de la commande à désactiver")
@@ -660,12 +718,12 @@ class Configuration(commands.Cog):
     async def disablecommand(self, ctx: commands.Context, commande: str):
         cmd = self.bot.get_command(commande)
         if not cmd:
-            return await ctx.send(embed=embeds.error(f"Commande `{commande}` introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Commande `{commande}` introuvable.')))
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO disabled_commands (guild_id, command_name) VALUES (?, ?)",
             (ctx.guild.id, commande),
         )
-        await ctx.send(embed=embeds.success(f"La commande `{commande}` a été désactivée sur ce serveur."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'La commande `{commande}` a été désactivée sur ce serveur.')))
 
     @commands.hybrid_command(name="enablecommand", description="Réactiver une commande précédemment désactivée.", with_app_command=False)
     @app_commands.describe(commande="Le nom de la commande à réactiver")
@@ -675,7 +733,7 @@ class Configuration(commands.Cog):
             "DELETE FROM disabled_commands WHERE guild_id = ? AND command_name = ?",
             (ctx.guild.id, commande),
         )
-        await ctx.send(embed=embeds.success(f"La commande `{commande}` a été réactivée."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'La commande `{commande}` a été réactivée.')))
 
     @commands.hybrid_command(name="ignorechannel", description="Ignorer un salon (le bot n'y répondra plus).", with_app_command=False)
     @app_commands.describe(salon="Le salon à ignorer")
@@ -689,7 +747,7 @@ class Configuration(commands.Cog):
         automod_cog = self.bot.get_cog("Automod")
         if automod_cog:
             automod_cog.ignored_channels_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"Le salon {salon.mention} est maintenant ignoré (y compris par AutoMod)."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le salon {salon.mention} est maintenant ignoré (y compris par AutoMod).')))
 
     @commands.hybrid_command(name="unignorechannel", description="Ne plus ignorer un salon.", with_app_command=False)
     @app_commands.describe(salon="Le salon à ne plus ignorer")
@@ -703,81 +761,136 @@ class Configuration(commands.Cog):
         automod_cog = self.bot.get_cog("Automod")
         if automod_cog:
             automod_cog.ignored_channels_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success(f"Le salon {salon.mention} n'est plus ignoré."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Le salon {salon.mention} n'est plus ignoré.")))
 
     @commands.hybrid_command(name="setlevelchannel", description="Définir le salon des annonces de niveau.", with_app_command=False)
     @app_commands.describe(salon="Le salon pour les annonces de niveau")
     @checks.is_owner_or_admin()
     async def setlevelchannel(self, ctx: commands.Context, salon: discord.TextChannel):
-        await self.bot.db.set_guild_config(ctx.guild.id, "level_channel", salon.id)
-        await ctx.send(embed=embeds.success(f"Salon des niveaux défini sur {salon.mention}."))
+        await _appliquer_reglage(self, ctx, "level_channel", salon.id)
 
     @commands.hybrid_command(name="setsuggestchannel", description="Définir le salon des suggestions.", with_app_command=False)
     @app_commands.describe(salon="Le salon des suggestions")
     @checks.is_owner_or_admin()
     async def setsuggestchannel(self, ctx: commands.Context, salon: discord.TextChannel):
-        await self.bot.db.set_guild_config(ctx.guild.id, "suggest_channel", salon.id)
-        await ctx.send(embed=embeds.success(f"Salon des suggestions défini sur {salon.mention}."))
+        await _appliquer_reglage(self, ctx, "suggest_channel", salon.id)
 
     @commands.hybrid_command(name="setannouncechannel", description="Définir le salon des annonces générales.", with_app_command=False)
     @app_commands.describe(salon="Le salon des annonces")
     @checks.is_owner_or_admin()
     async def setannouncechannel(self, ctx: commands.Context, salon: discord.TextChannel):
-        await self.bot.db.set_guild_config(ctx.guild.id, "announce_channel", salon.id)
-        await ctx.send(embed=embeds.success(f"Salon des annonces défini sur {salon.mention}."))
+        await _appliquer_reglage(self, ctx, "announce_channel", salon.id)
 
     @commands.hybrid_command(name="setgiveawaychannel", description="Définir le salon par défaut des giveaways.", with_app_command=False)
     @app_commands.describe(salon="Le salon par défaut des giveaways")
     @checks.is_owner_or_admin()
     async def setgiveawaychannel(self, ctx: commands.Context, salon: discord.TextChannel):
-        await self.bot.db.set_guild_config(ctx.guild.id, "giveaway_channel", salon.id)
-        await ctx.send(embed=embeds.success(f"Salon des giveaways défini sur {salon.mention}."))
+        await _appliquer_reglage(self, ctx, "giveaway_channel", salon.id)
 
     @commands.hybrid_command(name="config-view", description="Afficher la configuration actuelle du serveur.")
     @checks.is_owner_or_admin()
     async def config_view(self, ctx: commands.Context):
-        conf = await self.bot.db.get_guild_config(ctx.guild.id)
-        e = embeds.neutral("⚙️ Configuration du serveur")
-        if not conf:
-            e.description = "Aucune configuration définie pour l'instant."
-            return await ctx.send(embed=e)
+        """Configuration du serveur, groupee par sujet.
 
-        def fmt_channel(cid):
+        Les onze reglages etaient onze champs de meme poids : il fallait tous les
+        lire pour trouver celui qu'on cherchait. Ils sont maintenant regroupes
+        comme on y pense — general, moderation, accueil, tickets — et ce qui n'est
+        PAS defini est compte dans le resume.
+        """
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
+        if not conf:
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre="SentriX — Configuration",
+                    sous_titre="Aucun réglage n'est encore défini sur ce serveur.",
+                    kind="warning",
+                    sections=[
+                        panels.Section(
+                            "Démarrer",
+                            [
+                                panels.Ligne("`+setup`", "Centre de contrôle, tout se règle au clic"),
+                                panels.Ligne("`+create-logs`", "Crée la catégorie de journaux d'un coup"),
+                            ],
+                        )
+                    ],
+                    pied="SentriX • Configuration",
+                ),
+            )
+
+        def salon(cid):
             if not cid:
                 return "Non défini"
             ch = ctx.guild.get_channel(cid)
-            return ch.mention if ch else "Salon introuvable"
+            return ch.mention if ch else "**Salon supprimé**"
 
-        def fmt_role(rid):
+        def role(rid):
             if not rid:
                 return "Non défini"
             r = ctx.guild.get_role(rid)
-            return r.mention if r else "Rôle introuvable"
+            return r.mention if r else "**Rôle supprimé**"
 
-        e.add_field(name="Préfixe", value=f"`{conf['prefix'] or '+'}`", inline=True)
-        e.add_field(name="Rôle staff", value=fmt_role(conf["mod_role"]), inline=True)
-        e.add_field(name="Salon logs", value=fmt_channel(conf["log_channel"]), inline=True)
-        e.add_field(name="Salon bienvenue", value=fmt_channel(conf["welcome_channel"]), inline=True)
-        e.add_field(name="Salon départ", value=fmt_channel(conf["goodbye_channel"]), inline=True)
-        e.add_field(name="Rôle auto", value=fmt_role(conf["autorole"]), inline=True)
-        e.add_field(name="Logs tickets (repli)", value=fmt_channel(conf["ticket_log_channel"]), inline=True)
-        e.add_field(name="Rôle d'avertissement", value=fmt_role(conf["warn_role"]), inline=True)
-        e.add_field(
-            name="Ban auto après N warns",
-            value=f"{conf['warn_ban_threshold']} avertissement(s)" if conf["warn_ban_threshold"] else "Désactivé",
-            inline=True,
-        )
+        groupes = {
+            "Général": [
+                panels.Ligne("Préfixe", f"`{conf['prefix'] or '+'}`"),
+                panels.Ligne("Salon des logs", salon(conf["log_channel"])),
+            ],
+            "Modération": [
+                panels.Ligne("Rôle staff", role(conf["mod_role"])),
+                panels.Ligne("Rôle d'avertissement", role(conf["warn_role"])),
+                panels.Ligne(
+                    "Bannissement automatique",
+                    f"Au **{conf['warn_ban_threshold']}ᵉ** avertissement"
+                    if conf["warn_ban_threshold"] else "Désactivé",
+                ),
+            ],
+            "Accueil et départ": [
+                panels.Ligne("Salon de bienvenue", salon(conf["welcome_channel"])),
+                panels.Ligne("Salon de départ", salon(conf["goodbye_channel"])),
+                panels.Ligne("Rôle automatique", role(conf["autorole"])),
+            ],
+            "Tickets": [
+                panels.Ligne("Salon des logs de tickets", salon(conf["ticket_log_channel"])),
+            ],
+        }
+        sections = [panels.Section(titre, lignes) for titre, lignes in groupes.items()]
 
         managers = await self.bot.db.list_bot_managers(ctx.guild.id)
         if managers:
             mentions = []
-            for row in managers:
-                member = ctx.guild.get_member(row["user_id"])
-                mentions.append(member.mention if member else f"<@{row['user_id']}>")
-            e.add_field(name="Gestionnaires du bot", value=", ".join(mentions), inline=False)
+            for ligne in managers:
+                membre = ctx.guild.get_member(ligne["user_id"])
+                mentions.append(membre.mention if membre else f"<@{ligne['user_id']}>")
+            sections.append(
+                panels.Section(
+                    f"Gestionnaires du bot ({len(mentions)})",
+                    [panels.Ligne("Autorisés", ", ".join(mentions))],
+                )
+            )
         else:
-            e.add_field(name="Gestionnaires du bot", value="Aucun (seuls les administrateurs peuvent configurer le bot).", inline=False)
-        await ctx.send(embed=e)
+            sections.append(
+                panels.Section(
+                    "Gestionnaires du bot",
+                    [panels.Ligne("Aucun", "Seuls les administrateurs peuvent configurer SentriX")],
+                )
+            )
+
+        # Ce qui manque est ce qu'on vient chercher : on le compte.
+        total = sum(len(l) for l in groupes.values())
+        definis = sum(
+            1 for lignes in groupes.values() for l in lignes
+            if str(l.valeur) not in ("Non défini", "Désactivé")
+        )
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — Configuration du serveur",
+                sous_titre=f"**{definis}** réglage(s) définis sur **{total}**.",
+                kind="configuration",
+                sections=sections,
+                pied="SentriX • Configuration",
+            ),
+        )
 
     @commands.hybrid_command(name="config-reset", description="Réinitialiser toute la configuration du serveur.", with_app_command=False)
     @checks.is_owner_or_admin()
@@ -786,7 +899,40 @@ class Configuration(commands.Cog):
         await self.bot.db.ensure_guild(ctx.guild.id)
         self.bot.db.invalidate_guild_config(ctx.guild.id)
         self.bot.prefix_cache.pop(ctx.guild.id, None)
-        await ctx.send(embed=embeds.success("La configuration du serveur a été réinitialisée."))
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre="SentriX — Configuration réinitialisée",
+                sous_titre="Tous les réglages du serveur sont revenus à leur valeur par défaut.",
+                kind="warning",
+                sections=[
+                    panels.Section(
+                        "Effacé",
+                        [
+                            panels.Ligne("Salons", "Logs, bienvenue, départ, tickets"),
+                            panels.Ligne("Rôles", "Staff, avertissement, rôle automatique"),
+                            panels.Ligne("Préfixe", "Revenu à `+`"),
+                        ],
+                    ),
+                    panels.Section(
+                        "Conservé",
+                        [
+                            panels.Ligne(
+                                "Données des membres",
+                                "XP, niveaux, argent et sanctions",
+                                indice="Une réinitialisation de configuration n'efface aucune donnée de membre.",
+                            ),
+                            panels.Ligne("Tickets ouverts", "Ils restent accessibles"),
+                        ],
+                    ),
+                    panels.Section(
+                        "Reconfigurer",
+                        [panels.Ligne("`+setup`", "Tout se règle au clic depuis le centre de contrôle")],
+                    ),
+                ],
+                pied="SentriX • Configuration",
+            ),
+        )
 
     @commands.hybrid_command(
         name="setup",
@@ -842,7 +988,7 @@ class Configuration(commands.Cog):
         # boutons de navigation (ils encodent cet ID dans leur custom_id pour pouvoir
         # être retrouvés après un redémarrage — voir SetupNavButton plus bas).
         placeholder = embeds.neutral("⚙️ CENTRE DE CONFIGURATION SENTRIX", "Chargement...", color=SETUP_COLOR_MAIN)
-        message = await ctx_or_channel.send(embed=placeholder)
+        message = await panels.envoyer(ctx_or_channel, panels.depuis_embed(placeholder))
 
         view = SetupView(
             self.bot, guild.id, author.id, message.id, channel_id,
@@ -1059,19 +1205,13 @@ class LevelRoleModal(discord.ui.Modal, title="Ajouter un rôle de niveau"):
         try:
             level = int(str(self.niveau.component.value).strip())
         except (ValueError, AttributeError):
-            return await interaction.response.send_message(
-                embed=embeds.error("Entrez un nombre entier, par exemple 5.", title="Niveau invalide"),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Entrez un nombre entier, par exemple 5.', title='Niveau invalide')), ephemere=True)
         choisis = list(getattr(self.role.component, "values", ()) or ())
         role = choisis[0] if choisis else None
         if role is not None and not isinstance(role, discord.Role):
             role = interaction.guild.get_role(int(getattr(role, "id", role)))
         if role is None:
-            return await interaction.response.send_message(
-                embed=embeds.error("Sélectionnez un rôle dans la liste.", title="Aucun rôle choisi"),
-                ephemeral=True,
-            )
+            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Sélectionnez un rôle dans la liste.', title='Aucun rôle choisi')), ephemere=True)
 
         existing = await self.view_ref.bot.db.fetchone(
             "SELECT * FROM level_roles WHERE guild_id = ? AND level = ?", (self.view_ref.guild_id, level)
@@ -1402,7 +1542,7 @@ class LogsSetupView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if self.author_id is not None and interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=embeds.error("Vous n'êtes pas autorisé à utiliser ce panneau."), ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'êtes pas autorisé à utiliser ce panneau.")), ephemere=True)
             return False
         return True
 
@@ -1499,7 +1639,7 @@ class LogsSetupView(discord.ui.View):
             channel_id = resolved.id if resolved else None
             ok, reason = log_service.validate_channel(interaction.guild, channel_id)
             if not ok:
-                return await interaction.response.send_message(embed=embeds.error(f"Impossible d'utiliser ce salon : {reason}."), ephemeral=True)
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(f"Impossible d'utiliser ce salon : {reason}.")), ephemere=True)
             await log_service.set_log_channel(self.cog.bot, interaction.guild.id, self.current_type, channel_id)
             await self._refresh(interaction)
         return callback
@@ -1510,17 +1650,14 @@ class LogsSetupView(discord.ui.View):
             try:
                 await log_service.set_log_enabled(self.cog.bot, interaction.guild.id, self.current_type, True)
             except ValueError:
-                return await interaction.response.send_message(
-                    embed=embeds.error("○ Vous devez d'abord choisir un salon valide avant d'activer ce log."),
-                    ephemeral=True,
-                )
+                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("○ Vous devez d'abord choisir un salon valide avant d'activer ce log.")), ephemere=True)
         else:
             await log_service.set_log_enabled(self.cog.bot, interaction.guild.id, self.current_type, False)
         await self._refresh(interaction)
 
     async def _test_clicked(self, interaction: discord.Interaction):
         ok, message = await log_service.send_test_log(self.cog.bot, interaction.guild, self.current_type, interaction.user)
-        await interaction.response.send_message(embed=(embeds.success(message) if ok else embeds.error(message)), ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(message) if ok else embeds.error(message)), ephemere=True)
 
     async def _back_clicked(self, interaction: discord.Interaction):
         self.current_type = None
@@ -1569,7 +1706,7 @@ class SetupLockPromptView(discord.ui.View):
                 color=SETUP_COLOR_MAIN,
             )
         embed.set_footer(text=f"Lecture seule — session ouverte par {self.locked_author_name}")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
 
     @discord.ui.button(label="🔄 Prendre le contrôle", style=discord.ButtonStyle.primary, row=0)
     async def take_control(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1602,9 +1739,7 @@ class SetupLockPromptView(discord.ui.View):
             self.guild_id, interaction.user.id, "Configuration", "prise de contrôle", old_value=self.locked_author_name,
         )
         message, _view = await self.cog._open_setup_panel(interaction.channel, author=interaction.user)
-        await interaction.followup.send(
-            embed=embeds.success(f"Vous avez pris le contrôle — nouveau panneau : {message.jump_url}"), ephemeral=True,
-        )
+        await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(f'Vous avez pris le contrôle — nouveau panneau : {message.jump_url}')), ephemere=True)
 
     @discord.ui.button(label="○ Annuler", style=discord.ButtonStyle.danger, row=0)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1615,9 +1750,9 @@ class SetupLockPromptView(discord.ui.View):
     async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(embed=embeds.error("Une erreur inattendue est survenue."), ephemeral=True)
+                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Une erreur inattendue est survenue.')), ephemere=True)
             else:
-                await interaction.response.send_message(embed=embeds.error("Une erreur inattendue est survenue."), ephemeral=True)
+                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Une erreur inattendue est survenue.')), ephemere=True)
         except discord.HTTPException:
             pass
 
@@ -2145,7 +2280,7 @@ class SetupView(discord.ui.View):
             role = guild.get_role(r["role_id"]) if guild else None
             lines.append(f"Niveau **{r['level']}** → {role.mention if role else '*rôle supprimé*'}")
         e = embeds.neutral("🏆 Tous les paliers de niveau", "\n".join(lines)[:4000], color=SETUP_COLOR_MAIN)
-        await interaction.response.send_message(embed=e, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(e), ephemere=True)
 
     async def _tickets_hint(self, interaction: discord.Interaction):
         await interaction.response.send_message(
@@ -2313,7 +2448,7 @@ class SetupView(discord.ui.View):
         self.picker_selected = None
         await self.persist_session()
         self.render_page()
-        await interaction.followup.send(embed=embeds.success("Tous les salons annexes ont été retirés de la configuration."), ephemeral=True)
+        await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('Tous les salons annexes ont été retirés de la configuration.')), ephemere=True)
         try:
             channel = self.bot.get_channel(self.channel_id)
             if channel:
@@ -2465,7 +2600,7 @@ class SetupView(discord.ui.View):
                 + (f" (`{r['old_value']}` → `{r['new_value']}`)" if r["new_value"] is not None else "")
             )
         e = embeds.neutral("📜 Historique des modifications", "\n".join(lines)[:4000], color=SETUP_COLOR_MAIN)
-        await interaction.response.send_message(embed=e, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(e), ephemere=True)
 
     async def _save_pending(self, interaction: discord.Interaction):
         if not self.choices:
@@ -2488,9 +2623,9 @@ class SetupView(discord.ui.View):
         e = await self._build_summary_embed()
         e.title = "👁️ Aperçu de la configuration"
         if not interaction.response.is_done():
-            await interaction.response.send_message(embed=e, ephemeral=True)
+            await panels.envoyer(interaction.response, panels.depuis_embed(e), ephemere=True)
         else:
-            await interaction.followup.send(embed=e, ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(e), ephemere=True)
 
     async def _ask_cancel(self, interaction: discord.Interaction):
         confirm = helpers.ConfirmView(interaction.user.id, timeout=30)

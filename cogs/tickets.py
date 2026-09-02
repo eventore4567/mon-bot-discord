@@ -159,7 +159,7 @@ class PanelTextModal(discord.ui.Modal, title="📝 Texte du panel"):
             "UPDATE ticket_panels_v2 SET name = ?, title = ?, description = ? WHERE id = ?",
             (self.name.value, self.title_input.value, self.description.value, self.panel_id),
         )
-        await interaction.response.send_message(embed=embeds.success("Texte du panel mis à jour."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success('Texte du panel mis à jour.')), ephemere=True)
 
 
 class PanelMediaModal(discord.ui.Modal, title="🖼️ Image, miniature et couleur"):
@@ -185,12 +185,12 @@ class PanelMediaModal(discord.ui.Modal, title="🖼️ Image, miniature et coule
             try:
                 color_value = int(raw, 16)
             except ValueError:
-                return await interaction.response.send_message(embed=embeds.error("Couleur invalide — utilisez un code hexadécimal, ex: `5865F2`."), ephemeral=True)
+                return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Couleur invalide — utilisez un code hexadécimal, ex: `5865F2`.')), ephemere=True)
         await self.cog.bot.db.execute(
             "UPDATE ticket_panels_v2 SET color = ?, image_url = ?, thumbnail_url = ?, footer_text = ? WHERE id = ?",
             (color_value, self.image.value or None, self.thumbnail.value or None, self.footer.value or None, self.panel_id),
         )
-        await interaction.response.send_message(embed=embeds.success("Apparence du panel mise à jour."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success('Apparence du panel mise à jour.')), ephemere=True)
 
 
 class PanelMaxModal(discord.ui.Modal, title="🔢 Limite de tickets par membre"):
@@ -203,23 +203,14 @@ class PanelMaxModal(discord.ui.Modal, title="🔢 Limite de tickets par membre")
 
     async def on_submit(self, interaction: discord.Interaction):
         if not self.max_input.value.strip().isdigit():
-            return await interaction.response.send_message(
-                embed=embeds.error("La limite doit être un nombre entier compris entre 1 et 20."),
-                ephemeral=True,
-            )
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('La limite doit être un nombre entier compris entre 1 et 20.')), ephemere=True)
         maximum = int(self.max_input.value)
         if not 1 <= maximum <= 20:
-            return await interaction.response.send_message(
-                embed=embeds.error("La limite doit être comprise entre 1 et 20 tickets simultanés par membre."),
-                ephemeral=True,
-            )
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('La limite doit être comprise entre 1 et 20 tickets simultanés par membre.')), ephemere=True)
         await self.cog.bot.db.execute(
             "UPDATE ticket_panels_v2 SET max_per_member = ? WHERE id = ?", (maximum, self.panel_id)
         )
-        await interaction.response.send_message(
-            embed=embeds.success(f"Limite enregistrée : **{maximum}** ticket(s) simultané(s) maximum par membre."),
-            ephemeral=True,
-        )
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Limite enregistrée : **{maximum}** ticket(s) simultané(s) maximum par membre.')), ephemere=True)
 
 
 class PanelAddTypeModal(discord.ui.Modal, title="➕ Ajouter un type de ticket"):
@@ -237,9 +228,9 @@ class PanelAddTypeModal(discord.ui.Modal, title="➕ Ajouter un type de ticket")
     async def on_submit(self, interaction: discord.Interaction):
         name = self.name.value.strip()
         if not name:
-            return await interaction.response.send_message(embed=embeds.error("Le nom ne peut pas être vide."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Le nom ne peut pas être vide.')), ephemere=True)
         if await self.cog.get_type_by_name(self.guild_id, name):
-            return await interaction.response.send_message(embed=embeds.error(f"Un type nommé « {name} » existe déjà sur ce serveur."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error(f'Un type nommé « {name} » existe déjà sur ce serveur.')), ephemere=True)
         type_id = await self.cog.add_type(self.guild_id, self.panel_id, name)
         await interaction.response.send_message(
             embed=embeds.success(f"Type **{name}** créé (#{type_id}). Configurez-le ci-dessous, puis revenez sur l'éditeur du panel pour l'envoyer."),
@@ -270,21 +261,12 @@ class TypeTextModal(discord.ui.Modal, title="📝 Type de ticket — Texte"):
         raw_emoji = self.emoji.value.strip()
         emoji = parse_component_emoji(raw_emoji, interaction.client)
         if raw_emoji and emoji is None:
-            return await interaction.response.send_message(
-                embed=embeds.error(
-                    "L’emoji indiqué n’est pas utilisable par le bot. Collez un emoji Unicode, "
-                    "ou un emoji personnalisé Discord complet comme `<:nom:id>` ou `<a:nom:id>`."
-                ),
-                ephemeral=True,
-            )
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('L’emoji indiqué n’est pas utilisable par le bot. Collez un emoji Unicode, ou un emoji personnalisé Discord complet comme `<:nom:id>` ou `<a:nom:id>`.')), ephemere=True)
         await self.cog.bot.db.execute(
             "UPDATE ticket_types SET name = ?, description = ?, emoji = ?, button_label = ?, name_format = ? WHERE id = ?",
             (self.name.value.strip(), self.description.value, str(emoji) if emoji else None, self.button_label.value, self.name_format.value, self.type_id),
         )
-        await interaction.response.send_message(
-            embed=embeds.success("Le type de ticket a été mis à jour. Le prochain envoi du panel utilisera ces réglages."),
-            ephemeral=True,
-        )
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success('Le type de ticket a été mis à jour. Le prochain envoi du panel utilisera ces réglages.')), ephemere=True)
 
 
 class TypeOpenMessageModal(discord.ui.Modal, title="💬 Message d'ouverture"):
@@ -300,7 +282,7 @@ class TypeOpenMessageModal(discord.ui.Modal, title="💬 Message d'ouverture"):
 
     async def on_submit(self, interaction: discord.Interaction):
         await self.cog.bot.db.execute("UPDATE ticket_types SET open_message = ? WHERE id = ?", (self.message.value, self.type_id))
-        await interaction.response.send_message(embed=embeds.success("Message d'ouverture mis à jour."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success("Message d'ouverture mis à jour.")), ephemere=True)
 
 
 class TypeNumbersModal(discord.ui.Modal, title="🔢 Limites du type de ticket"):
@@ -317,33 +299,18 @@ class TypeNumbersModal(discord.ui.Modal, title="🔢 Limites du type de ticket")
 
     async def on_submit(self, interaction: discord.Interaction):
         if not self.max_per_member.value.strip().isdigit() or not self.autoclose.value.strip().isdigit():
-            return await interaction.response.send_message(
-                embed=embeds.error("Les deux champs doivent contenir des nombres entiers, sans lettre ni symbole."),
-                ephemeral=True,
-            )
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Les deux champs doivent contenir des nombres entiers, sans lettre ni symbole.')), ephemere=True)
         maximum = int(self.max_per_member.value)
         autoclose = int(self.autoclose.value)
         if not 1 <= maximum <= 20:
-            return await interaction.response.send_message(
-                embed=embeds.error("La limite doit être comprise entre 1 et 20 tickets simultanés par membre."),
-                ephemeral=True,
-            )
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('La limite doit être comprise entre 1 et 20 tickets simultanés par membre.')), ephemere=True)
         if not 0 <= autoclose <= 720:
-            return await interaction.response.send_message(
-                embed=embeds.error("La fermeture automatique doit être comprise entre 0 et 720 heures. Utilisez 0 pour la désactiver."),
-                ephemeral=True,
-            )
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('La fermeture automatique doit être comprise entre 0 et 720 heures. Utilisez 0 pour la désactiver.')), ephemere=True)
         await self.cog.bot.db.execute(
             "UPDATE ticket_types SET max_per_member = ?, autoclose_hours = ? WHERE id = ?",
             (maximum, autoclose, self.type_id),
         )
-        await interaction.response.send_message(
-            embed=embeds.success(
-                f"Limites enregistrées : **{maximum}** ticket(s) maximum par membre, fermeture automatique "
-                + (f"après **{autoclose} h**." if autoclose else "désactivée.")
-            ),
-            ephemeral=True,
-        )
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Limites enregistrées : **{maximum}** ticket(s) maximum par membre, fermeture automatique ' + (f'après **{autoclose} h**.' if autoclose else 'désactivée.'))), ephemere=True)
 
 
 class FormQuestionModal(discord.ui.Modal, title="📋 Question du formulaire"):
@@ -375,14 +342,14 @@ class FormQuestionModal(discord.ui.Modal, title="📋 Question du formulaire"):
     async def on_submit(self, interaction: discord.Interaction):
         style = self.style.value.strip().lower()
         if style not in TEXT_STYLES:
-            return await interaction.response.send_message(embed=embeds.error("Le style doit être `court` ou `long`."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Le style doit être `court` ou `long`.')), ephemere=True)
         required = self.required.value.strip().lower() in ("oui", "yes", "o", "y", "true", "1")
         m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", self.lengths.value)
         if not m:
-            return await interaction.response.send_message(embed=embeds.error("Longueur invalide — format attendu : `min-max`, ex: `0-500`."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Longueur invalide — format attendu : `min-max`, ex: `0-500`.')), ephemere=True)
         min_len, max_len = int(m.group(1)), int(m.group(2))
         if max_len < min_len or max_len > 4000 or max_len == 0:
-            return await interaction.response.send_message(embed=embeds.error("La longueur max doit être supérieure à 0, à la longueur min, et ≤ 4000."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('La longueur max doit être supérieure à 0, à la longueur min, et ≤ 4000.')), ephemere=True)
 
         if self.question_id:
             await self.cog.bot.db.execute(
@@ -393,9 +360,7 @@ class FormQuestionModal(discord.ui.Modal, title="📋 Question du formulaire"):
         else:
             count = await self.cog.bot.db.fetchone("SELECT COUNT(*) c FROM ticket_form_questions WHERE ticket_type_id = ?", (self.type_id,))
             if count["c"] >= 5:
-                return await interaction.response.send_message(
-                    embed=embeds.error("Un formulaire Discord ne peut pas dépasser **5 questions** (limite native des formulaires)."), ephemeral=True
-                )
+                return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Un formulaire Discord ne peut pas dépasser **5 questions** (limite native des formulaires).')), ephemere=True)
             await self.cog.bot.db.execute(
                 "INSERT INTO ticket_form_questions (ticket_type_id, position, label, placeholder, style, required, min_length, max_length) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -403,7 +368,7 @@ class FormQuestionModal(discord.ui.Modal, title="📋 Question du formulaire"):
             )
             await self.cog.bot.db.execute("UPDATE ticket_types SET use_form = 1 WHERE id = ?", (self.type_id,))
             msg = "Question ajoutée au formulaire."
-        await interaction.response.send_message(embed=embeds.success(msg), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(msg)), ephemere=True)
 
 
 class ButtonCustomizeModal(discord.ui.Modal, title="🔘 Personnaliser le bouton"):
@@ -424,23 +389,17 @@ class ButtonCustomizeModal(discord.ui.Modal, title="🔘 Personnaliser le bouton
     async def on_submit(self, interaction: discord.Interaction):
         style = self.style.value.strip().lower()
         if style not in BUTTON_STYLES:
-            return await interaction.response.send_message(embed=embeds.error(f"Couleur invalide — choisissez parmi : {', '.join(BUTTON_STYLE_NAMES)}."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error(f"Couleur invalide — choisissez parmi : {', '.join(BUTTON_STYLE_NAMES)}.")), ephemere=True)
         raw_emoji = self.emoji.value.strip()
         emoji = parse_component_emoji(raw_emoji, interaction.client)
         if raw_emoji and emoji is None:
-            return await interaction.response.send_message(
-                embed=embeds.error(
-                    "L’emoji indiqué n’est pas utilisable par le bot. Utilisez un emoji Unicode "
-                    "ou collez un emoji Discord complet, animé ou non."
-                ),
-                ephemeral=True,
-            )
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('L’emoji indiqué n’est pas utilisable par le bot. Utilisez un emoji Unicode ou collez un emoji Discord complet, animé ou non.')), ephemere=True)
         settings = await get_button_settings(self.cog.bot, self.guild_id)
         settings[self.key]["label"] = self.label.value.strip()
         settings[self.key]["emoji"] = str(emoji) if emoji else None
         settings[self.key]["style"] = style
         await save_button_settings(self.cog.bot, self.guild_id, settings)
-        await interaction.response.send_message(embed=embeds.success(f"Bouton **{self.label.value}** mis à jour."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Bouton **{self.label.value}** mis à jour.')), ephemere=True)
 
 
 class CloseReasonModal(discord.ui.Modal, title="🔒 Fermer le ticket"):
@@ -471,7 +430,7 @@ class TicketNoteModal(discord.ui.Modal, title="📝 Note interne"):
             "INSERT INTO ticket_notes (ticket_id, author_id, note, timestamp) VALUES (?, ?, ?, ?)",
             (self.ticket_id, interaction.user.id, self.note.value, now()),
         )
-        await interaction.response.send_message(embed=embeds.success("📝 Note interne enregistrée (invisible pour le membre)."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success('📝 Note interne enregistrée (invisible pour le membre).')), ephemere=True)
 
 
 class TicketRenameModal(discord.ui.Modal, title="✏️ Renommer le ticket"):
@@ -485,7 +444,7 @@ class TicketRenameModal(discord.ui.Modal, title="✏️ Renommer le ticket"):
     async def on_submit(self, interaction: discord.Interaction):
         name = slugify_channel_name(self.new_name.value, self.channel.name)
         await self.channel.edit(name=name)
-        await interaction.response.send_message(embed=embeds.success(f"Salon renommé en **{name}**."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Salon renommé en **{name}**.')), ephemere=True)
 
 
 # =============================================================================
@@ -638,7 +597,7 @@ class PanelEditView(discord.ui.View):
         new_style = "button" if panel["style"] == "select" else "select"
         await self.cog.bot.db.execute("UPDATE ticket_panels_v2 SET style = ? WHERE id = ?", (new_style, self.panel_id))
         label = "boutons" if new_style == "button" else "menu déroulant"
-        await interaction.response.send_message(embed=embeds.success(f"Le panel affichera désormais un **{label}**."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Le panel affichera désormais un **{label}**.')), ephemere=True)
 
     @discord.ui.button(label="Aperçu", style=discord.ButtonStyle.primary, emoji="👁️", row=1)
     async def preview(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -654,7 +613,7 @@ class PanelEditView(discord.ui.View):
     @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text], placeholder="📌 Choisir le salon où envoyer le panel", row=2)
     async def select_channel(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
         await self.cog.bot.db.execute("UPDATE ticket_panels_v2 SET channel_id = ? WHERE id = ?", (select.values[0].id, self.panel_id))
-        await interaction.response.send_message(embed=embeds.success(f"Salon de destination défini sur {select.values[0].mention}."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Salon de destination défini sur {select.values[0].mention}.')), ephemere=True)
 
     @discord.ui.button(label="📤 Envoyer / mettre à jour le panel", style=discord.ButtonStyle.success, row=3)
     async def send_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -695,29 +654,29 @@ class TypeEditView(discord.ui.View):
         new_val = 0 if t["use_form"] else 1
         await self.cog.bot.db.execute("UPDATE ticket_types SET use_form = ? WHERE id = ?", (new_val, self.type_id))
         state = "activé (utilisez `+ticketform add` pour ajouter des questions)" if new_val else "désactivé"
-        await interaction.response.send_message(embed=embeds.success(f"Formulaire {state}."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Formulaire {state}.')), ephemere=True)
 
     @discord.ui.button(label="Mention staff on/off", style=discord.ButtonStyle.secondary, emoji="🔔", row=1)
     async def toggle_mention(self, interaction: discord.Interaction, button: discord.ui.Button):
         t = await self.cog.get_type(self.type_id)
         new_val = 0 if t["mention_staff"] else 1
         await self.cog.bot.db.execute("UPDATE ticket_types SET mention_staff = ? WHERE id = ?", (new_val, self.type_id))
-        await interaction.response.send_message(embed=embeds.success(f"Mention du rôle staff {'activée' if new_val else 'désactivée'} à l'ouverture."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f"Mention du rôle staff {('activée' if new_val else 'désactivée')} à l'ouverture.")), ephemere=True)
 
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="🛡️ Rôle staff à mentionner / autoriser", row=2)
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
         await self.cog.bot.db.execute("UPDATE ticket_types SET staff_role_id = ? WHERE id = ?", (select.values[0].id, self.type_id))
-        await interaction.response.send_message(embed=embeds.success(f"Rôle staff défini sur {select.values[0].mention}."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Rôle staff défini sur {select.values[0].mention}.')), ephemere=True)
 
     @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.category], placeholder="📂 Catégorie où créer les salons", row=3)
     async def select_category(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
         await self.cog.bot.db.execute("UPDATE ticket_types SET category_id = ? WHERE id = ?", (select.values[0].id, self.type_id))
-        await interaction.response.send_message(embed=embeds.success(f"Catégorie définie sur **{select.values[0].name}**."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Catégorie définie sur **{select.values[0].name}**.')), ephemere=True)
 
     @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text], placeholder="📄 Salon de logs pour ce type", row=4)
     async def select_logs(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
         await self.cog.bot.db.execute("UPDATE ticket_types SET log_channel_id = ? WHERE id = ?", (select.values[0].id, self.type_id))
-        await interaction.response.send_message(embed=embeds.success(f"Salon de logs défini sur {select.values[0].mention}."), ephemeral=True)
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Salon de logs défini sur {select.values[0].mention}.')), ephemere=True)
 
 
 class ButtonSettingsView(discord.ui.View):
@@ -758,7 +717,7 @@ class ButtonSettingsView(discord.ui.View):
             settings2[key]["enabled"] = not settings2[key]["enabled"]
             await save_button_settings(self.cog.bot, self.guild_id, settings2)
             state = "activé ●" if settings2[key]["enabled"] else "désactivé ○"
-            await inter.response.send_message(embed=embeds.success(f"Bouton **{default_label}** {state}."), ephemeral=True)
+            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'Bouton **{default_label}** {state}.')), ephemere=True)
 
         toggle_btn.callback = toggle_cb
         view.add_item(toggle_btn)
@@ -778,7 +737,7 @@ class ButtonSettingsView(discord.ui.View):
             settings4 = await get_button_settings(self.cog.bot, self.guild_id)
             settings4[key]["role_id"] = role_select.values[0].id
             await save_button_settings(self.cog.bot, self.guild_id, settings4)
-            await inter.response.send_message(embed=embeds.success(f"Bouton **{default_label}** restreint au rôle {role_select.values[0].mention}."), ephemeral=True)
+            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'Bouton **{default_label}** restreint au rôle {role_select.values[0].mention}.')), ephemere=True)
 
         role_select.callback = role_cb
         view.add_item(role_select)
@@ -827,10 +786,7 @@ class TicketSetupHubView(discord.ui.View):
 
         async def on_submit(inter: discord.Interaction):
             panel_id = await self.cog.create_panel(inter.guild.id, name_input.value)
-            await inter.response.send_message(
-                embed=embeds.success(f"Panel **{name_input.value}** créé (#{panel_id}). Utilisez `+ticketpanel edit {name_input.value}` pour le configurer."),
-                ephemeral=True,
-            )
+            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'Panel **{name_input.value}** créé (#{panel_id}). Utilisez `+ticketpanel edit {name_input.value}` pour le configurer.')), ephemere=True)
 
         modal.on_submit = on_submit
         await interaction.response.send_modal(modal)
@@ -946,19 +902,19 @@ class Tickets(commands.Cog):
         panel = await self.get_panel(panel_id)
         types = await self.get_panel_types(panel_id)
         if not types:
-            return await interaction.response.send_message(embed=embeds.warning("Ce panel n'a aucun type de ticket — ajoutez-en avec `+tickettype add`."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning("Ce panel n'a aucun type de ticket — ajoutez-en avec `+tickettype add`.")), ephemere=True)
         await interaction.response.send_message(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types), ephemeral=True)
 
     async def send_panel(self, interaction: discord.Interaction, panel_id: int):
         panel = await self.get_panel(panel_id)
         types = await self.get_panel_types(panel_id)
         if not panel["channel_id"]:
-            return await interaction.response.send_message(embed=embeds.error("Choisissez d'abord un salon de destination (menu déroulant du dessus)."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Choisissez d'abord un salon de destination (menu déroulant du dessus).")), ephemere=True)
         if not types:
-            return await interaction.response.send_message(embed=embeds.error("Ce panel n'a aucun type de ticket — ajoutez-en avec `+tickettype add` avant de l'envoyer."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce panel n'a aucun type de ticket — ajoutez-en avec `+tickettype add` avant de l'envoyer.")), ephemere=True)
         channel = interaction.guild.get_channel(panel["channel_id"])
         if not channel:
-            return await interaction.response.send_message(embed=embeds.error("Le salon configuré n'existe plus."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Le salon configuré n'existe plus.")), ephemere=True)
 
         await interaction.response.defer(ephemeral=True)
         old_message_id = panel["message_id"]
@@ -970,7 +926,7 @@ class Tickets(commands.Cog):
                 pass
         msg = await channel.send(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types))
         await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?", (msg.id, channel.id, panel_id))
-        await interaction.followup.send(embed=embeds.success(f"📤 Panel envoyé dans {channel.mention}."), ephemeral=True)
+        await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')), ephemere=True)
 
     async def start_ticket_flow(self, interaction: discord.Interaction, type_id: int):
         started = time.monotonic()
@@ -979,7 +935,7 @@ class Tickets(commands.Cog):
         try:
             ticket_type = await self.get_type(type_id)
             if not ticket_type:
-                return await interaction.response.send_message(embed=embeds.error("Ce type de ticket n'existe plus."), ephemeral=True)
+                return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce type de ticket n'existe plus.")), ephemere=True)
 
             limit = ticket_type["max_per_member"] or 1
             open_count = await self.bot.db.fetchone(
@@ -987,10 +943,7 @@ class Tickets(commands.Cog):
                 (interaction.guild.id, interaction.user.id, type_id),
             )
             if open_count["c"] >= limit:
-                return await interaction.response.send_message(
-                    embed=embeds.warning(f"Vous avez déjà **{open_count['c']}** ticket(s) « {ticket_type['name']} » ouvert(s) (maximum : {limit})."),
-                    ephemeral=True,
-                )
+                return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning(f"Vous avez déjà **{open_count['c']}** ticket(s) « {ticket_type['name']} » ouvert(s) (maximum : {limit}).")), ephemere=True)
 
             if ticket_type["use_form"]:
                 questions = await self.bot.db.fetchall(
@@ -1007,7 +960,7 @@ class Tickets(commands.Cog):
             logger.error("Erreur Discord à l'ouverture du ticket type #%s (guild=%s, user=%s) : %s", type_id, guild_id, user_id, e)
             if not interaction.response.is_done():
                 try:
-                    await interaction.response.send_message(embed=embeds.error("Une erreur Discord est survenue. Réessayez dans un instant."), ephemeral=True)
+                    await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Une erreur Discord est survenue. Réessayez dans un instant.')), ephemere=True)
                 except discord.HTTPException:
                     pass
         except Exception:
@@ -1017,9 +970,9 @@ class Tickets(commands.Cog):
             )
             try:
                 if interaction.response.is_done():
-                    await interaction.followup.send(embed=embeds.error("Une erreur inattendue est survenue. Le staff a été informé."), ephemeral=True)
+                    await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.error('Une erreur inattendue est survenue. Le staff a été informé.')), ephemere=True)
                 else:
-                    await interaction.response.send_message(embed=embeds.error("Une erreur inattendue est survenue. Le staff a été informé."), ephemeral=True)
+                    await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Une erreur inattendue est survenue. Le staff a été informé.')), ephemere=True)
             except discord.HTTPException:
                 pass
         finally:
@@ -1054,7 +1007,7 @@ class Tickets(commands.Cog):
                 channel_name, overwrites=overwrites, category=category, reason=f"Ticket « {ticket_type['name']} » ouvert par {user}",
             )
         except discord.HTTPException:
-            return await interaction.followup.send(embed=embeds.error("Impossible de créer le salon (permissions du bot ou catégorie pleine)."), ephemeral=True)
+            return await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.error('Impossible de créer le salon (permissions du bot ou catégorie pleine).')), ephemere=True)
 
         cur = await self.bot.db.execute(
             "INSERT INTO tickets (guild_id, channel_id, user_id, status, category, type_id, priority, created_at, last_activity_at) "
@@ -1147,9 +1100,9 @@ class Tickets(commands.Cog):
         try:
             ticket = await self.get_ticket_by_channel(interaction.channel.id)
             if not ticket:
-                return await interaction.response.send_message(embed=embeds.error("Ce salon n'est pas (ou plus) un ticket."), ephemeral=True)
+                return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas (ou plus) un ticket.")), ephemere=True)
             if ticket["status"] != "ouvert" and key != "close":
-                return await interaction.response.send_message(embed=embeds.error("Ce ticket est fermé."), ephemeral=True)
+                return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Ce ticket est fermé.')), ephemere=True)
 
             settings = await get_button_settings(self.bot, interaction.guild.id)
             cfg = settings.get(key, {})
@@ -1163,9 +1116,7 @@ class Tickets(commands.Cog):
                     or member.id == interaction.guild.owner_id
                 )
                 if not allowed:
-                    return await interaction.response.send_message(
-                        embed=embeds.error(f"Seuls les membres avec le rôle {role.mention if role else 'configuré'} peuvent utiliser ce bouton."), ephemeral=True
-                    )
+                    return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error(f"Seuls les membres avec le rôle {(role.mention if role else 'configuré')} peuvent utiliser ce bouton.")), ephemere=True)
 
             await self.touch_activity(ticket["id"])
             handler = getattr(self, f"btn_{key}", None)
@@ -1177,7 +1128,7 @@ class Tickets(commands.Cog):
                     key, key, guild_id, user_id,
                 )
                 if not interaction.response.is_done():
-                    await interaction.response.send_message(embed=embeds.error("Ce bouton n'est pas encore relié à une action."), ephemeral=True)
+                    await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce bouton n'est pas encore relié à une action.")), ephemere=True)
         except discord.InteractionResponded:
             # Déjà répondu ailleurs (ex: double clic très rapide) — on ne relance jamais une
             # deuxième réponse dessus, Discord le refuserait de toute façon.
@@ -1186,7 +1137,7 @@ class Tickets(commands.Cog):
             logger.error("Erreur Discord sur ticket_ctrl_%s (guild=%s, user=%s) : %s", key, guild_id, user_id, e)
             if not interaction.response.is_done():
                 try:
-                    await interaction.response.send_message(embed=embeds.error("Une erreur Discord est survenue. Réessayez dans un instant."), ephemeral=True)
+                    await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Une erreur Discord est survenue. Réessayez dans un instant.')), ephemere=True)
                 except discord.HTTPException:
                     pass
         except Exception:
@@ -1199,7 +1150,7 @@ class Tickets(commands.Cog):
             )
             if not interaction.response.is_done():
                 try:
-                    await interaction.response.send_message(embed=embeds.error("Une erreur inattendue est survenue. Le staff a été informé."), ephemeral=True)
+                    await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error('Une erreur inattendue est survenue. Le staff a été informé.')), ephemere=True)
                 except discord.HTTPException:
                     pass
         finally:
@@ -1214,11 +1165,11 @@ class Tickets(commands.Cog):
 
     async def btn_claim(self, interaction: discord.Interaction, ticket):
         await self.bot.db.execute("UPDATE tickets SET claimed_by = ? WHERE id = ?", (interaction.user.id, ticket["id"]))
-        await interaction.response.send_message(embed=embeds.success(f"🙋 {interaction.user.mention} a pris en charge ce ticket."))
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'🙋 {interaction.user.mention} a pris en charge ce ticket.')))
 
     async def btn_unclaim(self, interaction: discord.Interaction, ticket):
         await self.bot.db.execute("UPDATE tickets SET claimed_by = NULL WHERE id = ?", (ticket["id"],))
-        await interaction.response.send_message(embed=embeds.success("↩️ Prise en charge annulée."))
+        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success('↩️ Prise en charge annulée.')))
 
     async def btn_add(self, interaction: discord.Interaction, ticket):
         select = discord.ui.UserSelect(placeholder="➕ Choisir le membre à ajouter")
@@ -1227,7 +1178,7 @@ class Tickets(commands.Cog):
         async def cb(inter: discord.Interaction):
             member = select.values[0]
             await inter.channel.set_permissions(member, view_channel=True, send_messages=True, read_message_history=True)
-            await inter.response.send_message(embed=embeds.success(f"➕ {member.mention} a été ajouté au ticket."))
+            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'➕ {member.mention} a été ajouté au ticket.')))
 
         select.callback = cb
         view.add_item(select)
@@ -1240,9 +1191,9 @@ class Tickets(commands.Cog):
         async def cb(inter: discord.Interaction):
             member = select.values[0]
             if member.id == ticket["user_id"]:
-                return await inter.response.send_message(embed=embeds.error("Impossible de retirer le créateur du ticket."), ephemeral=True)
+                return await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.error('Impossible de retirer le créateur du ticket.')), ephemere=True)
             await inter.channel.set_permissions(member, overwrite=None)
-            await inter.response.send_message(embed=embeds.success(f"➖ {member.mention} a été retiré du ticket."))
+            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'➖ {member.mention} a été retiré du ticket.')))
 
         select.callback = cb
         view.add_item(select)
@@ -1259,7 +1210,7 @@ class Tickets(commands.Cog):
             member = select.values[0]
             await self.bot.db.execute("UPDATE tickets SET claimed_by = ? WHERE id = ?", (member.id, ticket["id"]))
             await inter.channel.set_permissions(member, view_channel=True, send_messages=True, read_message_history=True)
-            await inter.response.send_message(embed=embeds.success(f"🔀 Ticket transféré à {member.mention}."))
+            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'🔀 Ticket transféré à {member.mention}.')))
 
         select.callback = cb
         view.add_item(select)
@@ -1428,16 +1379,16 @@ class Tickets(commands.Cog):
     async def ticket_reopen(self, ctx: commands.Context):
         ticket = await self.get_ticket_by_channel(ctx.channel.id)
         if not ticket:
-            return await ctx.send(embed=embeds.error("Ce salon n'est pas un ticket."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
         if ticket["status"] != "ferme":
-            return await ctx.send(embed=embeds.error("Ce ticket n'est pas fermé."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce ticket n'est pas fermé.")))
         await self.bot.db.execute("UPDATE tickets SET status = 'ouvert', closed_at = NULL, locked = 0, last_activity_at = ? WHERE id = ?", (now(), ticket["id"]))
         owner = ctx.guild.get_member(ticket["user_id"])
         if owner:
             overwrite = ctx.channel.overwrites_for(owner)
             overwrite.send_messages = True
             await ctx.channel.set_permissions(owner, overwrite=overwrite)
-        await ctx.send(embed=embeds.success("🔓 Le ticket a été rouvert."))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success('🔓 Le ticket a été rouvert.')))
 
     # ---------------------------------------------------------------- COMMANDES : OUVERTURE (MEMBRES)
 
@@ -1447,7 +1398,7 @@ class Tickets(commands.Cog):
         déjà envoyé dans un salon. Tout vient de la base de données (panels/types actifs
         sur CE serveur) — rien n'est jamais écrit en dur, exactement comme les panels."""
         if not ctx.guild:
-            return await ctx.send(embed=embeds.error("Cette commande doit être utilisée dans un serveur."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Cette commande doit être utilisée dans un serveur.')))
 
         panels = await self.bot.db.fetchall(
             "SELECT * FROM ticket_panels_v2 WHERE guild_id = ? AND enabled = 1", (ctx.guild.id,)
@@ -1564,20 +1515,32 @@ class Tickets(commands.Cog):
         await self._reply(ctx_or_interaction, e)
 
     async def _reply(self, target, embed, view=None):
-        if isinstance(target, discord.Interaction):
-            if target.response.is_done():
-                await target.followup.send(embed=embed, view=view or discord.utils.MISSING, ephemeral=True)
-            else:
-                await target.response.send_message(embed=embed, view=view or discord.utils.MISSING, ephemeral=True)
-        else:
-            await target.send(embed=embed, view=view or discord.utils.MISSING)
+        """Reponse des commandes de tickets.
+
+        Sans vue, l'embed devient un panneau : ses champs se transforment en
+        sections. Avec une vue classique, il reste un embed — un message
+        Components V2 ne peut pas porter de View, et la vue sert ici a agir sur
+        le ticket. Perdre le bouton pour gagner une banniere serait un mauvais
+        echange.
+        """
+        if view is not None:
+            if isinstance(target, discord.Interaction):
+                if target.response.is_done():
+                    return await target.followup.send(embed=embed, view=view, ephemeral=True)
+                return await target.response.send_message(embed=embed, view=view, ephemeral=True)
+            return await target.send(embed=embed, view=view)
+
+        panneau = sx_panels.depuis_embed(embed)
+        return await sx_panels.envoyer(
+            target, panneau, ephemere=isinstance(target, discord.Interaction)
+        )
 
     @ticketpanel.command(name="create", description="Créer un nouveau panel de tickets.")
     @app_commands.describe(nom="Le nom interne du panel (pour le retrouver dans les autres commandes)")
     @checks.is_owner_or_admin_for("tickets")
     async def ticketpanel_create(self, ctx: commands.Context, *, nom: str):
         if await self.get_panel_by_name(ctx.guild.id, nom):
-            return await ctx.send(embed=embeds.error(f"Un panel nommé « {nom} » existe déjà."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Un panel nommé « {nom} » existe déjà.')))
         panel_id = await self.create_panel(ctx.guild.id, nom)
         panel = await self.get_panel(panel_id)
         e = embeds.success(f"Panel **{nom}** créé (#{panel_id}). Configurez-le ci-dessous.")
@@ -1589,7 +1552,7 @@ class Tickets(commands.Cog):
     async def ticketpanel_edit(self, ctx: commands.Context, *, nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
-            return await ctx.send(embed=embeds.error(f"Aucun panel nommé « {nom} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {nom} ».')))
         e = embeds.neutral(f"⚙️ Modifier le panel « {panel['name']} »", "Choisissez ce que vous voulez modifier.")
         await ctx.send(embed=e, view=PanelEditView(self, panel["id"], ctx.author.id))
 
@@ -1599,7 +1562,7 @@ class Tickets(commands.Cog):
     async def ticketpanel_delete(self, ctx: commands.Context, *, nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
-            return await ctx.send(embed=embeds.error(f"Aucun panel nommé « {nom} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {nom} ».')))
         types = await self.get_panel_types(panel["id"])
         view = helpers.ConfirmView(ctx.author.id)
         msg = await ctx.send(
@@ -1627,10 +1590,10 @@ class Tickets(commands.Cog):
     async def ticketpanel_preview(self, ctx: commands.Context, *, nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
-            return await ctx.send(embed=embeds.error(f"Aucun panel nommé « {nom} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {nom} ».')))
         types = await self.get_panel_types(panel["id"])
         if not types:
-            return await ctx.send(embed=embeds.warning("Ce panel n'a aucun type de ticket."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning("Ce panel n'a aucun type de ticket.")))
         await ctx.send(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types), ephemeral=True if ctx.interaction else False)
 
     @ticketpanel.command(name="send", description="Envoyer (ou mettre à jour) un panel dans son salon configuré.")
@@ -1639,19 +1602,19 @@ class Tickets(commands.Cog):
     async def ticketpanel_send(self, ctx: commands.Context, *, nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
-            return await ctx.send(embed=embeds.error(f"Aucun panel nommé « {nom} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {nom} ».')))
         if ctx.interaction:
             await self.send_panel(ctx.interaction, panel["id"])
         else:
             if not panel["channel_id"]:
-                return await ctx.send(embed=embeds.error("Choisissez d'abord un salon via `+ticketpanel edit`."))
+                return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Choisissez d'abord un salon via `+ticketpanel edit`.")))
             types = await self.get_panel_types(panel["id"])
             if not types:
-                return await ctx.send(embed=embeds.error("Ce panel n'a aucun type de ticket."))
+                return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce panel n'a aucun type de ticket.")))
             channel = ctx.guild.get_channel(panel["channel_id"])
             msg = await channel.send(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types))
             await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ? WHERE id = ?", (msg.id, panel["id"]))
-            await ctx.send(embed=embeds.success(f"📤 Panel envoyé dans {channel.mention}."))
+            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')))
 
     @ticketpanel.command(name="duplicate", description="Dupliquer un panel existant (avec ses types de tickets).")
     @app_commands.describe(nom="Le nom du panel à dupliquer", nouveau_nom="Le nom du panel dupliqué")
@@ -1659,9 +1622,9 @@ class Tickets(commands.Cog):
     async def ticketpanel_duplicate(self, ctx: commands.Context, nom: str, *, nouveau_nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
-            return await ctx.send(embed=embeds.error(f"Aucun panel nommé « {nom} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {nom} ».')))
         if await self.get_panel_by_name(ctx.guild.id, nouveau_nom):
-            return await ctx.send(embed=embeds.error(f"Un panel nommé « {nouveau_nom} » existe déjà."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Un panel nommé « {nouveau_nom} » existe déjà.')))
         cur = await self.bot.db.execute(
             "INSERT INTO ticket_panels_v2 (guild_id, name, title, description, color, image_url, thumbnail_url, footer_text, style, max_per_member, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1687,7 +1650,7 @@ class Tickets(commands.Cog):
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (new_type_id, q["position"], q["label"], q["placeholder"], q["style"], q["required"], q["min_length"], q["max_length"]),
                 )
-        await ctx.send(embed=embeds.success(f"Panel **{nom}** dupliqué en **{nouveau_nom}** (#{new_panel_id}) avec {len(types)} type(s) de ticket."))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'Panel **{nom}** dupliqué en **{nouveau_nom}** (#{new_panel_id}) avec {len(types)} type(s) de ticket.')))
 
     @commands.hybrid_command(name="ticketpanel-toggle", description="Activer ou désactiver un panel.", with_app_command=False)
     @app_commands.describe(nom="Le nom du panel")
@@ -1695,10 +1658,10 @@ class Tickets(commands.Cog):
     async def ticketpanel_toggle(self, ctx: commands.Context, *, nom: str):
         panel = await self.get_panel_by_name(ctx.guild.id, nom)
         if not panel:
-            return await ctx.send(embed=embeds.error(f"Aucun panel nommé « {nom} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {nom} ».')))
         new_val = 0 if panel["enabled"] else 1
         await self.bot.db.execute("UPDATE ticket_panels_v2 SET enabled = ? WHERE id = ?", (new_val, panel["id"]))
-        await ctx.send(embed=embeds.success(f"Panel **{nom}** {'activé ●' if new_val else 'désactivé ⏸️'}."))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f"Panel **{nom}** {('activé ●' if new_val else 'désactivé ⏸️')}.")))
 
     # ---------------------------------------------------------------- COMMANDES : TYPES
 
@@ -1732,9 +1695,9 @@ class Tickets(commands.Cog):
     async def tickettype_add(self, ctx: commands.Context, panel: str, *, nom: str):
         panel_row = await self.get_panel_by_name(ctx.guild.id, panel)
         if not panel_row:
-            return await ctx.send(embed=embeds.error(f"Aucun panel nommé « {panel} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {panel} ».')))
         if await self.get_type_by_name(ctx.guild.id, nom):
-            return await ctx.send(embed=embeds.error(f"Un type nommé « {nom} » existe déjà sur ce serveur."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Un type nommé « {nom} » existe déjà sur ce serveur.')))
         type_id = await self.add_type(ctx.guild.id, panel_row["id"], nom)
         e = embeds.success(f"Type **{nom}** créé sur le panel « {panel} » (#{type_id}). Configurez-le ci-dessous.")
         await ctx.send(embed=e, view=TypeEditView(self, type_id, ctx.author.id))
@@ -1745,7 +1708,7 @@ class Tickets(commands.Cog):
     async def tickettype_edit(self, ctx: commands.Context, *, nom: str):
         t = await self.get_type_by_name(ctx.guild.id, nom)
         if not t:
-            return await ctx.send(embed=embeds.error(f"Aucun type nommé « {nom} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {nom} ».')))
         e = embeds.neutral(f"⚙️ Modifier le type « {t['name']} »", "Choisissez ce que vous voulez modifier.")
         await ctx.send(embed=e, view=TypeEditView(self, t["id"], ctx.author.id))
 
@@ -1755,7 +1718,7 @@ class Tickets(commands.Cog):
     async def tickettype_remove(self, ctx: commands.Context, *, nom: str):
         t = await self.get_type_by_name(ctx.guild.id, nom)
         if not t:
-            return await ctx.send(embed=embeds.error(f"Aucun type nommé « {nom} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {nom} ».')))
         view = helpers.ConfirmView(ctx.author.id)
         msg = await ctx.send(embed=embeds.warning(f"Supprimer le type **{t['name']}** et son formulaire ?"), view=view)
         await view.wait()
@@ -1775,7 +1738,7 @@ class Tickets(commands.Cog):
     @commands.hybrid_group(name="ticketform", description="Gérer le formulaire d'un type de ticket.")
     @checks.is_owner_or_admin_for("tickets")
     async def ticketform(self, ctx: commands.Context):
-        await ctx.send(embed=embeds.info("Utilisez `+ticketform add <type>`, `+ticketform edit <type> <question>` ou `+ticketform remove <type> <question>`."))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.info('Utilisez `+ticketform add <type>`, `+ticketform edit <type> <question>` ou `+ticketform remove <type> <question>`.')))
 
     @ticketform.command(name="add", description="Ajouter une question au formulaire d'un type de ticket (max 5).")
     @app_commands.describe(type_ticket="Le nom du type de ticket")
@@ -1783,11 +1746,11 @@ class Tickets(commands.Cog):
     async def ticketform_add(self, ctx: commands.Context, *, type_ticket: str):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
-            return await ctx.send(embed=embeds.error(f"Aucun type nommé « {type_ticket} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {type_ticket} ».')))
         if ctx.interaction:
             await ctx.interaction.response.send_modal(FormQuestionModal(self, t["id"]))
         else:
-            await ctx.send(embed=embeds.warning("Utilisez la version slash `/ticketform add` pour ouvrir le formulaire (obligatoire pour un modal Discord)."))
+            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning('Utilisez la version slash `/ticketform add` pour ouvrir le formulaire (obligatoire pour un modal Discord).')))
 
     @ticketform.command(name="edit", description="Modifier une question existante.")
     @app_commands.describe(type_ticket="Le nom du type de ticket", position="La position de la question (1, 2, 3...)")
@@ -1795,15 +1758,15 @@ class Tickets(commands.Cog):
     async def ticketform_edit(self, ctx: commands.Context, type_ticket: str, position: int):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
-            return await ctx.send(embed=embeds.error(f"Aucun type nommé « {type_ticket} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {type_ticket} ».')))
         questions = await self.bot.db.fetchall("SELECT * FROM ticket_form_questions WHERE ticket_type_id = ? ORDER BY position", (t["id"],))
         if position < 1 or position > len(questions):
-            return await ctx.send(embed=embeds.error(f"Position invalide (ce type a {len(questions)} question(s))."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Position invalide (ce type a {len(questions)} question(s)).')))
         question = questions[position - 1]
         if ctx.interaction:
             await ctx.interaction.response.send_modal(FormQuestionModal(self, t["id"], question=question))
         else:
-            await ctx.send(embed=embeds.warning("Utilisez la version slash `/ticketform edit` pour ouvrir le formulaire (obligatoire pour un modal Discord)."))
+            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning('Utilisez la version slash `/ticketform edit` pour ouvrir le formulaire (obligatoire pour un modal Discord).')))
 
     @ticketform.command(name="remove", description="Supprimer une question du formulaire.")
     @app_commands.describe(type_ticket="Le nom du type de ticket", position="La position de la question (1, 2, 3...)")
@@ -1811,10 +1774,10 @@ class Tickets(commands.Cog):
     async def ticketform_remove(self, ctx: commands.Context, type_ticket: str, position: int):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
-            return await ctx.send(embed=embeds.error(f"Aucun type nommé « {type_ticket} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {type_ticket} ».')))
         questions = await self.bot.db.fetchall("SELECT * FROM ticket_form_questions WHERE ticket_type_id = ? ORDER BY position", (t["id"],))
         if position < 1 or position > len(questions):
-            return await ctx.send(embed=embeds.error(f"Position invalide (ce type a {len(questions)} question(s))."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Position invalide (ce type a {len(questions)} question(s)).')))
         question = questions[position - 1]
         await self.bot.db.execute("DELETE FROM ticket_form_questions WHERE id = ?", (question["id"],))
         remaining = await self.bot.db.fetchall("SELECT * FROM ticket_form_questions WHERE ticket_type_id = ? ORDER BY position", (t["id"],))
@@ -1822,7 +1785,7 @@ class Tickets(commands.Cog):
             await self.bot.db.execute("UPDATE ticket_form_questions SET position = ? WHERE id = ?", (i, q["id"]))
         if not remaining:
             await self.bot.db.execute("UPDATE ticket_types SET use_form = 0 WHERE id = ?", (t["id"],))
-        await ctx.send(embed=embeds.success(f"Question « {question['label']} » supprimée."))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f"Question « {question['label']} » supprimée.")))
 
     # ---------------------------------------------------------------- RÉGLAGES RAPIDES
 
@@ -1842,7 +1805,7 @@ class Tickets(commands.Cog):
         async def dm_cb(inter: discord.Interaction):
             c = await self.bot.db.get_guild_config(ctx.guild.id)
             await self.bot.db.set_guild_config(ctx.guild.id, "ticket_transcript_dm", 0 if c["ticket_transcript_dm"] else 1)
-            await inter.response.send_message(embed=embeds.success("Réglage mis à jour."), ephemeral=True)
+            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success('Réglage mis à jour.')), ephemere=True)
 
         toggle_dm.callback = dm_cb
         view.add_item(toggle_dm)
@@ -1852,7 +1815,7 @@ class Tickets(commands.Cog):
         async def rating_cb(inter: discord.Interaction):
             c = await self.bot.db.get_guild_config(ctx.guild.id)
             await self.bot.db.set_guild_config(ctx.guild.id, "ticket_rating_enabled", 0 if c["ticket_rating_enabled"] else 1)
-            await inter.response.send_message(embed=embeds.success("Réglage mis à jour."), ephemeral=True)
+            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success('Réglage mis à jour.')), ephemere=True)
 
         toggle_rating.callback = rating_cb
         view.add_item(toggle_rating)
@@ -1865,9 +1828,9 @@ class Tickets(commands.Cog):
     async def ticketlogs(self, ctx: commands.Context, type_ticket: str, salon: discord.TextChannel):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
-            return await ctx.send(embed=embeds.error(f"Aucun type nommé « {type_ticket} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {type_ticket} ».')))
         await self.bot.db.execute("UPDATE ticket_types SET log_channel_id = ? WHERE id = ?", (salon.id, t["id"]))
-        await ctx.send(embed=embeds.success(f"Logs du type **{t['name']}** définis sur {salon.mention}."))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f"Logs du type **{t['name']}** définis sur {salon.mention}.")))
 
     @commands.hybrid_command(name="ticketlimit", description="Définir rapidement la limite de tickets par membre d'un type.", with_app_command=False)
     @app_commands.describe(type_ticket="Le nom du type de ticket", nombre="Nombre maximum de tickets ouverts simultanément par membre")
@@ -1875,9 +1838,9 @@ class Tickets(commands.Cog):
     async def ticketlimit(self, ctx: commands.Context, type_ticket: str, nombre: app_commands.Range[int, 1, 20]):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
-            return await ctx.send(embed=embeds.error(f"Aucun type nommé « {type_ticket} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {type_ticket} ».')))
         await self.bot.db.execute("UPDATE ticket_types SET max_per_member = ? WHERE id = ?", (nombre, t["id"]))
-        await ctx.send(embed=embeds.success(f"Limite du type **{t['name']}** définie à **{nombre}** ticket(s) par membre."))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f"Limite du type **{t['name']}** définie à **{nombre}** ticket(s) par membre.")))
 
     @commands.hybrid_command(name="ticketautoclose", description="Définir rapidement la fermeture automatique par inactivité d'un type.", with_app_command=False)
     @app_commands.describe(type_ticket="Le nom du type de ticket", heures="Heures d'inactivité avant fermeture (0 pour désactiver)")
@@ -1885,17 +1848,17 @@ class Tickets(commands.Cog):
     async def ticketautoclose(self, ctx: commands.Context, type_ticket: str, heures: app_commands.Range[int, 0, 720]):
         t = await self.get_type_by_name(ctx.guild.id, type_ticket)
         if not t:
-            return await ctx.send(embed=embeds.error(f"Aucun type nommé « {type_ticket} »."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {type_ticket} ».')))
         await self.bot.db.execute("UPDATE ticket_types SET autoclose_hours = ? WHERE id = ?", (heures, t["id"]))
         msg = f"Fermeture automatique désactivée pour **{t['name']}**." if heures == 0 else f"**{t['name']}** se fermera après **{heures}h** d'inactivité (sans prise en charge, note ou relance)."
-        await ctx.send(embed=embeds.success(msg))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(msg)))
 
     @commands.hybrid_command(name="tickettranscript", description="Générer la transcription de ce ticket sans le fermer.")
     @checks.has_permission_or_modrole("manage_channels")
     async def tickettranscript(self, ctx: commands.Context):
         ticket = await self.get_ticket_by_channel(ctx.channel.id)
         if not ticket:
-            return await ctx.send(embed=embeds.error("Ce salon n'est pas un ticket."))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
         await ctx.defer() if ctx.interaction else None
         file = await self.generate_transcript(ctx.channel)
         await ctx.send(embed=embeds.success("📄 Transcription générée."), file=file)

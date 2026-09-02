@@ -441,7 +441,7 @@ class Minigames(commands.Cog, name="Minigames"):
             issue, kind, game_result = "○ Vous perdez !", "danger", "loss"
         reward = await self._finish(ctx, "blackjack", session_id, game_result, REWARD_BLACKJACK)
         e = await self._embed(guild_id, title="Résultat", description=f"Vous : {sum(player)} | Bot : {sum(bot_hand)}\n{issue}" + self._reward_line(reward), kind=kind)
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="slots", description="Jouer à la machine à sous.", with_app_command=False)
     async def slots(self, ctx: commands.Context):

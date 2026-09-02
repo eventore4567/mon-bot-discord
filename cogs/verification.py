@@ -12,6 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, checks, design_system
+from utils import sentrix_panels as panels
 from database.db import now
 
 
@@ -766,7 +767,7 @@ class Verification(commands.Cog, name="Verification"):
         result = await self._embed(ctx.guild.id, title="Attribution terminée", description=f"Rôle {role.mention} attribué à **{count}** membre(s).", kind="success")
         if failed:
             result.add_field(name="⚠️ Échecs", value=f"{failed} membre(s) n'ont pas pu recevoir le rôle (permissions insuffisantes).", inline=False)
-        await ctx.send(embed=result)
+        await panels.envoyer(ctx, panels.depuis_embed(result))
 
     @commands.hybrid_command(name="massrole", description="Ajouter ou retirer un rôle sur une liste de membres.", with_app_command=False)
     @app_commands.describe(role="Le rôle concerné", action="add ou remove", membres="Membres séparés par des espaces (mentions)")

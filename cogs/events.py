@@ -14,6 +14,7 @@ from discord.ext import commands, tasks
 
 import config
 from utils import embeds, checks, helpers, design_system
+from utils import sentrix_panels as panels
 from database.db import now
 
 
@@ -155,7 +156,7 @@ class Events(commands.Cog, name="Events"):
                         colour=design.get("warning_color", design_system.COLORS.warning),
                         footer=design.get("footer"),
                     )
-                    await channel.send(embed=e)
+                    await panels.envoyer(channel, panels.depuis_embed(e))
                 except discord.HTTPException:
                     pass
             return
@@ -191,7 +192,7 @@ class Events(commands.Cog, name="Events"):
                 footer=design.get("footer"),
             )
             try:
-                await channel.send(embed=e)
+                await panels.envoyer(channel, panels.depuis_embed(e))
                 original = None
                 try:
                     original = await channel.fetch_message(giveaway["message_id"])
@@ -248,9 +249,9 @@ class Events(commands.Cog, name="Events"):
     ):
         seconds = helpers.parse_duration(duree)
         if not seconds:
-            return await ctx.send(embed=embeds.error("Durée invalide. Exemple : `10m`, `1h`, `1j`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide. Exemple : `10m`, `1h`, `1j`.')))
         if gagnants < 1:
-            return await ctx.send(embed=embeds.error("Le nombre de gagnants doit être au moins 1."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le nombre de gagnants doit être au moins 1.')))
         if entrees_bonus < 1:
             entrees_bonus = 2
 
@@ -260,7 +261,7 @@ class Events(commands.Cog, name="Events"):
         if not image and ctx.message and ctx.message.attachments:
             image = ctx.message.attachments[0].url
         if image and not (image.startswith("http://") or image.startswith("https://")):
-            return await ctx.send(embed=embeds.error("L'URL de l'image doit commencer par `http://` ou `https://`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'URL de l'image doit commencer par `http://` ou `https://`.")))
 
         end_at = now() + seconds
         design = await self.bot.db.get_design_settings(ctx.guild.id)
@@ -302,7 +303,7 @@ class Events(commands.Cog, name="Events"):
             ),
         )
         if ctx.interaction:
-            await ctx.send(embed=embeds.success("Giveaway créé !"), ephemeral=True)
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Giveaway créé !')), ephemere=True)
         await self.log_action(ctx.guild, embeds.log_entry(
             "🎉 Giveaway créé", config.COLOR_SUCCESS, acteur=ctx.author, acteur_label="🛠️ Organisé par",
             extra={"🎁 Prix": prix, "🏆 Gagnants": str(gagnants), "⏱️ Se termine": f"<t:{end_at}:R>"},
@@ -315,12 +316,12 @@ class Events(commands.Cog, name="Events"):
         try:
             mid = int(message_id)
         except ValueError:
-            return await ctx.send(embed=embeds.error("Identifiant de message invalide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Identifiant de message invalide.')))
         giveaway = await self.bot.db.fetchone("SELECT * FROM giveaways WHERE message_id = ?", (mid,))
         if not giveaway:
-            return await ctx.send(embed=embeds.error("Giveaway introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Giveaway introuvable.')))
         await self.end_giveaway(giveaway["id"])
-        await ctx.send(embed=embeds.success("Le giveaway a été terminé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Le giveaway a été terminé.')))
 
     @commands.hybrid_command(name="giveaway-reroll", description="Retirer un nouveau gagnant pour un giveaway terminé.")
     @app_commands.describe(message_id="L'identifiant du message du giveaway")
@@ -329,15 +330,15 @@ class Events(commands.Cog, name="Events"):
         try:
             mid = int(message_id)
         except ValueError:
-            return await ctx.send(embed=embeds.error("Identifiant de message invalide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Identifiant de message invalide.')))
         giveaway = await self.bot.db.fetchone("SELECT * FROM giveaways WHERE message_id = ?", (mid,))
         if not giveaway or giveaway["status"] != "termine":
-            return await ctx.send(embed=embeds.error("Ce giveaway n'existe pas ou n'est pas terminé."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce giveaway n'existe pas ou n'est pas terminé.")))
         entries = await self.bot.db.fetchall("SELECT * FROM giveaway_entries WHERE giveaway_id = ?", (giveaway["id"],))
         if not entries:
-            return await ctx.send(embed=embeds.warning("Aucun participant à ce giveaway."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Aucun participant à ce giveaway.')))
         winner = random.choice(entries)["user_id"]
-        await ctx.send(embed=embeds.success(f"🎉 Nouveau gagnant : <@{winner}> pour **{giveaway['prize']}** !"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"🎉 Nouveau gagnant : <@{winner}> pour **{giveaway['prize']}** !")))
 
     @commands.hybrid_command(name="giveaway-list", description="Lister les giveaways actifs.")
     async def giveaway_list(self, ctx: commands.Context):
@@ -345,9 +346,9 @@ class Events(commands.Cog, name="Events"):
             "SELECT * FROM giveaways WHERE guild_id = ? AND status = 'actif' ORDER BY end_at ASC", (ctx.guild.id,)
         )
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucun giveaway actif pour l'instant."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Aucun giveaway actif pour l'instant.")))
         lines = [f"**{r['prize']}** — se termine <t:{r['end_at']}:R> (msg `{r['message_id']}`)" for r in rows]
-        await ctx.send(embed=embeds.neutral("🎉 Giveaways actifs", "\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('🎉 Giveaways actifs', '\n'.join(lines))))
 
     @commands.hybrid_command(name="giveaway-cancel", description="Annuler un giveaway sans désigner de gagnant.", with_app_command=False)
     @app_commands.describe(message_id="L'identifiant du message du giveaway")
@@ -356,10 +357,10 @@ class Events(commands.Cog, name="Events"):
         try:
             mid = int(message_id)
         except ValueError:
-            return await ctx.send(embed=embeds.error("Identifiant de message invalide."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Identifiant de message invalide.')))
         giveaway = await self.bot.db.fetchone("SELECT * FROM giveaways WHERE message_id = ?", (mid,))
         if not giveaway:
-            return await ctx.send(embed=embeds.error("Giveaway introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Giveaway introuvable.')))
         await self.bot.db.execute("UPDATE giveaways SET status = 'annule' WHERE id = ?", (giveaway["id"],))
         channel = ctx.guild.get_channel(giveaway["channel_id"])
         if channel:
@@ -368,7 +369,7 @@ class Events(commands.Cog, name="Events"):
                 await msg.edit(embed=embeds.error(f"🚫 Giveaway annulé : {giveaway['prize']}"), view=None)
             except discord.NotFound:
                 pass
-        await ctx.send(embed=embeds.success("Giveaway annulé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Giveaway annulé.')))
         await self.log_action(ctx.guild, embeds.log_entry(
             "🚫 Giveaway annulé", config.COLOR_WARNING, acteur=ctx.author, acteur_label="🛠️ Annulé par",
             extra={"🎁 Prix": giveaway["prize"]},
@@ -381,7 +382,7 @@ class Events(commands.Cog, name="Events"):
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO giveaway_blacklist (guild_id, user_id) VALUES (?, ?)", (ctx.guild.id, membre.id)
         )
-        await ctx.send(embed=embeds.success(f"{membre.mention} ne peut plus participer aux giveaways."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} ne peut plus participer aux giveaways.')))
 
     @commands.hybrid_command(name="giveaway-unblacklist", description="Autoriser à nouveau un membre à participer aux giveaways.", with_app_command=False)
     @app_commands.describe(membre="Le membre à retirer de la liste noire")
@@ -390,7 +391,7 @@ class Events(commands.Cog, name="Events"):
         await self.bot.db.execute(
             "DELETE FROM giveaway_blacklist WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
-        await ctx.send(embed=embeds.success(f"{membre.mention} peut à nouveau participer aux giveaways."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} peut à nouveau participer aux giveaways.')))
 
     # ---------------------------------------------------------------- ÉVÉNEMENTS
 
@@ -406,7 +407,7 @@ class Events(commands.Cog, name="Events"):
                 channel = guild.get_channel(row["channel_id"])
                 if channel:
                     try:
-                        await channel.send(embed=embeds.success(f"📅 L'événement **{row['name']}** commence maintenant !"))
+                        await panels.envoyer(channel, panels.depuis_embed(embeds.success(f"📅 L'événement **{row['name']}** commence maintenant !")))
                     except discord.HTTPException:
                         pass
 
@@ -420,14 +421,14 @@ class Events(commands.Cog, name="Events"):
     async def event_create(self, ctx: commands.Context, nom: str, duree: str):
         seconds = helpers.parse_duration(duree)
         if not seconds:
-            return await ctx.send(embed=embeds.error("Durée invalide. Exemple : `1h`, `1j`."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide. Exemple : `1h`, `1j`.')))
         start_at = now() + seconds
         await self.bot.db.execute(
             "INSERT INTO events (guild_id, channel_id, name, start_at, status, created_by, created_at) "
             "VALUES (?, ?, ?, ?, 'planifie', ?, ?)",
             (ctx.guild.id, ctx.channel.id, nom, start_at, ctx.author.id, now()),
         )
-        await ctx.send(embed=embeds.success(f"📅 Événement **{nom}** créé, il commence <t:{start_at}:R>. Utilisez `/event-join` pour vous inscrire."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'📅 Événement **{nom}** créé, il commence <t:{start_at}:R>. Utilisez `/event-join` pour vous inscrire.')))
         await self.log_action(ctx.guild, embeds.log_entry(
             "📅 Événement créé", config.COLOR_SUCCESS, acteur=ctx.author, acteur_label="🛠️ Organisé par",
             extra={"🏷️ Nom": nom, "⏱️ Débute": f"<t:{start_at}:R>"},
@@ -440,22 +441,22 @@ class Events(commands.Cog, name="Events"):
             "SELECT * FROM events WHERE guild_id = ? AND name = ? AND status != 'termine'", (ctx.guild.id, nom)
         )
         if not event:
-            return await ctx.send(embed=embeds.error("Événement introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Événement introuvable.')))
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO event_participants (event_id, user_id) VALUES (?, ?)", (event["id"], ctx.author.id)
         )
-        await ctx.send(embed=embeds.success(f"● Vous participez à **{nom}** !"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'● Vous participez à **{nom}** !')))
 
     @commands.hybrid_command(name="event-leave", description="Quitter un événement.", with_app_command=False)
     @app_commands.describe(nom="Le nom de l'événement")
     async def event_leave(self, ctx: commands.Context, *, nom: str):
         event = await self.bot.db.fetchone("SELECT * FROM events WHERE guild_id = ? AND name = ?", (ctx.guild.id, nom))
         if not event:
-            return await ctx.send(embed=embeds.error("Événement introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Événement introuvable.')))
         await self.bot.db.execute(
             "DELETE FROM event_participants WHERE event_id = ? AND user_id = ?", (event["id"], ctx.author.id)
         )
-        await ctx.send(embed=embeds.success(f"Vous ne participez plus à **{nom}**."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous ne participez plus à **{nom}**.')))
 
     @commands.hybrid_command(name="event-list", description="Lister les événements à venir.")
     async def event_list(self, ctx: commands.Context):
@@ -463,9 +464,9 @@ class Events(commands.Cog, name="Events"):
             "SELECT * FROM events WHERE guild_id = ? AND status != 'termine' ORDER BY start_at ASC", (ctx.guild.id,)
         )
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucun événement à venir."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucun événement à venir.')))
         lines = [f"**{r['name']}** — <t:{r['start_at']}:R>" for r in rows]
-        await ctx.send(embed=embeds.neutral("📅 Événements à venir", "\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('📅 Événements à venir', '\n'.join(lines))))
 
     @commands.hybrid_command(name="event-cancel", description="Annuler un événement.", with_app_command=False)
     @app_commands.describe(nom="Le nom de l'événement")
@@ -473,9 +474,9 @@ class Events(commands.Cog, name="Events"):
     async def event_cancel(self, ctx: commands.Context, *, nom: str):
         event = await self.bot.db.fetchone("SELECT * FROM events WHERE guild_id = ? AND name = ?", (ctx.guild.id, nom))
         if not event:
-            return await ctx.send(embed=embeds.error("Événement introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Événement introuvable.')))
         await self.bot.db.execute("UPDATE events SET status = 'annule' WHERE id = ?", (event["id"],))
-        await ctx.send(embed=embeds.success(f"Événement **{nom}** annulé."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Événement **{nom}** annulé.')))
 
     # ---------------------------------------------------------------- TOURNOIS
 
@@ -488,7 +489,7 @@ class Events(commands.Cog, name="Events"):
             "VALUES (?, ?, ?, 'inscriptions', ?, ?)",
             (ctx.guild.id, nom, max_participants, ctx.author.id, now()),
         )
-        await ctx.send(embed=embeds.success(f"🏆 Tournoi **{nom}** créé ! Inscriptions ouvertes (`/tournament-join`)."))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🏆 Tournoi **{nom}** créé ! Inscriptions ouvertes (`/tournament-join`).')))
 
     @commands.hybrid_command(name="tournament-join", description="Rejoindre un tournoi.", with_app_command=False)
     @app_commands.describe(nom="Le nom du tournoi")
@@ -497,16 +498,16 @@ class Events(commands.Cog, name="Events"):
             "SELECT * FROM tournaments WHERE guild_id = ? AND name = ? AND status = 'inscriptions'", (ctx.guild.id, nom)
         )
         if not t:
-            return await ctx.send(embed=embeds.error("Tournoi introuvable ou inscriptions fermées."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Tournoi introuvable ou inscriptions fermées.')))
         count = await self.bot.db.fetchone(
             "SELECT COUNT(*) c FROM tournament_participants WHERE tournament_id = ?", (t["id"],)
         )
         if count["c"] >= t["max_participants"]:
-            return await ctx.send(embed=embeds.error("Le tournoi est complet."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le tournoi est complet.')))
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO tournament_participants (tournament_id, user_id) VALUES (?, ?)", (t["id"], ctx.author.id)
         )
-        await ctx.send(embed=embeds.success(f"● Vous êtes inscrit au tournoi **{nom}** !"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'● Vous êtes inscrit au tournoi **{nom}** !')))
 
     @commands.hybrid_command(name="tournament-start", description="Démarrer un tournoi (ferme les inscriptions).", with_app_command=False)
     @app_commands.describe(nom="Le nom du tournoi")
@@ -514,11 +515,11 @@ class Events(commands.Cog, name="Events"):
     async def tournament_start(self, ctx: commands.Context, *, nom: str):
         t = await self.bot.db.fetchone("SELECT * FROM tournaments WHERE guild_id = ? AND name = ?", (ctx.guild.id, nom))
         if not t:
-            return await ctx.send(embed=embeds.error("Tournoi introuvable."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Tournoi introuvable.')))
         await self.bot.db.execute("UPDATE tournaments SET status = 'en_cours' WHERE id = ?", (t["id"],))
         participants = await self.bot.db.fetchall("SELECT * FROM tournament_participants WHERE tournament_id = ?", (t["id"],))
         mentions = ", ".join(f"<@{p['user_id']}>" for p in participants) or "Aucun participant"
-        await ctx.send(embed=embeds.success(f"🏆 Le tournoi **{nom}** commence !\nParticipants : {mentions}"))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🏆 Le tournoi **{nom}** commence !\nParticipants : {mentions}')))
 
     @commands.hybrid_command(name="tournament-list", description="Lister les tournois en cours.", with_app_command=False)
     async def tournament_list(self, ctx: commands.Context):
@@ -526,9 +527,9 @@ class Events(commands.Cog, name="Events"):
             "SELECT * FROM tournaments WHERE guild_id = ? AND status != 'termine' ORDER BY created_at DESC", (ctx.guild.id,)
         )
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucun tournoi en cours."))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Aucun tournoi en cours.')))
         lines = [f"**{r['name']}** — {r['status']}" for r in rows]
-        await ctx.send(embed=embeds.neutral("🏆 Tournois", "\n".join(lines)))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('🏆 Tournois', '\n'.join(lines))))
 
     @commands.hybrid_command(name="announce", description="Faire une annonce dans le salon configuré.", with_app_command=False)
     @app_commands.describe(texte="Le contenu de l'annonce")
@@ -538,9 +539,9 @@ class Events(commands.Cog, name="Events"):
         channel = ctx.guild.get_channel(conf["announce_channel"]) if conf and conf["announce_channel"] else ctx.channel
         e = embeds.neutral("📢 Annonce", texte)
         e.set_footer(text=f"Par {ctx.author}")
-        await channel.send(embed=e)
+        await panels.envoyer(channel, panels.depuis_embed(e))
         if channel != ctx.channel:
-            await ctx.send(embed=embeds.success(f"Annonce envoyée dans {channel.mention}."))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Annonce envoyée dans {channel.mention}.')))
 
 
 async def setup(bot: commands.Bot):
