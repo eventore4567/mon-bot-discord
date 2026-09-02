@@ -73,7 +73,7 @@ async def _delete_later(message: discord.Message, delay: float = 1.5) -> None:
 
 async def _send_short(channel, embed: discord.Embed, *, delay: float = 10.0):
     try:
-        return await channel.send(embed=embed, delete_after=delay, allowed_mentions=discord.AllowedMentions.none())
+        return await panels.envoyer(channel, panels.depuis_embed(embed), delete_after=delay, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
         return None
 
@@ -323,7 +323,7 @@ class ProofReviewView(discord.ui.View):
         panel = interaction.message.embeds[0] if interaction.message.embeds else embeds.success("Preuve validée.")
         panel.colour = discord.Colour.green()
         panel.add_field(name="Décision staff", value=f"**VALIDÉE** par {interaction.user.mention}", inline=False)
-        await interaction.response.edit_message(embed=panel, view=None)
+        await panels.editer(interaction.response, panels.depuis_embed(panel))
 
     @discord.ui.button(label="Refuser", style=discord.ButtonStyle.danger, custom_id="sentrix:proof:reject")
     async def reject(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -338,7 +338,7 @@ class ProofReviewView(discord.ui.View):
         panel = interaction.message.embeds[0] if interaction.message.embeds else embeds.error("Preuve refusée.")
         panel.colour = discord.Colour.red()
         panel.add_field(name="Décision staff", value=f"**REFUSÉE** par {interaction.user.mention}", inline=False)
-        await interaction.response.edit_message(embed=panel, view=None)
+        await panels.editer(interaction.response, panels.depuis_embed(panel))
 
 
 class ProofVerification(commands.Cog, name="ProofVerification"):
@@ -597,12 +597,7 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
         panel.set_footer(text=f"SentriX • Vérification #{verification_id}")
         files = [discord.File(io.BytesIO(data), filename=f"preuve-{verification_id}-{index}.jpg") for index, data in enumerate(blobs, start=1)]
         try:
-            review_message = await review.send(
-                embed=panel,
-                files=files,
-                view=ProofReviewView(self),
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            review_message = await panels.envoyer(review, panels.avec_composants(panels.depuis_embed(panel), ProofReviewView(self)), files=files, allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
             await proof_service.finish_verification(self.bot, verification_id, "insufficient")
             return False

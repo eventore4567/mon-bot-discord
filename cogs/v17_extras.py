@@ -123,7 +123,7 @@ def install_image_role_quota(bot: commands.Bot) -> None:
         e.add_field(name="Résolution", value="3840 × 2160", inline=True)
         e.add_field(name="Modèle", value=result.model or config.OPENAI_IMAGE_MODEL, inline=True)
         e.set_image(url=f"attachment://{filename}")
-        await ctx.send(embed=e, file=file)
+        await panels.envoyer(ctx, panels.depuis_embed(e), file=file)
 
     image_v17._sentrix_v17_image_quota = True
     image_v17._sentrix_original = original

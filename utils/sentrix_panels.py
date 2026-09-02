@@ -352,9 +352,18 @@ async def envoyer(
             users=[mentionner], roles=False, everyone=False, replied_user=False
         )
     kwargs: dict[str, Any] = {"view": panneau, "allowed_mentions": autorisees}
-    if fichiers:
-        kwargs["files"] = fichiers
     kwargs.update(extra)
+
+    # Les fichiers de l'appelant (transcription, carte, image generee) et la
+    # banniere du panneau doivent COHABITER. Sans cette fusion, `files=` ecrasait
+    # la banniere et laissait une galerie pointant vers une piece jointe absente.
+    supplements = kwargs.pop("files", None) or []
+    unique = kwargs.pop("file", None)
+    if unique is not None:
+        supplements = [*supplements, unique]
+    tous = [*fichiers, *supplements]
+    if tous:
+        kwargs["files"] = tous
 
     # Garde-fou : un content glissé ici ferait échouer l'envoi côté Discord, et
     # l'erreur (400 Bad Request) ne dirait pas pourquoi.

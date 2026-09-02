@@ -119,3 +119,30 @@ def test_le_panneau_ne_porte_jamais_de_content():
     cible = _Salon()
     asyncio.run(panels.envoyer(cible, _panneau(), content="interdit"))
     assert "content" not in cible.appels[0][1]
+
+
+def test_les_fichiers_de_l_appelant_cohabitent_avec_la_banniere():
+    """Une transcription de ticket, une carte de profil, une image generee :
+    ces fichiers doivent partir AVEC la banniere, pas a sa place. Sans la
+    fusion, `files=` ecrasait la banniere et le panneau affichait une galerie
+    pointant vers une piece jointe absente."""
+    import io as _io
+
+    cible = _Salon()
+    fichier = discord.File(_io.BytesIO(b"x"), filename="transcription.txt")
+    asyncio.run(panels.envoyer(cible, _panneau(), files=[fichier]))
+    noms = [f.filename for f in cible.appels[0][1]["files"]]
+    assert noms == ["banner_info.webp", "transcription.txt"], noms
+
+
+def test_un_fichier_unique_est_accepte_aussi():
+    import io as _io
+
+    cible = _Salon()
+    asyncio.run(
+        panels.envoyer(
+            cible, _panneau(), file=discord.File(_io.BytesIO(b"y"), filename="carte.png")
+        )
+    )
+    noms = [f.filename for f in cible.appels[0][1]["files"]]
+    assert "carte.png" in noms and "banner_info.webp" in noms

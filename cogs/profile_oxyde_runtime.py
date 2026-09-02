@@ -12,6 +12,7 @@ from discord.ext import commands
 
 from utils import premium_style, stats_service, visual_v5
 from . import community_v3, community_v31
+from utils import sentrix_panels as panels
 
 CARD_COLOUR = premium_style.COLORS["profile"]
 
@@ -266,7 +267,7 @@ class CleanProfileView(discord.ui.View):
             file = discord.File(buffer, filename="sentrix-profile.png")
             embed = _base(self.bot, self.member, "Carte de profil", self.member.display_name)
             embed.set_image(url="attachment://sentrix-profile.png")
-            await interaction.followup.send(embed=embed, file=file, ephemeral=True)
+            await panels.envoyer(interaction.followup, panels.depuis_embed(embed), ephemere=True, file=file)
         except Exception:
             await interaction.followup.send(
                 'La carte est temporairement indisponible. Réessayez dans quelques instants.',

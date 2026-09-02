@@ -341,14 +341,7 @@ def install(bot: commands.Bot) -> None:
 
         reason_text = (reason or "Non précisée").strip()[:1200]
         try:
-            await channel.send(
-                embed=tickets.embeds.warning(
-                    f"🔒 Ticket fermé par {interaction.user.mention}.\nRaison : {reason_text}\n\n"
-                    f"Suppression automatique dans **{tickets.helpers.format_duration(delay)}**."
-                ),
-                file=self._transcript_file(channel, transcript_text),
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            await panels.envoyer(channel, panels.depuis_embed(tickets.embeds.warning(f'🔒 Ticket fermé par {interaction.user.mention}.\nRaison : {reason_text}\n\nSuppression automatique dans **{tickets.helpers.format_duration(delay)}**.')), file=self._transcript_file(channel, transcript_text), allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
             pass
 
@@ -394,10 +387,7 @@ def install(bot: commands.Bot) -> None:
 
         if owner and (not conf or conf["ticket_transcript_dm"]):
             try:
-                await owner.send(
-                    embed=tickets.embeds.info(f"Voici la transcription de votre ticket sur **{guild.name}**."),
-                    file=self._transcript_file(channel, transcript_text),
-                )
+                await panels.envoyer(owner, panels.depuis_embed(tickets.embeds.info(f'Voici la transcription de votre ticket sur **{guild.name}**.')), file=self._transcript_file(channel, transcript_text))
             except (discord.Forbidden, discord.HTTPException):
                 pass
             if not conf or conf["ticket_rating_enabled"]:

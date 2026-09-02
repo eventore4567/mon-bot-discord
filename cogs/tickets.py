@@ -1285,10 +1285,7 @@ class Tickets(commands.Cog):
         asyncio.create_task(self._auto_delete(channel, ticket_id, delay))
 
         try:
-            await channel.send(embed=embeds.warning(
-                f"🔒 Ticket fermé par {interaction.user.mention}.\nRaison : {reason}\n\n"
-                f"Suppression automatique dans **{helpers.format_duration(delay)}**."
-            ), file=self._transcript_file(channel, transcript_text))
+            await sx_panels.envoyer(channel, sx_panels.depuis_embed(embeds.warning(f'🔒 Ticket fermé par {interaction.user.mention}.\nRaison : {reason}\n\nSuppression automatique dans **{helpers.format_duration(delay)}**.')), file=self._transcript_file(channel, transcript_text))
         except discord.HTTPException:
             pass
 
@@ -1304,7 +1301,7 @@ class Tickets(commands.Cog):
             target_channel = channel.guild.get_channel(fallback_id) if fallback_id else None
         if target_channel:
             try:
-                await target_channel.send(embed=log_e, file=self._transcript_file(channel, transcript_text))
+                await sx_panels.envoyer(target_channel, sx_panels.depuis_embed(log_e), file=self._transcript_file(channel, transcript_text))
             except discord.HTTPException:
                 await helpers.send_log(self.bot, interaction.guild, "moderation", log_e)
         else:
@@ -1312,10 +1309,7 @@ class Tickets(commands.Cog):
 
         if owner and (not conf or conf["ticket_transcript_dm"]):
             try:
-                await owner.send(
-                    embed=embeds.info(f"Voici la transcription de votre ticket sur **{interaction.guild.name}**."),
-                    file=self._transcript_file(channel, transcript_text),
-                )
+                await sx_panels.envoyer(owner, sx_panels.depuis_embed(embeds.info(f'Voici la transcription de votre ticket sur **{interaction.guild.name}**.')), file=self._transcript_file(channel, transcript_text))
             except (discord.Forbidden, discord.HTTPException):
                 pass
             if not conf or conf["ticket_rating_enabled"]:
@@ -1359,7 +1353,7 @@ class Tickets(commands.Cog):
                 continue
             await self.bot.db.execute("UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 WHERE id = ?", (now(), row["id"]))
             transcript = await self.generate_transcript(channel)
-            await channel.send(embed=embeds.warning("🔒 Ticket fermé automatiquement pour inactivité."), file=transcript)
+            await sx_panels.envoyer(channel, sx_panels.depuis_embed(embeds.warning('🔒 Ticket fermé automatiquement pour inactivité.')), file=transcript)
             e = embeds.log_entry("🔒 Fermeture automatique (inactivité)", 0xFEE75C, extra={"📌 Salon": channel.name})
             await self.log_action(guild, e, row["log_channel_id"])
             conf = await self.bot.db.get_guild_config(guild.id)
@@ -1851,7 +1845,7 @@ class Tickets(commands.Cog):
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
         await ctx.defer() if ctx.interaction else None
         file = await self.generate_transcript(ctx.channel)
-        await ctx.send(embed=embeds.success("📄 Transcription générée."), file=file)
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success('📄 Transcription générée.')), file=file)
 
     async def send_stats(self, ctx_or_interaction):
         guild = ctx_or_interaction.guild

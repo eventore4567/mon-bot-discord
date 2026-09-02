@@ -848,7 +848,7 @@ class Ai(commands.Cog, name="Ai"):
         e.add_field(name="Résolution", value="3840 × 2160", inline=True)
         e.add_field(name="Modèle", value=result.model or config.OPENAI_IMAGE_MODEL, inline=True)
         e.set_image(url=f"attachment://{filename}")
-        await ctx.send(embed=e, file=file)
+        await panels.envoyer(ctx, panels.depuis_embed(e), file=file)
 
     @commands.hybrid_command(name="explain", description="Demander à l'IA d'expliquer un concept simplement.", with_app_command=False)
     @app_commands.describe(sujet="Le concept à expliquer")
