@@ -23,6 +23,7 @@ from typing import Any
 import discord
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from discord.ext import commands, tasks
 
 from database.db import now
@@ -430,22 +431,22 @@ async def _privacy_purge(bot: commands.Bot, guild_id: int, user_id: int) -> int:
 
 async def _require_admin(ctx: commands.Context) -> bool:
     if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-        await ctx.send(embed=_reponse("Accès refusé", 'Cette commande est disponible uniquement sur un serveur.', kind="danger"))
+        await panels.envoyer(ctx, _reponse('Accès refusé', 'Cette commande est disponible uniquement sur un serveur.', kind='danger'))
         return False
     if ctx.author.id == ctx.guild.owner_id or ctx.author.guild_permissions.administrator:
         return True
-    await ctx.send(embed=_reponse("Accès refusé", 'Seul le propriétaire du serveur ou un administrateur peut utiliser cette commande.', kind="danger"))
+    await panels.envoyer(ctx, _reponse('Accès refusé', 'Seul le propriétaire du serveur ou un administrateur peut utiliser cette commande.', kind='danger'))
     return False
 
 
 async def _require_owner(ctx: commands.Context) -> bool:
     if ctx.guild is None:
-        await ctx.send(embed=_reponse("Accès refusé", 'Cette commande est disponible uniquement sur un serveur.', kind="danger"))
+        await panels.envoyer(ctx, _reponse('Accès refusé', 'Cette commande est disponible uniquement sur un serveur.', kind='danger'))
         return False
     import config
     if ctx.author.id == ctx.guild.owner_id or ctx.author.id in config.OWNER_IDS:
         return True
-    await ctx.send(embed=_reponse("Accès refusé", 'Cette action de confidentialité est réservée au propriétaire du serveur ou du bot.', kind="danger"))
+    await panels.envoyer(ctx, _reponse('Accès refusé', 'Cette action de confidentialité est réservée au propriétaire du serveur ou du bot.', kind='danger'))
     return False
 
 
@@ -504,10 +505,10 @@ async def _security_retention(
     if action in {"run", "purge", "nettoyer"}:
         async with ctx.typing():
             result = await run_retention(ctx.bot, ctx.guild.id)
-        return await ctx.send(embed=_reponse("Rétention des données", f"Rétention terminée : {result['deleted_rows']} ligne(s) temporaire(s) supprimée(s).", kind="success"))
+        return await panels.envoyer(ctx, _reponse('Rétention des données', f"Rétention terminée : {result['deleted_rows']} ligne(s) temporaire(s) supprimée(s).", kind='success'))
     if action in {"set", "regler", "régler"}:
         if not category or category not in RETENTION_DEFAULTS or days is None:
-            return await ctx.send(embed=_reponse("Rétention des données", 'Utilisation : +security retention set <transcripts|evidence|diagnostics|analytics|appeals> <jours>.', kind="warning"))
+            return await panels.envoyer(ctx, _reponse('Rétention des données', 'Utilisation : +security retention set <transcripts|evidence|diagnostics|analytics|appeals> <jours>.', kind='warning'))
         days = max(1, min(3650, int(days)))
         await _ensure_schema(ctx.bot)
         await ctx.bot.db.execute(
@@ -515,8 +516,8 @@ async def _security_retention(
             "ON CONFLICT(guild_id,category) DO UPDATE SET days=excluded.days,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
             (ctx.guild.id, category, days, ctx.author.id, now()),
         )
-        return await ctx.send(embed=_reponse("Rétention des données", f'Conservation {category} réglée sur {days} jours.', kind="success"))
-    await ctx.send(embed=_reponse("Rétention des données", 'Action inconnue. Utilisez status, set ou run.', kind="warning"))
+        return await panels.envoyer(ctx, _reponse('Rétention des données', f'Conservation {category} réglée sur {days} jours.', kind='success'))
+    await panels.envoyer(ctx, _reponse('Rétention des données', 'Action inconnue. Utilisez status, set ou run.', kind='warning'))
 
 
 async def _security_privacy(
@@ -528,7 +529,7 @@ async def _security_privacy(
     if not await _require_owner(ctx):
         return
     if action not in {"export", "purge"} or not user_id or not str(user_id).isdigit():
-        return await ctx.send(embed=_reponse("Confidentialité", 'Utilisation : +security privacy export <ID> ou +security privacy purge <ID> CONFIRMER.', kind="warning"))
+        return await panels.envoyer(ctx, _reponse('Confidentialité', 'Utilisation : +security privacy export <ID> ou +security privacy purge <ID> CONFIRMER.', kind='warning'))
     target_id = int(user_id)
     if action == "export":
         async with ctx.typing():
@@ -544,7 +545,7 @@ async def _security_privacy(
             file=discord.File(io.BytesIO(raw), filename=f"sentrix-data-{ctx.guild.id}-{target_id}.json"),
         )
     if str(confirmation or "").upper() != "CONFIRMER":
-        return await ctx.send(embed=_reponse("Confidentialité", f'Suppression non exécutée. Retapez : +security privacy purge {target_id} CONFIRMER', kind="warning"))
+        return await panels.envoyer(ctx, _reponse('Confidentialité', f'Suppression non exécutée. Retapez : +security privacy purge {target_id} CONFIRMER', kind='warning'))
     async with ctx.typing():
         affected = await _privacy_purge(ctx.bot, ctx.guild.id, target_id)
     await _ensure_schema(ctx.bot)
@@ -552,7 +553,7 @@ async def _security_privacy(
         "INSERT INTO privacy_actions (guild_id,target_user_id,actor_id,action,affected_rows,created_at) VALUES (?,?,?,?,?,?)",
         (ctx.guild.id, target_id, ctx.author.id, "purge", affected, now()),
     )
-    await ctx.send(embed=_reponse("Confidentialité", f"Suppression terminée : {affected} ligne(s) de données communautaires/personnelles supprimée(s) ou nettoyée(s). Les dossiers de sanction restent conservés pour l'intégrité de la modération.", kind="success"))
+    await panels.envoyer(ctx, _reponse('Confidentialité', f"Suppression terminée : {affected} ligne(s) de données communautaires/personnelles supprimée(s) ou nettoyée(s). Les dossiers de sanction restent conservés pour l'intégrité de la modération.", kind='success'))
 
 
 def _install_security_subcommands(bot: commands.Bot) -> None:
@@ -573,13 +574,24 @@ def _install_security_subcommands(bot: commands.Bot) -> None:
 
 
 
-def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
-    """Reponse au format canonique SentriX.
+def _reponse(titre: str, description: str = "", *, kind: str = "securite"):
+    """Reponse composee : banniere, titre, et le detail en section quand il y en a.
 
-    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
-    ni barre d'identite, alors que le reste du bot en porte.
+    Une description sur plusieurs lignes devient une SECTION plutot qu'un
+    paragraphe : ces reponses enumerent souvent des reglages ou des etats, et une
+    enumeration se lit mal d'un bloc.
     """
-    return embeds._base(titre, description, kind=kind)
+    # Pas de section ici : une confirmation d'une ligne n'a rien a structurer, et
+    # fabriquer une section « Détail » autour d'une phrase ne ferait que deplacer
+    # du texte. Ce niveau est l'IDENTITE — banniere, accent, titre. Les ecrans qui
+    # ont vraiment de la matiere sont composes a la main, la ou ils sont ecrits.
+    resume = " ".join(l.strip() for l in str(description or "").split("\n") if l.strip())
+    return panels.Panneau(
+        titre=titre if titre.startswith("SentriX") else f"SentriX — {titre}",
+        sous_titre=resume,
+        kind=kind if kind in panels.INTENTIONS else "securite",
+        pied="SentriX",
+    )
 
 
 class ProductionReadinessRuntime(commands.Cog, name=_COG_NAME):

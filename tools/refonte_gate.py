@@ -55,9 +55,24 @@ RECOMPOSE = (
 EMBED = ("embeds.", "design_system.", "discord.Embed(", "create_embed", "_embed(")
 
 
+# Une SECTION est ce qui distingue une interface recomposee d'une interface qui a
+# seulement recu l'identite. Banniere et accent changent l'aspect ; les sections
+# changent la lecture. Les deux comptent, mais pas pareil.
+SECTIONS = ("panels.Section", "sx_panels.Section", "P.Section(", "depuis_embed")
+
+
 def classer(source: str) -> str:
+    """Trois niveaux, pas deux.
+
+    recomposé  la reponse est composee en sections : hierarchie reelle.
+    identité   la reponse est un panneau — banniere, accent, titre — mais son
+               contenu reste d'un bloc. Visible, pas restructure.
+    embed      inchange.
+    """
     if any(m in source for m in RECOMPOSE):
-        return "recomposé"
+        if any(m in source for m in SECTIONS):
+            return "recomposé"
+        return "identité"
     if any(m in source for m in EMBED):
         return "embed"
     return "autre"
@@ -275,9 +290,18 @@ def main() -> int:
     total = len(resultats)
     recomposees = par_verdict.get("recomposé", [])
     print(f"commandes analysées : {total}")
-    for verdict in ("recomposé", "embed", "autre"):
+    for verdict in ("recomposé", "identité", "embed", "autre"):
         lot = par_verdict.get(verdict, [])
         print(f"  {verdict:12} {len(lot):>4}  ({len(lot) * 100 // max(total, 1)} %)")
+
+    identite = par_verdict.get("identité", [])
+    if identite:
+        modules_id: dict[str, int] = {}
+        for r in identite:
+            modules_id[r["module"]] = modules_id.get(r["module"], 0) + 1
+        print(f"\n{len(identite)} commandes avec l'identité (bannière + accent) mais sans sections :")
+        for module, n in sorted(modules_id.items(), key=lambda kv: -kv[1])[:12]:
+            print(f"  {n:>3}  {module}")
 
     print(f"\n{len(recomposees)} commandes servies par une interface recomposée :")
     par_module: dict[str, list[str]] = {}

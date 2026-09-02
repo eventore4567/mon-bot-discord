@@ -116,19 +116,31 @@ def _clean_domain(value: str) -> str | None:
 
 
 
-def _panneau(
-    titre: str,
-    description: str = "",
-    *,
-    kind: str = "brand",
-    timestamp: bool = False,
-) -> discord.Embed:
-    """Panneau securite au format SentriX.
+def _panneau(titre: str, description: str = "", *, kind: str = "securite"):
+    """Reponse composee : banniere, titre, et le detail en section quand il y en a.
 
-    Ce module construisait ses 38 embeds a la main, avec des couleurs codees en dur et
-    son propre pied de page « SentriX Security V3 ». Les couleurs etaient deja les
-    bonnes, mais il manquait l'identite commune : la barre de titre et le pied de page
-    partages par le reste du bot. On passe donc par le renderer canonique.
+    Une description sur plusieurs lignes devient une SECTION plutot qu'un
+    paragraphe : ces reponses enumerent souvent des reglages ou des etats, et une
+    enumeration se lit mal d'un bloc.
+    """
+    # Pas de section ici : une confirmation d'une ligne n'a rien a structurer, et
+    # fabriquer une section « Détail » autour d'une phrase ne ferait que deplacer
+    # du texte. Ce niveau est l'IDENTITE — banniere, accent, titre. Les ecrans qui
+    # ont vraiment de la matiere sont composes a la main, la ou ils sont ecrits.
+    resume = " ".join(l.strip() for l in str(description or "").split("\n") if l.strip())
+    return panels.Panneau(
+        titre=titre if titre.startswith("SentriX") else f"SentriX — {titre}",
+        sous_titre=resume,
+        kind=kind if kind in panels.INTENTIONS else "securite",
+        pied="SentriX",
+    )
+def _embed_securite(titre: str, description: str = "", *, kind: str = "securite",
+                    timestamp: bool = False) -> discord.Embed:
+    """Embed enrichi par add_field, converti en panneau a l'envoi.
+
+    Certains ecrans ajoutent des champs apres coup. Leur laisser un embed puis le
+    convertir avec panels.depuis_embed donne de VRAIES sections — un champ egale
+    une section — la ou un panneau construit d'un bloc n'en aurait aucune.
     """
     return embeds._base(titre, description or None, kind=kind, timestamp=timestamp)
 
@@ -162,9 +174,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         except Exception:
             pass
 
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Accès propriétaire requis', 'Owner access required'), await self._t(ctx, "Cette action modifie une protection critique. Seul le propriétaire du serveur ou du bot peut l'utiliser.", 'This action changes a critical protection. Only the server or bot owner can use it.'), kind="danger")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Accès propriétaire requis', 'Owner access required'), await self._t(ctx, "Cette action modifie une protection critique. Seul le propriétaire du serveur ou du bot peut l'utiliser.", 'This action changes a critical protection. Only the server or bot owner can use it.'), kind='danger'))
         return False
 
     async def _conf(self, guild_id: int) -> dict:
@@ -323,7 +333,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             state = on_text if conf.get(key, 0) else off_text
             lines.append(f"**{label}** — {state}{suffix}")
 
-        embed = _panneau(title, description, kind="brand", timestamp=True)
+        embed = _embed_securite(title, description, kind='brand', timestamp=True)
         embed.add_field(name=modules_name, value="\n".join(lines)[:1024], inline=False)
         embed.add_field(name=level_name, value=f"`{await self._level(ctx.guild.id)}`", inline=True)
         embed.set_footer(text="SentriX Security V3")
@@ -332,9 +342,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
     async def _legacy(self, ctx: commands.Context, name: str, /, *args, **kwargs):
         command = self.bot.get_command(name)
         if command is None:
-            return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'Module indisponible', 'Module unavailable'), await self._t(ctx, "La commande interne correspondante n'est pas chargée.", 'The matching internal command is not loaded.'), kind="danger")
-            )
+            return await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Module indisponible', 'Module unavailable'), await self._t(ctx, "La commande interne correspondante n'est pas chargée.", 'The matching internal command is not loaded.'), kind='danger'))
         return await ctx.invoke(command, *args, **kwargs)
 
     # ------------------------------------------------------------------ CENTRE
@@ -365,15 +373,11 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
     ):
         """Affiche ou modifie un module de protection."""
         if not filtre:
-            return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'Modules disponibles', 'Available modules'), f"`{', '.join(sorted(SECURITY_FILTERS))}`\n\n`+security filter <module> <on/off>`", kind="brand")
-            )
+            return await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Modules disponibles', 'Available modules'), f"`{', '.join(sorted(SECURITY_FILTERS))}`\n\n`+security filter <module> <on/off>`", kind='brand'))
 
         field = FILTER_ALIASES.get(_norm(filtre))
         if field is None:
-            return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'Module inconnu', 'Unknown module'), await self._t(ctx, 'Utilisez `+security filter` pour afficher la liste.', 'Use `+security filter` to list modules.'), kind="danger")
-            )
+            return await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Module inconnu', 'Unknown module'), await self._t(ctx, 'Utilisez `+security filter` pour afficher la liste.', 'Use `+security filter` to list modules.'), kind='danger'))
 
         conf = await self._conf(ctx.guild.id)
         label = SECURITY_FILTERS[field][
@@ -381,45 +385,33 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         ]
         if etat is None:
             enabled = bool(conf.get(field, 0))
-            return await ctx.send(
-                embed=_panneau(label, await self._t(ctx, f"État actuel : **{('ACTIF' if enabled else 'INACTIF')}**", f"Current state: **{('ON' if enabled else 'OFF')}**"), kind='success' if enabled else 'neutral')
-            )
+            return await panels.envoyer(ctx, _panneau(label, await self._t(ctx, f"État actuel : **{('ACTIF' if enabled else 'INACTIF')}**", f"Current state: **{('ON' if enabled else 'OFF')}**"), kind='success' if enabled else 'neutral'))
 
         enabled = _parse_state(etat)
         if enabled is None:
-            return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'État invalide', 'Invalid state'), '`on` / `off`', kind="danger")
-            )
+            return await panels.envoyer(ctx, _panneau(await self._t(ctx, 'État invalide', 'Invalid state'), '`on` / `off`', kind='danger'))
         if field == "antinuke" and not await self._critical_owner(ctx):
             return
 
         await self._set_filter(ctx.guild.id, field, enabled)
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Protection mise à jour', 'Protection updated'), f"**{label}** — {('ON' if enabled else 'OFF')}", kind='success' if enabled else 'neutral')
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Protection mise à jour', 'Protection updated'), f"**{label}** — {('ON' if enabled else 'OFF')}", kind='success' if enabled else 'neutral'))
 
     @security.command(name="level", aliases=["niveau"])
     @checks.is_owner_or_admin_for("securite")
     async def security_level(self, ctx: commands.Context, niveau: str | None = None):
         """Applique un profil faible, moyen ou élevé."""
         if niveau is None:
-            return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'Niveau de sécurité', 'Security level'), f'**{await self._level(ctx.guild.id)}**\n`+security level faible|moyen|eleve`', kind="brand")
-            )
+            return await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Niveau de sécurité', 'Security level'), f'**{await self._level(ctx.guild.id)}**\n`+security level faible|moyen|eleve`', kind='brand'))
 
         level = LEVEL_ALIASES.get(_norm(niveau))
         if level is None:
-            return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'Niveau invalide', 'Invalid level'), '`faible` · `moyen` · `eleve` / `low` · `medium` · `high`', kind="danger")
-            )
+            return await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Niveau invalide', 'Invalid level'), '`faible` · `moyen` · `eleve` / `low` · `medium` · `high`', kind='danger'))
 
         await self.bot.db.set_guild_config(ctx.guild.id, "security_level", level)
         for field, value in SECURITY_PRESETS[level].items():
             await self._set_filter(ctx.guild.id, field, bool(value))
 
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Profil de sécurité appliqué', 'Security profile applied'), f'**{level.upper()}**', kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Profil de sécurité appliqué', 'Security profile applied'), f'**{level.upper()}**', kind='success'))
 
     @security.command(name="scan", aliases=["check", "diagnostic", "audit"])
     @checks.is_owner_or_admin_for("securite")
@@ -448,7 +440,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         )
         kind = "success" if score >= 85 else "warning" if score >= 60 else "danger"
 
-        embed = _panneau(await self._t(ctx, 'SENTRIX / ANALYSE SÉCURITÉ', 'SENTRIX / SECURITY SCAN'), await self._t(ctx, f'Score estimé : **{score}/100**', f'Estimated score: **{score}/100**'), kind=kind)
+        embed = _embed_securite(await self._t(ctx, 'SENTRIX / ANALYSE SÉCURITÉ', 'SENTRIX / SECURITY SCAN'), await self._t(ctx, f'Score estimé : **{score}/100**', f'Estimated score: **{score}/100**'), kind=kind)
         embed.add_field(
             name=await self._t(ctx, "Modules actifs", 'Activez modules'),
             value=f"{active}/{len(SECURITY_FILTERS)}",
@@ -470,7 +462,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             value="`+security permissions`",
             inline=False,
         )
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed, kind="securite"))
 
     @security.command(name="repair", aliases=["fix", "reparer", "réparer"])
     @checks.is_owner_or_admin_for("securite")
@@ -478,14 +470,14 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         """Active le profil recommandé et vérifie les permissions du bot."""
         result = await apply_recommended_security(self.bot, ctx.guild)
         missing = result.get("missing_permissions", [])
-        embed = _panneau(await self._t(ctx, 'Sécurité réparée', 'Security repaired'), await self._t(ctx, 'Le profil recommandé SentriX est maintenant appliqué.', 'The recommended SentriX profile is now applied.'), kind='success' if not missing else 'warning')
+        embed = _embed_securite(await self._t(ctx, 'Sécurité réparée', 'Security repaired'), await self._t(ctx, 'Le profil recommandé SentriX est maintenant appliqué.', 'The recommended SentriX profile is now applied.'), kind='success' if not missing else 'warning')
         if missing:
             embed.add_field(
                 name=await self._t(ctx, "Permissions manquantes", "Missing permissions"),
                 value="\n".join(f"- {item}" for item in missing)[:1024],
                 inline=False,
             )
-        await ctx.send(embed=embed)
+        await panels.envoyer(ctx, panels.depuis_embed(embed, kind="securite"))
 
     @security.command(name="history", aliases=["historique", "logs"])
     @checks.is_owner_or_admin_for("securite")
@@ -505,9 +497,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             rows = await self.bot.db.automod_recent(ctx.guild.id, limit=15)
 
         if not rows:
-            return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'Historique sécurité', 'Security history'), await self._t(ctx, 'Aucune action enregistrée.', 'No recorded action.'), kind="neutral")
-            )
+            return await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Historique sécurité', 'Security history'), await self._t(ctx, 'Aucune action enregistrée.', 'No recorded action.'), kind='neutral'))
 
         lines = []
         for row in rows:
@@ -516,9 +506,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
                 f"<t:{row['timestamp']}:R> · {who} · "
                 f"`{row['filter_name']}` → **{row['action']}**"
             )
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Historique sécurité', 'Security history'), '\n'.join(lines)[:4000], kind="brand")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Historique sécurité', 'Security history'), '\n'.join(lines)[:4000], kind='brand'))
 
     @security.command(name="panic", aliases=["emergency", "urgence"])
     async def security_panic(self, ctx: commands.Context, action: str = "status"):
@@ -528,9 +516,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
 
         hardening = self.bot.get_cog("SecurityHardening")
         if hardening is None:
-            return await ctx.send(
-                embed=_panneau('PANIC', await self._t(ctx, "Moteur d'urgence indisponible.", 'Emergency engine unavailable.'), kind="danger")
-            )
+            return await panels.envoyer(ctx, _panneau('PANIC', await self._t(ctx, "Moteur d'urgence indisponible.", 'Emergency engine unavailable.'), kind='danger'))
 
         mode = _norm(action)
         if mode in {"on", "start", "enable", "activer"}:
@@ -538,9 +524,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if mode in {"off", "stop", "restore", "restaurer", "desactiver", "désactiver"}:
             return await hardening._deactivate_panic(ctx)
         if mode not in {"status", "state", "etat", "état"}:
-            return await ctx.send(
-                embed=_panneau('PANIC', '`+security panic on|off|status`', kind="danger")
-            )
+            return await panels.envoyer(ctx, _panneau('PANIC', '`+security panic on|off|status`', kind='danger'))
 
         row = await hardening._panic_row(ctx.guild.id)
         if row:
@@ -553,9 +537,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         else:
             description = await self._t(ctx, "INACTIF", "INACTIVE")
             kind = "success"
-        await ctx.send(
-            embed=_panneau('SENTRIX / PANIC', description, kind=kind)
-        )
+        await panels.envoyer(ctx, _panneau('SENTRIX / PANIC', description, kind=kind))
 
     # -------------------------------------------------------------- LISTE BLANCHE
 
@@ -567,9 +549,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
     @checks.is_owner_or_admin_for("securite")
     async def security_whitelist(self, ctx: commands.Context):
         """Gère les exemptions et domaines autorisés."""
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'SENTRIX / LISTE BLANCHE', 'SENTRIX / ALLOWLIST'), '`+security whitelist user-add @membre` · `user-remove` · `users`\n`+security whitelist role-add @role` · `role-remove` · `roles`\n`+security whitelist domain-add example.com` · `domain-remove` · `domains`', kind="brand")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'SENTRIX / LISTE BLANCHE', 'SENTRIX / ALLOWLIST'), '`+security whitelist user-add @membre` · `user-remove` · `users`\n`+security whitelist role-add @role` · `role-remove` · `roles`\n`+security whitelist domain-add example.com` · `domain-remove` · `domains`', kind='brand'))
 
     @security_whitelist.command(name="user-add", aliases=["add-user", "membre-add"])
     async def whitelist_user_add(self, ctx: commands.Context, membre: discord.Member):
@@ -579,9 +559,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             "INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)",
             (ctx.guild.id, membre.id),
         )
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Exemption anti-nuke ajoutée', 'Anti-nuke exemption added'), membre.mention, kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Exemption anti-nuke ajoutée', 'Anti-nuke exemption added'), membre.mention, kind='success'))
 
     @security_whitelist.command(name="user-remove", aliases=["remove-user", "membre-remove"])
     async def whitelist_user_remove(self, ctx: commands.Context, membre: discord.Member):
@@ -591,9 +569,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             "DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?",
             (ctx.guild.id, membre.id),
         )
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Exemption anti-nuke retirée', 'Anti-nuke exemption removed'), membre.mention, kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Exemption anti-nuke retirée', 'Anti-nuke exemption removed'), membre.mention, kind='success'))
 
     @security_whitelist.command(name="users", aliases=["members", "membres"])
     async def whitelist_users(self, ctx: commands.Context):
@@ -607,9 +583,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             )
         else:
             text = await self._t(ctx, "Aucun membre exempté.", "No exempted member.")
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Exemptions anti-nuke', 'Anti-nuke exemptions'), text[:4000], kind="brand")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Exemptions anti-nuke', 'Anti-nuke exemptions'), text[:4000], kind='brand'))
 
     @security_whitelist.command(name="role-add", aliases=["add-role"])
     async def whitelist_role_add(self, ctx: commands.Context, role: discord.Role):
@@ -619,9 +593,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         automod = self._automod()
         if automod is not None:
             automod.exempt_roles_cache.pop(ctx.guild.id, None)
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Rôle exempté', 'Role exempted'), role.mention, kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Rôle exempté', 'Role exempted'), role.mention, kind='success'))
 
     @security_whitelist.command(name="role-remove", aliases=["remove-role"])
     async def whitelist_role_remove(self, ctx: commands.Context, role: discord.Role):
@@ -631,9 +603,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         automod = self._automod()
         if automod is not None:
             automod.exempt_roles_cache.pop(ctx.guild.id, None)
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Exemption de rôle retirée', 'Role exemption removed'), role.mention, kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Exemption de rôle retirée', 'Role exemption removed'), role.mention, kind='success'))
 
     @security_whitelist.command(name="roles")
     async def whitelist_roles(self, ctx: commands.Context):
@@ -644,17 +614,13 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             )
         else:
             text = await self._t(ctx, "Aucun rôle exempté.", "No exempted role.")
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Rôles exemptés', 'Exempted roles'), text[:4000], kind="brand")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Rôles exemptés', 'Exempted roles'), text[:4000], kind='brand'))
 
     @security_whitelist.command(name="domain-add", aliases=["add-domain", "domaine-add"])
     async def whitelist_domain_add(self, ctx: commands.Context, domaine: str):
         domain = _clean_domain(domaine)
         if domain is None:
-            return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'Domaine invalide', 'Invalid domain'), '`example.com`', kind="danger")
-            )
+            return await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Domaine invalide', 'Invalid domain'), '`example.com`', kind='danger'))
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO whitelist_domains (guild_id, domain) VALUES (?, ?)",
             (ctx.guild.id, domain),
@@ -662,17 +628,13 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         automod = self._automod()
         if automod is not None:
             automod.whitelist_domains_cache.pop(ctx.guild.id, None)
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Domaine autorisé', 'Domain allowed'), f'`{domain}`', kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Domaine autorisé', 'Domain allowed'), f'`{domain}`', kind='success'))
 
     @security_whitelist.command(name="domain-remove", aliases=["remove-domain", "domaine-remove"])
     async def whitelist_domain_remove(self, ctx: commands.Context, domaine: str):
         domain = _clean_domain(domaine)
         if domain is None:
-            return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'Domaine invalide', 'Invalid domain'), '`example.com`', kind="danger")
-            )
+            return await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Domaine invalide', 'Invalid domain'), '`example.com`', kind='danger'))
         await self.bot.db.execute(
             "DELETE FROM whitelist_domains WHERE guild_id = ? AND domain = ?",
             (ctx.guild.id, domain),
@@ -680,9 +642,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         automod = self._automod()
         if automod is not None:
             automod.whitelist_domains_cache.pop(ctx.guild.id, None)
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Domaine retiré', 'Domain removed'), f'`{domain}`', kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Domaine retiré', 'Domain removed'), f'`{domain}`', kind='success'))
 
     @security_whitelist.command(name="domains", aliases=["domain-list", "domaines"])
     async def whitelist_domains(self, ctx: commands.Context):
@@ -694,9 +654,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             text = "\n".join(f"`{row['domain']}`" for row in rows)
         else:
             text = await self._t(ctx, "Aucun domaine autorisé.", "No allowed domain.")
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Domaines autorisés', 'Allowed domains'), text[:4000], kind="brand")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Domaines autorisés', 'Allowed domains'), text[:4000], kind='brand'))
 
     # ----------------------------------------------------------------- LISTE NOIRE
 
@@ -708,9 +666,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
     @checks.is_owner_or_admin_for("securite")
     async def security_blacklist(self, ctx: commands.Context):
         """Gère les mots et utilisateurs bloqués."""
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'SENTRIX / LISTE NOIRE', 'SENTRIX / BLOCKLIST'), '`+security blacklist word-add <mot>` · `word-remove` · `words`\n`+security blacklist user-add @membre [raison]` · `user-remove` · `users`', kind="brand")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'SENTRIX / LISTE NOIRE', 'SENTRIX / BLOCKLIST'), '`+security blacklist word-add <mot>` · `word-remove` · `words`\n`+security blacklist user-add @membre [raison]` · `user-remove` · `users`', kind='brand'))
 
     @security_blacklist.command(name="word-add", aliases=["add-word", "mot-add"])
     async def blacklist_word_add(self, ctx: commands.Context, *, mot: str):
@@ -729,9 +685,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         automod = self._automod()
         if automod is not None:
             automod.blacklist_words_cache.pop(ctx.guild.id, None)
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Mot bloqué', 'Blocked word'), f'`{word}`', kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Mot bloqué', 'Blocked word'), f'`{word}`', kind='success'))
 
     @security_blacklist.command(name="word-remove", aliases=["remove-word", "mot-remove"])
     async def blacklist_word_remove(self, ctx: commands.Context, *, mot: str):
@@ -743,9 +697,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         automod = self._automod()
         if automod is not None:
             automod.blacklist_words_cache.pop(ctx.guild.id, None)
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Mot débloqué', 'Word unblocked'), f'`{word}`', kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Mot débloqué', 'Word unblocked'), f'`{word}`', kind='success'))
 
     @security_blacklist.command(name="words", aliases=["word-list", "mots"])
     async def blacklist_words(self, ctx: commands.Context):
@@ -757,9 +709,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             text = " · ".join(f"`{row['word']}`" for row in rows)
         else:
             text = await self._t(ctx, "Aucun mot bloqué.", "No blocked word.")
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Mots bloqués', 'Blocked words'), text[:4000], kind="brand")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Mots bloqués', 'Blocked words'), text[:4000], kind='brand'))
 
     @security_blacklist.command(name="user-add", aliases=["add-user", "membre-add"])
     async def blacklist_user_add(
@@ -771,9 +721,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
     ):
         err = checks.check_hierarchy(ctx.author, membre)
         if err:
-            return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'Action refusée', 'Action denied'), err, kind="danger")
-            )
+            return await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Action refusée', 'Action denied'), err, kind='danger'))
         await self.bot.db.execute(
             "INSERT OR REPLACE INTO blacklist_users "
             "(guild_id, user_id, reason) VALUES (?, ?, ?)",
@@ -782,9 +730,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         automod = self._automod()
         if automod is not None:
             automod.blacklist_users_cache.pop(ctx.guild.id, None)
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Utilisateur bloqué', 'User blocked'), f'{membre.mention}\n{raison[:1000]}', kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Utilisateur bloqué', 'User blocked'), f'{membre.mention}\n{raison[:1000]}', kind='success'))
 
     @security_blacklist.command(name="user-remove", aliases=["remove-user", "membre-remove"])
     async def blacklist_user_remove(self, ctx: commands.Context, membre: discord.Member):
@@ -795,9 +741,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         automod = self._automod()
         if automod is not None:
             automod.blacklist_users_cache.pop(ctx.guild.id, None)
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Utilisateur débloqué', 'User unblocked'), membre.mention, kind="success")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Utilisateur débloqué', 'User unblocked'), membre.mention, kind='success'))
 
     @security_blacklist.command(name="users", aliases=["members", "membres"])
     async def blacklist_users(self, ctx: commands.Context):
@@ -813,9 +757,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             )
         else:
             text = await self._t(ctx, "Aucun utilisateur bloqué.", "No blocked user.")
-        await ctx.send(
-            embed=_panneau(await self._t(ctx, 'Utilisateurs bloqués', 'Blocked users'), text[:4000], kind="brand")
-        )
+        await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Utilisateurs bloqués', 'Blocked users'), text[:4000], kind='brand'))
 
     # ------------------------------------------------------------ OUTILS AVANCÉS
     # Ces wrappers réutilisent les implémentations déjà éprouvées de security_tools.

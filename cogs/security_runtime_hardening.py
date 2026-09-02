@@ -20,6 +20,7 @@ from collections import defaultdict
 import discord
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from discord import app_commands
 from discord.ext import commands
 
@@ -253,13 +254,33 @@ async def apply_recommended_security(bot: commands.Bot, guild: discord.Guild) ->
 
 
 
-def _panneau(titre: str, description: str = "", *, kind: str = "brand") -> discord.Embed:
-    """Panneau de securite au format canonique.
+def _panneau(titre: str, description: str = "", *, kind: str = "securite"):
+    """Reponse composee : banniere, titre, et le detail en section quand il y en a.
 
-    Ce module construisait ses embeds a la main avec des couleurs en dur : ni pied
-    de page, ni barre d'identite, et des teintes qui ne suivaient pas la palette.
+    Une description sur plusieurs lignes devient une SECTION plutot qu'un
+    paragraphe : ces reponses enumerent souvent des reglages ou des etats, et une
+    enumeration se lit mal d'un bloc.
     """
-    return embeds._base(titre, description or None, kind=kind)
+    # Pas de section ici : une confirmation d'une ligne n'a rien a structurer, et
+    # fabriquer une section « Détail » autour d'une phrase ne ferait que deplacer
+    # du texte. Ce niveau est l'IDENTITE — banniere, accent, titre. Les ecrans qui
+    # ont vraiment de la matiere sont composes a la main, la ou ils sont ecrits.
+    resume = " ".join(l.strip() for l in str(description or "").split("\n") if l.strip())
+    return panels.Panneau(
+        titre=titre if titre.startswith("SentriX") else f"SentriX — {titre}",
+        sous_titre=resume,
+        kind=kind if kind in panels.INTENTIONS else "securite",
+        pied="SentriX",
+    )
+def _embed_securite(titre: str, description: str = "", *, kind: str = "securite",
+                    timestamp: bool = False) -> discord.Embed:
+    """Embed enrichi par add_field, converti en panneau a l'envoi.
+
+    Certains ecrans ajoutent des champs apres coup. Leur laisser un embed puis le
+    convertir avec panels.depuis_embed donne de VRAIES sections — un champ egale
+    une section — la ou un panneau construit d'un bloc n'en aurait aucune.
+    """
+    return embeds._base(titre, description or None, kind=kind, timestamp=timestamp)
 
 
 class SecurityHardening(commands.Cog):
@@ -480,9 +501,7 @@ class SecurityHardening(commands.Cog):
         lock = self._panic_locks[guild.id]
         async with lock:
             if await self._panic_row(guild.id):
-                return await ctx.send(
-                    embed=_panneau('PANIC déjà actif', 'Le serveur est déjà verrouillé. Utilisez `+panic status` ou `+panic off`.', kind="warning")
-                )
+                return await panels.envoyer(ctx, _panneau('PANIC déjà actif', 'Le serveur est déjà verrouillé. Utilisez `+panic status` ou `+panic off`.', kind='warning'))
 
             state = {}
             for channel in guild.text_channels:
@@ -521,7 +540,7 @@ class SecurityHardening(commands.Cog):
                 detail=f"{locked} salon(s) verrouillé(s); {len(failed)} échec(s)",
             )
 
-            embed = _panneau('PANIC ACTIVÉ', "Le serveur est placé en mode d'urgence. Les protections recommandées sont actives et l'écriture @everyone a été verrouillée dans les salons textuels.", kind="danger")
+            embed = _embed_securite('PANIC ACTIVÉ', "Le serveur est placé en mode d'urgence. Les protections recommandées sont actives et l'écriture @everyone a été verrouillée dans les salons textuels.", kind='danger')
             embed.add_field(name="Salons verrouillés", value=str(locked), inline=True)
             embed.add_field(name="Échecs", value=str(len(failed)), inline=True)
             missing = result.get("missing_permissions", [])
@@ -534,7 +553,7 @@ class SecurityHardening(commands.Cog):
             if failed:
                 embed.add_field(name="Salons non verrouillés", value=" ".join(failed)[:1024], inline=False)
             embed.set_footer(text="SentriX • +panic off pour restaurer exactement les anciens overwrites")
-            await ctx.send(embed=embed)
+            await panels.envoyer(ctx, panels.depuis_embed(embed, kind="securite"))
 
     async def _deactivate_panic(self, ctx: commands.Context) -> None:
         guild = ctx.guild
@@ -542,17 +561,13 @@ class SecurityHardening(commands.Cog):
         async with lock:
             row = await self._panic_row(guild.id)
             if not row:
-                return await ctx.send(
-                    embed=_panneau('PANIC inactif', "Aucun snapshot d'urgence actif n'a besoin d'être restauré.", kind="brand")
-                )
+                return await panels.envoyer(ctx, _panneau('PANIC inactif', "Aucun snapshot d'urgence actif n'a besoin d'être restauré.", kind='brand'))
 
             try:
                 state = json.loads(row["state_json"] or "{}")
             except (TypeError, ValueError):
                 logger.exception("Snapshot PANIC illisible sur %s.", guild.id)
-                return await ctx.send(
-                    embed=_panneau('Restauration impossible', "Le snapshot PANIC est illisible. Aucune permission n'a été modifiée.", kind="danger")
-                )
+                return await panels.envoyer(ctx, _panneau('Restauration impossible', "Le snapshot PANIC est illisible. Aucune permission n'a été modifiée.", kind='danger'))
 
             restored = 0
             failed = []
@@ -591,22 +606,14 @@ class SecurityHardening(commands.Cog):
                 detail=f"{restored} restauré(s); {len(failed)} échec(s)",
             )
 
-            embed = _panneau(
-                "PANIC RESTAURÉ" if not failed else "PANIC PARTIELLEMENT RESTAURÉ",
-                (
-                    "Les valeurs d'écriture @everyone précédentes ont été remises exactement."
-                    if not failed
-                    else "Certains salons n'ont pas pu être restaurés. Corrigez les permissions du bot puis relancez `+panic off`."
-                ),
-                kind="success" if not failed else "warning",
-            )
+            embed = _embed_securite('PANIC RESTAURÉ' if not failed else 'PANIC PARTIELLEMENT RESTAURÉ', "Les valeurs d'écriture @everyone précédentes ont été remises exactement." if not failed else "Certains salons n'ont pas pu être restaurés. Corrigez les permissions du bot puis relancez `+panic off`.", kind='success' if not failed else 'warning')
             embed.timestamp = discord.utils.utcnow()
             embed.add_field(name="Salons restaurés", value=str(restored), inline=True)
             embed.add_field(name="Échecs", value=str(len(failed)), inline=True)
             if failed:
                 embed.add_field(name="À réessayer", value=" ".join(failed)[:1024], inline=False)
             embed.set_footer(text="SentriX • Les protections AutoMod renforcées restent actives")
-            await ctx.send(embed=embed)
+            await panels.envoyer(ctx, panels.depuis_embed(embed, kind="securite"))
 
     @commands.group(name="panic", invoke_without_command=True)
     @commands.guild_only()
@@ -627,11 +634,9 @@ class SecurityHardening(commands.Cog):
     async def panic_status(self, ctx: commands.Context):
         row = await self._panic_row(ctx.guild.id)
         if not row:
-            return await ctx.send(
-                embed=_panneau('PANIC inactif', "Le serveur n'est pas en mode d'urgence.", kind="success")
-            )
-        embed = _panneau('PANIC actif', f"Activé <t:{row['created_at']}:R> par <@{row['created_by']}>.\nUtilisez `+panic off` pour restaurer le snapshot.", kind="danger")
-        await ctx.send(embed=embed)
+            return await panels.envoyer(ctx, _panneau('PANIC inactif', "Le serveur n'est pas en mode d'urgence.", kind='success'))
+        embed = _embed_securite('PANIC actif', f"Activé <t:{row['created_at']}:R> par <@{row['created_by']}>.\nUtilisez `+panic off` pour restaurer le snapshot.", kind='danger')
+        await panels.envoyer(ctx, panels.depuis_embed(embed, kind="securite"))
 
     @commands.command(name="security-repair", aliases=["securite-repair", "security-fix"])
     @commands.guild_only()
@@ -639,20 +644,11 @@ class SecurityHardening(commands.Cog):
     async def security_repair(self, ctx: commands.Context):
         result = await apply_recommended_security(self.bot, ctx.guild)
         missing = result["missing_permissions"]
-        e = _panneau(
-            "Sécurité SentriX réparée",
-            (
-                "Anti-spam, anti-liens, anti-invitations, anti-mentions, anti-caps, "
-                "anti-émojis, anti-raid, anti-scam, anti-nuke et escalade automatique sont actifs.\n\n"
-                "Anti-bot et anti-comptes récents restent désactivés par défaut pour éviter "
-                "les expulsions de membres légitimes."
-            ),
-            kind="success" if not missing else "warning",
-        )
+        e = _embed_securite('Sécurité SentriX réparée', 'Anti-spam, anti-liens, anti-invitations, anti-mentions, anti-caps, anti-émojis, anti-raid, anti-scam, anti-nuke et escalade automatique sont actifs.\n\nAnti-bot et anti-comptes récents restent désactivés par défaut pour éviter les expulsions de membres légitimes.', kind='success' if not missing else 'warning')
         if missing:
             e.add_field(name="Permissions manquantes", value="- " + "\n- ".join(missing), inline=False)
         e.set_footer(text="SentriX • Sécurité défensive")
-        await ctx.send(embed=e)
+        await panels.envoyer(ctx, panels.depuis_embed(e, kind="securite"))
 
 
 async def install(bot: commands.Bot) -> None:

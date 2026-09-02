@@ -41,6 +41,7 @@ from typing import Any
 import discord
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from discord.ext import commands, tasks
 
 from database.db import now
@@ -262,13 +263,24 @@ CREATE TABLE IF NOT EXISTS shutdown_state (
 
 
 
-def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
-    """Reponse au format canonique SentriX.
+def _reponse(titre: str, description: str = "", *, kind: str = "securite"):
+    """Reponse composee : banniere, titre, et le detail en section quand il y en a.
 
-    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
-    ni barre d'identite, alors que le reste du bot en porte.
+    Une description sur plusieurs lignes devient une SECTION plutot qu'un
+    paragraphe : ces reponses enumerent souvent des reglages ou des etats, et une
+    enumeration se lit mal d'un bloc.
     """
-    return embeds._base(titre, description, kind=kind)
+    # Pas de section ici : une confirmation d'une ligne n'a rien a structurer, et
+    # fabriquer une section « Détail » autour d'une phrase ne ferait que deplacer
+    # du texte. Ce niveau est l'IDENTITE — banniere, accent, titre. Les ecrans qui
+    # ont vraiment de la matiere sont composes a la main, la ou ils sont ecrits.
+    resume = " ".join(l.strip() for l in str(description or "").split("\n") if l.strip())
+    return panels.Panneau(
+        titre=titre if titre.startswith("SentriX") else f"SentriX — {titre}",
+        sous_titre=resume,
+        kind=kind if kind in panels.INTENTIONS else "securite",
+        pied="SentriX",
+    )
 
 
 class MasteryDegradedError(commands.CheckFailure):
@@ -410,15 +422,15 @@ async def _command_access_check(ctx: commands.Context) -> bool:
 
 async def _security_access(ctx: commands.Context, command_name: str | None = None, *, rule: str | None = None):
     if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-        return await ctx.send(embed=_reponse("Accès aux commandes", 'Cette configuration est disponible uniquement sur un serveur.', kind="danger"))
+        return await panels.envoyer(ctx, _reponse('Accès aux commandes', 'Cette configuration est disponible uniquement sur un serveur.', kind='danger'))
     if not (ctx.author.id == ctx.guild.owner_id or ctx.author.guild_permissions.administrator):
-        return await ctx.send(embed=_reponse("Accès aux commandes", 'Seul le propriétaire du serveur ou un administrateur peut modifier cet accès.', kind="danger"))
+        return await panels.envoyer(ctx, _reponse('Accès aux commandes', 'Seul le propriétaire du serveur ou un administrateur peut modifier cet accès.', kind='danger'))
     if not command_name:
-        return await ctx.send(embed=_reponse("Accès aux commandes", 'Utilisation : +security access <commande> <@role|admin|off>. Sans deuxième valeur, SentriX affiche la règle actuelle.', kind="warning"))
+        return await panels.envoyer(ctx, _reponse('Accès aux commandes', 'Utilisation : +security access <commande> <@role|admin|off>. Sans deuxième valeur, SentriX affiche la règle actuelle.', kind='warning'))
     command_name = command_name.casefold().lstrip("+/")
     command = ctx.bot.get_command(command_name)
     if command is None:
-        return await ctx.send(embed=_reponse("Accès aux commandes", 'Commande introuvable.', kind="danger"))
+        return await panels.envoyer(ctx, _reponse('Accès aux commandes', 'Commande introuvable.', kind='danger'))
     root = command.root_parent or command
     command_name = root.name.casefold()
     if not rule:
@@ -427,7 +439,7 @@ async def _security_access(ctx: commands.Context, command_name: str | None = Non
             (ctx.guild.id, command_name),
         )
         if not rows:
-            return await ctx.send(embed=_reponse("Accès aux commandes", f'Aucune restriction supplémentaire pour +{command_name}.', kind="warning"))
+            return await panels.envoyer(ctx, _reponse('Accès aux commandes', f'Aucune restriction supplémentaire pour +{command_name}.', kind='warning'))
         parts = []
         for row in rows:
             rid = int(row["role_id"])
@@ -437,7 +449,7 @@ async def _security_access(ctx: commands.Context, command_name: str | None = Non
                 role = ctx.guild.get_role(rid)
                 if role:
                     parts.append(role.mention)
-        return await ctx.send(embed=_reponse("Accès aux commandes", f'Accès +{command_name} : ' + (', '.join(parts) or 'règle invalide'), kind="brand"))
+        return await panels.envoyer(ctx, _reponse('Accès aux commandes', f'Accès +{command_name} : ' + (', '.join(parts) or 'règle invalide'), kind='brand'))
 
     value = rule.strip()
     if value.casefold() in {"off", "reset", "remove", "aucun"}:
@@ -445,7 +457,7 @@ async def _security_access(ctx: commands.Context, command_name: str | None = Non
             "DELETE FROM command_access_rules WHERE guild_id=? AND command_name=?",
             (ctx.guild.id, command_name),
         )
-        return await ctx.send(embed=_reponse("Accès aux commandes", f'Restriction supplémentaire retirée pour +{command_name}.', kind="success"))
+        return await panels.envoyer(ctx, _reponse('Accès aux commandes', f'Restriction supplémentaire retirée pour +{command_name}.', kind='success'))
 
     if value.casefold() in {"admin", "admins", "administrator", "administrateur"}:
         await ctx.bot.db.execute(
@@ -456,14 +468,14 @@ async def _security_access(ctx: commands.Context, command_name: str | None = Non
             "INSERT INTO command_access_rules (guild_id,command_name,role_id,created_by,created_at) VALUES (?,?,?,?,?)",
             (ctx.guild.id, command_name, -1, ctx.author.id, now()),
         )
-        return await ctx.send(embed=_reponse("Accès aux commandes", f'+{command_name} est maintenant réservé aux administrateurs.', kind="success"))
+        return await panels.envoyer(ctx, _reponse('Accès aux commandes', f'+{command_name} est maintenant réservé aux administrateurs.', kind='success'))
 
     match = re.search(r"(\d{15,22})", value)
     role = ctx.guild.get_role(int(match.group(1))) if match else None
     if role is None:
         role = discord.utils.find(lambda r: r.name.casefold() == value.casefold(), ctx.guild.roles)
     if role is None or role.is_default():
-        return await ctx.send(embed=_reponse("Accès aux commandes", 'Rôle introuvable. Mentionnez le rôle ou donnez son ID.', kind="danger"))
+        return await panels.envoyer(ctx, _reponse('Accès aux commandes', 'Rôle introuvable. Mentionnez le rôle ou donnez son ID.', kind='danger'))
     await ctx.bot.db.execute(
         "DELETE FROM command_access_rules WHERE guild_id=? AND command_name=? AND role_id=-1",
         (ctx.guild.id, command_name),
@@ -472,22 +484,22 @@ async def _security_access(ctx: commands.Context, command_name: str | None = Non
         "INSERT OR IGNORE INTO command_access_rules (guild_id,command_name,role_id,created_by,created_at) VALUES (?,?,?,?,?)",
         (ctx.guild.id, command_name, role.id, ctx.author.id, now()),
     )
-    return await ctx.send(embed=_reponse("Accès aux commandes", f'Le rôle {role.mention} peut utiliser +{command_name}, en plus des administrateurs.', kind="brand"))
+    return await panels.envoyer(ctx, _reponse('Accès aux commandes', f'Le rôle {role.mention} peut utiliser +{command_name}, en plus des administrateurs.', kind='brand'))
 
 
 async def _security_evidence(ctx: commands.Context, case_number: int | None = None):
     if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-        return await ctx.send(embed=_reponse("Preuves de sécurité", 'Cette commande est disponible uniquement sur un serveur.', kind="danger"))
+        return await panels.envoyer(ctx, _reponse('Preuves de sécurité', 'Cette commande est disponible uniquement sur un serveur.', kind='danger'))
     if not (ctx.author.guild_permissions.moderate_members or ctx.author.guild_permissions.administrator or ctx.author.id == ctx.guild.owner_id):
-        return await ctx.send(embed=_reponse("Preuves de sécurité", 'Permission de modération requise.', kind="danger"))
+        return await panels.envoyer(ctx, _reponse('Preuves de sécurité', 'Permission de modération requise.', kind='danger'))
     if case_number is None:
-        return await ctx.send(embed=_reponse("Preuves de sécurité", 'Utilisation : +security evidence <numéro de dossier>.', kind="warning"))
+        return await panels.envoyer(ctx, _reponse('Preuves de sécurité', 'Utilisation : +security evidence <numéro de dossier>.', kind='warning'))
     rows = await ctx.bot.db.fetchall(
         "SELECT * FROM moderation_evidence WHERE guild_id=? AND case_number=? ORDER BY id ASC LIMIT 8",
         (ctx.guild.id, int(case_number)),
     )
     if not rows:
-        return await ctx.send(embed=_reponse("Preuves de sécurité", 'Aucune preuve automatique enregistrée pour ce dossier.', kind="warning"))
+        return await panels.envoyer(ctx, _reponse('Preuves de sécurité', 'Aucune preuve automatique enregistrée pour ce dossier.', kind='warning'))
     lines = []
     for row in rows:
         content = (row["content"] or "[message sans texte]").replace("\n", " ")[:240]
@@ -495,7 +507,7 @@ async def _security_evidence(ctx: commands.Context, case_number: int | None = No
     text = "\n".join(lines)
     if len(text) > 1800:
         text = text[:1800] + "…"
-    await ctx.send(embed=_reponse("Preuves de sécurité", f'Preuves du dossier #{int(case_number)}\n{text}', kind="brand"))
+    await panels.envoyer(ctx, _reponse('Preuves de sécurité', f'Preuves du dossier #{int(case_number)}\n{text}', kind='brand'))
 
 
 def _install_security_subcommands(bot: commands.Bot) -> None:

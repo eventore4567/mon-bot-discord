@@ -14,6 +14,7 @@ import time
 import discord
 
 from utils import embeds
+from utils import sentrix_panels as panels
 from discord.ext import commands
 
 logger = logging.getLogger("bot.rolepanel.notifications")
@@ -110,13 +111,24 @@ def _manageable_roles(guild: discord.Guild, role_ids: list[int]) -> list[discord
 
 
 
-def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
-    """Reponse au format canonique SentriX.
+def _reponse(titre: str, description: str = "", *, kind: str = "configuration"):
+    """Reponse composee : banniere, titre, et le detail en section quand il y en a.
 
-    Ce module repondait en texte nu : ni couleur d'intention, ni pied de page,
-    ni barre d'identite, alors que le reste du bot en porte.
+    Une description sur plusieurs lignes devient une SECTION plutot qu'un
+    paragraphe : ces reponses enumerent souvent des reglages ou des etats, et une
+    enumeration se lit mal d'un bloc.
     """
-    return embeds._base(titre, description, kind=kind)
+    # Pas de section ici : une confirmation d'une ligne n'a rien a structurer, et
+    # fabriquer une section « Détail » autour d'une phrase ne ferait que deplacer
+    # du texte. Ce niveau est l'IDENTITE — banniere, accent, titre. Les ecrans qui
+    # ont vraiment de la matiere sont composes a la main, la ou ils sont ecrits.
+    resume = " ".join(l.strip() for l in str(description or "").split("\n") if l.strip())
+    return panels.Panneau(
+        titre=titre if titre.startswith("SentriX") else f"SentriX — {titre}",
+        sous_titre=resume,
+        kind=kind if kind in panels.INTENTIONS else "configuration",
+        pied="SentriX",
+    )
 
 
 class PersonalNotificationSelect(discord.ui.Select):
@@ -263,7 +275,7 @@ class NotificationRoleView(discord.ui.View):
     async def _open(self, interaction: discord.Interaction, mode: str) -> None:
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             if not interaction.response.is_done():
-                await interaction.response.send_message(embed=_reponse("Panneau de rôles", 'Serveur introuvable.', kind="danger"), ephemeral=True)
+                await panels.envoyer(interaction, _reponse('Panneau de rôles', 'Serveur introuvable.', kind='danger'), ephemere=True)
             return
 
         # ACK immédiat. Le menu est construit seulement après l'accusé de réception Discord.
@@ -353,9 +365,9 @@ class NotificationRolePanels(commands.Cog):
         try:
             roles = await self._ensure_roles(ctx.guild)
         except commands.BotMissingPermissions:
-            return await ctx.send(embed=_reponse("Panneau de rôles", 'SentriX a besoin de la permission **Gérer les rôles** pour créer le panneau.', kind="danger"))
+            return await panels.envoyer(ctx, _reponse('Panneau de rôles', 'SentriX a besoin de la permission **Gérer les rôles** pour créer le panneau.', kind='danger'))
         except discord.Forbidden:
-            return await ctx.send(embed=_reponse("Panneau de rôles", 'Je ne peux pas créer les rôles. Vérifiez la permission **Gérer les rôles**.', kind="danger"))
+            return await panels.envoyer(ctx, _reponse('Panneau de rôles', 'Je ne peux pas créer les rôles. Vérifiez la permission **Gérer les rôles**.', kind='danger'))
 
         role_ids = [role.id for role in roles]
         view = NotificationRoleView(ctx.guild, role_ids)
@@ -382,7 +394,7 @@ class NotificationRolePanels(commands.Cog):
                 (ctx.guild.id, message_id),
             )
         if not row:
-            return await ctx.send(embed=_reponse("Panneau de rôles", "Aucun panneau de notifications SentriX n'a été trouvé sur ce serveur.", kind="warning"))
+            return await panels.envoyer(ctx, _reponse('Panneau de rôles', "Aucun panneau de notifications SentriX n'a été trouvé sur ce serveur.", kind='warning'))
 
         try:
             stored_ids = [int(value) for value in json.loads(row["role_ids_json"])]
@@ -394,19 +406,19 @@ class NotificationRolePanels(commands.Cog):
 
         channel = ctx.guild.get_channel(int(row["channel_id"]))
         if not isinstance(channel, discord.TextChannel):
-            return await ctx.send(embed=_reponse("Panneau de rôles", "Le salon du panneau n'existe plus.", kind="danger"))
+            return await panels.envoyer(ctx, _reponse('Panneau de rôles', "Le salon du panneau n'existe plus.", kind='danger'))
         try:
             message = await channel.fetch_message(int(row["message_id"]))
         except discord.NotFound:
-            return await ctx.send(embed=_reponse("Panneau de rôles", 'Le message du panneau a été supprimé. Relancez `+rolepanel`.', kind="success"))
+            return await panels.envoyer(ctx, _reponse('Panneau de rôles', 'Le message du panneau a été supprimé. Relancez `+rolepanel`.', kind='success'))
         except discord.Forbidden:
-            return await ctx.send(embed=_reponse("Panneau de rôles", 'SentriX ne peut pas accéder au message du panneau.', kind="danger"))
+            return await panels.envoyer(ctx, _reponse('Panneau de rôles', 'SentriX ne peut pas accéder au message du panneau.', kind='danger'))
 
         view = NotificationRoleView(ctx.guild, role_ids)
         await message.edit(embed=_panel_embed(ctx.guild, role_ids), view=view)
         await self._save_panel(message, ctx.author.id, role_ids)
         self.bot.add_view(NotificationRoleView(ctx.guild, role_ids), message_id=message.id)
-        await ctx.send(embed=_reponse("Panneau de rôles", 'Le panneau de notifications a été mis à jour.', kind="success"))
+        await panels.envoyer(ctx, _reponse('Panneau de rôles', 'Le panneau de notifications a été mis à jour.', kind='success'))
 
 
 async def _restore_saved_views(bot: commands.Bot) -> None:
