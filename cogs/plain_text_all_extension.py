@@ -117,9 +117,10 @@ def _install_final_visual_stack(bot: commands.Bot) -> None:
 
     # sentrix_runtime est maintenant installé après le chargement des cogs. Son hook
     # Bot.add_cog ne peut donc pas rétroactivement toucher les commandes déjà présentes :
-    # on applique explicitement les deux patchs qui étaient actifs avant le merge.
+    # on applique explicitement le patch qui doit rester actif. La surcharge de +ping
+    # a ete retiree : la commande composee de cogs/utility fait desormais tout ce que
+    # cette surcharge apportait, et davantage.
     sentrix_runtime._patch_clear(bot)
-    sentrix_runtime._patch_ping(bot)
 
     # Le convertisseur app_commands.Range est parfait côté slash, mais son annotation a
     # déjà produit des BadArgument sur la commande préfixée +clear. Le slash garde sa

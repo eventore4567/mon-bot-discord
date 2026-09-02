@@ -405,6 +405,12 @@ async def main(fichiers: list[str]) -> int:
         # Une extension chargee plus tard peut reinitialiser _ready ; en production
         # une commande ne s'execute que sur un bot pret, donc on fige la reponse.
         type(bot).is_ready = lambda self: True
+        # is_owner() interroge application_info() par HTTP quand owner_id est
+        # inconnu. On le renseigne avec un identifiant qui n'est PAS celui de
+        # l'auteur simule : la garde « proprietaire du bot » reste donc fausse,
+        # et les commandes qui en dependent sont bien refusees comme en vrai.
+        bot.owner_id = 999_999_999
+        bot.owner_ids = set()
     except Exception:
         pass
     bot.db = Database(config.DATABASE_PATH)

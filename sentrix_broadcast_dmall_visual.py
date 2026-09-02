@@ -1,3 +1,10 @@
+"""Diffusion privée à tous les membres d'un serveur.
+
+Une commande qui écrit à des centaines de personnes ne peut pas ressembler à une
+commande ordinaire : chaque écran dit ce qui va partir, à combien de monde, et ce
+qui ne peut plus être repris une fois lancé. D'où des panneaux détaillés là où un
+simple « Confirmer ? » suffirait ailleurs.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -6,33 +13,77 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds as sentrix_embeds
-from utils.command_style_v2 import style_embed
-
-
-def _sentrix_panel(title: str, description: str, *, kind: str = "info") -> discord.Embed:
-    panel = discord.Embed(title=title, description=description)
-    return style_embed(panel, category="utility", kind=kind)
-
-
-def embed(title: str, description: str) -> discord.Embed:
-    return _sentrix_panel(title, description, kind="info")
-
-
-def error(title: str, description: str) -> discord.Embed:
-    return _sentrix_panel(title, description, kind="danger")
-
-
-def success(title: str, description: str) -> discord.Embed:
-    return _sentrix_panel(title, description, kind="success")
-
-
-def warning(title: str, description: str) -> discord.Embed:
-    return _sentrix_panel(title, description, kind="warning")
+from utils import sentrix_panels as panels
 
 
 SEND_DELAY_SECONDS = 0.75
 PROGRESS_EVERY = 25
+LONGUEUR_MAX = 3500
+APERCU_MAX = 1200
+
+
+def _duree_lisible(secondes: float) -> str:
+    """Une durée qu'on lit sans calculer.
+
+    « 412 secondes » ne dit rien à personne au moment de lancer une diffusion ;
+    « environ 7 min » permet de décider tout de suite.
+    """
+    secondes = int(secondes)
+    if secondes < 60:
+        return f"environ {max(secondes, 1)} s"
+    minutes = secondes // 60
+    if minutes < 60:
+        return f"environ {minutes} min"
+    heures, reste = divmod(minutes, 60)
+    return f"environ {heures} h {reste:02d}"
+
+
+def _refus(titre: str, sous_titre: str, sections=()) -> panels.Panneau:
+    return panels.Panneau(
+        titre=titre,
+        sous_titre=sous_titre,
+        kind="danger",
+        sections=list(sections),
+        pied="Aucun message privé n'a été envoyé.",
+    )
+
+
+def _panneau_progression(
+    titre: str,
+    sous_titre: str,
+    *,
+    kind: str,
+    traites: int,
+    total: int,
+    envoyes: int,
+    echecs: int,
+    pied: str,
+) -> panels.Panneau:
+    """Le même tableau de bord du début à la fin de la diffusion.
+
+    Garder la même forme pendant et après l'envoi évite d'avoir à relire un
+    écran différent au moment où le résultat compte.
+    """
+    return panels.Panneau(
+        titre=titre,
+        sous_titre=sous_titre,
+        kind=kind,
+        sections=[
+            panels.Section(
+                "Avancement",
+                [
+                    panels.Ligne("Traités", f"{traites} / {total}"),
+                    panels.Ligne("Reçus", str(envoyes)),
+                    panels.Ligne(
+                        "Non délivrés",
+                        str(echecs),
+                        indice="messages privés fermés, blocage, ou refus de Discord",
+                    ),
+                ],
+            )
+        ],
+        pied=pied,
+    )
 
 
 class BroadcastConfirmView(discord.ui.View):
@@ -55,46 +106,51 @@ class BroadcastConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message(
-                embed=error(
+            await panels.envoyer(
+                interaction.response,
+                _refus(
                     "Confirmation privée",
-                    "Seule la personne qui a lancé la commande peut confirmer cette diffusion.",
+                    "Seule la personne qui a lancé la diffusion peut la confirmer.",
                 ),
-                ephemeral=True,
+                ephemere=True,
             )
             return False
         return True
 
-    @discord.ui.button(
-        label="Envoyer",
-        style=discord.ButtonStyle.primary,
-    )
+    def _figer(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(label="Envoyer à tous", style=discord.ButtonStyle.primary)
     async def confirm(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
         if self.guild.id in self.cog.active_guilds:
-            await interaction.response.send_message(
-                embed=error(
+            await panels.envoyer(
+                interaction.response,
+                _refus(
                     "Diffusion déjà en cours",
-                    "Une autre diffusion privée est déjà en cours sur ce serveur.",
+                    "Une autre diffusion privée tourne déjà sur ce serveur.",
                 ),
-                ephemeral=True,
+                ephemere=True,
             )
             return
 
-        for item in self.children:
-            item.disabled = True
-
-        await interaction.response.edit_message(
-            embed=warning(
-                "Diffusion lancée",
-                f"Envoi vers **{len(self.recipients)} membre(s)** non-bot.\n"
-                "Le bot respecte un délai entre les messages pour suivre les limites de Discord.",
-            ),
-            view=self,
+        self._figer()
+        total = len(self.recipients)
+        lancee = _panneau_progression(
+            "Diffusion lancée",
+            f"Envoi vers **{total} membre(s)** non-bot.",
+            kind="brand",
+            traites=0,
+            total=total,
+            envoyes=0,
+            echecs=0,
+            pied=f"Durée attendue : {_duree_lisible(total * SEND_DELAY_SECONDS)}.",
         )
+        await interaction.response.edit_message(view=lancee, attachments=lancee.fichiers())
 
         self.cog.active_guilds.add(self.guild.id)
         asyncio.create_task(
@@ -106,40 +162,36 @@ class BroadcastConfirmView(discord.ui.View):
             )
         )
 
-    @discord.ui.button(
-        label="Annuler",
-        style=discord.ButtonStyle.secondary,
-    )
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(
-            embed=embed(
-                "Diffusion annulée",
-                "Aucun message privé n'a été envoyé.",
-            ),
-            view=self,
+        self._figer()
+        annulee = panels.Panneau(
+            titre="Diffusion annulée",
+            sous_titre="Aucun message privé n'a été envoyé.",
+            kind="neutral",
+            pied="Relance `+dmall` quand tu veux.",
         )
+        await interaction.response.edit_message(view=annulee, attachments=annulee.fichiers())
         self.stop()
 
     async def on_timeout(self) -> None:
-        for item in self.children:
-            item.disabled = True
-        if self.message is not None:
-            try:
-                await self.message.edit(
-                    embed=embed(
-                        "Confirmation expirée",
-                        "La diffusion n'a pas été lancée.",
-                    ),
-                    view=self,
-                )
-            except discord.HTTPException:
-                pass
+        self._figer()
+        if self.message is None:
+            return
+        expiree = panels.Panneau(
+            titre="Confirmation expirée",
+            sous_titre="La diffusion n'a pas été lancée.",
+            kind="neutral",
+            pied="Deux minutes sans confirmation : la demande est abandonnée.",
+        )
+        try:
+            await self.message.edit(view=expiree, attachments=expiree.fichiers())
+        except discord.HTTPException:
+            pass
 
 
 class Broadcast(commands.Cog):
@@ -154,6 +206,22 @@ class Broadcast(commands.Cog):
             return True
         return ctx.guild.owner_id == ctx.author.id
 
+    def _panneau_prive(self, guild: discord.Guild, content: str) -> panels.Panneau:
+        """Ce que le membre reçoit en message privé.
+
+        La bannière est en HAUT du panneau, avant le texte : dans un embed,
+        set_image la reléguait sous le message, donc la personne lisait une
+        annonce sans savoir d'où elle venait avant d'avoir fini.
+        """
+        return panels.Panneau(
+            titre=f"Message de {guild.name}",
+            sous_titre="Annonce envoyée par l'équipe du serveur.",
+            kind="brand",
+            vignette=guild.icon.url if guild.icon else None,
+            sections=[panels.Section("Message", texte=content)],
+            pied=f"Message de SentriX • {guild.name}",
+        )
+
     async def run_broadcast(
         self,
         *,
@@ -164,51 +232,53 @@ class Broadcast(commands.Cog):
     ) -> None:
         sent = 0
         failed = 0
+        total = len(recipients)
 
         try:
             for index, member in enumerate(recipients, start=1):
-                dm_embed = embed(
-                    "Message de SentriX",
-                    f"**Serveur :** {guild.name}\n\n{content}",
-                )
-                if guild.icon:
-                    dm_embed.set_thumbnail(url=guild.icon.url)
-                dm_embed.set_image(url=sentrix_embeds.SENTRIX_BANNER_URL)
-                dm_embed.set_footer(
-                    text=f"Message envoyé par l'équipe de {guild.name} • SentriX"
-                )
-
+                # Un panneau neuf par membre : la vignette du serveur et la
+                # bannière sont réattachées à chaque envoi.
                 try:
-                    await member.send(embed=dm_embed)
+                    await panels.envoyer(member, self._panneau_prive(guild, content))
                     sent += 1
                 except (discord.Forbidden, discord.HTTPException):
                     failed += 1
 
-                if index < len(recipients):
+                if index < total:
                     await asyncio.sleep(SEND_DELAY_SECONDS)
 
                 if index % PROGRESS_EVERY == 0:
+                    restant = (total - index) * SEND_DELAY_SECONDS
+                    encours = _panneau_progression(
+                        "Diffusion en cours",
+                        f"**{index}** membre(s) traité(s) sur **{total}**.",
+                        kind="warning",
+                        traites=index,
+                        total=total,
+                        envoyes=sent,
+                        echecs=failed,
+                        pied=f"Fin dans {_duree_lisible(restant)}.",
+                    )
                     try:
                         await interaction.edit_original_response(
-                            embed=warning(
-                                "Diffusion en cours",
-                                f"Progression : **{index}/{len(recipients)}**\n"
-                                f"Envoyés : **{sent}**\n"
-                                f"Échecs / MP fermés : **{failed}**",
-                            )
+                            view=encours, attachments=encours.fichiers()
                         )
                     except discord.HTTPException:
                         pass
 
+            bilan = _panneau_progression(
+                "Diffusion terminée",
+                f"**{sent}** membre(s) sur **{total}** ont reçu l'annonce.",
+                kind="success",
+                traites=total,
+                total=total,
+                envoyes=sent,
+                echecs=failed,
+                pied="Un échec ne veut pas dire un blocage : la plupart"
+                " viennent de messages privés fermés.",
+            )
             try:
-                await interaction.edit_original_response(
-                    embed=success(
-                        "Diffusion terminée",
-                        f"**{sent}** message(s) envoyé(s).\n"
-                        f"**{failed}** échec(s) (MP fermés, blocage ou erreur Discord).\n"
-                        f"**{len(recipients)}** membre(s) traité(s).",
-                    )
-                )
+                await interaction.edit_original_response(view=bilan, attachments=bilan.fichiers())
             except discord.HTTPException:
                 pass
         finally:
@@ -227,42 +297,74 @@ class Broadcast(commands.Cog):
         message: str,
     ) -> None:
         assert ctx.guild is not None
+        ephemere = bool(ctx.interaction)
 
         if not await self._can_broadcast(ctx):
-            await ctx.send(
-                embed=error(
+            await panels.envoyer(
+                ctx,
+                _refus(
                     "Permission refusée",
-                    "Cette commande est réservée au propriétaire du serveur "
-                    "ou au propriétaire du bot.",
+                    "Écrire à tout le serveur en privé n'est pas une action d'administration ordinaire.",
+                    [
+                        panels.Section(
+                            "Qui peut lancer cette commande",
+                            [
+                                panels.Ligne("Propriétaire du serveur", "autorisé"),
+                                panels.Ligne("Propriétaire de SentriX", "autorisé"),
+                                panels.Ligne(
+                                    "Rôle Administrateur",
+                                    "**refusé**",
+                                    indice="le rôle ne suffit pas pour cette commande",
+                                ),
+                            ],
+                        )
+                    ],
                 ),
-                ephemeral=bool(ctx.interaction),
+                ephemere=ephemere,
             )
             return
 
         if ctx.guild.id in self.active_guilds:
-            await ctx.send(
-                embed=error(
+            await panels.envoyer(
+                ctx,
+                _refus(
                     "Diffusion déjà en cours",
                     "Attends la fin de la diffusion actuelle avant d'en lancer une autre.",
                 ),
-                ephemeral=bool(ctx.interaction),
+                ephemere=ephemere,
             )
             return
 
         content = message.strip()
         if not content:
-            await ctx.send(
-                embed=error("Message vide", "Ajoute le texte que tu veux envoyer."),
-                ephemeral=bool(ctx.interaction),
+            await panels.envoyer(
+                ctx,
+                _refus(
+                    "Message vide",
+                    "Ajoute le texte que tu veux envoyer aux membres.",
+                    [panels.Section("Exemple", texte="`+dmall Maintenance ce soir à 21 h.`")],
+                ),
+                ephemere=ephemere,
             )
             return
-        if len(content) > 3500:
-            await ctx.send(
-                embed=error(
+
+        if len(content) > LONGUEUR_MAX:
+            await panels.envoyer(
+                ctx,
+                _refus(
                     "Message trop long",
-                    "Le texte doit faire **3 500 caractères maximum**.",
+                    f"Le texte fait **{len(content)}** caractères.",
+                    [
+                        panels.Section(
+                            "Limite",
+                            [
+                                panels.Ligne("Maximum", f"{LONGUEUR_MAX} caractères"),
+                                panels.Ligne("À retirer", f"{len(content) - LONGUEUR_MAX} caractères"),
+                            ],
+                        )
+                    ],
                 ),
-                ephemeral=bool(ctx.interaction),
+                ephemere=ephemere,
             )
             return
 
@@ -273,20 +375,51 @@ class Broadcast(commands.Cog):
         ]
 
         if not recipients:
-            await ctx.send(
-                embed=error("Aucun destinataire", "Aucun membre non-bot n'a été trouvé."),
-                ephemeral=bool(ctx.interaction),
+            await panels.envoyer(
+                ctx,
+                _refus(
+                    "Aucun destinataire",
+                    "Aucun membre non-bot n'a été trouvé sur ce serveur.",
+                    [
+                        panels.Section(
+                            "Piste",
+                            texte="Si le serveur compte pourtant des membres, il manque"
+                            " probablement l'intention **Membres du serveur** à SentriX.",
+                        )
+                    ],
+                ),
+                ephemere=ephemere,
             )
             return
 
-        preview = embed(
-            "Confirmer la diffusion privée",
-            f"Le message sera envoyé à **{len(recipients)} membre(s)** non-bot.\n\n"
-            f"**Aperçu :**\n{content[:1200]}"
-            + ("\n…" if len(content) > 1200 else "")
-            + "\n\n"
-            "Les membres qui ont fermé leurs MP ne recevront rien. "
-            "Discord peut appliquer un délai supplémentaire aux diffusions importantes.",
+        apercu = content[:APERCU_MAX] + ("\n…" if len(content) > APERCU_MAX else "")
+        confirmation = panels.Panneau(
+            titre="Confirmer la diffusion privée",
+            sous_titre=f"Le message partira à **{len(recipients)} membre(s)** non-bot.",
+            kind="warning",
+            sections=[
+                panels.Section(
+                    "Portée",
+                    [
+                        panels.Ligne("Destinataires", f"{len(recipients)} membre(s)"),
+                        panels.Ligne("Serveur", ctx.guild.name),
+                        panels.Ligne(
+                            "Durée",
+                            _duree_lisible(len(recipients) * SEND_DELAY_SECONDS),
+                            indice="SentriX espace les envois pour respecter Discord",
+                        ),
+                    ],
+                ),
+                panels.Section("Aperçu du message", texte=apercu),
+                panels.Section(
+                    "À savoir avant d'envoyer",
+                    [
+                        panels.Ligne("Messages privés fermés", "ces membres ne recevront rien"),
+                        panels.Ligne("Envoi lancé", "**il ne peut plus être annulé**"),
+                    ],
+                ),
+            ],
+            pied="Rien ne part tant que tu n'as pas confirmé.",
         )
         view = BroadcastConfirmView(
             self,
@@ -295,10 +428,10 @@ class Broadcast(commands.Cog):
             content=content,
             recipients=recipients,
         )
-        sent_message = await ctx.send(
-            embed=preview,
-            view=view,
-            ephemeral=bool(ctx.interaction),
+        sent_message = await panels.envoyer(
+            ctx,
+            panels.avec_composants(confirmation, view),
+            ephemere=ephemere,
         )
         if isinstance(sent_message, discord.Message):
             view.message = sent_message

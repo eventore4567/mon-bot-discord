@@ -58,6 +58,9 @@ RENDU_CANONIQUE = (
     "design_system.", "create_embed", "category_embed",
     "success_embed(", "error_embed(", "warning_embed(", "info_embed(",
     "_panneau(",
+    # Une commande batie directement sur utils/sentrix_panels ne passe par aucun
+    # helper d'embed : c'est l'etat le PLUS migre, pas une echappatoire.
+    "panels.", "sx_panels.", "sentrix_panels.",
 )
 
 # Components V2 : LayoutView et compagnie portent leur propre identite visuelle
@@ -237,8 +240,28 @@ async def analyser() -> list[dict]:
     # une frontiere de module (`bot.get_cog(...).methode(...)`).
     compte: dict[str, int] = {}
     sources: dict[str, str] = {}
-    for dossier in ("cogs", "utils"):
-        for fichier in sorted((RACINE / dossier).glob("*.py")):
+    # Une extension peut vivre a la RACINE et pas dans cogs/ : c'est ainsi que
+    # +dmall a echappe a cette porte. On suit donc la liste reelle d'extensions
+    # plutot que deux dossiers supposes complets.
+    a_lire = [f for d in ("cogs", "utils") for f in sorted((RACINE / d).glob("*.py"))]
+    try:
+        arbre_main = ast.parse((RACINE / "main.py").read_text(encoding="utf-8"))
+        for n in arbre_main.body:
+            if not isinstance(n, ast.Assign):
+                continue
+            if not any(getattr(c, "id", None) == "EXTENSIONS" for c in n.targets):
+                continue
+            for nom in ast.literal_eval(n.value):
+                if "." in nom:
+                    continue
+                chemin = RACINE / f"{nom}.py"
+                if chemin.exists():
+                    a_lire.append(chemin)
+    except Exception:
+        pass
+
+    if True:
+        for fichier in a_lire:
             try:
                 arbre = ast.parse(fichier.read_text(encoding="utf-8"))
             except Exception:
@@ -254,6 +277,9 @@ async def analyser() -> list[dict]:
             chemin = RACINE / "cogs" / f"{module}.py"
             if not chemin.exists():
                 chemin = RACINE / "utils" / f"{module}.py"
+            if not chemin.exists():
+                # Extension a la racine du depot (voir a_lire plus haut).
+                chemin = RACINE / f"{module}.py"
             try:
                 arbre = ast.parse(chemin.read_text(encoding="utf-8"))
                 arbres[module] = {

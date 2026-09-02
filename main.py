@@ -56,8 +56,11 @@ EXTENSIONS = [
     "cogs.invites",
     "cogs.design",
     "cogs.embed_builder",
-    "cogs.visual_experience_v5",
+    # cogs.visual_experience_v5 declenche finalize_runtime() et doit rester
+    # DERNIERE : une extension chargee apres elle echappe a toute la pile de
+    # style. C'est ce qui laissait +dmall en dehors du systeme visuel.
     "sentrix_broadcast_dmall_visual",
+    "cogs.visual_experience_v5",
 ]
 
 # Les réglages ci-dessous existent déjà dans les panneaux interactifs. Ils restent
