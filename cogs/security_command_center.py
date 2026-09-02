@@ -16,7 +16,7 @@ from discord.ext import commands
 
 import config
 from database.db import PRIMARY_CREATOR_ID
-from utils import checks
+from utils import checks, embeds
 from . import language_runtime
 from .security_runtime_hardening import apply_recommended_security
 
@@ -114,6 +114,24 @@ def _clean_domain(value: str) -> str | None:
     return value if _DOMAIN_RE.fullmatch(value) else None
 
 
+
+def _panneau(
+    titre: str,
+    description: str = "",
+    *,
+    kind: str = "brand",
+    timestamp: bool = False,
+) -> discord.Embed:
+    """Panneau securite au format SentriX.
+
+    Ce module construisait ses 38 embeds a la main, avec des couleurs codees en dur et
+    son propre pied de page « SentriX Security V3 ». Les couleurs etaient deja les
+    bonnes, mais il manquait l'identite commune : la barre de titre et le pied de page
+    partages par le reste du bot. On passe donc par le renderer canonique.
+    """
+    return embeds._base(titre, description or None, kind=kind, timestamp=timestamp)
+
+
 class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
     """Interface canonique des outils de sécurité SentriX."""
 
@@ -144,15 +162,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             pass
 
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Accès propriétaire requis", "Owner access required"),
-                description=await self._t(
-                    ctx,
-                    "Cette action modifie une protection critique. Seul le propriétaire du serveur ou du bot peut l'utiliser.",
-                    "This action changes a critical protection. Only the server or bot owner can use it.",
-                ),
-                color=0xED4245,
-            )
+            embed=_panneau(await self._t(ctx, 'Accès propriétaire requis', 'Owner access required'), await self._t(ctx, "Cette action modifie une protection critique. Seul le propriétaire du serveur ou du bot peut l'utiliser.", 'This action changes a critical protection. Only the server or bot owner can use it.'), kind="danger")
         )
         return False
 
@@ -211,12 +221,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             state = on_text if conf.get(key, 0) else off_text
             lines.append(f"**{label}** — {state}{suffix}")
 
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=0x6D5DFB,
-            timestamp=discord.utils.utcnow(),
-        )
+        embed = _panneau(title, description, kind="brand", timestamp=True)
         embed.add_field(name=modules_name, value="\n".join(lines)[:1024], inline=False)
         embed.add_field(name=level_name, value=f"`{await self._level(ctx.guild.id)}`", inline=True)
         embed.set_footer(text="SentriX Security V3")
@@ -226,15 +231,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         command = self.bot.get_command(name)
         if command is None:
             return await ctx.send(
-                embed=discord.Embed(
-                    title=await self._t(ctx, "Module indisponible", "Module unavailable"),
-                    description=await self._t(
-                        ctx,
-                        "La commande interne correspondante n'est pas chargée.",
-                        "The matching internal command is not loaded.",
-                    ),
-                    color=0xED4245,
-                )
+                embed=_panneau(await self._t(ctx, 'Module indisponible', 'Module unavailable'), await self._t(ctx, "La commande interne correspondante n'est pas chargée.", 'The matching internal command is not loaded.'), kind="danger")
             )
         return await ctx.invoke(command, *args, **kwargs)
 
@@ -277,28 +274,13 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         """Affiche ou modifie un module de protection."""
         if not filtre:
             return await ctx.send(
-                embed=discord.Embed(
-                    title=await self._t(ctx, "Modules disponibles", "Available modules"),
-                    description=(
-                        f"`{', '.join(sorted(SECURITY_FILTERS))}`\n\n"
-                        "`+security filter <module> <on/off>`"
-                    ),
-                    color=0x6D5DFB,
-                )
+                embed=_panneau(await self._t(ctx, 'Modules disponibles', 'Available modules'), f"`{', '.join(sorted(SECURITY_FILTERS))}`\n\n`+security filter <module> <on/off>`", kind="brand")
             )
 
         field = FILTER_ALIASES.get(_norm(filtre))
         if field is None:
             return await ctx.send(
-                embed=discord.Embed(
-                    title=await self._t(ctx, "Module inconnu", "Unknown module"),
-                    description=await self._t(
-                        ctx,
-                        "Utilise `+security filter` pour afficher la liste.",
-                        "Use `+security filter` to list modules.",
-                    ),
-                    color=0xED4245,
-                )
+                embed=_panneau(await self._t(ctx, 'Module inconnu', 'Unknown module'), await self._t(ctx, 'Utilise `+security filter` pour afficher la liste.', 'Use `+security filter` to list modules.'), kind="danger")
             )
 
         conf = await self._conf(ctx.guild.id)
@@ -308,36 +290,20 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if etat is None:
             enabled = bool(conf.get(field, 0))
             return await ctx.send(
-                embed=discord.Embed(
-                    title=label,
-                    description=await self._t(
-                        ctx,
-                        f"État actuel : **{'ACTIF' if enabled else 'INACTIF'}**",
-                        f"Current state: **{'ON' if enabled else 'OFF'}**",
-                    ),
-                    color=0x57F287 if enabled else 0x747F8D,
-                )
+                embed=_panneau(label, await self._t(ctx, f"État actuel : **{('ACTIF' if enabled else 'INACTIF')}**", f"Current state: **{('ON' if enabled else 'OFF')}**"), kind='success' if enabled else 'neutral')
             )
 
         enabled = _parse_state(etat)
         if enabled is None:
             return await ctx.send(
-                embed=discord.Embed(
-                    title=await self._t(ctx, "État invalide", "Invalid state"),
-                    description="`on` / `off`",
-                    color=0xED4245,
-                )
+                embed=_panneau(await self._t(ctx, 'État invalide', 'Invalid state'), '`on` / `off`', kind="danger")
             )
         if field == "antinuke" and not await self._critical_owner(ctx):
             return
 
         await self._set_filter(ctx.guild.id, field, enabled)
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Protection mise à jour", "Protection updated"),
-                description=f"**{label}** — {'ON' if enabled else 'OFF'}",
-                color=0x57F287 if enabled else 0x747F8D,
-            )
+            embed=_panneau(await self._t(ctx, 'Protection mise à jour', 'Protection updated'), f"**{label}** — {('ON' if enabled else 'OFF')}", kind='success' if enabled else 'neutral')
         )
 
     @security.command(name="level", aliases=["niveau"])
@@ -346,27 +312,13 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         """Applique un profil faible, moyen ou élevé."""
         if niveau is None:
             return await ctx.send(
-                embed=discord.Embed(
-                    title=await self._t(ctx, "Niveau de sécurité", "Security level"),
-                    description=(
-                        f"**{await self._level(ctx.guild.id)}**\n"
-                        "`+security level faible|moyen|eleve`"
-                    ),
-                    color=0x6D5DFB,
-                )
+                embed=_panneau(await self._t(ctx, 'Niveau de sécurité', 'Security level'), f'**{await self._level(ctx.guild.id)}**\n`+security level faible|moyen|eleve`', kind="brand")
             )
 
         level = LEVEL_ALIASES.get(_norm(niveau))
         if level is None:
             return await ctx.send(
-                embed=discord.Embed(
-                    title=await self._t(ctx, "Niveau invalide", "Invalid level"),
-                    description=(
-                        "`faible` · `moyen` · `eleve` / "
-                        "`low` · `medium` · `high`"
-                    ),
-                    color=0xED4245,
-                )
+                embed=_panneau(await self._t(ctx, 'Niveau invalide', 'Invalid level'), '`faible` · `moyen` · `eleve` / `low` · `medium` · `high`', kind="danger")
             )
 
         await self.bot.db.set_guild_config(ctx.guild.id, "security_level", level)
@@ -374,15 +326,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             await self._set_filter(ctx.guild.id, field, bool(value))
 
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(
-                    ctx,
-                    "Profil de sécurité appliqué",
-                    "Security profile applied",
-                ),
-                description=f"**{level.upper()}**",
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Profil de sécurité appliqué', 'Security profile applied'), f'**{level.upper()}**', kind="success")
         )
 
     @security.command(name="scan", aliases=["check", "diagnostic", "audit"])
@@ -410,21 +354,9 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             (active / len(SECURITY_FILTERS)) * 70
             + ((len(required) - len(missing)) / len(required)) * 30
         )
-        color = 0x57F287 if score >= 85 else 0xFEE75C if score >= 60 else 0xED4245
+        kind = "success" if score >= 85 else "warning" if score >= 60 else "danger"
 
-        embed = discord.Embed(
-            title=await self._t(
-                ctx,
-                "SENTRIX / ANALYSE SÉCURITÉ",
-                "SENTRIX / SECURITY SCAN",
-            ),
-            description=await self._t(
-                ctx,
-                f"Score estimé : **{score}/100**",
-                f"Estimated score: **{score}/100**",
-            ),
-            color=color,
-        )
+        embed = _panneau(await self._t(ctx, 'SENTRIX / ANALYSE SÉCURITÉ', 'SENTRIX / SECURITY SCAN'), await self._t(ctx, f'Score estimé : **{score}/100**', f'Estimated score: **{score}/100**'), kind=kind)
         embed.add_field(
             name=await self._t(ctx, "Modules actifs", "Active modules"),
             value=f"{active}/{len(SECURITY_FILTERS)}",
@@ -454,15 +386,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         """Active le profil recommandé et vérifie les permissions du bot."""
         result = await apply_recommended_security(self.bot, ctx.guild)
         missing = result.get("missing_permissions", [])
-        embed = discord.Embed(
-            title=await self._t(ctx, "Sécurité réparée", "Security repaired"),
-            description=await self._t(
-                ctx,
-                "Le profil recommandé SentriX est maintenant appliqué.",
-                "The recommended SentriX profile is now applied.",
-            ),
-            color=0x57F287 if not missing else 0xFEE75C,
-        )
+        embed = _panneau(await self._t(ctx, 'Sécurité réparée', 'Security repaired'), await self._t(ctx, 'Le profil recommandé SentriX est maintenant appliqué.', 'The recommended SentriX profile is now applied.'), kind='success' if not missing else 'warning')
         if missing:
             embed.add_field(
                 name=await self._t(ctx, "Permissions manquantes", "Missing permissions"),
@@ -490,15 +414,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
 
         if not rows:
             return await ctx.send(
-                embed=discord.Embed(
-                    title=await self._t(ctx, "Historique sécurité", "Security history"),
-                    description=await self._t(
-                        ctx,
-                        "Aucune action enregistrée.",
-                        "No recorded action.",
-                    ),
-                    color=0x747F8D,
-                )
+                embed=_panneau(await self._t(ctx, 'Historique sécurité', 'Security history'), await self._t(ctx, 'Aucune action enregistrée.', 'No recorded action.'), kind="neutral")
             )
 
         lines = []
@@ -509,11 +425,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
                 f"`{row['filter_name']}` → **{row['action']}**"
             )
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Historique sécurité", "Security history"),
-                description="\n".join(lines)[:4000],
-                color=0x6D5DFB,
-            )
+            embed=_panneau(await self._t(ctx, 'Historique sécurité', 'Security history'), '\n'.join(lines)[:4000], kind="brand")
         )
 
     @security.command(name="panic", aliases=["emergency", "urgence"])
@@ -525,15 +437,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         hardening = self.bot.get_cog("SecurityHardening")
         if hardening is None:
             return await ctx.send(
-                embed=discord.Embed(
-                    title="PANIC",
-                    description=await self._t(
-                        ctx,
-                        "Moteur d'urgence indisponible.",
-                        "Emergency engine unavailable.",
-                    ),
-                    color=0xED4245,
-                )
+                embed=_panneau('PANIC', await self._t(ctx, "Moteur d'urgence indisponible.", 'Emergency engine unavailable.'), kind="danger")
             )
 
         mode = _norm(action)
@@ -543,11 +447,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             return await hardening._deactivate_panic(ctx)
         if mode not in {"status", "state", "etat", "état"}:
             return await ctx.send(
-                embed=discord.Embed(
-                    title="PANIC",
-                    description="`+security panic on|off|status`",
-                    color=0xED4245,
-                )
+                embed=_panneau('PANIC', '`+security panic on|off|status`', kind="danger")
             )
 
         row = await hardening._panic_row(ctx.guild.id)
@@ -557,16 +457,12 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
                 f"ACTIF depuis <t:{row['created_at']}:R> · activé par <@{row['created_by']}>",
                 f"ACTIVE since <t:{row['created_at']}:R> · enabled by <@{row['created_by']}>",
             )
-            color = 0xED4245
+            kind = "danger"
         else:
             description = await self._t(ctx, "INACTIF", "INACTIVE")
-            color = 0x57F287
+            kind = "success"
         await ctx.send(
-            embed=discord.Embed(
-                title="SENTRIX / PANIC",
-                description=description,
-                color=color,
-            )
+            embed=_panneau('SENTRIX / PANIC', description, kind=kind)
         )
 
     # -------------------------------------------------------------- LISTE BLANCHE
@@ -580,19 +476,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
     async def security_whitelist(self, ctx: commands.Context):
         """Gère les exemptions et domaines autorisés."""
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(
-                    ctx,
-                    "SENTRIX / LISTE BLANCHE",
-                    "SENTRIX / ALLOWLIST",
-                ),
-                description=(
-                    "`+security whitelist user-add @membre` · `user-remove` · `users`\n"
-                    "`+security whitelist role-add @role` · `role-remove` · `roles`\n"
-                    "`+security whitelist domain-add example.com` · `domain-remove` · `domains`"
-                ),
-                color=0x6D5DFB,
-            )
+            embed=_panneau(await self._t(ctx, 'SENTRIX / LISTE BLANCHE', 'SENTRIX / ALLOWLIST'), '`+security whitelist user-add @membre` · `user-remove` · `users`\n`+security whitelist role-add @role` · `role-remove` · `roles`\n`+security whitelist domain-add example.com` · `domain-remove` · `domains`', kind="brand")
         )
 
     @security_whitelist.command(name="user-add", aliases=["add-user", "membre-add"])
@@ -604,15 +488,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             (ctx.guild.id, membre.id),
         )
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(
-                    ctx,
-                    "Exemption anti-nuke ajoutée",
-                    "Anti-nuke exemption added",
-                ),
-                description=membre.mention,
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Exemption anti-nuke ajoutée', 'Anti-nuke exemption added'), membre.mention, kind="success")
         )
 
     @security_whitelist.command(name="user-remove", aliases=["remove-user", "membre-remove"])
@@ -624,15 +500,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             (ctx.guild.id, membre.id),
         )
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(
-                    ctx,
-                    "Exemption anti-nuke retirée",
-                    "Anti-nuke exemption removed",
-                ),
-                description=membre.mention,
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Exemption anti-nuke retirée', 'Anti-nuke exemption removed'), membre.mention, kind="success")
         )
 
     @security_whitelist.command(name="users", aliases=["members", "membres"])
@@ -648,11 +516,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         else:
             text = await self._t(ctx, "Aucun membre exempté.", "No exempted member.")
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Exemptions anti-nuke", "Anti-nuke exemptions"),
-                description=text[:4000],
-                color=0x6D5DFB,
-            )
+            embed=_panneau(await self._t(ctx, 'Exemptions anti-nuke', 'Anti-nuke exemptions'), text[:4000], kind="brand")
         )
 
     @security_whitelist.command(name="role-add", aliases=["add-role"])
@@ -664,11 +528,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if automod is not None:
             automod.exempt_roles_cache.pop(ctx.guild.id, None)
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Rôle exempté", "Role exempted"),
-                description=role.mention,
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Rôle exempté', 'Role exempted'), role.mention, kind="success")
         )
 
     @security_whitelist.command(name="role-remove", aliases=["remove-role"])
@@ -680,15 +540,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if automod is not None:
             automod.exempt_roles_cache.pop(ctx.guild.id, None)
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(
-                    ctx,
-                    "Exemption de rôle retirée",
-                    "Role exemption removed",
-                ),
-                description=role.mention,
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Exemption de rôle retirée', 'Role exemption removed'), role.mention, kind="success")
         )
 
     @security_whitelist.command(name="roles")
@@ -701,11 +553,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         else:
             text = await self._t(ctx, "Aucun rôle exempté.", "No exempted role.")
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Rôles exemptés", "Exempted roles"),
-                description=text[:4000],
-                color=0x6D5DFB,
-            )
+            embed=_panneau(await self._t(ctx, 'Rôles exemptés', 'Exempted roles'), text[:4000], kind="brand")
         )
 
     @security_whitelist.command(name="domain-add", aliases=["add-domain", "domaine-add"])
@@ -713,11 +561,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         domain = _clean_domain(domaine)
         if domain is None:
             return await ctx.send(
-                embed=discord.Embed(
-                    title=await self._t(ctx, "Domaine invalide", "Invalid domain"),
-                    description="`example.com`",
-                    color=0xED4245,
-                )
+                embed=_panneau(await self._t(ctx, 'Domaine invalide', 'Invalid domain'), '`example.com`', kind="danger")
             )
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO whitelist_domains (guild_id, domain) VALUES (?, ?)",
@@ -727,11 +571,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if automod is not None:
             automod.whitelist_domains_cache.pop(ctx.guild.id, None)
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Domaine autorisé", "Domain allowed"),
-                description=f"`{domain}`",
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Domaine autorisé', 'Domain allowed'), f'`{domain}`', kind="success")
         )
 
     @security_whitelist.command(name="domain-remove", aliases=["remove-domain", "domaine-remove"])
@@ -739,11 +579,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         domain = _clean_domain(domaine)
         if domain is None:
             return await ctx.send(
-                embed=discord.Embed(
-                    title=await self._t(ctx, "Domaine invalide", "Invalid domain"),
-                    description="`example.com`",
-                    color=0xED4245,
-                )
+                embed=_panneau(await self._t(ctx, 'Domaine invalide', 'Invalid domain'), '`example.com`', kind="danger")
             )
         await self.bot.db.execute(
             "DELETE FROM whitelist_domains WHERE guild_id = ? AND domain = ?",
@@ -753,11 +589,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if automod is not None:
             automod.whitelist_domains_cache.pop(ctx.guild.id, None)
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Domaine retiré", "Domain removed"),
-                description=f"`{domain}`",
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Domaine retiré', 'Domain removed'), f'`{domain}`', kind="success")
         )
 
     @security_whitelist.command(name="domains", aliases=["domain-list", "domaines"])
@@ -771,11 +603,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         else:
             text = await self._t(ctx, "Aucun domaine autorisé.", "No allowed domain.")
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Domaines autorisés", "Allowed domains"),
-                description=text[:4000],
-                color=0x6D5DFB,
-            )
+            embed=_panneau(await self._t(ctx, 'Domaines autorisés', 'Allowed domains'), text[:4000], kind="brand")
         )
 
     # ----------------------------------------------------------------- LISTE NOIRE
@@ -789,18 +617,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
     async def security_blacklist(self, ctx: commands.Context):
         """Gère les mots et utilisateurs bloqués."""
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(
-                    ctx,
-                    "SENTRIX / LISTE NOIRE",
-                    "SENTRIX / BLOCKLIST",
-                ),
-                description=(
-                    "`+security blacklist word-add <mot>` · `word-remove` · `words`\n"
-                    "`+security blacklist user-add @membre [raison]` · `user-remove` · `users`"
-                ),
-                color=0x6D5DFB,
-            )
+            embed=_panneau(await self._t(ctx, 'SENTRIX / LISTE NOIRE', 'SENTRIX / BLOCKLIST'), '`+security blacklist word-add <mot>` · `word-remove` · `words`\n`+security blacklist user-add @membre [raison]` · `user-remove` · `users`', kind="brand")
         )
 
     @security_blacklist.command(name="word-add", aliases=["add-word", "mot-add"])
@@ -821,11 +638,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if automod is not None:
             automod.blacklist_words_cache.pop(ctx.guild.id, None)
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Mot bloqué", "Blocked word"),
-                description=f"`{word}`",
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Mot bloqué', 'Blocked word'), f'`{word}`', kind="success")
         )
 
     @security_blacklist.command(name="word-remove", aliases=["remove-word", "mot-remove"])
@@ -839,11 +652,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if automod is not None:
             automod.blacklist_words_cache.pop(ctx.guild.id, None)
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Mot débloqué", "Word unblocked"),
-                description=f"`{word}`",
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Mot débloqué', 'Word unblocked'), f'`{word}`', kind="success")
         )
 
     @security_blacklist.command(name="words", aliases=["word-list", "mots"])
@@ -857,11 +666,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         else:
             text = await self._t(ctx, "Aucun mot bloqué.", "No blocked word.")
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Mots bloqués", "Blocked words"),
-                description=text[:4000],
-                color=0x6D5DFB,
-            )
+            embed=_panneau(await self._t(ctx, 'Mots bloqués', 'Blocked words'), text[:4000], kind="brand")
         )
 
     @security_blacklist.command(name="user-add", aliases=["add-user", "membre-add"])
@@ -875,11 +680,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         err = checks.check_hierarchy(ctx.author, membre)
         if err:
             return await ctx.send(
-                embed=discord.Embed(
-                    title=await self._t(ctx, "Action refusée", "Action denied"),
-                    description=err,
-                    color=0xED4245,
-                )
+                embed=_panneau(await self._t(ctx, 'Action refusée', 'Action denied'), err, kind="danger")
             )
         await self.bot.db.execute(
             "INSERT OR REPLACE INTO blacklist_users "
@@ -890,11 +691,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if automod is not None:
             automod.blacklist_users_cache.pop(ctx.guild.id, None)
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Utilisateur bloqué", "User blocked"),
-                description=f"{membre.mention}\n{raison[:1000]}",
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Utilisateur bloqué', 'User blocked'), f'{membre.mention}\n{raison[:1000]}', kind="success")
         )
 
     @security_blacklist.command(name="user-remove", aliases=["remove-user", "membre-remove"])
@@ -907,11 +704,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         if automod is not None:
             automod.blacklist_users_cache.pop(ctx.guild.id, None)
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Utilisateur débloqué", "User unblocked"),
-                description=membre.mention,
-                color=0x57F287,
-            )
+            embed=_panneau(await self._t(ctx, 'Utilisateur débloqué', 'User unblocked'), membre.mention, kind="success")
         )
 
     @security_blacklist.command(name="users", aliases=["members", "membres"])
@@ -929,11 +722,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         else:
             text = await self._t(ctx, "Aucun utilisateur bloqué.", "No blocked user.")
         await ctx.send(
-            embed=discord.Embed(
-                title=await self._t(ctx, "Utilisateurs bloqués", "Blocked users"),
-                description=text[:4000],
-                color=0x6D5DFB,
-            )
+            embed=_panneau(await self._t(ctx, 'Utilisateurs bloqués', 'Blocked users'), text[:4000], kind="brand")
         )
 
     # ------------------------------------------------------------ OUTILS AVANCÉS

@@ -19,7 +19,7 @@ from discord.ext import commands, tasks
 
 import config
 from database.db import now
-from utils import ai_service, stats_service
+from utils import ai_service, stats_service, embeds
 
 logger = logging.getLogger("bot.sentrix-ultimate")
 
@@ -86,6 +86,17 @@ def _day() -> str:
 
 
 _ULTIMATE_CACHE_TTL = 60.0
+
+
+
+def _panneau(titre: str, description: str = "", *, kind: str = "brand") -> discord.Embed:
+    """Panneau SentriX Pro au format canonique.
+
+    Ce module construisait ses embeds avec discord.Colour.blurple/green/dark_grey, sans
+    le pied de page ni la barre partages par le reste du bot. Meme identite pour tout
+    le monde desormais.
+    """
+    return embeds._base(titre, description or None, kind=kind)
 
 
 class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
@@ -429,7 +440,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
                         log_id = _get(conf, "ticket_log_channel")
                         log = interaction.guild.get_channel(int(log_id)) if log_id else None
                         if isinstance(log, discord.TextChannel):
-                            e = discord.Embed(title=f"Résumé ticket #{ticket_id}", description=summary, colour=discord.Colour.blurple())
+                            e = _panneau(f'Résumé ticket #{ticket_id}', summary, kind="brand")
                             e.add_field(name="Fermeture", value=reason[:1000] or "Aucune raison", inline=False)
                             await log.send(embed=e)
                     except Exception: pass
@@ -557,7 +568,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         alerts = await count("SELECT COUNT(*) AS n FROM ultimate_security_events WHERE guild_id=? AND created_at>=?", (guild.id, since))
         open_tickets = await count("SELECT COUNT(*) AS n FROM tickets WHERE guild_id=? AND status='ouvert'", (guild.id,))
         live = await self.live_snapshot(guild)
-        e = discord.Embed(title="Résumé staff — 24 dernières heures", colour=discord.Colour.blurple())
+        e = _panneau('Résumé staff — 24 dernières heures', '', kind="brand")
         e.description = f"Nouveaux membres : **{joins}**\nSanctions : **{sanctions}**\nTickets créés : **{tickets}** • ouverts : **{open_tickets}**\nAlertes sécurité : **{alerts}**\nScore sécurité : **{live['security_score']}/100**"
         e.set_footer(text="SentriX • Rapport automatique")
         return e
@@ -600,13 +611,13 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     @commands.group(name="sentrixpro", aliases=["spro"], invoke_without_command=True)
     @commands.guild_only()
     async def sentrixpro(self, ctx: commands.Context):
-        e = discord.Embed(title="SentriX Pro Suite", colour=discord.Colour.blurple())
+        e = _panneau('SentriX Pro Suite', '', kind="brand")
         e.description = "20 systèmes professionnels dans un seul hub.\n\n`+sentrixpro security` • sécurité\n`+sentrixpro live` • serveur en direct\n`+sentrixpro profile [membre]` • profil premium\n`+sentrixpro trust [membre]` • confiance\n`+sentrixpro history @membre` • historique\n`+sentrixpro modules` • modules\n`+sentrixpro help` • toutes les actions"
         await ctx.send(embed=e)
 
     @sentrixpro.command(name="help")
     async def pro_help(self, ctx: commands.Context):
-        e = discord.Embed(title="SentriX Pro — actions", colour=discord.Colour.blurple())
+        e = _panneau('SentriX Pro — actions', '', kind="brand")
         e.description = "**Sécurité**\n`security`, `lockdown on|off`, `quarantine-setup [heures]`, `trust [membre]`, `history @membre`, `aimod on|off [alert|delete|timeout]`\n\n**Communauté**\n`profile [membre]`, `badges [membre]`, `season [membre]`, `goal add|list|remove`, `autorole add|list|remove`\n\n**Automatisation**\n`welcome #salon|off`, `digest #salon|off`, `notifications`, `ticket-summary <id>`\n\n**Système**\n`live`, `status`, `modules`, `module enable|disable <nom>`"
         await ctx.send(embed=e)
 
@@ -614,7 +625,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     @commands.has_guild_permissions(manage_guild=True)
     async def pro_security(self, ctx):
         s = await self._security(ctx.guild)
-        e = discord.Embed(title="Centre de sécurité", colour=discord.Colour.green() if s['score'] >= 75 else discord.Colour.orange())
+        e = _panneau("Centre de sécurité", kind="success" if s['score'] >= 75 else "warning")
         e.description = f"Score : **{s['score']}/100**\nÉvénements 24 h : **{s['events']}**\nProtections avancées : **{s['protections']}/3**\nÉtat : **{'LOCKDOWN ACTIF' if s['lockdown'] else 'Normal'}**"
         if s['reason']: e.add_field(name="Dernière raison", value=str(s['reason'])[:1000], inline=False)
         await ctx.send(embed=e)
@@ -647,7 +658,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     @sentrixpro.command(name="trust")
     async def pro_trust(self, ctx, member: discord.Member | None = None):
         member = member or ctx.author; score = await self._trust(member)
-        e = discord.Embed(title=f"Confiance — {member.display_name}", description=f"Score SentriX : **{score}/100**\nNiveau : **{'Élevé' if score >= 80 else 'Moyen' if score >= 55 else 'Faible'}**", colour=discord.Colour.green() if score >= 80 else discord.Colour.orange()); e.set_thumbnail(url=member.display_avatar.url)
+        e = _panneau(f"Confiance — {member.display_name}", f"Score SentriX : **{score}/100**\nNiveau : **{'Élevé' if score >= 80 else 'Moyen' if score >= 55 else 'Faible'}**", kind="success" if score >= 80 else "warning" if score >= 55 else "danger"); e.set_thumbnail(url=member.display_avatar.url)
         await ctx.send(embed=e)
 
     @sentrixpro.command(name="history")
@@ -656,7 +667,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         sanctions = await self.bot.db.fetchall("SELECT case_number,action,reason FROM sanctions WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 8", (ctx.guild.id, member.id))
         tickets = await self.bot.db.fetchall("SELECT id,status FROM tickets WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 5", (ctx.guild.id, member.id))
         events = await self.bot.db.fetchall("SELECT event_type,score,details FROM ultimate_security_events WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 5", (ctx.guild.id, member.id))
-        e = discord.Embed(title=f"Historique — {member.display_name}", colour=discord.Colour.blurple())
+        e = _panneau(f'Historique — {member.display_name}', '', kind="brand")
         if sanctions: e.add_field(name="Sanctions", value="\n".join(f"#{_get(r,'case_number','?')} • {_get(r,'action','?')} • {str(_get(r,'reason',''))[:70]}" for r in sanctions)[:1024], inline=False)
         if tickets: e.add_field(name="Tickets", value="\n".join(f"#{_get(r,'id','?')} • {_get(r,'status','?')}" for r in tickets)[:1024], inline=False)
         if events: e.add_field(name="Sécurité", value="\n".join(f"{_get(r,'event_type','?')} • risque {_get(r,'score',0)} • {str(_get(r,'details',''))[:60]}" for r in events)[:1024], inline=False)
@@ -667,7 +678,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     @commands.has_guild_permissions(manage_guild=True)
     async def pro_live(self, ctx):
         d = await self.live_snapshot(ctx.guild)
-        e = discord.Embed(title="Live Server", description=f"En ligne : **{d['online_members']}**\nEn vocal : **{d['voice_users']}**\nTickets ouverts : **{d['open_tickets']}**\nSécurité : **{d['security_score']}/100**\nLockdown : **{'ACTIF' if d['lockdown'] else 'inactif'}**\nModules : **{d['modules_enabled']}/{d['modules_total']}**\nLatence : **{d['latency_ms']} ms**", colour=discord.Colour.blurple())
+        e = _panneau('Live Server', f"En ligne : **{d['online_members']}**\nEn vocal : **{d['voice_users']}**\nTickets ouverts : **{d['open_tickets']}**\nSécurité : **{d['security_score']}/100**\nLockdown : **{('ACTIF' if d['lockdown'] else 'inactif')}**\nModules : **{d['modules_enabled']}/{d['modules_total']}**\nLatence : **{d['latency_ms']} ms**", kind="brand")
         await ctx.send(embed=e)
 
     @sentrixpro.command(name="notifications")
@@ -678,7 +689,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         try: scheduled = int(_get(await self.bot.db.fetchone("SELECT COUNT(*) AS n FROM sentrix_scheduled_messages WHERE guild_id=? AND status='pending'", (ctx.guild.id,)), "n", 0))
         except Exception: scheduled = 0
         welcome = await self._setting(ctx.guild.id, "smart_welcome_channel"); digest = await self.bot.db.fetchone("SELECT channel_id FROM ultimate_staff_digest WHERE guild_id=?", (ctx.guild.id,))
-        e = discord.Embed(title="Centre de notifications", colour=discord.Colour.blurple()); e.add_field(name="Réseaux", value="\n".join(f"{_get(r,'platform','?')} : {_get(r,'n',0)}" for r in rows) or "Aucune surveillance sociale.", inline=False); e.add_field(name="Annonces programmées", value=str(scheduled)); e.add_field(name="Welcome", value=f"<#{welcome}>" if welcome else "Non configuré"); e.add_field(name="Digest staff", value=f"<#{_get(digest,'channel_id')}>" if digest else "Non configuré")
+        e = _panneau('Centre de notifications', '', kind="brand"); e.add_field(name="Réseaux", value="\n".join(f"{_get(r,'platform','?')} : {_get(r,'n',0)}" for r in rows) or "Aucune surveillance sociale.", inline=False); e.add_field(name="Annonces programmées", value=str(scheduled)); e.add_field(name="Welcome", value=f"<#{welcome}>" if welcome else "Non configuré"); e.add_field(name="Digest staff", value=f"<#{_get(digest,'channel_id')}>" if digest else "Non configuré")
         await ctx.send(embed=e)
 
     @sentrixpro.command(name="welcome")
@@ -694,7 +705,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     async def pro_autorole(self, ctx, action: str, metric: str | None = None, threshold: int | None = None, role: discord.Role | None = None):
         action = action.casefold()
         if action == "list":
-            rows = await self.bot.db.fetchall("SELECT id,metric,threshold,role_id FROM ultimate_autoroles WHERE guild_id=?", (ctx.guild.id,)); text = "\n".join(f"#{_get(r,'id')} • {_get(r,'metric')} >= {_get(r,'threshold')} -> <@&{_get(r,'role_id')}>" for r in rows) or "Aucune règle."; return await ctx.send(embed=discord.Embed(title="Auto-rôles intelligents", description=text[:4000], colour=discord.Colour.blurple()))
+            rows = await self.bot.db.fetchall("SELECT id,metric,threshold,role_id FROM ultimate_autoroles WHERE guild_id=?", (ctx.guild.id,)); text = "\n".join(f"#{_get(r,'id')} • {_get(r,'metric')} >= {_get(r,'threshold')} -> <@&{_get(r,'role_id')}>" for r in rows) or "Aucune règle."; return await ctx.send(embed=_panneau('Auto-rôles intelligents', text[:4000], kind="brand"))
         if action == "remove" and metric and metric.isdigit(): await self.bot.db.execute("DELETE FROM ultimate_autoroles WHERE guild_id=? AND id=?", (ctx.guild.id, int(metric))); return await ctx.send("Règle supprimée.")
         if action == "add" and metric in {"trust","messages","level","days"} and threshold is not None and role is not None:
             await self.bot.db.execute("INSERT INTO ultimate_autoroles(guild_id,metric,threshold,role_id) VALUES(?,?,?,?)", (ctx.guild.id, metric, int(threshold), role.id)); await self._set_module(ctx.guild.id, "smart_autorole", True); return await ctx.send(f"Règle ajoutée : {metric} >= {threshold} -> {role.mention}.")
@@ -703,12 +714,12 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     @sentrixpro.command(name="profile")
     async def pro_profile(self, ctx, member: discord.Member | None = None):
         member = member or ctx.author; stats = await self._stats(member); trust = await self._trust(member); badges = await self._badges(member)
-        e = discord.Embed(title=f"Profil Pro — {member.display_name}", colour=discord.Colour.blurple()); e.set_thumbnail(url=member.display_avatar.url); e.add_field(name="Progression", value=f"Niveau **{stats.get('current_level',0)}**" + (f" • Rang **#{stats.get('rank')}**" if stats.get('rank') else ""), inline=False); e.add_field(name="Activité", value=f"{stats.get('message_count',0)} messages • {stats_service.format_duration(stats.get('voice_time',0))} vocal", inline=False); e.add_field(name="Économie", value=f"{int(stats.get('wallet',0))+int(stats.get('bank',0))} total"); e.add_field(name="Confiance", value=f"{trust}/100"); e.add_field(name="Badges", value=" • ".join(BADGE_LABELS.get(b,b) for b in badges) or "Aucun", inline=False)
+        e = _panneau(f'Profil Pro — {member.display_name}', '', kind="brand"); e.set_thumbnail(url=member.display_avatar.url); e.add_field(name="Progression", value=f"Niveau **{stats.get('current_level',0)}**" + (f" • Rang **#{stats.get('rank')}**" if stats.get('rank') else ""), inline=False); e.add_field(name="Activité", value=f"{stats.get('message_count',0)} messages • {stats_service.format_duration(stats.get('voice_time',0))} vocal", inline=False); e.add_field(name="Économie", value=f"{int(stats.get('wallet',0))+int(stats.get('bank',0))} total"); e.add_field(name="Confiance", value=f"{trust}/100"); e.add_field(name="Badges", value=" • ".join(BADGE_LABELS.get(b,b) for b in badges) or "Aucun", inline=False)
         await ctx.send(embed=e)
 
     @sentrixpro.command(name="badges")
     async def pro_badges(self, ctx, member: discord.Member | None = None):
-        member = member or ctx.author; badges = await self._badges(member); await ctx.send(embed=discord.Embed(title=f"Badges — {member.display_name}", description="\n".join(f"• {BADGE_LABELS.get(b,b)}" for b in badges) or "Aucun badge débloqué.", colour=discord.Colour.blurple()))
+        member = member or ctx.author; badges = await self._badges(member); await ctx.send(embed=_panneau(f'Badges — {member.display_name}', '\n'.join((f'• {BADGE_LABELS.get(b, b)}' for b in badges)) or 'Aucun badge débloqué.', kind="brand"))
 
     @sentrixpro.command(name="season")
     async def pro_season(self, ctx, member: discord.Member | None = None):
@@ -718,14 +729,14 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             p = await community_v3.get_progression(self.bot, ctx.guild.id, member.id); text = f"Saison : **{community_v3.season_label(p['season_id'])}**\nTier : **{p['tier']}**\nNiveau : **{p['season_level']}**\nXP : **{p['season_xp']}**"
         except Exception:
             row = await self.bot.db.fetchone("SELECT season_xp FROM member_engagement WHERE guild_id=? AND user_id=?", (ctx.guild.id, member.id)); text = f"XP saison : **{_get(row,'season_xp',0)}**" if row else "Aucune progression de saison."
-        await ctx.send(embed=discord.Embed(title=f"Saison — {member.display_name}", description=text, colour=discord.Colour.blurple()))
+        await ctx.send(embed=_panneau(f'Saison — {member.display_name}', text, kind="brand"))
 
     @sentrixpro.command(name="goal")
     @commands.has_guild_permissions(manage_guild=True)
     async def pro_goal(self, ctx, action: str, metric: str | None = None, target: int | None = None, reward_money: int = 0, reward_role: discord.Role | None = None):
         action = action.casefold()
         if action == "list":
-            rows = await self.bot.db.fetchall("SELECT * FROM ultimate_goals WHERE guild_id=? ORDER BY id DESC LIMIT 15", (ctx.guild.id,)); text = "\n".join(f"#{_get(r,'id')} • {_get(r,'metric')} • {_get(r,'progress')}/{_get(r,'target')} • {_get(r,'status')}" for r in rows) or "Aucun objectif."; return await ctx.send(embed=discord.Embed(title="Objectifs serveur", description=text[:4000], colour=discord.Colour.blurple()))
+            rows = await self.bot.db.fetchall("SELECT * FROM ultimate_goals WHERE guild_id=? ORDER BY id DESC LIMIT 15", (ctx.guild.id,)); text = "\n".join(f"#{_get(r,'id')} • {_get(r,'metric')} • {_get(r,'progress')}/{_get(r,'target')} • {_get(r,'status')}" for r in rows) or "Aucun objectif."; return await ctx.send(embed=_panneau('Objectifs serveur', text[:4000], kind="brand"))
         if action == "remove" and metric and metric.isdigit(): await self.bot.db.execute("DELETE FROM ultimate_goals WHERE guild_id=? AND id=?", (ctx.guild.id, int(metric))); self._no_goals.pop(int(ctx.guild.id), None); return await ctx.send("Objectif supprimé.")
         if action == "add" and metric in {"messages","joins","voice_minutes"} and target and target > 0:
             await self.bot.db.execute("INSERT INTO ultimate_goals(guild_id,metric,target,progress,reward_role_id,reward_money,starts_at,status) VALUES(?,?,?,?,?,?,?,'active')", (ctx.guild.id, metric, int(target), 0, reward_role.id if reward_role else None, max(0, int(reward_money)), now())); self._no_goals.pop(int(ctx.guild.id), None); return await ctx.send(f"Objectif créé : **{target} {metric}**.")
@@ -743,7 +754,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     async def pro_ticket_summary(self, ctx, ticket_id: int):
         row = await self.bot.db.fetchone("SELECT summary FROM ultimate_ticket_summaries WHERE guild_id=? AND ticket_id=?", (ctx.guild.id, ticket_id))
         if not row: return await ctx.send("Aucun résumé enregistré pour ce ticket.")
-        await ctx.send(embed=discord.Embed(title=f"Résumé ticket #{ticket_id}", description=str(_get(row,'summary'))[:4000], colour=discord.Colour.blurple()))
+        await ctx.send(embed=_panneau(f'Résumé ticket #{ticket_id}', str(_get(row, 'summary'))[:4000], kind="brand"))
 
     @sentrixpro.command(name="digest")
     @commands.has_guild_permissions(manage_guild=True)
@@ -759,14 +770,14 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         try: await self.bot.db.fetchone("SELECT 1 AS ok")
         except Exception: db_ok = False
         live = await self.live_snapshot(ctx.guild); ai_ok = bool(getattr(config, "OPENAI_API_KEY", None))
-        e = discord.Embed(title="Statut SentriX", colour=discord.Colour.green() if db_ok and self.bot.is_ready() else discord.Colour.orange()); e.description = f"Discord : **{'OPÉRATIONNEL' if self.bot.is_ready() else 'DÉGRADÉ'}**\nBase : **{'OPÉRATIONNELLE' if db_ok else 'DÉGRADÉE'}**\nIA : **{'CONFIGURÉE' if ai_ok else 'NON CONFIGURÉE'}**\nDashboard : **ACTIF**\nLatence : **{live['latency_ms']} ms**"
+        e = _panneau("Statut SentriX", kind="success" if db_ok and self.bot.is_ready() else "danger" if not db_ok else "warning"); e.description = f"Discord : **{'OPÉRATIONNEL' if self.bot.is_ready() else 'DÉGRADÉ'}**\nBase : **{'OPÉRATIONNELLE' if db_ok else 'DÉGRADÉE'}**\nIA : **{'CONFIGURÉE' if ai_ok else 'NON CONFIGURÉE'}**\nDashboard : **ACTIF**\nLatence : **{live['latency_ms']} ms**"
         await ctx.send(embed=e)
 
     @sentrixpro.command(name="modules")
     @commands.has_guild_permissions(manage_guild=True)
     async def pro_modules(self, ctx):
         lines = [f"{'●' if await self._enabled(ctx.guild.id, key) else '○'} `{key}` — {label}" for key, (label, _) in MODULES.items()]
-        await ctx.send(embed=discord.Embed(title="Modules SentriX", description="\n".join(lines)[:4000], colour=discord.Colour.blurple()))
+        await ctx.send(embed=_panneau('Modules SentriX', '\n'.join(lines)[:4000], kind="brand"))
 
     @sentrixpro.command(name="module")
     @commands.has_guild_permissions(manage_guild=True)
