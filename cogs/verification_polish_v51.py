@@ -27,10 +27,7 @@ def _panel_embed(bot, guild: discord.Guild) -> discord.Embed:
     embed = discord.Embed(
         title="🔐 PASSERELLE DE VÉRIFICATION",
         description=(
-            "### Accès temporairement verrouillé\n"
-            "Pour protéger le serveur contre les **bots, raids et comptes automatisés**, "
-            "SentriX doit valider ton accès avant d'ouvrir les salons.\n\n"
-            "> **Un simple clic ne donne jamais accès au serveur.**"
+            "### Accès temporairement verrouillé\nPour protéger le serveur contre les **bots, raids et comptes automatisés**, SentriX doit valider votre accès avant d'ouvrir les salons.\n\n> **Un simple clic ne donne jamais accès au serveur.**"
         ),
         colour=0x5865F2,
     )
@@ -92,11 +89,7 @@ def _info_embed() -> discord.Embed:
     embed = discord.Embed(
         title="ℹ️ Comment fonctionne la vérification ?",
         description=(
-            "1. SentriX vérifie l'état Discord du compte.\n"
-            "2. Tu reproduis une **séquence aléatoire**.\n"
-            "3. Un formulaire demande un **code unique** et un **petit calcul**.\n"
-            "4. SentriX recontrôle tes rôles et ton état juste avant l'ouverture du serveur.\n\n"
-            "Aucune étape seule ne suffit pour obtenir l'accès."
+            "1. SentriX vérifie l'état Discord du compte.\n2. Vous reproduisez une **séquence aléatoire**.\n3. Un formulaire demande un **code unique** et un **petit calcul**.\n4. SentriX recontrôle vos rôles et votre état juste avant l'ouverture du serveur.\n\nAucune étape seule ne suffit pour obtenir l'accès."
         ),
         colour=0x5865F2,
     )
@@ -193,7 +186,7 @@ class StyledSequenceView(discord.ui.View):
             return await interaction.response.edit_message(
                 embed=_status_embed(
                     "Session expirée",
-                    "Clique de nouveau sur **Commencer** dans le panneau de vérification.",
+                    'Cliquez de nouveau sur **Commencer** dans le panneau de vérification.',
                     state="warn",
                 ),
                 view=None,
@@ -210,7 +203,7 @@ class StyledSequenceView(discord.ui.View):
             return await interaction.response.edit_message(
                 embed=_status_embed(
                     "Ordre incorrect",
-                    "La tentative a été annulée. Utilise **Relancer** pour obtenir un nouveau challenge.",
+                    'La tentative a été annulée. Utilisez **Relancer** pour obtenir un nouveau challenge.',
                     state="error",
                 ),
                 view=self,
@@ -311,7 +304,7 @@ async def _patched_start(self, interaction: discord.Interaction):
 
     if verified in member.roles and unverified not in member.roles:
         return await interaction.response.send_message(
-            embed=_status_embed("Déjà vérifié", "Ton accès au serveur est déjà validé.", state="ok"),
+            embed=_status_embed("Déjà vérifié", 'Votre accès au serveur est déjà validé.', state="ok"),
             ephemeral=True,
         )
 
@@ -323,7 +316,7 @@ async def _patched_start(self, interaction: discord.Interaction):
             return await interaction.response.send_message(
                 embed=_status_embed(
                     "Rôle impossible à appliquer",
-                    "SentriX ne peut pas placer ton compte en attente. Vérifie la hiérarchie des rôles.",
+                    'SentriX ne peut pas placer votre compte en attente. Vérifiez la hiérarchie des rôles.',
                     state="error",
                 ),
                 ephemeral=True,
@@ -340,7 +333,7 @@ async def _patched_start(self, interaction: discord.Interaction):
         return await interaction.response.send_message(
             embed=_status_embed(
                 "Règles Discord requises",
-                "Accepte d'abord les **règles du serveur Discord**, puis relance la vérification.",
+                "Acceptez d'abord les **règles du serveur Discord**, puis relancez la vérification.",
                 state="warn",
             ),
             ephemeral=True,
@@ -359,7 +352,7 @@ async def _patched_start(self, interaction: discord.Interaction):
         return await interaction.response.send_message(
             embed=_status_embed(
                 "Compte trop récent",
-                f"Réessaie dans environ **{minutes} min**. Cette limite réduit les comptes de raid jetables.",
+                f'Réessayez dans environ **{minutes} min**. Cette limite réduit les comptes de raid jetables.',
                 state="warn",
             ),
             ephemeral=True,
@@ -370,8 +363,8 @@ async def _patched_start(self, interaction: discord.Interaction):
     if joined_for < legacy.MIN_JOIN_DELAY_SECONDS:
         return await interaction.response.send_message(
             embed=_status_embed(
-                "Patiente quelques secondes",
-                f"Tu pourras commencer dans **{legacy.MIN_JOIN_DELAY_SECONDS - joined_for}s**.",
+                'Patientez quelques secondes',
+                f'Vous pourrez commencer dans **{legacy.MIN_JOIN_DELAY_SECONDS - joined_for}s**.',
                 state="info",
             ),
             ephemeral=True,
@@ -383,7 +376,7 @@ async def _patched_start(self, interaction: discord.Interaction):
         return await interaction.response.send_message(
             embed=_status_embed(
                 "Vérification temporairement verrouillée",
-                f"Trop de tentatives incorrectes. Réessaie dans environ **{minutes} min**.",
+                f'Trop de tentatives incorrectes. Réessayez dans environ **{minutes} min**.',
                 state="error",
             ),
             ephemeral=True,
@@ -395,7 +388,7 @@ async def _patched_start(self, interaction: discord.Interaction):
         return await interaction.response.send_message(
             embed=_status_embed(
                 "Challenge déjà généré",
-                "Une session vient d'être créée. Utilise-la ou attends quelques secondes avant de relancer.",
+                "Une session vient d'être créée. Utilisez-la ou attendez quelques secondes avant de relancer.",
                 state="info",
             ),
             ephemeral=True,
@@ -452,7 +445,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
         return await interaction.response.send_message(
             embed=_status_embed(
                 "Challenge expiré",
-                "La session n'est plus valide. Recommence depuis le panneau de vérification.",
+                "La session n'est plus valide. Recommencez depuis le panneau de vérification.",
                 state="warn",
             ),
             ephemeral=True,
@@ -475,7 +468,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
     if not conf:
         self._challenges.pop(key, None)
         return await interaction.response.send_message(
-            embed=_status_embed("Vérification désactivée", "Le portail a été désactivé pendant ta session.", state="warn"),
+            embed=_status_embed("Vérification désactivée", 'Le portail a été désactivé pendant votre session.', state="warn"),
             ephemeral=True,
         )
 
@@ -484,7 +477,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
         return await interaction.response.send_message(
             embed=_status_embed(
                 "Règles Discord non validées",
-                "Accepte les règles natives Discord puis recommence.",
+                'Acceptez les règles natives Discord puis recommencez.',
                 state="warn",
             ),
             ephemeral=True,
@@ -498,7 +491,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
         return await interaction.response.send_message(
             embed=_status_embed(
                 "État de sécurité incohérent",
-                "SentriX a refusé l'ouverture du serveur. Relance une nouvelle session.",
+                "SentriX a refusé l'ouverture du serveur. Relancez une nouvelle session.",
                 state="error",
             ),
             ephemeral=True,
@@ -508,7 +501,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
     if account_age < legacy.MIN_ACCOUNT_AGE_SECONDS:
         self._challenges.pop(key, None)
         return await interaction.response.send_message(
-            embed=_status_embed("Compte trop récent", "Ton compte ne remplit pas encore le délai minimum.", state="warn"),
+            embed=_status_embed("Compte trop récent", 'Votre compte ne remplit pas encore le délai minimum.', state="warn"),
             ephemeral=True,
         )
 
@@ -522,7 +515,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
         return await interaction.response.send_message(
             embed=_status_embed(
                 "Impossible d'ouvrir l'accès",
-                "SentriX ne peut pas modifier tes rôles. Vérifie la hiérarchie des rôles.",
+                'SentriX ne peut pas modifier vos rôles. Vérifiez la hiérarchie des rôles.',
                 state="error",
             ),
             ephemeral=True,
@@ -562,9 +555,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
         embed=_status_embed(
             "Vérification réussie",
             (
-                f"{member.mention}, ton compte a été validé en **{elapsed}s**.\n"
-                "Le rôle `Non vérifié` a été retiré et le rôle `Vérifié` vient d'être attribué.\n\n"
-                "### ✅ Accès au serveur débloqué"
+                f"{member.mention}, votre compte a été validé en **{elapsed}s**.\nLe rôle `Non vérifié` a été retiré et le rôle `Vérifié` vient d'être attribué.\n\n### ✅ Accès au serveur débloqué"
             ),
             state="ok",
         ),

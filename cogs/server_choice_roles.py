@@ -133,13 +133,13 @@ class ConfiguredRoleSelect(discord.ui.Select):
                 status = "Aucun rôle modifiable sélectionné."
         except discord.Forbidden:
             return await interaction.response.edit_message(
-                content="SentriX ne peut pas gérer ces rôles. Place son rôle plus haut.",
+                content="SentriX ne peut pas gérer ces rôles. Placez son rôle plus haut.",
                 view=None,
             )
         except discord.HTTPException:
             refreshed = await _private_view(interaction.client, guild, member)
             return await interaction.response.edit_message(
-                content="Discord a refusé la modification. Réessaie dans quelques secondes.",
+                content='Discord a refusé la modification. Réessayez dans quelques secondes.',
                 view=refreshed,
             )
 
@@ -199,7 +199,7 @@ class ServerSelfRoleView(discord.ui.View):
             pass
 
         await interaction.response.send_message(
-            "**Choix des rôles** — ajoute ou retire uniquement les rôles que tu veux.",
+            '**Choix des rôles** — ajoute ou retirez uniquement les rôles que vous voulez.',
             view=await _private_view(interaction.client, interaction.guild, member),
             ephemeral=True,
         )
@@ -209,9 +209,7 @@ def build_embed() -> discord.Embed:
     embed = discord.Embed(
         title="Choix des rôles",
         description=(
-            "Choisis les rôles que le staff a configurés pour ce serveur.\n\n"
-            "Le menu est **privé** : les autres membres ne voient pas tes choix. "
-            "Un rôle déjà pris disparaît automatiquement de la liste d'ajout."
+            "Choisissez les rôles que le staff a configurés pour ce serveur.\n\nLe menu est **privé** : les autres membres ne voient pas vos choix. Un rôle déjà pris disparaît automatiquement de la liste d'ajout."
         ),
         color=0x7C6CFF,
     )

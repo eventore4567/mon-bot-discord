@@ -369,7 +369,7 @@ def _category_text(category, language: str) -> tuple[str, str]:
             "embeds": "Embeds, announcements and appearance.", "stats": "Bot statistics and diagnostics.",
             "owner": "Global owner-only bot management.", "other": "Other active commands.",
         }
-        summary = generic.get(getattr(category, "key", "other"), "Active SentriX commands.")
+        summary = generic.get(getattr(category, "key", "other"), 'Activez SentriX commands.')
     return name, summary
 
 
@@ -565,8 +565,7 @@ def _help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_s
     else:
         e = embeds.brand(
             "✦ Centre de commandes SentriX",
-            f"Les commandes de **{server}** sont affichees en francais. Choisis une categorie ou recherche une commande.\n\n"
-            f"**{total} commandes actives** • prefixe `{prefix}`",
+            f'Les commandes de **{server}** sont affichees en francais. Choisissez une categorie ou recherche une commande.\n\n**{total} commandes actives** • prefixe `{prefix}`',
         )
         section_names = {"essential": "⭐ Essentiels", "community": "🎉 Communaute", "staff": "🛡️ Administration"}
         quick_name = "⌕ Navigation rapide"
@@ -681,7 +680,7 @@ class LanguageHelpSelect(discord.ui.Select):
                 description=f"{len(commands_list)} • {summary}"[:100],
             ))
         super().__init__(
-            placeholder="Choose a category..." if language == LANG_EN else "Choisis une categorie...",
+            placeholder="Choose a category..." if language == LANG_EN else 'Choisissez une categorie...',
             options=options[:25],
             row=0,
         )
@@ -966,7 +965,7 @@ async def _send_initial_language_prompt(bot: commands.Bot, guild: discord.Guild)
         logger.warning("Aucun salon disponible pour demander la langue sur %s.", guild.id)
         return
     e = embeds.brand(
-        "🌐 Choose your language • Choisis ta langue",
+        '🌐 Choose your language • Choisissez votre langue',
         "**Francais** → les noms des commandes et les interfaces principales seront en francais.\n"
         "**English** → command names and the main interfaces will be in English.\n\n"
         "Ce choix est modifiable plus tard dans `+setup`. / You can change it later in `+setup`.",

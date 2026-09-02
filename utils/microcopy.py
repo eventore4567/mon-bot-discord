@@ -22,9 +22,12 @@ _EXACT = {
     "aucune action n'a été exécutée.": "Aucune action exécutée.",
     "cette action a déjà été traitée.": "Action déjà traitée.",
     "la confirmation a expiré. aucune action n'a été exécutée.": "Confirmation expirée. Aucune action exécutée.",
-    "vérifie les informations avant de confirmer.": "Vérifie puis confirme.",
-    "réessaie dans quelques instants.": "Réessaie dans un instant.",
-    "réessaie ta question.": "Réessaie.",
+    "vérifie les informations avant de confirmer.": "Vérifiez puis confirmez.",
+    "vérifiez les informations avant de confirmer.": "Vérifiez puis confirmez.",
+    "réessaie dans quelques instants.": "Réessayez dans un instant.",
+    "réessayez dans quelques instants.": "Réessayez dans un instant.",
+    "réessaie ta question.": "Réessayez.",
+    "réessayez votre question.": "Réessayez.",
     "aucune raison fournie": "Aucun motif",
     "aucun motif fourni": "Aucun motif",
     "aucune bio définie.": "Aucune bio.",
@@ -37,18 +40,19 @@ _EXACT = {
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(
-            r"mentionne le membre concerné\s*\*\*ou réponds directement à son message\*\*,?\s*puis reformule ta demande\.?",
+            r"mentionn(?:e|ez) le membre concerné\s*\*\*ou répond(?:s|ez) directement à son message\*\*,?"
+            r"\s*puis reformul(?:e|ez) (?:ta|votre) demande\.?",
             re.IGNORECASE,
         ),
-        "Mentionne un membre ou réponds à son message.",
+        "Mentionnez un membre ou répondez à son message.",
     ),
     (
         re.compile(r"je n'ai pas pu (?:préparer|terminer) cette action\.[^\n]*", re.IGNORECASE),
-        "Action impossible pour le moment. Réessaie.",
+        "Action impossible pour le moment. Réessayez.",
     ),
     (
         re.compile(r"l'action n'a pas pu être terminée\.[^\n]*", re.IGNORECASE),
-        "Action impossible pour le moment. Réessaie.",
+        "Action impossible pour le moment. Réessayez.",
     ),
     (
         re.compile(r"cette action existe dans sentrix mais n'est pas disponible sur cette instance\.?", re.IGNORECASE),

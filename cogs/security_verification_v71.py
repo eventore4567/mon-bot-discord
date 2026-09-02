@@ -794,7 +794,7 @@ class SecurityVerificationRuntimeV71:
                         if age < required:
                             minutes = max(1, (required - age + 59) // 60)
                             return await interaction.response.send_message(
-                                embed=embeds.warning(f"Compte trop récent. Réessaie dans environ **{minutes} min**."),
+                                embed=embeds.warning(f'Compte trop récent. Réessayez dans environ **{minutes} min**.'),
                                 ephemeral=True,
                             )
                 return await original_start(interaction)
@@ -841,8 +841,7 @@ class SecurityVerificationRuntimeV71:
                     failed = [name for name, passed in checks.items() if not passed and name not in {"age_7d", "avatar"}]
                     await interaction.response.send_message(
                         embed=embeds.warning(
-                            f"Vérification incomplète : **{score}/{SCORE_MAX}** (seuil **{cfg['verification_threshold']}**).\n"
-                            "Ton accès reste verrouillé. Relance une nouvelle session après avoir rempli les conditions Discord."
+                            f"Vérification incomplète : **{score}/{SCORE_MAX}** (seuil **{cfg['verification_threshold']}**).\nVotre accès reste verrouillé. Relancez une nouvelle session après avoir rempli les conditions Discord."
                             + (f"\nContrôles à revoir : `{', '.join(failed[:5])}`" if failed else "")
                         ),
                         ephemeral=True,

@@ -99,8 +99,8 @@ class CreateRouter(commands.Cog, name="CreateRouter"):
         if not me.guild_permissions.administrator:
             return await ctx.send(
                 embed=self._error(
-                    "Donne temporairement la permission **Administrateur** à SentriX, place son rôle "
-                    "assez haut, puis relance `+create sentrix`."
+                    "Donnez temporairement la permission **Administrateur** à SentriX, placez son rôle "
+                    "assez haut, puis relancez `+create sentrix`."
                 )
             )
 
@@ -155,9 +155,7 @@ class CreateRouter(commands.Cog, name="CreateRouter"):
                     ctx,
                     progress,
                     self._error(
-                        "Discord a refusé une action. Vérifie que SentriX possède **Administrateur** "
-                        "et que son rôle est placé au-dessus des rôles qu'il doit gérer. "
-                        f"Erreur : `{type(error).__name__}`."
+                        f"Discord a refusé une action. Vérifiez que SentriX possède **Administrateur** et que son rôle est placé au-dessus des rôles qu'il doit gérer. Erreur : `{type(error).__name__}`."
                     ),
                 )
                 return

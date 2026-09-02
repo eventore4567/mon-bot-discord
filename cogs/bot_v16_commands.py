@@ -183,7 +183,7 @@ def _prefix_special_error(error: commands.CommandError):
     if isinstance(raw, commands.TooManyArguments):
         return "Trop d'arguments", "Tu as ajouté trop d'informations à la commande."
     if isinstance(raw, commands.MaxConcurrencyReached):
-        return "Commande déjà en cours", "Cette commande est déjà en cours d'exécution. Attends qu'elle se termine puis réessaie."
+        return "Commande déjà en cours", "Cette commande est déjà en cours d'exécution. Attends qu'elle se termine puis réessayez."
     if isinstance(raw, commands.NoPrivateMessage):
         return "Serveur requis", "Cette commande doit être utilisée dans un serveur Discord, pas en message privé."
     if isinstance(raw, commands.PrivateMessageOnly):
@@ -210,13 +210,13 @@ def _prefix_special_error(error: commands.CommandError):
         return "Choix invalide", f"Cette option accepte uniquement : {shown}."
 
     if isinstance(raw, discord.NotFound):
-        return "Élément introuvable", "Le membre, rôle, salon ou message visé n'existe plus. Actualise la cible puis réessaie."
+        return "Élément introuvable", "Le membre, rôle, salon ou message visé n'existe plus. Actualisez la cible puis réessayez."
 
     if isinstance(raw, discord.HTTPException) and not isinstance(raw, discord.Forbidden):
         status = int(getattr(raw, "status", 0) or 0)
         code = int(getattr(raw, "code", 0) or 0)
         if status == 429:
-            return "Discord est occupé", "Discord limite temporairement les requêtes. Attends quelques secondes puis réessaie."
+            return "Discord est occupé", "Discord limite temporairement les requêtes. Attends quelques secondes puis réessayez."
         if status >= 500:
             return "Discord indisponible", "Discord rencontre une erreur temporaire. Réessaie dans quelques instants."
         if code in {10003, 10007, 10008, 10011, 10013}:
@@ -329,18 +329,18 @@ def _install_slash_error_handler(bot: commands.Bot) -> None:
         embed = None
         if isinstance(raw, discord.NotFound):
             embed = embeds.error(
-                "Le membre, rôle, salon ou message visé n'existe plus. Actualise la cible puis réessaie.",
+                "Le membre, rôle, salon ou message visé n'existe plus. Actualisez la cible puis réessayez.",
                 title="Élément introuvable",
             )
         elif isinstance(raw, discord.HTTPException) and not isinstance(raw, discord.Forbidden):
             status = int(getattr(raw, "status", 0) or 0)
             code = int(getattr(raw, "code", 0) or 0)
             if status == 429:
-                embed = embeds.warning("Discord limite temporairement les requêtes. Réessaie dans quelques secondes.", title="Discord est occupé")
+                embed = embeds.warning('Discord limite temporairement les requêtes. Réessayez dans quelques secondes.', title="Discord est occupé")
             elif status >= 500:
-                embed = embeds.warning("Discord rencontre une erreur temporaire. Réessaie dans quelques instants.", title="Discord indisponible")
+                embed = embeds.warning('Discord rencontre une erreur temporaire. Réessayez dans quelques instants.', title="Discord indisponible")
             elif code == 50035:
-                embed = embeds.error("Une valeur n'est plus valide. Vérifie les choix de la commande puis réessaie.", title="Valeur refusée")
+                embed = embeds.error("Une valeur n'est plus valide. Vérifiez les choix de la commande puis réessayez.", title="Valeur refusée")
 
         if embed is None:
             return await current(interaction, error)

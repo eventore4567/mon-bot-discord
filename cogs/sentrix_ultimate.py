@@ -647,7 +647,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     async def pro_lockdown(self, ctx, mode: str):
         if mode.casefold() == "on": return await ctx.send("Lockdown activé pour 15 minutes." if await self._start_lockdown(ctx.guild, f"Activation manuelle par {ctx.author}", 900) else "Permissions insuffisantes.")
         if mode.casefold() == "off": await self._stop_lockdown(ctx.guild); return await ctx.send(embed=_reponse("Verrouillage du serveur", 'Lockdown désactivé.', kind="success"))
-        await ctx.send(embed=_reponse("Verrouillage du serveur", 'Utilise `lockdown on` ou `lockdown off`.', kind="warning"))
+        await ctx.send(embed=_reponse("Verrouillage du serveur", 'Utilisez `lockdown on` ou `lockdown off`.', kind="warning"))
 
     @sentrixpro.command(name="quarantine-setup")
     @commands.has_guild_permissions(manage_guild=True)
@@ -709,7 +709,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     async def pro_welcome(self, ctx, target: str):
         if target.casefold() == "off": await self._set_module(ctx.guild.id, "smart_welcome", False); return await ctx.send(embed=_reponse("Accueil intelligent", 'Welcome intelligent désactivé.', kind="success"))
         match = re.search(r"(\d{15,22})", target); channel = ctx.guild.get_channel(int(match.group(1))) if match else None
-        if not isinstance(channel, discord.TextChannel): return await ctx.send(embed=_reponse("Accueil intelligent", 'Mentionne un salon texte.', kind="warning"))
+        if not isinstance(channel, discord.TextChannel): return await ctx.send(embed=_reponse("Accueil intelligent", 'Mentionnez un salon texte.', kind="warning"))
         await self._set_setting(ctx.guild.id, "smart_welcome_channel", channel.id); await self._set_module(ctx.guild.id, "smart_welcome", True); await ctx.send(embed=_reponse("Accueil intelligent", f'Welcome intelligent activé dans {channel.mention}.', kind="success"))
 
     @sentrixpro.command(name="autorole")
@@ -773,7 +773,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     async def pro_digest(self, ctx, target: str):
         if target.casefold() == "off": await self.bot.db.execute("DELETE FROM ultimate_staff_digest WHERE guild_id=?", (ctx.guild.id,)); await self._set_module(ctx.guild.id, "staff_digest", False); return await ctx.send(embed=_reponse("Résumé d activité", 'Résumé quotidien staff désactivé.', kind="success"))
         match = re.search(r"(\d{15,22})", target); channel = ctx.guild.get_channel(int(match.group(1))) if match else None
-        if not isinstance(channel, discord.TextChannel): return await ctx.send(embed=_reponse("Résumé d activité", 'Mentionne un salon texte.', kind="warning"))
+        if not isinstance(channel, discord.TextChannel): return await ctx.send(embed=_reponse("Résumé d activité", 'Mentionnez un salon texte.', kind="warning"))
         await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_staff_digest(guild_id,channel_id,last_day) VALUES(?,?,NULL)", (ctx.guild.id, channel.id)); await self._set_module(ctx.guild.id, "staff_digest", True); await ctx.send(embed=_reponse("Résumé d activité", f'Résumé staff activé dans {channel.mention} vers 18:00 UTC.', kind="success"))
 
     @sentrixpro.command(name="status")
@@ -795,8 +795,8 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     @commands.has_guild_permissions(manage_guild=True)
     async def pro_module(self, ctx, action: str, module: str):
         module = module.casefold(); action = action.casefold()
-        if module not in MODULES: return await ctx.send(embed=_reponse("Modules SentriX Pro", 'Module inconnu. Utilise `+sentrixpro modules`.', kind="warning"))
-        if action not in {"enable","on","1","true","disable","off","0","false"}: return await ctx.send(embed=_reponse("Modules SentriX Pro", 'Utilise `module enable <nom>` ou `module disable <nom>`.', kind="warning"))
+        if module not in MODULES: return await ctx.send(embed=_reponse("Modules SentriX Pro", 'Module inconnu. Utilisez `+sentrixpro modules`.', kind="warning"))
+        if action not in {"enable","on","1","true","disable","off","0","false"}: return await ctx.send(embed=_reponse("Modules SentriX Pro", 'Utilisez `module enable <nom>` ou `module disable <nom>`.', kind="warning"))
         enabled = action in {"enable","on","1","true"}; await self._set_module(ctx.guild.id, module, enabled); await ctx.send(embed=_reponse("Modules SentriX Pro", f"Module **{MODULES[module][0]}** {('activé' if enabled else 'désactivé')}.", kind="brand"))
 
 

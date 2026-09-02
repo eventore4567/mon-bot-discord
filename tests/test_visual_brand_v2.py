@@ -340,7 +340,7 @@ def test_guild_arrival_opens_the_real_setup_and_has_safe_fallbacks():
     assert 'configuration._open_setup_panel(interaction.channel, author=member)' in source
     assert 'await guild.owner.send(' in source
     assert 'title="SentriX • Installation réussie"' in source
-    assert 'Place le rôle **SentriX** au-dessus' in source
+    assert 'Placez le rôle **SentriX** au-dessus' in source
     assert 'name="Liens officiels"' in source
     assert 'Une fois le panneau terminé' not in source
 

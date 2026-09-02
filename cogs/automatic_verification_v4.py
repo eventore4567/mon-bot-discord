@@ -311,10 +311,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
         info = discord.Embed(
             title="SentriX • Vérification automatique",
             description=(
-                "Tu n'as **rien à faire**. SentriX vérifie automatiquement ton compte avec **20 facteurs** "
-                f"techniques et comportementaux. Il faut au minimum **{settings['threshold']}/20** pour être validé.\n\n"
-                "Si les règles Discord du serveur doivent être acceptées, fais-le normalement : SentriX relancera "
-                "le contrôle tout seul juste après. Un score insuffisant ne provoque aucun bannissement automatique."
+                f"Vous n'avez **rien à faire**. SentriX vérifie automatiquement votre compte avec **20 facteurs** techniques et comportementaux. Il faut au minimum **{settings['threshold']}/20** pour être validé.\n\nSi les règles Discord du serveur doivent être acceptées, fais-le normalement : SentriX relancera le contrôle tout seul juste après. Un score insuffisant ne provoque aucun bannissement automatique."
             ),
             colour=discord.Color.blurple(),
         )
@@ -460,7 +457,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             description=f"{member.mention} (`{member.id}`) — **{score}/{FACTOR_COUNT}** • seuil **{threshold}/{FACTOR_COUNT}**",
             colour=colour,
         )
-        embed.add_field(name="Décision", value="Vérifié automatiquement" if status == "verified" else "Reste Non vérifié — revue staff possible", inline=False)
+        embed.add_field(name="Décision", value="Vérifié automatiquement" if status == "verified" else 'Restez Non vérifié — revue staff possible', inline=False)
         embed.add_field(name="Facteurs non validés", value="\n".join(f"• {x}" for x in failed)[:1024] or "Aucun", inline=False)
         settings = await self.settings(member.guild.id)
         channel = member.guild.get_channel(settings.get("log_channel_id") or 0)

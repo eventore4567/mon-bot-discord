@@ -178,9 +178,7 @@ def _install_missing_argument_help(bot: commands.Bot) -> None:
             usage = f"{prefix}{qualified} {signature}".strip()
             return await ctx.send(
                 embed=embeds.error(
-                    f"L'argument **{raw.param.name}** est obligatoire.\n"
-                    f"Syntaxe correcte : `{usage}`\n"
-                    f"Ouvre `{prefix}help` puis utilise **Rechercher** pour voir les détails de la commande."
+                    f"L'argument **{raw.param.name}** est obligatoire.\nSyntaxe correcte : `{usage}`\nOuvrez `{prefix}help` puis utilisez **Rechercher** pour voir les détails de la commande."
                 )
             )
         return await current(ctx, error)

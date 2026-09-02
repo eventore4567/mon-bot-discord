@@ -463,7 +463,7 @@ async def _security_access(ctx: commands.Context, command_name: str | None = Non
     if role is None:
         role = discord.utils.find(lambda r: r.name.casefold() == value.casefold(), ctx.guild.roles)
     if role is None or role.is_default():
-        return await ctx.send(embed=_reponse("Accès aux commandes", 'Rôle introuvable. Mentionne le rôle ou donne son ID.', kind="danger"))
+        return await ctx.send(embed=_reponse("Accès aux commandes", 'Rôle introuvable. Mentionnez le rôle ou donnez son ID.', kind="danger"))
     await ctx.bot.db.execute(
         "DELETE FROM command_access_rules WHERE guild_id=? AND command_name=? AND role_id=-1",
         (ctx.guild.id, command_name),
@@ -1313,7 +1313,7 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
             return True
         until = self._degraded_until.get(name, 0.0)
         if until > time.monotonic():
-            raise MasteryDegradedError("Cette fonction se remet automatiquement d'une série d'erreurs. Réessaie dans quelques instants.")
+            raise MasteryDegradedError("Cette fonction se remet automatiquement d'une série d'erreurs. Réessayez dans quelques instants.")
         if ctx.guild and name in {"pay", "rob", "gamble"}:
             row = await self.bot.db.fetchone(
                 "SELECT blocked_until FROM economy_abuse_state WHERE guild_id=? AND user_id=?",
@@ -1462,7 +1462,7 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
             if row and row["channel_id"]:
                 extra = f"\nChoix de rôles : https://discord.com/channels/{after.guild.id}/{int(row['channel_id'])}"
             await after.send(
-                f"Ta vérification sur {after.guild.name} est terminée.{extra}\nPour découvrir les commandes utiles, utilise +help.",
+                f'Votre vérification sur {after.guild.name} est terminée.{extra}\nPour découvrir les commandes utiles, utilise +help.',
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             await self.bot.db.execute(

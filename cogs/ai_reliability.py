@@ -383,10 +383,10 @@ def install() -> None:
 
     ai_service.generate = reliable_generate
     ai_service.ERROR_MESSAGES[ai_service.ERROR_TIMEOUT] = brand_text(
-        "⏱️ Le service IA n'a pas répondu après deux tentatives. Réessaie dans quelques instants."
+        "⏱️ Le service IA n'a pas répondu après deux tentatives. Réessayez dans quelques instants."
     )
     ai_service.ERROR_MESSAGES[ai_service.ERROR_RATE_LIMIT] = brand_text(
-        "⏳ OpenAI refuse encore la requête après les modèles de secours. Réessaie dans quelques instants."
+        '⏳ OpenAI refuse encore la requête après les modèles de secours. Réessayez dans quelques instants.'
     )
     ai_service._SENTRIX_AI_RUNTIME = {
         "brand": brand_label(),

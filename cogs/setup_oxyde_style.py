@@ -144,8 +144,7 @@ def install(bot: commands.Bot) -> None:
         embed = discord.Embed(
             title="SentriX • Configuration",
             description=(
-                "Configure SentriX depuis un seul menu.\n"
-                "Choisis ci-dessous ce que tu veux modifier ; les changements sont enregistrés pour ce serveur."
+                'Configurez SentriX depuis un seul menu.\nChoisissez ci-dessous ce que vous voulez modifier ; les changements sont enregistrés pour ce serveur.'
             ),
             color=PURPLE_MAIN,
         )
@@ -163,7 +162,7 @@ def install(bot: commands.Bot) -> None:
         step = configuration.SETUP_STEPS[self.page]
         meta = STEP_META.get(step["key"], {
             "title": step["title"],
-            "summary": "Modifie les réglages de cette catégorie.",
+            "summary": 'Modifiez les réglages de cette catégorie.',
             "icon": "⚙️",
         })
 
@@ -233,7 +232,7 @@ def install(bot: commands.Bot) -> None:
             ))
 
         category_select = discord.ui.Select(
-            placeholder="Choisis ce que tu veux configurer…",
+            placeholder='Choisissez ce que vous voulez configurer…',
             options=options[:25],
             min_values=1,
             max_values=1,
@@ -284,7 +283,7 @@ def install(bot: commands.Bot) -> None:
                     item.emoji = None
                 elif isinstance(item, discord.ui.Select):
                     placeholder = str(item.placeholder or "").strip()
-                    placeholder = placeholder.replace("Choisissez", "Choisis").replace("Choisir", "Choisis")
+                    placeholder = placeholder.replace("Choisissez", 'Choisissez').replace("Choisir", 'Choisissez')
                     item.placeholder = (placeholder or "Choisis une option…")[:150]
                     for option in list(getattr(item, "options", ()) or ()):
                         # Une option = un libellé clair ; jamais un emoji écrit deux fois

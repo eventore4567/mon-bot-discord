@@ -814,9 +814,7 @@ def _install_commands(bot: commands.Bot) -> None:
             if threshold is None and window is None:
                 return await ctx.send(embed=embeds.neutral(
                     "Configuration anti-nuke",
-                    f"Seuil actuel : **{current['action_threshold']} actions en {current['window_seconds']} secondes**.\n"
-                    f"Utilise `+security antinuke-config 3 30`.\n"
-                    f"Limites : {MIN_THRESHOLD}-{MAX_THRESHOLD} actions, {MIN_WINDOW}-{MAX_WINDOW} secondes.",
+                    f"Seuil actuel : **{current['action_threshold']} actions en {current['window_seconds']} secondes**.\nUtilisez `+security antinuke-config 3 30`.\nLimites : {MIN_THRESHOLD}-{MAX_THRESHOLD} actions, {MIN_WINDOW}-{MAX_WINDOW} secondes.",
                 ))
             threshold = current["action_threshold"] if threshold is None else threshold
             window = current["window_seconds"] if window is None else window

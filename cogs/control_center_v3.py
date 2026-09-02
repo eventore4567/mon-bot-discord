@@ -345,7 +345,7 @@ def _install_self_role_backend(bot: commands.Bot) -> None:
                 await interaction.user.remove_roles(*removed, reason="Choix dans le panel SentriX")
         except (discord.Forbidden, discord.HTTPException):
             return await interaction.followup.send(
-                "Discord refuse un de ces rôles. Place le rôle SentriX au-dessus des rôles du panel.", ephemeral=True
+                'Discord refuse un de ces rôles. Placez le rôle SentriX au-dessus des rôles du panel.', ephemeral=True
             )
         result = []
         if added:
@@ -425,7 +425,7 @@ class SecurityVerificationSelect(discord.ui.Select):
             options=[
                 discord.SelectOption(label="Activer / actualiser — Softban", value="softban", description="Challenge complet + softban si le piège est déclenché"),
                 discord.SelectOption(label="Activer / actualiser — Expulsion", value="kick", description="Challenge complet + expulsion si le piège est déclenché"),
-                discord.SelectOption(label="Désactiver", value="disable", description="Désactive le portail sans supprimer sa configuration"),
+                discord.SelectOption(label="Désactiver", value="disable", description='Désactivez le portail sans supprimer sa configuration'),
             ],
             row=2,
         )
@@ -528,7 +528,7 @@ class LogActionSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if not self.owner.selected_log:
-            return await interaction.response.send_message("Choisis d'abord un type de log.", ephemeral=True)
+            return await interaction.response.send_message("Choisissez d'abord un type de log.", ephemeral=True)
         # Point d'écriture unique : plus de SQL direct sur log_settings (table archivée).
         try:
             await log_service.set_log_enabled(
@@ -537,7 +537,7 @@ class LogActionSelect(discord.ui.Select):
             )
         except ValueError:
             return await interaction.response.send_message(
-                "Choisis d'abord un salon pour ce type de log avant de l'activer.",
+                "Choisissez d'abord un salon pour ce type de log avant de l'activer.",
                 ephemeral=True,
             )
         await self.owner.refresh(interaction)
@@ -570,7 +570,7 @@ async def _v3_build_embed(self) -> discord.Embed:
                 active += 1
         panel = embeds.brand(
             "SentriX — Control Center",
-            "Configuration complète du serveur. Choisis une page dans le menu sous le panneau.",
+            'Configuration complète du serveur. Choisissez une page dans le menu sous le panneau.',
         )
         panel.add_field(name="Serveur", value=f"**{self.guild.name}**\n{self.guild.member_count or 0} membre(s)", inline=True)
         panel.add_field(name="Configuration", value=f"**{setup_ui._completion(statuses)} %**\n{active}/{len(statuses)} modules activés", inline=True)

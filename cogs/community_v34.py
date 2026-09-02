@@ -221,7 +221,7 @@ def _slash_error_text(error: Exception) -> str:
     original = getattr(error, "original", error)
     name = type(original).__name__
     if name in {"BotPermissionError"}:
-        return _clean(getattr(original, "message", None) or "Tu n'as pas accès à cette commande.")
+        return _clean(getattr(original, "message", None) or "Vous n'avez pas accès à cette commande.")
     if name == "BotBlacklistedError":
         reason = _clean(getattr(original, "reason", None) or "Aucune raison fournie")
         return f"Tu n'es pas autorisé à utiliser SentriX. Raison : {reason}"

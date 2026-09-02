@@ -74,7 +74,7 @@ def _build_callback(bot: commands.Bot):
         if ai_cog is None or not hasattr(ai_cog, "ask_ai"):
             await _edit_original(
                 interaction,
-                content="Le moteur IA de SentriX n'est pas chargé. Réessaie dans quelques instants.",
+                content="Le moteur IA de SentriX n'est pas chargé. Réessayez dans quelques instants.",
             )
             return
 

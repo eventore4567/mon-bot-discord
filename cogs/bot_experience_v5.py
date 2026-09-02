@@ -180,7 +180,7 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
                 return await destination.send(**kwargs)
 
         if await _is_blacklisted(self.bot, author.id):
-            return await _send(embed=embeds.error("Tu n'es pas autorisé à utiliser ce bot."))
+            return await _send(embed=embeds.error("Vous n'êtes pas autorisé à utiliser ce bot."))
 
         guild = getattr(destination, "guild", None)
         if guild is None:
@@ -198,8 +198,7 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
             brand = brand_label()
             return await _send(
                 content=(
-                    f"Je suis là. Écris **{brand}** suivi de ta question, réponds directement "
-                    f"à un de mes messages, ou utilise `{prefix}help`."
+                    f'Je suis là. Écrivez **{brand}** suivi de votre question, réponds directement à un de mes messages, ou utilisez `{prefix}help`.'
                 )
             )
 

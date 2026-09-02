@@ -135,9 +135,7 @@ class SentriXAccessibility(commands.Cog):
                     ctx,
                     title="Information manquante",
                     description=(
-                        f"Il manque **{parameter}**.\n"
-                        f"Utilise : `{usage}`\n\n"
-                        "Les éléments entre `< >` sont obligatoires ; ceux entre `[ ]` sont optionnels."
+                        f'Il manque **{parameter}**.\nUtilisez : `{usage}`\n\nLes éléments entre `< >` sont obligatoires ; ceux entre `[ ]` sont optionnels.'
                     ),
                 )
 
@@ -145,7 +143,7 @@ class SentriXAccessibility(commands.Cog):
                 return await _safe_send(
                     ctx,
                     title="Trop d'informations",
-                    description=f"Cette commande a reçu trop d'arguments.\nUtilise : `{usage}`",
+                    description=f"Cette commande a reçu trop d'arguments.\nUtilisez : `{usage}`",
                 )
 
             member_not_found = getattr(commands, "MemberNotFound", ())
@@ -157,23 +155,21 @@ class SentriXAccessibility(commands.Cog):
                 return await _safe_send(
                     ctx,
                     title="Membre introuvable",
-                    description=f"Mentionne le membre ou utilise son identifiant Discord.\nExemple : `{_prefix(ctx)}{command_name} @membre ...`",
+                    description=f'Mentionnez le membre ou utilisez son identifiant Discord.\nExemple : `{_prefix(ctx)}{command_name} @membre ...`',
                 )
             if user_not_found and isinstance(error, user_not_found):
-                return await _safe_send(ctx, title="Utilisateur introuvable", description=f"Vérifie la mention ou l'identifiant.\nUtilise : `{usage}`")
+                return await _safe_send(ctx, title="Utilisateur introuvable", description=f"Vérifiez la mention ou l'identifiant.\nUtilisez : `{usage}`")
             if role_not_found and isinstance(error, role_not_found):
-                return await _safe_send(ctx, title="Rôle introuvable", description=f"Mentionne un rôle existant ou vérifie son nom.\nUtilise : `{usage}`")
+                return await _safe_send(ctx, title="Rôle introuvable", description=f'Mentionnez un rôle existant ou vérifiez son nom.\nUtilisez : `{usage}`')
             if channel_not_found and isinstance(error, channel_not_found):
-                return await _safe_send(ctx, title="Salon introuvable", description=f"Mentionne un salon existant.\nUtilise : `{usage}`")
+                return await _safe_send(ctx, title="Salon introuvable", description=f'Mentionnez un salon existant.\nUtilisez : `{usage}`')
 
             if isinstance(error, commands.BadArgument):
                 return await _safe_send(
                     ctx,
                     title="Argument non compris",
                     description=(
-                        "Je n'ai pas compris une des informations données.\n"
-                        f"Syntaxe attendue : `{usage}`\n"
-                        "Tu peux utiliser des mentions Discord quand une commande demande un membre, un rôle ou un salon."
+                        f"Je n'ai pas compris une des informations données.\nSyntaxe attendue : `{usage}`\nVous pouvez utiliser des mentions Discord quand une commande demande un membre, un rôle ou un salon."
                     ),
                 )
 
@@ -185,13 +181,13 @@ class SentriXAccessibility(commands.Cog):
                     wait = f"{seconds // 60} min {seconds % 60} s"
                 else:
                     wait = f"{seconds} s"
-                return await _safe_send(ctx, title="Commande en pause", description=f"Tu pourras la réutiliser dans **{wait}**.")
+                return await _safe_send(ctx, title="Commande en pause", description=f'Vous pourrez la réutiliser dans **{wait}**.')
 
             if isinstance(error, commands.MissingPermissions):
                 return await _safe_send(
                     ctx,
                     title="Permission nécessaire",
-                    description=f"Il te manque : **{_friendly_permissions(error.missing_permissions)}**.",
+                    description=f"Il vous manque : **{_friendly_permissions(error.missing_permissions)}**.",
                 )
 
             if isinstance(error, commands.BotMissingPermissions):

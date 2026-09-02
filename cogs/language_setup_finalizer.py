@@ -207,7 +207,7 @@ def install(bot: commands.Bot) -> None:
                 ))
 
             selector = discord.ui.Select(
-                placeholder="Choose what you want to configure…" if english else "Choisis ce que tu veux configurer…",
+                placeholder="Choose what you want to configure…" if english else 'Choisissez ce que vous voulez configurer…',
                 options=options[:25],
                 min_values=1,
                 max_values=1,
@@ -314,7 +314,7 @@ def install(bot: commands.Bot) -> None:
                 description=(
                     "Choose a category below to configure SentriX for this server."
                     if english else
-                    "Choisis une catégorie ci-dessous pour configurer SentriX sur ce serveur."
+                    'Choisissez une catégorie ci-dessous pour configurer SentriX sur ce serveur.'
                 ),
                 color=_SETUP_COLOR,
             )
@@ -330,7 +330,7 @@ def install(bot: commands.Bot) -> None:
                 description=(
                     "Choose the language used by SentriX on this server."
                     if english else
-                    "Choisis la langue utilisée par SentriX sur ce serveur."
+                    'Choisissez la langue utilisée par SentriX sur ce serveur.'
                 ),
                 color=_SETUP_COLOR,
             )

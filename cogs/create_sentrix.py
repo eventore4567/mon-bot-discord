@@ -274,7 +274,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
         return await self._seed_embed(
             channel,
             "📜 Règlement officiel SentriX",
-            "Bienvenue sur le serveur officiel de **SentriX**. Le but est de garder un espace propre, professionnel et utile pour les utilisateurs du bot.\n\nEn restant sur le serveur, tu acceptes les règles ci-dessous.",
+            'Bienvenue sur le serveur officiel de **SentriX**. Le but est de garder un espace propre, professionnel et utile pour les utilisateurs du bot.\n\nEn restant sur le serveur, vous acceptes les règles ci-dessous.',
             fields=fields,
             footer="SentriX • Règlement officiel",
         )
@@ -406,7 +406,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
                 "max_per_member=?,enabled=1 WHERE id=?",
                 (
                     "🎫 Support officiel SentriX",
-                    "Un bug, une question, un problème de configuration ou un signalement privé ? Ouvre un ticket : l'équipe support te répondra dans un salon privé.",
+                    "Un bug, une question, un problème de configuration ou un signalement privé ? Ouvrez un ticket : l'équipe support vous répondra dans un salon privé.",
                     panel_channel.id,
                     "button",
                     1,
@@ -434,7 +434,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
                     tickets_category.id,
                     logs_channel.id,
                     "ticket-{pseudo}",
-                    "Décris précisément ta demande. Un membre du support SentriX va prendre le relais.",
+                    'Décrivez précisément votre demande. Un membre du support SentriX va prendre le relais.',
                     type_id,
                 ),
             )
@@ -984,7 +984,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
             self._seed_embed(
                 welcome,
                 "👋 Bienvenue sur SentriX",
-                "Bienvenue sur le serveur officiel de **SentriX**.\n\nCommence par lire le règlement, puis passe dans **🤖・sentrix-chat** pour parler directement avec l'IA du bot.",
+                "Bienvenue sur le serveur officiel de **SentriX**.\n\nCommencez par lire le règlement, puis passez dans **🤖・sentrix-chat** pour parler directement avec l'IA du bot.",
             ),
             self._seed_rules(rules),
             self._seed_embed(
@@ -1012,7 +1012,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
             self._seed_embed(
                 sentrix_chat,
                 "🤖 Parler avec SentriX",
-                "Écris simplement ton message dans ce salon. **Pas besoin de `+ai` ni de mentionner le bot** : SentriX te répond directement.",
+                'Écrivez simplement votre message dans ce salon. **Pas besoin de `+ai` ni de mentionner le bot** : SentriX vous répond directement.',
             ),
             self._seed_embed(
                 suggestions,
@@ -1178,7 +1178,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
         """Installe ou répare le modèle officiel avec ``+create sentrix``."""
         requested = template.strip().casefold()
         if requested != TEMPLATE_NAME:
-            return await ctx.send("Utilise `+create sentrix` pour créer ou réparer le serveur officiel SentriX.")
+            return await ctx.send('Utilisez `+create sentrix` pour créer ou réparer le serveur officiel SentriX.')
 
         guild = ctx.guild
         if guild is None or not isinstance(ctx.author, discord.Member):
@@ -1191,7 +1191,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
         if me is None:
             return await ctx.send("SentriX n'est pas correctement présent sur ce serveur.")
         if not me.guild_permissions.administrator:
-            return await ctx.send("Donne temporairement la permission **Administrateur** à SentriX puis relance `+create sentrix`.")
+            return await ctx.send('Donnez temporairement la permission **Administrateur** à SentriX puis relancez `+create sentrix`.')
 
         lock = self._lock_for(guild.id)
         if lock.locked():
@@ -1209,9 +1209,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
                 try:
                     await progress.edit(
                         content=(
-                            "Installation arrêtée : Discord a refusé une action. "
-                            "Vérifie que le rôle de SentriX est placé assez haut et possède Administrateur. "
-                            f"`{type(error).__name__}`"
+                            f'Installation arrêtée : Discord a refusé une action. Vérifiez que le rôle de SentriX est placé assez haut et possède Administrateur. `{type(error).__name__}`'
                         )
                     )
                 except discord.HTTPException:
@@ -1223,9 +1221,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
                 try:
                     await progress.edit(
                         content=(
-                            "Discord a interrompu l'installation. Relance `+create sentrix` : "
-                            "les éléments déjà créés seront réutilisés. "
-                            f"Détail : `{detail or type(error).__name__}`"
+                            f"Discord a interrompu l'installation. Relancez `+create sentrix` : les éléments déjà créés seront réutilisés. Détail : `{detail or type(error).__name__}`"
                         )
                     )
                 except discord.HTTPException:
@@ -1237,9 +1233,7 @@ class CreateSentrix(commands.Cog, name="CreateSentrix"):
                 try:
                     await progress.edit(
                         content=(
-                            "La création a rencontré une erreur interne, mais la commande n'a pas été verrouillée. "
-                            "Tu peux la relancer après correction. "
-                            f"Détail : `{type(error).__name__}: {detail}`"
+                            f"La création a rencontré une erreur interne, mais la commande n'a pas été verrouillée. Vous pouvez la relancer après correction. Détail : `{type(error).__name__}: {detail}`"
                         )
                     )
                 except discord.HTTPException:

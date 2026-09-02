@@ -122,7 +122,7 @@ def _install_ticket_uploads() -> bool:
                 except ValueError:
                     return await interaction.response.send_message(
                         embed=tickets_mod.embeds.error(
-                            "Couleur invalide. Utilise un code hexadécimal comme `5865F2`."
+                            'Couleur invalide. Utilisez un code hexadécimal comme `5865F2`.'
                         ),
                         ephemeral=True,
                     )

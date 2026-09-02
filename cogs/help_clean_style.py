@@ -116,9 +116,7 @@ def _help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_s
         embed = _brand(
             "SENTRIX / AIDE",
             (
-                f"**{total} commandes** • préfixe `{prefix}`\n"
-                "Choisis une catégorie ci-dessous ou utilise la recherche.\n\n"
-                f"Accès rapides : {'  '.join(shortcuts)}"
+                f"**{total} commandes** • préfixe `{prefix}`\nChoisissez une catégorie ci-dessous ou utilisez la recherche.\n\nAccès rapides : {'  '.join(shortcuts)}"
             ),
         )
         embed.set_footer(text=f"SentriX • {category_count} catégories")
@@ -373,7 +371,7 @@ async def _clean_help_callback(cog, ctx: commands.Context, *, commande: str = No
         if command is None or (utility.is_staff_command(command) and not is_staff):
             if language == "en":
                 return await ctx.send(embed=_brand("SENTRIX / COMMAND NOT FOUND", f"Command `{commande}` was not found or you do not have access. Use `{prefix}help` to return."))
-            return await ctx.send(embed=_brand("SENTRIX / COMMANDE INTROUVABLE", f"La commande `{commande}` est introuvable ou tu n'y as pas acces. Utilise `{prefix}aide` pour revenir."))
+            return await ctx.send(embed=_brand("SENTRIX / COMMANDE INTROUVABLE", f"La commande `{commande}` est introuvable ou vous n'y as pas acces. Utilisez `{prefix}aide` pour revenir."))
         category = help_complete._category_for(command)
         category_name, _ = _category_text(category, language)
         command_title = language_runtime._title(command, language).upper()

@@ -609,7 +609,7 @@ def _install_manox_command(bot: commands.Bot) -> None:
             )
         guild = ctx.guild
         if guild is None or not isinstance(ctx.author, discord.Member):
-            return await ctx.send(embed=embeds.error("Utilise `+create manox` dans un serveur Discord."))
+            return await ctx.send(embed=embeds.error('Utilisez `+create manox` dans un serveur Discord.'))
 
         me = guild.me
         if me is None or not me.guild_permissions.manage_channels:
@@ -635,7 +635,7 @@ def _install_manox_command(bot: commands.Bot) -> None:
             except discord.Forbidden:
                 logger.exception("+create manox refusé par Discord guild=%s", guild.id)
                 panel = embeds.error(
-                    "Discord a refusé une création. Vérifie les permissions de SentriX et la position de son rôle."
+                    'Discord a refusé une création. Vérifiez les permissions de SentriX et la position de son rôle.'
                 )
             except discord.HTTPException as exc:
                 logger.exception("+create manox erreur HTTP guild=%s", guild.id)

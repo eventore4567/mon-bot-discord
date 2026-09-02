@@ -320,7 +320,7 @@ class NaturalAiSelect(discord.ui.Select):
         super().__init__(
             placeholder="Conversation naturelle SentriX",
             options=[
-                discord.SelectOption(label="Tester `sentrix salut`", value="test", description="Vérifie que le listener naturel est chargé"),
+                discord.SelectOption(label="Tester `sentrix salut`", value="test", description='Vérifiez que le listener naturel est chargé'),
                 discord.SelectOption(label="Ouvrir les limites IA", value="limits", description="Cooldown, minute et limites quotidiennes"),
             ],
             row=3,

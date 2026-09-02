@@ -64,7 +64,7 @@ async def build_status_embed(bot: commands.Bot, guild: discord.Guild | None) -> 
     embed = _base(
         bot,
         "Statut",
-        "État en direct des services principaux. Utilise **Actualiser** pour refaire le contrôle.",
+        'État en direct des services principaux. Utilisez **Actualiser** pour refaire le contrôle.',
         colour,
     )
     embed.add_field(name="Discord", value=f"En ligne • {latency} ms", inline=True)
@@ -145,7 +145,7 @@ class StatusHubView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.owner_id:
             return True
-        await interaction.response.send_message(embed=_reponse("Expérience visuelle", 'Ouvre ton propre panneau avec `+status`.', kind="warning"), ephemeral=True)
+        await interaction.response.send_message(embed=_reponse("Expérience visuelle", 'Ouvrez votre propre panneau avec `+status`.', kind="warning"), ephemeral=True)
         return False
 
     @discord.ui.button(label="Statut", custom_id="sx:v5:status")
@@ -359,7 +359,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
                 embed=_base(
                     self.bot,
                     "Permission requise",
-                    "Ajoute la permission **Joindre des fichiers** au rôle du bot pour générer les cartes.",
+                    'Ajoutez la permission **Joindre des fichiers** au rôle du bot pour générer les cartes.',
                     0xED4245,
                 )
             )
@@ -388,7 +388,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
                 embed=_base(
                     self.bot,
                     "Carte indisponible",
-                    "Le moteur d’image n’a pas terminé. Réessaie dans quelques instants. `[R1]`",
+                    'Le moteur d’image n’a pas terminé. Réessayez dans quelques instants. `[R1]`',
                     0xED4245,
                 ),
                 attachments=[],
@@ -421,7 +421,7 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
                 embed=_base(
                     self.bot,
                     "Envoi impossible",
-                    "Discord a refusé l’image. Vérifie **Joindre des fichiers** et **Intégrer des liens** pour le rôle du bot. `[S1]`",
+                    'Discord a refusé l’image. Vérifiez **Joindre des fichiers** et **Intégrer des liens** pour le rôle du bot. `[S1]`',
                     0xED4245,
                 ),
                 attachments=[],
@@ -454,11 +454,11 @@ class VisualExperienceV5(commands.Cog, name="VisualExperienceV5"):
     async def iconsetup(self, ctx: commands.Context, category: str = "all"):
         """Installe les petites icônes SentriX comme emojis personnalisés du serveur."""
         if not ctx.guild.me.guild_permissions.manage_emojis_and_stickers:
-            return await ctx.send(embed=_base(self.bot, "Permission requise", "Donne au bot la permission **Gérer les expressions**.", 0xED4245))
+            return await ctx.send(embed=_base(self.bot, "Permission requise", 'Donnez au bot la permission **Gérer les expressions**.', 0xED4245))
         selected = list(ICON_CATEGORIES) if category.casefold() == "all" else [category.casefold()]
         selected = [item for item in selected if item in ICON_CATEGORIES]
         if not selected:
-            return await ctx.send(embed=_base(self.bot, "Catégorie inconnue", f"Choisis : `{', '.join(ICON_CATEGORIES)}` ou `all`."))
+            return await ctx.send(embed=_base(self.bot, "Catégorie inconnue", f"Choisissez : `{', '.join(ICON_CATEGORIES)}` ou `all`."))
 
         existing = {emoji.name for emoji in ctx.guild.emojis}
         created, skipped, failed = [], [], []

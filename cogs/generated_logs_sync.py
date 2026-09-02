@@ -178,7 +178,7 @@ class LogsDiagnostics(commands.Cog, name="LogsDiagnostics"):
         requested = (category or "").strip().casefold().replace("-", "_")
         if requested and requested not in log_service.LOG_TYPES:
             await destination.send(
-                "Catégorie inconnue. Utilise : `" + ", ".join(log_service.LOG_TYPES) + "`."
+                'Catégorie inconnue. Utilisez : `' + ", ".join(log_service.LOG_TYPES) + "`."
             )
             return
 

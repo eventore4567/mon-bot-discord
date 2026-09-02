@@ -247,7 +247,7 @@ def _cooldown_retry_after(error) -> float | None:
 
 async def _send_slash_cooldown(interaction: discord.Interaction, retry_after: float) -> None:
     embed = embeds.warning(
-        f"Tu pourras réutiliser cette commande dans **{_cooldown_text(retry_after)}**.",
+        f'Vous pourrez réutiliser cette commande dans **{_cooldown_text(retry_after)}**.',
         title="Cooldown actif",
     )
     try:
@@ -273,7 +273,7 @@ def _patch_slash_error_ux(bot: commands.Bot) -> None:
         original = getattr(error, "original", error)
         if isinstance(error, (discord.app_commands.TransformerError, discord.app_commands.CommandSignatureMismatch)):
             embed = embeds.warning(
-                "Une valeur n'est pas valide. Vérifie le nombre, le membre, le rôle ou le salon sélectionné.",
+                "Une valeur n'est pas valide. Vérifiez le nombre, le membre, le rôle ou le salon sélectionné.",
                 title="Valeur invalide",
             )
             try:
@@ -304,7 +304,7 @@ def _patch_prefix_error_ux(bot: commands.Bot) -> None:
         if isinstance(original, commands.CommandOnCooldown):
             return await ctx.send(
                 embed=embeds.warning(
-                    f"Tu pourras réutiliser cette commande dans **{_cooldown_text(original.retry_after)}**.",
+                    f'Vous pourrez réutiliser cette commande dans **{_cooldown_text(original.retry_after)}**.',
                     title="Cooldown actif",
                 )
             )
@@ -312,7 +312,7 @@ def _patch_prefix_error_ux(bot: commands.Bot) -> None:
         if isinstance(original, commands.MaxConcurrencyReached):
             return await ctx.send(
                 embed=embeds.warning(
-                    "Une partie ou une action identique est déjà en cours. Termine-la avant de recommencer.",
+                    'Une partie ou une action identique est déjà en cours. Terminez-la avant de recommencer.',
                     title="Action déjà en cours",
                 )
             )

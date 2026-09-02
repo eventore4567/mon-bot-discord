@@ -307,8 +307,7 @@ async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
         await message.channel.send(
             embed=embeds.neutral(
                 "👋 Besoin d'aide ?",
-                f"Mon préfixe sur ce serveur est **`{prefix}`**.\n"
-                f"Tape **`{prefix}help`** pour voir les commandes ou **`{prefix}setup`** pour configurer le serveur.",
+                f'Mon préfixe sur ce serveur est **`{prefix}`**.\nTapez **`{prefix}help`** pour voir les commandes ou **`{prefix}setup`** pour configurer le serveur.',
             ),
             allowed_mentions=discord.AllowedMentions.none(),
         )

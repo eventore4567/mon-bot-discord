@@ -406,7 +406,7 @@ class PlatformV4(commands.Cog):
     async def save_announcement(self, guild: discord.Guild, actor_id: int, data: dict[str, Any]) -> dict[str, Any]:
         channel_id = int(data.get("channel_id") or 0)
         if not isinstance(guild.get_channel(channel_id), discord.TextChannel):
-            raise ValueError("Choisis un salon textuel valide.")
+            raise ValueError('Choisissez un salon textuel valide.')
         content = str(data.get("content") or "").strip()[:3900]
         title = str(data.get("title") or "").strip()[:200]
         if not content:
@@ -549,7 +549,7 @@ class PlatformV4(commands.Cog):
     async def create_role_menu(self, guild: discord.Guild, actor_id: int, data: dict[str, Any]) -> dict[str, Any]:
         channel = guild.get_channel(int(data.get("channel_id") or 0))
         if not isinstance(channel, discord.TextChannel):
-            raise ValueError("Choisis un salon textuel valide.")
+            raise ValueError('Choisissez un salon textuel valide.')
         raw_roles = data.get("roles") if isinstance(data.get("roles"), list) else []
         items = []
         me = guild.me
@@ -564,7 +564,7 @@ class PlatformV4(commands.Cog):
             label = str(raw.get("label") if isinstance(raw, dict) else role.name).strip()[:80] or role.name[:80]
             items.append({"role_id": role.id, "label": label, "position": index})
         if not items:
-            raise ValueError("Ajoute au moins un rôle attribuable et non administratif.")
+            raise ValueError('Ajoutez au moins un rôle attribuable et non administratif.')
         title = str(data.get("title") or "Choisissez vos rôles").strip()[:200]
         description = str(data.get("description") or "Cliquez pour ajouter ou retirer un rôle.").strip()[:1500]
         cur = await self.bot.db.execute(
@@ -620,7 +620,7 @@ class PlatformV4(commands.Cog):
         async with self._money_lock:
             row = await self.bot.db.fetchone("SELECT quantity FROM inventory WHERE guild_id=? AND user_id=? AND item_name=?", (guild_id, seller_id, item_name))
             if not row or int(row["quantity"]) < quantity:
-                raise ValueError("Tu n'as pas assez de cet objet dans ton inventaire.")
+                raise ValueError("Vous n'avez pas assez de cet objet dans votre inventaire.")
             left = int(row["quantity"]) - quantity
             if left:
                 await self.bot.db.execute("UPDATE inventory SET quantity=? WHERE guild_id=? AND user_id=? AND item_name=?", (left, guild_id, seller_id, item_name))
@@ -638,7 +638,7 @@ class PlatformV4(commands.Cog):
             if not listing:
                 raise ValueError("Cette annonce n'est plus disponible.")
             if int(listing["seller_id"]) == buyer_id:
-                raise ValueError("Tu ne peux pas acheter ta propre annonce.")
+                raise ValueError('Vous ne pouvez pas acheter votre propre annonce.')
             total = int(listing["quantity"]) * int(listing["unit_price"])
             await self.bot.db.ensure_economy(guild_id, buyer_id)
             balance = await self.bot.db.get_balance(guild_id, buyer_id)
@@ -660,7 +660,7 @@ class PlatformV4(commands.Cog):
             if not listing:
                 raise ValueError("Annonce introuvable.")
             if not admin and int(listing["seller_id"]) != user_id:
-                raise ValueError("Tu ne peux pas annuler l'annonce d'un autre membre.")
+                raise ValueError("Vous ne pouvez pas annuler l'annonce d'un autre membre.")
             await self.bot.db.execute(
                 "INSERT INTO inventory (guild_id,user_id,item_name,quantity) VALUES (?,?,?,?) ON CONFLICT(guild_id,user_id,item_name) DO UPDATE SET quantity=quantity+excluded.quantity",
                 (guild_id, int(listing["seller_id"]), listing["item_name"], int(listing["quantity"])),
@@ -669,7 +669,7 @@ class PlatformV4(commands.Cog):
 
     async def create_trade(self, guild_id: int, creator_id: int, target_id: int, offer_item: str, offer_quantity: int, want_item: str, want_quantity: int, want_money: int) -> dict[str, Any]:
         if creator_id == target_id:
-            raise ValueError("Choisis un autre membre.")
+            raise ValueError('Choisissez un autre membre.')
         offer_item = offer_item.strip()[:100]
         want_item = want_item.strip()[:100]
         offer_quantity = max(1, min(int(offer_quantity), 9999))
@@ -698,12 +698,12 @@ class PlatformV4(commands.Cog):
             if trade["want_item"] and int(trade["want_quantity"]):
                 row = await self.bot.db.fetchone("SELECT quantity FROM inventory WHERE guild_id=? AND user_id=? AND item_name=?", (guild_id, target_id, trade["want_item"]))
                 if not row or int(row["quantity"]) < int(trade["want_quantity"]):
-                    raise ValueError("Tu n'as pas les objets demandés.")
+                    raise ValueError("Vous n'avez pas les objets demandés.")
             if int(trade["want_money"]):
                 await self.bot.db.ensure_economy(guild_id, target_id)
                 bal = await self.bot.db.get_balance(guild_id, target_id)
                 if int(bal["cash"]) < int(trade["want_money"]):
-                    raise ValueError("Tu n'as pas assez d'argent liquide.")
+                    raise ValueError("Vous n'avez pas assez d'argent liquide.")
             if trade["want_item"] and int(trade["want_quantity"]):
                 qty = int(trade["want_quantity"])
                 await self.bot.db.execute("UPDATE inventory SET quantity=quantity-? WHERE guild_id=? AND user_id=? AND item_name=?", (qty, guild_id, target_id, trade["want_item"]))
@@ -742,7 +742,7 @@ class PlatformV4(commands.Cog):
             catalog = await self.bot.db.fetchone("SELECT * FROM platform_item_catalog WHERE guild_id=? AND item_name=? AND enabled=1", (guild.id, item_name))
             inv = await self.bot.db.fetchone("SELECT quantity FROM inventory WHERE guild_id=? AND user_id=? AND item_name=?", (guild.id, member.id, item_name))
             if not catalog or not inv or int(inv["quantity"]) <= 0:
-                raise ValueError("Cet objet n'est pas utilisable ou absent de ton inventaire.")
+                raise ValueError("Cet objet n'est pas utilisable ou absent de votre inventaire.")
             if catalog["effect_type"] == "role":
                 role = guild.get_role(int(catalog["role_id"] or 0))
                 me = guild.me
@@ -776,7 +776,7 @@ class PlatformV4(commands.Cog):
     async def create_event(self, guild: discord.Guild, actor_id: int, data: dict[str, Any]) -> dict[str, Any]:
         channel = guild.get_channel(int(data.get("channel_id") or 0))
         if not isinstance(channel, discord.TextChannel):
-            raise ValueError("Choisis un salon textuel valide.")
+            raise ValueError('Choisissez un salon textuel valide.')
         name = str(data.get("name") or "Événement").strip()[:120]
         description = str(data.get("description") or "").strip()[:1500]
         start_at = int(data.get("start_at") or 0)
@@ -790,7 +790,7 @@ class PlatformV4(commands.Cog):
         reward = max(0, min(int(data.get("reward_amount") or 0), 10_000_000))
         reminder = max(1, min(int(data.get("reminder_minutes") or 15), 1440))
         await self.bot.db.execute("INSERT OR REPLACE INTO platform_event_meta (event_id,reminder_minutes,reward_amount) VALUES (?,?,?)", (event_id, reminder, reward))
-        embed = discord.Embed(title=f"Événement — {name}", description=description or "Inscris-toi avec le bouton ci-dessous.", color=0x7D8CFF)
+        embed = discord.Embed(title=f"Événement — {name}", description=description or 'Inscris-vous avec le bouton ci-dessous.', color=0x7D8CFF)
         embed.add_field(name="Début", value=f"<t:{start_at}:F>\n<t:{start_at}:R>", inline=True)
         embed.add_field(name="Récompense", value=f"{reward:,} pièces".replace(",", " ") if reward else "Aucune", inline=True)
         view = EventSignupView(self, event_id)
@@ -803,7 +803,7 @@ class PlatformV4(commands.Cog):
     async def create_giveaway(self, guild: discord.Guild, actor_id: int, data: dict[str, Any]) -> dict[str, Any]:
         channel = guild.get_channel(int(data.get("channel_id") or 0))
         if not isinstance(channel, discord.TextChannel):
-            raise ValueError("Choisis un salon textuel valide.")
+            raise ValueError('Choisissez un salon textuel valide.')
         prize = str(data.get("prize") or "Prix").strip()[:300]
         end_at = int(data.get("end_at") or 0)
         if end_at <= now():
@@ -822,7 +822,7 @@ class PlatformV4(commands.Cog):
         min_account = max(0, min(int(data.get("min_account_age_days") or 0), 3650))
         min_member = max(0, min(int(data.get("min_member_age_days") or 0), 3650))
         await self.bot.db.execute("INSERT INTO platform_giveaway_rules (giveaway_id,min_account_age_days,min_member_age_days) VALUES (?,?,?)", (giveaway_id, min_account, min_member))
-        embed = discord.Embed(title="GIVEAWAY", description=f"**Prix :** {prize}\n\nClique sur **Participer**.", color=0x7D8CFF)
+        embed = discord.Embed(title="GIVEAWAY", description=f'**Prix :** {prize}\n\nCliquez sur **Participer**.', color=0x7D8CFF)
         embed.add_field(name="Fin", value=f"<t:{end_at}:R>", inline=True)
         embed.add_field(name="Gagnants", value=str(winners), inline=True)
         if min_account:
@@ -845,11 +845,11 @@ class PlatformV4(commands.Cog):
         member = interaction.user
         blacklisted = await self.bot.db.fetchone("SELECT 1 FROM giveaway_blacklist WHERE guild_id=? AND user_id=?", (interaction.guild.id, member.id))
         if blacklisted:
-            return await interaction.response.send_message("Tu n'es pas autorisé à participer aux giveaways.", ephemeral=True)
+            return await interaction.response.send_message("Vous n'êtes pas autorisé à participer aux giveaways.", ephemeral=True)
         if g["required_role_id"] and not any(r.id == g["required_role_id"] for r in member.roles):
-            return await interaction.response.send_message("Il te manque le rôle requis.", ephemeral=True)
+            return await interaction.response.send_message("Il vous manque le rôle requis.", ephemeral=True)
         if g["excluded_role_id"] and any(r.id == g["excluded_role_id"] for r in member.roles):
-            return await interaction.response.send_message("Un de tes rôles est exclu de ce giveaway.", ephemeral=True)
+            return await interaction.response.send_message('Un de vos rôles est exclu de ce giveaway.', ephemeral=True)
         if g["required_level"]:
             level = await self.bot.db.get_level(interaction.guild.id, member.id)
             if int(level["level"]) < int(g["required_level"]):
@@ -860,9 +860,9 @@ class PlatformV4(commands.Cog):
             account_days = (current - member.created_at).days
             joined_days = (current - member.joined_at).days if member.joined_at else 0
             if account_days < int(rule["min_account_age_days"]):
-                return await interaction.response.send_message(f"Ton compte doit avoir au moins {rule['min_account_age_days']} jour(s).", ephemeral=True)
+                return await interaction.response.send_message(f"Votre compte doit avoir au moins {rule['min_account_age_days']} jour(s).", ephemeral=True)
             if joined_days < int(rule["min_member_age_days"]):
-                return await interaction.response.send_message(f"Tu dois être sur le serveur depuis au moins {rule['min_member_age_days']} jour(s).", ephemeral=True)
+                return await interaction.response.send_message(f"Vous devez être sur le serveur depuis au moins {rule['min_member_age_days']} jour(s).", ephemeral=True)
         existing = await self.bot.db.fetchone("SELECT 1 FROM giveaway_entries WHERE giveaway_id=? AND user_id=?", (giveaway_id, member.id))
         if existing:
             await self.bot.db.execute("DELETE FROM giveaway_entries WHERE giveaway_id=? AND user_id=?", (giveaway_id, member.id))
@@ -1134,7 +1134,7 @@ class PlatformV4(commands.Cog):
             active = await self.bot.db.fetchone("SELECT COUNT(*) c FROM platform_market_listings WHERE guild_id=? AND seller_id=? AND status='active'", (guild_id, user_id))
             pending = await self.bot.db.fetchone("SELECT COUNT(*) c FROM platform_trade_offers WHERE guild_id=? AND (creator_id=? OR target_id=?) AND status='pending'", (guild_id, user_id, user_id))
             if (active and int(active["c"])) or (pending and int(pending["c"])):
-                raise ValueError("Annule d'abord tes ventes et échanges en cours avant de supprimer tes données économiques.")
+                raise ValueError("Annulez d'abord vos ventes et échanges en cours avant de supprimer vos données économiques.")
             for name, sql in deletions:
                 try:
                     cur = await self.bot.db.execute(sql, (guild_id, user_id))

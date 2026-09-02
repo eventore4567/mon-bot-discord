@@ -163,8 +163,7 @@ def _install_clear_error_guard(bot: commands.Bot) -> None:
 
             return await ctx.send(
                 embed=embeds.warning(
-                    "Le nombre doit être un entier entre **1 et 100**.\n\n"
-                    "Utilise : `+clear <nombre>`",
+                    'Le nombre doit être un entier entre **1 et 100**.\n\nUtilisez : `+clear <nombre>`',
                     title="Nombre invalide",
                 )
             )

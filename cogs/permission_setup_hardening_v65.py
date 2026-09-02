@@ -623,10 +623,7 @@ def _patch_setup_surface() -> None:
             panel.add_field(
                 name="Fonctionnement",
                 value=(
-                    "**1.** Choisis un rôle.\n"
-                    "**2.** Choisis le groupe puis la commande.\n"
-                    "**3.** Utilise **Bloquer / rétablir**.\n\n"
-                    "Les commandes `+` et `/` partagent exactement la même règle."
+                    '**1.** Choisissez un rôle.\n**2.** Choisissez le groupe puis la commande.\n**3.** Utilisez **Bloquer / rétablir**.\n\nLes commandes `+` et `/` partagent exactement la même règle.'
                 ),
                 inline=False,
             )
@@ -670,8 +667,7 @@ def _patch_setup_surface() -> None:
             panel.add_field(
                 name="Utilisation",
                 value=(
-                    "Utilise uniquement **Activer / Désactiver**. À l'activation, SentriX applique "
-                    "son profil recommandé. À la désactivation, les réglages sont conservés."
+                    "Utilisez uniquement **Activer / Désactiver**. À l'activation, SentriX applique son profil recommandé. À la désactivation, les réglages sont conservés."
                 ),
                 inline=False,
             )

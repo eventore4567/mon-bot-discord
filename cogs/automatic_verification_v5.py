@@ -614,11 +614,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         info = discord.Embed(
             title="SentriX • Vérification adaptative",
             description=(
-                "Tu n'as **rien à faire**. SentriX analyse **40 signaux** répartis "
-                "dans **8 familles pondérées** et produit un score normalisé sur **20**.\n\n"
-                f"Seuil actuel : **{settings['threshold']}/20**. Les signaux indisponibles "
-                "sont neutres et les comptes limites sont réévalués automatiquement. "
-                "Un score insuffisant ne bannit jamais le membre."
+                f"Vous n'avez **rien à faire**. SentriX analyse **40 signaux** répartis dans **8 familles pondérées** et produit un score normalisé sur **20**.\n\nSeuil actuel : **{settings['threshold']}/20**. Les signaux indisponibles sont neutres et les comptes limites sont réévalués automatiquement. Un score insuffisant ne bannit jamais le membre."
             ),
             colour=discord.Color.blurple(),
         )

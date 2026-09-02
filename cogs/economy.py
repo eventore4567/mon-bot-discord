@@ -135,7 +135,7 @@ class ShopCatalogueView(discord.ui.View):
         if interaction.user.id == self.owner_id:
             return True
         await interaction.response.send_message(
-            "Ouvre ton propre catalogue avec +shop.",
+            'Ouvrez votre propre catalogue avec +shop.',
             ephemeral=True,
         )
         return False
@@ -380,8 +380,7 @@ class Economy(commands.Cog, name="Economy"):
         return design_system.create_embed(
             title="Boutique de rôles",
             description=(
-                f"**{total} rôle(s) disponible(s)**\n"
-                "Choisis un rôle ci-dessous. Le prix est débité automatiquement et le résultat reste privé."
+                f'**{total} rôle(s) disponible(s)**\nChoisissez un rôle ci-dessous. Le prix est débité automatiquement et le résultat reste privé.'
             ),
             colour=design.get("primary_color", style["colour"]),
             footer=design.get("footer"),

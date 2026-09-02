@@ -236,7 +236,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
     async def verification_calibration(self, ctx: commands.Context) -> None:
         """Affiche l'avancement et la précision réellement mesurée de V5."""
         if not await self._staff_allowed(ctx):
-            return await ctx.send(embed=_reponse("Calibration de la vérification", "Tu n'as pas la permission de consulter la calibration.", kind="danger"))
+            return await ctx.send(embed=_reponse("Calibration de la vérification", "Vous n'avez pas la permission de consulter la calibration.", kind="danger"))
         data = await self.stats()
         accuracy = (
             f"{data['accuracy']:.2f} %"
@@ -289,7 +289,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
     ) -> None:
         """Ajoute la vérité terrain staff : legit ou suspect."""
         if not await self._staff_allowed(ctx):
-            return await ctx.send(embed=_reponse("Relecture d échantillon", "Tu n'as pas la permission de valider un échantillon.", kind="danger"))
+            return await ctx.send(embed=_reponse("Relecture d échantillon", "Vous n'avez pas la permission de valider un échantillon.", kind="danger"))
 
         normalized = verdict.casefold().strip()
         aliases = {
@@ -304,7 +304,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
         }
         label = aliases.get(normalized)
         if label is None:
-            return await ctx.send(embed=_reponse("Relecture d échantillon", 'Verdict invalide : utilise `legit` ou `suspect`.', kind="danger"))
+            return await ctx.send(embed=_reponse("Relecture d échantillon", 'Verdict invalide : utilisez `legit` ou `suspect`.', kind="danger"))
 
         row = await self.bot.db.fetchone(
             "SELECT predicted_status,score FROM automatic_verification_calibration_v5 "

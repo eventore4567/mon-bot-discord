@@ -91,9 +91,7 @@ _CASUAL_PROMPT = (
 )
 
 _LINK_REQUEST_PATTERN = re.compile(
-    r"(?:\b(?:donne|envoie|passe|partage|trouve|cherche|file|balance|mets?|met)\b.{0,32}"
-    r"\b(?:lien|url)\b|\b(?:lien|url)\b\s+(?:de|du|des|vers|pour)\b|"
-    r"\b(?:tu\s+as|t\s+as|tas|as\s+tu)\b.{0,12}\b(?:lien|url)\b)"
+    '(?:\\b(?:donne|envoie|passe|partage|trouve|cherche|file|balance|mets?|met)\\b.{0,32}\\b(?:lien|url)\\b|\\b(?:lien|url)\\b\\s+(?:de|du|des|vers|pour)\\b|\\b(?:vous\\s+as|t\\s+as|tas|as\\s+vous)\\b.{0,12}\\b(?:lien|url)\\b)'
 )
 _LINK_RELATION_PATTERN = re.compile(r"\b(?:lien|relation)\s+entre\b")
 _MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", re.IGNORECASE)

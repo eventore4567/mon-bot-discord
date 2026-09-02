@@ -712,11 +712,7 @@ async def _on_guild_join(bot: commands.Bot, guild: discord.Guild) -> None:
     embed = embeds.brand(
         "🚀 Bienvenue sur SentriX V3",
         (
-            "SentriX est prêt. Pour éviter une configuration compliquée, commence par **`+setup`** : "
-            "l'assistant te guide pour les rôles, salons, tickets, sécurité, niveaux et logs.\n\n"
-            "**Pour les membres :** `+profile` affiche maintenant la saison, le streak, les missions et les succès.\n"
-            "**IA :** écris simplement `SentriX ...` ou utilise `+ai`.\n"
-            "**Besoin d'aide :** `+help`."
+            "SentriX est prêt. Pour éviter une configuration compliquée, commence par **`+setup`** : l'assistant vous guide pour les rôles, salons, tickets, sécurité, niveaux et logs.\n\n**Pour les membres :** `+profile` affiche maintenant la saison, le streak, les missions et les succès.\n**IA :** écris simplement `SentriX ...` ou utilisez `+ai`.\n**Besoin d'aide :** `+help`."
         ),
     )
     if config.DASHBOARD_PUBLIC_URL:

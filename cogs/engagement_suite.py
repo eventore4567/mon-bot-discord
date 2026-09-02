@@ -198,7 +198,7 @@ class OnboardingMemberView(discord.ui.View):
         self.settings = settings
 
         language = discord.ui.Select(
-            placeholder="Langue de ton profil / Profile language",
+            placeholder='Langue de votre profil / Profile language',
             min_values=1,
             max_values=1,
             options=[
@@ -225,7 +225,7 @@ class OnboardingMemberView(discord.ui.View):
                 role_options.append(discord.SelectOption(label=role.name[:100], value=str(role.id)))
         if role_options:
             roles = discord.ui.Select(
-                placeholder="Choisis tes rôles / interests",
+                placeholder='Choisissez vos rôles / interests',
                 min_values=0,
                 max_values=min(5, len(role_options)),
                 options=role_options,
@@ -253,7 +253,7 @@ class OnboardingMemberView(discord.ui.View):
                         await self.member.add_roles(*to_add, reason=f"Onboarding {brand_label()}")
                     if to_remove:
                         await self.member.remove_roles(*to_remove, reason=f"Onboarding {brand_label()}")
-                    await interaction.response.send_message("Tes rôles ont été mis à jour.", ephemeral=True)
+                    await interaction.response.send_message('Vos rôles ont été mis à jour.', ephemeral=True)
                 except (discord.Forbidden, discord.HTTPException):
                     await interaction.response.send_message("Je n'ai pas la permission de modifier un de ces rôles.", ephemeral=True)
 
@@ -293,10 +293,10 @@ class OnboardingStartView(discord.ui.View):
                 return await interaction.response.send_message("Ce bouton fonctionne uniquement dans un serveur.", ephemeral=True)
             service = self.bot.get_cog("EngagementSuite")
             if service is None:
-                return await interaction.response.send_message("Le module communauté démarre. Réessaie dans quelques secondes.", ephemeral=True)
+                return await interaction.response.send_message('Le module communauté démarre. Réessayez dans quelques secondes.', ephemeral=True)
             settings = await service.get_settings(interaction.guild.id)
             await interaction.response.send_message(
-                "Configure ton profil, choisis tes rôles puis valide le règlement.",
+                'Configurez votre profil, choisis vos rôles puis validez le règlement.',
                 view=OnboardingMemberView(service, interaction.user, settings),
                 ephemeral=True,
             )
@@ -793,8 +793,7 @@ class EngagementSuite(commands.Cog):
         embed = discord.Embed(
             title=f"Bienvenue sur {member.guild.name}",
             description=(
-                f"{member.mention}, utilise le bouton ci-dessous pour choisir ta langue de profil, "
-                "tes rôles et valider le règlement."
+                f'{member.mention}, utilise le bouton ci-dessous pour choisir votre langue de profil, vos rôles et valider le règlement.'
             ),
             color=discord.Color.blurple(),
         )

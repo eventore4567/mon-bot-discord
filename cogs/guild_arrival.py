@@ -66,8 +66,7 @@ def _arrival_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embed:
     embed = discord.Embed(
         title="SentriX • Installation réussie",
         description=(
-            f"{owner}, **SentriX est maintenant actif sur {guild.name}.**\n"
-            "Tu peux configurer l'essentiel en quelques minutes depuis le centre de contrôle."
+            f"{owner}, **SentriX est maintenant actif sur {guild.name}.**\nVous pouvez configurer l'essentiel en quelques minutes depuis le centre de contrôle."
         ),
         colour=discord.Colour(WELCOME_COLOUR),
     )
@@ -91,8 +90,7 @@ def _arrival_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embed:
     embed.add_field(
         name="Avant de commencer",
         value=(
-            "Place le rôle **SentriX** au-dessus des rôles qu'il doit gérer, puis utilise "
-            "le bouton **Configurer** ci-dessous."
+            "Placez le rôle **SentriX** au-dessus des rôles qu'il doit gérer, puis utilisez le bouton **Configurer** ci-dessous."
         ),
         inline=False,
     )
@@ -169,7 +167,7 @@ class GuildArrivalView(discord.ui.View):
         configuration = self.bot.get_cog("Configuration")
         if configuration is None or not hasattr(configuration, "_open_setup_panel"):
             return await interaction.response.send_message(
-                "Le centre de configuration est momentanément indisponible. Utilise `+setup`.",
+                'Le centre de configuration est momentanément indisponible. Utilisez `+setup`.',
                 ephemeral=True,
             )
 
@@ -186,7 +184,7 @@ class GuildArrivalView(discord.ui.View):
         except Exception:
             logger.exception("Ouverture du setup depuis le message d'arrivée impossible.")
             return await interaction.followup.send(
-                "Je n'ai pas pu ouvrir le panneau ici. Vérifie mes permissions puis utilise `+setup`.",
+                "Je n'ai pas pu ouvrir le panneau ici. Vérifiez mes permissions puis utilisez `+setup`.",
                 ephemeral=True,
             )
         await interaction.followup.send(

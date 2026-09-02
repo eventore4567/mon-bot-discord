@@ -133,7 +133,7 @@ class AiResponseView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(view=self)
-        await interaction.followup.send(embed=embeds.success("🧹 Conversation réinitialisée — ta prochaine question repartira de zéro."), ephemeral=True)
+        await interaction.followup.send(embed=embeds.success('🧹 Conversation réinitialisée — votre prochaine question repartira de zéro.'), ephemeral=True)
 
     async def on_timeout(self):
         for item in self.children:
@@ -955,7 +955,7 @@ class Ai(commands.Cog, name="Ai"):
                 return await ctx.send(embed=embeds.error("L'IA n'est pas autorisée dans ce salon sur ce serveur."))
             role_ids = [r.id for r in getattr(ctx.author, "roles", [])]
             if not ai_service.is_role_allowed(settings, role_ids):
-                return await ctx.send(embed=embeds.error("Tu n'as pas le rôle nécessaire pour utiliser l'IA sur ce serveur."))
+                return await ctx.send(embed=embeds.error("Vous n'avez pas le rôle nécessaire pour utiliser l'IA sur ce serveur."))
 
         # Indicateur de chargement immédiat (jamais "L'application ne répond plus") :
         # message "SentriX réfléchit…" + ctx.typing() côté préfixe, defer() côté slash.
@@ -1024,7 +1024,7 @@ class Ai(commands.Cog, name="Ai"):
         name="ai",
         description="Poser une question à l'IA de SentriX (avec mémoire de conversation).",
     )
-    @app_commands.describe(question="Ta question, ou 'reset' / 'memory' / 'model' / 'help'")
+    @app_commands.describe(question="Votre question, ou 'reset' / 'memory' / 'model' / 'help'")
     async def ai_command(self, ctx: commands.Context, *, question: str):
         """+ai est une commande à plat (pas un groupe) pour pouvoir exister à la fois en
         `/ai question:<question>` ET en `+ai reset`/`+ai memory`/`+ai model`/`+ai help` —
@@ -1047,7 +1047,7 @@ class Ai(commands.Cog, name="Ai"):
             return await ctx.send(embed=embeds.error("Cette commande doit être utilisée sur un serveur."))
         await ai_service.reset_conversation(self.bot, guild_id, ctx.channel.id, ctx.author.id)
         self.histories.pop(ctx.author.id, None)
-        await ctx.send(embed=embeds.success("🧹 Ta conversation avec l'IA a été réinitialisée dans ce salon."))
+        await ctx.send(embed=embeds.success("🧹 Votre conversation avec l'IA a été réinitialisée dans ce salon."))
 
     async def _ai_memory(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
@@ -1058,7 +1058,7 @@ class Ai(commands.Cog, name="Ai"):
             return await ctx.send(embed=embeds.info("🧠 La mémoire de conversation est **désactivée** sur ce serveur."))
         active = await ai_service.has_active_memory(self.bot, guild_id, ctx.channel.id, ctx.author.id, settings["memory_minutes"])
         if active:
-            return await ctx.send(embed=embeds.success(f"🧠 Tu as une conversation active dans ce salon (elle expire après {settings['memory_minutes']} min d'inactivité). Son contenu reste privé."))
+            return await ctx.send(embed=embeds.success(f"🧠 Vous avez une conversation active dans ce salon (elle expire après {settings['memory_minutes']} min d'inactivité). Son contenu reste privé."))
         await ctx.send(embed=embeds.info("🧠 Aucune conversation active dans ce salon pour l'instant."))
 
     async def _ai_model(self, ctx: commands.Context):
@@ -1073,26 +1073,12 @@ class Ai(commands.Cog, name="Ai"):
 
     async def _ai_help(self, ctx: commands.Context):
         e = embeds.brand("🤖 Aide — Intelligence artificielle SentriX", (
-            "**+ai <question>** / **/ai question:...** — poser une question à l'IA\n"
-            "**+ai reset** — réinitialiser ta conversation dans ce salon\n"
-            "**+ai memory** — voir si une conversation est active\n"
-            "**+ai model** — voir le modèle utilisé par défaut\n"
-            "**+chat <message>** — discuter avec mémoire de conversation\n"
-            "**+improve <texte>** — améliorer un texte\n"
-            "**+correct <texte>** — corriger l'orthographe et la grammaire\n"
-            "**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n"
-            "**+code <demande>** — générer du code\n"
-            "**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n"            "**+image <description>** — générer une image 4K (3840 × 2160)\n"
-            "**SentriX fais-moi une image de...** — génération 4K en langage naturel\n"
-            "**SentriX ouvre-moi setup/help** — exécuter une commande en langage naturel\n"
-            "**SentriX ajoute cet emoji** — importer l'emoji collé ou l'image jointe\n"
-            "**SentriX donne-moi le lien de...** — rechercher un lien public avec ses sources\n"
-            "**+aisetup** *(admin)* — configurer l'IA sur ce serveur"
+            "**+ai <question>** / **/ai question:...** — poser une question à l'IA\n**+ai reset** — réinitialiser votre conversation dans ce salon\n**+ai memory** — voir si une conversation est active\n**+ai model** — voir le modèle utilisé par défaut\n**+chat <message>** — discuter avec mémoire de conversation\n**+improve <texte>** — améliorer un texte\n**+correct <texte>** — corriger l'orthographe et la grammaire\n**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n**+code <demande>** — générer du code\n**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n**+image <description>** — générer une image 4K (3840 × 2160)\n**SentriX fais-moi une image de...** — génération 4K en langage naturel\n**SentriX ouvre-moi setup/help** — exécuter une commande en langage naturel\n**SentriX ajoute cet emoji** — importer l'emoji collé ou l'image jointe\n**SentriX donne-moi le lien de...** — rechercher un lien public avec ses sources\n**+aisetup** *(admin)* — configurer l'IA sur ce serveur"
         ))
         await ctx.send(embed=e)
 
     @commands.hybrid_command(name="chat", description="Discuter avec l'IA de SentriX (avec mémoire de conversation).", with_app_command=False)
-    @app_commands.describe(message="Ton message")
+    @app_commands.describe(message='Votre message')
     async def chat_command(self, ctx: commands.Context, *, message: str):
         await self._handle_ai_command(ctx, message)
 

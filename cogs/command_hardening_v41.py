@@ -350,12 +350,12 @@ def install(bot: commands.Bot) -> None:
         root = _interaction_root(interaction)
         retry = _duplicate_retry(bot, source="slash", user_id=user.id, root=root)
         if retry > 0:
-            await _send_slash_denial(interaction, f"Commande déjà reçue. Réessaie dans {max(1, round(retry))} s.")
+            await _send_slash_denial(interaction, f'Commande déjà reçue. Réessayez dans {max(1, round(retry))} s.')
             return False
 
         retry = _slash_rate_retry(bot, int(user.id), root)
         if retry > 0:
-            await _send_slash_denial(interaction, f"Tu utilises les commandes trop vite. Réessaie dans {max(1, round(retry))} s.")
+            await _send_slash_denial(interaction, f'Vous utilisez les commandes trop vite. Réessayez dans {max(1, round(retry))} s.')
             return False
 
         error = _acquire(

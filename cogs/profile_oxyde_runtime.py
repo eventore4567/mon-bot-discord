@@ -226,7 +226,7 @@ class CleanProfileView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.author_id:
             return True
-        await interaction.response.send_message("Ouvre ton propre profil avec `+profil`.", ephemeral=True)
+        await interaction.response.send_message('Ouvrez votre propre profil avec `+profil`.', ephemeral=True)
         return False
 
     async def _show(self, interaction: discord.Interaction, page: str):
@@ -269,7 +269,7 @@ class CleanProfileView(discord.ui.View):
             await interaction.followup.send(embed=embed, file=file, ephemeral=True)
         except Exception:
             await interaction.followup.send(
-                "La carte est temporairement indisponible. Réessaie dans quelques instants.",
+                'La carte est temporairement indisponible. Réessayez dans quelques instants.',
                 ephemeral=True,
             )
 

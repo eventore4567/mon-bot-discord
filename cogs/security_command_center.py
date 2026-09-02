@@ -280,7 +280,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
         field = FILTER_ALIASES.get(_norm(filtre))
         if field is None:
             return await ctx.send(
-                embed=_panneau(await self._t(ctx, 'Module inconnu', 'Unknown module'), await self._t(ctx, 'Utilise `+security filter` pour afficher la liste.', 'Use `+security filter` to list modules.'), kind="danger")
+                embed=_panneau(await self._t(ctx, 'Module inconnu', 'Unknown module'), await self._t(ctx, 'Utilisez `+security filter` pour afficher la liste.', 'Use `+security filter` to list modules.'), kind="danger")
             )
 
         conf = await self._conf(ctx.guild.id)
@@ -358,7 +358,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
 
         embed = _panneau(await self._t(ctx, 'SENTRIX / ANALYSE SÉCURITÉ', 'SENTRIX / SECURITY SCAN'), await self._t(ctx, f'Score estimé : **{score}/100**', f'Estimated score: **{score}/100**'), kind=kind)
         embed.add_field(
-            name=await self._t(ctx, "Modules actifs", "Active modules"),
+            name=await self._t(ctx, "Modules actifs", 'Activez modules'),
             value=f"{active}/{len(SECURITY_FILTERS)}",
             inline=True,
         )

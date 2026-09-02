@@ -561,7 +561,7 @@ def install_economy_antifarm(bot: commands.Bot) -> None:
         if len(bucket) >= limit:
             from .bot_excellence_runtime import RuntimeRateLimitError
             retry = max(1, int(window - (mono - bucket[0])))
-            raise RuntimeRateLimitError(f"Anti-farm : trop d'utilisations de +{root}. Réessaie dans environ {retry}s.")
+            raise RuntimeRateLimitError(f"Anti-farm : trop d'utilisations de +{root}. Réessayez dans environ {retry}s.")
         bucket.append(mono)
         return True
 
@@ -881,7 +881,7 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
             first_ctx, _stamp = queue.pop(0)
             first_member = ctx.guild.get_member(first_ctx.author.id)
             if first_member is None:
-                return await ctx.send(embed=embeds.warning("L'adversaire précédent n'est plus disponible. Relance la recherche."))
+                return await ctx.send(embed=embeds.warning("L'adversaire précédent n'est plus disponible. Relancez la recherche."))
             await ctx.send(embed=embeds.success(f"Match trouvé : {first_member.mention} vs {ctx.author.mention}."))
             try:
                 if "adversaire" in command.clean_params:

@@ -434,8 +434,7 @@ async def _ensure_ticket_panel_on_support(
             (
                 support_channel.id,
                 "Support",
-                "Besoin d'aide, d'informations ou d'un problème avec une commande ?\n"
-                "Ouvre un ticket et explique clairement ta demande. Un membre du staff te répondra dès que possible.",
+                "Besoin d'aide, d'informations ou d'un problème avec une commande ?\nOuvrez un ticket et explique clairement votre demande. Un membre du staff vous répondra dès que possible.",
                 "SentriX",
                 panel_id,
             ),

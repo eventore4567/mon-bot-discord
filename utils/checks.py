@@ -68,7 +68,7 @@ def action_validation(*, bot_permissions: tuple[str, ...] = (), target: str = ""
         if me is None:
             raise BotPermissionError(
                 "SentriX ne peut pas vérifier ses propres permissions pour le "
-                "moment. Réessaie dans quelques secondes."
+                "moment. Réessayez dans quelques secondes."
             )
         granted = me.guild_permissions
         missing = [p for p in bot_permissions if not getattr(granted, p, False)]

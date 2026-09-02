@@ -152,7 +152,7 @@ class VerificationSequenceView(discord.ui.View):
         if current is None or current.token != self.state.token or time.time() > current.expires_at:
             self.stop()
             return await interaction.response.edit_message(
-                content="⌛ Cette vérification a expiré. Clique de nouveau sur **Commencer la vérification**.",
+                content='⌛ Cette vérification a expiré. Cliquez de nouveau sur **Commencer la vérification**.',
                 view=None,
             )
 
@@ -165,8 +165,7 @@ class VerificationSequenceView(discord.ui.View):
             self.stop()
             return await interaction.response.edit_message(
                 content=(
-                    "❌ Mauvais ordre. La tentative a été annulée.\n"
-                    "Clique de nouveau sur **Commencer la vérification** pour obtenir un nouveau challenge."
+                    '❌ Mauvais ordre. La tentative a été annulée.\nCliquez de nouveau sur **Commencer la vérification** pour obtenir un nouveau challenge.'
                 ),
                 view=self,
             )
@@ -176,9 +175,7 @@ class VerificationSequenceView(discord.ui.View):
             progress = "●" * self.position + "○" * (len(current.sequence) - self.position)
             return await interaction.response.edit_message(
                 content=(
-                    "**Étape 1/2 — challenge anti-automatisation**\n"
-                    f"Clique dans cet ordre : **{' → '.join(current.sequence)}**\n"
-                    f"Progression : {progress}"
+                    f"**Étape 1/2 — challenge anti-automatisation**\nCliquez dans cet ordre : **{' → '.join(current.sequence)}**\nProgression : {progress}"
                 ),
                 view=self,
             )
@@ -421,14 +418,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         verify_embed = discord.Embed(
             title="🔐 Vérification renforcée SentriX",
             description=(
-                "L'accès au serveur reste **bloqué** tant que la vérification complète n'est pas terminée.\n\n"
-                "SentriX contrôle :\n"
-                "• les règles Discord / Membership Screening si elles sont activées ;\n"
-                "• l'ancienneté minimale du compte ;\n"
-                "• un challenge interactif anti-automatisation ;\n"
-                "• un code unique + un calcul à usage unique ;\n"
-                "• les tentatives répétées et les délais anormaux.\n\n"
-                "Clique sur **Commencer la vérification**. Un simple clic ne donne jamais accès au serveur."
+                "L'accès au serveur reste **bloqué** tant que la vérification complète n'est pas terminée.\n\nSentriX contrôle :\n• les règles Discord / Membership Screening si elles sont activées ;\n• l'ancienneté minimale du compte ;\n• un challenge interactif anti-automatisation ;\n• un code unique + un calcul à usage unique ;\n• les tentatives répétées et les délais anormaux.\n\nCliquez sur **Commencer la vérification**. Un simple clic ne donne jamais accès au serveur."
             ),
             colour=discord.Color.blurple(),
         )
@@ -545,16 +535,16 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             )
         if unverified not in member.roles:
             if verified in member.roles:
-                return await interaction.response.send_message("Tu es déjà vérifié.", ephemeral=True)
+                return await interaction.response.send_message('Vous êtes déjà vérifié.', ephemeral=True)
             return await interaction.response.send_message(
-                "Ton accès n'est pas marqué comme étant en attente de vérification.", ephemeral=True
+                "Votre accès n'est pas marqué comme étant en attente de vérification.", ephemeral=True
             )
 
         # Discord Membership Screening : lorsqu'il est activé sur le serveur, Member.pending
         # reste vrai tant que les règles natives Discord n'ont pas été acceptées.
         if bool(getattr(member, "pending", False)):
             return await interaction.response.send_message(
-                "⚠️ Tu dois d'abord accepter les **règles Discord du serveur**. Une fois fait, relance la vérification.",
+                "⚠️ Vous devez d'abord accepter les **règles Discord du serveur**. Une fois fait, relance la vérification.",
                 ephemeral=True,
             )
 
@@ -569,7 +559,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 danger=True,
             )
             return await interaction.response.send_message(
-                f"🛡️ Ton compte Discord est trop récent pour la vérification automatique. Réessaie dans environ **{minutes} min**.",
+                f'🛡️ Votre compte Discord est trop récent pour la vérification automatique. Réessayez dans environ **{minutes} min**.',
                 ephemeral=True,
             )
 
@@ -590,7 +580,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         if locked > 0:
             minutes = max(1, (locked + 59) // 60)
             return await interaction.response.send_message(
-                f"🔒 Trop de tentatives incorrectes. Réessaie dans environ **{minutes} min**.",
+                f'🔒 Trop de tentatives incorrectes. Réessayez dans environ **{minutes} min**.',
                 ephemeral=True,
             )
 
@@ -598,7 +588,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         now_ts = time.time()
         if now_ts - self._last_start.get(key, 0.0) < START_COOLDOWN_SECONDS:
             return await interaction.response.send_message(
-                "⏳ Une vérification vient déjà d'être générée. Attends quelques secondes.",
+                "⏳ Une vérification vient déjà d'être générée. Attendez quelques secondes.",
                 ephemeral=True,
             )
         self._last_start[key] = now_ts
@@ -626,11 +616,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         age_days = account_age // 86400
         await interaction.response.send_message(
             (
-                "**Étape 1/2 — challenge anti-automatisation**\n"
-                f"Compte Discord : **{age_days} jour(s)** · règles Discord : **validées**\n\n"
-                f"Clique dans cet ordre : **{' → '.join(sequence)}**\n"
-                "Ensuite SentriX ouvrira une seconde vérification avec un code unique et un calcul.\n"
-                f"Le challenge expire dans **{CHALLENGE_TTL_SECONDS // 60} minutes**."
+                f"**Étape 1/2 — challenge anti-automatisation**\nCompte Discord : **{age_days} jour(s)** · règles Discord : **validées**\n\nCliquez dans cet ordre : **{' → '.join(sequence)}**\nEnsuite SentriX ouvrira une seconde vérification avec un code unique et un calcul.\nLe challenge expire dans **{CHALLENGE_TTL_SECONDS // 60} minutes**."
             ),
             view=view,
             ephemeral=True,
@@ -658,7 +644,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         ):
             self._challenges.pop(key, None)
             return await interaction.response.send_message(
-                "⌛ Challenge expiré ou invalide. Recommence depuis le panneau de vérification.",
+                '⌛ Challenge expiré ou invalide. Recommencez depuis le panneau de vérification.',
                 ephemeral=True,
             )
 
@@ -685,7 +671,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         if bool(getattr(member, "pending", False)):
             self._challenges.pop(key, None)
             return await interaction.response.send_message(
-                "⚠️ Les règles Discord du serveur ne sont plus validées. Accepte-les puis recommence.",
+                '⚠️ Les règles Discord du serveur ne sont plus validées. Acceptez-les puis recommencez.',
                 ephemeral=True,
             )
 
@@ -695,7 +681,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         if unverified is None or verified is None or unverified not in member.roles or not pending:
             self._challenges.pop(key, None)
             return await interaction.response.send_message(
-                "La session de vérification n'est plus cohérente. Recommence depuis le panneau.",
+                "La session de vérification n'est plus cohérente. Recommencez depuis le panneau.",
                 ephemeral=True,
             )
 
@@ -703,7 +689,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         if account_age < MIN_ACCOUNT_AGE_SECONDS:
             self._challenges.pop(key, None)
             return await interaction.response.send_message(
-                "Ton compte est encore trop récent pour être validé.", ephemeral=True
+                'Votre compte est encore trop récent pour être validé.', ephemeral=True
             )
 
         self._verification_in_progress.add(key)
@@ -714,7 +700,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 await member.remove_roles(unverified, reason="SentriX : vérification renforcée réussie")
         except (discord.Forbidden, discord.HTTPException):
             return await interaction.response.send_message(
-                "SentriX ne peut pas modifier tes rôles. Préviens un administrateur.", ephemeral=True
+                'SentriX ne peut pas modifier vos rôles. Préviens un administrateur.', ephemeral=True
             )
         finally:
             self._verification_in_progress.discard(key)
@@ -748,7 +734,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
 
         elapsed = max(1, int(time.time() - state.created_at))
         await interaction.response.send_message(
-            "✅ **Vérification complète réussie.** Ton accès au serveur vient d'être débloqué.",
+            "✅ **Vérification complète réussie.** Votre accès au serveur vient d'être débloqué.",
             ephemeral=True,
         )
         await self._log(
@@ -988,7 +974,7 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                 ),
                 discord.SelectOption(
                     label="Désactiver",
-                    description="Désactive le portail et libère les membres en attente.",
+                    description='Désactivez le portail et libère les membres en attente.',
                     value="disable",
                 ),
             ],

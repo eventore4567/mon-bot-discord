@@ -349,7 +349,7 @@ def _install_ai_recovery(bot: commands.Bot) -> None:
                 return await ctx.send("L'IA n'est pas autorisée dans ce salon sur ce serveur.")
             role_ids = [role.id for role in getattr(ctx.author, "roles", [])]
             if not ai_service.is_role_allowed(settings, role_ids):
-                return await ctx.send("Tu n'as pas le rôle nécessaire pour utiliser l'IA sur ce serveur.")
+                return await ctx.send("Vous n'avez pas le rôle nécessaire pour utiliser l'IA sur ce serveur.")
 
         thinking = None
         if ctx.interaction:

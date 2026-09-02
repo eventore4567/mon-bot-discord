@@ -100,8 +100,7 @@ def _home_embed(bot: commands.Bot, author: discord.abc.User, prefix: str, guild_
     embed = discord.Embed(
         title=f"{brand} — Accueil",
         description=(
-            f"Salut **{display_name}**. Choisis un bouton ci-dessous ou parle-moi directement.\n"
-            f"Exemple : `{'Odboug' if 'odboug' in brand.casefold() else 'SentriX'} explique-moi comment fonctionne Discord`."
+            f"Salut **{display_name}**. Choisissez un bouton ci-dessous ou parle-moi directement.\nExemple : `{('Odboug' if 'odboug' in brand.casefold() else 'SentriX')} explique-moi comment fonctionne Discord`."
         ),
         color=_ACCENT,
     )
@@ -115,10 +114,10 @@ def _home_embed(bot: commands.Bot, author: discord.abc.User, prefix: str, guild_
         ),
         inline=False,
     )
-    embed.add_field(name="Tes raccourcis", value=shortcuts, inline=False)
+    embed.add_field(name='Vos raccourcis', value=shortcuts, inline=False)
     embed.add_field(
         name="Conversation naturelle",
-        value="Tu peux aussi répondre directement à l'un de mes messages : pas besoin de répéter mon nom à chaque fois.",
+        value="Vous pouvez aussi répondre directement à l'un de mes messages : pas besoin de répéter mon nom à chaque fois.",
         inline=False,
     )
     embed.set_footer(text="Les boutons répondent seulement à la personne qui clique pour éviter de spammer le salon.")

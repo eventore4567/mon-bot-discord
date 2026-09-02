@@ -303,7 +303,7 @@ def _install_economy(bot: commands.Bot) -> bool:
                 return await ctx.send(embed=embeds.error("Disponible uniquement sur un serveur."))
             item_name = str(objet or "").strip()
             if not item_name:
-                return await ctx.send(embed=embeds.error("Indique l'objet à vendre."))
+                return await ctx.send(embed=embeds.error("Indiquez l'objet à vendre."))
             status, price = await _atomic_sell(bot.db, ctx.guild.id, ctx.author.id, item_name)
             if status == "ok":
                 return await ctx.send(
@@ -312,7 +312,7 @@ def _install_economy(bot: commands.Bot) -> bool:
                     )
                 )
             if status in {"missing", "changed"}:
-                return await ctx.send(embed=embeds.error("Tu ne possèdes pas cet objet."))
+                return await ctx.send(embed=embeds.error('Vous ne possèdes pas cet objet.'))
             return await ctx.send(embed=embeds.error("Vente temporairement indisponible."))
         _replace_callback(sell, safe_sell, "_sentrix_integrity_atomic")
 
@@ -331,8 +331,8 @@ def _install_economy(bot: commands.Bot) -> bool:
                 return await ctx.send(embed=embeds.error("Casino temporairement indisponible."))
             amount_text = stats_service.format_number(int(montant))
             if win:
-                return await ctx.send(embed=embeds.success(f"Tu gagnes **{amount_text}** 🪙."))
-            return await ctx.send(embed=embeds.error(f"Tu perds **{amount_text}** 🪙."))
+                return await ctx.send(embed=embeds.success(f'Vous gagnez **{amount_text}** 🪙.'))
+            return await ctx.send(embed=embeds.error(f'Vous perds **{amount_text}** 🪙.'))
         _replace_callback(gamble, safe_gamble, "_sentrix_integrity_atomic")
 
     give_money = bot.get_command("give-money")
@@ -642,7 +642,7 @@ def _install_tickets(bot: commands.Bot) -> bool:
             select.callback = cb
             view.add_item(select)
             return await interaction.response.send_message(
-                "Choisis le membre du staff.", view=view, ephemeral=True
+                'Choisissez le membre du staff.', view=view, ephemeral=True
             )
 
         safe_transfer._sentrix_integrity_staff_target = True

@@ -54,9 +54,7 @@ def _panel_embed(guild: discord.Guild, role_ids: list[int]) -> discord.Embed:
     e = discord.Embed(
         title="Notifications",
         description=(
-            "Choisis uniquement les notifications que tu veux recevoir.\n\n"
-            "Clique sur **Ajouter des notifications** pour prendre des rôles ou sur "
-            "**Retirer des notifications** pour enlever ceux que tu ne veux plus."
+            'Choisissez uniquement les notifications que vous voulez recevoir.\n\nCliquez sur **Ajouter des notifications** pour prendre des rôles ou sur **Retirer des notifications** pour enlever ceux que vous ne veux plus.'
         ),
         color=0x7C6CFF,
     )
@@ -67,7 +65,7 @@ def _panel_embed(guild: discord.Guild, role_ids: list[int]) -> discord.Embed:
     )
     e.add_field(
         name="Fonctionnement",
-        value="Tes choix sont privés et le panneau reste identique pour les autres membres.",
+        value='Vos choix sont privés et le panneau reste identique pour les autres membres.',
         inline=False,
     )
     e.set_footer(text="SentriX • Rôles de notifications")
@@ -154,8 +152,8 @@ class PersonalNotificationSelect(discord.ui.Select):
                     label="Aucune notification disponible",
                     value="0",
                     description=(
-                        "Tu as déjà tous les rôles." if mode == "add"
-                        else "Tu n'as aucun rôle de notification."
+                        'Vous avez déjà tous les rôles.' if mode == "add"
+                        else "Vous n'avez aucun rôle de notification."
                     ),
                 )
             ]
@@ -213,12 +211,12 @@ class PersonalNotificationSelect(discord.ui.Select):
                 text = "Retiré : " + ", ".join(role.name for role in roles)
         except discord.Forbidden:
             return await interaction.edit_original_response(
-                content="SentriX ne peut pas modifier ces rôles. Place son rôle au-dessus des rôles de notifications.",
+                content='SentriX ne peut pas modifier ces rôles. Placez son rôle au-dessus des rôles de notifications.',
                 view=None,
             )
         except discord.HTTPException:
             return await interaction.edit_original_response(
-                content="Discord a refusé la modification. Réessaie dans quelques secondes.",
+                content='Discord a refusé la modification. Réessayez dans quelques secondes.',
                 view=PersonalNotificationView(guild, member, self.role_ids, mode=self.mode),
             )
 
@@ -357,7 +355,7 @@ class NotificationRolePanels(commands.Cog):
         except commands.BotMissingPermissions:
             return await ctx.send(embed=_reponse("Panneau de rôles", 'SentriX a besoin de la permission **Gérer les rôles** pour créer le panneau.', kind="danger"))
         except discord.Forbidden:
-            return await ctx.send(embed=_reponse("Panneau de rôles", 'Je ne peux pas créer les rôles. Vérifie la permission **Gérer les rôles**.', kind="danger"))
+            return await ctx.send(embed=_reponse("Panneau de rôles", 'Je ne peux pas créer les rôles. Vérifiez la permission **Gérer les rôles**.', kind="danger"))
 
         role_ids = [role.id for role in roles]
         view = NotificationRoleView(ctx.guild, role_ids)
@@ -400,7 +398,7 @@ class NotificationRolePanels(commands.Cog):
         try:
             message = await channel.fetch_message(int(row["message_id"]))
         except discord.NotFound:
-            return await ctx.send(embed=_reponse("Panneau de rôles", 'Le message du panneau a été supprimé. Relance `+rolepanel`.', kind="success"))
+            return await ctx.send(embed=_reponse("Panneau de rôles", 'Le message du panneau a été supprimé. Relancez `+rolepanel`.', kind="success"))
         except discord.Forbidden:
             return await ctx.send(embed=_reponse("Panneau de rôles", 'SentriX ne peut pas accéder au message du panneau.', kind="danger"))
 

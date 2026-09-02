@@ -311,7 +311,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             "INSERT OR REPLACE INTO sentrix_voicehub_config(guild_id,lobby_channel_id,category_id) VALUES(?,?,?)",
             (guild.id, lobby.id, category.id),
         )
-        await ctx.send(embed=_reponse("VoiceHub", f'VoiceHub activé : rejoins {lobby.mention} pour créer automatiquement ton propre salon vocal.', kind="success"))
+        await ctx.send(embed=_reponse("VoiceHub", f'VoiceHub activé : rejoignez {lobby.mention} pour créer automatiquement votre propre salon vocal.', kind="success"))
 
     @commands.command(name="voicehub-off")
     @commands.guild_only()
@@ -338,19 +338,19 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     async def voice_name(self, ctx: commands.Context, *, name: str):
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
-            return await ctx.send(embed=_reponse("Salon vocal", "Tu dois être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
+            return await ctx.send(embed=_reponse("Salon vocal", "Vous devez être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
         name = str(name).strip()[:90]
         if len(name) < 2:
-            return await ctx.send(embed=_reponse("Salon vocal", 'Choisis un nom de salon plus long.', kind="danger"))
+            return await ctx.send(embed=_reponse("Salon vocal", 'Choisissez un nom de salon plus long.', kind="danger"))
         await channel.edit(name=name, reason=f"VoiceHub : renommage par {ctx.author}")
-        await ctx.send(embed=_reponse("Salon vocal", f"Ton vocal s'appelle maintenant « {name} ».", kind="success"))
+        await ctx.send(embed=_reponse("Salon vocal", f"Votre vocal s'appelle maintenant « {name} ».", kind="success"))
 
     @commands.command(name="voice-limit")
     @commands.guild_only()
     async def voice_limit(self, ctx: commands.Context, limit: int):
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
-            return await ctx.send(embed=_reponse("Salon vocal", "Tu dois être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
+            return await ctx.send(embed=_reponse("Salon vocal", "Vous devez être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
         if limit < 0 or limit > 99:
             return await ctx.send(embed=_reponse("Salon vocal", 'La limite doit être comprise entre 0 et 99. 0 signifie illimité.', kind="danger"))
         await channel.edit(user_limit=limit, reason=f"VoiceHub : limite par {ctx.author}")
@@ -361,7 +361,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     async def voice_lock(self, ctx: commands.Context):
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
-            return await ctx.send(embed=_reponse("Salon vocal", "Tu dois être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
+            return await ctx.send(embed=_reponse("Salon vocal", "Vous devez être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
         overwrite = channel.overwrites_for(ctx.guild.default_role)
         overwrite.connect = False
         await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason="VoiceHub : verrouillage")
@@ -370,27 +370,27 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         owner_overwrite.manage_channels = True
         owner_overwrite.move_members = True
         await channel.set_permissions(ctx.author, overwrite=owner_overwrite, reason="VoiceHub : propriétaire")
-        await ctx.send(embed=_reponse("Salon vocal", 'Ton vocal est maintenant verrouillé.', kind="success"))
+        await ctx.send(embed=_reponse("Salon vocal", 'Votre vocal est maintenant verrouillé.', kind="success"))
 
     @commands.command(name="voice-unlock")
     @commands.guild_only()
     async def voice_unlock(self, ctx: commands.Context):
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
-            return await ctx.send(embed=_reponse("Salon vocal", "Tu dois être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
+            return await ctx.send(embed=_reponse("Salon vocal", "Vous devez être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
         overwrite = channel.overwrites_for(ctx.guild.default_role)
         overwrite.connect = None
         await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason="VoiceHub : déverrouillage")
-        await ctx.send(embed=_reponse("Salon vocal", 'Ton vocal est de nouveau ouvert.', kind="success"))
+        await ctx.send(embed=_reponse("Salon vocal", 'Votre vocal est de nouveau ouvert.', kind="success"))
 
     @commands.command(name="voice-transfer")
     @commands.guild_only()
     async def voice_transfer(self, ctx: commands.Context, member: discord.Member):
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
-            return await ctx.send(embed=_reponse("Salon vocal", "Tu dois être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
+            return await ctx.send(embed=_reponse("Salon vocal", "Vous devez être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
         if member.bot or member not in channel.members:
-            return await ctx.send(embed=_reponse("Salon vocal", 'Le nouveau propriétaire doit être un membre présent dans ton vocal.', kind="danger"))
+            return await ctx.send(embed=_reponse("Salon vocal", 'Le nouveau propriétaire doit être un membre présent dans votre vocal.', kind="danger"))
         await self.bot.db.execute(
             "UPDATE sentrix_temp_voice SET owner_id=? WHERE channel_id=?",
             (member.id, channel.id),

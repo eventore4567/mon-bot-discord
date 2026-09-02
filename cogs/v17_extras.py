@@ -80,7 +80,7 @@ def install_image_role_quota(bot: commands.Bot) -> None:
                 return await ctx.send(embed=embeds.error("L'IA n'est pas autorisée dans ce salon."))
             role_ids = [role.id for role in getattr(ctx.author, "roles", ())]
             if not ai_service.is_role_allowed(settings, role_ids):
-                return await ctx.send(embed=embeds.error("Tu n'as pas le rôle nécessaire pour utiliser l'IA dans ce serveur."))
+                return await ctx.send(embed=embeds.error("Vous n'avez pas le rôle nécessaire pour utiliser l'IA dans ce serveur."))
             problem = ai_service.moderate_input(description, max_length=settings["max_question_length"])
             if problem:
                 return await ctx.send(embed=embeds.error(problem))
@@ -89,7 +89,7 @@ def install_image_role_quota(bot: commands.Bot) -> None:
             priority = int(role_policy["priority"] if role_policy else 0)
             used_today = await ai_service.get_daily_usage(self.bot, guild_id, ctx.author.id)
             if used_today >= daily_limit:
-                return await ctx.send(embed=embeds.error(f"Limite IA quotidienne atteinte (**{daily_limit}/jour** pour ton niveau d'accès)."))
+                return await ctx.send(embed=embeds.error(f"Limite IA quotidienne atteinte (**{daily_limit}/jour** pour votre niveau d'accès)."))
 
         thinking = None
         if ctx.interaction:

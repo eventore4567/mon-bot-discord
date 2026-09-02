@@ -95,7 +95,7 @@ class MoneyDropView(discord.ui.View):
                     self.amount,
                 )
                 return await interaction.response.send_message(
-                    "Le drop n'a pas pu être crédité. Réessaie dans quelques secondes.",
+                    "Le drop n'a pas pu être crédité. Réessayez dans quelques secondes.",
                     ephemeral=True,
                 )
 

@@ -296,7 +296,7 @@ class ProfileHubView(discord.ui.View):
         if interaction.user.id == self.author_id:
             return True
         await interaction.response.send_message(
-            "Ce profil interactif appartient à la personne qui a lancé la commande. Utilise `+profile` pour ouvrir le tien.",
+            'Ce profil interactif appartient à la personne qui a lancé la commande. Utilisez `+profile` pour ouvrir le tien.',
             ephemeral=True,
         )
         return False
@@ -486,9 +486,7 @@ def _install_mission_reward_card(bot: commands.Bot) -> None:
         total = sum(xp for _, xp in rewards)
         lines = "\n".join(f"✅ {label} → **+{xp} XP**" for label, xp in rewards)
         embed = embeds.success(
-            f"{lines}\n\n**+{total} XP saison** • Total : **{stats_service.format_number(progression['season_xp'])} XP**\n"
-            f"Rang : {progression['tier']} • Niveau de saison **{progression['season_level']}**\n\n"
-            "Utilise `+profile` puis **Missions** pour voir la suite.",
+            f"{lines}\n\n**+{total} XP saison** • Total : **{stats_service.format_number(progression['season_xp'])} XP**\nRang : {progression['tier']} • Niveau de saison **{progression['season_level']}**\n\nUtilisez `+profile` puis **Missions** pour voir la suite.",
             title="🎯 Mission terminée",
         )
         try:

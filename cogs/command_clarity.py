@@ -348,8 +348,7 @@ def install(bot: commands.Bot) -> None:
                     f"`{prefix}{name}`" for name in suggestions[:3]
                 )
             return await ctx.send(embed=embeds.error(
-                f"Je ne trouve pas la commande `{commande}` ou tu n'as pas accès à son aide."
-                f"{suggestion_text}\n\nTape `{prefix}help` pour revenir au catalogue."
+                f"Je ne trouve pas la commande `{commande}` ou vous n'avez pas accès à son aide.{suggestion_text}\n\nTapez `{prefix}help` pour revenir au catalogue."
             ))
 
         slash_names = utility.slash_command_names(bot)
@@ -366,15 +365,15 @@ def install(bot: commands.Bot) -> None:
         e.add_field(name="⌨️ Syntaxe", value=f"`{syntax}`", inline=False)
         e.add_field(
             name="🧪 Exemple concret",
-            value=f"`{example}`\n*Tu peux remplacer les valeurs de l'exemple par les tiennes.*",
+            value=f"`{example}`\n*Vous pouvez remplacer les valeurs de l'exemple par les tiennes.*",
             inline=False,
         )
 
         params = parameter_lines(cmd)
         if params:
-            e.add_field(name="🧩 Ce que tu dois mettre", value="\n".join(params)[:1024], inline=False)
+            e.add_field(name='🧩 Ce que vous devez mettre', value="\n".join(params)[:1024], inline=False)
         else:
-            e.add_field(name="🧩 Paramètres", value="Aucun : tu peux lancer la commande directement.", inline=False)
+            e.add_field(name="🧩 Paramètres", value='Aucun : vous pouvez lancer la commande directement.', inline=False)
 
         access_parts = [category.label]
         access_parts.append("🔒 Staff uniquement" if utility.is_staff_command(cmd) else "👤 Utilisable par les membres")

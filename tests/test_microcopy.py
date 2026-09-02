@@ -19,7 +19,9 @@ def test_member_prompt_is_shorter():
         "Mentionne le membre concerné **ou réponds directement à son message**, "
         "puis reformule ta demande."
     )
-    assert microcopy.polish_text(text) == "Mentionne un membre ou réponds à son message."
+    # Le bot vouvoie partout depuis la standardisation du registre ; ce que ce test
+    # verifie reste le RACCOURCISSEMENT, pas la formulation exacte.
+    assert microcopy.polish_text(text) == "Mentionnez un membre ou répondez à son message."
 
 
 def test_code_blocks_are_never_rewritten():

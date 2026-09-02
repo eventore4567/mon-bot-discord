@@ -196,7 +196,7 @@ async def _invoke_existing_command(
         except Exception:
             return await _send_reply(
                 message,
-                embed=embeds.error("Tu n'as pas les permissions nécessaires pour cette action."),
+                embed=embeds.error("Vous n'avez pas les permissions nécessaires pour cette action."),
             )
 
     kwargs = {}
@@ -323,7 +323,7 @@ async def _handle_plan(bot: commands.Bot, message: discord.Message, plan: Natura
         return await _send_reply(
             message,
             embed=embeds.warning(
-                "Mentionne le membre concerné **ou réponds directement à son message**, puis reformule ta demande.",
+                'Mentionnez le membre concerné **ou réponds directement à son message**, puis reformule votre demande.',
                 title="Membre à préciser",
             ),
         )
@@ -333,7 +333,7 @@ async def _handle_plan(bot: commands.Bot, message: discord.Message, plan: Natura
         return await _send_reply(
             message,
             embed=embeds.warning(
-                _action_details(plan, target) + "\n\nVérifie les informations avant de confirmer.",
+                _action_details(plan, target) + '\n\nVérifiez les informations avant de confirmer.',
                 title="Confirmation obligatoire",
             ),
             view=view,

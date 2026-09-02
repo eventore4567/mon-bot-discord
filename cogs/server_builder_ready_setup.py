@@ -212,11 +212,7 @@ def _bot_ready_embed(guild: discord.Guild) -> discord.Embed:
     e.add_field(
         name="Parler avec SentriX",
         value=(
-            "Écris naturellement **SentriX** suivi de ta demande.\n"
-            "`SentriX raconte-moi une blague`\n"
-            "`SentriX donne-moi un défi`\n"
-            "`SentriX explique-moi quelque chose`\n"
-            "`SentriX ouvre-moi le help`"
+            'Écrivez naturellement **SentriX** suivi de votre demande.\n`SentriX raconte-moi une blague`\n`SentriX donne-moi un défi`\n`SentriX explique-moi quelque chose`\n`SentriX ouvre-moi le help`'
         ),
         inline=False,
     )
@@ -233,14 +229,13 @@ def _bot_ready_embed(guild: discord.Guild) -> discord.Embed:
     e.add_field(
         name="Génération d'images",
         value=(
-            "Exemple : `SentriX fais-moi une image de Goku sous la pluie avec une aura bleue`\n"
-            "Plus la description est précise, plus le résultat peut suivre ton idée."
+            'Exemple : `SentriX fais-moi une image de Goku sous la pluie avec une aura bleue`\nPlus la description est précise, plus le résultat peut suivre votre idée.'
         ),
         inline=False,
     )
     e.add_field(
         name="Découvrir le reste",
-        value="Utilise `+help` pour voir toutes les commandes et tester tes propres demandes.",
+        value='Utilisez `+help` pour voir toutes les commandes et tester vos propres demandes.',
         inline=False,
     )
     e.set_footer(text="SentriX • Présentation automatique v1")

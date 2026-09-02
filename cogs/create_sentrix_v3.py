@@ -1045,8 +1045,7 @@ async def _run_manox_builder(
     me = guild.me
     if me is None or not me.guild_permissions.administrator:
         await ctx.send(
-            "Donne temporairement la permission **Administrateur** à SentriX puis relance "
-            f"`+create {requested_name}`."
+            f'Donnez temporairement la permission **Administrateur** à SentriX puis relancez `+create {requested_name}`.'
         )
         return
 
@@ -1117,9 +1116,7 @@ async def _run_manox_builder(
             logger.exception("V3: +create %s interdit guild=%s étape=%s", requested_name, guild.id, stage)
             await progress.edit(
                 content=(
-                    f"Création arrêtée pendant **{stage}** : Discord a refusé une permission. "
-                    f"Corrige le rôle de SentriX puis relance `+create {requested_name}` ; "
-                    "les éléments déjà créés seront réutilisés."
+                    f'Création arrêtée pendant **{stage}** : Discord a refusé une permission. Corrige le rôle de SentriX puis relancez `+create {requested_name}` ; les éléments déjà créés seront réutilisés.'
                 )
             )
         except Exception as exc:
@@ -1127,9 +1124,7 @@ async def _run_manox_builder(
             detail = str(exc).replace("\n", " ")[:180]
             await progress.edit(
                 content=(
-                    f"Erreur pendant **{stage}**. La création reste relançable et ne repart pas de zéro. "
-                    f"Relance `+create {requested_name}` après correction. "
-                    f"`{type(exc).__name__}: {detail}`"
+                    f'Erreur pendant **{stage}**. La création reste relançable et ne repart pas de zéro. Relancez `+create {requested_name}` après correction. `{type(exc).__name__}: {detail}`'
                 )
             )
 
@@ -1152,9 +1147,7 @@ def _patch_create_command(bot: commands.Bot) -> None:
             return await current(cog_self, ctx, template=template)
         if not requested:
             return await ctx.send(
-                "Utilise `+create sentrix` pour le serveur officiel, "
-                "ou `+create <nom>` (ex. `+create manox`) pour installer/réparer "
-                "le modèle communauté complet."
+                'Utilisez `+create sentrix` pour le serveur officiel, ou `+create <nom>` (ex. `+create manox`) pour installer/réparer le modèle communauté complet.'
             )
         return await _run_manox_builder(bot, ctx, requested[:100])
 
