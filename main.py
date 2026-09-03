@@ -568,6 +568,28 @@ class BotAllInOne(commands.Bot):
             return True
         raise BotPermissionError(decision.message)
 
+    async def _is_extra_bot_creator(self, user_id: int) -> bool:
+        """is_bot_creator() sans jamais bloquer une commande sur un incident SQLite.
+
+        Le créateur principal contourne déjà cette lecture (voir les deux appelants),
+        mais TOUT LE MONDE D'AUTRE la déclenchait à chaque commande, sans protection.
+        Un verrou SQLite ("database is locked", contention en écriture) faisait alors
+        planter le check global AVANT la commande elle-même — pour n'importe quel
+        membre, tandis que le créateur principal restait épargné par son raccourci.
+        C'est exactement ce qui peut produire « seul le propriétaire arrive à utiliser
+        les commandes » : un incident base de données invisible pour lui, bloquant pour
+        tous les autres.
+
+        Repli sûr : en cas d'erreur, l'utilisateur n'est PAS traité comme créateur — ça
+        n'accorde aucun privilège en trop — et le check appelant continue normalement
+        au lieu de planer.
+        """
+        try:
+            return await self.db.is_bot_creator(user_id)
+        except Exception:
+            logger.exception("is_bot_creator indisponible pour user=%s ; traité comme non-créateur.", user_id)
+            return False
+
     async def global_blacklist_check(self, ctx: commands.Context) -> bool:
         """Bloque tout utilisateur inscrit sur la liste noire GLOBALE d'utilisation du bot
         (/bl, cog Owner) — sur n'importe quelle commande, n'importe quel serveur."""
@@ -575,7 +597,7 @@ class BotAllInOne(commands.Bot):
         # sinon le check global plante AVANT la commande et produit une erreur générique.
         if ctx.author.id == PRIMARY_CREATOR_ID or ctx.author.id in config.OWNER_IDS:
             return True
-        if await self.db.is_bot_creator(ctx.author.id):
+        if await self._is_extra_bot_creator(ctx.author.id):
             return True
         reason = self.blacklist_cache.get(ctx.author.id)
         if reason is not None:
@@ -585,7 +607,7 @@ class BotAllInOne(commands.Bot):
     async def global_cooldown_check(self, ctx: commands.Context) -> bool:
         if ctx.author.id == PRIMARY_CREATOR_ID or ctx.author.id in config.OWNER_IDS:
             return True
-        if await self.db.is_bot_creator(ctx.author.id):
+        if await self._is_extra_bot_creator(ctx.author.id):
             return True
         bucket = self._cooldown_bucket.get_bucket(ctx.message if not ctx.interaction else ctx)
         retry_after = bucket.update_rate_limit()
