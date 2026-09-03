@@ -1228,6 +1228,20 @@ INDEX_HTML = r"""<!doctype html>
     async function save(event){event.preventDefault();if(!state.guildId||!state.guildData)return;const tab=tabs[state.tab];if(tab.sanctions){await loadSanctions(true);return;}const values={};$("fields").querySelectorAll("[data-key]").forEach(el=>{let value=el.type==="checkbox"?el.checked:el.value;if(el.type==="number"&&value!=="")value=Number(value);values[el.dataset.key]=value;});const endpoint=tab.notifications?`/api/guilds/${state.guildId}/notifications`:`/api/guilds/${state.guildId}/settings`;const body=tab.notifications?values:tab.automod?{automod:values}:tab.ai?{ai:values}:{settings:values};$("settingsForm").classList.add("loading");try{const result=await json(endpoint,{method:tab.notifications?"POST":"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:JSON.stringify(body)});toast(result.message);state.dirty=false;$("saveStatus").textContent="Configuration enregistrée";await selectGuild(state.guildId);}catch(e){toast(e.message,true);$("saveStatus").textContent="Enregistrement impossible";}finally{$("settingsForm").classList.remove("loading");}}
     async function removeNotification(id){if(!state.guildId||!id)return;if(!confirm("Supprimer cette notification automatique ?"))return;try{const result=await json(`/api/guilds/${state.guildId}/notifications/${id}`,{method:"DELETE",headers:{"X-CSRF-Token":state.csrf}});toast(result.message);await selectGuild(state.guildId);}catch(e){toast(e.message,true);}}
     $("serverSelect").addEventListener("change",e=>selectGuild(e.target.value));$("settingsForm").addEventListener("submit",save);$("navigation").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(!button)return;state.tab=button.dataset.tab;$("navigation").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===button));renderTab();});$("logoutButton").addEventListener("click",async()=>{try{await json("/logout",{method:"POST",headers:{"X-CSRF-Token":state.csrf}});}finally{location.href="/";}});window.addEventListener("beforeunload",e=>{if(state.dirty){e.preventDefault();e.returnValue="";}});
+    (function reportAuthFailure(){
+      // handle_login redirige ici avec ?auth=missing quand DISCORD_CLIENT_SECRET
+      // n'est pas configure sur Railway : #authMessage existait dans le HTML mais
+      // rien ne le remplissait jamais, donc le clic sur "Se connecter avec
+      // Discord" ramenait silencieusement a la meme page, sans aucune
+      // explication — exactement ce qui ressemblait a "le dashboard ne s'ouvre
+      // pas".
+      const params=new URLSearchParams(location.search);
+      if(params.get("auth")==="missing"){
+        const el=$("authMessage");
+        if(el)el.textContent="Connexion Discord indisponible pour le moment. Réessayez dans quelques instants ou contactez le support.";
+        history.replaceState(null,"",location.pathname);
+      }
+    })();
     Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));
   </script>
 </body>
