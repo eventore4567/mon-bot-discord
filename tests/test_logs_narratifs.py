@@ -127,3 +127,54 @@ def test_les_journaux_resistent_a_l_installation_reelle_du_bot():
     )
     assert resultat.returncode == 0, resultat.stdout + resultat.stderr
     assert "les journaux resistent a l'installation reelle" in resultat.stdout
+
+
+def test_surnom_modifie_montre_avant_apres():
+    e = embeds.canonical_log_embed(
+        "Surnom modifié",
+        fields=[
+            ("Membre", "<@153201041595183925>", True),
+            ("Avant", "Jayden", True),
+            ("Après", "Jay", True),
+        ],
+    )
+    corps = narrative_body(e, log_type="member_update")
+    assert "Jayden" in corps and "Jay" in corps
+    assert "changé de surnom" in corps
+
+
+def test_invitation_creee_montre_le_lien_et_le_salon():
+    e = embeds.canonical_log_embed(
+        "Invitation créée",
+        fields=[
+            ("Créateur", "<@111222333444555666>", True),
+            ("Salon", "<#222333444555666777>", True),
+            ("Lien", "https://discord.gg/abc", False),
+            ("Expire", "Jamais", True),
+        ],
+    )
+    corps = narrative_body(e, log_type="invite_create")
+    assert "https://discord.gg/abc" in corps
+    assert "<#222333444555666777>" in corps
+    assert "<@111222333444555666>" in corps
+
+
+def test_invitation_supprimee_montre_le_code():
+    e = embeds.canonical_log_embed(
+        "Invitation supprimée",
+        fields=[
+            ("Responsable", "<@111222333444555666>", True),
+            ("Code", "abc123", True),
+        ],
+    )
+    corps = narrative_body(e, log_type="invite_delete")
+    assert "abc123" in corps
+
+
+def test_serveur_modifie_montre_ce_qui_a_change():
+    e = embeds.canonical_log_embed(
+        "Serveur modifié",
+        fields=[("Nom", "`Ancien` → `Nouveau`", False)],
+    )
+    corps = narrative_body(e, log_type="guild_update")
+    assert "Ancien" in corps and "Nouveau" in corps

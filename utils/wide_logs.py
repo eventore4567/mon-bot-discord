@@ -294,7 +294,7 @@ def narrative_body(
         member = f"<@{identity_id}>"
     moderator = _with_id(
         _first_user_ref(
-            _field_value(embed, "modérateur", "moderateur", "staff", "responsable", "acteur")
+            _field_value(embed, "modérateur", "moderateur", "staff", "responsable", "acteur", "créateur")
         )
     )
     channel = _first_channel_ref(_field_value(embed, "salon", "channel"))
@@ -396,6 +396,43 @@ def narrative_body(
             permissions_supprimees = _field_value(embed, "permissions supprimées")
             if permissions_supprimees:
                 lines.append(f"**Permissions retirées :** {permissions_supprimees}")
+    elif event_type == "member_update":
+        # Seuls les changements de surnom passent par cette branche
+        # aujourd'hui (cogs/logs.py). Avant/Après ne sont PAS ajoutés ici :
+        # compact_fields() (plus bas) les rend déjà, dans le même style que
+        # message_edit — les dupliquer ici les aurait affichés deux fois,
+        # sous deux formats différents.
+        if before and after:
+            lines.append(f"{member or 'Un membre'} a changé de surnom" + (f", par {moderator}" if moderator else "") + ".")
+        else:
+            lines.append(f"{member or 'Un membre'} a été modifié" + (f" par {moderator}" if moderator else "") + ".")
+    elif event_type in {"invite_create", "invite_delete"}:
+        verb = "créée" if event_type == "invite_create" else "supprimée"
+        lines.append(
+            f"Une invitation a été {verb}" + (f" par {moderator}" if moderator else "")
+            + (f" pour {channel}" if channel else "") + "."
+        )
+        lien = _field_value(embed, "lien")
+        if lien:
+            lines.append(f"**Lien :** {lien}")
+        code = _field_value(embed, "code")
+        if code:
+            lines.append(f"**Code :** {code}")
+        expire = _field_value(embed, "expire")
+        if expire:
+            lines.append(f"**Expire :** {expire}")
+        utilisations = _field_value(embed, "utilisations max")
+        if utilisations:
+            lines.append(f"**Utilisations max :** {utilisations}")
+    elif event_type == "guild_update":
+        lines.append(f"Les paramètres du serveur ont été modifiés" + (f" par {moderator}" if moderator else "") + ".")
+        for label, affichage in (
+            ("nom", "Nom"), ("niveau de vérification", "Niveau de vérification"),
+            ("délai afk", "Délai AFK"),
+        ):
+            valeur = _field_value(embed, label)
+            if valeur:
+                lines.append(f"**{affichage} :** {valeur}")
     elif event_type == "voice_join":
         lines.append(f"{member or 'Un membre'} a rejoint {channel or 'un salon vocal'}.")
     elif event_type == "voice_leave":
