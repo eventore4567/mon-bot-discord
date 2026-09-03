@@ -34,6 +34,10 @@ _SESSION_KEY = "sentrix_ha_dashboard_proxy_session"
 _INSTALLED = False
 
 
+def _truthy_env(name: str) -> bool:
+    return (os.getenv(name, "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _peer_base_url(role: str) -> str:
     role = (role or "").strip().lower()
     if role == "primary":
@@ -45,13 +49,23 @@ def _peer_base_url(role: str) -> str:
     return ""
 
 
-def _runtime_state(coordinator: Any) -> tuple[bool, bool, str, str]:
-    return (
-        bool(getattr(coordinator, "enabled", False)),
-        bool(getattr(coordinator, "is_leader", False)),
-        str(getattr(coordinator, "role", "") or "").strip().lower(),
-        str(getattr(coordinator, "state", "starting") or "starting").strip().lower(),
-    )
+def _runtime_state(bot: Any, coordinator: Any | None) -> tuple[bool, bool, str, str]:
+    live = coordinator or getattr(bot, "_sentrix_ha_coordinator", None)
+    if live is not None:
+        return (
+            bool(getattr(live, "enabled", False)),
+            bool(getattr(live, "is_leader", False)),
+            str(getattr(live, "role", "") or "").strip().lower(),
+            str(getattr(live, "state", "starting") or "starting").strip().lower(),
+        )
+
+    # Petite fenetre entre le demarrage HTTP et l'attachement du coordinateur au bot.
+    # On garde un fallback environnemental sans inventer un leader : si Discord est deja
+    # pret, cette instance est necessairement active ; sinon elle reste consideree passive.
+    enabled = _truthy_env("SENTRIX_FAILOVER_ENABLED")
+    role = (os.getenv("SENTRIX_FAILOVER_ROLE", "") or "").strip().lower()
+    leader = bool(getattr(bot, "is_ready", lambda: False)()) if enabled else False
+    return enabled, leader, role, "leader" if leader else "starting"
 
 
 def _forward_headers(request: web.Request) -> CIMultiDict[str]:
@@ -84,7 +98,7 @@ def _response_headers(upstream) -> CIMultiDict[str]:
     return headers
 
 
-def install(dashboard_module: Any, coordinator: Any) -> None:
+def install(dashboard_module: Any, coordinator: Any | None = None) -> None:
     """Installe le proxy avant la construction de l'application aiohttp."""
     global _INSTALLED
     if _INSTALLED:
@@ -103,7 +117,7 @@ def install(dashboard_module: Any, coordinator: Any) -> None:
             if request.path in _LOCAL_ONLY_PATHS:
                 return await handler(request)
 
-            enabled, leader, role, state = _runtime_state(coordinator)
+            enabled, leader, role, state = _runtime_state(bot, coordinator)
             if not enabled or leader:
                 return await handler(request)
 
