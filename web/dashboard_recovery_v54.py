@@ -84,7 +84,7 @@ def configure_public_url() -> str:
     return config.DASHBOARD_PUBLIC_URL
 
 
-def _redirect_to_app(_request: web.Request):
+async def _redirect_to_app(_request: web.Request):
     raise web.HTTPFound("/app")
 
 
