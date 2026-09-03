@@ -25,11 +25,25 @@ def _release_id() -> str:
     return "inconnu"
 
 
-def _ha_passive_standby() -> bool:
-    """True quand cette instance HA est volontairement le secours passif."""
-    enabled = (os.getenv("SENTRIX_FAILOVER_ENABLED", "") or "").strip().lower()
-    role = (os.getenv("SENTRIX_FAILOVER_ROLE", "") or "").strip().lower()
-    return enabled in {"1", "true", "yes", "on"} and role == "standby"
+def _ha_passive_instance(bot) -> bool:
+    """True quand cette instance HA attend volontairement le lease Redis.
+
+    Le rôle déclaré (primary/standby) ne suffit pas : pendant un redéploiement, un
+    nouveau primary peut légitimement rester passif tant qu'une autre instance détient
+    encore le lease. Le launcher HA publie donc son état runtime directement sur le bot.
+    """
+    runtime = getattr(bot, "_sentrix_ha_runtime", None)
+    if not isinstance(runtime, dict):
+        return False
+    if not bool(runtime.get("enabled")):
+        return False
+    if bool(runtime.get("leader")):
+        return False
+    return str(runtime.get("state") or "") in {
+        "waiting_for_leadership",
+        "standby",
+        "blocked",
+    }
 
 
 def _count_members(bot) -> int:
@@ -163,11 +177,17 @@ async def _boot_audit(bot, dashboard) -> None:
     try:
         await asyncio.wait_for(bot.wait_until_ready(), timeout=90)
     except asyncio.TimeoutError:
-        # En HA actif/passif, le standby est sain précisément parce qu'il N'OUVRE PAS
-        # Discord tant que le primary détient le lease Redis. Ce timeout est donc attendu
-        # et ne doit ni polluer Railway en ERROR ni déclencher une alerte de démarrage.
-        if _ha_passive_standby():
-            logger.info("Audit démarrage V45 : standby HA passif, Discord volontairement en attente.")
+        # Une instance HA peut être saine tout en restant volontairement déconnectée de
+        # Discord lorsqu'une autre instance détient le lease Redis. Cela vaut aussi pour
+        # un primary pendant un rolling deploy, pas seulement pour le rôle standby.
+        if _ha_passive_instance(bot):
+            runtime = getattr(bot, "_sentrix_ha_runtime", {}) or {}
+            logger.info(
+                "Audit démarrage V45 : instance HA passive en attente du lease "
+                "(role=%s, state=%s).",
+                runtime.get("role", "inconnu"),
+                runtime.get("state", "inconnu"),
+            )
             return
         logger.error("Audit démarrage V45 : Discord n'est pas devenu prêt en 90 secondes.")
         return
