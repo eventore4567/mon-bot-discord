@@ -25,25 +25,33 @@ def _release_id() -> str:
     return "inconnu"
 
 
-def _ha_passive_instance(bot) -> bool:
-    """True quand cette instance HA attend volontairement le lease Redis.
+def _truthy_env(name: str) -> bool:
+    return (os.getenv(name, "") or "").strip().lower() in {"1", "true", "yes", "on"}
 
-    Le rôle déclaré (primary/standby) ne suffit pas : pendant un redéploiement, un
-    nouveau primary peut légitimement rester passif tant qu'une autre instance détient
-    encore le lease. Le launcher HA publie donc son état runtime directement sur le bot.
+
+def _ha_runtime_state(bot) -> tuple[bool, bool, str, str]:
+    """Retourne (enabled, leader, role, state) depuis le coordinateur HA vivant.
+
+    Le launcher attache son coordinateur au bot avant d'attendre le lease Redis. On garde
+    un fallback environnemental uniquement pour la toute petite fenêtre avant cet attach.
     """
-    runtime = getattr(bot, "_sentrix_ha_runtime", None)
-    if not isinstance(runtime, dict):
-        return False
-    if not bool(runtime.get("enabled")):
-        return False
-    if bool(runtime.get("leader")):
-        return False
-    return str(runtime.get("state") or "") in {
-        "waiting_for_leadership",
-        "standby",
-        "blocked",
-    }
+    coordinator = getattr(bot, "_sentrix_ha_coordinator", None)
+    if coordinator is not None:
+        return (
+            bool(getattr(coordinator, "enabled", False)),
+            bool(getattr(coordinator, "is_leader", False)),
+            str(getattr(coordinator, "role", "inconnu") or "inconnu"),
+            str(getattr(coordinator, "state", "starting") or "starting"),
+        )
+
+    enabled = _truthy_env("SENTRIX_FAILOVER_ENABLED")
+    role = (os.getenv("SENTRIX_FAILOVER_ROLE", "") or "").strip().lower() or "inconnu"
+    return enabled, False, role, "starting"
+
+
+def _ha_passive_instance(bot) -> bool:
+    enabled, leader, _role, state = _ha_runtime_state(bot)
+    return enabled and not leader and state in {"starting", "standby"}
 
 
 def _count_members(bot) -> int:
@@ -177,18 +185,32 @@ async def _boot_audit(bot, dashboard) -> None:
     try:
         await asyncio.wait_for(bot.wait_until_ready(), timeout=90)
     except asyncio.TimeoutError:
+        enabled, leader, role, state = _ha_runtime_state(bot)
+
         # Une instance HA peut être saine tout en restant volontairement déconnectée de
         # Discord lorsqu'une autre instance détient le lease Redis. Cela vaut aussi pour
         # un primary pendant un rolling deploy, pas seulement pour le rôle standby.
         if _ha_passive_instance(bot):
-            runtime = getattr(bot, "_sentrix_ha_runtime", {}) or {}
             logger.info(
                 "Audit démarrage V45 : instance HA passive en attente du lease "
                 "(role=%s, state=%s).",
-                runtime.get("role", "inconnu"),
-                runtime.get("state", "inconnu"),
+                role,
+                state,
             )
             return
+
+        # Redis indisponible est un incident à voir, mais le processus HA est conçu pour
+        # rester vivant et retenter plutôt que de provoquer une boucle de redémarrage.
+        if enabled and not leader and state == "blocked":
+            logger.warning(
+                "Audit démarrage V45 : instance HA bloquée en attente de Redis "
+                "(role=%s).",
+                role,
+            )
+            return
+
+        # Si cette instance détient déjà le lease mais n'est toujours pas prête après
+        # 90 secondes, c'est une vraie anomalie Discord et on conserve le niveau ERROR.
         logger.error("Audit démarrage V45 : Discord n'est pas devenu prêt en 90 secondes.")
         return
     except asyncio.CancelledError:
