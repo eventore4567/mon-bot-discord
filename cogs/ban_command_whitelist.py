@@ -147,20 +147,13 @@ def _patch_permission_runtime(bot: commands.Bot) -> None:
     evaluate_with_ban_whitelist._sentrix_ban_whitelist = True
     evaluate_with_ban_whitelist._sentrix_previous = current
 
-    # Les deux transports (+ et /) lisent ces mêmes points d'entrée.
+    # Les deux transports d'exécution (+ et /) lisent ces mêmes points d'entrée.
+    # Les trois commandes de GESTION de la whitelist restent préfixées uniquement afin
+    # de ne pas consommer le budget slash global ni exposer des outils sensibles au menu.
     matrix.evaluate = evaluate_with_ban_whitelist
     permission_guard.evaluate = evaluate_with_ban_whitelist
     permission_guard.access_matrix.evaluate = evaluate_with_ban_whitelist
     bot._sentrix_ban_whitelist_evaluate = evaluate_with_ban_whitelist
-
-
-def _set_admin_visibility(command: commands.Command) -> None:
-    app_command = getattr(command, "app_command", None)
-    if app_command is not None:
-        try:
-            app_command.default_permissions = discord.Permissions(administrator=True)
-        except Exception:
-            pass
 
 
 def _install_commands(bot: commands.Bot) -> None:
@@ -186,13 +179,12 @@ def _install_commands(bot: commands.Bot) -> None:
                 ),
             )
 
-        command = commands.hybrid_command(
+        command = commands.command(
             name="whitelist-ban",
             aliases=["wlban"],
             description="Autoriser un membre non-admin à utiliser les commandes de bannissement SentriX.",
         )(whitelist_ban)
         bot.add_command(command)
-        _set_admin_visibility(command)
 
     if bot.get_command("unwhitelist-ban") is None:
 
@@ -210,13 +202,12 @@ def _install_commands(bot: commands.Bot) -> None:
                 ),
             )
 
-        command = commands.hybrid_command(
+        command = commands.command(
             name="unwhitelist-ban",
             aliases=["unwlban"],
             description="Retirer un membre de la whitelist des commandes de bannissement.",
         )(unwhitelist_ban)
         bot.add_command(command)
-        _set_admin_visibility(command)
 
     if bot.get_command("whitelist-ban-list") is None:
 
@@ -248,12 +239,11 @@ def _install_commands(bot: commands.Bot) -> None:
                 ),
             )
 
-        command = commands.hybrid_command(
+        command = commands.command(
             name="whitelist-ban-list",
             description="Afficher les membres autorisés à utiliser les commandes de bannissement SentriX.",
         )(whitelist_ban_list)
         bot.add_command(command)
-        _set_admin_visibility(command)
 
 
 async def install(bot: commands.Bot) -> None:
