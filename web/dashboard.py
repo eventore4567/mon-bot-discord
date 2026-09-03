@@ -1085,6 +1085,41 @@ INDEX_HTML = r"""<!doctype html>
     @media(max-width:980px){.hero{grid-template-columns:1fr}.preview{transform:none}.features{grid-template-columns:1fr}.shell{grid-template-columns:1fr}.side{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line)}.nav{display:flex;overflow:auto}.nav button{min-width:max-content}.side-bottom{display:none}.overview{grid-template-columns:1fr 1fr}.workspace-head{align-items:stretch;flex-direction:column}.server-select{min-width:0}.fields{grid-template-columns:1fr}.field.full{grid-column:auto}}
     @media(max-width:560px){.sanction-toolbar{grid-template-columns:1fr}.sanction-head,.sanction-body{grid-template-columns:1fr;display:grid}.top{padding:0 18px}.hero{padding:60px 20px}.features{padding:10px 20px 60px}.hero h1{font-size:45px}.overview{grid-template-columns:1fr}.preview-grid{grid-template-columns:1fr}.workspace{padding:25px 16px}.fields{padding:16px}.panel-head{padding:17px}.status span{display:none}}
   </style>
+  <style id="sentrix-motion">
+    /* Animations additives : le dashboard reel (apres connexion) n'avait
+       jusqu'ici aucune transition, contrairement a la page d'accueil.
+       Purement visuel — aucune classe existante n'est retiree ni renommee,
+       aucun script n'est modifie. */
+    @media(prefers-reduced-motion:no-preference){
+      @keyframes sxAppFade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+      @keyframes sxAppRise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+      .shell:not(.hidden) .side nav button{opacity:0;animation:sxAppFade .4s ease both}
+      .shell:not(.hidden) .side nav button:nth-child(1){animation-delay:.03s}
+      .shell:not(.hidden) .side nav button:nth-child(2){animation-delay:.06s}
+      .shell:not(.hidden) .side nav button:nth-child(3){animation-delay:.09s}
+      .shell:not(.hidden) .side nav button:nth-child(4){animation-delay:.12s}
+      .shell:not(.hidden) .side nav button:nth-child(5){animation-delay:.15s}
+      .shell:not(.hidden) .side nav button:nth-child(6){animation-delay:.18s}
+      .shell:not(.hidden) .side nav button:nth-child(7){animation-delay:.21s}
+      .shell:not(.hidden) .side nav button:nth-child(8){animation-delay:.24s}
+      .shell:not(.hidden) .side nav button:nth-child(9){animation-delay:.27s}
+      .shell:not(.hidden) .side nav button:nth-child(10){animation-delay:.3s}
+      .metric{animation:sxAppRise .45s cubic-bezier(.2,.8,.2,1) both}
+      .metric:nth-child(1){animation-delay:.05s}
+      .metric:nth-child(2){animation-delay:.1s}
+      .metric:nth-child(3){animation-delay:.15s}
+      .metric:nth-child(4){animation-delay:.2s}
+      .panel{animation:sxAppFade .35s ease both}
+      #toast:not(.hidden){animation:sxAppRise .3s cubic-bezier(.2,.8,.2,1) both}
+    }
+    .btn{transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease,background .16s ease}
+    .btn:hover{transform:translateY(-2px);box-shadow:0 10px 26px #0006}
+    .btn:active{transform:translateY(0);box-shadow:none}
+    .side nav button{transition:background .16s ease,color .16s ease,padding-left .16s ease}
+    .side nav button:hover{padding-left:4px}
+    .metric,.panel{transition:box-shadow .2s ease,transform .2s ease}
+    .metric:hover{transform:translateY(-3px)}
+  </style>
 </head>
 <body>
   <section id="landing">
