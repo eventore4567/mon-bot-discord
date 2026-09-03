@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS guild_config (
     verification_channel INTEGER,
     verification_role INTEGER,
     verify_role INTEGER,
+    verify_captcha_enabled INTEGER DEFAULT 1,
+    verify_captcha_max_attempts INTEGER DEFAULT 3,
     security_level TEXT DEFAULT 'moyen',
     xp_multiplier REAL DEFAULT 1.0,
     xp_channel_disabled TEXT DEFAULT '',
@@ -433,6 +435,20 @@ CREATE TABLE IF NOT EXISTS verified_users (
     guild_id INTEGER,
     user_id INTEGER,
     verified_at INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+-- Session de CAPTCHA en cours pour un membre (cogs/verification.py). Une seule session
+-- active par membre : un nouveau code écrase la précédente. locked_until fait patienter
+-- un membre qui a épuisé ses tentatives sans jamais le bloquer définitivement.
+CREATE TABLE IF NOT EXISTS verification_captcha_sessions (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    locked_until INTEGER,
     PRIMARY KEY (guild_id, user_id)
 );
 
@@ -998,6 +1014,13 @@ GUILD_CONFIG_NEW_COLUMNS = {
     # Ajoutée pour la Phase 1 de la refonte visuelle (+designsetup) : mêmes principes que
     # stats_settings_json — un seul blob JSON pour tous les réglages de design.
     "design_settings_json": "TEXT DEFAULT '{}'",
+    # CAPTCHA de vérification (cogs/verification.py) : le rôle configuré via verify_role
+    # n'est plus donné immédiatement au clic sur "J'ai lu les règles", seulement après un
+    # défi réussi. Activé par défaut : c'est l'amélioration de sécurité demandée, un
+    # administrateur qui préfère l'ancien comportement instantané peut le désactiver depuis
+    # /setup (section Règles).
+    "verify_captcha_enabled": "INTEGER DEFAULT 1",
+    "verify_captcha_max_attempts": "INTEGER DEFAULT 3",
 }
 
 # Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"

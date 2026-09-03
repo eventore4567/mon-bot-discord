@@ -6,14 +6,20 @@ Cog VÉRIFICATION / RÔLES.
 """
 
 import asyncio
+import io
+import logging
+import random
+import time
 import unicodedata
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks, design_system
+from utils import embeds, checks, design_system, visual_v5
 from utils import sentrix_panels as panels
 from database.db import now
+
+logger = logging.getLogger("bot.verification")
 
 
 def _emoji_parts(raw: str) -> tuple[str, str, discord.PartialEmoji]:
@@ -50,6 +56,30 @@ def _self_role_error(guild: discord.Guild, role: discord.Role) -> str | None:
         or permissions.manage_webhooks
     ):
         return "Les rôles d'administration ou de modération ne peuvent pas être obtenus automatiquement."
+    return None
+
+
+def role_grant_problem(guild: discord.Guild, role: discord.Role | None) -> str | None:
+    """Diagnostic explicite : pourquoi (ou si) SentriX ne peut pas donner ce rôle.
+
+    Contrairement à _self_role_error (rôles en self-service, où un membre choisit lui-même
+    -- les rôles d'administration y sont donc exclus par sécurité), verify_role est choisi
+    par un administrateur dans /setup : seule la faisabilité TECHNIQUE compte ici. Utilisé
+    à la fois par le setup (avertir avant l'envoi du panneau) et par le flux de vérification
+    réel (ne jamais échouer en silence -- voir do_verify)."""
+    if role is None:
+        return "Le rôle de vérification configuré est introuvable (peut-être supprimé)."
+    if role.is_default():
+        return "Le rôle @everyone ne peut pas être utilisé comme rôle de vérification."
+    if role.managed:
+        return "Ce rôle est géré par Discord ou une intégration : il ne peut pas être attribué manuellement."
+    me = guild.me
+    if me is None:
+        return "SentriX n'est pas disponible dans le cache de ce serveur."
+    if not me.guild_permissions.manage_roles:
+        return "SentriX n'a pas la permission **Gérer les rôles**."
+    if role >= me.top_role:
+        return "Le rôle de SentriX doit être placé au-dessus du rôle de vérification (Paramètres du serveur > Rôles)."
     return None
 
 
@@ -96,6 +126,165 @@ class SelfRolePublicView(discord.ui.View):
     def __init__(self, options: list[discord.SelectOption] | None = None, *, handler: bool = False):
         super().__init__(timeout=None)
         self.add_item(SelfRoleSelect(options, handler=handler))
+
+
+# ---------------------------------------------------------------------------
+# CAPTCHA de vérification : un défi image (code à recopier) s'intercale entre
+# « J'ai lu les règles » et l'attribution réelle du rôle configuré. Simple pour un humain,
+# mais impossible à résoudre sans vision (OCR) pour un bot de raid basique -- contrairement
+# à un code montré en texte brut, qu'un script peut lire et retaper sans aucun effort.
+# ---------------------------------------------------------------------------
+
+_CAPTCHA_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sans 0/O ni 1/I/L : ambigus à l'oeil
+_CAPTCHA_CODE_LENGTH = 5
+_CAPTCHA_TTL_SECONDS = 5 * 60
+_CAPTCHA_LOCKOUT_SECONDS = 10 * 60
+_CAPTCHA_CLICK_COOLDOWN_SECONDS = 3.0
+
+# Anti-spam du bouton "J'ai lu les règles" : purement en mémoire (pas besoin de survivre à
+# un redémarrage, une fenêtre de quelques secondes suffit). Clé (guild_id, user_id).
+_recent_verify_clicks: dict[tuple[int, int], float] = {}
+
+
+def _click_is_spam(guild_id: int, user_id: int) -> bool:
+    key = (int(guild_id), int(user_id))
+    now_value = time.monotonic()
+    last = _recent_verify_clicks.get(key)
+    _recent_verify_clicks[key] = now_value
+    if len(_recent_verify_clicks) > 8192:
+        cutoff = now_value - 60.0
+        for stale_key, seen_at in tuple(_recent_verify_clicks.items()):
+            if seen_at < cutoff:
+                _recent_verify_clicks.pop(stale_key, None)
+    return last is not None and (now_value - last) < _CAPTCHA_CLICK_COOLDOWN_SECONDS
+
+
+def _generate_captcha_code() -> str:
+    return "".join(random.choices(_CAPTCHA_ALPHABET, k=_CAPTCHA_CODE_LENGTH))
+
+
+def _render_captcha_image(code: str) -> bytes:
+    """PNG avec bruit/distorsion : lisible en quelques secondes par un humain, illisible
+    par un simple parseur de texte puisque le code n'apparaît jamais en clair."""
+    from PIL import Image, ImageDraw
+
+    width, height = 260, 100
+    image = Image.new("RGB", (width, height), (244, 245, 250))
+    draw = ImageDraw.Draw(image)
+
+    for _ in range(6):
+        draw.line(
+            (random.randint(0, width), random.randint(0, height), random.randint(0, width), random.randint(0, height)),
+            fill=(200, 205, 218), width=2,
+        )
+    for _ in range(140):
+        draw.point((random.randint(0, width - 1), random.randint(0, height - 1)), fill=(188, 193, 205))
+
+    font = visual_v5._font(50, bold=True)
+    char_width = width // len(code)
+    colours = ((60, 55, 130), (95, 40, 120), (35, 90, 130), (110, 60, 40), (40, 110, 80))
+    for index, character in enumerate(code):
+        layer = Image.new("RGBA", (char_width, height), (0, 0, 0, 0))
+        layer_draw = ImageDraw.Draw(layer)
+        layer_draw.text((char_width // 2, height // 2), character, font=font, fill=random.choice(colours), anchor="mm")
+        rotated = layer.rotate(random.randint(-30, 30), expand=False, resample=Image.BICUBIC)
+        image.paste(rotated, (index * char_width, random.randint(-8, 8)), rotated)
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer.read()
+
+
+async def _get_captcha_session(bot, guild_id: int, user_id: int) -> dict | None:
+    row = await bot.db.fetchone(
+        "SELECT * FROM verification_captcha_sessions WHERE guild_id = ? AND user_id = ?",
+        (guild_id, user_id),
+    )
+    return dict(row) if row else None
+
+
+async def _start_captcha_session(bot, guild_id: int, user_id: int) -> str:
+    code = _generate_captcha_code()
+    created_at = int(time.time())
+    await bot.db.execute(
+        "INSERT INTO verification_captcha_sessions (guild_id, user_id, code, attempts, created_at, expires_at, locked_until) "
+        "VALUES (?, ?, ?, 0, ?, ?, NULL) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET code = excluded.code, attempts = 0, "
+        "created_at = excluded.created_at, expires_at = excluded.expires_at, locked_until = NULL",
+        (guild_id, user_id, code, created_at, created_at + _CAPTCHA_TTL_SECONDS),
+    )
+    return code
+
+
+async def _clear_captcha_session(bot, guild_id: int, user_id: int) -> None:
+    await bot.db.execute(
+        "DELETE FROM verification_captcha_sessions WHERE guild_id = ? AND user_id = ?",
+        (guild_id, user_id),
+    )
+
+
+async def _fail_captcha_attempt(bot, guild_id: int, user_id: int, max_attempts: int) -> tuple[bool, str | None, int]:
+    """Incrémente les tentatives et régénère TOUJOURS un nouveau code pour la prochaine
+    (un bot qui aurait mémorisé l'image précédente ne peut pas juste réessayer le même
+    OCR). Renvoie (verrouillé, nouveau_code_ou_None_si_verrouille, tentatives_utilisees)."""
+    session = await _get_captcha_session(bot, guild_id, user_id)
+    attempts = (int(session["attempts"]) if session else 0) + 1
+    if attempts >= max(1, int(max_attempts)):
+        locked_until = int(time.time()) + _CAPTCHA_LOCKOUT_SECONDS
+        await bot.db.execute(
+            "UPDATE verification_captcha_sessions SET attempts = ?, locked_until = ? WHERE guild_id = ? AND user_id = ?",
+            (attempts, locked_until, guild_id, user_id),
+        )
+        return True, None, attempts
+    new_code = _generate_captcha_code()
+    await bot.db.execute(
+        "UPDATE verification_captcha_sessions SET code = ?, attempts = ? WHERE guild_id = ? AND user_id = ?",
+        (new_code, attempts, guild_id, user_id),
+    )
+    return False, new_code, attempts
+
+
+async def _captcha_file_and_embed(cog: "Verification", guild_id: int, code: str, *, title: str, description: str, kind: str = "primary"):
+    image_bytes = _render_captcha_image(code)
+    file = discord.File(io.BytesIO(image_bytes), filename="captcha.png")
+    embed = await cog._embed(guild_id, title=title, description=description, kind=kind)
+    embed.set_image(url="attachment://captcha.png")
+    return file, embed
+
+
+class CaptchaModal(discord.ui.Modal, title="Vérification — Entrez le code"):
+    code_input = discord.ui.TextInput(label="Code affiché sur l'image", max_length=10, placeholder="Ex : 7K3PL")
+
+    def __init__(self, cog: "Verification"):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.cog.handle_captcha_submission(interaction, str(self.code_input.value))
+
+
+class CaptchaOpenModalView(discord.ui.View):
+    """Vue éphémère à courte durée de vie (liée à une session CAPTCHA de quelques minutes) :
+    n'a pas besoin d'un custom_id persistant. Le bouton "J'ai lu les règles" sur le panneau
+    permanent, lui (VerifyView plus bas), reste enregistré comme vue persistante et survit
+    donc normalement à un redémarrage -- relancer le défi après un redémarrage revient
+    simplement à recliquer ce bouton-là."""
+
+    def __init__(self, cog: "Verification", author_id: int):
+        super().__init__(timeout=_CAPTCHA_TTL_SECONDS)
+        self.cog = cog
+        self.author_id = int(author_id)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Ce défi ne vous appartient pas.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Entrer le code", style=discord.ButtonStyle.primary)
+    async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(CaptchaModal(self.cog))
 
 
 class VerifyView(discord.ui.View):
@@ -279,25 +468,151 @@ class Verification(commands.Cog, name="Verification"):
             lines.append("Retiré : " + ", ".join(role.mention for role in removed))
         await interaction.followup.send("\n".join(lines), ephemeral=True)
 
-    async def do_verify(self, interaction: discord.Interaction):
-        conf = await self.bot.db.get_guild_config(interaction.guild.id)
+    async def _grant_verified_role(self, interaction: discord.Interaction, role: discord.Role) -> None:
+        """Point d'écriture UNIQUE du rôle vérifié — appelé aussi bien sans CAPTCHA
+        (désactivé) qu'après un CAPTCHA réussi. Ne échoue jamais en silence : Discord
+        refuse ? Le membre ET les logs le savent, avec la cause exacte."""
+        member = interaction.user
+        try:
+            await member.add_roles(role, reason="Vérification via panneau SentriX")
+        except discord.Forbidden:
+            logger.error(
+                "Attribution du rôle de vérification refusée guild=%s user=%s role=%s : "
+                "permission Discord manquante ou hiérarchie insuffisante malgré la vérification préalable.",
+                interaction.guild.id, member.id, role.id,
+            )
+            return await interaction.response.send_message(
+                "Discord a refusé l'attribution du rôle. Un administrateur doit vérifier que le rôle de "
+                "SentriX est bien placé au-dessus du rôle de vérification, puis relancer la vérification.",
+                ephemeral=True,
+            )
+        await self.bot.db.execute(
+            "INSERT OR IGNORE INTO verified_users (guild_id, user_id, verified_at) VALUES (?, ?, strftime('%s','now'))",
+            (interaction.guild.id, member.id),
+        )
+        await interaction.response.send_message("● Vous avez été vérifié avec succès !", ephemeral=True)
+
+    async def _send_captcha_challenge(self, interaction: discord.Interaction, *, new_session: bool) -> None:
+        guild, member = interaction.guild, interaction.user
+        if new_session:
+            code = await _start_captcha_session(self.bot, guild.id, member.id)
+        else:
+            session = await _get_captcha_session(self.bot, guild.id, member.id)
+            code = session["code"] if session else await _start_captcha_session(self.bot, guild.id, member.id)
+        file, embed = await _captcha_file_and_embed(
+            self, guild.id, code,
+            title="Vérification — CAPTCHA",
+            description=(
+                "Recopiez le code affiché sur l'image ci-dessous, puis cliquez sur **Entrer le code**.\n"
+                "Ce défi expire dans quelques minutes et n'est visible que par vous."
+            ),
+        )
+        await interaction.response.send_message(embed=embed, file=file, view=CaptchaOpenModalView(self, member.id), ephemeral=True)
+
+    async def do_verify(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        member = interaction.user
+        if guild is None or not isinstance(member, discord.Member):
+            return await interaction.response.send_message("Cette action doit se faire sur un serveur.", ephemeral=True)
+
+        # Anti-spam du bouton lui-même, avant toute lecture DB : un clic répété très
+        # rapproché n'a aucune raison légitime et ne doit pas régénérer d'image à chaque fois.
+        if _click_is_spam(guild.id, member.id):
+            return await interaction.response.send_message(
+                "Vous venez déjà de cliquer. Patientez quelques secondes avant de réessayer.",
+                ephemeral=True,
+            )
+
+        conf = await self.bot.db.get_guild_config(guild.id)
         role_id = conf["verify_role"] if conf else None
         if not role_id:
             return await interaction.response.send_message("Aucun rôle de vérification n'est configuré sur ce serveur.", ephemeral=True)
-        role = interaction.guild.get_role(role_id)
-        if not role:
-            return await interaction.response.send_message("Le rôle de vérification configuré est introuvable.", ephemeral=True)
-        if role in interaction.user.roles:
+        role = guild.get_role(int(role_id))
+        problem = role_grant_problem(guild, role)
+        if problem:
+            logger.warning("Vérification bloquée guild=%s role=%s : %s", guild.id, role_id, problem)
+            return await interaction.response.send_message(f"Vérification impossible pour le moment : {problem}", ephemeral=True)
+        if role in member.roles:
+            await _clear_captcha_session(self.bot, guild.id, member.id)
             return await interaction.response.send_message("Vous êtes déjà vérifié !", ephemeral=True)
-        try:
-            await interaction.user.add_roles(role, reason="Vérification via panneau")
-        except discord.Forbidden:
-            return await interaction.response.send_message("Je n'ai pas la permission d'attribuer ce rôle.", ephemeral=True)
-        await self.bot.db.execute(
-            "INSERT OR IGNORE INTO verified_users (guild_id, user_id, verified_at) VALUES (?, ?, strftime('%s','now'))",
-            (interaction.guild.id, interaction.user.id),
-        )
-        await interaction.response.send_message("● Vous avez été vérifié avec succès !", ephemeral=True)
+
+        captcha_on = bool(conf["verify_captcha_enabled"]) if conf and "verify_captcha_enabled" in conf.keys() else True
+        if not captcha_on:
+            return await self._grant_verified_role(interaction, role)
+
+        session = await _get_captcha_session(self.bot, guild.id, member.id)
+        now_value = int(time.time())
+        if session and session.get("locked_until") and int(session["locked_until"]) > now_value:
+            minutes = max(1, (int(session["locked_until"]) - now_value) // 60)
+            return await interaction.response.send_message(
+                f"Trop de tentatives incorrectes. Réessayez dans environ {minutes} minute(s), "
+                "ou contactez un membre du staff.",
+                ephemeral=True,
+            )
+        # Une session valide et pas verrouillée deja en cours ? Reaffiche EXACTEMENT le meme
+        # defi (meme code, memes tentatives deja utilisees) au lieu d'en redemarrer une
+        # nouvelle a chaque clic : sinon, spammer ce bouton reinitialiserait indefiniment le
+        # compteur de tentatives et contournerait la limite.
+        has_live_session = bool(session) and int(session["expires_at"]) > now_value and not session.get("locked_until")
+        await self._send_captcha_challenge(interaction, new_session=not has_live_session)
+
+    async def handle_captcha_submission(self, interaction: discord.Interaction, submitted: str) -> None:
+        guild = interaction.guild
+        member = interaction.user
+        if guild is None or not isinstance(member, discord.Member):
+            return await interaction.response.send_message("Cette action doit se faire sur un serveur.", ephemeral=True)
+
+        conf = await self.bot.db.get_guild_config(guild.id)
+        role_id = conf["verify_role"] if conf else None
+        role = guild.get_role(int(role_id)) if role_id else None
+        problem = role_grant_problem(guild, role)
+        if problem:
+            return await interaction.response.send_message(f"Vérification impossible pour le moment : {problem}", ephemeral=True)
+        if role in member.roles:
+            await _clear_captcha_session(self.bot, guild.id, member.id)
+            return await interaction.response.send_message("Vous êtes déjà vérifié !", ephemeral=True)
+
+        session = await _get_captcha_session(self.bot, guild.id, member.id)
+        now_value = int(time.time())
+        if not session:
+            return await interaction.response.send_message(
+                "Ce défi n'existe plus. Cliquez de nouveau sur le bouton du panneau de règles pour en obtenir un nouveau.",
+                ephemeral=True,
+            )
+        if int(session["expires_at"]) < now_value:
+            await _clear_captcha_session(self.bot, guild.id, member.id)
+            return await interaction.response.send_message(
+                "Ce code a expiré. Cliquez de nouveau sur le bouton du panneau de règles pour en obtenir un nouveau.",
+                ephemeral=True,
+            )
+        if session.get("locked_until") and int(session["locked_until"]) > now_value:
+            minutes = max(1, (int(session["locked_until"]) - now_value) // 60)
+            return await interaction.response.send_message(
+                f"Trop de tentatives incorrectes. Réessayez dans environ {minutes} minute(s).",
+                ephemeral=True,
+            )
+
+        if submitted.strip().upper() != str(session["code"]).upper():
+            max_attempts = int(conf["verify_captcha_max_attempts"]) if conf and conf["verify_captcha_max_attempts"] else 3
+            locked, new_code, attempts = await _fail_captcha_attempt(self.bot, guild.id, member.id, max_attempts)
+            if locked:
+                return await interaction.response.send_message(
+                    f"Code incorrect ({attempts}/{max_attempts} tentative(s)). Trop d'essais : réessayez dans "
+                    f"environ {_CAPTCHA_LOCKOUT_SECONDS // 60} minutes, ou contactez un membre du staff.",
+                    ephemeral=True,
+                )
+            file, embed = await _captcha_file_and_embed(
+                self, guild.id, new_code,
+                title="Code incorrect",
+                description=f"Ce n'était pas le bon code ({attempts}/{max_attempts} tentative(s) utilisée(s)). Voici un nouveau défi :",
+                kind="warning",
+            )
+            return await interaction.response.send_message(
+                embed=embed, file=file, view=CaptchaOpenModalView(self, member.id), ephemeral=True,
+            )
+
+        await _clear_captcha_session(self.bot, guild.id, member.id)
+        await self._grant_verified_role(interaction, role)
 
     @commands.hybrid_command(name="verify-setup", description="Définir le rôle attribué lors de la vérification.")
     @app_commands.describe(role="Le rôle à attribuer aux membres vérifiés")

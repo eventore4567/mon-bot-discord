@@ -307,6 +307,7 @@ class V3CategorySelect(discord.ui.Select):
             options.append(discord.SelectOption(label="Sécurité — Vérification", value="security_verification", description="Vérification renforcée et honeypot anti-bot"))
         if "roles" in setup_ui.CATEGORIES:
             options.append(discord.SelectOption(label="Rôles — Panel de choix", value="roles_panel", description="Salon et rôles proposés aux membres"))
+            options.append(discord.SelectOption(label="Rôles — Règles & CAPTCHA", value="roles_rules", description="Salon des règles, rôle donné et CAPTCHA de vérification"))
         super().__init__(placeholder="Choisir une page du Control Center", options=options[:25], row=0)
 
     async def callback(self, interaction: discord.Interaction):
@@ -320,6 +321,9 @@ class V3CategorySelect(discord.ui.Select):
         elif value == "roles_panel":
             self.owner.category = "roles"
             self.owner._v3_subpage = "panel"
+        elif value == "roles_rules":
+            self.owner.category = "roles"
+            self.owner._v3_subpage = "rules"
         else:
             self.owner.category = value
         self.owner.selected_log = self.owner.selected_ticket = self.owner.selected_notification = None
@@ -432,6 +436,87 @@ class RolePanelRolesSelect(discord.ui.RoleSelect):
             )
 
 
+class CaptchaToggleButton(discord.ui.Button):
+    """Active/désactive le CAPTCHA de vérification. Le libellé réel (ON/OFF) est corrigé
+    juste avant l'envoi par _v3_refresh, comme ModuleToggle : impossible de lire la DB
+    depuis __init__ (synchrone)."""
+
+    def __init__(self, owner):
+        self.owner = owner
+        super().__init__(label="CAPTCHA : …", style=discord.ButtonStyle.secondary, row=4)
+
+    async def callback(self, interaction: discord.Interaction):
+        conf = await self.owner.bot.db.get_guild_config(self.owner.guild.id)
+        enabled = bool(setup_ui._get(conf, "verify_captcha_enabled", 1))
+        await self.owner.bot.db.set_guild_config(self.owner.guild.id, "verify_captcha_enabled", int(not enabled))
+        await self.owner.audit(interaction.user.id, "verify_captcha_enabled", int(not enabled))
+        await self.owner.refresh(interaction)
+
+
+class CaptchaMaxAttemptsModal(discord.ui.Modal, title="Tentatives CAPTCHA"):
+    attempts = discord.ui.TextInput(label="Tentatives maximum (1 à 10)", default="3", max_length=2)
+
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            value = max(1, min(10, int(str(self.attempts.value).strip())))
+        except ValueError:
+            return await interaction.response.send_message("Utilisez un nombre entre 1 et 10.", ephemeral=True)
+        await self.owner.bot.db.set_guild_config(self.owner.guild.id, "verify_captcha_max_attempts", value)
+        await self.owner.audit(interaction.user.id, "verify_captcha_max_attempts", value)
+        self.owner.render()
+        await interaction.response.edit_message(embed=await self.owner.build_embed(), view=self.owner)
+
+
+class CaptchaMaxAttemptsButton(discord.ui.Button):
+    def __init__(self, owner):
+        self.owner = owner
+        super().__init__(label="Tentatives max.", style=discord.ButtonStyle.secondary, row=4)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(CaptchaMaxAttemptsModal(self.owner))
+
+
+class SendRulesPanelButton(discord.ui.Button):
+    def __init__(self, owner):
+        self.owner = owner
+        super().__init__(label="Envoyer / recréer le panneau", style=discord.ButtonStyle.primary, row=4)
+
+    async def callback(self, interaction: discord.Interaction):
+        conf = await self.owner.bot.db.get_guild_config(self.owner.guild.id)
+        channel_id = setup_ui._get(conf, "rules_channel")
+        channel = self.owner.guild.get_channel(int(channel_id)) if channel_id else None
+        if channel is None:
+            return await interaction.response.send_message(
+                "Choisissez d'abord un salon des règles ci-dessus.", ephemeral=True,
+            )
+        role_id = setup_ui._get(conf, "verify_role") or setup_ui._get(conf, "verification_role")
+        role = self.owner.guild.get_role(int(role_id)) if role_id else None
+        problem = verification_module.role_grant_problem(self.owner.guild, role)
+        if problem:
+            return await interaction.response.send_message(
+                f"Panneau non envoyé : {problem}", ephemeral=True,
+            )
+        cog = self.owner.bot.get_cog("Verification")
+        if cog is None:
+            return await interaction.response.send_message(
+                "Le module de vérification n'est pas chargé pour le moment.", ephemeral=True,
+            )
+        embed = await cog._embed(
+            self.owner.guild.id,
+            title="Vérification",
+            description="Cliquez sur le bouton ci-dessous après avoir lu les règles du serveur pour obtenir l'accès complet.",
+        )
+        try:
+            await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(embed), verification_module.VerifyView()))
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            return await interaction.response.send_message(f"Discord a refusé l'envoi : {exc}", ephemeral=True)
+        await interaction.response.send_message(f"Panneau envoyé dans {channel.mention}.", ephemeral=True)
+
+
 class AiActionSelect(discord.ui.Select):
     def __init__(self, owner):
         self.owner = owner
@@ -532,6 +617,8 @@ async def _v3_build_embed(self) -> discord.Embed:
         page_title = "Sécurité — Vérification"
     elif self.category == "roles" and subpage == "panel":
         page_title = "Rôles — Panel de choix"
+    elif self.category == "roles" and subpage == "rules":
+        page_title = "Rôles — Règles & CAPTCHA"
 
     panel = embeds.brand(f"SentriX — {page_title}", description)
     panel.add_field(name="État", value=f"**{shown_state}**", inline=True)
@@ -580,6 +667,26 @@ async def _v3_build_embed(self) -> discord.Embed:
         me = self.guild.me
         role_ok = bool(me and me.guild_permissions.manage_roles)
         panel.add_field(name="Vérification technique", value="Gérer les rôles : OK" if role_ok else "Gérer les rôles : MANQUANT", inline=False)
+    elif self.category == "roles" and subpage == "rules":
+        role_id = setup_ui._get(conf, "verify_role") or setup_ui._get(conf, "verification_role")
+        role = self.guild.get_role(int(role_id)) if role_id else None
+        captcha_on = bool(setup_ui._get(conf, "verify_captcha_enabled", 1))
+        max_attempts = setup_ui._get(conf, "verify_captcha_max_attempts", 3)
+        # Une couche partagée bien plus en aval du setup (setup_oxyde_v69.py::_build_page,
+        # limit=4 -- pas 5, pas 6, un plafond DIFFERENT de celui de setup_polish_v70.py sur
+        # la MEME chaine) plafonne chaque page à 4 champs propres, quelle que soit la
+        # catégorie -- pas seulement celle-ci. Mesuré en instrumentant add_field() sur un
+        # boot complet : un 5e champ ("Vérification technique" à part) disparaissait
+        # silencieusement. On fusionne donc le diagnostic dans le champ du rôle plutôt que
+        # de lui laisser son propre champ, pour rester à 4 sans rien perdre.
+        problem = verification_module.role_grant_problem(self.guild, role)
+        role_value = setup_ui._role(self.guild, role_id)
+        if problem:
+            role_value += f"\n⚠️ {problem}"
+        panel.add_field(name="Salon des règles", value=setup_ui._channel(self.guild, setup_ui._get(conf, "rules_channel")), inline=True)
+        panel.add_field(name="Rôle donné", value=role_value, inline=True)
+        panel.add_field(name="CAPTCHA", value=_state_text(captcha_on), inline=True)
+        panel.add_field(name="Tentatives max.", value=f"**{max_attempts}**", inline=True)
     elif self.category == "roles":
         rewards = await self.bot.db.fetchall("SELECT level,role_id FROM level_roles WHERE guild_id=? ORDER BY level", (self.guild.id,))
         panel.add_field(
@@ -671,10 +778,15 @@ def _v3_render(self) -> None:
     elif self.category == "roles" and subpage == "panel":
         self.add_item(RolePanelChannelSelect(self))
         self.add_item(RolePanelRolesSelect(self))
+    elif self.category == "roles" and subpage == "rules":
+        self.add_item(setup_ui.FieldChannelSelect(self, "rules_channel", "Salon des règles", 2))
+        self.add_item(setup_ui.FieldRoleSelect(self, "verify_role", "Rôle donné après vérification", 3))
+        self.add_item(CaptchaToggleButton(self))
+        self.add_item(CaptchaMaxAttemptsButton(self))
+        self.add_item(SendRulesPanelButton(self))
     elif self.category == "roles":
         self.add_item(setup_ui.FieldRoleSelect(self, "autorole", "Autorole", 2))
-        self.add_item(setup_ui.FieldRoleSelect(self, "verify_role", "Rôle vérifié", 3))
-        self.add_item(setup_ui.FieldRoleSelect(self, "member_role", "Rôle membre principal", 4))
+        self.add_item(setup_ui.FieldRoleSelect(self, "member_role", "Rôle membre principal", 3))
     elif self.category == "levels":
         self.add_item(setup_ui.FieldChannelSelect(self, "level_channel", "Salon des niveaux", 2))
     elif self.category == "logs":
@@ -695,6 +807,13 @@ async def _v3_refresh(self, interaction: discord.Interaction):
             if isinstance(child, ModuleToggle):
                 child.label = "Désactiver" if enabled else "Activer"
                 child.style = discord.ButtonStyle.secondary if enabled else discord.ButtonStyle.success
+    if self.category == "roles" and getattr(self, "_v3_subpage", None) == "rules":
+        conf = await self.bot.db.get_guild_config(self.guild.id)
+        captcha_on = bool(setup_ui._get(conf, "verify_captcha_enabled", 1))
+        for child in self.children:
+            if isinstance(child, CaptchaToggleButton):
+                child.label = "CAPTCHA : Activé" if captcha_on else "CAPTCHA : Désactivé"
+                child.style = discord.ButtonStyle.success if captcha_on else discord.ButtonStyle.secondary
     await interaction.response.edit_message(embed=await self.build_embed(), view=self)
 
 
