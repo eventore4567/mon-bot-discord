@@ -25,6 +25,35 @@ def _release_id() -> str:
     return "inconnu"
 
 
+def _truthy_env(name: str) -> bool:
+    return (os.getenv(name, "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ha_runtime_state(bot) -> tuple[bool, bool, str, str]:
+    """Retourne (enabled, leader, role, state) depuis le coordinateur HA vivant.
+
+    Le launcher attache son coordinateur au bot avant d'attendre le lease Redis. On garde
+    un fallback environnemental uniquement pour la toute petite fenêtre avant cet attach.
+    """
+    coordinator = getattr(bot, "_sentrix_ha_coordinator", None)
+    if coordinator is not None:
+        return (
+            bool(getattr(coordinator, "enabled", False)),
+            bool(getattr(coordinator, "is_leader", False)),
+            str(getattr(coordinator, "role", "inconnu") or "inconnu"),
+            str(getattr(coordinator, "state", "starting") or "starting"),
+        )
+
+    enabled = _truthy_env("SENTRIX_FAILOVER_ENABLED")
+    role = (os.getenv("SENTRIX_FAILOVER_ROLE", "") or "").strip().lower() or "inconnu"
+    return enabled, False, role, "starting"
+
+
+def _ha_passive_instance(bot) -> bool:
+    enabled, leader, _role, state = _ha_runtime_state(bot)
+    return enabled and not leader and state in {"starting", "standby"}
+
+
 def _count_members(bot) -> int:
     return sum(max(0, int(getattr(guild, "member_count", 0) or 0)) for guild in getattr(bot, "guilds", []) or [])
 
@@ -156,6 +185,32 @@ async def _boot_audit(bot, dashboard) -> None:
     try:
         await asyncio.wait_for(bot.wait_until_ready(), timeout=90)
     except asyncio.TimeoutError:
+        enabled, leader, role, state = _ha_runtime_state(bot)
+
+        # Une instance HA peut être saine tout en restant volontairement déconnectée de
+        # Discord lorsqu'une autre instance détient le lease Redis. Cela vaut aussi pour
+        # un primary pendant un rolling deploy, pas seulement pour le rôle standby.
+        if _ha_passive_instance(bot):
+            logger.info(
+                "Audit démarrage V45 : instance HA passive en attente du lease "
+                "(role=%s, state=%s).",
+                role,
+                state,
+            )
+            return
+
+        # Redis indisponible est un incident à voir, mais le processus HA est conçu pour
+        # rester vivant et retenter plutôt que de provoquer une boucle de redémarrage.
+        if enabled and not leader and state == "blocked":
+            logger.warning(
+                "Audit démarrage V45 : instance HA bloquée en attente de Redis "
+                "(role=%s).",
+                role,
+            )
+            return
+
+        # Si cette instance détient déjà le lease mais n'est toujours pas prête après
+        # 90 secondes, c'est une vraie anomalie Discord et on conserve le niveau ERROR.
         logger.error("Audit démarrage V45 : Discord n'est pas devenu prêt en 90 secondes.")
         return
     except asyncio.CancelledError:
