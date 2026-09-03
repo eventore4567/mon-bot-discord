@@ -25,6 +25,13 @@ def _release_id() -> str:
     return "inconnu"
 
 
+def _ha_passive_standby() -> bool:
+    """True quand cette instance HA est volontairement le secours passif."""
+    enabled = (os.getenv("SENTRIX_FAILOVER_ENABLED", "") or "").strip().lower()
+    role = (os.getenv("SENTRIX_FAILOVER_ROLE", "") or "").strip().lower()
+    return enabled in {"1", "true", "yes", "on"} and role == "standby"
+
+
 def _count_members(bot) -> int:
     return sum(max(0, int(getattr(guild, "member_count", 0) or 0)) for guild in getattr(bot, "guilds", []) or [])
 
@@ -156,6 +163,12 @@ async def _boot_audit(bot, dashboard) -> None:
     try:
         await asyncio.wait_for(bot.wait_until_ready(), timeout=90)
     except asyncio.TimeoutError:
+        # En HA actif/passif, le standby est sain précisément parce qu'il N'OUVRE PAS
+        # Discord tant que le primary détient le lease Redis. Ce timeout est donc attendu
+        # et ne doit ni polluer Railway en ERROR ni déclencher une alerte de démarrage.
+        if _ha_passive_standby():
+            logger.info("Audit démarrage V45 : standby HA passif, Discord volontairement en attente.")
+            return
         logger.error("Audit démarrage V45 : Discord n'est pas devenu prêt en 90 secondes.")
         return
     except asyncio.CancelledError:
