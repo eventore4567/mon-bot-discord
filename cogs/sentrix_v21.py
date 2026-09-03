@@ -26,7 +26,7 @@ from utils.v21_rules import (
 )
 
 V21_PUBLIC_COMMANDS = frozenset({
-    "achievements", "challenges", "market-find", "market-history", "market-my",
+    "achievements-v21", "challenges", "market-find", "market-history", "market-my",
 })
 V21_DIRECT_COMMANDS = V21_PUBLIC_COMMANDS | {"systemstatus"}
 
@@ -331,7 +331,11 @@ class SentriXV21(commands.Cog):
             joined_days = max(0, (datetime.now(timezone.utc) - member.joined_at).days)
         return stats, row, joined_days
 
-    @commands.hybrid_command(name="achievements", aliases=["badges"], description="Afficher tous les succès V2.1.", with_app_command=False)
+    # name="achievements-v21" (pas "achievements") : cogs.v17_ai_economy_games enregistre
+    # deja une commande +achievements, vivante et distincte. add_cog() abandonne TOUT le
+    # cog des la premiere collision de nom (CommandRegistrationError) — SentriXV21 entier
+    # (marche, defis, tout) echouait donc a charger silencieusement, a chaque demarrage.
+    @commands.hybrid_command(name="achievements-v21", aliases=["badges"], description="Afficher tous les succès V2.1.", with_app_command=False)
     @commands.cooldown(2, 5, commands.BucketType.user)
     async def achievements(self, ctx: commands.Context, membre: discord.Member = None):
         if ctx.guild is None:

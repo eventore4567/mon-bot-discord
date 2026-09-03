@@ -100,38 +100,58 @@ async def _bootstrap_sentrix_v2(bot: commands.Bot) -> None:
     """Branche V2/V2.1/V2.2/V2.3 accessibilité et le dashboard live.
 
     V2.2/V2.3 n'ajoutent aucune commande : elles améliorent les commandes déjà chargées.
+
+    Chaque étape est isolée dans son propre try/except (au lieu d'un seul bloc autour de
+    tout) : cogs.v17_ai_economy_games et cogs.sentrix_v21 enregistrent CHACUN une commande
+    +achievements, et add_cog() abandonne entièrement un cog dès la première collision de
+    nom (CommandRegistrationError) — un seul bloc commun faisait donc échouer V2.1, V2.2,
+    ET SentriXAccessibility (ainsi que les trois installs dashboard qui suivaient), à
+    CHAQUE démarrage, pour une collision qui ne concernait que V2.1.
     """
     if getattr(bot, "_sentrix_v2_ready", False) and getattr(bot, "_sentrix_accessibility_ready", False):
         return
+
+    async def _add_cog_once(name: str, factory) -> bool:
+        if bot.get_cog(name) is not None:
+            return True
+        try:
+            await bot.add_cog(factory(bot))
+            return True
+        except Exception:
+            logger.exception("Impossible d'installer le cog SentriX %s.", name)
+            return False
+
     try:
         from .sentrix_v2 import SentriXV2
         from .sentrix_v21 import SentriXV21
         from .sentrix_v22 import SentriXV22
         from .sentrix_accessibility import SentriXAccessibility
+    except Exception:
+        logger.exception("Impossible d'importer SentriX V2/V2.1/V2.2/V2.3 accessibilité.")
+        return
 
-        if bot.get_cog("SentriXV2") is None:
-            await bot.add_cog(SentriXV2(bot))
-        if bot.get_cog("SentriXV21") is None:
-            await bot.add_cog(SentriXV21(bot))
-        if bot.get_cog("SentriXV22") is None:
-            await bot.add_cog(SentriXV22(bot))
-        if bot.get_cog("SentriXAccessibility") is None:
-            await bot.add_cog(SentriXAccessibility(bot))
+    v2_ok = await _add_cog_once("SentriXV2", SentriXV2)
+    v21_ok = await _add_cog_once("SentriXV21", SentriXV21)
+    v22_ok = await _add_cog_once("SentriXV22", SentriXV22)
+    accessibility_ok = await _add_cog_once("SentriXAccessibility", SentriXAccessibility)
 
+    try:
         from web import dashboard, dashboard_v2_home, dashboard_v21, dashboard_accessibility
         dashboard_v2_home.install(dashboard)
         dashboard_v21.install(dashboard)
         dashboard_accessibility.install(dashboard)
-
-        bot._sentrix_v2_ready = True
-        bot._sentrix_v21_ready = True
-        bot._sentrix_v22_ready = True
-        bot._sentrix_accessibility_ready = True
-        logger.info(
-            "SentriX V2.3 branché : accessibilité, tolérance aux fautes, mobile et clavier, sans nouvelle commande."
-        )
     except Exception:
-        logger.exception("Impossible d'installer SentriX V2/V2.1/V2.2/V2.3 accessibilité.")
+        logger.exception("Impossible d'installer le dashboard live SentriX V2/V2.1/accessibilité.")
+
+    bot._sentrix_v2_ready = v2_ok
+    bot._sentrix_v21_ready = v21_ok
+    bot._sentrix_v22_ready = v22_ok
+    bot._sentrix_accessibility_ready = accessibility_ok
+    logger.info(
+        "SentriX V2.3 branché (V2=%s, V2.1=%s, V2.2=%s, accessibilité=%s) : tolérance aux "
+        "fautes, mobile et clavier, sans nouvelle commande.",
+        v2_ok, v21_ok, v22_ok, accessibility_ok,
+    )
 
 
 def _schedule_sentrix_v2(bot: commands.Bot) -> None:
