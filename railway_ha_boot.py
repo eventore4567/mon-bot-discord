@@ -18,6 +18,35 @@ import traceback
 from typing import Any
 
 from aiohttp import web as aiohttp_web
+import discord
+
+
+# Certains cogs historiques démarrent leurs tâches de fond dès leur construction et leur
+# before_loop appelle wait_until_ready(). Sur une instance HA standby, ces tâches peuvent
+# s'exécuter quelques millisecondes avant que le contexte asynchrone de discord.py ait créé
+# son Event interne `_ready`. discord.py lève alors "Client has not been properly
+# initialised" et les boucles meurent avant même que le standby ait eu une chance de prendre
+# le relais. Cette garde, installée AVANT l'import du bootstrap/cogs, transforme uniquement
+# cette fenêtre d'initialisation en attente courte. Une vraie erreur RuntimeError différente
+# continue d'être propagée normalement.
+_original_wait_until_ready = discord.Client.wait_until_ready
+
+
+async def _ha_safe_wait_until_ready(self):
+    while True:
+        try:
+            return await _original_wait_until_ready(self)
+        except RuntimeError as exc:
+            if "properly initialised" not in str(exc):
+                raise
+            await asyncio.sleep(0.25)
+
+
+if not getattr(discord.Client.wait_until_ready, "_sentrix_ha_init_guard", False):
+    _ha_safe_wait_until_ready._sentrix_ha_init_guard = True
+    _ha_safe_wait_until_ready._sentrix_original = _original_wait_until_ready
+    discord.Client.wait_until_ready = _ha_safe_wait_until_ready
+
 
 from utils.failover import FailoverConfigurationError, LeadershipGrant, SentriXFailoverCoordinator
 
