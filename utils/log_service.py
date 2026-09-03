@@ -17,6 +17,7 @@ from typing import Any
 import discord
 
 from utils.log_categories import (
+    CATEGORIE_PRECEDENTE,
     CATEGORIES,
     CATEGORY_ORDER as CATEGORY_KEYS,
     LOG_REGISTRY,
@@ -515,6 +516,30 @@ async def send_log(
 
     config = await get_log_config(bot, guild.id, category)
     channel_id = config["channel_id"] if config else None
+
+    # Repli sur la categorie d'origine quand la nouvelle n'est pas utilisable.
+    # Les roles donnes a un membre sont passes des logs Roles aux logs Membres :
+    # un serveur qui n'avait configure que les logs Roles aurait vu ces journaux
+    # disparaitre, sans message d'erreur, puisqu'un salon absent fait
+    # simplement abandonner l'envoi.
+    if not (config and config["enabled"] and channel_id):
+        precedente = CATEGORIE_PRECEDENTE.get(event_type)
+        if precedente and precedente != category:
+            repli = await get_log_config(bot, guild.id, precedente)
+            if repli and repli["enabled"] and repli["channel_id"]:
+                logger.info(
+                    "SENTRIX ROUTE log_type=%s category=%s indisponible ; repli sur "
+                    "%s (salon %s). Configurez les logs « %s » pour l'y deplacer.",
+                    event_type,
+                    category,
+                    precedente,
+                    repli["channel_id"],
+                    CATEGORIES.get(category, category),
+                )
+                category = precedente
+                config = repli
+                channel_id = repli["channel_id"]
+
     logger.warning(
         "SXTRACE 4 ROUTE guild=%s log_type=%s category=%s channel_id=%s enabled=%s "
         "updated_at=%s reason=%s",

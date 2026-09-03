@@ -96,6 +96,17 @@ LEGACY_EVENT_ALIASES: dict[str, str] = {
     "member_departure": "member_leave",
 }
 
+# Evenements qui ont CHANGE de categorie. Un serveur configure avant ce
+# changement n'a pas forcement de salon pour la nouvelle categorie : sans ce
+# repli, ses journaux disparaitraient en silence, car un salon absent fait
+# abandonner l'envoi. Le repli s'efface de lui-meme des que la nouvelle
+# categorie est configuree.
+CATEGORIE_PRECEDENTE: dict[str, str] = {
+    "role_add": "roles",
+    "role_remove": "roles",
+    "member_roles": "roles",
+}
+
 LEGACY_CATEGORY_KEYS: dict[str, str] = {
     **{key: key for key in CATEGORIES},
     "protection": "automod",

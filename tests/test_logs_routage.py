@@ -81,3 +81,34 @@ def test_un_role_donne_a_un_membre_va_dans_les_logs_membres(evenement):
 def test_les_logs_roles_ne_gardent_que_le_role_lui_meme(evenement):
     """Création, suppression, permissions : là, le rôle EST le sujet."""
     assert resolve(evenement)[0] == "roles"
+
+
+def test_un_serveur_configure_avant_le_changement_ne_perd_rien():
+    """Un salon absent fait ABANDONNER l'envoi, sans message d'erreur.
+
+    Les rôles donnés à un membre sont passés des logs Rôles aux logs Membres.
+    Un serveur qui n'avait configuré que les logs Rôles aurait donc vu ces
+    journaux disparaître en silence. Le repli les y maintient jusqu'à ce que
+    les logs Membres soient configurés, puis s'efface de lui-même.
+    """
+    from utils.log_categories import CATEGORIE_PRECEDENTE, resolve
+
+    for evenement in ("role_add", "role_remove", "member_roles"):
+        assert resolve(evenement)[0] == "members"
+        assert CATEGORIE_PRECEDENTE[evenement] == "roles"
+
+    # Les événements qui n'ont pas change de categorie n'ont pas de repli :
+    # en ajouter un masquerait une vraie erreur de configuration.
+    for evenement in ("member_join", "role_create", "message_delete"):
+        assert evenement not in CATEGORIE_PRECEDENTE
+
+
+def test_le_repli_est_bien_branche_dans_l_envoi():
+    import inspect
+
+    from utils import log_service
+
+    source = inspect.getsource(log_service.send_log)
+    assert "CATEGORIE_PRECEDENTE" in source
+    # Le repli ne doit s'appliquer que si la categorie visee est inutilisable.
+    assert 'if not (config and config["enabled"] and channel_id):' in source
