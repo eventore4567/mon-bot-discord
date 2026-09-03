@@ -7,6 +7,11 @@ clics. On conserve donc leurs routes serveur, puis on restaure l'interface princ
 """
 
 from . import dashboard as _dashboard
+from . import dashboard_recovery_v54 as _dashboard_recovery_v54
+
+# Corrige l'URL publique AVANT les couches SEO/branding qui peuvent l'intégrer dans leur HTML.
+_dashboard_recovery_v54.configure_public_url()
+
 from . import setup_dashboard as _setup_dashboard
 from . import design_setup_dashboard as _design_setup_dashboard
 from . import setup_center as _setup_center
@@ -255,3 +260,6 @@ _seo_v38.install(_dashboard)
 # Identité V39 : les pages publiques, aperçus sociaux et favicon utilisent directement la
 # PP Discord actuelle de SentriX afin qu'une seule image officielle soit utilisée partout.
 _brand_avatar_v39.install(_dashboard)
+
+# Dernier filet : URL Railway dynamique + alias /dashboard + fallback web sécurisé.
+_dashboard_recovery_v54.install(_dashboard)
