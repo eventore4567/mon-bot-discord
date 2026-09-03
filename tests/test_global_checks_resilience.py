@@ -9,6 +9,17 @@ AVANT la commande elle-même : le propriétaire ne le voyait jamais (son
 raccourci l'esquive), mais n'importe quel autre membre en était bloqué.
 C'est un candidat direct pour « seul le propriétaire arrive à utiliser les
 commandes ».
+
+RACINE REELLE trouvee par execution complete du boot (pas seulement lecture) :
+cogs/no_cooldown_final.py vide bot._cooldown_bucket (CooldownMapping(None,
+BucketType.default)) PENDANT le chargement des extensions, alors que
+global_cooldown_check n'est enregistre comme check global qu'APRES (main.py,
+setup_hook, add_check appele apres la boucle EXTENSIONS) — no_cooldown_final
+ne peut donc jamais retirer ce check-la lui-meme. get_bucket() renvoie alors
+None pour CHAQUE commande, CHAQUE membre non-owner : bucket.update_rate_limit()
+levait AttributeError, un type qui n'est PAS un commands.CommandError, donc
+jamais rattrape par on_command_error — aucune reponse, aucune trace, pour
+absolument tout le monde sauf le proprietaire. Voir test ci-dessous.
 """
 from __future__ import annotations
 
@@ -60,6 +71,28 @@ def test_cooldown_check_survit_a_un_incident_db_pour_un_membre_normal():
     bot._cooldown_bucket = commands.CooldownMapping.from_cooldown(
         1000, 60.0, commands.BucketType.user
     )
+
+    class _Message:
+        author = _Auteur(999888777)
+
+    class Ctx:
+        author = _Auteur(999888777)
+        message = _Message()
+        interaction = None
+
+    autorise = asyncio.run(bot_main.BotAllInOne.global_cooldown_check(bot, Ctx()))
+    assert autorise is True
+
+
+def test_cooldown_check_survit_a_un_bucket_vide_par_no_cooldown_final():
+    """cogs/no_cooldown_final.py neutralise deliberement bot._cooldown_bucket avec
+    CooldownMapping(None, BucketType.default) pour supprimer tout cooldown. get_bucket()
+    renvoie alors None : le check ne doit pas planter dessus (c'etait le vrai bug — voir
+    docstring du module)."""
+    import discord.ext.commands as commands
+
+    bot = _bot_minimal()
+    bot._cooldown_bucket = commands.CooldownMapping(None, commands.BucketType.default)
 
     class _Message:
         author = _Auteur(999888777)

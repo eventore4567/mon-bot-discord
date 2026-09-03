@@ -610,6 +610,16 @@ class BotAllInOne(commands.Bot):
         if await self._is_extra_bot_creator(ctx.author.id):
             return True
         bucket = self._cooldown_bucket.get_bucket(ctx.message if not ctx.interaction else ctx)
+        # bucket peut valoir None : cogs/no_cooldown_final.py vide volontairement ce mapping
+        # (CooldownMapping(None, BucketType.default)) pour desactiver tout cooldown global.
+        # Ce vidage tourne PENDANT le chargement des extensions, alors que ce check n'est
+        # enregistre qu'apres (voir add_check plus bas) : il ne peut donc jamais retirer ce
+        # check lui-meme, qui continuait a planter ici pour TOUT LE MONDE SAUF le proprietaire
+        # (seul le proprietaire evite cette ligne, via les deux `return True` ci-dessus) — un
+        # AttributeError n'etant pas un commands.CommandError, il ne declenchait meme pas
+        # on_command_error : la commande ne repondait rigoureusement rien.
+        if bucket is None:
+            return True
         retry_after = bucket.update_rate_limit()
         if retry_after:
             raise commands.CommandOnCooldown(bucket, retry_after, commands.BucketType.user)
