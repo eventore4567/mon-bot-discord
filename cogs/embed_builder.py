@@ -47,6 +47,11 @@ logger = logging.getLogger("bot.embeds")
 
 MAX_TITLE = 256
 MAX_DESCRIPTION = 4096
+# Discord plafonne TOUT TextInput de modal a 4000 caracteres, quelle que soit
+# la limite du champ cible — 400035 chaque fois qu'on ouvrait "Modifier le
+# texte" pour changer la description, car la modal declarait max_length=4096
+# (la limite de l'EMBED, pas celle du composant modal qui la porte).
+MAX_DESCRIPTION_INPUT = 4000
 MAX_FIELD_NAME = 256
 MAX_FIELD_VALUE = 1024
 MAX_FOOTER = 2048
@@ -342,7 +347,7 @@ class EmbedTextModal(discord.ui.Modal, title="📝 Modifier le texte"):
         )
         self.description_input = discord.ui.TextInput(
             label="Description", style=discord.TextStyle.paragraph,
-            default=d.description or "", required=False, max_length=MAX_DESCRIPTION,
+            default=d.description or "", required=False, max_length=MAX_DESCRIPTION_INPUT,
         )
         self.footer_input = discord.ui.TextInput(
             label="Footer", default=d.footer_text or "", required=False, max_length=MAX_FOOTER,
