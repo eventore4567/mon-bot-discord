@@ -18,6 +18,7 @@ from discord.ext import commands
 from .afk_nickname import install as install_afk_nickname
 from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
+from .ban_command_whitelist import install as install_ban_command_whitelist
 from .bot_tracker import install as install_bot_tracker
 from .command_error_release_v41 import install as install_command_error_release_v41
 from .command_hardening_v41 import install as install_command_hardening_v41
@@ -282,6 +283,9 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     # est canonique et n'est plus remplacé au runtime. Ce point d'ancrage ne sert plus qu'à
     # laisser les couches UI tardives (V90/V92) s'exécuter après tout le reste.
     await _run_installer("Hooks de fin de runtime", run_late_runtime_hooks, bot)
+    # Cette exception de permission doit être installée en dernier : elle enveloppe la
+    # décision V66 finale sans contourner les refus Setup/blacklist/module.
+    await _run_installer("whitelist ban par membre", install_ban_command_whitelist, bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
         "Runtime SentriX finalisé : Setup V75/V74 + Components V2 V73 + Sécurité V71 + Tickets V72."
