@@ -63,7 +63,7 @@ def _render(embed: discord.Embed) -> discord.Embed:
     if not isinstance(embed, discord.Embed):
         return embed
     try:
-        return embeds.normalize_log(embed)
+        return embeds.canonical_normalize_log(embed)
     except Exception:
         logger.exception("V5.3 compat : normalisation impossible ; embed original conservé.")
         return embed

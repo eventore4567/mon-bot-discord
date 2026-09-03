@@ -497,7 +497,11 @@ def log_entry(title: str, color: int | None = None, *, cible=None, cible_label: 
                 fields.append((name, value, None))
     if raison and not _empty_log_value(raison):
         fields.append(("Raison", raison, False))
-    return log_embed(title, fields=fields)
+    # canonical_log_embed, pas log_embed : 23 appelants (automod, antinuke,
+    # tickets, invites, giveaways, security_tools...) passent par cette
+    # fonction, donc TOUS auraient perdu leurs champs une fois le patch
+    # runtime actif — pas seulement les rôles.
+    return canonical_log_embed(title, fields=fields)
 
 
 def bar(value: float, maximum: float, length: int = 10, filled_char: str = "█", empty_char: str = "░") -> str:

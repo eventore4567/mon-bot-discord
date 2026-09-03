@@ -277,7 +277,7 @@ async def _send_log_v82(
     rendered = (
         embed
         if getattr(getattr(embed, "image", None), "url", None) == embeds.SENTRIX_BANNER_URL
-        else embeds.normalize_log(embed)
+        else embeds.canonical_normalize_log(embed)
     )
     semantic_key = log_service.semantic_event_key(guild.id, log_type, rendered)
     if log_service._is_duplicate(event_key) or log_service._is_duplicate(semantic_key):

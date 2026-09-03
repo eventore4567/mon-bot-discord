@@ -47,12 +47,23 @@ def main() -> int:
     corps = wide_logs.narrative_body(panneau, log_type="role_update")
     corps_ok = "<@&999888777666555444>" in corps
 
+    # log_entry() est le point d'entree de 23 producteurs (automod, antinuke,
+    # tickets, invites, giveaways, security_tools...) : il doit rester
+    # protege lui aussi, pas seulement canonical_log_embed directement.
+    entree = embeds.log_entry(
+        "Ticket ouvert", cible=None, extra={"Type": "Support", "Numéro": "#42"}
+    )
+    log_entry_ok = {(f.name, f.value) for f in entree.fields} == {
+        ("Type", "Support"), ("Numéro", "#42"),
+    }
+
     print(f"log_embed (nom swappable) toujours corrompu, comme attendu : {corrompu_ok}")
     print(f"canonical_log_embed garde ses champs                       : {champs_ok}")
     print(f"canonical_normalize_log les preserve a la re-normalisation : {reparse_ok}")
     print(f"narrative_body affiche le role modifie                     : {corps_ok}")
+    print(f"log_entry (23 appelants) garde ses champs                  : {log_entry_ok}")
 
-    if corrompu_ok and champs_ok and reparse_ok and corps_ok:
+    if corrompu_ok and champs_ok and reparse_ok and corps_ok and log_entry_ok:
         print("\nOK : les journaux resistent a l'installation reelle du bot.")
         return 0
     print("\nECHEC : au moins une verification a echoue.")

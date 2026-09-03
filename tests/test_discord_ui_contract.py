@@ -35,7 +35,7 @@ class DiscordUiContractTests(unittest.TestCase):
         self.assertTrue(asset.is_file())
         self.assertGreater(asset.stat().st_size, 1000)
         self.assertTrue(embeds.SENTRIX_BANNER_URL.endswith("/assets/sentrix-log-header.png"))
-        panel = embeds.log_embed("Rôle retiré", fields=(("Membre", "<@123456789012345678>", True),))
+        panel = embeds.canonical_log_embed("Rôle retiré", fields=(("Membre", "<@123456789012345678>", True),))
         self.assertEqual(panel.image.url, embeds.SENTRIX_BANNER_URL)
 
     def test_small_boxes_do_not_use_log_banner(self):
@@ -77,7 +77,7 @@ class DiscordUiContractTests(unittest.TestCase):
         member = "<@1355855757991481475>"
         role = "<@&1355855757991481476>"
         channel = "<#1355855757991481477>"
-        panel = embeds.log_embed(
+        panel = embeds.canonical_log_embed(
             "Rôle retiré",
             fields=(("Membre", member, True), ("Rôle", role, True), ("Salon", channel, True)),
         )
@@ -128,11 +128,11 @@ class DiscordUiContractTests(unittest.TestCase):
 
     def test_kick_command_and_discord_event_share_semantic_dedup_key(self):
         target = 1355855757991481475
-        command_log = embeds.log_embed(
+        command_log = embeds.canonical_log_embed(
             "Dossier 12 — Expulsion",
             fields=(("Membre", f"<@{target}>\n`ID: {target}`", True),),
         )
-        event_log = embeds.log_embed(
+        event_log = embeds.canonical_log_embed(
             "Membre expulsé",
             fields=(("Membre", f"<@{target}>", True),),
         )
@@ -153,14 +153,14 @@ class DiscordUiContractTests(unittest.TestCase):
             raison="Terminé",
         )
         self.assertEqual(helpers._normalize_log_kind("moderation", ticket_log), "tickets")
-        moderation_log = embeds.log_embed(
+        moderation_log = embeds.canonical_log_embed(
             "Membre banni",
             fields=(("Membre", "<@1355855757991481475>", True),),
         )
         self.assertEqual(helpers._normalize_log_kind("moderation", moderation_log), "moderation")
 
     def test_log_layout_skips_empty_filler_and_uses_inline_width(self):
-        panel = embeds.log_embed(
+        panel = embeds.canonical_log_embed(
             "Rôle retiré",
             fields=(
                 ("Membre", "<@1355855757991481475>", True),
@@ -178,7 +178,7 @@ class DiscordUiContractTests(unittest.TestCase):
         old.add_field(name="Historique", value="7 sanctions", inline=True)
         old.add_field(name="Raison", value="Aucune raison fournie", inline=False)
         old.add_field(name="Membre", value="<@1355855757991481475>", inline=True)
-        rendered = embeds.normalize_log(old)
+        rendered = embeds.canonical_normalize_log(old)
         self.assertEqual([field.name for field in rendered.fields], ["Membre"])
 
     def test_message_buttons_have_real_behavior(self):
