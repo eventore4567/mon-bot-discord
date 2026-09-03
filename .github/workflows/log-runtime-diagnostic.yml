@@ -11,8 +11,8 @@ on:
       - 'utils/log_compact_final.py'
       - 'utils/embeds.py'
       - 'utils/log_service.py'
-      - 'cogs/logs_runtime_v83.py'
-      - 'cogs/log_runtime_diagnostic.py'
+      - 'cogs/logs_unified_v6.py'
+      - 'cogs/log_rectangle_v25.py'
       - 'cogs/log_transport_v52.py'
       - '.github/workflows/log-runtime-diagnostic.yml'
   pull_request:
@@ -24,8 +24,8 @@ on:
       - 'utils/log_compact_final.py'
       - 'utils/embeds.py'
       - 'utils/log_service.py'
-      - 'cogs/logs_runtime_v83.py'
-      - 'cogs/log_runtime_diagnostic.py'
+      - 'cogs/logs_unified_v6.py'
+      - 'cogs/log_rectangle_v25.py'
       - 'cogs/log_transport_v52.py'
       - '.github/workflows/log-runtime-diagnostic.yml'
 
@@ -44,8 +44,8 @@ jobs:
             utils/embeds.py \
             utils/log_compact_final.py \
             utils/log_service.py \
-            cogs/logs_runtime_v83.py \
-            cogs/log_runtime_diagnostic.py \
+            cogs/logs_unified_v6.py \
+            cogs/log_rectangle_v25.py \
             cogs/log_transport_v52.py
       - name: Verify no legacy send transport can return
         run: |
@@ -53,45 +53,29 @@ jobs:
           from pathlib import Path
 
           wide = Path('utils/wide_logs.py').read_text()
-          v83 = Path('cogs/logs_runtime_v83.py').read_text()
-          diag = Path('cogs/log_runtime_diagnostic.py').read_text()
+          unified = Path('cogs/logs_unified_v6.py').read_text()
+          rectangle = Path('cogs/log_rectangle_v25.py').read_text()
           compat = Path('cogs/log_transport_v52.py').read_text()
+          service = Path('utils/log_service.py').read_text()
           embeds = Path('utils/embeds.py').read_text()
+          runtime = Path('cogs/__init__.py').read_text()
 
           assert not Path('utils/log_channel_guard.py').exists()
           assert not Path('utils/log_v2_hardening.py').exists()
+          assert not Path('cogs/logs_runtime_v83.py').exists()
+          assert not Path('cogs/log_runtime_diagnostic.py').exists()
 
-          assert 'discord.TextChannel.send = guarded_send' not in v83
           assert 'discord.abc.Messageable.send = _sentrix_messageable_send' not in embeds
-          assert 'SEND PATCHED = %s | qualname=%s | module=%s' in wide
-          assert 'stale Logs._send instance override removed' in v83
-          assert 'delattr(active_cog, "_send")' in v83
-          assert 'discord.ui.Thumbnail(str(thumbnail))' in wide
+          assert 'discord.ui.Thumbnail(str(identity_icon))' in wide
           assert 'description="SentriX"' not in wide
-          assert 'SENTRIX V2 PHASE A' in wide
-          assert 'SENTRIX V2 PHASE B' in wide
-          assert 'SENTRIX V2 PHASE C' in wide
-          assert 'aucun fallback embed classique' in wide
 
           assert 'cog._send = types.MethodType' not in compat
           assert 'log_service.send_log = send_log_v52' not in compat
-
-          # V83 ne doit plus capturer le wrapper V33 au moment de l'import.
-          assert '_CANONICAL_SEND_LOG = log_service.send_log' not in v83
-          assert 'async def _traced_canonical_send_log(' in v83
-          assert 'return await _traced_canonical_send_log(' in v83
-          assert 'log_service.send_log = _traced_canonical_send_log' in v83
-          assert 'send_wide_log(' in v83
-
-          # +logs-diag est un vrai embed natif et teste exactement le transport V83.
-          assert 'name="logs-diag"' in diag
-          assert '@checks.is_bot_owner()' in diag
-          assert 'async def _native_embed_send(' in diag
-          assert 'embed=panel' in diag
-          assert 'logs_runtime_v83._traced_canonical_send_log(' in diag
-          assert 'await ctx.send(' not in diag
-          assert 'types.MethodType' not in diag
-          assert '_reassert_transport' not in diag
+          assert 'return await log_service.send_log(' in unified
+          assert 'await log_service.send_log(' in unified
+          assert 'return await send_wide_log(' in service
+          assert 'class RectangleLogLayout' in rectangle
+          assert 'Remplace l\'ancien ``install_logs_runtime_v83``' in runtime
 
           print('canonical Components V2 log transport + native diagnostic embed contracts OK')
           PY

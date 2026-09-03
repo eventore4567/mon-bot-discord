@@ -168,10 +168,15 @@ class DurableDatabaseReplica:
     async def _local_healthy(self) -> bool:
         return await asyncio.to_thread(_sqlite_healthy_sync, self.sqlite_path)
 
-    async def restore_latest_if_needed(self) -> dict[str, Any]:
-        """Restaure seulement la dernière sauvegarde de CETTE instance."""
+    async def restore_latest_if_needed(self, *, force: bool | None = None) -> dict[str, Any]:
+        """Restaure seulement la dernière sauvegarde de CETTE instance.
+
+        ``force=True`` est reserve a une promotion failover : le disque local du service
+        de secours peut etre ancien et ne doit alors jamais gagner sur PostgreSQL.
+        """
         local_ok = await self._local_healthy()
-        if local_ok and not self.force_restore:
+        force_restore = self.force_restore if force is None else bool(force)
+        if local_ok and not force_restore:
             return {"restored": False, "reason": "local_healthy"}
         if self.pool is None and not await self.connect():
             return {"restored": False, "reason": "postgres_unavailable", "error": self.error}
@@ -207,6 +212,15 @@ class DurableDatabaseReplica:
                             await asyncio.to_thread(self.sqlite_path.replace, backup)
                         except OSError:
                             pass
+                    # Une ancienne instance peut avoir laisse un WAL/SHM local apres un
+                    # crash. Ces fichiers appartiennent a l'ancienne base et ne doivent
+                    # surtout pas etre rejoues au-dessus du snapshot PostgreSQL promu.
+                    for suffix in ("-wal", "-shm"):
+                        sidecar = Path(f"{self.sqlite_path}{suffix}")
+                        try:
+                            await asyncio.to_thread(sidecar.unlink, missing_ok=True)
+                        except OSError:
+                            logger.warning("Nettoyage du sidecar SQLite impossible : %s", sidecar)
                     await asyncio.to_thread(os.replace, temp_path, self.sqlite_path)
                 finally:
                     try:

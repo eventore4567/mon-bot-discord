@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 import discord
 from discord.ext import commands
 
+from utils.failover import FailoverSettings, is_active_process
+
 from . import premium_logs_v2
 from .premium_logs import _button_items
 
@@ -188,6 +190,9 @@ def _is_primary_process() -> bool:
 
     En local/CI sans variables Railway, les logs restent actifs pour ne pas casser les tests.
     """
+    if FailoverSettings.from_env().enabled:
+        return is_active_process()
+
     service_id = (os.getenv("RAILWAY_SERVICE_ID") or "").strip()
     if service_id:
         return service_id == PRIMARY_RAILWAY_SERVICE_ID

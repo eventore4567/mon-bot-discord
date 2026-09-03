@@ -30,6 +30,7 @@ from discord.ext import commands
 
 import config
 from utils import ai_reply_claim
+from utils.failover import FailoverSettings, is_active_process
 
 logger = logging.getLogger("bot.passive-ai-single-reply-final")
 
@@ -52,6 +53,8 @@ _KIND_BY_MODULE = {
 
 def _is_primary_service() -> bool:
     """Un seul service Railway conserve les réponses naturelles SentriX."""
+    if FailoverSettings.from_env().enabled:
+        return is_active_process()
     service_id = (os.getenv("RAILWAY_SERVICE_ID") or "").strip()
     if service_id:
         return service_id == PRIMARY_RAILWAY_SERVICE_ID
