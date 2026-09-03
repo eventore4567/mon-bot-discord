@@ -12,6 +12,7 @@ trop tôt.
 
 import asyncio
 import logging
+import os
 import traceback
 
 from aiohttp import web as aiohttp_web
@@ -19,6 +20,7 @@ from discord.ext import commands
 
 import config
 from utils.durable_database import DurableDatabaseReplica
+from utils.failover import FailoverSettings, RedisFailoverLease
 
 
 class SentriXAutoShardedBot(commands.AutoShardedBot):
@@ -160,12 +162,16 @@ def _install_discord_readiness_healthcheck() -> None:
 
     async def ready_health(request):
         bot = request.app["bot"]
-        ready = bool(bot.is_ready() and not bot.is_closed())
+        failover = getattr(bot, "sentrix_failover", None)
+        lease_ok = bool(failover is None or failover.owns_lease)
+        ready = bool(bot.is_ready() and not bot.is_closed() and lease_ok)
+        failover_state = failover.public_state() if failover is not None else {"enabled": False}
         return aiohttp_web.json_response(
             {
                 "ok": ready,
                 "discord_ready": ready,
                 "latency_ms": round(bot.latency * 1000) if ready else None,
+                "failover": failover_state,
             },
             status=200 if ready else 503,
         )
@@ -203,21 +209,39 @@ def _install_sentrix_asset_route() -> None:
     logger.info("Bannière Ping SentriX exposée via Railway.")
 
 
-async def _prepare_durable_store(bot) -> DurableDatabaseReplica:
+async def _prepare_durable_store(
+    bot,
+    *,
+    force_failover_restore: bool = False,
+) -> DurableDatabaseReplica:
     durable = DurableDatabaseReplica(config.DATABASE_PATH)
     bot.sentrix_durable_store = durable
     if not durable.configured:
+        if config.FAILOVER_ENABLED:
+            raise RuntimeError("Le failover SentriX exige POSTGRES_URL/DATABASE_URL.")
         logger.info("PostgreSQL durable non configuré ; démarrage SQLite normal.")
         return durable
     try:
         connected = await asyncio.wait_for(durable.connect(), timeout=8)
         if connected:
-            result = await asyncio.wait_for(durable.restore_latest_if_needed(), timeout=20)
+            result = await asyncio.wait_for(
+                durable.restore_latest_if_needed(force=force_failover_restore),
+                timeout=30,
+            )
             if result.get("restored"):
                 logger.warning("Base restaurée depuis PostgreSQL avant connexion SQLite : %s", result)
+            elif force_failover_restore:
+                raise RuntimeError(
+                    "Promotion failover refusée : aucun snapshot PostgreSQL restaurable "
+                    f"({result.get('reason') or 'raison inconnue'})."
+                )
             else:
                 logger.info("Restauration PostgreSQL non nécessaire : %s", result.get("reason"))
+        elif config.FAILOVER_ENABLED:
+            raise RuntimeError("PostgreSQL durable indisponible pour le failover.")
     except Exception:
+        if config.FAILOVER_ENABLED:
+            raise
         logger.warning(
             "Préparation PostgreSQL durable impossible ; le démarrage local continue :\n%s",
             traceback.format_exc(),
@@ -225,8 +249,36 @@ async def _prepare_durable_store(bot) -> DurableDatabaseReplica:
     return durable
 
 
-async def run() -> None:
+async def _failover_snapshot_loop(
+    bot,
+    durable: DurableDatabaseReplica,
+    coordinator: RedisFailoverLease,
+) -> None:
+    """Publie un snapshot partage regulier tant que ce processus detient le lease."""
+    await bot.wait_until_ready()
+    while coordinator.owns_lease and not bot.is_closed():
+        try:
+            result = await asyncio.wait_for(
+                durable.snapshot(reason="failover_periodic", clean_shutdown=False),
+                timeout=60,
+            )
+            coordinator.record_snapshot(result)
+            if not result.get("stored"):
+                logger.error("Snapshot failover non stocké : %s", result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Snapshot failover périodique impossible.")
+        await asyncio.sleep(coordinator.settings.snapshot_interval)
+
+
+async def _run_active(
+    coordinator: RedisFailoverLease | None = None,
+    *,
+    force_failover_restore: bool = False,
+) -> None:
     bot = bot_main.BotAllInOne()
+    bot.sentrix_failover = coordinator
 
     # V19 : le gate est attaché AVANT bot.start(). Il s'exécute après on_ready, donc avec
     # une vraie connexion Discord, de vrais serveurs/membres et le registre slash distant.
@@ -239,9 +291,39 @@ async def run() -> None:
     _install_discord_readiness_healthcheck()
     _install_sentrix_asset_route()
 
-    durable = await _prepare_durable_store(bot)
+    watchdog_task: asyncio.Task | None = None
+    snapshot_task: asyncio.Task | None = None
+
+    if coordinator is not None:
+        async def close_after_lease_loss() -> None:
+            if not bot.is_closed():
+                await bot.close()
+
+        watchdog_task = asyncio.create_task(
+            coordinator.maintain(close_after_lease_loss),
+            name="sentrix-failover-lease-watchdog",
+        )
+
+    durable = await _prepare_durable_store(
+        bot,
+        force_failover_restore=force_failover_restore,
+    )
 
     await bot.db.connect()
+    if coordinator is not None:
+        if not coordinator.owns_lease:
+            raise RuntimeError("Lease failover perdu avant la connexion Discord.")
+        bootstrap_snapshot = await asyncio.wait_for(
+            durable.snapshot(reason="failover_promotion", clean_shutdown=False),
+            timeout=60,
+        )
+        coordinator.record_snapshot(bootstrap_snapshot)
+        if not bootstrap_snapshot.get("stored"):
+            raise RuntimeError(f"Snapshot initial failover impossible : {bootstrap_snapshot}")
+        snapshot_task = asyncio.create_task(
+            _failover_snapshot_loop(bot, durable, coordinator),
+            name="sentrix-failover-postgres-snapshots",
+        )
     logger.info("Base prête pour le démarrage anticipé du dashboard Railway.")
     logger.info(
         "Sharding production actif : configuration=%s, runtime=%s.",
@@ -263,6 +345,8 @@ async def run() -> None:
     try:
         async with bot:
             await bot.start(config.DISCORD_TOKEN)
+        if coordinator is not None and not coordinator.owns_lease:
+            raise RuntimeError("SentriX actif s'est arrêté après perte du lease failover.")
         if getattr(bot, "_sentrix_live_gate_failed", False):
             detail = str(getattr(bot, "_sentrix_live_gate_detail", "échec live inconnu"))[:2000]
             raise RuntimeError(f"Gate live commandes V19 en échec : {detail}")
@@ -270,8 +354,25 @@ async def run() -> None:
         logger.critical("Le processus Discord s'est arrêté :\n%s", traceback.format_exc())
         raise
     finally:
+        for task in (snapshot_task, watchdog_task):
+            if task is not None and not task.done():
+                task.cancel()
+        for task in (snapshot_task, watchdog_task):
+            if task is not None:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.warning("Tâche failover arrêtée avec une erreur.", exc_info=True)
         try:
-            if durable.configured:
+            # Apres une perte de lease, ce disque n'est plus la source autoritaire : un
+            # nouveau primaire a peut-etre deja restaure/ecrit sa copie. Ne jamais publier
+            # alors un dernier snapshot stale qui pourrait gagner par son timestamp.
+            may_publish_shutdown_snapshot = bool(
+                coordinator is None or coordinator.owns_lease
+            )
+            if durable.configured and may_publish_shutdown_snapshot:
                 await asyncio.wait_for(
                     durable.snapshot(reason="graceful_shutdown", clean_shutdown=True),
                     timeout=45,
@@ -292,6 +393,79 @@ async def run() -> None:
             await durable.close()
         except Exception:
             logger.warning("Fermeture du stockage durable impossible :\n%s", traceback.format_exc())
+
+
+async def _start_standby_health(coordinator: RedisFailoverLease):
+    """Garde le service Railway sain pendant qu'il attend sans ouvrir Discord."""
+    async def health(_request):
+        state = coordinator.public_state()
+        return aiohttp_web.json_response(
+            {
+                "ok": True,
+                "mode": "standby",
+                "discord_ready": False,
+                "failover": state,
+            }
+        )
+
+    app = aiohttp_web.Application()
+    app.router.add_get("/health", health)
+    app.router.add_get("/", health)
+    runner = aiohttp_web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", "8080"))
+    await aiohttp_web.TCPSite(runner, "0.0.0.0", port).start()
+    logger.info("SentriX standby prêt sur le port %s; aucune connexion Discord ouverte.", port)
+    return runner
+
+
+async def run() -> None:
+    settings = FailoverSettings.from_env()
+    if not settings.enabled:
+        await _run_active()
+        return
+
+    if config.CANARY_MODE:
+        raise RuntimeError("Le Canary séparé ne doit pas activer SENTRIX_FAILOVER_ENABLED.")
+    if not config.REDIS_URL:
+        raise RuntimeError("Le failover SentriX exige REDIS_URL.")
+    if not config.POSTGRES_URL:
+        raise RuntimeError("Le failover SentriX exige POSTGRES_URL/DATABASE_URL.")
+
+    coordinator = RedisFailoverLease(settings)
+    standby_runner = None
+    waited_for_another_process = False
+    try:
+        await coordinator.connect()
+
+        if settings.role == "standby" and settings.standby_delay:
+            standby_runner = await _start_standby_health(coordinator)
+            coordinator.status = "standby_delay"
+            await asyncio.sleep(settings.standby_delay)
+
+        acquired = await coordinator.try_acquire()
+        if not acquired:
+            waited_for_another_process = True
+            if standby_runner is None:
+                standby_runner = await _start_standby_health(coordinator)
+            while not await coordinator.try_acquire():
+                await asyncio.sleep(settings.poll_interval)
+
+        # Le serveur HTTP d'attente libere le port juste avant que le dashboard complet
+        # prenne sa place. Le lease est deja renouvele pendant cette courte transition.
+        if standby_runner is not None:
+            await standby_runner.cleanup()
+            standby_runner = None
+
+        force_restore = waited_for_another_process or settings.role == "standby"
+        await _run_active(
+            coordinator,
+            force_failover_restore=force_restore,
+        )
+    finally:
+        if standby_runner is not None:
+            await standby_runner.cleanup()
+        await coordinator.close()
 
 
 if __name__ == "__main__":

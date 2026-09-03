@@ -16,6 +16,8 @@ from types import MethodType
 
 from discord.ext import commands
 
+from utils.failover import FailoverSettings, is_active_process
+
 logger = logging.getLogger("bot.production-alert-noise-fix")
 _ALERTS_PATCHED = False
 
@@ -43,6 +45,8 @@ def _primary_service_name() -> str:
 
 def _is_primary_service() -> bool:
     """Vrai uniquement pour l'instance autorisée à faire les mutations uniques."""
+    if FailoverSettings.from_env().enabled:
+        return is_active_process()
     service = (os.getenv("RAILWAY_SERVICE_NAME") or "").strip().casefold()
     if not service:
         # En local / autre hébergeur, ne pas neutraliser les fonctions de sécurité.

@@ -40,6 +40,12 @@ except ValueError:
 # URLs sont présentes, sinon SQLite/caches locaux restent le fallback sans casser le bot.
 POSTGRES_URL = (os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL") or "").strip()
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
+# Haute disponibilite active/passive. Quand elle est activee, Redis elit exactement un
+# processus autorise a se connecter au token Discord; PostgreSQL transporte les snapshots
+# SQLite vers le service qui prend le relais.
+FAILOVER_ENABLED = os.getenv("SENTRIX_FAILOVER_ENABLED", "0").strip().lower() in {
+    "1", "true", "yes", "on", "oui"
+}
 # Mode canary pour un service de test séparé. Ne jamais l'activer sur le service principal.
 CANARY_MODE = os.getenv("SENTRIX_CANARY_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
 try:

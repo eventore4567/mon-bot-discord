@@ -16,6 +16,8 @@ from typing import Any
 
 import discord
 
+from utils.failover import FailoverSettings
+from utils.failover import is_active_process as is_failover_active
 from utils.log_categories import (
     CATEGORIES,
     CATEGORY_ORDER as CATEGORY_KEYS,
@@ -79,6 +81,8 @@ _SCHEMA_READY: set[int] = set()
 
 
 def is_primary_process() -> bool:
+    if FailoverSettings.from_env().enabled:
+        return is_failover_active()
     raw = (os.getenv("SENTRIX_LOG_PRODUCER") or "").strip().casefold()
     return raw not in {"0", "false", "no", "off", "disabled"}
 
