@@ -178,3 +178,38 @@ def test_serveur_modifie_montre_ce_qui_a_change():
     )
     corps = narrative_body(e, log_type="guild_update")
     assert "Ancien" in corps and "Nouveau" in corps
+
+
+def test_voice_logs_v2_transmet_l_event_type_precis():
+    """voice_logs_v2.py calculait le bon event_type localement (pour la clé de
+    dédup) mais passait « log_voice » — un alias de CATÉGORIE — à _send().
+    canonical_event_type() s'arrête dès qu'il reconnaît une catégorie et ne
+    tente alors JAMAIS le rattachement par titre : voice_join/voice_leave
+    tombaient dans le fallback générique et perdaient jusqu'à la mention du
+    membre, la seule information qui comptait."""
+    import ast
+
+    chemin = RACINE / "cogs" / "voice_logs_v2.py"
+    arbre = ast.parse(chemin.read_text(encoding="utf-8"))
+    appels = [
+        n for n in ast.walk(arbre)
+        if isinstance(n, ast.Call) and ast.unparse(n.func).endswith("_send")
+    ]
+    assert appels, "aucun appel _send trouvé"
+    for appel in appels:
+        args = [ast.unparse(a) for a in appel.args]
+        assert "'log_voice'" not in args, args
+        assert "event_type" in args, args
+
+
+def test_deplacement_vocal_mentionne_le_membre():
+    e = embeds.canonical_log_embed(
+        "Activité vocale — Connexion",
+        fields=[
+            ("Membre", "<@153201041595183925>", False),
+            ("Salon", "<#222333444555666777>", False),
+        ],
+    )
+    corps = narrative_body(e, log_type="voice_join")
+    assert "<@153201041595183925>" in corps
+    assert "<#222333444555666777>" in corps

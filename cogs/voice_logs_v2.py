@@ -132,7 +132,12 @@ def install(bot: commands.Bot) -> bool:
         )
         await logs_cog._send(
             member.guild,
-            "log_voice",
+            # event_type (voice_join/leave/move), pas "log_voice" : ce dernier
+            # est un alias de CATEGORIE qui court-circuite canonical_event_type
+            # avant qu'il ne puisse reconnaitre l'evenement precis via le titre —
+            # narrative_body() tombait donc dans le fallback generique, qui
+            # filtre les mentions courtes (Membre, Salon, Duree).
+            event_type,
             panel,
             event_key=event_key,
         )
