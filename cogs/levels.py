@@ -878,6 +878,28 @@ class Levels(commands.Cog, name="Levels"):
 
     # -------------------------------------------------------------- Embeds centralisés
 
+    async def _niveaux_actifs(self, guild_id: int) -> bool:
+        """Le systeme de niveaux est-il actif sur ce serveur ?
+
+        Deux interrupteurs existent et l'un ou l'autre suffit a couper : celui
+        de +level-system et celui du panneau de configuration. Les gains d'XP
+        etaient bien bloques, mais +profile, +me et +stats continuaient
+        d'afficher niveau et XP — donc rien ne semblait desactive.
+        """
+        from utils import system_features
+
+        try:
+            if not await system_features.is_system_enabled(self.bot.db, guild_id, "levels"):
+                return False
+        except Exception:
+            pass
+        try:
+            from cogs import setup_v2_core
+
+            return await setup_v2_core.module_enabled(self.bot, guild_id, "levels")
+        except Exception:
+            return True
+
     @staticmethod
     def _next_role_text(stats: dict) -> str:
         """Texte du champ "🎭 Prochain rôle", identique partout (section 3 de la demande)."""
@@ -898,8 +920,15 @@ class Levels(commands.Cog, name="Levels"):
             timestamp=discord.utils.utcnow(),
         )
         e.set_thumbnail(url=member.display_avatar.url)
-        e.add_field(name="📈 Niveau", value=f"Niveau {stats['current_level']}", inline=True)
-        e.add_field(name="🏆 Classement", value=(f"#{stats['rank']}" if stats["is_ranked"] else "Non classé"), inline=True)
+        if await self._niveaux_actifs(guild.id):
+            e.add_field(name="📈 Niveau", value=f"Niveau {stats['current_level']}", inline=True)
+            e.add_field(
+                name="🏆 Classement",
+                value=(f"#{stats['rank']}" if stats["is_ranked"] else "Non classé"),
+                inline=True,
+            )
+        else:
+            e.add_field(name="📈 Niveaux", value="Désactivés sur ce serveur", inline=True)
         if settings.get("show_messages", True):
             e.add_field(name="💬 Messages", value=stats_service.format_number(stats["message_count"]), inline=True)
         e.add_field(
@@ -984,6 +1013,21 @@ class Levels(commands.Cog, name="Levels"):
         if stats.get("voice_seconds"):
             activite.append(
                 panels.Ligne("En vocal", stats_service.format_duration(stats["voice_seconds"]))
+            )
+
+        if not await self._niveaux_actifs(guild.id):
+            return panels.Panneau(
+                titre="SentriX — Niveau",
+                sous_titre=f"{member.mention} · le système de niveaux est désactivé sur ce serveur.",
+                kind="neutral",
+                vignette=member.display_avatar.url,
+                sections=[
+                    panels.Section(
+                        "Activité",
+                        [panels.Ligne("Messages", nombre(stats.get("message_count", 0)))],
+                    ),
+                ],
+                pied="SentriX • Niveaux désactivés",
             )
 
         sections = [
@@ -1406,16 +1450,22 @@ class Levels(commands.Cog, name="Levels"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Une erreur est survenue en préparant ce profil.')))
         eco_emoji = settings.get("economy_emoji", "🪙")
         style = design_system.CATEGORY_STYLES["levels"]
+        niveaux_actifs = await self._niveaux_actifs(ctx.guild.id)
+        description = f"{membre.mention}"
+        if niveaux_actifs:
+            description += f" • Niveau **{stats['current_level']}**" + (
+                f" • Rang **#{stats['rank']}**" if stats["is_ranked"] else " • Non classé"
+            )
         e = design_system.create_embed(
             title=f"🪪 Profil de {membre.display_name}",
-            description=f"{membre.mention} • Niveau **{stats['current_level']}**"
-                        + (f" • Rang **#{stats['rank']}**" if stats["is_ranked"] else " • Non classé"),
+            description=description,
             colour=design.get("primary_color", style["colour"]),
             user=membre if design.get("show_avatars", True) else None,
             thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
             footer=design.get("footer"),
         )
-        e.add_field(name="📈 Niveau", value=f"**{stats['current_level']}**", inline=True)
+        if niveaux_actifs:
+            e.add_field(name="📈 Niveau", value=f"**{stats['current_level']}**", inline=True)
         e.add_field(name="💬 Messages", value=stats_service.format_number(stats["message_count"]), inline=True)
         e.add_field(name="🔊 Temps vocal", value=stats_service.format_duration(stats["voice_time"]), inline=True)
         if settings.get("show_economy", True):
