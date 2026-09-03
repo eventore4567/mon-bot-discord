@@ -8,6 +8,7 @@ Objectifs :
 - conserver toutes les erreurs importantes ;
 - réduire les bibliothèques tierces très bavardes ;
 - empêcher une boucle INFO/WARNING identique de dépasser la limite de logs Railway ;
+- ignorer uniquement les faux positifs connus d'un standby HA volontairement non connecté ;
 - ne modifier aucune logique Discord, Redis, PostgreSQL ou HA.
 """
 from __future__ import annotations
@@ -35,6 +36,28 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
+def _truthy_env(name: str) -> bool:
+    return (os.getenv(name, "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _expected_ha_standby_not_ready(record: logging.LogRecord, message: str) -> bool:
+    """Reconnaît le faux ERROR V45 attendu sur une instance standby passive.
+
+    Le standby HA doit rester vivant sans ouvrir Discord tant que le primary détient le
+    lease Redis. L'ancien audit V45, conçu avant le failover, considère encore cette
+    absence de on_ready après 90 s comme une erreur. On ne masque ce message que lorsque
+    le mode HA est explicitement actif ET que l'instance est explicitement standby.
+    """
+    if not _truthy_env("SENTRIX_FAILOVER_ENABLED"):
+        return False
+    if (os.getenv("SENTRIX_FAILOVER_ROLE", "") or "").strip().lower() != "standby":
+        return False
+    return (
+        record.name == "bot.dashboard.health-runtime-v45"
+        and "Discord n'est pas devenu prêt en 90 secondes" in message
+    )
+
+
 @dataclass
 class _RepeatState:
     started_at: float
@@ -42,7 +65,7 @@ class _RepeatState:
 
 
 class _RailwayFloodFilter(logging.Filter):
-    """Laisse toujours passer ERROR+, mais bride les floods de logs de faible priorité."""
+    """Laisse passer les vraies ERROR+, mais bride les floods de faible priorité."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -63,15 +86,22 @@ class _RailwayFloodFilter(logging.Filter):
         )
 
     def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = str(record.msg)
+
+        # Le standby passif n'est volontairement pas connecté à Discord. L'audit V45
+        # historique produit alors un faux ERROR après 90 s : on ignore uniquement ce cas
+        # précisément identifié, sans toucher aux autres erreurs.
+        if _expected_ha_standby_not_ready(record, message):
+            return False
+
         # Une vraie erreur ne doit jamais être cachée par le garde anti-flood.
         if record.levelno >= logging.ERROR:
             return True
 
         now = time.monotonic()
-        try:
-            message = record.getMessage()
-        except Exception:
-            message = str(record.msg)
         key = (record.name, record.levelno, message)
 
         with self._lock:
