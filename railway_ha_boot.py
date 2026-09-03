@@ -219,6 +219,12 @@ async def _ha_bot_start(self, token: str, *args, **kwargs):
     if not coordinator.enabled:
         return await _original_bot_start(self, token, *args, **kwargs)
 
+    # Expose le coordinateur réel au diagnostic V45. Le rôle configuré ne suffit pas pour
+    # savoir si une instance doit être connectée à Discord : pendant un rolling deploy, un
+    # nouveau primary peut rester passif tant qu'une autre instance possède encore le lease.
+    # Le diagnostic peut ainsi distinguer une attente HA normale d'un leader réellement cassé.
+    self._sentrix_ha_coordinator = coordinator
+
     grant = await coordinator.wait_for_leadership()
     durable = getattr(self, "sentrix_durable_store", None)
 
