@@ -40,7 +40,7 @@ def _patch_ai_features(bot) -> None:
 
 
 async def _send_resource_log(bot, guild, title: str, fields, event: str) -> None:
-    panel = embeds.log_embed(title, fields=fields)
+    panel = embeds.canonical_log_embed(title, fields=fields)
     await log_service.send_log(bot, guild, "resources", panel, event_key=log_service.make_event_key(guild.id, event, discriminator=time.time_ns()))
 
 

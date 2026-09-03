@@ -354,6 +354,17 @@ def narrative_body(
         lines.append(f"{member or 'Un membre'} a reçu un avertissement" + (f" de {moderator}" if moderator else "") + ".")
         if reason:
             lines.append(f"**Raison :** {reason}")
+    elif event_type in {"role_add", "role_remove"}:
+        # Ces logs n'avaient AUCUNE branche narrative : le corps restait
+        # entièrement vide, y compris le membre concerné. Le salon de logs
+        # bloque déjà toute notification (allowed_mentions=NO_PINGS à
+        # l'envoi) : la mention identifie le membre sans jamais le notifier.
+        verb = "reçu" if event_type == "role_add" else "perdu"
+        lines.append(
+            f"{member or 'Un membre'} a {verb} le rôle {role or 'un rôle'}"
+            + (f", par {moderator}" if moderator else "")
+            + "."
+        )
     elif event_type in {"channel_create", "channel_delete", "channel_update"}:
         verb = {"channel_create": "créé", "channel_delete": "supprimé", "channel_update": "modifié"}[event_type]
         entity = identity_name or channel or "Un salon"
@@ -361,9 +372,30 @@ def narrative_body(
         lines.append(f"Le salon **{entity}**{id_part} a été {verb}" + (f" par {moderator}" if moderator else "") + ".")
     elif event_type in {"role_create", "role_delete", "role_update"}:
         verb = {"role_create": "créé", "role_delete": "supprimé", "role_update": "modifié"}[event_type]
-        entity = identity_name or role or "Un rôle"
-        id_part = f" (`{identity_id}`)" if identity_id else ""
-        lines.append(f"Le rôle **{entity}**{id_part} a été {verb}" + (f" par {moderator}" if moderator else "") + ".")
+        # Un mention de rôle (<@&id>) reste toujours cliquable et lisible ; un
+        # nom de rôle brut peut contenir des astérisques ou autres caractères
+        # qui cassent le markdown quand ils sont eux-mêmes mis en gras.
+        entity = role or (f"**{identity_name}**" if identity_name else None) or "Un rôle"
+        lines.append(f"Le rôle {entity} a été {verb}" + (f" par {moderator}" if moderator else "") + ".")
+        if event_type == "role_update":
+            # compact_fields() ignore les valeurs courtes (<70 caractères, pas
+            # de saut de ligne) : « Nom » et « Couleur » ne passaient donc
+            # jamais, et « Rôle modifié » ne disait jamais CE QUI avait changé.
+            nom = _field_value(embed, "nom")
+            if nom:
+                lines.append(f"**Nom :** {nom}")
+            couleur = _field_value(embed, "couleur")
+            if couleur:
+                lines.append(f"**Couleur :** {couleur}")
+            position = _field_value(embed, "position modifiée", "position")
+            if position:
+                lines.append(f"**Position :** {position}")
+            permissions_ajoutees = _field_value(embed, "permissions ajoutées")
+            if permissions_ajoutees:
+                lines.append(f"**Permissions ajoutées :** {permissions_ajoutees}")
+            permissions_supprimees = _field_value(embed, "permissions supprimées")
+            if permissions_supprimees:
+                lines.append(f"**Permissions retirées :** {permissions_supprimees}")
     elif event_type == "voice_join":
         lines.append(f"{member or 'Un membre'} a rejoint {channel or 'un salon vocal'}.")
     elif event_type == "voice_leave":

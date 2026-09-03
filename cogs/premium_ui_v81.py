@@ -414,7 +414,7 @@ async def _send_test_log_v81(bot, guild: discord.Guild, log_type: str, author: d
 
     from utils import embeds as embeds_mod
 
-    test_embed = embeds_mod.log_embed(
+    test_embed = embeds_mod.canonical_log_embed(
         "Test de log",
         fields=(("Catégorie", log_service.LOG_TYPES.get(log_type, {}).get("label", log_type), False), ("Déclenché par", f"<@{author.id}>", True)),
     )

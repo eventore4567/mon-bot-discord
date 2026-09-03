@@ -195,7 +195,7 @@ async def _send_clear_log(
         return
 
     preview = _message_preview(messages)
-    panel = embeds.log_embed(
+    panel = embeds.canonical_log_embed(
         "Messages supprimés avec Clear",
         fields=(
             ("Modérateur", f"<@{ctx.author.id}>", True),

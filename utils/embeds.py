@@ -212,6 +212,15 @@ def standard(title: str, description: str = "", *, thumbnail: str | None = None,
     return _base(title, description or None, thumbnail=thumbnail, timestamp=timestamp)
 
 
+# Référence figée sur l'implémentation CANONIQUE de _base, prise avant que
+# quoi que ce soit ne puisse la réassigner (voir _CANONICAL_ADD_FIELDS plus
+# bas pour la raison complète). Un nom de fonction au niveau module est
+# résolu dynamiquement à CHAQUE appel via le namespace du module : réassigner
+# `embeds._base` change donc ce que tous les appels internes utilisent,
+# log_embed compris. Cette référence-ci ne peut plus être détournée.
+_CANONICAL_BASE = _base
+
+
 # Ces trois constructeurs passaient tous colour=SENTRIX_COLOR. Comme _colour() renvoie
 # le fallback en ignorant le kind, un succes, une erreur et un avertissement sortaient
 # EXACTEMENT de la meme couleur violette. Sur les ~290 commandes qui passent par ce
@@ -291,6 +300,19 @@ def add_fields(embed: discord.Embed, fields: Iterable[tuple[str, Any, bool | Non
             continue
         embed.add_field(name=safe_name, value=raw_value, inline=_field_inline(safe_name, raw_value, requested))
     return embed
+
+
+# Même précaution que _CANONICAL_BASE, pour la raison qui a produit le bug
+# constaté : cogs/command_error_release_v41.py réassigne globalement
+# `embeds.add_fields` (et `embeds._base`) vers une variante « compacte » qui
+# fusionne les champs COURTS dans embed.description au lieu d'appeler
+# Embed.add_field(). C'est voulu pour les embeds de COMMANDE (moins de bruit
+# visuel), mais log_embed() appelait ce même nom de fonction — donc, une fois
+# ce patch actif (au démarrage réel du bot), un log comme « Rôle modifié »
+# perdait purement et simplement ses champs Membre/Rôle/Nom/Couleur : ils
+# finissaient dans une description que narrative_body(), derive_identity() et
+# compact_fields() ne lisent jamais, puisqu'ils lisent embed.fields.
+_CANONICAL_ADD_FIELDS = add_fields
 
 
 def _latency_quality(latency_ms: int) -> tuple[str, str]:
@@ -398,9 +420,31 @@ def clean_view(view: Any) -> Any:
 
 
 def log_embed(title: str, *, fields: Iterable[tuple[str, Any, bool | None] | tuple[str, Any]] = (), description: str = "", event_time: datetime | None = None, banner: bool = True) -> discord.Embed:
+    """Construit un embed de JOURNAL — jamais soumis au style compact des commandes.
+
+    wide_logs.py lit embed.fields structurellement (identité, corps narratif,
+    boutons d'ID) : un champ fusionné dans description casse tout le pipeline,
+    silencieusement. _CANONICAL_BASE / _CANONICAL_ADD_FIELDS restent donc
+    figés sur l'implémentation d'origine, quoi que le reste du bot patche.
+    """
     footer = f"SentriX • {format_datetime_fr(event_time)}"
-    embed = _base(title, description or None, footer=footer, kind=_kind_from_text(title, description), clean_description=False, banner=banner)
-    return add_fields(embed, fields)
+    embed = _CANONICAL_BASE(
+        title, description or None, footer=footer,
+        kind=_kind_from_text(title, description), clean_description=False, banner=banner,
+    )
+    return _CANONICAL_ADD_FIELDS(embed, fields)
+
+
+# Alias figé, distinct du nom `log_embed` : trois modules runtime
+# (sentrix_runtime, sentrix_visual_cleanup, log_compact_final) réassignent
+# ENTIÈREMENT `embeds.log_embed` à leur propre implémentation — celle-ci
+# fusionne les champs marqués inline dans `embed.description` sous forme de
+# texte (« **Nom :** valeur »), au lieu d'un vrai Embed.add_field(). Protéger
+# l'INTÉRIEUR de log_embed (_CANONICAL_BASE/_CANONICAL_ADD_FIELDS ci-dessus)
+# ne suffit donc pas : c'est la fonction ENTIÈRE qui est remplacée, pas
+# seulement ce qu'elle appelle. Tout producteur de log doit appeler CET alias,
+# jamais `embeds.log_embed` directement.
+canonical_log_embed = log_embed
 
 
 def normalize_log(source: discord.Embed, *, event_time: datetime | None = None) -> discord.Embed:
@@ -410,7 +454,7 @@ def normalize_log(source: discord.Embed, *, event_time: datetime | None = None) 
         if safe_name.casefold() in _LEGACY_FILLER_FIELDS or _empty_log_value(field.value):
             continue
         fields.append((safe_name, str(field.value), bool(field.inline)))
-    panel = log_embed(str(source.title or "Journal SentriX"), description=str(source.description or ""), fields=fields, event_time=event_time)
+    panel = canonical_log_embed(str(source.title or "Journal SentriX"), description=str(source.description or ""), fields=fields, event_time=event_time)
     thumbnail = getattr(source.thumbnail, "url", None)
     if thumbnail:
         panel.set_thumbnail(url=str(thumbnail))
@@ -419,6 +463,13 @@ def normalize_log(source: discord.Embed, *, event_time: datetime | None = None) 
     if author_name and not str(author_name).casefold().startswith(("sentrix", "odboug")):
         panel.set_author(name=clean_ui_text(author_name, 256, "SentriX"), icon_url=str(author_icon) if author_icon else None)
     return panel
+
+
+# Même précaution que canonical_log_embed : send_log() rappelle
+# normalize_log() sur CHAQUE journal envoyé, quelle que soit la source de
+# l'embed. C'est le point de passage obligé de tout le pipeline — le
+# protéger ici couvre tous les producteurs de logs d'un coup.
+canonical_normalize_log = normalize_log
 
 
 def _who(entity: Any) -> str:

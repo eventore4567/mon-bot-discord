@@ -124,7 +124,7 @@ class Logs(commands.Cog, name="Logs"):
         body = identity_text
         if description:
             body = f"{body}\n\n{description}" if body else description
-        panel = embeds.log_embed(title, fields=fields, description=body)
+        panel = embeds.canonical_log_embed(title, fields=fields, description=body)
         if avatar:
             panel.set_thumbnail(url=avatar)
         return panel

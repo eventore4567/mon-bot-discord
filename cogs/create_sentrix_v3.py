@@ -1151,7 +1151,7 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
         ]
         if actor is not None:
             fields.insert(0, ("Créateur", f"<@{actor.id}>", True))
-        panel = embeds.log_embed("Invitation créée", fields=fields)
+        panel = embeds.canonical_log_embed("Invitation créée", fields=fields)
         view = log_service.log_actions(
             ids=[("Copier l'ID créateur", actor.id)] if actor is not None else None
         )
@@ -1180,7 +1180,7 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
         ]
         if actor is not None:
             fields.insert(0, ("Responsable", f"<@{actor.id}>", True))
-        panel = embeds.log_embed("Invitation supprimée", fields=fields)
+        panel = embeds.canonical_log_embed("Invitation supprimée", fields=fields)
         await log_service.send_log(
             self.bot,
             guild,
@@ -1243,7 +1243,7 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
         auteur = guild.get_member(author_id) if author_id else None
         if author_id and auteur is None:
             fields.insert(0, ("Auteur", f"<@{author_id}>", True))
-        panel = embeds.log_embed(
+        panel = embeds.canonical_log_embed(
             "Message épinglé" if pinned else "Message désépinglé",
             fields=fields,
         )
@@ -1286,7 +1286,7 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
         ]
         if actor is not None:
             fields.append(("Modérateur", f"<@{actor.id}>", True))
-        panel = embeds.log_embed("Rôle modifié", fields=fields)
+        panel = embeds.canonical_log_embed("Rôle modifié", fields=fields)
         ids = [("Copier l'ID du rôle", after.id)]
         if actor is not None:
             ids.append(("Copier l'ID du modérateur", actor.id))

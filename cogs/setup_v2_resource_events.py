@@ -13,7 +13,7 @@ def _actor(value) -> str:
 
 
 async def _send(bot, guild: discord.Guild, title: str, fields, event: str) -> None:
-    panel = embeds.log_embed(title, fields=fields)
+    panel = embeds.canonical_log_embed(title, fields=fields)
     await log_service.send_log(
         bot,
         guild,

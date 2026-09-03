@@ -490,7 +490,7 @@ def _patch_tickets(bot: commands.Bot) -> None:
         except discord.HTTPException:
             pass
 
-        panel = embeds.log_embed(
+        panel = embeds.canonical_log_embed(
             "Ticket fermé",
             fields=(
                 ("Ticket", f"`#{ticket_id}`", True),
@@ -586,7 +586,7 @@ def _patch_raw_file_recovery(bot: commands.Bot) -> None:
             channel_id = int(row["channel_id"] or fallback_channel_id or 0)
             message_id = int(row["message_id"])
             author_id = int(row["author_id"])
-            panel = embeds.log_embed(
+            panel = embeds.canonical_log_embed(
                 "Pièce jointe supprimée" if len(urls) == 1 else "Pièces jointes supprimées",
                 fields=(
                     ("Salon", _channel_ref_v6(channel_id), False),
@@ -648,7 +648,7 @@ class UnifiedLogsV6(commands.Cog, name="UnifiedLogsV6"):
         _remember_channel(message.channel)
         files = await _best_effort_files(list(message.attachments))
         lines = [_attachment_line(item) for item in message.attachments]
-        panel = embeds.log_embed(
+        panel = embeds.canonical_log_embed(
             "Image supprimée"
             if len(message.attachments) == 1
             and str(message.attachments[0].content_type or "").startswith("image/")

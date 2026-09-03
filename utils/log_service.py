@@ -500,7 +500,15 @@ async def send_log(
 
     from utils import embeds as embeds_mod
     try:
-        rendered = embeds_mod.normalize_log(embed)
+        # canonical_normalize_log, PAS embeds_mod.normalize_log : ce dernier est
+        # réassigné au démarrage réel par sentrix_runtime/log_compact_final/
+        # sentrix_visual_cleanup vers une variante qui fusionne les champs
+        # marqués inline dans embed.description (texte « **Nom :** valeur »)
+        # au lieu d'un vrai Embed.add_field(). C'est ICI que ça se produisait
+        # pour TOUT log passant par send_log(), quel que soit son producteur —
+        # narrative_body()/derive_identity()/compact_fields() lisent
+        # embed.fields et ne voyaient donc plus rien.
+        rendered = embeds_mod.canonical_normalize_log(embed)
     except Exception:
         logger.exception("Normalisation du log échouée; embed métier conservé.")
         rendered = embed.copy()
@@ -630,7 +638,7 @@ async def send_test_log(
         return False, f"Impossible d'envoyer le test : {reason}."
 
     from utils import embeds as embeds_mod
-    test_embed = embeds_mod.log_embed(
+    test_embed = embeds_mod.canonical_log_embed(
         "Test de log",
         description=(
             f"<@{author.id}> a lancé un test de la catégorie "
