@@ -29,6 +29,28 @@ WARNING_COLOR = int(_config.COLOR_WARNING)
 FOOTER = "SentriX • Réponse rapide et sécurisée"
 _ALLOWED = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=False)
 
+# Un message d'erreur qui reste affiché indéfiniment finit par encombrer le
+# salon : la personne corrige, réessaie, et l'ancien message traîne encore.
+# 30 secondes laissent le temps de lire une erreur détaillée (syntaxe,
+# permissions, sections explicatives) sans devenir un déchet permanent.
+_DUREE_AFFICHAGE = 30
+
+
+async def _effacer_plus_tard(message: discord.Message | None) -> None:
+    """Programme la suppression pour les surfaces sans delete_after natif.
+
+    Messageable.send, InteractionResponse.send_message et Message.edit
+    acceptent delete_after directement. edit_original_response et
+    Webhook.send ne l'acceptent pas : on programme la suppression à la main
+    sur le message qu'ils renvoient.
+    """
+    if not isinstance(message, discord.Message):
+        return
+    try:
+        await message.delete(delay=_DUREE_AFFICHAGE)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        pass
+
 
 def _clip(value: object, limit: int = 3900) -> str:
     text = str(value or "").strip()
@@ -475,7 +497,7 @@ async def _raw_prefix_send(ctx: commands.Context, panneau: panels.Panneau) -> No
     referencee par la MediaGallery du conteneur, pas un second envoi.
     """
     raw_send = policy._unwrap(discord.abc.Messageable.send)
-    kwargs = {"view": panneau, "allowed_mentions": _ALLOWED}
+    kwargs = {"view": panneau, "allowed_mentions": _ALLOWED, "delete_after": _DUREE_AFFICHAGE}
     fichiers = panneau.fichiers()
     if fichiers:
         kwargs["files"] = fichiers
@@ -514,6 +536,7 @@ async def _replace_prefix_response(ctx: commands.Context, panneau: panels.Pannea
             embeds=[],
             view=panneau,
             attachments=panneau.fichiers(),
+            delete_after=_DUREE_AFFICHAGE,
         )
         return True
     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
@@ -530,13 +553,19 @@ async def _raw_slash_send(interaction: discord.Interaction, panneau: panels.Pann
     raw_edit = policy._unwrap(discord.Interaction.edit_original_response)
 
     if interaction.response.is_done() and deferred:
-        await raw_edit(interaction, content=None, embeds=[], view=panneau,
-                       attachments=panneau.fichiers())
+        message = await raw_edit(interaction, content=None, embeds=[], view=panneau,
+                                 attachments=panneau.fichiers())
+        await _effacer_plus_tard(message)
         return
 
     if not interaction.response.is_done():
         raw_response = policy._unwrap(discord.InteractionResponse.send_message)
-        kwargs = {"view": panneau, "ephemeral": True, "allowed_mentions": _ALLOWED}
+        kwargs = {
+            "view": panneau,
+            "ephemeral": True,
+            "allowed_mentions": _ALLOWED,
+            "delete_after": _DUREE_AFFICHAGE,
+        }
         fichiers = panneau.fichiers()
         if fichiers:
             kwargs["files"] = fichiers
@@ -546,8 +575,9 @@ async def _raw_slash_send(interaction: discord.Interaction, panneau: panels.Pann
     # Une reponse normale existe deja. La remplacer evite le couple « resultat +
     # erreur » qui faisait croire a une double reponse de SentriX.
     try:
-        await raw_edit(interaction, content=None, embeds=[], view=panneau,
-                       attachments=panneau.fichiers())
+        message = await raw_edit(interaction, content=None, embeds=[], view=panneau,
+                                 attachments=panneau.fichiers())
+        await _effacer_plus_tard(message)
         return
     except discord.NotFound:
         # Pas de message original : dans ce cas seulement, un follow-up ne duplique rien.
@@ -556,7 +586,8 @@ async def _raw_slash_send(interaction: discord.Interaction, panneau: panels.Pann
         fichiers = panneau.fichiers()
         if fichiers:
             kwargs["files"] = fichiers
-        await raw_webhook(interaction.followup, **kwargs)
+        message = await raw_webhook(interaction.followup, **kwargs)
+        await _effacer_plus_tard(message)
 
 
 def install(bot: commands.Bot) -> None:
