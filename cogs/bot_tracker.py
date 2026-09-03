@@ -42,30 +42,6 @@ def _duration(seconds: int) -> str:
     return f"{secs}s"
 
 
-def _member_message(text: str, member: discord.Member) -> str:
-    """Résout les variables d'accueil/départ avec une vraie mention Discord.
-
-    ``{member}`` reste la variable historique et ``{user}`` devient un alias simple.
-    On accepte aussi les anciens placeholders visuels ``(user)`` et ``[user]`` afin
-    qu'un message déjà enregistré n'affiche plus littéralement « user ».
-    """
-    replacements = (
-        ("{member}", member.mention),
-        ("{user}", member.mention),
-        ("(user)", member.mention),
-        ("[user]", member.mention),
-        ("<user>", member.mention),
-        ("{username}", member.display_name),
-        ("{display_name}", member.display_name),
-        ("{server}", member.guild.name),
-        ("{member_count}", str(member.guild.member_count or 0)),
-    )
-    value = str(text or "")
-    for placeholder, replacement in replacements:
-        value = value.replace(placeholder, replacement)
-    return value
-
-
 def _claim_member_event(kind: str, member: discord.Member) -> bool:
     """Déduplique les dispatchs répétés dans un même processus pendant quelques secondes."""
     now_value = time.monotonic()
@@ -244,111 +220,16 @@ def _restore_canonical_log_pipeline() -> bool:
     return changed
 
 
-def _install_member_presence_mentions(bot: commands.Bot) -> None:
-    """Rend les messages d'arrivée/départ cohérents et pingue le vrai membre.
-
-    Le handler principal historique envoyait la bienvenue uniquement dans un embed : une
-    mention dans un embed n'est pas un ping fiable. Il utilisait aussi ``str(member)`` au
-    départ, et ne connaissait pas ``{user}``. On remplace seulement les deux handlers du
-    Bot ; les listeners des autres cogs (logs, invites, niveaux...) continuent d'être
-    dispatchés normalement par discord.py.
-    """
-    if getattr(bot, "_sentrix_member_presence_mentions_installed", False):
-        return
-
-    bot._sentrix_original_on_member_join = getattr(bot, "on_member_join", None)
-    bot._sentrix_original_on_member_remove = getattr(bot, "on_member_remove", None)
-
-    async def on_member_join(member: discord.Member):
-        if not _claim_member_event("join", member):
-            logger.warning("Bienvenue doublon ignoré guild=%s member=%s", member.guild.id, member.id)
-            return
-
-        conf = await bot.db.get_guild_config(member.guild.id)
-        if not conf:
-            return
-
-        if conf["autorole"]:
-            role = member.guild.get_role(conf["autorole"])
-            if role:
-                try:
-                    await member.add_roles(role, reason="Rôle automatique à l'arrivée")
-                except discord.Forbidden:
-                    pass
-
-        if not conf["welcome_channel"]:
-            return
-        channel = member.guild.get_channel(conf["welcome_channel"])
-        if channel is None:
-            return
-
-        raw_text = conf["welcome_message"] or "Bienvenue {member} sur **{server}** !"
-        text = _member_message(raw_text, member)
-        try:
-            welcome_embed = embeds.success(text, title=f"Bienvenue {member.display_name}")
-            welcome_embed.set_thumbnail(url=member.display_avatar.url)
-            if conf["welcome_image_url"]:
-                welcome_embed.set_image(url=conf["welcome_image_url"])
-
-            # Le ping est placé dans le contenu du message, pas seulement dans l'embed.
-            # AllowedMentions limite strictement la notification à ce membre : un texte
-            # personnalisé ne peut donc pas déclencher @everyone ou un rôle par accident.
-            ping = None if member.bot else member.mention
-            allowed = discord.AllowedMentions(
-                everyone=False,
-                roles=False,
-                users=[] if member.bot else [member],
-                replied_user=False,
-            )
-            await channel.send(content=ping, embed=welcome_embed, allowed_mentions=allowed)
-            asyncio.create_task(
-                _cleanup_presence_duplicates(bot, channel, member, "join"),
-                name=f"sentrix-dedupe-welcome-{member.guild.id}-{member.id}",
-            )
-        except discord.HTTPException:
-            pass
-
-    async def on_member_remove(member: discord.Member):
-        if not _claim_member_event("leave", member):
-            logger.warning("Départ doublon ignoré guild=%s member=%s", member.guild.id, member.id)
-            return
-
-        conf = await bot.db.get_guild_config(member.guild.id)
-        if not conf or not conf["goodbye_channel"]:
-            return
-        channel = member.guild.get_channel(conf["goodbye_channel"])
-        if channel is None:
-            return
-
-        raw_text = conf["goodbye_message"] or "{member} a quitté **{server}**."
-        text = _member_message(raw_text, member)
-        try:
-            # La mention reste réelle/clickable dans le message de départ. Discord ne peut
-            # toutefois pas garantir une notification à quelqu'un qui a déjà quitté le
-            # serveur au moment où l'événement member_remove est reçu.
-            ping = None if member.bot else member.mention
-            allowed = discord.AllowedMentions(
-                everyone=False,
-                roles=False,
-                users=[] if member.bot else [member],
-                replied_user=False,
-            )
-            await channel.send(
-                content=ping,
-                embed=embeds.neutral("Départ", text),
-                allowed_mentions=allowed,
-            )
-            asyncio.create_task(
-                _cleanup_presence_duplicates(bot, channel, member, "leave"),
-                name=f"sentrix-dedupe-goodbye-{member.guild.id}-{member.id}",
-            )
-        except discord.HTTPException:
-            pass
-
-    bot.on_member_join = on_member_join
-    bot.on_member_remove = on_member_remove
-    bot._sentrix_member_presence_mentions_installed = True
-    logger.info("Accueil/départ : vraie mention membre, alias {user} et anti-doublon activés.")
+# _install_member_presence_mentions a été retiré : il assignait, lui aussi, un TROISIÈME
+# bot.on_member_join/on_member_remove concurrent (voir cogs/setup_v2_completion.py, seul
+# émetteur désormais, et cogs/control_center_v3.py où le même doublon a été retiré). Ce
+# handler-ci restait invisible en production tant que control_center_v3 s'installait après
+# lui et écrasait l'attribut à son tour — mais dès que ce dernier a arrêté de le faire, ce
+# handler serait redevenu actif et aurait simplement déplacé le doublon au lieu de le
+# résoudre. _claim_member_event/_cleanup_presence_duplicates restent définis ci-dessous :
+# setup_v2_completion.py les appelle désormais après CHAQUE envoi réel (pas les tests), en
+# filet de sécurité après coup — utile en particulier si le PRIMARY et le standby HA sont
+# brièvement connectés à Discord en même temps pendant une bascule de lease.
 
 
 
@@ -484,7 +365,6 @@ async def install(bot: commands.Bot) -> None:
     if _INSTALLED:
         return
     await bot.db.execute(_SCHEMA)
-    _install_member_presence_mentions(bot)
     if bot.get_cog(_COG_NAME) is None:
         await bot.add_cog(BotTracker(bot))
     _INSTALLED = True

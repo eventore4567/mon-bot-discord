@@ -6,6 +6,7 @@ accueil riche configurable et maintenance create-server strictement opt-in.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -14,6 +15,8 @@ from discord.ext import commands
 
 from utils import checks, embeds, log_service
 from utils import sentrix_panels as panels
+from . import bot_tracker
+from . import control_center_v3
 from . import setup_control_center as setup_ui
 from . import setup_v2_core as core
 from . import setup_v2_ui as v2ui
@@ -78,9 +81,12 @@ async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, s
 
 
 def _format_welcome(value: str, member: discord.Member) -> str:
-    guild = member.guild
-    return (str(value).replace("{member}", member.mention).replace("{username}", member.display_name)
-            .replace("{server}", guild.name).replace("{member_count}", str(guild.member_count or 0)))
+    # Seul renderer de variables pour la bienvenue/le départ (source unique avec le
+    # bouton "Tester la bienvenue" ci-dessous, qui appelle exactement la même fonction) :
+    # {member}/{membre}, {mention}, {user}, {username}, {display_name}, {server}/{serveur}
+    # et {member_count} sont tous supportés, y compris les alias déjà utilisés ailleurs
+    # dans SentriX (ex: DM de sanction) pour rester cohérent d'une fonction à l'autre.
+    return control_center_v3.render_member_template(value, member)
 
 
 async def _welcome_destination(bot, guild: discord.Guild):
@@ -132,16 +138,18 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     return True, f"Test envoyé dans {channel.mention}." if test else "Bienvenue envoyée."
 
 
-async def _send_goodbye(bot, member: discord.Member) -> None:
+async def _send_goodbye(bot, member: discord.Member) -> discord.abc.Messageable | None:
+    """Renvoie le salon utilisé en cas d'envoi réussi (None sinon) : sert au filet de
+    sécurité anti-doublon après coup, voir cogs/bot_tracker.py::_cleanup_presence_duplicates."""
     if not await core.module_enabled(bot, member.guild.id, "welcome"):
-        return
+        return None
     conf = await bot.db.get_guild_config(member.guild.id)
     channel_id = _conf_value(conf, "goodbye_channel")
     if not channel_id:
-        return
+        return None
     channel = member.guild.get_channel(int(channel_id))
     if not isinstance(channel, (discord.TextChannel, discord.Thread)):
-        return
+        return None
     template = _conf_value(conf, "goodbye_message", "**{username}** a quitté **{server}**.")
     panel = embeds.neutral("Départ d’un membre", _format_welcome(template, member))
     presentation = await _welcome_presentation(bot, member.guild.id)
@@ -150,7 +158,8 @@ async def _send_goodbye(bot, member: discord.Member) -> None:
     try:
         await panels.envoyer(channel, panels.depuis_embed(panel), allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
-        pass
+        return None
+    return channel
 
 
 def _replace_welcome_listeners(bot) -> None:
@@ -168,18 +177,38 @@ def _replace_welcome_listeners(bot) -> None:
         else: bot.extra_events.pop(event_name, None)
 
     async def on_member_join(member: discord.Member):
+        # Garde HA : évite un double message/double autorole si le PRIMARY et le standby
+        # sont brièvement connectés à Discord en même temps pendant une bascule de lease.
+        if not control_center_v3._is_primary_sentrix_service():
+            return
         conf = await bot.db.get_guild_config(member.guild.id)
         if await core.module_enabled(bot, member.guild.id, "roles"):
             role_id = _conf_value(conf, "autorole")
             role = member.guild.get_role(int(role_id)) if role_id else None
             me = member.guild.me
-            if role and me and me.guild_permissions.manage_roles and role < me.top_role:
+            if role and not role.managed and me and me.guild_permissions.manage_roles and role < me.top_role:
                 try: await member.add_roles(role, reason="Autorole SentriX")
                 except discord.HTTPException: pass
-        await _send_welcome(bot, member)
+        ok, _message = await _send_welcome(bot, member)
+        if ok:
+            # Filet de sécurité après coup (channel.history, garde même contre un doublon
+            # envoyé par un AUTRE processus SentriX) : voir cogs/bot_tracker.py.
+            channel, _error = await _welcome_destination(bot, member.guild)
+            if channel is not None:
+                asyncio.create_task(
+                    bot_tracker._cleanup_presence_duplicates(bot, channel, member, "join"),
+                    name=f"sentrix-dedupe-welcome-{member.guild.id}-{member.id}",
+                )
 
     async def on_member_remove(member: discord.Member):
-        await _send_goodbye(bot, member)
+        if not control_center_v3._is_primary_sentrix_service():
+            return
+        channel = await _send_goodbye(bot, member)
+        if channel is not None:
+            asyncio.create_task(
+                bot_tracker._cleanup_presence_duplicates(bot, channel, member, "leave"),
+                name=f"sentrix-dedupe-goodbye-{member.guild.id}-{member.id}",
+            )
 
     bot.add_listener(on_member_join, "on_member_join")
     bot.add_listener(on_member_remove, "on_member_remove")

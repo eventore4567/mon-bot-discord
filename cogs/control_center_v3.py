@@ -14,7 +14,6 @@ restent actifs.
 """
 from __future__ import annotations
 
-import inspect
 import logging
 import re
 import types
@@ -113,6 +112,7 @@ def _install_semantic_renderer() -> None:
 def render_member_template(text: str, member: discord.Member) -> str:
     replacements = {
         "{member}": member.mention,
+        "{membre}": member.mention,
         "{mention}": member.mention,
         "{user}": member.mention,
         "(user)": member.mention,
@@ -121,6 +121,7 @@ def render_member_template(text: str, member: discord.Member) -> str:
         "{username}": member.name,
         "{display_name}": member.display_name,
         "{server}": member.guild.name,
+        "{serveur}": member.guild.name,
         "{member_count}": str(member.guild.member_count or 0),
     }
     value = str(text or "")
@@ -141,88 +142,19 @@ def _is_primary_sentrix_service() -> bool:
         return True
 
 
-def _remove_visible_presence_listeners(bot: commands.Bot) -> int:
-    removed = 0
-    for event, needle in (("on_member_join", "welcome"), ("on_member_remove", "goodbye")):
-        for callback in list(getattr(bot, "extra_events", {}).get(event, ())):
-            try:
-                source = inspect.getsource(callback).casefold()
-            except (OSError, TypeError):
-                continue
-            # On ne retire que les listeners qui lisent explicitement le salon d'accueil
-            # ou de départ ET envoient un message. Les listeners de logs/XP/sécurité restent.
-            if f"{needle}_channel" not in source or ".send(" not in source:
-                continue
-            try:
-                bot.remove_listener(callback, event)
-                removed += 1
-            except Exception:
-                logger.debug("Listener présence non retiré: %s", callback, exc_info=True)
-    return removed
-
-
-def _install_presence_renderer(bot: commands.Bot) -> None:
-    if getattr(bot, "_sentrix_control_center_v3_presence", False):
-        return
-
-    _remove_visible_presence_listeners(bot)
-
-    async def on_member_join(member: discord.Member):
-        if not _is_primary_sentrix_service():
-            return
-        conf = await bot.db.get_guild_config(member.guild.id)
-        if not conf:
-            return
-
-        role_id = conf["autorole"]
-        if role_id:
-            role = member.guild.get_role(int(role_id))
-            if role and not role.managed and member.guild.me and role < member.guild.me.top_role:
-                try:
-                    await member.add_roles(role, reason="SentriX : autorole à l'arrivée")
-                except (discord.Forbidden, discord.HTTPException):
-                    pass
-
-        channel_id = conf["welcome_channel"]
-        channel = member.guild.get_channel(int(channel_id)) if channel_id else None
-        if channel is None:
-            return
-        raw = conf["welcome_message"] or "Bienvenue {mention} sur **{server}** ! Lis le règlement et choisis tes rôles pour commencer."
-        text = render_member_template(raw, member)
-        panel = embeds.success(text, title=f"Bienvenue {member.display_name}")
-        panel.set_thumbnail(url=member.display_avatar.url)
-        image = conf["welcome_image_url"]
-        if image:
-            panel.set_image(url=image)
-        try:
-            # La mention reste lisible/clickable dans l'embed mais aucun second ping n'est
-            # ajouté au-dessus du panneau.
-            await sx_panels.envoyer(channel, sx_panels.depuis_embed(panel), allowed_mentions=discord.AllowedMentions.none())
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-
-    async def on_member_remove(member: discord.Member):
-        if not _is_primary_sentrix_service():
-            return
-        conf = await bot.db.get_guild_config(member.guild.id)
-        if not conf:
-            return
-        channel_id = conf["goodbye_channel"]
-        channel = member.guild.get_channel(int(channel_id)) if channel_id else None
-        if channel is None:
-            return
-        raw = conf["goodbye_message"] or "{user} a quitté **{server}**. Nous lui souhaitons une bonne continuation."
-        text = render_member_template(raw, member)
-        panel = embeds.neutral("Départ d’un membre", text)
-        panel.set_thumbnail(url=member.display_avatar.url)
-        try:
-            await sx_panels.envoyer(channel, sx_panels.depuis_embed(panel), allowed_mentions=discord.AllowedMentions.none())
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-
-    bot.on_member_join = on_member_join
-    bot.on_member_remove = on_member_remove
-    bot._sentrix_control_center_v3_presence = True
+# _install_presence_renderer et _remove_visible_presence_listeners ont été retirés :
+# ce fichier assignait bot.on_member_join/on_member_remove (un attribut) EN PLUS du
+# listener add_listener() posé par cogs/setup_v2_completion.py — discord.py déclenche
+# les deux mécanismes séparément (Bot.dispatch appelle self.on_member_join ET chaque
+# listener de extra_events), donc CHAQUE arrivée envoyait deux messages de bienvenue
+# différents (titre, ping et respect du module "welcome" divergents), et le nettoyage
+# heuristique par inspection de code source ne retirait jamais l'autre système (son
+# listener appelle un helper _send_welcome() dont le corps ne contient littéralement ni
+# "welcome_channel" ni ".send("). cogs/setup_v2_completion.py::_send_welcome est
+# maintenant l'unique émetteur — c'est aussi lui qui alimente le bouton "Tester la
+# bienvenue" du setup, donc l'aperçu et le message réel sont enfin garantis identiques.
+# render_member_template et _is_primary_sentrix_service restent définis ci-dessus : ils
+# sont réutilisés par setup_v2_completion.py (alias de variables + garde anti-doublon HA).
 
 
 # ---------------------------------------------------------------------------
@@ -823,7 +755,6 @@ async def install(bot: commands.Bot) -> None:
     )
 
     _install_semantic_renderer()
-    _install_presence_renderer(bot)
     await _install_honeypot_runtime(bot)
     _install_self_role_backend(bot)
     _install_setup_v3(bot)
@@ -831,5 +762,5 @@ async def install(bot: commands.Bot) -> None:
 
     bot._sentrix_control_center_v3_installed = True
     logger.info(
-        "Control Center V3 actif : Setup premium, sécurité/honeypot, rôles, présence unique et rendu sémantique."
+        "Control Center V3 actif : Setup premium, sécurité/honeypot, rôles et rendu sémantique."
     )

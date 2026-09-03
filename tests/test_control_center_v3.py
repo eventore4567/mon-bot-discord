@@ -21,7 +21,6 @@ def test_control_center_v3_is_valid_python_and_has_one_final_installer():
     assert "_sentrix_control_center_v3_installed" in source
     assert "_install_setup_v3(bot)" in source
     assert "_install_honeypot_runtime(bot)" in source
-    assert "_install_presence_renderer(bot)" in source
     assert "_install_self_role_backend(bot)" in source
 
 
@@ -50,18 +49,16 @@ def test_honeypot_reuses_the_existing_strong_v50_engine():
     assert not (ROOT / "cogs" / "security_verification_v3.py").exists()
 
 
-def test_welcome_goodbye_has_one_visible_message_and_all_placeholders():
+def test_render_member_template_placeholders_still_defined_here():
+    # Bienvenue/depart ne sont plus envoyes depuis ce fichier (voir
+    # tests/test_welcome_single_source_of_truth.py) mais render_member_template reste ici,
+    # reutilise par cogs/setup_v2_completion.py — seul emetteur desormais.
     source = _source(CONTROL)
     for placeholder in (
-        "{member}", "{mention}", "{user}", "{username}",
-        "{display_name}", "{server}", "{member_count}",
+        "{member}", "{membre}", "{mention}", "{user}", "{username}",
+        "{display_name}", "{server}", "{serveur}", "{member_count}",
     ):
         assert placeholder in source
-    assert "bot.on_member_join = on_member_join" in source
-    assert "bot.on_member_remove = on_member_remove" in source
-    assert "allowed_mentions=discord.AllowedMentions.none()" in source
-    # Le membre est dans l'embed : pas de deuxième ligne/ping content au-dessus.
-    assert "content=member.mention" not in source
 
 
 def test_role_choice_panel_is_explicitly_configurable():
