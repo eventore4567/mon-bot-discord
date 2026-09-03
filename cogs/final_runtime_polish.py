@@ -308,22 +308,29 @@ def _install_intelligent_ux(bot: commands.Bot) -> None:
 
 
 def _install_command_surface(bot: commands.Bot) -> None:
-    """Réapplique toujours en dernier les décisions catalogue et permissions."""
+    """Réapplique toujours en dernier les décisions catalogue et permissions.
+
+    command_access_policy_v2, command_centers_v2 et command_direct_aliases_v2 ont été
+    supprimés (commit 2a130d7, "groupe mort des correctifs de logs") : le détecteur de
+    code mort de cette passe n'a pas vu que cet import différé (dans le corps de fonction,
+    donc invisible à une analyse statique du graphe d'imports) les rendait encore
+    atteignables depuis ce module, lui bien vivant. Résultat : ce `from . import (...)`
+    levait une ImportError sur le premier nom manquant à CHAQUE démarrage, empêchant même
+    les trois modules restants (toujours présents, toujours voulus) de s'exécuter —
+    silencieusement avalé par le try/except de help_v8_final_guard.install(). Leur rôle
+    (command_access_policy_v2 dupliquait une politique de permissions slash déjà remplacée
+    par utils/access_matrix.py ; command_centers_v2/command_direct_aliases_v2 n'ajoutaient
+    que des alias slash cosmétiques) confirme qu'ils sont sans remplacement à prévoir.
+    """
     from . import (
-        command_access_policy_v2,
         command_catalog_cleanup,
-        command_centers_v2,
-        command_direct_aliases_v2,
         command_hybrid_slash_restore_v3,
         slash_command_budget,
     )
 
     slash_command_budget.install(bot)
-    command_centers_v2.install(bot)
-    command_direct_aliases_v2.install(bot)
     command_catalog_cleanup.install(bot)
     command_hybrid_slash_restore_v3.install(bot)
-    command_access_policy_v2.install(bot)
     slash_command_budget.finalize(bot)
 
 
