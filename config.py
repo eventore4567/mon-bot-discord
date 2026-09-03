@@ -10,7 +10,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Obligatoire ---
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+# Railway peut conserver un retour à la ligne final lorsqu'un secret est collé/importé.
+# Discord envoie le token dans l'en-tête Authorization : un CR/LF résiduel est donc rejeté
+# par aiohttp comme tentative d'injection d'en-tête. On retire uniquement l'espace externe,
+# puis on refuse explicitement tout caractère de contrôle restant à l'intérieur du token.
+DISCORD_TOKEN = (os.getenv("DISCORD_TOKEN") or "").strip()
+if any(ord(ch) < 32 or ord(ch) == 127 for ch in DISCORD_TOKEN):
+    raise RuntimeError(
+        "DISCORD_TOKEN invalide : caractère de contrôle détecté. "
+        "Recréez la variable Railway ou utilisez une référence vers le token du service principal."
+    )
 
 # --- Optionnel (fonctionnalités IA / utilitaires) ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")          # /ask, /ai, /sentrix, etc.
