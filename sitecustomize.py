@@ -1,15 +1,15 @@
 """Protection de sortie logs pour SentriX sur Railway.
 
-Python importe automatiquement ``sitecustomize`` au démarrage (sauf ``-S``). Le garde
-est volontairement limité à Railway : en local et dans les tests, la configuration de
-logging historique reste inchangée.
+Python importe automatiquement ``sitecustomize`` au demarrage (sauf ``-S``). Le garde
+est volontairement limite a Railway : en local et dans les tests, la configuration de
+logging historique reste inchangee.
 
 Objectifs :
 - conserver toutes les erreurs importantes ;
-- réduire les bibliothèques tierces très bavardes ;
-- empêcher une boucle INFO/WARNING identique de dépasser la limite de logs Railway ;
-- ignorer uniquement les faux positifs connus d'un standby HA volontairement non connecté ;
-- ne modifier aucune logique Discord, Redis, PostgreSQL ou HA.
+- reduire les bibliotheques tierces tres bavardes ;
+- empecher une boucle INFO/WARNING identique de depasser la limite de logs Railway ;
+- ignorer uniquement les faux positifs connus d'un standby HA volontairement non connecte ;
+- installer le routage dashboard leader-aware avant la construction aiohttp.
 """
 from __future__ import annotations
 
@@ -41,11 +41,11 @@ def _truthy_env(name: str) -> bool:
 
 
 def _expected_ha_standby_not_ready(record: logging.LogRecord, message: str) -> bool:
-    """Reconnaît le faux ERROR V45 attendu sur une instance standby passive.
+    """Reconnait le faux ERROR V45 attendu sur une instance standby passive.
 
-    Le standby HA doit rester vivant sans ouvrir Discord tant que le primary détient le
-    lease Redis. L'ancien audit V45, conçu avant le failover, considère encore cette
-    absence de on_ready après 90 s comme une erreur. On ne masque ce message que lorsque
+    Le standby HA doit rester vivant sans ouvrir Discord tant que le primary detient le
+    lease Redis. L'ancien audit V45, concu avant le failover, considere encore cette
+    absence de on_ready apres 90 s comme une erreur. On ne masque ce message que lorsque
     le mode HA est explicitement actif ET que l'instance est explicitement standby.
     """
     if not _truthy_env("SENTRIX_FAILOVER_ENABLED"):
@@ -54,7 +54,7 @@ def _expected_ha_standby_not_ready(record: logging.LogRecord, message: str) -> b
         return False
     return (
         record.name == "bot.dashboard.health-runtime-v45"
-        and "Discord n'est pas devenu prêt en 90 secondes" in message
+        and "Discord n'est pas devenu pret en 90 secondes" in message
     )
 
 
@@ -65,7 +65,7 @@ class _RepeatState:
 
 
 class _RailwayFloodFilter(logging.Filter):
-    """Laisse passer les vraies ERROR+, mais bride les floods de faible priorité."""
+    """Laisse passer les vraies ERROR+, mais bride les floods de faible priorite."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -74,8 +74,8 @@ class _RailwayFloodFilter(logging.Filter):
         self._low_priority_count = 0
         self._repeats: dict[tuple[str, int, str], _RepeatState] = {}
 
-        # Railway avait déjà signalé 500 logs/s. On reste très loin dessous tout en
-        # gardant assez de marge pour observer un démarrage chargé de SentriX.
+        # Railway avait deja signale 500 logs/s. On reste tres loin dessous tout en
+        # gardant assez de marge pour observer un demarrage charge de SentriX.
         self._max_low_priority_per_second = _env_int(
             "SENTRIX_LOG_MAX_PER_SECOND", 100, 20, 300
         )
@@ -91,13 +91,13 @@ class _RailwayFloodFilter(logging.Filter):
         except Exception:
             message = str(record.msg)
 
-        # Le standby passif n'est volontairement pas connecté à Discord. L'audit V45
-        # historique produit alors un faux ERROR après 90 s : on ignore uniquement ce cas
-        # précisément identifié, sans toucher aux autres erreurs.
+        # Le standby passif n'est volontairement pas connecte a Discord. L'audit V45
+        # historique produit alors un faux ERROR apres 90 s : on ignore uniquement ce cas
+        # precisement identifie, sans toucher aux autres erreurs.
         if _expected_ha_standby_not_ready(record, message):
             return False
 
-        # Une vraie erreur ne doit jamais être cachée par le garde anti-flood.
+        # Une vraie erreur ne doit jamais etre cachee par le garde anti-flood.
         if record.levelno >= logging.ERROR:
             return True
 
@@ -105,12 +105,12 @@ class _RailwayFloodFilter(logging.Filter):
         key = (record.name, record.levelno, message)
 
         with self._lock:
-            # Fenêtre globale d'une seconde pour DEBUG/INFO uniquement.
+            # Fenetre globale d'une seconde pour DEBUG/INFO uniquement.
             if now - self._second_started >= 1.0:
                 self._second_started = now
                 self._low_priority_count = 0
 
-            # Déduplication des messages strictement identiques. Les WARNING restent
+            # Deduplication des messages strictement identiques. Les WARNING restent
             # visibles plus souvent que les INFO afin de ne pas masquer un incident.
             state = self._repeats.get(key)
             if state is None or now - state.started_at >= self._repeat_window:
@@ -131,7 +131,7 @@ class _RailwayFloodFilter(logging.Filter):
                 if self._low_priority_count > self._max_low_priority_per_second:
                     return False
 
-            # Nettoyage léger pour empêcher le dictionnaire de grossir indéfiniment.
+            # Nettoyage leger pour empecher le dictionnaire de grossir indefiniment.
             if len(self._repeats) > 5000:
                 cutoff = now - self._repeat_window
                 self._repeats = {
@@ -151,7 +151,7 @@ def _configure_railway_logging() -> None:
     root.setLevel(logging.INFO)
 
     # Installer notre handler avant l'import de main.py : son logging.basicConfig()
-    # devient alors volontairement un no-op et on évite plusieurs handlers identiques.
+    # devient alors volontairement un no-op et on evite plusieurs handlers identiques.
     if not root.handlers:
         handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(logging.Formatter(_LOG_FORMAT))
@@ -162,8 +162,8 @@ def _configure_railway_logging() -> None:
         if not any(isinstance(current, _RailwayFloodFilter) for current in handler.filters):
             handler.addFilter(flood_filter)
 
-    # Ces bibliothèques peuvent produire énormément de détails réseau au niveau INFO.
-    # Les WARNING/ERROR restent intégralement disponibles.
+    # Ces bibliotheques peuvent produire enormement de details reseau au niveau INFO.
+    # Les WARNING/ERROR restent integralement disponibles.
     for logger_name in (
         "aiohttp.access",
         "aiosqlite",
@@ -178,4 +178,22 @@ def _configure_railway_logging() -> None:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
+def _install_railway_dashboard_ha_proxy() -> None:
+    """Branche le proxy avant que railway_boot construise l'application dashboard."""
+    if not _running_on_railway() or not _truthy_env("SENTRIX_FAILOVER_ENABLED"):
+        return
+    try:
+        from web import dashboard as dashboard_web
+        from web.dashboard_ha_proxy_v1 import install
+
+        install(dashboard_web)
+    except Exception:
+        # Un probleme de proxy ne doit jamais empecher le bot Discord de demarrer. L'erreur
+        # reste visible dans les logs Railway afin d'etre diagnostiquee.
+        logging.getLogger("bot.dashboard-ha-proxy").exception(
+            "Installation precoce du proxy dashboard HA impossible."
+        )
+
+
 _configure_railway_logging()
+_install_railway_dashboard_ha_proxy()
