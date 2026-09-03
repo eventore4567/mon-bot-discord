@@ -108,7 +108,7 @@ def _install_ha_healthcheck() -> None:
 
 
 async def _restore_for_takeover(bot: Any, durable: Any) -> dict[str, Any]:
-    """Ferme SQLite, restaure PostgreSQL puis reconnecte la couche DB du bot."""
+    """Ferme SQLite, restaure PostgreSQL puis reconnecte réellement la couche DB."""
     previous_force_restore = bool(getattr(durable, "force_restore", False))
     await bot.db.close()
     try:
@@ -116,7 +116,18 @@ async def _restore_for_takeover(bot: Any, durable: Any) -> dict[str, Any]:
         result = await asyncio.wait_for(durable.restore_latest_if_needed(), timeout=60)
     finally:
         durable.force_restore = previous_force_restore
-        await bot.db.connect()
+
+        # railway_boot.run() remplace volontairement l'attribut d'instance
+        # `bot.db.connect` par un no-op après la première connexion afin que le démarrage
+        # historique n'ouvre pas SQLite deux fois. Lors d'un takeover HA, nous venons au
+        # contraire de FERMER la connexion pour restaurer le fichier depuis PostgreSQL :
+        # rappeler `bot.db.connect()` ici invoquerait donc ce no-op et laisserait
+        # aiosqlite fermé, ce qui provoquait en boucle `ValueError: no active connection`.
+        # Appeler la méthode de la classe contourne uniquement ce monkey-patch d'instance
+        # et rouvre la vraie connexion sur le fichier fraîchement restauré.
+        real_connect = type(bot.db).connect.__get__(bot.db, type(bot.db))
+        await real_connect()
+
     return result
 
 
