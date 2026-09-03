@@ -9,7 +9,8 @@ Objectifs :
 - reduire les bibliotheques tierces tres bavardes ;
 - empecher une boucle INFO/WARNING identique de depasser la limite de logs Railway ;
 - ignorer uniquement les faux positifs connus d'un standby HA volontairement non connecte ;
-- installer le routage dashboard leader-aware avant la construction aiohttp.
+- installer le routage dashboard leader-aware avant la construction aiohttp ;
+- installer les raffinements visuels du dashboard apres les couches principales.
 """
 from __future__ import annotations
 
@@ -195,5 +196,23 @@ def _install_railway_dashboard_ha_proxy() -> None:
         )
 
 
+def _install_railway_dashboard_focus_ui() -> None:
+    """Ajoute le loader direct et replie les outils serveur dans une fenetre dediee."""
+    if not _running_on_railway():
+        return
+    try:
+        from web import dashboard as dashboard_web
+        from web.dashboard_focus_loading_v1 import install
+
+        install(dashboard_web)
+    except Exception:
+        # Purement visuel : le dashboard et Discord doivent continuer a demarrer meme si
+        # cette couche optionnelle rencontre un probleme.
+        logging.getLogger("bot.dashboard-focus-loading").exception(
+            "Installation de l'interface dashboard focalisee impossible."
+        )
+
+
 _configure_railway_logging()
 _install_railway_dashboard_ha_proxy()
+_install_railway_dashboard_focus_ui()
