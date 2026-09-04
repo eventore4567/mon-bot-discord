@@ -480,6 +480,18 @@ def intention_de(embed: discord.Embed, defaut: str = "info") -> str:
     return _PAR_COULEUR.get(valeur, defaut)
 
 
+def _tient_sur_une_ligne(valeur: str) -> bool:
+    """Un champ qui rentre dans le budget d'une ``Ligne`` sans jamais être tronqué.
+
+    ``_texte()`` coupe a ``_LIMITE_LIGNE`` (240) caracteres : un champ plus long
+    ou multi-lignes irait donc a la trappe si on le forcait quand meme dans le
+    mode compact. Il garde alors sa propre section complete — jamais de perte,
+    seuls les champs REELLEMENT courts sont regroupes.
+    """
+    texte = str(valeur or "").strip()
+    return bool(texte) and "\n" not in texte and len(texte) <= _LIMITE_LIGNE
+
+
 def depuis_embed(
     embed: discord.Embed,
     *,
@@ -488,6 +500,7 @@ def depuis_embed(
     sous_titre: str | None = None,
     pied: str | None = None,
     boutons: Sequence[Bouton] = (),
+    compact: bool = True,
 ) -> Panneau:
     """Convertit un embed deja construit en panneau compose.
 
@@ -499,12 +512,33 @@ def depuis_embed(
 
     Un champ d'embed devient une section : c'est exactement la meme intention,
     rendue avec un filet et un en-tete au lieu d'une colonne.
+
+    ``compact`` (par defaut) regroupe les champs COURTS dans une seule section
+    « Résumé », une ligne chacun, au lieu d'un en-tete de section complet par
+    champ — un dossier de sanction a sept champs courts (membre, moderateur,
+    duree...) qui n'ont pas besoin chacun de leur propre grand titre et de leur
+    propre filet. Un champ trop long ou multi-lignes pour tenir sur une ligne
+    garde sa section complete, jamais tronquee : le mode compact ne perd jamais
+    d'information, il ne fait que grouper ce qui tient deja sur une ligne.
+    Passer ``compact=False`` retrouve l'ancien rendu, une section par champ.
     """
-    sections = [
-        Section(_titre_propre(champ.name), texte=_sans_barre(champ.value))
-        for champ in getattr(embed, "fields", ())
+    champs = [
+        champ for champ in getattr(embed, "fields", ())
         if str(champ.value or "").strip()
     ]
+    if compact:
+        courtes: list[Ligne] = []
+        sections: list[Section] = []
+        for champ in champs:
+            valeur = _sans_barre(champ.value)
+            if _tient_sur_une_ligne(valeur):
+                courtes.append(Ligne(_titre_propre(champ.name), valeur))
+            else:
+                sections.append(Section(_titre_propre(champ.name), texte=valeur))
+        if courtes:
+            sections.insert(0, Section("Résumé", courtes))
+    else:
+        sections = [Section(_titre_propre(champ.name), texte=_sans_barre(champ.value)) for champ in champs]
     if kind is None:
         kind = intention_de(embed)
     vignette = getattr(getattr(embed, "thumbnail", None), "url", None)

@@ -173,7 +173,9 @@ class PontDepuisEmbed(unittest.TestCase):
         return embed
 
     def test_un_champ_devient_une_section(self):
-        panneau = panels.depuis_embed(self._embed(), kind="moderation")
+        """Le mode compact (par defaut) regroupe les champs courts : ce test porte
+        specifiquement sur le pont champ -> section, donc compact=False."""
+        panneau = panels.depuis_embed(self._embed(), kind="moderation", compact=False)
         titres = [
             t.split("\n")[0] for t in
             [i.get("content", "") for i in _aplatir(panneau.to_components())]
@@ -183,7 +185,7 @@ class PontDepuisEmbed(unittest.TestCase):
 
     def test_les_emojis_de_tete_sont_retires(self):
         """Le chevron et le filet marquent deja la section ; l'emoji fait du bruit."""
-        texte = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation"))
+        texte = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation", compact=False))
         self.assertIn("### ◢ MEMBRE", texte)
         self.assertNotIn("👤", texte)
 
@@ -196,6 +198,48 @@ class PontDepuisEmbed(unittest.TestCase):
     def test_la_banniere_suit_le_domaine_demande(self):
         panneau = panels.depuis_embed(self._embed(), kind="moderation")
         self.assertEqual([f.filename for f in panneau.fichiers()], ["banner_moderation.webp"])
+
+    def test_compact_regroupe_les_champs_dans_une_seule_section(self):
+        """Un dossier de sanction a sept champs courts : chacun avec son propre
+        grand titre et son propre filet rendait la fiche disproportionnee. En
+        mode compact, un seul "### ◢ RÉSUMÉ" porte tous les champs, une ligne
+        chacun."""
+        texte = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation", compact=True))
+        self.assertEqual(texte.count("### "), 1)
+        self.assertIn("### ◢ RÉSUMÉ", texte)
+        self.assertIn("**Membre** · <@1>", texte)
+        self.assertIn("**Raison** · Spam massif", texte)
+
+    def test_compact_tient_sur_moins_de_lignes_que_le_rendu_normal(self):
+        compact = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation", compact=True))
+        normal = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation", compact=False))
+        self.assertLess(len(compact.splitlines()), len(normal.splitlines()))
+
+    def test_compact_sans_champs_ne_plante_pas(self):
+        embed = discord.Embed(title="Rien à voir")
+        panneau = panels.depuis_embed(embed, compact=True)
+        self.assertIsInstance(panneau, panels.Panneau)
+
+    def test_compact_est_le_reglage_par_defaut(self):
+        """toutes les commandes passent par depuis_embed() sans jamais preciser
+        compact= : c'est donc bien le defaut qui doit produire le rendu court."""
+        avec_defaut = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation"))
+        explicite = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation", compact=True))
+        self.assertEqual(avec_defaut, explicite)
+
+    def test_compact_ne_tronque_jamais_un_champ_trop_long_pour_une_ligne(self):
+        """Le mode compact ne doit JAMAIS perdre d'information : un champ trop
+        long ou multi-lignes pour tenir sur une ligne garde sa propre section
+        complete au lieu d'etre tronque dans le Résumé."""
+        long_texte = "Ligne 1\nLigne 2 avec beaucoup de details sur ce qui s'est passe exactement."
+        embed = discord.Embed(title="Dossier")
+        embed.add_field(name="Court", value="ok", inline=True)
+        embed.add_field(name="Long détail", value=long_texte, inline=False)
+        texte = panels.texte_complet(panels.depuis_embed(embed, kind="moderation"))
+        self.assertIn("### ◢ RÉSUMÉ", texte)
+        self.assertIn("**Court** · ok", texte)
+        self.assertIn("### ◢ LONG DÉTAIL", texte)
+        self.assertIn(long_texte, texte)
 
     def test_une_sanction_n_est_pas_peinte_en_vert(self):
         """« Membre banni » n'est pas une bonne nouvelle : c'est un acte de modération."""
