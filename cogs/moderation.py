@@ -57,35 +57,60 @@ class Moderation(commands.Cog):
 
         for row in rows:
             try:
-                await self._expirer_tempaction(row)
+                consommer = await self._expirer_tempaction(row)
             except Exception:
-                # Une ligne défectueuse ne doit jamais emporter la boucle entière.
+                # Une ligne défectueuse ne doit jamais emporter la boucle entière —
+                # ni être consommée : on la rejouera au tour suivant.
                 logger.exception("Expiration de la sanction temporaire #%s impossible.", row["id"])
-            finally:
-                # La ligne est consommée dans tous les cas, comme avant : sans
-                # cela, une ligne en échec serait rejouée à chaque tour.
-                try:
-                    await self.bot.db.execute("DELETE FROM tempactions WHERE id = ?", (row["id"],))
-                except Exception:
-                    logger.exception("Suppression de la sanction temporaire #%s impossible.", row["id"])
+                continue
 
-    async def _expirer_tempaction(self, row) -> None:
-        """Lève UNE sanction échue. L'appelant supprime la ligne dans tous les cas."""
+            if not consommer:
+                # Discord n'a PAS confirmé la levée : garder la ligne est la seule
+                # chose qui garantisse un nouvel essai. La supprimer laisserait un
+                # bannissement « temporaire » devenir définitif en silence.
+                continue
+
+            try:
+                await self.bot.db.execute("DELETE FROM tempactions WHERE id = ?", (row["id"],))
+            except Exception:
+                logger.exception("Suppression de la sanction temporaire #%s impossible.", row["id"])
+
+    async def _expirer_tempaction(self, row) -> bool:
+        """Lève UNE sanction échue.
+
+        Retourne True si la ligne peut être supprimée, False s'il faut la rejouer.
+
+        Ce booléen est tout l'enjeu : la ligne était auparavant supprimée dans un
+        ``finally``, donc même quand Discord refusait le débannissement. Une simple
+        HTTPException passagère laissait le membre banni ET effaçait la seule trace
+        qui aurait permis de réessayer — le bannissement temporaire devenait
+        définitif sans que rien ne le signale.
+
+        Après un débannissement réussi, un échec de journalisation remonte à
+        l'appelant, qui garde la ligne : le tour suivant retombera sur NotFound et
+        la consommera. Réessayer est donc toujours sans danger.
+        """
         guild = self.bot.get_guild(row["guild_id"])
         if not guild or row["action"] != "ban":
-            return
+            return True  # rien à lever ici : la ligne n'a plus d'objet
 
         try:
             await guild.unban(discord.Object(id=row["user_id"]), reason="Fin du bannissement temporaire")
         except discord.NotFound:
-            return  # déjà débanni à la main : il n'y a rien à annoncer
-        except discord.HTTPException:
+            # Discord confirme qu'il n'y a plus de bannissement : la sanction EST
+            # levée (débannissement manuel, par exemple). Rien à annoncer.
+            return True
+        except discord.HTTPException as exc:
+            # Couvre aussi Forbidden, qui en hérite : permission retirée, panne
+            # passagère, rate limit. Dans tous ces cas la levée n'est PAS acquise.
             logger.warning(
-                "Débannissement automatique refusé par Discord (serveur %s, membre %s).",
+                "Débannissement automatique refusé par Discord (serveur %s, membre %s) : %r ; "
+                "la sanction est conservée et sera réessayée.",
                 row["guild_id"],
                 row["user_id"],
+                exc,
             )
-            return
+            return False
 
         case_number = await self.bot.db.record_sanction(
             guild.id, row["user_id"], self.bot.user.id, "unban", "Fin du bannissement temporaire (automatique)"
@@ -98,6 +123,7 @@ class Moderation(commands.Cog):
         e.add_field(name="👤 Utilisateur", value=f"<@{row['user_id']}>\n`ID: {row['user_id']}`", inline=False)
         e.add_field(name="📄 Détail", value="Débanni automatiquement (fin du tempban)", inline=False)
         await self.log_action(guild, e)
+        return True
 
     @check_tempactions.before_loop
     async def before_check_tempactions(self):

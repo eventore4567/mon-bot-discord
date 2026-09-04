@@ -163,7 +163,12 @@ async def _tempban_expire_malgre_une_ligne_defectueuse():
 
     assert debannis == [222], "le second tempban devait expirer malgré l'échec du premier"
     restantes = await db.fetchall("SELECT * FROM tempactions")
-    assert restantes == [], "les deux lignes échues doivent être consommées"
+    # La ligne qui a REUSSI est consommée ; celle qui a échoué est conservée pour
+    # être rejouée. Cette assertion exigeait auparavant que les DEUX disparaissent :
+    # c'était le bug — un échec effaçait la seule trace permettant de réessayer.
+    assert [row["user_id"] for row in restantes] == [111], (
+        "seule la ligne en échec doit survivre, pour un nouvel essai"
+    )
 
     await db.close()
 
@@ -185,3 +190,140 @@ async def _base_indisponible_ne_tue_pas_la_boucle():
 
 def test_une_base_indisponible_ne_tue_pas_la_boucle():
     asyncio.run(_base_indisponible_ne_tue_pas_la_boucle())
+
+
+# ---------------------------------------------------------------------------
+# Un refus passager de Discord ne doit pas rendre un tempban définitif
+# ---------------------------------------------------------------------------
+async def _un_echec_http_conserve_la_ligne_puis_reessaie():
+    """Le scénario qui transformait un tempban en bannissement permanent.
+
+    La ligne était supprimée dans un ``finally``, donc même quand ``guild.unban()``
+    avait échoué. Une HTTPException passagère — panne, rate limit, permission
+    momentanément retirée — laissait le membre banni ET effaçait la seule trace
+    permettant de réessayer : plus aucun passage ne reprenait la sanction.
+    """
+    db = Database(":memory:")
+    await db.connect()
+    await db.execute(
+        "INSERT INTO tempactions (guild_id,user_id,action,expires_at) VALUES (?,?,'ban',?)",
+        (1, 333, now() - 10),
+    )
+
+    debannis: list[int] = []
+    echouer = True
+
+    async def unban(objet, reason=None):
+        if echouer:
+            raise discord.HTTPException(Mock(status=500), "panne passagère de Discord")
+        debannis.append(objet.id)
+
+    guild = Mock(spec=discord.Guild)
+    guild.id = 1
+    guild.unban = unban
+
+    bot = Mock()
+    bot.db = db
+    bot.user = Mock(id=999)
+    bot.get_guild = Mock(return_value=guild)
+
+    cog = moderation.Moderation.__new__(moderation.Moderation)
+    cog.bot = bot
+    cog.log_action = AsyncMock()
+
+    # 1er passage : Discord refuse.
+    await cog.check_tempactions()
+    assert debannis == [], "aucun débannissement n'a eu lieu"
+    restantes = await db.fetchall("SELECT * FROM tempactions")
+    assert [row["user_id"] for row in restantes] == [333], (
+        "la sanction doit survivre à l'échec, sinon elle devient définitive"
+    )
+
+    # 2e passage : Discord répond enfin.
+    echouer = False
+    await cog.check_tempactions()
+    assert debannis == [333], "le nouvel essai doit lever la sanction"
+    assert await db.fetchall("SELECT * FROM tempactions") == [], (
+        "une fois la levée confirmée, la ligne est consommée"
+    )
+
+    await db.close()
+
+
+def test_un_refus_passager_de_discord_est_reessaye():
+    asyncio.run(_un_echec_http_conserve_la_ligne_puis_reessaie())
+
+
+async def _un_membre_deja_debanni_consomme_la_ligne():
+    """NotFound est une CONFIRMATION que la sanction est levée, pas un échec."""
+    db = Database(":memory:")
+    await db.connect()
+    await db.execute(
+        "INSERT INTO tempactions (guild_id,user_id,action,expires_at) VALUES (?,?,'ban',?)",
+        (1, 444, now() - 10),
+    )
+
+    async def unban(objet, reason=None):
+        raise discord.NotFound(Mock(status=404), "déjà débanni à la main")
+
+    guild = Mock(spec=discord.Guild)
+    guild.id = 1
+    guild.unban = unban
+
+    bot = Mock()
+    bot.db = db
+    bot.user = Mock(id=999)
+    bot.get_guild = Mock(return_value=guild)
+
+    cog = moderation.Moderation.__new__(moderation.Moderation)
+    cog.bot = bot
+    cog.log_action = AsyncMock()
+
+    await cog.check_tempactions()
+    assert await db.fetchall("SELECT * FROM tempactions") == [], (
+        "un membre déjà débanni ne doit pas être rejoué indéfiniment"
+    )
+
+    await db.close()
+
+
+def test_un_membre_deja_debanni_ne_reste_pas_en_file():
+    asyncio.run(_un_membre_deja_debanni_consomme_la_ligne())
+
+
+async def _un_refus_de_permission_conserve_la_ligne():
+    """Forbidden hérite de HTTPException : la levée n'est pas acquise non plus."""
+    db = Database(":memory:")
+    await db.connect()
+    await db.execute(
+        "INSERT INTO tempactions (guild_id,user_id,action,expires_at) VALUES (?,?,'ban',?)",
+        (1, 555, now() - 10),
+    )
+
+    async def unban(objet, reason=None):
+        raise discord.Forbidden(Mock(status=403), "permission Bannir retirée")
+
+    guild = Mock(spec=discord.Guild)
+    guild.id = 1
+    guild.unban = unban
+
+    bot = Mock()
+    bot.db = db
+    bot.user = Mock(id=999)
+    bot.get_guild = Mock(return_value=guild)
+
+    cog = moderation.Moderation.__new__(moderation.Moderation)
+    cog.bot = bot
+    cog.log_action = AsyncMock()
+
+    await cog.check_tempactions()
+    restantes = await db.fetchall("SELECT * FROM tempactions")
+    assert [row["user_id"] for row in restantes] == [555], (
+        "la permission peut revenir : la sanction doit rester à lever"
+    )
+
+    await db.close()
+
+
+def test_une_permission_retiree_conserve_la_sanction():
+    asyncio.run(_un_refus_de_permission_conserve_la_ligne())
