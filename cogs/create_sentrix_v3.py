@@ -30,6 +30,12 @@ from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.create-sentrix-v3")
 
+
+# Fenêtre d'accumulation des déplacements de rôles. Discord émet un évènement par
+# rôle décalé : sans regroupement, déplacer un rôle dans une liste de 20 générait
+# 20 lectures d'audit log et 20 messages avec upload de bannière, donc un rate limit.
+_DELAI_REGROUPEMENT_POSITIONS = 3.0
+
 RUNTIME_MARKER = "Create SentriX V3"
 _CREATE_LOCKS: dict[int, asyncio.Lock] = {}
 _VOICE_JOINED_AT: dict[tuple[int, int], tuple[int, float]] = {}
@@ -1113,10 +1119,19 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._runtime_ready = False
+        # Déplacements de rôles en attente de regroupement : {guild_id: {role_id: (avant, apres)}}
+        self._positions_roles: dict[int, dict[int, tuple[int, int]]] = {}
+        self._taches_positions: dict[int, asyncio.Task] = {}
 
     async def cog_load(self) -> None:
         _install_log_catalog()
         _patch_no_log_fallback()
+
+    def cog_unload(self) -> None:
+        for tache in list(self._taches_positions.values()):
+            tache.cancel()
+        self._taches_positions.clear()
+        self._positions_roles.clear()
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -1275,29 +1290,88 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
         # Le logger officiel couvre nom/couleur/permissions mais ignorait les déplacements.
         if before.position == after.position:
             return
-        actor = await _audit_actor_for(
-            after.guild,
-            getattr(discord.AuditLogAction, "role_update", None),
-            target_id=after.id,
+        # Déplacer UN rôle décale tous les rôles intermédiaires : Discord émet donc un
+        # évènement PAR rôle touché. Traiter chacun séparément déclenchait une lecture
+        # d'audit log ET un message avec upload de bannière par rôle — d'où les rafales
+        # « We are being rate limited » observées en production. On accumule la rafale
+        # et on n'émet qu'un seul log une fois qu'elle est retombée.
+        buffer = self._positions_roles.setdefault(after.guild.id, {})
+        origine = buffer.get(after.id, (before.position, before.position))[0]
+        buffer[after.id] = (origine, after.position)
+        self._programmer_log_positions(after.guild)
+
+    def _programmer_log_positions(self, guild: discord.Guild) -> None:
+        """Repousse l'envoi tant que la rafale continue."""
+        tache = self._taches_positions.get(guild.id)
+        if tache is not None and not tache.done():
+            tache.cancel()
+        self._taches_positions[guild.id] = asyncio.create_task(
+            self._envoyer_log_positions(guild),
+            name=f"sentrix-positions-roles-{guild.id}",
         )
-        fields = [
-            ("Rôle", after.mention, True),
-            ("Position modifiée", f"`{before.position}` → `{after.position}`", False),
-        ]
-        if actor is not None:
-            fields.append(("Modérateur", f"<@{actor.id}>", True))
-        panel = embeds.canonical_log_embed("Rôle modifié", fields=fields)
-        ids = [("Copier l'ID du rôle", after.id)]
-        if actor is not None:
-            ids.append(("Copier l'ID du modérateur", actor.id))
-        await log_service.send_log(
-            self.bot,
-            after.guild,
-            "roles",
-            panel,
-            view=log_service.log_actions(ids=ids),
-            event_key=f"role-position:{after.guild.id}:{after.id}:{after.position}",
-        )
+
+    async def _envoyer_log_positions(self, guild: discord.Guild) -> None:
+        try:
+            await asyncio.sleep(_DELAI_REGROUPEMENT_POSITIONS)
+        except asyncio.CancelledError:
+            return  # une nouvelle modification est arrivée : ce lot est remplacé
+
+        self._taches_positions.pop(guild.id, None)
+        mouvements = self._positions_roles.pop(guild.id, {})
+        # Un rôle poussé puis remis à sa place n'a finalement pas bougé.
+        reels = {rid: bornes for rid, bornes in mouvements.items() if bornes[0] != bornes[1]}
+        if not reels:
+            return
+
+        try:
+            # UNE seule lecture d'audit pour toute la rafale, au lieu d'une par rôle.
+            actor = await _audit_actor_for(
+                guild,
+                getattr(discord.AuditLogAction, "role_update", None),
+                target_id=next(iter(reels)) if len(reels) == 1 else None,
+            )
+
+            lignes = []
+            for role_id, (avant, apres) in sorted(reels.items(), key=lambda item: item[1][1], reverse=True):
+                role = guild.get_role(role_id)
+                nom = role.mention if role is not None else f"`{role_id}`"
+                lignes.append(f"{nom} : `{avant}` → `{apres}`")
+
+            if len(reels) == 1:
+                titre = "Rôle modifié"
+                fields = [
+                    ("Rôle", lignes[0].split(" : ")[0], True),
+                    ("Position modifiée", lignes[0].split(" : ", 1)[1], False),
+                ]
+            else:
+                titre = "Rôles déplacés"
+                fields = [
+                    ("Rôles concernés", f"**{len(reels)}**", True),
+                    ("Positions modifiées", "\n".join(lignes)[:1024], False),
+                ]
+            if actor is not None:
+                fields.append(("Modérateur", f"<@{actor.id}>", True))
+
+            panel = embeds.canonical_log_embed(titre, fields=fields)
+            ids: list[tuple[str, int]] = []
+            if len(reels) == 1:
+                ids.append(("Copier l'ID du rôle", next(iter(reels))))
+            if actor is not None:
+                ids.append(("Copier l'ID du modérateur", actor.id))
+
+            empreinte = ",".join(f"{rid}:{bornes[1]}" for rid, bornes in sorted(reels.items()))
+            await log_service.send_log(
+                self.bot,
+                guild,
+                "roles",
+                panel,
+                view=log_service.log_actions(ids=ids) if ids else None,
+                event_key=f"role-positions:{guild.id}:{empreinte}"[:200],
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Log de déplacement de rôles impossible (serveur %s).", guild.id)
 
 
 async def setup(bot: commands.Bot) -> None:
