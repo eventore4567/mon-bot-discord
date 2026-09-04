@@ -12,6 +12,7 @@ import io
 import logging
 import re
 import time
+from datetime import timedelta
 
 import discord
 from discord.ext import commands
@@ -260,19 +261,58 @@ async def _clear_v80(self, ctx: commands.Context, nombre: int):
     _mark_suppressed(self.bot, candidate_ids)
     asyncio.create_task(_release_suppressed(self.bot, candidate_ids))
 
-    deleted = await ctx.channel.purge(limit=purge_limit)
+    # `purge()` relit TOUT l'historique du salon alors qu'on vient déjà de le
+    # récupérer ci-dessus : c'était un aller-retour complet en double. Les messages
+    # sont en main, on les supprime directement. `purge()` reste le repli pour les
+    # messages de plus de 14 jours, que la suppression groupée refuse.
+    deleted = await _supprimer_messages(ctx, candidates, purge_limit)
     messages = [
         message for message in deleted
         if invocation_id is None or int(message.id) != int(invocation_id)
     ]
 
-    await _send_clear_log(self.bot, ctx, messages, requested=requested)
-
+    # L'utilisateur est servi AVANT le journal : celui-ci construit une
+    # transcription, la téléverse, puis passe par tout le transport de logs avec sa
+    # bannière. Ces deux uploads étaient sur le chemin critique de la réponse et
+    # constituaient l'essentiel des ~5,7 s mesurées. Rien n'est perdu : le journal
+    # part juste après, avec exactement le même contenu.
     response = embeds.success(f"{len(messages)} message(s) supprimé(s).")
     if ctx.interaction:
         await panels.envoyer(ctx, panels.depuis_embed(response), ephemere=True)
     else:
         await panels.envoyer(ctx, panels.depuis_embed(response))
+
+    asyncio.create_task(_journaliser_clear(self.bot, ctx, messages, requested))
+
+
+async def _supprimer_messages(ctx: commands.Context, candidates: list, purge_limit: int) -> list:
+    """Supprime des messages DÉJÀ récupérés, sans relire l'historique."""
+    if not candidates:
+        return []
+
+    limite_groupee = discord.utils.utcnow() - timedelta(days=14)
+    trop_vieux = any(message.created_at <= limite_groupee for message in candidates)
+    if trop_vieux:
+        # Suppression groupée impossible : purge() sait traiter ces messages un par un.
+        return await ctx.channel.purge(limit=purge_limit)
+
+    try:
+        if len(candidates) == 1:
+            await candidates[0].delete()
+        else:
+            await ctx.channel.delete_messages(candidates)
+    except discord.HTTPException:
+        # Repli intégral plutôt que de laisser le salon à moitié nettoyé.
+        return await ctx.channel.purge(limit=purge_limit)
+    return candidates
+
+
+async def _journaliser_clear(bot, ctx: commands.Context, messages: list, requested: int) -> None:
+    """Journal de purge, hors du chemin critique : un échec ici ne casse pas la commande."""
+    try:
+        await _send_clear_log(bot, ctx, messages, requested=requested)
+    except Exception:
+        logger.exception("V80 : journal de purge impossible (salon %s).", getattr(ctx.channel, "id", "?"))
 
 
 def _install_clear_command(bot: commands.Bot) -> None:
