@@ -117,16 +117,60 @@ def test_le_cache_expire_bien():
     asyncio.run(_le_cache_expire())
 
 
-async def _passage_hors_ligne_visible_apres_expiration():
+async def _passage_hors_ligne_visible_immediatement():
+    """« online » ne doit JAMAIS être servi depuis le cache.
+
+    Première version : la bascule n'était visible qu'après expiration, soit
+    jusqu'à 3 s de retard. L'audit e2e l'a attrapé — il interroge /api/public
+    avant puis après la mise en état prêt et lisait l'ancienne valeur. C'est
+    l'information même que la page d'accueil consulte pour arrêter de sonder.
+    """
     _reinitialiser_cache()
     bot = _bot()
     requete = _requete(bot)
     assert (await _corps(await dashboard.handle_public(requete)))["online"] is True
 
     bot.is_ready.return_value = False
-    dashboard._public_cache["expire"] = time.monotonic() - 1
-    assert (await _corps(await dashboard.handle_public(requete)))["online"] is False
+    # Cache encore chaud, volontairement : aucune expiration forcée ici.
+    hors_ligne = await _corps(await dashboard.handle_public(requete))
+    assert hors_ligne["online"] is False, "une déconnexion ne doit pas attendre le cache"
+    assert hors_ligne["latency_ms"] is None
+
+    bot.is_ready.return_value = True
+    retour = await _corps(await dashboard.handle_public(requete))
+    assert retour["online"] is True, "la reconnexion doit être visible aussitôt"
+    assert retour["latency_ms"] == 50
 
 
-def test_une_perte_de_connexion_reste_visible():
-    asyncio.run(_passage_hors_ligne_visible_apres_expiration())
+def test_une_perte_de_connexion_est_visible_sans_attendre():
+    asyncio.run(_passage_hors_ligne_visible_immediatement())
+
+
+async def _la_latence_n_est_jamais_figee():
+    _reinitialiser_cache()
+    bot = _bot()
+    requete = _requete(bot)
+    assert (await _corps(await dashboard.handle_public(requete)))["latency_ms"] == 50
+
+    bot.latency = 0.25
+    assert (await _corps(await dashboard.handle_public(requete)))["latency_ms"] == 250
+
+
+def test_la_latence_suit_le_bot_et_non_le_cache():
+    asyncio.run(_la_latence_n_est_jamais_figee())
+
+
+async def _seul_le_comptage_est_mis_en_cache():
+    """Le cache protège le parcours de tous les serveurs — rien d'autre."""
+    _reinitialiser_cache()
+    bot = _bot(guilds=4, membres=50)
+    requete = _requete(bot)
+    await dashboard.handle_public(requete)
+
+    bot.guilds = [Mock(member_count=50) for _ in range(9)]
+    second = await _corps(await dashboard.handle_public(requete))
+    assert second["guilds"] == 4, "le comptage coûteux reste bien mis en cache"
+
+
+def test_le_comptage_couteux_reste_cache():
+    asyncio.run(_seul_le_comptage_est_mis_en_cache())
