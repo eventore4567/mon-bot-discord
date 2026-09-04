@@ -53,18 +53,27 @@ async def main() -> int:
     source = inspect.getsource(dashboard_server_tools)
     required = (
         "/api/guilds/{guild_id}/server-tools/create",
-        "/api/guilds/{guild_id}/server-tools/wipe",
         "cog.build_server(guild, template_key, actor)",
-        "user_id != int(guild.owner_id)",
-        "typed_name != guild.name",
         "server_tool_lock",
     )
     for marker in required:
         if marker not in source:
             errors.append(f"garde dashboard manquante: {marker}")
 
-    if "<dialog class=\"sx-wipe-dialog\"" not in dashboard_server_tools.SERVER_TOOLS_JS:
-        errors.append("confirmation visuelle du wipe absente du dashboard")
+    # c43989e a retire le Wipe serveur de l'interface web : un effacement destructif
+    # ne doit partir que de Discord (+wipe-server, qui garde sa propre implementation),
+    # jamais d'un site. Cet audit exigeait encore la route et sa confirmation, donc
+    # l'inverse exact de la posture retenue. On verifie desormais leur ABSENCE.
+    # « def _perform_wipe( » et non « _perform_wipe » : la docstring du module cite
+    # ce nom pour expliquer sa suppression, on cherche la definition, pas la prose.
+    interdits = (
+        "/api/guilds/{guild_id}/server-tools/wipe",
+        "def _perform_wipe(",
+        "sx-wipe-dialog",
+    )
+    for marker in interdits:
+        if marker in source:
+            errors.append(f"le wipe serveur est revenu dans le dashboard: {marker}")
     if "Configurer avec ce modèle" not in dashboard_server_tools.SERVER_TOOLS_JS:
         errors.append("bouton create-server dashboard absent")
 

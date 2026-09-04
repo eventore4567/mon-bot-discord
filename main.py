@@ -103,6 +103,10 @@ PRUNED_COMMANDS = COMMANDS_REPLACED_BY_SETUP | EXACT_DUPLICATE_COMMANDS
 PUBLIC_COMMANDS = frozenset({
     # Aide et utilitaires sans modification du serveur
     "help", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
+    # +serverinfo est le pont installe par premium_ui_v81 vers « info serveur »,
+    # +leaderboard celui vers leaderboard-levels : deux racines en lecture seule
+    # dont les cibles sont deja publiques, mais qui n'avaient jamais ete classees.
+    "serverinfo",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
     "report-bug", "afk", "roll", "choose",
@@ -114,7 +118,7 @@ PUBLIC_COMMANDS = frozenset({
     "balance", "economy", "daily", "weekly", "work", "rob", "pay",
     "economyleaderboard", "leaderboard-money", "shop", "buy", "buyrole",
     "inventory", "sell", "gamble", "deposit", "withdraw", "banque",
-    "stats", "me", "level", "rank", "leaderboard-levels", "level-roles",
+    "stats", "me", "level", "rank", "leaderboard", "leaderboard-levels", "level-roles",
     "profile", "set-bio", "rep", "reputation", "repleaderboard", "voice-time",
     # Tickets, événements et invitations accessibles aux membres
     "ticket", "giveaway-list", "event-join", "event-leave", "event-list",
