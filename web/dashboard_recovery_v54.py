@@ -5,7 +5,8 @@ Objectifs :
   RAILWAY_PUBLIC_DOMAIN plus récent ;
 - accepter /dashboard et /dashboard/ comme alias stables de /app ;
 - si une extension avancée casse build_app(), servir automatiquement le dashboard cœur
-  au lieu de laisser le domaine Railway sans serveur HTTP.
+  au lieu de laisser le domaine Railway sans serveur HTTP ;
+- respecter les wrappers build_app installés APRES Recovery V54 (notamment le proxy HA).
 
 Le fallback ne contourne aucune sécurité : il réutilise les middlewares, sessions,
 contrôles OAuth/CSRF et handlers canoniques de web.dashboard.
@@ -154,7 +155,6 @@ def install(dashboard) -> None:
         return
 
     public_url = configure_public_url()
-    full_build_app = dashboard.build_app
 
     async def resilient_start_dashboard(bot):
         if getattr(bot, "_sentrix_dashboard_runner_v54", None) is not None:
@@ -166,7 +166,14 @@ def install(dashboard) -> None:
             mode = "complet"
             try:
                 try:
-                    app = full_build_app(bot)
+                    # IMPORTANT : ne jamais capturer build_app au moment de install().
+                    # Recovery V54 est importé très tôt par web/__init__.py. Sur Railway,
+                    # sitecustomize installe ensuite le proxy HA leader-aware, puis le boot
+                    # ajoute encore des routes. Une référence figée ici contournait TOUS ces
+                    # wrappers tardifs : un PRIMARY passif servait alors /login localement,
+                    # voyait bot.user absent et renvoyait ?auth=missing au lieu de proxyfier
+                    # l'OAuth vers l'instance qui possède réellement le lease Discord.
+                    app = dashboard.build_app(bot)
                     _add_dashboard_aliases(app)
                 except Exception as exc:
                     last_error = exc
@@ -192,7 +199,9 @@ def install(dashboard) -> None:
                 )
                 if not dashboard._oauth_ready(bot):
                     logger.warning(
-                        "Dashboard ouvert mais OAuth indisponible : DISCORD_CLIENT_SECRET manque."
+                        "Dashboard local sans OAuth prêt ; en HA passif les requêtes web "
+                        "doivent être routées vers le leader. Si cette instance est leader, "
+                        "vérifiez DISCORD_CLIENT_SECRET."
                     )
                 return
             except Exception as exc:
