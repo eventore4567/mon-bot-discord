@@ -67,7 +67,9 @@ async def _cleanup_old_counter(runtime) -> None:
             titles = {str(embed.title or "").casefold() for embed in message.embeds}
             if any("sentrix sur discord" in title for title in titles):
                 try:
-                    await message.delete(reason="V62: remplacement du compteur fixe par le journal d'ajouts")
+                    # discord.py 2.7 peut retourner un PartialMessage ici. Sa méthode
+                    # delete() n'accepte pas le paramètre audit-log ``reason``.
+                    await message.delete()
                 except (discord.Forbidden, discord.NotFound, discord.HTTPException):
                     pass
     except RuntimeError:
