@@ -16,6 +16,7 @@ précise par son numéro, /modhistory affiche l'historique complet d'un membre (
 confondus, pas seulement les avertissements comme avec /warnings).
 """
 
+import logging
 from datetime import timedelta
 
 import discord
@@ -26,6 +27,8 @@ import config
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as panels
 from database.db import now
+
+logger = logging.getLogger("bot.moderation")
 
 
 class Moderation(commands.Cog):
@@ -38,33 +41,73 @@ class Moderation(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def check_tempactions(self):
-        rows = await self.bot.db.fetchall("SELECT * FROM tempactions WHERE expires_at <= ?", (now(),))
+        """Lève les sanctions temporaires échues.
+
+        Toute exception qui sortait d'ici TERMINAIT la tâche : discord.py n'en
+        relance que les erreurs réseau de sa liste de reconnexion, et le
+        watchdog Mastery était incapable de ressusciter une boucle terminée.
+        Un seul incident figeait donc l'expiration des tempbans jusqu'au
+        prochain déploiement. Chaque étape est désormais isolée.
+        """
+        try:
+            rows = await self.bot.db.fetchall("SELECT * FROM tempactions WHERE expires_at <= ?", (now(),))
+        except Exception:
+            logger.exception("Lecture des sanctions temporaires impossible ; nouvel essai dans une minute.")
+            return
+
         for row in rows:
-            guild = self.bot.get_guild(row["guild_id"])
-            if not guild:
-                await self.bot.db.execute("DELETE FROM tempactions WHERE id = ?", (row["id"],))
-                continue
-            if row["action"] == "ban":
+            try:
+                await self._expirer_tempaction(row)
+            except Exception:
+                # Une ligne défectueuse ne doit jamais emporter la boucle entière.
+                logger.exception("Expiration de la sanction temporaire #%s impossible.", row["id"])
+            finally:
+                # La ligne est consommée dans tous les cas, comme avant : sans
+                # cela, une ligne en échec serait rejouée à chaque tour.
                 try:
-                    await guild.unban(discord.Object(id=row["user_id"]), reason="Fin du bannissement temporaire")
-                    case_number = await self.bot.db.record_sanction(
-                        guild.id, row["user_id"], self.bot.user.id, "unban", "Fin du bannissement temporaire (automatique)"
-                    )
-                    e = design_system.create_embed(
-                        title=f"⏰ Dossier #{case_number} — Fin de sanction temporaire",
-                        colour=config.COLOR_INFO,
-                        footer="SentriX",
-                    )
-                    e.add_field(name="👤 Utilisateur", value=f"<@{row['user_id']}>\n`ID: {row['user_id']}`", inline=False)
-                    e.add_field(name="📄 Détail", value="Débanni automatiquement (fin du tempban)", inline=False)
-                    await self.log_action(guild, e)
-                except discord.HTTPException:
-                    pass
-            await self.bot.db.execute("DELETE FROM tempactions WHERE id = ?", (row["id"],))
+                    await self.bot.db.execute("DELETE FROM tempactions WHERE id = ?", (row["id"],))
+                except Exception:
+                    logger.exception("Suppression de la sanction temporaire #%s impossible.", row["id"])
+
+    async def _expirer_tempaction(self, row) -> None:
+        """Lève UNE sanction échue. L'appelant supprime la ligne dans tous les cas."""
+        guild = self.bot.get_guild(row["guild_id"])
+        if not guild or row["action"] != "ban":
+            return
+
+        try:
+            await guild.unban(discord.Object(id=row["user_id"]), reason="Fin du bannissement temporaire")
+        except discord.NotFound:
+            return  # déjà débanni à la main : il n'y a rien à annoncer
+        except discord.HTTPException:
+            logger.warning(
+                "Débannissement automatique refusé par Discord (serveur %s, membre %s).",
+                row["guild_id"],
+                row["user_id"],
+            )
+            return
+
+        case_number = await self.bot.db.record_sanction(
+            guild.id, row["user_id"], self.bot.user.id, "unban", "Fin du bannissement temporaire (automatique)"
+        )
+        e = design_system.create_embed(
+            title=f"⏰ Dossier #{case_number} — Fin de sanction temporaire",
+            colour=config.COLOR_INFO,
+            footer="SentriX",
+        )
+        e.add_field(name="👤 Utilisateur", value=f"<@{row['user_id']}>\n`ID: {row['user_id']}`", inline=False)
+        e.add_field(name="📄 Détail", value="Débanni automatiquement (fin du tempban)", inline=False)
+        await self.log_action(guild, e)
 
     @check_tempactions.before_loop
     async def before_check_tempactions(self):
         await self.bot.wait_until_ready()
+
+    @check_tempactions.error
+    async def check_tempactions_error(self, error: BaseException) -> None:
+        """Dernier filet, indépendant du watchdog Mastery (qui peut ne pas être chargé)."""
+        logger.error("Boucle check_tempactions interrompue (%r) ; relance immédiate.", error)
+        self.check_tempactions.restart()
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
         # Utilise le salon "logs-moderation" dédié s'il existe (via /create-logs), sinon

@@ -78,10 +78,12 @@ def log_runtime_capabilities() -> None:
     if _RUNTIME_CHECKED:
         return
     _RUNTIME_CHECKED = True
-    logger.warning("RAILWAY GIT SHA = %s", os.getenv("RAILWAY_GIT_COMMIT_SHA") or "?")
-    logger.warning("DISCORD.PY RUNTIME VERSION = %s", getattr(discord, "__version__", "?"))
+    # Diagnostics d'environnement : utiles, mais ce ne sont pas des problèmes.
+    # Les émettre en WARNING ajoutait dix fausses alertes à chaque démarrage.
+    logger.info("RAILWAY GIT SHA = %s", os.getenv("RAILWAY_GIT_COMMIT_SHA") or "?")
+    logger.info("DISCORD.PY RUNTIME VERSION = %s", getattr(discord, "__version__", "?"))
     for name in ("LayoutView", "Container", "MediaGallery", "Section", "TextDisplay", "Thumbnail", "Separator", "ActionRow"):
-        logger.warning("discord.ui.%-14s = %s", name, hasattr(discord.ui, name))
+        logger.debug("discord.ui.%-14s = %s", name, hasattr(discord.ui, name))
 
 
 def safe_text(value: object) -> str:
@@ -738,7 +740,7 @@ async def send_wide_log(
     banner_path = get_banner(event_type, embed.title or "", embed.description or "")
     banner_filename = f"sentrix_log_{kind}.png"
 
-    logger.warning(
+    logger.debug(
         "SXTRACE 6 TRANSPORT phase=enter channel=%s log_type=%s event_type=%s kind=%s "
         "banner=%s banner_exists=%s",
         getattr(channel, "id", "?"), log_type, event_type, kind,
@@ -797,18 +799,18 @@ async def send_wide_log(
         _rewind_file(extra_file)
         files.append(extra_file)
 
-    logger.warning(
+    logger.debug(
         "SXTRACE 6 TRANSPORT phase=before-send channel=%s event_type=%s files=%s view=%s",
         getattr(channel, "id", "?"), event_type, len(files), type(view).__name__,
     )
     try:
         message = await channel.send(view=view, files=files, allowed_mentions=NO_PINGS)
-        logger.warning(
+        logger.debug(
             "SXTRACE 6 TRANSPORT phase=after-send channel=%s event_type=%s message_id=%s",
             getattr(channel, "id", "?"), event_type, getattr(message, "id", "?"),
         )
         flags_value = int(getattr(getattr(message, "flags", None), "value", 0) or 0)
-        logger.warning(
+        logger.debug(
             "SENTRIX LOG V2 SUCCESS message_id=%s type=%s kind=%s components_v2=%s",
             getattr(message, "id", "?"), event_type, kind, bool(flags_value & 32768),
         )

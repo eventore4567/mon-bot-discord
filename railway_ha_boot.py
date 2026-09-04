@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import traceback
 from typing import Any
 
@@ -171,7 +172,20 @@ async def _prepare_leader_storage(
 
     _guard_durable_snapshots(durable)
 
-    takeover = coordinator.role == "standby" or not grant.acquired_immediately
+    # Reprendre la main après SON PROPRE redémarrage n'est pas un takeover : le volume
+    # SQLite local est alors la copie la plus récente. Restaurer un snapshot y ferait
+    # au contraire REVENIR EN ARRIÈRE toutes les écritures postérieures au dernier
+    # snapshot périodique (jusqu'à 5 minutes de XP, économie, sanctions, tickets).
+    # C'est le cas le plus fréquent : un simple redéploiement du primary.
+    if coordinator.reprise_de_soi():
+        logger.warning(
+            "HA: reprise après redémarrage de %s (dernier leader identique) — "
+            "aucune restauration, les données locales font foi.",
+            coordinator.service_id,
+        )
+        takeover = False
+    else:
+        takeover = coordinator.role == "standby" or not grant.acquired_immediately
     if takeover:
         result = await _restore_for_takeover(bot, durable)
         if not result.get("restored"):
@@ -215,6 +229,63 @@ async def _periodic_snapshot_loop(bot: Any, durable: Any) -> None:
         logger.warning("HA: boucle snapshot en erreur:\n%s", traceback.format_exc())
 
 
+def _installer_arret_gracieux(bot: Any) -> bool:
+    """Fait de SIGTERM/SIGINT un arrêt propre au lieu d'une mort brutale.
+
+    Railway envoie SIGTERM à chaque redéploiement. Python, par défaut, termine
+    alors le processus SANS dérouler les ``finally`` : ni le snapshot d'arrêt de
+    ``railway_boot.run()``, ni le ``coordinator.close(release=True)`` ci-dessous
+    ne s'exécutaient. Le lease Redis survivait donc jusqu'à l'expiration du TTL
+    (30 s de bot hors ligne à chaque bascule) et le dernier snapshot manquait.
+
+    Le handler ne fait que DEMANDER l'arrêt : c'est le déroulement normal des
+    ``finally`` qui persiste puis libère, dans cet ordre.
+    """
+    if getattr(bot, "_sentrix_ha_signaux_installes", False):
+        return True
+
+    try:
+        boucle = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+
+    def _demander_arret(nom_signal: str) -> None:
+        if getattr(bot, "_sentrix_arret_demande", False):
+            return  # un second SIGTERM ne doit pas relancer la séquence
+        bot._sentrix_arret_demande = True
+        logger.warning(
+            "HA: %s reçu — arrêt gracieux (snapshot final puis libération du lease).",
+            nom_signal,
+        )
+        # Débloque une instance encore passive : sans cela elle attend le lease
+        # jusqu'au SIGKILL.
+        coordinator.demander_arret()
+        # Fait sortir bot.start() proprement quand l'instance est active.
+        boucle.create_task(_fermer_proprement(bot))
+
+    installes = 0
+    for nom_signal in ("SIGTERM", "SIGINT"):
+        numero = getattr(signal, nom_signal, None)
+        if numero is None:
+            continue
+        try:
+            boucle.add_signal_handler(numero, _demander_arret, nom_signal)
+            installes += 1
+        except (NotImplementedError, RuntimeError, ValueError):
+            # Plateformes sans support (Windows) : on reste sur le comportement par défaut.
+            logger.warning("HA: arrêt gracieux indisponible pour %s sur cette plateforme.", nom_signal)
+
+    bot._sentrix_ha_signaux_installes = installes > 0
+    return bot._sentrix_ha_signaux_installes
+
+
+async def _fermer_proprement(bot: Any) -> None:
+    try:
+        await bot.close()
+    except Exception:
+        logger.warning("HA: fermeture Discord pendant l'arrêt gracieux :\n%s", traceback.format_exc())
+
+
 async def _ha_bot_start(self, token: str, *args, **kwargs):
     if not coordinator.enabled:
         return await _original_bot_start(self, token, *args, **kwargs)
@@ -224,6 +295,10 @@ async def _ha_bot_start(self, token: str, *args, **kwargs):
     # nouveau primary peut rester passif tant qu'une autre instance possède encore le lease.
     # Le diagnostic peut ainsi distinguer une attente HA normale d'un leader réellement cassé.
     self._sentrix_ha_coordinator = coordinator
+
+    # Posé AVANT l'attente : une instance passive redéployée doit elle aussi
+    # pouvoir sortir proprement au lieu d'être tuée au bout du délai de grâce.
+    _installer_arret_gracieux(self)
 
     grant = await coordinator.wait_for_leadership()
     durable = getattr(self, "sentrix_durable_store", None)

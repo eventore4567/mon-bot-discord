@@ -102,6 +102,14 @@ class SentriXFailoverCoordinator:
 
         lock_name = (os.getenv("SENTRIX_FAILOVER_LOCK_NAME") or "failover:discord-primary").strip()
         self.lock_key = storage_key(lock_name)
+        # Mémoire du dernier leader, indépendante du lease (qui expire, lui).
+        # Elle permet de distinguer « je reprends la main après MON propre
+        # redémarrage » (données locales encore valables) de « une autre instance
+        # a écrit entre-temps » (restauration obligatoire).
+        self.last_leader_key = storage_key(f"{lock_name}:last-leader")
+        # Identité STABLE d'un redémarrage à l'autre, contrairement à owner_id qui
+        # contient un uuid régénéré à chaque boot.
+        self.service_id = (railway_service_name() or "local").casefold()
 
         replica_bits = [
             railway_service_name() or "local",
@@ -121,6 +129,8 @@ class SentriXFailoverCoordinator:
         self._redis: Any = None
         self._watchdog_task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        # Service qui détenait le leadership juste AVANT nous (None si inconnu).
+        self._dernier_leader_lu: str | None = None
 
     @property
     def is_leader(self) -> bool:
@@ -166,6 +176,39 @@ class SentriXFailoverCoordinator:
             except Exception:
                 pass
 
+    async def _lire_dernier_leader(self) -> str | None:
+        """Service qui détenait le leadership avant nous. Jamais bloquant."""
+        try:
+            valeur = await self._redis.get(self.last_leader_key)
+        except Exception:
+            return None
+        return str(valeur).casefold() if valeur else None
+
+    async def _marquer_dernier_leader(self) -> None:
+        """Inscrit notre identité de service. Un échec ne doit pas coûter le leadership."""
+        try:
+            await self._redis.set(self.last_leader_key, self.service_id)
+        except Exception:
+            logger.warning("HA: mémorisation du dernier leader impossible (sans gravité).")
+
+    def reprise_de_soi(self) -> bool:
+        """Vrai si NOUS étions déjà le dernier leader avant ce démarrage.
+
+        Dans ce cas le volume SQLite local est la copie la plus à jour : restaurer
+        un snapshot ferait REVENIR EN ARRIÈRE les écritures faites depuis le dernier
+        snapshot périodique. C'est précisément le cas d'un simple redéploiement du
+        primary, le plus fréquent — et le plus coûteux si on restaure pour rien.
+        """
+        return self._dernier_leader_lu is not None and self._dernier_leader_lu == self.service_id
+
+    def demander_arret(self) -> None:
+        """Débloque ``wait_for_leadership()`` sur une instance encore passive.
+
+        Sans cela, une instance qui attend le lease ignore SIGTERM : elle est tuée
+        par SIGKILL à la fin du délai de grâce, sans dérouler ses ``finally``.
+        """
+        self._stop.set()
+
     async def _try_acquire(self) -> bool:
         await self._connect()
         acquired = await self._redis.set(
@@ -179,6 +222,8 @@ class SentriXFailoverCoordinator:
             self.current_owner = self.owner_id
             self.last_error = None
             self.leader_since = time.monotonic()
+            self._dernier_leader_lu = await self._lire_dernier_leader()
+            await self._marquer_dernier_leader()
             logger.warning(
                 "HA: leadership acquis role=%s lease=%ss owner=%s",
                 self.role,

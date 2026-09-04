@@ -83,7 +83,13 @@ async def _resolve_invite_guild_id(runtime) -> int | None:
                     await runtime._set_setting(RELEASE_CHANNEL_SETTING, channel.id)
             return guild_id
     except Exception:
-        logger.warning("Invitation officielle SentriX non résolue directement ; fallbacks locaux utilisés.")
+        # Repli qui fonctionne, répété toutes les deux minutes en production :
+        # ce n'est pas un incident. On descend en DEBUG mais on garde enfin la
+        # trace de l'exception, qui était purement et simplement jetée avant.
+        logger.debug(
+            "Invitation officielle SentriX non résolue directement ; fallbacks locaux utilisés.",
+            exc_info=True,
+        )
     return None
 
 

@@ -26,9 +26,14 @@ from utils.checks import (
     is_verified_bot_owner,
 )
 from utils import access_matrix
+from utils import log_hygiene
 from web.dashboard import start_dashboard
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+# Compresse les journaux répétitifs SANS jamais toucher aux ERROR/CRITICAL : une
+# seule boucle en panne remplissait le journal du même message toutes les 60 s,
+# au point de rendre une vraie erreur invisible. Voir utils/log_hygiene.py.
+log_hygiene.installer()
 logger = logging.getLogger("bot")
 
 # Liste des modules (cogs) à charger au démarrage.
