@@ -25,6 +25,7 @@ from utils import log_service
 logger = logging.getLogger("bot.production-embed-log-repair-v3")
 
 _MIGRATION_KEY = "production_embed_log_repair_v3_force_routes"
+_MIGRATION_TABLE = "sentrix_runtime_migrations_v3"
 _INVOKE_MARKER = "_sentrix_prefix_command_context_v3"
 _EMITTING_LOG_TYPES = tuple(
     name for name, meta in log_service.LOG_TYPES.items() if bool(meta.get("emits"))
@@ -73,9 +74,12 @@ def _install_prefix_execution_context(bot: commands.Bot) -> None:
 
 
 async def _ensure_migration_table(bot: commands.Bot) -> None:
+    # Cette table est volontairement propre à V3. Un ancien module avait déjà créé
+    # ``sentrix_runtime_migrations`` avec un schéma différent en production ; CREATE TABLE
+    # IF NOT EXISTS ne migrait donc rien et chaque SELECT sur guild_id échouait au boot.
     await bot.db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS sentrix_runtime_migrations (
+        f"""
+        CREATE TABLE IF NOT EXISTS {_MIGRATION_TABLE} (
             guild_id INTEGER NOT NULL,
             migration_key TEXT NOT NULL,
             applied_at INTEGER NOT NULL,
@@ -87,7 +91,7 @@ async def _ensure_migration_table(bot: commands.Bot) -> None:
 
 async def _migration_applied(bot: commands.Bot, guild_id: int) -> bool:
     row = await bot.db.fetchone(
-        "SELECT 1 AS ok FROM sentrix_runtime_migrations WHERE guild_id = ? AND migration_key = ?",
+        f"SELECT 1 AS ok FROM {_MIGRATION_TABLE} WHERE guild_id = ? AND migration_key = ?",
         (int(guild_id), _MIGRATION_KEY),
     )
     return bool(row)
@@ -95,7 +99,7 @@ async def _migration_applied(bot: commands.Bot, guild_id: int) -> bool:
 
 async def _mark_migration(bot: commands.Bot, guild_id: int) -> None:
     await bot.db.execute(
-        "INSERT INTO sentrix_runtime_migrations (guild_id, migration_key, applied_at) "
+        f"INSERT INTO {_MIGRATION_TABLE} (guild_id, migration_key, applied_at) "
         "VALUES (?, ?, ?) ON CONFLICT(guild_id, migration_key) DO NOTHING",
         (int(guild_id), _MIGRATION_KEY, int(time.time())),
     )
