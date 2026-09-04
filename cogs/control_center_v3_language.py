@@ -80,6 +80,9 @@ class _V4CategorySelectCompat(control_center_v3.V3CategorySelect):
         }
         if value == "__home__":
             self.owner.category = None
+        elif value == "roles_rules":
+            self.owner.category = "roles"
+            self.owner._v3_subpage = "rules"
         elif value in mapping:
             self.owner.category, self.owner._v4_subpage = mapping[value]
             if value == "roles_panel":

@@ -367,11 +367,24 @@ async def _build_security(self) -> discord.Embed:
     return _footer(panel, page="security")
 
 
+_TITLE_PREFIX = "SentriX — "
+
+
+def _page_title(page_id: str, original: discord.Embed) -> str:
+    """Respecte un titre de sous-page (ex: "Rôles — Règles & CAPTCHA") au lieu de
+    toujours retomber sur le libellé nu de la catégorie : cette page reconstruit
+    l'embed depuis zéro et ignorait jusqu'ici le titre déjà choisi en amont."""
+    original_title = str(getattr(original, "title", "") or "")
+    if original_title.startswith(_TITLE_PREFIX):
+        return original_title[len(_TITLE_PREFIX):]
+    return _label(page_id)
+
+
 async def _build_page(self, original: discord.Embed) -> discord.Embed:
     page_id = str(self.category)
     source = _clean_panel(original.copy())
     fields = _field_map(source)
-    panel = _panel(_label(page_id), _description(page_id))
+    panel = _panel(_page_title(page_id, original), _description(page_id))
 
     state = _pick(fields, "État", "État du module", default="—")
     config = _pick(fields, "Configuration", "Configuration actuelle", default="—")

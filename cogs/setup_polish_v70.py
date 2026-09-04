@@ -153,9 +153,25 @@ def _add_bot_permissions(source: discord.Embed, target: discord.Embed) -> None:
 
 
 class V70PageSelect(discord.ui.Select):
+    # V70 retire ET remplace TOUT enfant en ligne 0 à chaque render() (voir render_v70
+    # plus bas) : c'est donc la dernière autorité réelle du menu de navigation, et les
+    # options de sous-page posées par les couches antérieures (V3CategorySelect,
+    # _V4CategorySelectCompat) ne survivaient jamais jusqu'à l'utilisateur. Sans ces
+    # entrées ici, "Rôles — Règles & CAPTCHA" (et "Rôles — Panel de choix",
+    # "Sécurité — Vérification") étaient injoignables par le menu en production.
+    _SUBPAGES = {
+        "security_verification": ("security", "verification"),
+        "roles_panel": ("roles", "panel"),
+        "roles_rules": ("roles", "rules"),
+    }
+
     def __init__(self, owner):
         self.owner = owner
-        current = owner.category or "__home__"
+        subpage = getattr(owner, "_v3_subpage", None)
+        current = next(
+            (value for value, (cat, sub) in self._SUBPAGES.items() if owner.category == cat and subpage == sub),
+            owner.category or "__home__",
+        )
         options = [
             discord.SelectOption(
                 label="Accueil",
@@ -173,12 +189,36 @@ class V70PageSelect(discord.ui.Select):
                     default=current == key,
                 )
             )
-        placeholder = "Accueil" if current == "__home__" else f"Page : {_label(str(current))}"
+        if "security" in setup_ui.CATEGORIES:
+            options.append(discord.SelectOption(
+                label="Sécurité — Vérification",
+                value="security_verification",
+                description="Vérification renforcée et honeypot anti-bot",
+                default=current == "security_verification",
+            ))
+        if "roles" in setup_ui.CATEGORIES:
+            options.append(discord.SelectOption(
+                label="Rôles — Panel de choix",
+                value="roles_panel",
+                description="Salon et rôles proposés aux membres",
+                default=current == "roles_panel",
+            ))
+            options.append(discord.SelectOption(
+                label="Rôles — Règles & CAPTCHA",
+                value="roles_rules",
+                description="Salon des règles, rôle donné et CAPTCHA de vérification",
+                default=current == "roles_rules",
+            ))
+        placeholder = "Accueil" if owner.category is None else f"Page : {_label(str(owner.category))}"
         super().__init__(placeholder=placeholder[:150], options=options[:25], row=0)
 
     async def callback(self, interaction: discord.Interaction):
         value = self.values[0]
-        self.owner.category = None if value == "__home__" else value
+        self.owner._v3_subpage = None
+        if value in self._SUBPAGES:
+            self.owner.category, self.owner._v3_subpage = self._SUBPAGES[value]
+        else:
+            self.owner.category = None if value == "__home__" else value
         self.owner.selected_log = None
         self.owner.selected_ticket = None
         self.owner.selected_notification = None
@@ -349,8 +389,12 @@ async def _generic_page(self, source: discord.Embed) -> discord.Embed:
     state = _state(_pick(fields, "État du module", "État", default="—"))
     configuration = _plain(_pick(fields, "Configuration actuelle", "Configuration", default="—")) or "—"
 
+    # V69 transmet déjà un titre de sous-page nu (ex: "Rôles — Règles & CAPTCHA") sans
+    # préfixe de marque quand la page en a un : le respecter au lieu de toujours
+    # retomber sur le libellé nu de la catégorie perdait les sous-pages en route.
+    source_title = str(getattr(source, "title", "") or "")
     panel = _panel(
-        f"SentriX — {_label(page_id)}",
+        f"SentriX — {source_title or _label(page_id)}",
         _description(page_id),
         context=self.guild.name,
     )
