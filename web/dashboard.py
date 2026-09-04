@@ -228,10 +228,18 @@ async def handle_health(request: web.Request):
     })
 
 
-async def handle_public(request: web.Request):
-    bot = request.app["bot"]
+# /api/public est appelé en boucle par la page d'accueil tant que le bot n'est pas
+# « online » : c'est un point d'entrée PUBLIC, donc non authentifié et sollicitable
+# par autant d'onglets qu'on veut. Le contenu est un état global du bot, identique
+# pour tout le monde : un cache très court supprime le recalcul (somme des membres
+# sur tous les serveurs) sans jamais rendre l'affichage perceptiblement obsolète.
+_PUBLIC_CACHE_TTL = 3.0
+_public_cache: dict[str, object] = {"expire": 0.0, "payload": None}
+
+
+def _public_payload(bot) -> dict:
     guilds = bot.guilds
-    return web.json_response({
+    return {
         "bot_name": bot.user.name if bot.user else "SentriX",
         "avatar_url": str(bot.user.display_avatar.url) if bot.user else None,
         "online": bot.is_ready(),
@@ -241,7 +249,22 @@ async def handle_public(request: web.Request):
         "uptime_seconds": int(time.time() - START_TIME),
         "invite_url": _invite_url(bot),
         "oauth_ready": _oauth_ready(bot),
-    })
+    }
+
+
+async def handle_public(request: web.Request):
+    bot = request.app["bot"]
+    maintenant = time.monotonic()
+    payload = _public_cache["payload"]
+    if payload is None or maintenant >= float(_public_cache["expire"]):
+        payload = _public_payload(bot)
+        _public_cache["payload"] = payload
+        _public_cache["expire"] = maintenant + _PUBLIC_CACHE_TTL
+    else:
+        # L'uptime doit rester juste même servi depuis le cache.
+        payload = dict(payload)
+        payload["uptime_seconds"] = int(time.time() - START_TIME)
+    return web.json_response(payload)
 
 
 async def handle_login(request: web.Request):

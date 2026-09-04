@@ -130,6 +130,10 @@ _CORE_RECOVERY_JS = r"""
 
   let attempts = 0;
   let guildReloading = false;
+  let delai = 2000;
+  let timer = null;
+  let arrete = false;
+  const arreter = () => { arrete = true; if (timer) clearTimeout(timer); timer = null; };
   const refreshRuntime = async () => {
     attempts += 1;
     try {
@@ -161,14 +165,31 @@ _CORE_RECOVERY_JS = r"""
         finally { guildReloading = false; }
       }
 
-      if (data.online && data.oauth_ready && attempts >= 6) clearInterval(timer);
+      if (data.online && data.oauth_ready && attempts >= 6) arreter();
     } catch (_) {
       // Le script principal affiche déjà les erreurs réseau. Ce polling reste silencieux.
     }
-    if (attempts >= 90) clearInterval(timer);
+    if (attempts >= 90) arreter();
   };
 
-  const timer = setInterval(refreshRuntime, 2000);
+  // Ce sondage attend que le bot passe « online ». Quand il ne l'est pas — ce qui
+  // arrive pendant un redéploiement — la condition d'arrêt n'est jamais atteinte et
+  // l'ancienne cadence fixe de 2 s tapait /api/public 90 fois par chargement de page,
+  // sur chaque onglet ouvert. On espace progressivement et on ne sonde pas un onglet
+  // que personne ne regarde.
+  const planifier = () => {
+    if (arrete) return;
+    timer = setTimeout(async () => {
+      if (document.hidden) { planifier(); return; }
+      await refreshRuntime();
+      delai = Math.min(delai * 1.6, 30000);
+      planifier();
+    }, delai);
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && !arrete) { delai = 2000; if (timer) clearTimeout(timer); planifier(); }
+  });
+  planifier();
   setTimeout(refreshRuntime, 100);
 })();
 </script>
