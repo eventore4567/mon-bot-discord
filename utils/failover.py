@@ -107,6 +107,14 @@ class SentriXFailoverCoordinator:
         # redémarrage » (données locales encore valables) de « une autre instance
         # a écrit entre-temps » (restauration obligatoire).
         self.last_leader_key = storage_key(f"{lock_name}:last-leader")
+        # Signal « un primary attend » : le secours ne peut pas deviner autrement
+        # qu'il occupe une place qui ne lui revient pas.
+        self.attente_primary_key = storage_key(f"{lock_name}:primary-waiting")
+        # Le secours ne rend la main qu'apres avoir reellement servi un moment, et
+        # pas plus d'une fois par periode : sans ces deux garde-fous, un primary qui
+        # redemarre en boucle ferait rebondir le leadership sans fin (ping-pong).
+        self.prefere_primary = _truthy("SENTRIX_FAILOVER_PREFER_PRIMARY", True)
+        self.duree_min_leadership = _env_int("SENTRIX_FAILOVER_MIN_LEADERSHIP", 120, 30, 3600)
         # Identité STABLE d'un redémarrage à l'autre, contrairement à owner_id qui
         # contient un uuid régénéré à chaque boot.
         self.service_id = (railway_service_name() or "local").casefold()
@@ -234,7 +242,38 @@ class SentriXFailoverCoordinator:
 
         self.current_owner = await self._redis.get(self.lock_key)
         self.state = "standby"
+        if self.role == "primary":
+            # On signale notre attente au leader en place. La cle expire vite : si ce
+            # primary meurt, le secours cesse aussitot de croire qu'on l'attend.
+            try:
+                await self._redis.set(
+                    self.attente_primary_key, self.owner_id, ex=max(10, self.poll_seconds * 5)
+                )
+            except Exception:
+                pass
         return False
+
+    async def un_primary_attend(self) -> bool:
+        """Vrai si une instance de role `primary` reclame actuellement la place."""
+        if self._redis is None:
+            return False
+        try:
+            return bool(await self._redis.get(self.attente_primary_key))
+        except Exception:
+            return False
+
+    def doit_ceder_la_place(self) -> bool:
+        """Un secours doit-il rendre la main a un primary qui attend ?
+
+        Jamais avant d'avoir servi ``duree_min_leadership`` : un primary qui
+        redemarre en boucle ferait sinon rebondir le leadership sans fin. Et jamais
+        un primary ne se cede la place a lui-meme.
+        """
+        if not self.prefere_primary or self.role != "standby" or not self.is_leader:
+            return False
+        if self.leader_since is None:
+            return False
+        return (time.monotonic() - self.leader_since) >= self.duree_min_leadership
 
     async def wait_for_leadership(self) -> LeadershipGrant:
         """Attend le lease sans jamais ouvrir Discord en absence de preuve de leadership."""
@@ -296,6 +335,24 @@ class SentriXFailoverCoordinator:
                     renewed = False
 
                 if renewed:
+                    # Un secours qui occupe la place pendant qu'un primary attend la
+                    # rend PROPREMENT : on ferme Discord, ce qui declenche le snapshot
+                    # d'arret puis la liberation du lease (dans cet ordre). Le primary,
+                    # qui sonde toutes les 2 s, reprend alors avec des donnees fraiches.
+                    # On ne prend jamais la place de force : preempter le leader ferait
+                    # tourner deux instances pendant la bascule.
+                    if self.doit_ceder_la_place() and await self.un_primary_attend():
+                        self.state = "yielding"
+                        logger.warning(
+                            "HA: un primary attend la place — le secours la rend apres "
+                            "%.0fs de service (snapshot final puis liberation du lease).",
+                            time.monotonic() - (self.leader_since or time.monotonic()),
+                        )
+                        try:
+                            await bot.close()
+                        except Exception:
+                            logger.exception("HA: fermeture Discord pendant la cession impossible.")
+                        return
                     continue
 
                 self.state = "lost"

@@ -210,3 +210,75 @@ def test_le_panneau_dm_ne_reimplemente_pas_le_moteur():
     source = pathlib.Path("web/dm_panel.py").read_text(encoding="utf-8")
     assert "moteur.diffuser(" in source
     assert "panels.envoyer(" not in source, "le panneau ne doit jamais envoyer lui-même"
+
+
+# ---------------------------------------------------------------- interface
+def _html() -> str:
+    import web  # déclenche l'assemblage complet de la page
+    from web import dashboard
+
+    return dashboard.INDEX_HTML
+
+
+def test_l_onglet_dm_est_reellement_servi():
+    """L'injection doit survivre à la restauration de INDEX_HTML par web/__init__ :
+    posée trop tôt, elle était effacée comme les anciennes couches visuelles."""
+    html = _html()
+    assert 'data-tab="dm"' in html, "l'onglet n'apparaît pas dans la navigation"
+    assert 'id="sentrix-dm-panel"' in html
+    assert 'id="sentrix-dm-style"' in html
+
+
+def test_le_rendu_de_l_onglet_est_branche():
+    html = _html()
+    assert "if(tab.dm){window.sentrixRenderDM" in html, "l'onglet ne rendrait rien"
+    # Rien à « enregistrer » ici : la barre de sauvegarde doit disparaître.
+    assert 'Boolean(tab.sanctions||tab.dm)' in html
+
+
+def test_l_interface_couvre_les_elements_demandes():
+    html = _html()
+    for element in (
+        "dmAllMessage", "dmAllPreview", "dmAllConfirm", "dmAllSend", "dmAllProgress",
+        "dmOneUser", "dmOneMessage", "dmOnePreview", "dmOneSend", "dmOneResult",
+    ):
+        assert element in html, f"élément d'interface manquant : {element}"
+    for libelle in ("Envoyés", "MP fermés", "Échecs", "Bots ignorés"):
+        assert libelle in html, f"compteur manquant : {libelle}"
+
+
+def test_l_interface_utilise_les_routes_existantes_et_aucun_moteur_bis():
+    html = _html()
+    assert "/dm/apercu" in html and "/dm/all" in html and "/dm/job" in html and "/dm/user" in html
+    # Le navigateur ne doit jamais parler directement à Discord.
+    assert "discord.com/api" not in html.split('id="sentrix-dm-panel"')[1]
+
+
+def test_l_envoi_est_neutralise_avant_le_premier_aller_retour():
+    """Anti double-clic : le bouton est désactivé AVANT l'appel réseau, pas après."""
+    html = _html()
+    bloc = html.split("async function envoyerTous")[1].split("async function envoyerUn")[0]
+    i_desactive = bloc.index("bouton.disabled = true")
+    i_appel = bloc.index("await appel(")
+    assert i_desactive < i_appel
+
+
+def test_le_conflit_409_est_traite_comme_une_diffusion_en_cours():
+    html = _html()
+    assert "r.status === 409" in html, "un double envoi doit être signalé, pas ignoré"
+
+
+def test_l_interface_est_responsive():
+    html = _html()
+    assert "@media(max-width:620px)" in html, "l'interface doit tenir sur mobile"
+
+
+def test_le_formulaire_n_est_montre_qu_apres_accord_du_serveur():
+    """La visibilité suit la réponse du serveur : aucun formulaire pour un non-autorisé."""
+    html = _html()
+    # sentrixRenderDM apparait deux fois (aiguillage puis definition) : on vise la definition.
+    bloc = html.split("window.sentrixRenderDM = async function renderDM")[1]
+    i_verif = bloc.index("/dm/apercu")
+    i_formulaire = bloc.index("dmAllMessage")
+    assert i_verif < i_formulaire
+    assert "Réservé au propriétaire du serveur" in bloc

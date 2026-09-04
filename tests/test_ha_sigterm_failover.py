@@ -221,3 +221,88 @@ async def _sigterm_declenche_l_arret_gracieux():
 
 def test_sigterm_ferme_discord_et_debloque_le_coordinateur():
     asyncio.run(_sigterm_declenche_l_arret_gracieux())
+
+
+# --------------------------------------------------------------------------
+# Preference du primary (roles inverses)
+# --------------------------------------------------------------------------
+def test_le_role_ne_donne_aucune_priorite_a_l_election():
+    """Constat d'origine : le role est decoratif, l'election reste un premier-arrive.
+
+    On ne change PAS cela — preempter un leader ferait tourner deux instances
+    pendant la bascule. La preference passe par une cession volontaire.
+    """
+    redis = _FauxRedis()
+    standby = _coordinateur("sentrix-standby", redis, role="standby")
+    primary = _coordinateur("mon-bot-discord", redis, role="primary")
+    assert asyncio.run(standby._try_acquire()) is True
+    assert asyncio.run(primary._try_acquire()) is False, "le lease reste au premier arrive"
+
+
+async def _primary_signale_son_attente():
+    redis = _FauxRedis()
+    occupant = _coordinateur("sentrix-standby", redis, role="standby")
+    await occupant._try_acquire()
+
+    primary = _coordinateur("mon-bot-discord", redis, role="primary")
+    assert await primary._try_acquire() is False
+    # Le secours ne peut pas deviner qu'il occupe une place qui ne lui revient pas.
+    assert await occupant.un_primary_attend() is True
+    return occupant
+
+
+def test_un_primary_en_attente_est_visible_par_le_secours():
+    asyncio.run(_primary_signale_son_attente())
+
+
+async def _secours_ne_signale_pas_son_attente():
+    redis = _FauxRedis()
+    occupant = _coordinateur("mon-bot-discord", redis, role="primary")
+    await occupant._try_acquire()
+    autre_secours = _coordinateur("sentrix-standby", redis, role="standby")
+    await autre_secours._try_acquire()
+    return await occupant.un_primary_attend()
+
+
+def test_un_secours_qui_attend_ne_declenche_aucune_cession():
+    assert asyncio.run(_secours_ne_signale_pas_son_attente()) is False
+
+
+def test_un_primary_ne_se_cede_jamais_la_place_a_lui_meme():
+    redis = _FauxRedis()
+    primary = _coordinateur("mon-bot-discord", redis, role="primary")
+    asyncio.run(primary._try_acquire())
+    primary.leader_since = 0.0  # leader depuis longtemps
+    assert primary.doit_ceder_la_place() is False
+
+
+def test_le_secours_ne_cede_pas_avant_d_avoir_reellement_servi():
+    """Anti ping-pong : un primary qui redemarre en boucle ne doit pas faire
+    rebondir le leadership a chaque tentative."""
+    import time as _t
+
+    redis = _FauxRedis()
+    secours = _coordinateur("sentrix-standby", redis, role="standby")
+    asyncio.run(secours._try_acquire())
+    secours.leader_since = _t.monotonic()  # vient tout juste de prendre la main
+    assert secours.doit_ceder_la_place() is False
+
+    secours.leader_since = _t.monotonic() - secours.duree_min_leadership - 1
+    assert secours.doit_ceder_la_place() is True
+
+
+def test_la_preference_primary_est_desactivable():
+    import time as _t
+
+    redis = _FauxRedis()
+    secours = _coordinateur("sentrix-standby", redis, role="standby")
+    asyncio.run(secours._try_acquire())
+    secours.leader_since = _t.monotonic() - secours.duree_min_leadership - 1
+    secours.prefere_primary = False
+    assert secours.doit_ceder_la_place() is False
+
+
+def test_un_secours_non_leader_ne_cede_rien():
+    secours = _coordinateur("sentrix-standby", _FauxRedis(), role="standby")
+    secours.state = "standby"
+    assert secours.doit_ceder_la_place() is False

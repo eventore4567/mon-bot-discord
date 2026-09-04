@@ -101,10 +101,7 @@ _dashboard_polish.POLISH_JS = _dashboard_polish.POLISH_JS.replace(
 )
 _dashboard_polish.install(_dashboard, _setup_center, _embed_center)
 
-# Panneau DM (diffusion serveur + message a un membre). Aucune logique d'envoi
-# ici : il appelle le moteur de +dmall, avec verification des droits cote serveur.
 from . import dm_panel as _dm_panel
-_dm_panel.installer(_dashboard)
 
 # Sessions persistantes et routes propriétaires restent actives côté serveur.
 _persistent_dashboard_sessions.install(_dashboard)
@@ -219,6 +216,11 @@ _dashboard.INDEX_HTML = _main_html
 _log_settings_dashboard_v32.install(_dashboard)
 _ticket_center_v35.install(_dashboard)
 _ticket_buttons_editor_v53.install(_dashboard)
+
+# Panneau DM : installe APRES la restauration de INDEX_HTML, sinon son interface
+# serait effacee comme les anciennes couches visuelles. Aucune logique d'envoi ici,
+# il appelle le moteur de +dmall avec verification des droits cote serveur.
+_dm_panel.installer(_dashboard)
 
 # Community Growth doit être branché AVANT build_app()/le bind HTTP. Auparavant il était
 # installé depuis une tâche asynchrone de cog ; Railway pouvait donc créer l'application
