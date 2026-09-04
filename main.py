@@ -55,6 +55,9 @@ EXTENSIONS = [
     "cogs.games_economy",
     "cogs.music",
     "cogs.events",
+    # Rétablit la racine +giveaway que le catalogue annonce depuis toujours. Chargé
+    # APRÈS cogs.events, dont il délègue les commandes giveaway-* existantes.
+    "cogs.giveaway_center",
     "cogs.verification",
     "cogs.stats",
     "cogs.owner",
