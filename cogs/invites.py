@@ -23,6 +23,7 @@ une heuristique (plusieurs comptes très récents invités par la même personne
 temps) qui peut se tromper — à traiter comme une alerte à vérifier, pas une preuve.
 """
 
+import logging
 import time
 
 import discord
@@ -33,6 +34,8 @@ import config
 from utils import embeds, helpers, checks, design_system
 from utils import sentrix_panels as panels
 from database.db import FAKE_INVITE_ACCOUNT_AGE_DAYS
+
+logger = logging.getLogger("bot.invites")
 
 # Fenêtre et seuil de l'heuristique "comptes suspects" : si le même invitant amène au
 # moins ce nombre de comptes créés depuis moins de 3 jours, en moins de 10 minutes.
@@ -86,7 +89,30 @@ class Invites(commands.Cog, name="Invites"):
                 used = inv
                 break
         self.invite_cache[guild.id] = {inv.code: (inv.uses or 0) for inv in current}
+
+        if used is None:
+            # Une URL personnalisée (vanity) n'apparaît pas dans guild.invites() : sans
+            # ce repli, une arrivée par le lien vanity restait « invitation inconnue ».
+            # Elle n'a jamais d'invitant, et on n'en invente donc aucun.
+            used = await self._invitation_vanity(guild)
         return used
+
+    async def _invitation_vanity(self, guild: discord.Guild) -> discord.Invite | None:
+        """Détecte une arrivée par l'URL personnalisée du serveur, si elle a servi."""
+        if "VANITY_URL" not in getattr(guild, "features", ()):
+            return None
+        try:
+            vanity = await guild.vanity_invite()
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            return None
+        if vanity is None:
+            return None
+        cle = f"vanity:{vanity.code}"
+        cache = self.invite_cache.setdefault(guild.id, {})
+        precedent = cache.get(cle, 0)
+        actuel = vanity.uses or 0
+        cache[cle] = actuel
+        return vanity if actuel > precedent else None
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -101,6 +127,7 @@ class Invites(commands.Cog, name="Invites"):
         # invitation "réelle" d'une invitation "fake" sur /invites, sans jamais deviner.
         account_age_days = (discord.utils.utcnow() - member.created_at).days
         await self.bot.db.record_invite_join(guild.id, member.id, inviter_id, code, account_age_days)
+        await self._journaliser_arrivee(member, code, inviter_id)
 
         if not inviter_id:
             return
@@ -130,6 +157,52 @@ class Invites(commands.Cog, name="Invites"):
             )
             await helpers.send_log(self.bot, guild, "automod", e)
             self.recent_new_accounts[key] = []
+
+    async def _journaliser_arrivee(
+        self, member: discord.Member, code: str | None, inviter_id: int | None
+    ) -> None:
+        """Annonce l'arrivée dans le salon d'invitations CONFIGURÉ.
+
+        Le salon n'est jamais codé en dur : il passe par la route de logs
+        « dossiers », que le Setup relie au salon voulu (📬・invitations ou autre).
+        Quand l'invitant est inconnu — permission manquante, lien vanity, ou deux
+        arrivées simultanées — on l'écrit noir sur blanc plutôt que d'attribuer
+        l'arrivée à quelqu'un au hasard.
+        """
+        guild = member.guild
+        try:
+            if inviter_id:
+                detail = await self.bot.db.get_invite_breakdown(guild.id, inviter_id)
+                invitant = f"<@{inviter_id}>\n`ID: {inviter_id}`"
+                total = f"**{detail['credited']}** invitation(s) créditée(s)"
+            else:
+                invitant = "Inconnu"
+                total = "Non attribué : SentriX n'a pas pu déterminer l'invitation utilisée."
+
+            extra = {
+                "🔗 Invité par": invitant,
+                "📊 Total de l'invitant": total,
+                "🎟️ Invitation utilisée": f"`{code}`" if code else "Inconnue",
+            }
+            entree = embeds.log_entry(
+                "📬 Nouvelle arrivée",
+                config.COLOR_SUCCESS,
+                cible=member,
+                cible_label="👤 Membre",
+                extra=extra,
+            )
+            # La clé d'événement empêche un double log si deux couches relaient l'arrivée.
+            await helpers.send_log(
+                self.bot,
+                guild,
+                "dossiers",
+                entree,
+                event_key=f"invite-join:{guild.id}:{member.id}",
+            )
+        except Exception:
+            # Un journal en échec ne doit jamais empêcher l'enregistrement de l'arrivée,
+            # déjà persisté juste avant cet appel.
+            logger.exception("Log d'arrivée par invitation impossible (serveur %s).", guild.id)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
