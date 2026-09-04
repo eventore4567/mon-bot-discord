@@ -26,13 +26,13 @@ jobs:
           cache: pip
 
       - name: Dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pytest
 
       - name: Compile all Python
         run: python -m compileall -q .
 
       - name: Pure unit tests
-        run: python -m unittest discover -s tests -p 'test_*.py'
+        run: python -m pytest tests -q
 
       - name: Repository audit
         run: python tools/repo_audit.py

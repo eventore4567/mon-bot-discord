@@ -829,7 +829,11 @@ class Moderation(commands.Cog):
 
     # ---------------------------------------------------------------- DIVERS
 
-    @commands.hybrid_command(name="nickname", description="Changer le pseudo d'un membre.", with_app_command=False)
+    # `nickname` fait partie des commandes directes normales du catalogue, mais était
+    # la seule sans version slash : with_app_command=False la privait de /nickname
+    # depuis le premier commit, alors que sa signature et son @app_commands.describe
+    # étaient déjà prêts pour Discord.
+    @commands.hybrid_command(name="nickname", description="Changer le pseudo d'un membre.")
     @app_commands.describe(membre="Le membre concerné", pseudo="Le nouveau pseudo")
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.

@@ -30,13 +30,13 @@ jobs:
           cache: pip
 
       - name: Dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pytest
 
       - name: Compile
         run: python -m compileall -q .
 
       - name: Unit tests
-        run: python -m unittest discover -s tests -p 'test_*.py'
+        run: python -m pytest tests -q
 
       - name: Production ops tests
         run: python -m unittest tests.test_production_ops -v

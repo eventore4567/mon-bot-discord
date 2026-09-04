@@ -183,15 +183,16 @@ async def run() -> int:
 
         app_roots = list(bot.tree.get_commands())
         app_root_names = {str(command.name).casefold() for command in app_roots}
-        expected_slash = {
-            "nick" if name == "nickname" else name
-            for name in command_catalog_cleanup.NORMAL_DIRECT_COMMANDS
-        }
+        # Le renommage nickname -> nick n'etait code QUE dans cet audit : ni le
+        # catalogue (SHORT_COMMAND_NAMES), ni le runtime ne le realisent. L'audit
+        # exigeait donc une racine /nick que rien ne cree. La verification de fond
+        # reste identique : toute commande directe normale doit avoir sa slash.
+        expected_slash = set(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)
         missing_slash_direct = sorted(expected_slash - app_root_names)
         if len(app_roots) > slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET:
             errors.append(f"trop de racines slash: {len(app_roots)}/100")
-        if "nick" not in app_root_names:
-            errors.append("/nick est absent")
+        if "nickname" not in app_root_names:
+            errors.append("/nickname est absent")
 
         missing_proof_slash = sorted(set(slash_command_budget.PROOF_SLASH_PREFERRED) - app_root_names)
         if missing_proof_slash:

@@ -57,7 +57,11 @@ def main() -> None:
     assert "game_mission_progress_v2" in games
     assert "bonus_awarded=0" in games
     assert "rowcount" in games, "Le bonus de mission doit être protégé contre les doubles crédits"
-    assert '@commands.command(name="season"' in games
+    # La commande a ete renommee season -> gameseason (commit 0a9c254) pour ne pas
+    # entrer en collision avec le groupe `season` de cogs/v17_ai_economy_games.py.
+    # L'intention de la verification reste la meme : c'est bien une commande
+    # prefixe simple, ce que confirment les deux assertions suivantes.
+    assert '@commands.command(name="gameseason"' in games
     assert "@commands.hybrid_command" not in games
     assert "@app_commands.command" not in games
 
