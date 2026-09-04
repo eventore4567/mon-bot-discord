@@ -33,10 +33,14 @@ def _format_duration(seconds: float) -> str:
 
 def _seed_existing_sessions(bot: commands.Bot, sessions: dict[tuple[int, int], datetime | None]) -> None:
     """Marque les connexions déjà présentes sans inventer leur heure de début."""
+    # discord.py 2.7 n'expose plus ``Guild.voice_states`` publiquement. La source
+    # supportée est Member.voice ; elle donne le même résultat sans dépendre d'un
+    # attribut interne susceptible de disparaître entre versions.
     for guild in bot.guilds:
-        for member_id, voice_state in guild.voice_states.items():
-            if voice_state.channel is not None:
-                sessions.setdefault((guild.id, int(member_id)), None)
+        for member in guild.members:
+            voice_state = getattr(member, "voice", None)
+            if voice_state is not None and voice_state.channel is not None:
+                sessions.setdefault((guild.id, int(member.id)), None)
 
 
 def _remove_official_listener(bot: commands.Bot, logs_cog) -> int:
