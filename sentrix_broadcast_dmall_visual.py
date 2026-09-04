@@ -8,6 +8,7 @@ simple « Confirmer ? » suffirait ailleurs.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 
 import discord
 from discord import app_commands
@@ -20,6 +21,112 @@ SEND_DELAY_SECONDS = 0.75
 PROGRESS_EVERY = 25
 LONGUEUR_MAX = 3500
 APERCU_MAX = 1200
+
+
+# ---------------------------------------------------------------------------
+# Moteur de diffusion, indépendant du transport
+#
+# Le Dashboard doit pouvoir lancer exactement la même diffusion que +dmall sans
+# passer par une interaction Discord. Le cœur est donc isolé ici : la commande
+# comme le panneau web l'appellent, et il n'existe qu'UNE implémentation de
+# l'envoi en masse.
+# ---------------------------------------------------------------------------
+@dataclass
+class BilanDiffusion:
+    """Compteurs d'une diffusion en cours ou terminée."""
+
+    total: int = 0
+    envoyes: int = 0
+    dms_fermes: int = 0
+    echecs: int = 0
+    bots_ignores: int = 0
+    termine: bool = False
+
+    @property
+    def traites(self) -> int:
+        return self.envoyes + self.dms_fermes + self.echecs
+
+    def en_dict(self) -> dict:
+        return {
+            "total": self.total,
+            "envoyes": self.envoyes,
+            "dms_fermes": self.dms_fermes,
+            "echecs": self.echecs,
+            "bots_ignores": self.bots_ignores,
+            "traites": self.traites,
+            "termine": self.termine,
+        }
+
+
+def destinataires_du_serveur(guild: discord.Guild, bot_user_id: int | None = None):
+    """Membres joignables, et nombre de bots volontairement ignorés."""
+    membres: list[discord.Member] = []
+    bots = 0
+    for membre in guild.members:
+        if membre.bot:
+            bots += 1
+            continue
+        if bot_user_id is not None and membre.id == bot_user_id:
+            continue
+        membres.append(membre)
+    return membres, bots
+
+
+async def diffuser(
+    guild: discord.Guild,
+    recipients: list,
+    contenu: str,
+    *,
+    bots_ignores: int = 0,
+    fabrique_panneau=None,
+    progression=None,
+) -> BilanDiffusion:
+    """Envoie le message à chaque destinataire, sans jamais s'arrêter sur un échec.
+
+    Un message privé fermé (``Forbidden``) est compté à part d'une vraie panne
+    technique : ce n'est pas une erreur du bot, et le distinguer évite de faire
+    passer une diffusion normale pour un incident.
+    """
+    bilan = BilanDiffusion(total=len(recipients), bots_ignores=bots_ignores)
+    fabrique = fabrique_panneau or _panneau_prive_par_defaut
+
+    for index, membre in enumerate(recipients, start=1):
+        try:
+            await panels.envoyer(membre, fabrique(guild, contenu))
+            bilan.envoyes += 1
+        except discord.Forbidden:
+            bilan.dms_fermes += 1
+        except Exception:
+            # Un membre en échec ne doit JAMAIS interrompre les centaines d'autres.
+            bilan.echecs += 1
+
+        if index < bilan.total:
+            await asyncio.sleep(SEND_DELAY_SECONDS)
+
+        if progression is not None and (index % PROGRESS_EVERY == 0 or index == bilan.total):
+            try:
+                await progression(bilan)
+            except Exception:
+                pass  # l'affichage ne doit pas faire échouer la diffusion
+
+    bilan.termine = True
+    if progression is not None:
+        try:
+            await progression(bilan)
+        except Exception:
+            pass
+    return bilan
+
+
+def _panneau_prive_par_defaut(guild: discord.Guild, contenu: str) -> panels.Panneau:
+    return panels.Panneau(
+        titre=f"Message de {guild.name}",
+        sous_titre="Annonce envoyée par l'équipe du serveur.",
+        kind="brand",
+        vignette=guild.icon.url if guild.icon else None,
+        sections=[panels.Section("Message", texte=contenu)],
+        pied=f"Message de SentriX • {guild.name}",
+    )
 
 
 def _duree_lisible(secondes: float) -> str:
@@ -230,50 +337,47 @@ class Broadcast(commands.Cog):
         recipients: list[discord.Member],
         content: str,
     ) -> None:
-        sent = 0
-        failed = 0
         total = len(recipients)
 
+        async def afficher(bilan: BilanDiffusion) -> None:
+            if bilan.termine:
+                return
+            restant = (total - bilan.traites) * SEND_DELAY_SECONDS
+            encours = _panneau_progression(
+                "Diffusion en cours",
+                f"**{bilan.traites}** membre(s) traité(s) sur **{total}**.",
+                kind="warning",
+                traites=bilan.traites,
+                total=total,
+                envoyes=bilan.envoyes,
+                echecs=bilan.dms_fermes + bilan.echecs,
+                pied=f"Fin dans {_duree_lisible(restant)}.",
+            )
+            try:
+                await interaction.edit_original_response(
+                    view=encours, attachments=encours.fichiers()
+                )
+            except discord.HTTPException:
+                pass
+
         try:
-            for index, member in enumerate(recipients, start=1):
-                # Un panneau neuf par membre : la vignette du serveur et la
-                # bannière sont réattachées à chaque envoi.
-                try:
-                    await panels.envoyer(member, self._panneau_prive(guild, content))
-                    sent += 1
-                except (discord.Forbidden, discord.HTTPException):
-                    failed += 1
-
-                if index < total:
-                    await asyncio.sleep(SEND_DELAY_SECONDS)
-
-                if index % PROGRESS_EVERY == 0:
-                    restant = (total - index) * SEND_DELAY_SECONDS
-                    encours = _panneau_progression(
-                        "Diffusion en cours",
-                        f"**{index}** membre(s) traité(s) sur **{total}**.",
-                        kind="warning",
-                        traites=index,
-                        total=total,
-                        envoyes=sent,
-                        echecs=failed,
-                        pied=f"Fin dans {_duree_lisible(restant)}.",
-                    )
-                    try:
-                        await interaction.edit_original_response(
-                            view=encours, attachments=encours.fichiers()
-                        )
-                    except discord.HTTPException:
-                        pass
+            # Même moteur que le panneau DM du Dashboard : une seule implémentation.
+            resultat = await diffuser(
+                guild,
+                recipients,
+                content,
+                fabrique_panneau=self._panneau_prive,
+                progression=afficher,
+            )
 
             bilan = _panneau_progression(
                 "Diffusion terminée",
-                f"**{sent}** membre(s) sur **{total}** ont reçu l'annonce.",
+                f"**{resultat.envoyes}** membre(s) sur **{total}** ont reçu l'annonce.",
                 kind="success",
                 traites=total,
                 total=total,
-                envoyes=sent,
-                echecs=failed,
+                envoyes=resultat.envoyes,
+                echecs=resultat.dms_fermes + resultat.echecs,
                 pied="Un échec ne veut pas dire un blocage : la plupart"
                 " viennent de messages privés fermés.",
             )
@@ -435,6 +539,82 @@ class Broadcast(commands.Cog):
         )
         if isinstance(sent_message, discord.Message):
             view.message = sent_message
+
+    @commands.command(name="dm", aliases=["mp"])
+    @commands.guild_only()
+    async def dm(self, ctx: commands.Context, membre: discord.Member, *, message: str) -> None:
+        """Écrit à UN membre en privé, avec le même habillage que +dmall.
+
+        Volontairement en préfixe seul : le budget slash est saturé (100/100) et
+        `+dm` ne mérite pas d'évincer une commande déjà exposée.
+        """
+        assert ctx.guild is not None
+
+        if not await self._can_broadcast(ctx):
+            await panels.envoyer(
+                ctx,
+                _refus(
+                    "Permission refusée",
+                    "Écrire au nom du serveur en privé reste réservé à ses responsables.",
+                ),
+            )
+            return
+
+        if membre.bot:
+            await panels.envoyer(
+                ctx,
+                _refus("Destinataire invalide", "Les bots ne reçoivent pas de message privé."),
+            )
+            return
+
+        contenu = message.strip()
+        if not contenu:
+            await panels.envoyer(ctx, _refus("Message vide", "Écris le texte à envoyer."))
+            return
+        if len(contenu) > LONGUEUR_MAX:
+            await panels.envoyer(
+                ctx,
+                _refus(
+                    "Message trop long",
+                    f"Limite : **{LONGUEUR_MAX}** caractères (actuellement {len(contenu)}).",
+                ),
+            )
+            return
+
+        # Le moteur partagé gère déjà la distinction « MP fermé » / vraie panne.
+        bilan = await diffuser(
+            ctx.guild, [membre], contenu, fabrique_panneau=self._panneau_prive
+        )
+
+        if bilan.envoyes:
+            titre, sous_titre, kind = (
+                "Message envoyé",
+                f"{membre.mention} a bien reçu le message.",
+                "success",
+            )
+        elif bilan.dms_fermes:
+            titre, sous_titre, kind = (
+                "Message privé fermé",
+                f"{membre.mention} n'accepte pas les messages privés de ce serveur.",
+                "warning",
+            )
+        else:
+            titre, sous_titre, kind = (
+                "Envoi impossible",
+                f"Discord a refusé l'envoi à {membre.mention}.",
+                "danger",
+            )
+
+        await panels.envoyer(
+            ctx,
+            panels.Panneau(
+                titre=f"SentriX — {titre}",
+                sous_titre=sous_titre,
+                kind=kind,
+                sections=[panels.Section("Aperçu", texte=contenu[:APERCU_MAX])],
+                pied="SentriX • Message privé",
+            ),
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

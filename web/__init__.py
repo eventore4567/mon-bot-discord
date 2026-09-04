@@ -101,6 +101,11 @@ _dashboard_polish.POLISH_JS = _dashboard_polish.POLISH_JS.replace(
 )
 _dashboard_polish.install(_dashboard, _setup_center, _embed_center)
 
+# Panneau DM (diffusion serveur + message a un membre). Aucune logique d'envoi
+# ici : il appelle le moteur de +dmall, avec verification des droits cote serveur.
+from . import dm_panel as _dm_panel
+_dm_panel.installer(_dashboard)
+
 # Sessions persistantes et routes propriétaires restent actives côté serveur.
 _persistent_dashboard_sessions.install(_dashboard)
 _owner_server_manager.install(_dashboard)

@@ -118,6 +118,7 @@ GUILD_OWNER_COMMANDS = frozenset({
     "proofreset",           # efface toutes les preuves de verification
     # Diffusion privee a l'ensemble du serveur
     "dmall",                # envoie un MP a tous les membres non-bot
+    "dm",                   # ecrit a UN membre au nom du serveur
 })
 
 CUSTOM_PERMISSION_COMMANDS = frozenset({"embed"})

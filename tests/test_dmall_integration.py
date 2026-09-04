@@ -91,6 +91,11 @@ def test_chaque_edition_reattache_sa_banniere():
 
 
 def test_le_message_prive_porte_la_banniere_en_haut():
+    """L'envoi passe désormais par le moteur partagé avec le Dashboard, mais c'est
+    toujours _panneau_prive (bannière en tête) qui construit le message reçu."""
     source = (ROOT / "sentrix_broadcast_dmall_visual.py").read_text(encoding="utf-8")
     assert "def _panneau_prive" in source
-    assert "panels.envoyer(member, self._panneau_prive(guild, content))" in source
+    # La commande fournit sa fabrique de panneau au moteur...
+    assert "fabrique_panneau=self._panneau_prive" in source
+    # ...et le moteur envoie bien ce panneau-là à chaque membre.
+    assert "await panels.envoyer(membre, fabrique(guild, contenu))" in source
