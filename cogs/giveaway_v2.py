@@ -327,7 +327,8 @@ class GiveawayBuilderView(discord.ui.View):
         return e
 
     async def refresh(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(embed=self.setup_embed(), view=self)
+        panneau = panels.avec_composants(panels.depuis_embed(self.setup_embed()), self)
+        await panels.editer(interaction.response, panneau)
 
     @discord.ui.button(label="1. Lot / durée / gagnants", style=discord.ButtonStyle.primary, row=0)
     async def base(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -371,7 +372,8 @@ class GiveawayBuilderView(discord.ui.View):
             child.disabled = True
         if self.message:
             try:
-                await self.message.edit(embed=self.setup_embed(), view=self)
+                panneau = panels.avec_composants(panels.depuis_embed(self.setup_embed()), self)
+                await panels.editer(self.message, panneau)
             except discord.HTTPException:
                 pass
         self.stop()
@@ -382,7 +384,17 @@ class GiveawayBuilderView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         self.stop()
-        await interaction.response.edit_message(embed=discord.Embed(title="Création annulée", description="Aucun giveaway n’a été publié.", colour=discord.Colour.dark_grey()), view=self)
+        panneau = panels.avec_composants(
+            panels.depuis_embed(
+                discord.Embed(
+                    title="Création annulée",
+                    description="Aucun giveaway n’a été publié.",
+                    colour=discord.Colour.dark_grey(),
+                )
+            ),
+            self,
+        )
+        await panels.editer(interaction.response, panneau)
 
 
 class AdvancedGiveawayView(discord.ui.View):
