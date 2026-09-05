@@ -8,6 +8,7 @@ optional database table can never leave /app completely blank.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 
@@ -271,18 +272,8 @@ def patch_dashboard_runtime(dashboard=None) -> None:
     if dashboard is None or not hasattr(dashboard, "handle_guild"):
         return
 
-    async def resilient_handle_guild(request: web.Request):
-        try:
-            guild_id = int(request.match_info["guild_id"])
-        except (KeyError, ValueError):
-            return dashboard._json_error("Identifiant de serveur invalide.", 400)
-
-        _session, guild, error = await dashboard._manageable_guild(request, guild_id)
-        if error:
-            return error
-
-        db = request.app["bot"].db
-
+    async def _assemble_guild_payload_fail_soft(db, guild) -> dict:
+        guild_id = guild.id
         try:
             conf = await db.get_guild_config(guild_id)
         except Exception:
@@ -338,7 +329,7 @@ def patch_dashboard_runtime(dashboard=None) -> None:
             if isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel))
         ]
 
-        return web.json_response({
+        return {
             "guild": {
                 "id": str(guild.id),
                 "name": guild.name,
@@ -354,7 +345,34 @@ def patch_dashboard_runtime(dashboard=None) -> None:
             "roles": roles,
             "channels": channels,
             "metrics": metrics,
-        })
+        }
+
+    async def resilient_handle_guild(request: web.Request):
+        try:
+            guild_id = int(request.match_info["guild_id"])
+        except (KeyError, ValueError):
+            return dashboard._json_error("Identifiant de serveur invalide.", 400)
+
+        _session, guild, error = await dashboard._manageable_guild(request, guild_id)
+        if error:
+            return error
+
+        # Plusieurs onglets/comptes redemandant le même serveur en rafale
+        # relançaient chacun 10+ requêtes SQL sur l'unique connexion aiosqlite
+        # partagée (database/db.py) : la file d'attente grossissait plus vite
+        # qu'elle ne se vidait et la latence explosait (plusieurs secondes,
+        # parfois plus de 10s, observées en production). Les appels concurrents
+        # pour le même serveur partagent maintenant le même calcul.
+        inflight = dashboard._guild_payload_inflight
+        future = inflight.get(guild_id)
+        if future is None:
+            future = asyncio.ensure_future(
+                _assemble_guild_payload_fail_soft(request.app["bot"].db, guild)
+            )
+            inflight[guild_id] = future
+            future.add_done_callback(lambda _f: inflight.pop(guild_id, None))
+        payload = await future
+        return web.json_response(payload)
 
     resilient_handle_guild._sentrix_oxyde_hotfix = True
     dashboard.handle_guild = resilient_handle_guild

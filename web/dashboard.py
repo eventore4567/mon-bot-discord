@@ -14,6 +14,7 @@ Le client ID est lu depuis DISCORD_CLIENT_ID s'il existe, sinon depuis l'identit
 Aucun token utilisateur, token du bot ou secret OAuth n'est envoyé au navigateur.
 """
 
+import asyncio
 import logging
 import secrets
 import time
@@ -421,16 +422,11 @@ async def handle_guilds(request: web.Request):
     return web.json_response({"guilds": guilds})
 
 
-async def handle_guild(request: web.Request):
-    try:
-        guild_id = int(request.match_info["guild_id"])
-    except ValueError:
-        return _json_error("Identifiant de serveur invalide.", 400)
-    session, guild, error = await _manageable_guild(request, guild_id)
-    if error:
-        return error
+_guild_payload_inflight: dict[int, "asyncio.Future"] = {}
 
-    db = request.app["bot"].db
+
+async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
+    guild_id = guild.id
     conf = await db.get_guild_config(guild_id)
     automod = await db.get_automod(guild_id)
     await db.execute(
@@ -460,7 +456,7 @@ async def handle_guild(request: web.Request):
         for channel in guild.channels
         if isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel))
     ]
-    return web.json_response({
+    return {
         "guild": {
             "id": str(guild.id),
             "name": guild.name,
@@ -476,7 +472,33 @@ async def handle_guild(request: web.Request):
         "roles": roles,
         "channels": channels,
         "metrics": metrics,
-    })
+    }
+
+
+async def handle_guild(request: web.Request):
+    try:
+        guild_id = int(request.match_info["guild_id"])
+    except ValueError:
+        return _json_error("Identifiant de serveur invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+
+    # Plusieurs onglets/comptes ouverts sur le même serveur redemandent souvent
+    # ces données à quelques millisecondes d'intervalle. Sans coalescence, chaque
+    # requête relance 6+ appels SQL séquentiels sur l'unique connexion aiosqlite
+    # partagée (database/db.py, Database._conn) : la file d'attente explose sous
+    # charge concurrente (latences de plusieurs secondes observées en production).
+    # Les requêtes qui arrivent pendant qu'un chargement est déjà en cours pour ce
+    # même serveur reçoivent le même résultat au lieu de relancer leurs propres
+    # requêtes SQL.
+    future = _guild_payload_inflight.get(guild_id)
+    if future is None:
+        future = asyncio.ensure_future(_assemble_guild_payload(request.app["bot"].db, guild))
+        _guild_payload_inflight[guild_id] = future
+        future.add_done_callback(lambda _f: _guild_payload_inflight.pop(guild_id, None))
+    payload = await future
+    return web.json_response(payload)
 
 
 def _normalise_optional_id(value) -> int | None:
