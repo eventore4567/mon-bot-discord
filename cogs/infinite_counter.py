@@ -110,7 +110,8 @@ class InfiniteSetupView(discord.ui.View):
         return e
 
     async def refresh(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(embed=self.embed(), view=self)
+        panneau = panels.avec_composants(panels.depuis_embed(self.embed()), self)
+        await panels.editer(interaction.response, panneau)
 
     @discord.ui.button(label="Nombre de départ", style=discord.ButtonStyle.secondary, row=0)
     async def start_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -125,24 +126,34 @@ class InfiniteSetupView(discord.ui.View):
             child.disabled = True
         self.stop()
         channel = self.ctx.guild.get_channel(self.channel_id)
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                title="Compteur infini activé",
-                description=f"Salon : {channel.mention if channel else self.channel_id}\nPremier nombre attendu : **{self.start_number}**",
-                colour=discord.Colour.green(),
+        panneau = panels.avec_composants(
+            panels.depuis_embed(
+                discord.Embed(
+                    title="Compteur infini activé",
+                    description=f"Salon : {channel.mention if channel else self.channel_id}\nPremier nombre attendu : **{self.start_number}**",
+                    colour=discord.Colour.green(),
+                )
             ),
-            view=self,
+            self,
         )
+        await panels.editer(interaction.response, panneau)
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger, row=0)
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button):
         for child in self.children:
             child.disabled = True
         self.stop()
-        await interaction.response.edit_message(
-            embed=discord.Embed(title="Configuration annulée", description="Aucun réglage n’a été modifié.", colour=discord.Colour.dark_grey()),
-            view=self,
+        panneau = panels.avec_composants(
+            panels.depuis_embed(
+                discord.Embed(
+                    title="Configuration annulée",
+                    description="Aucun réglage n’a été modifié.",
+                    colour=discord.Colour.dark_grey(),
+                )
+            ),
+            self,
         )
+        await panels.editer(interaction.response, panneau)
 
 
 class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
