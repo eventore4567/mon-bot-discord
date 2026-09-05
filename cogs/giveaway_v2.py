@@ -15,6 +15,7 @@ import discord
 from discord.ext import commands, tasks
 
 from utils import helpers
+from utils import sentrix_panels as panels
 
 
 SCHEMA = (
@@ -429,7 +430,8 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
 
     async def open_builder(self, ctx: commands.Context):
         view = GiveawayBuilderView(self, ctx)
-        msg = await ctx.send(embed=view.setup_embed(), view=view)
+        panneau = panels.avec_composants(panels.depuis_embed(view.setup_embed()), view)
+        msg = await panels.envoyer(ctx, panneau)
         view.message = msg
 
     def build_public_embed(self, guild: discord.Guild, state: BuilderState, end_at: int, author) -> discord.Embed:
