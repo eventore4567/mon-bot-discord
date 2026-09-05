@@ -206,6 +206,33 @@ def _install_sentrix_asset_route() -> None:
     logger.info("Bannière Ping SentriX exposée via Railway.")
 
 
+def _install_dashboard_loader_guard_prestart() -> bool:
+    """Installe toutes les couches dashboard qui doivent exister avant build_app().
+
+    En HA, une instance peut servir /app sans jamais devenir leader Discord. Les routes
+    Tickets/Embeds et la récupération du loader doivent donc être prêtes avant le chargement
+    tardif des cogs, sinon deux utilisateurs peuvent voir deux dashboards différents.
+    """
+    product_installed = False
+    loader_installed = False
+    try:
+        from sentrix_product_update import install_dashboard_prestart
+        product_installed = bool(install_dashboard_prestart(dashboard_web))
+    except Exception:
+        logger.exception("Installation précoce des fonctions dashboard impossible.")
+    try:
+        from sentrix_regression_runtime import _install_dashboard_loader_fix
+        loader_installed = bool(_install_dashboard_loader_fix())
+    except Exception:
+        logger.exception("Installation précoce de la garde dashboard impossible.")
+    logger.info(
+        "Dashboard pré-start produit=%s garde_loader=%s.",
+        product_installed,
+        loader_installed,
+    )
+    return product_installed and loader_installed
+
+
 async def _prepare_durable_store(bot) -> DurableDatabaseReplica:
     durable = DurableDatabaseReplica(config.DATABASE_PATH)
     bot.sentrix_durable_store = durable
@@ -238,9 +265,10 @@ async def run() -> None:
     from cogs.live_command_gate_v19 import install as install_live_command_gate_v19
     install_live_command_gate_v19(bot)
 
-    # Les handlers doivent être remplacés AVANT build_app() / start_dashboard().
+    # Les handlers, routes et le HTML final doivent être prêts AVANT build_app().
     _install_discord_readiness_healthcheck()
     _install_sentrix_asset_route()
+    _install_dashboard_loader_guard_prestart()
 
     durable = await _prepare_durable_store(bot)
 
