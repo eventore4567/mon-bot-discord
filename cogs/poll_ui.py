@@ -284,7 +284,8 @@ class EditQuestionModal(discord.ui.Modal, title="Modifier la question"):
 
 
 class DurationSelect(discord.ui.Select):
-    def __init__(self):
+    def __init__(self, builder: "PollBuilderView"):
+        self.builder = builder
         options = [
             discord.SelectOption(label=label, value=str(hours), default=hours == 24)
             for hours, label in _DURATION_LABELS.items()
@@ -296,15 +297,15 @@ class DurationSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        builder: PollBuilderView = self.view  # type: ignore[assignment]
-        builder.duration_hours = int(self.values[0])
+        self.builder.duration_hours = int(self.values[0])
         for option in self.options:
             option.default = option.value == self.values[0]
-        await builder.refresh(interaction)
+        await self.builder.refresh(interaction)
 
 
 class VoteModeSelect(discord.ui.Select):
-    def __init__(self):
+    def __init__(self, builder: "PollBuilderView"):
+        self.builder = builder
         super().__init__(
             placeholder="Choisir le type de vote",
             options=[
@@ -324,11 +325,10 @@ class VoteModeSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        builder: PollBuilderView = self.view  # type: ignore[assignment]
-        builder.multiple = self.values[0] == "multiple"
+        self.builder.multiple = self.values[0] == "multiple"
         for option in self.options:
             option.default = option.value == self.values[0]
-        await builder.refresh(interaction)
+        await self.builder.refresh(interaction)
 
 
 class PollBuilderView(discord.ui.View):
@@ -348,8 +348,8 @@ class PollBuilderView(discord.ui.View):
         self.duration_hours = 24
         self.multiple = False
         self._publish_lock = asyncio.Lock()
-        self.add_item(DurationSelect())
-        self.add_item(VoteModeSelect())
+        self.add_item(DurationSelect(self))
+        self.add_item(VoteModeSelect(self))
         self._update_buttons()
 
     def _update_buttons(self):
