@@ -120,6 +120,17 @@ def _install_guild_loading_recovery(dashboard) -> None:
     if getattr(dashboard, "_sentrix_guild_loading_recovery_v54", False):
         return
 
+    required = (
+        "_manageable_guild",
+        "handle_guilds",
+        "_require_session",
+        "_administrator_member",
+        "_invite_url",
+        "_json_error",
+    )
+    if not all(hasattr(dashboard, name) for name in required):
+        return
+
     original_manageable = dashboard._manageable_guild
 
     async def manageable_guild_ha_safe(request: web.Request, guild_id: int):
