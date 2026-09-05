@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import re
 
@@ -38,6 +39,17 @@ def _answers_error(answers: list[str]) -> str | None:
     if len(set(normalised)) != len(normalised):
         return "Chaque réponse doit être différente."
     return None
+
+
+def _poll_error(question: str, answers: list[str], duration_hours: int) -> str | None:
+    question = str(question or "").strip()
+    if not question:
+        return "La question du sondage ne peut pas être vide."
+    if len(question) > 300:
+        return "La question doit contenir au maximum **300 caractères**."
+    if not 1 <= duration_hours <= 168:
+        return "La durée doit être comprise entre **1 heure et 7 jours**."
+    return _answers_error(answers)
 
 
 def _builder_embed(question: str, answers: list[str], duration_hours: int, multiple: bool) -> discord.Embed:
@@ -106,19 +118,24 @@ class PollSetupModal(discord.ui.Modal, title="Créer un sondage"):
             self.answer_3.value,
             self.answer_4.value,
         ])
-        error = _answers_error(answers)
+        question = str(self.question.value).strip()
+        error = _poll_error(question, answers, 24)
         if error:
             return await interaction.response.send_message(error, ephemeral=True)
 
         view = PollBuilderView(
             self.bot,
             author_id=self.author_id,
-            question=str(self.question.value).strip(),
+            question=question,
             answers=answers,
         )
         embed = _builder_embed(view.question, view.answers, view.duration_hours, view.multiple)
         if self.direct_from_slash:
-            await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), view), ephemere=True)
+            await panels.envoyer(
+                interaction.response,
+                panels.avec_composants(panels.depuis_embed(embed), view),
+                ephemere=True,
+            )
         else:
             await interaction.response.edit_message(embed=embed, view=view)
 
@@ -148,7 +165,7 @@ class AddAnswersModal(discord.ui.Modal, title="Ajouter des réponses"):
 
         additions = _clean_answers([item.value for item in self.inputs])
         candidate = [*self.builder.answers, *additions]
-        error = _answers_error(candidate)
+        error = _poll_error(self.builder.question, candidate, self.builder.duration_hours)
         if error:
             return await interaction.response.send_message(error, ephemeral=True)
 
@@ -228,6 +245,7 @@ class PollBuilderView(discord.ui.View):
         self.answers = answers
         self.duration_hours = 24
         self.multiple = False
+        self._publish_lock = asyncio.Lock()
         self.add_item(DurationSelect())
         self.add_item(VoteModeSelect())
         self._update_buttons()
@@ -243,11 +261,30 @@ class PollBuilderView(discord.ui.View):
                 ephemeral=True,
             )
             return False
+        if self._publish_lock.locked():
+            await interaction.response.send_message(
+                "La publication du sondage est déjà en cours.",
+                ephemeral=True,
+            )
+            return False
         return True
 
     async def refresh(self, interaction: discord.Interaction):
         self._update_buttons()
-        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(_builder_embed(self.question, self.answers, self.duration_hours, self.multiple)), self))
+        await panels.editer(
+            interaction.response,
+            panels.avec_composants(
+                panels.depuis_embed(
+                    _builder_embed(
+                        self.question,
+                        self.answers,
+                        self.duration_hours,
+                        self.multiple,
+                    )
+                ),
+                self,
+            ),
+        )
 
     @discord.ui.button(label="Ajouter des réponses", emoji="➕", style=discord.ButtonStyle.secondary, row=2)
     async def add_answers(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -274,6 +311,12 @@ class PollBuilderView(discord.ui.View):
                 ephemeral=True,
             )
 
+        if self._publish_lock.locked():
+            return await interaction.response.send_message(
+                "La publication du sondage est déjà en cours.",
+                ephemeral=True,
+            )
+
         permissions = channel.permissions_for(guild.me)
         if not permissions.send_messages or not getattr(permissions, "create_polls", True):
             return await interaction.response.send_message(
@@ -281,36 +324,48 @@ class PollBuilderView(discord.ui.View):
                 ephemeral=True,
             )
 
-        poll = discord.Poll(
-            question=self.question,
-            duration=datetime.timedelta(hours=self.duration_hours),
-            multiple=self.multiple,
-        )
-        for answer in self.answers:
-            poll.add_answer(text=answer)
+        error = _poll_error(self.question, self.answers, self.duration_hours)
+        if error:
+            return await interaction.response.send_message(error, ephemeral=True)
 
-        try:
-            message = await channel.send(poll=poll)
-        except discord.Forbidden:
-            return await interaction.response.send_message(
-                "Discord a refusé l'envoi. Vérifiez les permissions de SentriX.",
-                ephemeral=True,
-            )
-        except (discord.HTTPException, ValueError):
-            return await interaction.response.send_message(
-                "Discord n'a pas pu créer ce sondage. Vérifiez les réponses et réessayez.",
-                ephemeral=True,
-            )
+        async with self._publish_lock:
+            try:
+                poll = discord.Poll(
+                    question=self.question,
+                    duration=datetime.timedelta(hours=self.duration_hours),
+                    multiple=self.multiple,
+                )
+                for answer in self.answers:
+                    poll.add_answer(text=answer)
+                message = await channel.send(poll=poll)
+            except discord.Forbidden:
+                return await interaction.response.send_message(
+                    "Discord a refusé l'envoi. Vérifiez les permissions de SentriX.",
+                    ephemeral=True,
+                )
+            except (discord.HTTPException, ValueError, TypeError, AttributeError):
+                return await interaction.response.send_message(
+                    "Discord n'a pas pu créer ce sondage. Vérifiez les réponses et réessayez.",
+                    ephemeral=True,
+                )
 
-        success = embeds.success(
-            f"Sondage publié dans {channel.mention}.\n[Voir le sondage]({message.jump_url})"
-        )
-        await panels.editer(interaction.response, panels.depuis_embed(success))
-        self.stop()
+            success = embeds.success(
+                f"Sondage publié dans {channel.mention}.\n[Voir le sondage]({message.jump_url})"
+            )
+            await panels.editer(interaction.response, panels.depuis_embed(success))
+            self.stop()
 
     @discord.ui.button(label="Annuler", emoji="✖️", style=discord.ButtonStyle.danger, row=2)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await panels.editer(interaction.response, panels.depuis_embed(embeds.error('Création du sondage annulée.')))
+        if self._publish_lock.locked():
+            return await interaction.response.send_message(
+                "La publication du sondage est déjà en cours.",
+                ephemeral=True,
+            )
+        await panels.editer(
+            interaction.response,
+            panels.depuis_embed(embeds.error("Création du sondage annulée.")),
+        )
         self.stop()
 
 
@@ -349,7 +404,10 @@ class PollUI(commands.Cog, name="PollUI"):
     )
     async def poll(self, ctx: commands.Context, *, question: str = None):
         if ctx.guild is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("Cette commande doit être utilisée sur un serveur.")),
+            )
 
         raw = str(question or "").strip()
         if raw:
@@ -361,25 +419,37 @@ class PollUI(commands.Cog, name="PollUI"):
             parts = [part.strip() for part in raw.split("|")]
             poll_question = parts[0] if parts else ""
             answers = _clean_answers(parts[1:] if len(parts) > 1 else ["Oui", "Non"])
-            error = _answers_error(answers)
-            if not poll_question or len(poll_question) > 300 or not 1 <= duration_hours <= 168 or error:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le sondage écrit est invalide. Utilisez simplement `+poll` pour ouvrir le créateur interactif.')))
+            error = _poll_error(poll_question, answers, duration_hours)
+            if error:
+                return await panels.envoyer(
+                    ctx,
+                    panels.depuis_embed(
+                        embeds.error(
+                            f"{error}\nUtilisez simplement `+poll` pour ouvrir le créateur interactif."
+                        )
+                    ),
+                )
 
-            poll = discord.Poll(
-                question=poll_question,
-                duration=datetime.timedelta(hours=duration_hours),
-                multiple=False,
-            )
-            for answer in answers:
-                poll.add_answer(text=answer)
-            kwargs = {"poll": poll}
-            if ctx.interaction is None:
-                kwargs["reference"] = None
-                kwargs["mention_author"] = False
             try:
+                poll = discord.Poll(
+                    question=poll_question,
+                    duration=datetime.timedelta(hours=duration_hours),
+                    multiple=False,
+                )
+                for answer in answers:
+                    poll.add_answer(text=answer)
+                kwargs = {"poll": poll}
+                if ctx.interaction is None:
+                    kwargs["reference"] = None
+                    kwargs["mention_author"] = False
                 return await ctx.send(**kwargs)
-            except (discord.Forbidden, discord.HTTPException, ValueError):
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Discord a refusé ce sondage. Vérifiez les permissions du bot.')))
+            except (discord.Forbidden, discord.HTTPException, ValueError, TypeError, AttributeError):
+                return await panels.envoyer(
+                    ctx,
+                    panels.depuis_embed(
+                        embeds.error("Discord a refusé ce sondage. Vérifiez les permissions du bot.")
+                    ),
+                )
 
         if ctx.interaction is not None:
             return await ctx.interaction.response.send_modal(
@@ -417,6 +487,7 @@ async def install_poll_ui(bot: commands.Bot):
 
     try:
         from . import utility as utility_module
+
         utility_module.CATEGORY_LABELS["PollUI"] = "📊 Sondages"
     except Exception:
         pass
