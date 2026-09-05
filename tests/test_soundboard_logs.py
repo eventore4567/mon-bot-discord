@@ -7,14 +7,18 @@ from __future__ import annotations
 
 import asyncio
 import os
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 os.environ.setdefault("DISCORD_TOKEN", "x")
 
 import pytest  # noqa: E402
 
-from cogs.soundboard_logs import SoundboardLogs  # noqa: E402
+from cogs.soundboard_logs import (  # noqa: E402
+    SoundboardLogs,
+    _install_setup_logs_entry,
+)
 from utils import log_service  # noqa: E402
 from utils.log_categories import (  # noqa: E402
     CATEGORIES,
@@ -37,6 +41,9 @@ class FakeGuild:
 
     def get_soundboard_sound(self, sound_id: int):
         return self._sounds.get(int(sound_id))
+
+    def get_channel(self, _channel_id: int):
+        return None
 
 
 class FakeSound:
@@ -86,6 +93,19 @@ def test_disabled_soundboard_route_is_a_safe_noop(monkeypatch):
     )
     assert ok is False
     assert "désactivée" in message
+
+
+def test_deleted_soundboard_channel_is_a_safe_noop(monkeypatch):
+    async def enabled(*_args, **_kwargs):
+        return {"channel_id": 999, "enabled": True, "updated_at": 0}
+
+    monkeypatch.setattr(log_service, "get_log_config", enabled)
+    channel, category, reason = run(
+        log_service.route_for(object(), FakeGuild(), "soundboard_create")
+    )
+    assert channel is None
+    assert category == "soundboard"
+    assert reason == "CHANNEL GONE"
 
 
 def test_missing_audit_permission_never_touches_audit_logs():
@@ -191,3 +211,42 @@ def test_voice_effect_without_sound_is_not_faked():
     run(cog.on_voice_channel_effect(effect))
 
     cog._send.assert_not_awaited()
+
+
+def test_setup_logs_page_exposes_category_configurator(monkeypatch):
+    class FakeSetupView:
+        def __init__(self, page: int):
+            self.page = page
+            self.guild_id = 42
+            self.children = []
+
+        def render_page(self):
+            self.children.clear()
+
+        def add_item(self, item):
+            self.children.append(item)
+
+    fake_configuration = ModuleType("cogs.configuration")
+    fake_configuration.SETUP_STEPS = [
+        {"key": "general"},
+        {"key": "logs"},
+    ]
+    fake_configuration.SetupView = FakeSetupView
+    monkeypatch.setitem(sys.modules, "cogs.configuration", fake_configuration)
+
+    bot = SimpleNamespace(get_cog=lambda _name: None)
+    assert _install_setup_logs_entry(bot) is True
+
+    general = FakeSetupView(0)
+    general.render_page()
+    assert not any(
+        getattr(item, "label", None) == "Configurer les catégories"
+        for item in general.children
+    )
+
+    logs = FakeSetupView(1)
+    logs.render_page()
+    assert any(
+        getattr(item, "label", None) == "Configurer les catégories"
+        for item in logs.children
+    )
