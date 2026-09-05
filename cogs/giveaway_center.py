@@ -50,15 +50,14 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
             )
         return await ctx.invoke(commande, *args, **kwargs)
 
-    @commands.group(name="giveaway", aliases=["giveaways", "concours"], invoke_without_command=True)
-    @commands.guild_only()
-    async def giveaway(self, ctx: commands.Context):
-        """Centre des giveaways. Sans sous-commande, affiche ceux en cours."""
-        await self.giveaway_list(ctx)
+    async def _list_active(self, ctx: commands.Context):
+        """Point unique pour `+giveaway` et `+giveaway list`.
 
-    @giveaway.command(name="list", aliases=["liste", "en-cours"])
-    async def giveaway_list(self, ctx: commands.Context):
-        """Lister ensemble les giveaways V2 et historiques actifs."""
+        Une sous-commande décorée est un objet Command discord.py, pas une coroutine
+        métier à rappeler directement depuis la racine. Cette méthode évite donc un
+        faux appel `self.giveaway_list(ctx)` et garde les deux entrées strictement
+        identiques.
+        """
         v2 = self._v2()
         if v2 is None:
             return await self._deleguer(ctx, "list")
@@ -84,6 +83,17 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
                 f"· `{row['message_id']}` · {engine}"
             )
         await ctx.send(embed=embeds.info("\n".join(lines), title="Giveaways actifs"))
+
+    @commands.group(name="giveaway", aliases=["giveaways", "concours"], invoke_without_command=True)
+    @commands.guild_only()
+    async def giveaway(self, ctx: commands.Context):
+        """Centre des giveaways. Sans sous-commande, affiche ceux en cours."""
+        await self._list_active(ctx)
+
+    @giveaway.command(name="list", aliases=["liste", "en-cours"])
+    async def giveaway_list(self, ctx: commands.Context):
+        """Lister ensemble les giveaways V2 et historiques actifs."""
+        await self._list_active(ctx)
 
     @giveaway.command(name="create", aliases=["creer", "créer", "nouveau", "start"])
     @checks.is_owner_or_admin()
