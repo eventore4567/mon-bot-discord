@@ -12,7 +12,17 @@ import time
 import discord
 from discord.ext import commands
 
-from utils import checks
+from utils import access_matrix, checks
+from utils import sentrix_panels as panels
+
+
+# Le registre d'accès est chargé avant les extensions. +infinit est une commande de
+# configuration serveur et doit donc être classée explicitement au lieu de tomber dans le
+# fail-closed. Les sous-commandes héritent automatiquement du niveau de la racine.
+access_matrix.CATEGORY_COMMANDS["configuration"] = frozenset(
+    {*access_matrix.CATEGORY_COMMANDS["configuration"], "infinit"}
+)
+access_matrix.KNOWN_COMMANDS = frozenset({*access_matrix.KNOWN_COMMANDS, "infinit"})
 
 
 SCHEMA = """
@@ -178,7 +188,8 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
     async def infinit(self, ctx: commands.Context):
         """Ouvre le setup interactif du compteur infini."""
         view = InfiniteSetupView(self, ctx)
-        msg = await ctx.send(embed=view.embed(), view=view)
+        panneau = panels.avec_composants(panels.depuis_embed(view.embed()), view)
+        msg = await panels.envoyer(ctx, panneau)
         view.message = msg
 
     @infinit.command(name="status", aliases=["etat", "état"])
