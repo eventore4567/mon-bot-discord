@@ -54,7 +54,8 @@ def test_dashboard_switch_patch_drops_stale_native_payloads():
     patched, ok = _patch_switch_html(source)
     assert ok is True
     assert "guildLoadToken" in patched
-    assert "state.guildId)!==String(value)" in patched
+    # selectGuild normalise déjà value avec String(value) avant cette garde.
+    assert "String(state.guildId)!==value" in patched
     assert "Les données précédentes ont été retirées" in patched
     assert "{OLD}" not in patched
 
