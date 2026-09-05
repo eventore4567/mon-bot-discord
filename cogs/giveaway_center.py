@@ -157,6 +157,15 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
 
 
 async def setup(bot: commands.Bot) -> None:
+    # Invariant historique : si une autre extension fournit déjà la racine +giveaway,
+    # ce centre ne doit ajouter AUCUN cog auxiliaire. Cela évite les doubles commandes et
+    # garde les tests de registre déterministes.
+    if bot.get_cog("GiveawayCenter") is not None:
+        return
+    if bot.get_command("giveaway") is not None:
+        logger.info("Racine +giveaway déjà présente : centre V2 non installé.")
+        return
+
     # Ces patchs doivent être en place avant le démarrage aiohttp et avant le chargement
     # du cog Invites, qui utilisera ainsi directement la catégorie dédiée.
     install_dashboard_patch()
@@ -166,11 +175,5 @@ async def setup(bot: commands.Bot) -> None:
         await bot.add_cog(GiveawayV2(bot))
     if bot.get_cog("InfiniteCounter") is None:
         await bot.add_cog(InfiniteCounter(bot))
-
-    if bot.get_cog("GiveawayCenter") is not None:
-        return
-    if bot.get_command("giveaway") is not None:
-        logger.info("Racine +giveaway déjà présente : centre V2 non installé.")
-        return
     await bot.add_cog(GiveawayCenter(bot))
     logger.info("%s chargé : builder interactif, compteur infini, invitations et dashboard actifs.", RUNTIME_MARKER)
