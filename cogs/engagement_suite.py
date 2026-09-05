@@ -17,6 +17,7 @@ from typing import Any
 
 import discord
 
+from utils import join_dedup
 from utils import sentrix_panels as panels
 from discord.ext import commands
 
@@ -791,6 +792,12 @@ class EngagementSuite(commands.Cog):
             return
         channel = member.guild.get_channel(int(settings.get("onboarding_channel_id") or 0))
         if not isinstance(channel, discord.TextChannel):
+            return
+        # Verrou partage avec la bienvenue standard (Setup) et smart_welcome
+        # (+sentrixpro) : voir utils/join_dedup.py. Sans lui, un serveur ayant
+        # active a la fois +setup et l'onboarding annoncait deux fois la meme
+        # arrivee.
+        if not await join_dedup.reclamer(self.bot, member.guild.id, member.id, "welcome"):
             return
         embed = discord.Embed(
             title=f"Bienvenue sur {member.guild.name}",

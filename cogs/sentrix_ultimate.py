@@ -16,7 +16,7 @@ from typing import Any
 
 import discord
 
-from utils import embeds, helpers
+from utils import embeds, helpers, join_dedup
 from utils import sentrix_panels as panels
 from discord.ext import commands, tasks
 
@@ -541,7 +541,13 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         if await self._enabled(member.guild.id, "smart_welcome"):
             cid = await self._setting(member.guild.id, "smart_welcome_channel")
             channel = member.guild.get_channel(int(cid)) if cid and cid.isdigit() else None
-            if isinstance(channel, discord.TextChannel):
+            # Verrou partage avec la bienvenue standard (Setup) et l'onboarding
+            # (Suite Engagement) : voir utils/join_dedup.py. Sans lui, un serveur
+            # ayant a la fois +setup et smart_welcome actives annoncait deux fois
+            # la meme arrivee.
+            if isinstance(channel, discord.TextChannel) and await join_dedup.reclamer(
+                self.bot, member.guild.id, member.id, "welcome"
+            ):
                 if quarantined: text = f"{member.mention}, bienvenue. Ton compte est récent : une vérification rapide est nécessaire."
                 elif joins > 1: text = f"Bon retour {member.mention} sur **{member.guild.name}**."
                 else: text = f"Bienvenue {member.mention} sur **{member.guild.name}** • membre #{member.guild.member_count or '?'}"

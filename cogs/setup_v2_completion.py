@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from utils import checks, embeds, log_service
 from utils import sentrix_panels as panels
+from utils import join_dedup
 from . import bot_tracker
 from . import control_center_v3
 from . import setup_control_center as setup_ui
@@ -189,6 +190,14 @@ def _replace_welcome_listeners(bot) -> None:
             if role and not role.managed and me and me.guild_permissions.manage_roles and role < me.top_role:
                 try: await member.add_roles(role, reason="Autorole SentriX")
                 except discord.HTTPException: pass
+        # Verrou partage : sentrix_ultimate (smart_welcome) et engagement_suite
+        # (onboarding) peuvent aussi vouloir annoncer cette arrivee. Le premier
+        # a reclamer l'evenement gagne, les autres se taisent — voir
+        # utils/join_dedup.py pour la raison complete (dont la course pendant
+        # une bascule HA, que la garde primary/standby ci-dessus ne couvre pas
+        # a elle seule des que PLUSIEURS fonctionnalites sont actives).
+        if not await join_dedup.reclamer(bot, member.guild.id, member.id, "welcome"):
+            return
         ok, _message = await _send_welcome(bot, member)
         if ok:
             # Filet de sécurité après coup (channel.history, garde même contre un doublon
