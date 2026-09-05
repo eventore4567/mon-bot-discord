@@ -116,13 +116,7 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
     if isinstance(base, commands.CommandNotFound):
         if not _can_reply_unknown(bot, ctx):
             return True
-        typed = str(getattr(ctx, "invoked_with", "") or "").strip()
-        suggestions = _command_suggestions(bot, ctx, typed)[:2]
-        description = f"La commande `{prefix}{typed}` n’existe pas.\n\nUtilisez `{prefix}help` pour consulter les commandes disponibles."
-        if suggestions:
-            proposed = ", ".join(f"`{prefix}{name}`" for name in suggestions)
-            description += f"\n\nCommandes proches : {proposed}"
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.error(description, title='Commande introuvable')))
+        await ctx.send("Commande introuvable. Utilisez `/help` pour voir les commandes disponibles.")
         return True
 
     if isinstance(base, commands.MissingRequiredArgument):
