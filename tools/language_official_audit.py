@@ -14,7 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-EXPECTED_SETUP_CATEGORIES = 10
+EXPECTED_SETUP_CATEGORIES = 11
 
 
 async def run() -> int:
@@ -83,6 +83,8 @@ async def run() -> int:
             )
         if "permissions" not in setup_control_center.CATEGORIES:
             errors.append("la categorie Permissions / Acces aux commandes manque")
+        if "invitations" not in setup_control_center.CATEGORIES:
+            errors.append("la categorie Invitations manque dans le setup officiel")
 
         view_cls = setup_control_center.SetupView
         # Les marqueurs V3/langue restent le contrat backend. V70 est le propriétaire
@@ -123,7 +125,7 @@ async def run() -> int:
             if forbidden in button_labels:
                 errors.append(f"ancien bouton de navigation encore present: {forbidden}")
 
-        # Depuis V70, le menu final est volontairement simple : Accueil + les dix pages
+        # Depuis V70, le menu final est volontairement simple : Accueil + les onze pages
         # officielles. Les anciennes sous-pages techniques V3 ne sont plus des options du
         # menu principal ; V71 les ouvre depuis les contrôles de la page Sécurité.
         page_selects = [
@@ -152,6 +154,8 @@ async def run() -> int:
             labels = {str(option.label) for option in select.options}
             if "Permissions" not in labels:
                 errors.append("l'option Permissions manque dans le menu final traduit")
+            if "Invitations" not in labels:
+                errors.append("l'option Invitations manque dans le menu final")
 
         help_command = bot.get_command("help")
         help_cog = bot.get_cog("SentriXHelp")
@@ -193,7 +197,7 @@ async def run() -> int:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
     print(
-        "OK: FR/EN persistant, 10 categories, navigation V70/V72, "
+        "OK: FR/EN persistant, 11 categories dont Invitations, navigation V70/V72, "
         "Tickets V72, help officiel et aucun doublon"
     )
     return 0
