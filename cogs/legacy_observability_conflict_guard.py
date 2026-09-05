@@ -45,3 +45,8 @@ def install(bot: commands.Bot) -> None:
 
 async def setup(bot: commands.Bot) -> None:
     install(bot)
+    # Soundboard est volontairement isolé dans son propre cog. Le charger ici évite de
+    # modifier le gros bootstrap principal tout en garantissant son chargement sur Railway,
+    # où cette garde est déjà ajoutée après cogs.logs et cogs.configuration.
+    if "cogs.soundboard_logs" not in bot.extensions:
+        await bot.load_extension("cogs.soundboard_logs")
