@@ -41,11 +41,15 @@ class DashboardGuildLoadingRecoveryTests(unittest.IsolatedAsyncioTestCase):
         async def old_manageable(_request, _guild_id):
             return session, object(), None
 
+        async def old_handle_guilds(_request):
+            raise AssertionError("Le handler /api/guilds doit être remplacé par Recovery V54")
+
         return SimpleNamespace(
             INDEX_HTML=f"<script>{_GUILD_LOADER_OLD}</script>",
             _require_session=require_session,
             _administrator_member=administrator_member,
             _manageable_guild=old_manageable,
+            handle_guilds=old_handle_guilds,
             _invite_url=lambda _bot, guild_id=None: f"https://discord.test/invite/{guild_id}",
             _json_error=lambda message, status: SimpleNamespace(
                 status=status,
