@@ -2,7 +2,7 @@
 
 La section possède sa propre route de logs. Arrivées par invitation, créations et
 suppressions d'invitations sont routées vers cette catégorie sans réutiliser le salon
-Ressources.
+Ressources ni dupliquer la configuration dans la section Logs générale.
 """
 from __future__ import annotations
 
@@ -50,8 +50,9 @@ class InvitationLogChannelSelect(discord.ui.ChannelSelect):
 
 
 def _install_log_category() -> None:
-    # Les dictionnaires sont les registres runtime utilisés par log_service. Les modifier
-    # ici évite une deuxième infrastructure de logs et garde la déduplication officielle.
+    # La catégorie canonique suffit au transport. On ne l'ajoute volontairement PAS à
+    # log_service.LOG_TYPES : sinon elle apparaîtrait aussi dans « Logs », alors que la
+    # demande est d'avoir une vraie section Invitations séparée dans +setup.
     log_categories.CATEGORIES[CATEGORY] = LABEL
     if CATEGORY not in log_categories.CATEGORY_ORDER:
         log_categories.CATEGORY_ORDER = tuple(log_categories.CATEGORY_ORDER) + (CATEGORY,)
@@ -63,14 +64,6 @@ def _install_log_category() -> None:
         if current:
             _old_category, emoji, kind = current
             log_categories.LOG_REGISTRY[event] = (CATEGORY, emoji, kind)
-    log_service.LOG_TYPES[CATEGORY] = {
-        "label": LABEL,
-        "category": LABEL,
-        "legacy_column": None,
-        "emits": True,
-    }
-    if LABEL not in log_service.CATEGORY_ORDER:
-        log_service.CATEGORY_ORDER.append(LABEL)
 
 
 def _patch_statuses() -> None:
@@ -119,8 +112,6 @@ def _patch_render() -> None:
         current(self)
         if self.category != CATEGORY:
             return
-        # `ajouter` est le chemin officiel de SetupView LayoutView ; il laisse le panneau
-        # composer les composants avec le reste du design SentriX.
         self.ajouter(InvitationLogChannelSelect(self))
         toggle = discord.ui.Button(label="Activer / Désactiver les logs", style=discord.ButtonStyle.primary)
         test = discord.ui.Button(label="Tester", style=discord.ButtonStyle.secondary)
@@ -185,16 +176,8 @@ def _patch_embed() -> None:
         setting = await log_service.get_log_setting(self.bot, self.guild.id, CATEGORY)
         channel_id = setting.get("channel_id")
         channel = self.guild.get_channel(int(channel_id)) if channel_id else None
-        panel.add_field(
-            name="Salon des invitations",
-            value=(channel.mention if channel else "Non configuré"),
-            inline=False,
-        )
-        panel.add_field(
-            name="État",
-            value="ACTIF" if setting.get("enabled") and channel_id else "INACTIF",
-            inline=True,
-        )
+        panel.add_field(name="Salon des invitations", value=(channel.mention if channel else "Non configuré"), inline=False)
+        panel.add_field(name="État", value="ACTIF" if setting.get("enabled") and channel_id else "INACTIF", inline=True)
         panel.add_field(
             name="Événements",
             value="Arrivée via invitation • invitation créée • invitation supprimée",
@@ -219,7 +202,9 @@ def install(_bot) -> None:
         insert_at = order.index("logs") + 1 if "logs" in order else len(order)
         order.insert(insert_at, CATEGORY)
     setup_ui.CATEGORY_ORDER = tuple(order)
-    setup_ui.BOT_PERMS[CATEGORY] = ("view_channel", "send_messages", "embed_links", "read_message_history")
+    setup_ui.BOT_PERMS[CATEGORY] = (
+        "view_channel", "send_messages", "embed_links", "attach_files", "read_message_history"
+    )
     _patch_statuses()
     _patch_render()
     _patch_embed()
