@@ -31,10 +31,10 @@ async def _manager_member(guild: discord.Guild, user_id: int) -> discord.Member 
 
 
 def _patch_switch_html(html: str) -> tuple[str, bool]:
-    start_token = "    async function selectGuild(value){"
-    end_token = "    function optionList(type,current){"
-    start = html.find(start_token)
-    end = html.find(end_token, start + 1) if start >= 0 else -1
+    start_marker = "    async function selectGuild(value){"
+    end_marker = "    function optionList(type,current){"
+    start = html.find(start_marker)
+    end = html.find(end_marker, start + 1) if start >= 0 else -1
     if start < 0 or end < 0:
         return html, False
     replacement = r'''    async function selectGuild(value){
