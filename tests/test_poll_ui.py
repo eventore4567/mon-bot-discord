@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from cogs.poll_ui import (
+    AddAnswersModal,
     PollBuilderView,
+    PollSetupModal,
     _answers_error,
     _clean_answers,
     _interaction_notice,
@@ -35,6 +38,15 @@ class PollValidationTests(unittest.TestCase):
         view = PollBuilderView(object(), author_id=42, question="On joue ?", answers=["Oui", "Non"])
         self.assertEqual(view.edit_question.label, "Modifier question")
         self.assertFalse(view.edit_question.disabled)
+
+    def test_modal_transitions_never_switch_components_v2_back_to_embed(self):
+        setup_source = inspect.getsource(PollSetupModal.on_submit)
+        add_source = inspect.getsource(AddAnswersModal.on_submit)
+
+        self.assertIn("panels.editer", setup_source)
+        self.assertIn("panels.editer", add_source)
+        self.assertNotIn("edit_message(embed=", setup_source)
+        self.assertNotIn("edit_message(embed=", add_source)
 
 
 class PollPublishTests(unittest.IsolatedAsyncioTestCase):
