@@ -5,6 +5,7 @@ compatibilité des anciennes configurations et les quatre listeners introduits p
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -20,6 +21,10 @@ from utils.log_categories import (  # noqa: E402
     category_for,
     legacy_to_category,
 )
+
+
+def run(coro):
+    return asyncio.run(coro)
 
 
 class FakeGuild:
@@ -69,28 +74,27 @@ def test_legacy_alias_is_additive_and_needs_no_guild_config_column():
     assert "soundboard" not in log_service._LEGACY_COLUMNS
 
 
-@pytest.mark.asyncio
-async def test_disabled_soundboard_route_is_a_safe_noop(monkeypatch):
+def test_disabled_soundboard_route_is_a_safe_noop(monkeypatch):
     async def disabled(*_args, **_kwargs):
         return {"channel_id": 999, "enabled": False, "updated_at": 0}
 
     monkeypatch.setattr(log_service, "get_log_config", disabled)
-    ok, message = await log_service.send_test_log(
-        object(), FakeGuild(), "soundboard", SimpleNamespace(id=7)
+    ok, message = run(
+        log_service.send_test_log(
+            object(), FakeGuild(), "soundboard", SimpleNamespace(id=7)
+        )
     )
     assert ok is False
     assert "désactivée" in message
 
 
-@pytest.mark.asyncio
-async def test_missing_audit_permission_never_touches_audit_logs():
+def test_missing_audit_permission_never_touches_audit_logs():
     guild = FakeGuild(can_audit=False)
     cog = SoundboardLogs(object())
-    assert await cog._audit_actor(guild, "soundboard_sound_create", 1234) == (None, None)
+    assert run(cog._audit_actor(guild, "soundboard_sound_create", 1234)) == (None, None)
 
 
-@pytest.mark.asyncio
-async def test_sound_create_emits_once_without_audit_permission():
+def test_sound_create_emits_once_without_audit_permission():
     guild = FakeGuild()
     uploader = SimpleNamespace(id=91)
     sound = FakeSound(guild, user=uploader)
@@ -98,7 +102,7 @@ async def test_sound_create_emits_once_without_audit_permission():
     cog._audit_actor = AsyncMock(return_value=(None, None))
     cog._send = AsyncMock(return_value=True)
 
-    await cog.on_soundboard_sound_create(sound)
+    run(cog.on_soundboard_sound_create(sound))
 
     cog._send.assert_awaited_once()
     args = cog._send.await_args.args
@@ -107,8 +111,7 @@ async def test_sound_create_emits_once_without_audit_permission():
     assert args[2].title == "Son Soundboard ajouté"
 
 
-@pytest.mark.asyncio
-async def test_sound_update_only_logs_real_changes():
+def test_sound_update_only_logs_real_changes():
     guild = FakeGuild()
     before = FakeSound(guild, name="Airhorn", volume=1.0)
     after = FakeSound(guild, name="Airhorn 2", volume=0.5)
@@ -116,7 +119,7 @@ async def test_sound_update_only_logs_real_changes():
     cog._audit_actor = AsyncMock(return_value=(None, None))
     cog._send = AsyncMock(return_value=True)
 
-    await cog.on_soundboard_sound_update(before, after)
+    run(cog.on_soundboard_sound_update(before, after))
 
     cog._send.assert_awaited_once()
     args = cog._send.await_args.args
@@ -125,8 +128,7 @@ async def test_sound_update_only_logs_real_changes():
     assert {"Nom", "Volume"} <= field_names
 
 
-@pytest.mark.asyncio
-async def test_sound_update_unchanged_object_is_ignored():
+def test_sound_update_unchanged_object_is_ignored():
     guild = FakeGuild()
     before = FakeSound(guild)
     after = FakeSound(guild)
@@ -134,28 +136,26 @@ async def test_sound_update_unchanged_object_is_ignored():
     cog._audit_actor = AsyncMock(return_value=(None, None))
     cog._send = AsyncMock(return_value=True)
 
-    await cog.on_soundboard_sound_update(before, after)
+    run(cog.on_soundboard_sound_update(before, after))
 
     cog._send.assert_not_awaited()
     cog._audit_actor.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_sound_delete_emits_once():
+def test_sound_delete_emits_once():
     guild = FakeGuild()
     sound = FakeSound(guild)
     cog = SoundboardLogs(object())
     cog._audit_actor = AsyncMock(return_value=(None, None))
     cog._send = AsyncMock(return_value=True)
 
-    await cog.on_soundboard_sound_delete(sound)
+    run(cog.on_soundboard_sound_delete(sound))
 
     cog._send.assert_awaited_once()
     assert cog._send.await_args.args[1] == "soundboard_delete"
 
 
-@pytest.mark.asyncio
-async def test_voice_effect_logs_real_sound_play_with_user_and_channel():
+def test_voice_effect_logs_real_sound_play_with_user_and_channel():
     guild = FakeGuild()
     guild._sounds[1234] = FakeSound(guild, name="Airhorn")
     channel = SimpleNamespace(id=555, guild=guild)
@@ -167,7 +167,7 @@ async def test_voice_effect_logs_real_sound_play_with_user_and_channel():
     cog = SoundboardLogs(object())
     cog._send = AsyncMock(return_value=True)
 
-    await cog.on_voice_channel_effect(effect)
+    run(cog.on_voice_channel_effect(effect))
 
     cog._send.assert_awaited_once()
     args = cog._send.await_args.args
@@ -178,8 +178,7 @@ async def test_voice_effect_logs_real_sound_play_with_user_and_channel():
     assert fields["Salon vocal"] == "<#555>"
 
 
-@pytest.mark.asyncio
-async def test_voice_effect_without_sound_is_not_faked():
+def test_voice_effect_without_sound_is_not_faked():
     guild = FakeGuild()
     effect = SimpleNamespace(
         channel=SimpleNamespace(id=555, guild=guild),
@@ -189,6 +188,6 @@ async def test_voice_effect_without_sound_is_not_faked():
     cog = SoundboardLogs(object())
     cog._send = AsyncMock(return_value=True)
 
-    await cog.on_voice_channel_effect(effect)
+    run(cog.on_voice_channel_effect(effect))
 
     cog._send.assert_not_awaited()
