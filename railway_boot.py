@@ -93,6 +93,9 @@ if "cogs.final_stability_guard" not in bot_main.EXTENSIONS:
 # progression. Chargé après les autres cogs pour entourer les commandes de reset finales.
 if "cogs.member_data_retention_v17" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.member_data_retention_v17")
+# Correctifs d'interface finaux : dashboard, +setup invitation, rôles-réactions et doublons.
+if "cogs.sentrix_regression_fix" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.sentrix_regression_fix")
 
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
