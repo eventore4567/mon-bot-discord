@@ -1,18 +1,23 @@
 """Correctifs ciblés du dashboard sans recopier le gros fichier web/dashboard.py.
 
 Installé avant ``start_dashboard`` : les routes utilisent donc les fonctions corrigées et
-la page HTML finale contient le sélecteur de serveur isolé contre les réponses réseau
-arrivant dans le désordre.
+la page HTML finale contient un changement de serveur atomique. Le dashboard possède deux
+chargeurs (le natif et le filet de récupération Oxyde) : les deux sont protégés afin
+qu'une réponse lente d'un ancien serveur ne puisse jamais écraser le serveur sélectionné.
 """
 from __future__ import annotations
+
+import logging
 
 import discord
 
 
+logger = logging.getLogger("bot.dashboard-runtime-patch")
 MANAGE_GUILD = 1 << 5
 
 
 async def _manager_member(guild: discord.Guild, user_id: int) -> discord.Member | None:
+    """Accès dashboard : propriétaire, Administrateur ou Gérer le serveur."""
     member = guild.get_member(user_id)
     if member is None:
         try:
@@ -25,13 +30,13 @@ async def _manager_member(guild: discord.Guild, user_id: int) -> discord.Member 
     return None
 
 
-def _patch_switch_html(html: str) -> str:
+def _patch_switch_html(html: str) -> tuple[str, bool]:
     start_token = "    async function selectGuild(value){"
     end_token = "    function optionList(type,current){"
     start = html.find(start_token)
     end = html.find(end_token, start + 1) if start >= 0 else -1
     if start < 0 or end < 0:
-        return html
+        return html, False
     replacement = r'''    async function selectGuild(value){
       state.guildLoadToken=(state.guildLoadToken||0)+1;
       const requestToken=state.guildLoadToken;
@@ -73,7 +78,20 @@ def _patch_switch_html(html: str) -> str:
       }
     }
 '''
-    return html[:start] + replacement + html[end:]
+    return html[:start] + replacement + html[end:], True
+
+
+def _patch_recovery_loader(html: str) -> tuple[str, bool]:
+    """Le hotfix Oxyde possède son propre fetch différé : lui aussi doit ignorer le stale."""
+    marker = '      if(!applyGuildData(id,data)) throw new Error("Les données du serveur ont été reçues mais leur affichage a échoué.");'
+    if marker not in html:
+        return html, False
+    replacement = (
+        '      const selectedNow=String(document.getElementById("serverSelect")?.value||"");\n'
+        '      if(selectedNow && !selectedNow.startsWith("invite:") && selectedNow!==id) return;\n'
+        + marker
+    )
+    return html.replace(marker, replacement, 1), True
 
 
 def install() -> None:
@@ -89,5 +107,12 @@ def install() -> None:
     # Toutes les lectures/écritures API repassent ensuite par cette vérification live ;
     # perdre la permission retire donc immédiatement l'accès, même avec une session ouverte.
     dashboard._administrator_member = _manager_member
-    dashboard.INDEX_HTML = _patch_switch_html(dashboard.INDEX_HTML)
+
+    html, native_ok = _patch_switch_html(dashboard.INDEX_HTML)
+    html, recovery_ok = _patch_recovery_loader(html)
+    dashboard.INDEX_HTML = html
+    if not native_ok:
+        logger.error("Correctif dashboard : chargeur natif selectGuild introuvable dans INDEX_HTML.")
+    if not recovery_ok:
+        logger.warning("Correctif dashboard : chargeur de récupération Oxyde introuvable ; garde native seule.")
     dashboard._sentrix_runtime_patch_installed = True
