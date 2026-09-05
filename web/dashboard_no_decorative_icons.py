@@ -146,7 +146,7 @@ CLEAN_JS = r"""
       const data = await response.json();
       const user = data && data.user ? data.user : null;
       if (!user) return;
-      if (userName && user.username) userName.textContent = user.username;
+      if (userName && user.username && userName.textContent !== user.username) userName.textContent = user.username;
       if (userAvatar && user.avatar_url) {
         const current = userAvatar.querySelector("img.sx-real-discord-avatar");
         if (!current || current.getAttribute("src") !== user.avatar_url) {

@@ -2,11 +2,22 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 
 from aiohttp import ClientSession, ClientTimeout, web
 
 _INSTALLED = False
 logger = logging.getLogger("bot.dashboard.user-avatar-v46")
+
+# /api/me est interrogé à chaque chargement de page (et, en cas de régression
+# côté client, bien plus souvent — c'est exactement ce qui vient de se produire
+# avec la boucle MutationObserver de dashboard_no_decorative_icons.py). Sans ce
+# cache, chaque appel retéléchargeait la PP depuis le CDN Discord et la
+# ré-encodait en base64, gonflant chaque réponse à ~350 Ko. La clé inclut
+# l'URL CDN résolue : si la vraie photo de profil change, le cache est
+# automatiquement invalidé sans attendre l'expiration du TTL.
+_AVATAR_CACHE_TTL = 90.0
+_avatar_cache: dict[int, tuple[float, str, str]] = {}
 
 
 async def _discord_avatar_url(request: web.Request, session: dict) -> str | None:
@@ -58,6 +69,17 @@ async def _avatar_data_uri(request: web.Request, session: dict) -> str | None:
         return None
 
     try:
+        user_id = int((session.get("user") or {}).get("id") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+
+    now = time.monotonic()
+    if user_id:
+        cached = _avatar_cache.get(user_id)
+        if cached and cached[0] > now and cached[2] == url:
+            return cached[1]
+
+    try:
         timeout = ClientTimeout(total=10)
         headers = {"User-Agent": "SentriX-Dashboard/1.0"}
         async with ClientSession(timeout=timeout, headers=headers) as client:
@@ -76,7 +98,10 @@ async def _avatar_data_uri(request: web.Request, session: dict) -> str | None:
         return None
 
     encoded = base64.b64encode(body).decode("ascii")
-    return f"data:{content_type};base64,{encoded}"
+    data_uri = f"data:{content_type};base64,{encoded}"
+    if user_id:
+        _avatar_cache[user_id] = (now + _AVATAR_CACHE_TTL, data_uri, url)
+    return data_uri
 
 
 async def handle_me_with_embedded_avatar(request: web.Request) -> web.Response:
