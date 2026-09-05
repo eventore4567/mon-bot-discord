@@ -16,6 +16,7 @@ from utils import sentrix_panels as panels
 from .giveaway_v2 import GiveawayV2
 from .infinite_counter import InfiniteCounter
 from .setup_invitations import install as install_invitation_setup
+from .invite_tracker_runtime import install as install_invite_tracker
 from .dashboard_runtime_patch import install as install_dashboard_patch
 
 logger = logging.getLogger("bot.giveaway-center")
@@ -170,10 +171,14 @@ async def setup(bot: commands.Bot) -> None:
     # du cog Invites, qui utilisera ainsi directement la catégorie dédiée.
     install_dashboard_patch()
     install_invitation_setup(bot)
+    await install_invite_tracker(bot)
 
     if bot.get_cog("GiveawayV2") is None:
         await bot.add_cog(GiveawayV2(bot))
     if bot.get_cog("InfiniteCounter") is None:
         await bot.add_cog(InfiniteCounter(bot))
     await bot.add_cog(GiveawayCenter(bot))
-    logger.info("%s chargé : builder interactif, compteur infini, invitations et dashboard actifs.", RUNTIME_MARKER)
+    logger.info(
+        "%s chargé : builder interactif, compteur infini, tracker invitations et dashboard actifs.",
+        RUNTIME_MARKER,
+    )
