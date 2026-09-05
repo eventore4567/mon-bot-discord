@@ -206,6 +206,23 @@ def _install_sentrix_asset_route() -> None:
     logger.info("Bannière Ping SentriX exposée via Railway.")
 
 
+def _install_dashboard_loader_guard_prestart() -> bool:
+    """Applique la garde du loader avant que le premier octet de /app soit servi.
+
+    En HA, l'instance qui sert le dashboard peut rester en attente du leadership Discord.
+    Le correctif ne doit donc pas dépendre du chargement tardif des cogs.
+    """
+    try:
+        from sentrix_regression_runtime import _install_dashboard_loader_fix
+
+        installed = bool(_install_dashboard_loader_fix())
+    except Exception:
+        logger.exception("Installation précoce de la garde dashboard impossible.")
+        return False
+    logger.info("Garde dashboard pré-start installée=%s.", installed)
+    return installed
+
+
 async def _prepare_durable_store(bot) -> DurableDatabaseReplica:
     durable = DurableDatabaseReplica(config.DATABASE_PATH)
     bot.sentrix_durable_store = durable
@@ -238,9 +255,10 @@ async def run() -> None:
     from cogs.live_command_gate_v19 import install as install_live_command_gate_v19
     install_live_command_gate_v19(bot)
 
-    # Les handlers doivent être remplacés AVANT build_app() / start_dashboard().
+    # Les handlers et le HTML final doivent être remplacés AVANT build_app() / start_dashboard().
     _install_discord_readiness_healthcheck()
     _install_sentrix_asset_route()
+    _install_dashboard_loader_guard_prestart()
 
     durable = await _prepare_durable_store(bot)
 
