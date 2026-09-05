@@ -42,9 +42,10 @@ def test_final_finish_runs_after_product_runtime():
 
 
 def test_ticket_setup_remains_dashboard_only_while_runtime_reopen_survives():
-    source = (ROOT / "sentrix_product_update.py").read_text(encoding="utf-8")
-    assert '"ticketsetup"' in source
-    assert '"ticketpanel"' in source
-    assert '"ticketconfig"' in source
-    assert '"ticket-reopen"' in source
-    assert "TICKET_CONFIG_COMMANDS" in source
+    product = (ROOT / "sentrix_product_update.py").read_text(encoding="utf-8")
+    tickets = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
+    assert '"ticketsetup"' in product
+    assert '"ticketpanel"' in product
+    assert '"ticketconfig"' in product
+    assert "TICKET_CONFIG_COMMANDS" in product
+    assert '@commands.hybrid_command(name="ticket-reopen"' in tickets
