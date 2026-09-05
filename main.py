@@ -26,9 +26,14 @@ from utils.checks import (
     is_verified_bot_owner,
 )
 from utils import access_matrix
+from utils import log_hygiene
 from web.dashboard import start_dashboard
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+# Compresse les journaux répétitifs SANS jamais toucher aux ERROR/CRITICAL : une
+# seule boucle en panne remplissait le journal du même message toutes les 60 s,
+# au point de rendre une vraie erreur invisible. Voir utils/log_hygiene.py.
+log_hygiene.installer()
 logger = logging.getLogger("bot")
 
 # Liste des modules (cogs) à charger au démarrage.
@@ -50,6 +55,9 @@ EXTENSIONS = [
     "cogs.games_economy",
     "cogs.music",
     "cogs.events",
+    # Rétablit la racine +giveaway que le catalogue annonce depuis toujours. Chargé
+    # APRÈS cogs.events, dont il délègue les commandes giveaway-* existantes.
+    "cogs.giveaway_center",
     "cogs.verification",
     "cogs.stats",
     "cogs.owner",
@@ -95,6 +103,10 @@ PRUNED_COMMANDS = COMMANDS_REPLACED_BY_SETUP | EXACT_DUPLICATE_COMMANDS
 PUBLIC_COMMANDS = frozenset({
     # Aide et utilitaires sans modification du serveur
     "help", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
+    # +serverinfo est le pont installe par premium_ui_v81 vers « info serveur »,
+    # +leaderboard celui vers leaderboard-levels : deux racines en lecture seule
+    # dont les cibles sont deja publiques, mais qui n'avaient jamais ete classees.
+    "serverinfo",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
     "report-bug", "afk", "roll", "choose",
@@ -106,7 +118,7 @@ PUBLIC_COMMANDS = frozenset({
     "balance", "economy", "daily", "weekly", "work", "rob", "pay",
     "economyleaderboard", "leaderboard-money", "shop", "buy", "buyrole",
     "inventory", "sell", "gamble", "deposit", "withdraw", "banque",
-    "stats", "me", "level", "rank", "leaderboard-levels", "level-roles",
+    "stats", "me", "level", "rank", "leaderboard", "leaderboard-levels", "level-roles",
     "profile", "set-bio", "rep", "reputation", "repleaderboard", "voice-time",
     # Tickets, événements et invitations accessibles aux membres
     "ticket", "giveaway-list", "event-join", "event-leave", "event-list",

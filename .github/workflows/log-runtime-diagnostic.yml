@@ -44,54 +44,55 @@ jobs:
             utils/embeds.py \
             utils/log_compact_final.py \
             utils/log_service.py \
-            cogs/logs_runtime_v83.py \
-            cogs/log_runtime_diagnostic.py \
+            database/db.py \
             cogs/log_transport_v52.py
+      # Cette garde protegeait l'architecture V83, supprimee par dbed45a quand
+      # log_config est devenue l'unique source de verite du routage. Elle lisait
+      # encore cogs/logs_runtime_v83.py et cogs/log_runtime_diagnostic.py, tous
+      # deux effaces : le workflow echouait sur « No such file or directory »
+      # sans plus rien verifier depuis ce commit.
+      #
+      # Reecrite sur l'invariant qui compte AUJOURD'HUI : aucun transport de
+      # journalisation parallele ne peut revenir, et log_config reste le seul
+      # chemin de lecture comme d'ecriture.
       - name: Verify no legacy send transport can return
         run: |
           python - <<'PY'
           from pathlib import Path
 
           wide = Path('utils/wide_logs.py').read_text()
-          v83 = Path('cogs/logs_runtime_v83.py').read_text()
-          diag = Path('cogs/log_runtime_diagnostic.py').read_text()
           compat = Path('cogs/log_transport_v52.py').read_text()
           embeds = Path('utils/embeds.py').read_text()
+          service = Path('utils/log_service.py').read_text()
+          db = Path('database/db.py').read_text()
 
-          assert not Path('utils/log_channel_guard.py').exists()
-          assert not Path('utils/log_v2_hardening.py').exists()
+          # Les couches paralleles retirees ne doivent pas reapparaitre.
+          for mort in (
+              'utils/log_channel_guard.py',
+              'utils/log_v2_hardening.py',
+              'cogs/logs_runtime_v83.py',
+              'cogs/log_runtime_diagnostic.py',
+          ):
+              assert not Path(mort).exists(), f'couche de journalisation ressuscitee: {mort}'
 
-          assert 'discord.TextChannel.send = guarded_send' not in v83
+          # Aucun monkeypatch global du transport Discord.
           assert 'discord.abc.Messageable.send = _sentrix_messageable_send' not in embeds
-          assert 'SEND PATCHED = %s | qualname=%s | module=%s' in wide
-          assert 'stale Logs._send instance override removed' in v83
-          assert 'delattr(active_cog, "_send")' in v83
-          assert 'discord.ui.Thumbnail(str(thumbnail))' in wide
+          assert 'discord.TextChannel.send = guarded_send' not in wide
           assert 'description="SentriX"' not in wide
-          assert 'SENTRIX V2 PHASE A' in wide
-          assert 'SENTRIX V2 PHASE B' in wide
-          assert 'SENTRIX V2 PHASE C' in wide
-          assert 'aucun fallback embed classique' in wide
 
+          # La couche de compatibilite V52 ne doit pas se reinstaller en transport.
           assert 'cog._send = types.MethodType' not in compat
           assert 'log_service.send_log = send_log_v52' not in compat
 
-          # V83 ne doit plus capturer le wrapper V33 au moment de l'import.
-          assert '_CANONICAL_SEND_LOG = log_service.send_log' not in v83
-          assert 'async def _traced_canonical_send_log(' in v83
-          assert 'return await _traced_canonical_send_log(' in v83
-          assert 'log_service.send_log = _traced_canonical_send_log' in v83
-          assert 'send_wide_log(' in v83
+          # log_config : point d'ecriture unique, avec relecture obligatoire.
+          assert 'async def set_log_config(' in service
+          assert 'invalidate_log_config(' in service
+          assert 'INSERT INTO log_config' in service
 
-          # +logs-diag est un vrai embed natif et teste exactement le transport V83.
-          assert 'name="logs-diag"' in diag
-          assert '@checks.is_bot_owner()' in diag
-          assert 'async def _native_embed_send(' in diag
-          assert 'embed=panel' in diag
-          assert 'logs_runtime_v83._traced_canonical_send_log(' in diag
-          assert 'await ctx.send(' not in diag
-          assert 'types.MethodType' not in diag
-          assert '_reassert_transport' not in diag
+          # La regression corrigee par dbed45a : recreer log_settings a chaque
+          # connect() ressuscitait une table vide et annulait la migration.
+          assert 'LOG_SETTINGS_SCHEMA' not in db, 'log_settings ne doit plus etre recreee'
+          assert 'await self._migrate_logs()' in db
 
-          print('canonical Components V2 log transport + native diagnostic embed contracts OK')
+          print('transport de journalisation canonique + log_config source unique OK')
           PY

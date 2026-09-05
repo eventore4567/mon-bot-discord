@@ -102,6 +102,22 @@ class SentriXFailoverCoordinator:
 
         lock_name = (os.getenv("SENTRIX_FAILOVER_LOCK_NAME") or "failover:discord-primary").strip()
         self.lock_key = storage_key(lock_name)
+        # Mémoire du dernier leader, indépendante du lease (qui expire, lui).
+        # Elle permet de distinguer « je reprends la main après MON propre
+        # redémarrage » (données locales encore valables) de « une autre instance
+        # a écrit entre-temps » (restauration obligatoire).
+        self.last_leader_key = storage_key(f"{lock_name}:last-leader")
+        # Signal « un primary attend » : le secours ne peut pas deviner autrement
+        # qu'il occupe une place qui ne lui revient pas.
+        self.attente_primary_key = storage_key(f"{lock_name}:primary-waiting")
+        # Le secours ne rend la main qu'apres avoir reellement servi un moment, et
+        # pas plus d'une fois par periode : sans ces deux garde-fous, un primary qui
+        # redemarre en boucle ferait rebondir le leadership sans fin (ping-pong).
+        self.prefere_primary = _truthy("SENTRIX_FAILOVER_PREFER_PRIMARY", True)
+        self.duree_min_leadership = _env_int("SENTRIX_FAILOVER_MIN_LEADERSHIP", 120, 30, 3600)
+        # Identité STABLE d'un redémarrage à l'autre, contrairement à owner_id qui
+        # contient un uuid régénéré à chaque boot.
+        self.service_id = (railway_service_name() or "local").casefold()
 
         replica_bits = [
             railway_service_name() or "local",
@@ -121,6 +137,8 @@ class SentriXFailoverCoordinator:
         self._redis: Any = None
         self._watchdog_task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        # Service qui détenait le leadership juste AVANT nous (None si inconnu).
+        self._dernier_leader_lu: str | None = None
 
     @property
     def is_leader(self) -> bool:
@@ -166,6 +184,39 @@ class SentriXFailoverCoordinator:
             except Exception:
                 pass
 
+    async def _lire_dernier_leader(self) -> str | None:
+        """Service qui détenait le leadership avant nous. Jamais bloquant."""
+        try:
+            valeur = await self._redis.get(self.last_leader_key)
+        except Exception:
+            return None
+        return str(valeur).casefold() if valeur else None
+
+    async def _marquer_dernier_leader(self) -> None:
+        """Inscrit notre identité de service. Un échec ne doit pas coûter le leadership."""
+        try:
+            await self._redis.set(self.last_leader_key, self.service_id)
+        except Exception:
+            logger.warning("HA: mémorisation du dernier leader impossible (sans gravité).")
+
+    def reprise_de_soi(self) -> bool:
+        """Vrai si NOUS étions déjà le dernier leader avant ce démarrage.
+
+        Dans ce cas le volume SQLite local est la copie la plus à jour : restaurer
+        un snapshot ferait REVENIR EN ARRIÈRE les écritures faites depuis le dernier
+        snapshot périodique. C'est précisément le cas d'un simple redéploiement du
+        primary, le plus fréquent — et le plus coûteux si on restaure pour rien.
+        """
+        return self._dernier_leader_lu is not None and self._dernier_leader_lu == self.service_id
+
+    def demander_arret(self) -> None:
+        """Débloque ``wait_for_leadership()`` sur une instance encore passive.
+
+        Sans cela, une instance qui attend le lease ignore SIGTERM : elle est tuée
+        par SIGKILL à la fin du délai de grâce, sans dérouler ses ``finally``.
+        """
+        self._stop.set()
+
     async def _try_acquire(self) -> bool:
         await self._connect()
         acquired = await self._redis.set(
@@ -179,6 +230,8 @@ class SentriXFailoverCoordinator:
             self.current_owner = self.owner_id
             self.last_error = None
             self.leader_since = time.monotonic()
+            self._dernier_leader_lu = await self._lire_dernier_leader()
+            await self._marquer_dernier_leader()
             logger.warning(
                 "HA: leadership acquis role=%s lease=%ss owner=%s",
                 self.role,
@@ -189,7 +242,38 @@ class SentriXFailoverCoordinator:
 
         self.current_owner = await self._redis.get(self.lock_key)
         self.state = "standby"
+        if self.role == "primary":
+            # On signale notre attente au leader en place. La cle expire vite : si ce
+            # primary meurt, le secours cesse aussitot de croire qu'on l'attend.
+            try:
+                await self._redis.set(
+                    self.attente_primary_key, self.owner_id, ex=max(10, self.poll_seconds * 5)
+                )
+            except Exception:
+                pass
         return False
+
+    async def un_primary_attend(self) -> bool:
+        """Vrai si une instance de role `primary` reclame actuellement la place."""
+        if self._redis is None:
+            return False
+        try:
+            return bool(await self._redis.get(self.attente_primary_key))
+        except Exception:
+            return False
+
+    def doit_ceder_la_place(self) -> bool:
+        """Un secours doit-il rendre la main a un primary qui attend ?
+
+        Jamais avant d'avoir servi ``duree_min_leadership`` : un primary qui
+        redemarre en boucle ferait sinon rebondir le leadership sans fin. Et jamais
+        un primary ne se cede la place a lui-meme.
+        """
+        if not self.prefere_primary or self.role != "standby" or not self.is_leader:
+            return False
+        if self.leader_since is None:
+            return False
+        return (time.monotonic() - self.leader_since) >= self.duree_min_leadership
 
     async def wait_for_leadership(self) -> LeadershipGrant:
         """Attend le lease sans jamais ouvrir Discord en absence de preuve de leadership."""
@@ -251,6 +335,24 @@ class SentriXFailoverCoordinator:
                     renewed = False
 
                 if renewed:
+                    # Un secours qui occupe la place pendant qu'un primary attend la
+                    # rend PROPREMENT : on ferme Discord, ce qui declenche le snapshot
+                    # d'arret puis la liberation du lease (dans cet ordre). Le primary,
+                    # qui sonde toutes les 2 s, reprend alors avec des donnees fraiches.
+                    # On ne prend jamais la place de force : preempter le leader ferait
+                    # tourner deux instances pendant la bascule.
+                    if self.doit_ceder_la_place() and await self.un_primary_attend():
+                        self.state = "yielding"
+                        logger.warning(
+                            "HA: un primary attend la place — le secours la rend apres "
+                            "%.0fs de service (snapshot final puis liberation du lease).",
+                            time.monotonic() - (self.leader_since or time.monotonic()),
+                        )
+                        try:
+                            await bot.close()
+                        except Exception:
+                            logger.exception("HA: fermeture Discord pendant la cession impossible.")
+                        return
                     continue
 
                 self.state = "lost"

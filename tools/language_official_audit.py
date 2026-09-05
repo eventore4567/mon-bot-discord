@@ -135,7 +135,14 @@ async def run() -> int:
         else:
             select = page_selects[0]
             values = {str(option.value) for option in select.options}
-            expected_values = set(setup_control_center.CATEGORY_ORDER) | {"__home__"}
+            # dc70965 a ajoute trois sous-pages au menu principal : elles n'etaient
+            # atteignables que par les controles de la page Securite, mecanisme qui
+            # ne fonctionnait pas en production (page Roles — Regles & CAPTCHA
+            # injoignable). Ce sont des entrees VOULUES, pas des fuites.
+            sous_pages_volontaires = {"security_verification", "roles_panel", "roles_rules"}
+            expected_values = (
+                set(setup_control_center.CATEGORY_ORDER) | {"__home__"} | sous_pages_volontaires
+            )
             missing = sorted(expected_values - values)
             unexpected = sorted(values - expected_values)
             if missing:

@@ -174,7 +174,12 @@ def _patch_setup(*, force: bool = False) -> None:
         # La langue reste transversale. Sur le Control Center V3 le menu principal occupe
         # déjà la première ligne ; le sélecteur de langue n'est ajouté à l'accueil que si
         # une ligne Discord reste disponible.
-        if getattr(self, "category", None) is None:
+        # Idempotent : control_center_v3_language pose le meme selecteur et se garde
+        # deja de le doubler. Sans cette verification ici, selon l'ordre de rendu des
+        # deux couches, l'accueil du Setup affichait DEUX menus de langue identiques.
+        if getattr(self, "category", None) is None and not any(
+            isinstance(item, OfficialLanguageSelect) for item in self.children
+        ):
             try:
                 self.add_item(OfficialLanguageSelect(self))
             except ValueError:

@@ -18,11 +18,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install probe runtime dependency
-        run: python -m pip install "discord.py>=2.4.0,<3.0"
+      # La sonde de sauvegarde importe la vraie base, donc config.py et python-dotenv :
+      # discord.py seul la faisait echouer sur ModuleNotFoundError.
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
       - name: Compile V13 production sources
         run: python -m compileall -q cogs/bot_v13_production.py cogs/remove_code_command/__init__.py tools/bot_v13_gate.py tools/bot_v13_backup_probe.py
       - name: Bot V13 production regression gate
         run: python tools/bot_v13_gate.py
+        env:
+          DISCORD_TOKEN: ci.fake.token
       - name: V13 SQLite backup/recovery round-trip
         run: python tools/bot_v13_backup_probe.py
+        env:
+          DISCORD_TOKEN: ci.fake.token

@@ -20,7 +20,13 @@ PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofexample", "proof
 
 def _preferred_names() -> set[str]:
     from .command_catalog_cleanup import NORMAL_DIRECT_COMMANDS
-    return {("nick" if name == "nickname" else name) for name in NORMAL_DIRECT_COMMANDS} | set(PROOF_SLASH_PREFERRED)
+
+    # Le renommage nickname -> nick n'est realise NULLE PART : ni le catalogue
+    # (SHORT_COMMAND_NAMES), ni le runtime ne creent de racine `nick`. La liste
+    # prioritaire contenait donc un nom inexistant, et la vraie commande
+    # `nickname` n'etait jamais protegee : des que le budget de 100 racines etait
+    # atteint, elle etait la premiere evincee.
+    return set(NORMAL_DIRECT_COMMANDS) | set(PROOF_SLASH_PREFERRED)
 
 
 def _excluded_names() -> set[str]:

@@ -228,20 +228,52 @@ async def handle_health(request: web.Request):
     })
 
 
-async def handle_public(request: web.Request):
-    bot = request.app["bot"]
+# /api/public est appelé en boucle par la page d'accueil tant que le bot n'est pas
+# « online » : c'est un point d'entrée PUBLIC, donc non authentifié et sollicitable
+# par autant d'onglets qu'on veut. Le contenu est un état global du bot, identique
+# pour tout le monde : un cache très court supprime le recalcul (somme des membres
+# sur tous les serveurs) sans jamais rendre l'affichage perceptiblement obsolète.
+_PUBLIC_CACHE_TTL = 3.0
+_public_cache: dict[str, object] = {"expire": 0.0, "payload": None}
+
+
+def _public_payload(bot) -> dict:
+    """Partie coûteuse : elle parcourt tous les serveurs, d'où la mise en cache."""
     guilds = bot.guilds
-    return web.json_response({
+    return {
         "bot_name": bot.user.name if bot.user else "SentriX",
         "avatar_url": str(bot.user.display_avatar.url) if bot.user else None,
-        "online": bot.is_ready(),
         "guilds": len(guilds),
         "members": sum(g.member_count or 0 for g in guilds),
-        "latency_ms": round(bot.latency * 1000) if bot.is_ready() else None,
-        "uptime_seconds": int(time.time() - START_TIME),
         "invite_url": _invite_url(bot),
         "oauth_ready": _oauth_ready(bot),
-    })
+    }
+
+
+def _public_champs_vivants(bot) -> dict:
+    """Champs gratuits à calculer, et JAMAIS mis en cache.
+
+    Un cache de 3 s sur « online » afficherait le bot hors ligne pendant trois
+    secondes après une reconnexion — c'est précisément l'information que la page
+    d'accueil consulte, et l'audit e2e l'a attrapée.
+    """
+    pret = bot.is_ready()
+    return {
+        "online": pret,
+        "latency_ms": round(bot.latency * 1000) if pret else None,
+        "uptime_seconds": int(time.time() - START_TIME),
+    }
+
+
+async def handle_public(request: web.Request):
+    bot = request.app["bot"]
+    maintenant = time.monotonic()
+    payload = _public_cache["payload"]
+    if payload is None or maintenant >= float(_public_cache["expire"]):
+        payload = _public_payload(bot)
+        _public_cache["payload"] = payload
+        _public_cache["expire"] = maintenant + _PUBLIC_CACHE_TTL
+    return web.json_response({**payload, **_public_champs_vivants(bot)})
 
 
 async def handle_login(request: web.Request):

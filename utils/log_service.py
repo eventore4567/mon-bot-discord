@@ -476,7 +476,7 @@ async def send_log(
     identity_icon: str | None = None,
 ) -> bool:
     """Pipeline unique : event -> catégorie -> log_config -> validation -> Components V2."""
-    logger.warning(
+    logger.debug(
         "SXTRACE 3 SEND_LOG guild=%s log_type=%s event_key=%s title=%r primary=%s "
         "producer_env=%r wrapped_by=%s",
         getattr(guild, "id", None), log_type, event_key,
@@ -485,7 +485,7 @@ async def send_log(
         getattr(send_log, "__name__", "?"),
     )
     if not is_primary_process():
-        logger.warning(
+        logger.debug(
             "SXTRACE 3 SEND_LOG skipped=NOT_PRIMARY_PROCESS guild=%s",
             getattr(guild, "id", None),
         )
@@ -515,7 +515,7 @@ async def send_log(
 
     semantic_key = semantic_event_key(guild.id, event_type, rendered)
     if _is_duplicate(event_key) or _is_duplicate(semantic_key):
-        logger.warning(
+        logger.debug(
             "SXTRACE 5 GATE guild=%s type=%s category=%s skipped=DUPLICATE "
             "event_key=%s semantic_key=%s",
             guild.id, event_type, category, event_key, semantic_key,
@@ -548,7 +548,7 @@ async def send_log(
                 config = repli
                 channel_id = repli["channel_id"]
 
-    logger.warning(
+    logger.debug(
         "SXTRACE 4 ROUTE guild=%s log_type=%s category=%s channel_id=%s enabled=%s "
         "updated_at=%s reason=%s",
         guild.id, event_type, category, channel_id,
@@ -583,12 +583,12 @@ async def send_log(
 
     ok, reason = validate_channel(guild, channel_id, needs_file=True)
     if not ok:
-        logger.warning(
+        logger.debug(
             "SXTRACE 5 GATE guild=%s category=%s channel_id=%s dedup=passed "
             "skipped=PERMISSIONS reason=%s",
             guild.id, category, channel_id, reason,
         )
-        logger.warning(
+        logger.debug(
             "SENTRIX ROUTE log_type=%s category=%s channel_id=%s source=log_config skipped=%s",
             event_type,
             category,
@@ -598,7 +598,7 @@ async def send_log(
         return False
 
     channel = guild.get_channel(int(channel_id))
-    logger.warning(
+    logger.debug(
         "SXTRACE 5 GATE guild=%s category=%s channel_id=%s dedup=passed permissions=ok "
         "channel_resolved=%s transport=%s.%s",
         guild.id, category, channel_id, channel is not None,

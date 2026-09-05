@@ -803,6 +803,33 @@ def _install_graceful_close(bot: commands.Bot) -> None:
     logger.info("Arrêt gracieux Mastery activé.")
 
 
+def _relancer_boucle(loop_obj: tasks.Loop) -> bool:
+    """Remet réellement en marche une boucle morte ou bloquée.
+
+    ``Loop.restart()`` ne relance PAS une boucle morte : discord.py le garde
+    derrière ``_can_be_cancelled()``, qui exige une tâche encore vivante
+    (``self._task and not self._task.done()``). Or une boucle qui a levé une
+    exception a justement une tâche terminée. ``restart()`` y était donc un
+    no-op silencieux — exactement dans le seul cas où le watchdog l'appelait.
+
+    En production, ``Moderation.check_tempactions`` est ainsi restée morte
+    pendant que le watchdog journalisait « Boucle de fond relancée » toutes les
+    60 secondes sans que rien ne redémarre, et plus aucun bannissement
+    temporaire n'expirait.
+
+    Sur une tâche terminée, seul ``start()`` recrée la tâche — et il réarme au
+    passage le drapeau d'échec que lit ``failed()``.
+    """
+    try:
+        if loop_obj.is_running():
+            loop_obj.restart()
+        else:
+            loop_obj.start()
+    except RuntimeError:
+        return False
+    return loop_obj.is_running()
+
+
 class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -982,15 +1009,21 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
                     continue
                 try:
                     if loop_obj.failed() or not loop_obj.is_running():
-                        loop_obj.restart()
-                        logger.warning("Boucle de fond relancée : %s.%s", cog.qualified_name, name)
+                        if _relancer_boucle(loop_obj):
+                            logger.warning("Boucle de fond relancée : %s.%s", cog.qualified_name, name)
+                        else:
+                            logger.error(
+                                "Boucle de fond morte et impossible à relancer : %s.%s",
+                                cog.qualified_name,
+                                name,
+                            )
                         continue
                     nxt = loop_obj.next_iteration
                     seconds = float(loop_obj.seconds or 0) + float(loop_obj.minutes or 0) * 60 + float(loop_obj.hours or 0) * 3600
                     threshold = max(300.0, seconds * 3 + 60)
                     if nxt and (now_dt - nxt).total_seconds() > threshold:
-                        loop_obj.restart()
-                        logger.warning("Boucle silencieusement bloquée relancée : %s.%s", cog.qualified_name, name)
+                        if _relancer_boucle(loop_obj):
+                            logger.warning("Boucle silencieusement bloquée relancée : %s.%s", cog.qualified_name, name)
                 except Exception:
                     continue
 

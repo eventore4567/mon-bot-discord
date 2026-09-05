@@ -101,6 +101,8 @@ _dashboard_polish.POLISH_JS = _dashboard_polish.POLISH_JS.replace(
 )
 _dashboard_polish.install(_dashboard, _setup_center, _embed_center)
 
+from . import dm_panel as _dm_panel
+
 # Sessions persistantes et routes propriétaires restent actives côté serveur.
 _persistent_dashboard_sessions.install(_dashboard)
 _owner_server_manager.install(_dashboard)
@@ -130,6 +132,10 @@ _CORE_RECOVERY_JS = r"""
 
   let attempts = 0;
   let guildReloading = false;
+  let delai = 2000;
+  let timer = null;
+  let arrete = false;
+  const arreter = () => { arrete = true; if (timer) clearTimeout(timer); timer = null; };
   const refreshRuntime = async () => {
     attempts += 1;
     try {
@@ -161,14 +167,31 @@ _CORE_RECOVERY_JS = r"""
         finally { guildReloading = false; }
       }
 
-      if (data.online && data.oauth_ready && attempts >= 6) clearInterval(timer);
+      if (data.online && data.oauth_ready && attempts >= 6) arreter();
     } catch (_) {
       // Le script principal affiche déjà les erreurs réseau. Ce polling reste silencieux.
     }
-    if (attempts >= 90) clearInterval(timer);
+    if (attempts >= 90) arreter();
   };
 
-  const timer = setInterval(refreshRuntime, 2000);
+  // Ce sondage attend que le bot passe « online ». Quand il ne l'est pas — ce qui
+  // arrive pendant un redéploiement — la condition d'arrêt n'est jamais atteinte et
+  // l'ancienne cadence fixe de 2 s tapait /api/public 90 fois par chargement de page,
+  // sur chaque onglet ouvert. On espace progressivement et on ne sonde pas un onglet
+  // que personne ne regarde.
+  const planifier = () => {
+    if (arrete) return;
+    timer = setTimeout(async () => {
+      if (document.hidden) { planifier(); return; }
+      await refreshRuntime();
+      delai = Math.min(delai * 1.6, 30000);
+      planifier();
+    }, delai);
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && !arrete) { delai = 2000; if (timer) clearTimeout(timer); planifier(); }
+  });
+  planifier();
   setTimeout(refreshRuntime, 100);
 })();
 </script>
@@ -193,6 +216,11 @@ _dashboard.INDEX_HTML = _main_html
 _log_settings_dashboard_v32.install(_dashboard)
 _ticket_center_v35.install(_dashboard)
 _ticket_buttons_editor_v53.install(_dashboard)
+
+# Panneau DM : installe APRES la restauration de INDEX_HTML, sinon son interface
+# serait effacee comme les anciennes couches visuelles. Aucune logique d'envoi ici,
+# il appelle le moteur de +dmall avec verification des droits cote serveur.
+_dm_panel.installer(_dashboard)
 
 # Community Growth doit être branché AVANT build_app()/le bind HTTP. Auparavant il était
 # installé depuis une tâche asynchrone de cog ; Railway pouvait donc créer l'application

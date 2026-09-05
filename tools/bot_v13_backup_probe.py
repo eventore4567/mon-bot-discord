@@ -4,10 +4,17 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import sqlite3
+import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Lance en `python tools/bot_v13_backup_probe.py`, sys.path[0] vaut tools/ : le module
+# V13 charge plus bas fait `from utils import ...` et echouait donc sur
+# ModuleNotFoundError: No module named 'utils'. La verification du backup SQLite ne
+# tournait plus du tout en CI, alors qu'elle protege la restauration des donnees.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 V13 = ROOT / "cogs" / "bot_v13_production.py"
 
 
