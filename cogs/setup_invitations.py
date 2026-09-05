@@ -15,6 +15,7 @@ from . import setup_control_center as setup_ui
 
 CATEGORY = "invitations"
 LABEL = "Invitations"
+SETUP_ALIASES = frozenset({"invite", "invites", "invitation", "invitations"})
 
 
 class InvitationLogChannelSelect(discord.ui.ChannelSelect):
@@ -189,8 +190,54 @@ def _patch_embed() -> None:
     setup_ui.SetupView.build_embed = build_embed
 
 
+def _requested_setup_category(target) -> str | None:
+    """Retourne la section demandée par une commande comme ``+setup invitation``."""
+    message = getattr(target, "message", None)
+    content = str(getattr(message, "content", "") or "").strip()
+    if not content:
+        return None
+    parts = content.split()
+    if len(parts) < 2:
+        return None
+    requested = parts[1].casefold().strip()
+    return CATEGORY if requested in SETUP_ALIASES else None
+
+
+def _patch_setup_entry(bot) -> None:
+    """Autorise les quatre écritures naturelles et ouvre directement Invitations.
+
+    ``setup`` est historiquement une Command et non un Group : discord.py rejetait donc
+    ``+setup invitation`` comme argument en trop avant même d'ouvrir le panneau. On laisse
+    la commande accepter le suffixe, puis le contrôleur officiel choisit la page demandée.
+    Le slash ``/setup`` conserve exactement son comportement actuel.
+    """
+    current = setup_ui.OfficialSetup.send_setup
+    if not getattr(current, "_sentrix_invitation_route", False):
+        async def send_setup(self, target):
+            guild = getattr(target, "guild", None)
+            member = getattr(target, "author", None) or getattr(target, "user", None)
+            if not await setup_ui._can_setup(self.bot, member, guild):
+                return await setup_ui._permission_error(target)
+            view = setup_ui.SetupView(self.bot, guild, member.id)
+            requested = _requested_setup_category(target)
+            if requested is not None:
+                view.category = requested
+            await view.composer()
+            return await panels.envoyer(target, view)
+
+        send_setup._sentrix_invitation_route = True
+        send_setup._sentrix_previous = current
+        setup_ui.OfficialSetup.send_setup = send_setup
+
+    command = bot.get_command("setup")
+    if command is not None:
+        command.ignore_extra = True
+        command._sentrix_invitation_aliases = tuple(sorted(SETUP_ALIASES))
+
+
 def install(_bot) -> None:
     if getattr(setup_ui, "_sentrix_invitation_section", False):
+        _patch_setup_entry(_bot)
         return
     _install_log_category()
     setup_ui.CATEGORIES[CATEGORY] = (
@@ -208,4 +255,5 @@ def install(_bot) -> None:
     _patch_statuses()
     _patch_render()
     _patch_embed()
+    _patch_setup_entry(_bot)
     setup_ui._sentrix_invitation_section = True
