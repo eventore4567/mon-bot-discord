@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 from web.dashboard_recovery_v54 import (
     _GUILD_LOADER_OLD,
@@ -117,6 +116,13 @@ class DashboardGuildLoadingRecoveryTests(unittest.IsolatedAsyncioTestCase):
         first_handler = dashboard.handle_guilds
         _install_guild_loading_recovery(dashboard)
         self.assertIs(first_handler, dashboard.handle_guilds)
+
+    def test_partial_dashboard_namespace_is_ignored(self):
+        dashboard = SimpleNamespace()
+        _install_guild_loading_recovery(dashboard)
+        self.assertFalse(
+            getattr(dashboard, "_sentrix_guild_loading_recovery_v54", False)
+        )
 
 
 if __name__ == "__main__":
