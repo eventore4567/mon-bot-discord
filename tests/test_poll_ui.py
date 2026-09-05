@@ -8,9 +8,12 @@ from unittest.mock import AsyncMock, patch
 
 from cogs.poll_ui import (
     AddAnswersModal,
+    DurationSelect,
     PollBuilderView,
     PollSetupModal,
+    VoteModeSelect,
     _answers_error,
+    _builder_panel,
     _clean_answers,
     _interaction_notice,
     _poll_error,
@@ -47,6 +50,34 @@ class PollValidationTests(unittest.TestCase):
         self.assertIn("panels.editer", add_source)
         self.assertNotIn("edit_message(embed=", setup_source)
         self.assertNotIn("edit_message(embed=", add_source)
+
+    def test_selects_keep_source_builder_after_components_v2_relocation(self):
+        builder = PollBuilderView(
+            object(),
+            author_id=42,
+            question="On joue ?",
+            answers=["Oui", "Non"],
+        )
+        duration = next(item for item in builder.children if isinstance(item, DurationSelect))
+        vote_mode = next(item for item in builder.children if isinstance(item, VoteModeSelect))
+
+        panel = _builder_panel(builder)
+
+        # avec_composants() reloge les menus dans un LayoutView Components V2.
+        # Leur .view peut donc changer ; le contexte métier doit rester le builder.
+        self.assertIs(duration.builder, builder)
+        self.assertIs(vote_mode.builder, builder)
+        self.assertIs(duration.view, panel)
+        self.assertIs(vote_mode.view, panel)
+
+    def test_select_callbacks_never_depend_on_relocated_view(self):
+        duration_source = inspect.getsource(DurationSelect.callback)
+        vote_source = inspect.getsource(VoteModeSelect.callback)
+
+        self.assertIn("self.builder", duration_source)
+        self.assertIn("self.builder", vote_source)
+        self.assertNotIn("self.view", duration_source)
+        self.assertNotIn("self.view", vote_source)
 
 
 class PollPublishTests(unittest.IsolatedAsyncioTestCase):
