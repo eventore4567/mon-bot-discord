@@ -120,6 +120,26 @@ def _builder_embed(question: str, answers: list[str], duration_hours: int, multi
     return embed
 
 
+def _builder_panel(builder: "PollBuilderView"):
+    """Garde le créateur en Components V2 pendant toute sa durée de vie.
+
+    Un message créé en Components V2 ne peut pas redevenir un embed classique par
+    édition. Centraliser la composition évite précisément le 400 Discord qui se
+    manifestait côté utilisateur par « Action interrompue » après le modal.
+    """
+    return panels.avec_composants(
+        panels.depuis_embed(
+            _builder_embed(
+                builder.question,
+                builder.answers,
+                builder.duration_hours,
+                builder.multiple,
+            )
+        ),
+        builder,
+    )
+
+
 class PollSetupModal(discord.ui.Modal, title="Créer un sondage"):
     question = discord.ui.TextInput(
         label="Question",
@@ -177,15 +197,17 @@ class PollSetupModal(discord.ui.Modal, title="Créer un sondage"):
             question=question,
             answers=answers,
         )
-        embed = _builder_embed(view.question, view.answers, view.duration_hours, view.multiple)
+        panel = _builder_panel(view)
         if self.direct_from_slash:
             await panels.envoyer(
                 interaction.response,
-                panels.avec_composants(panels.depuis_embed(embed), view),
+                panel,
                 ephemere=True,
             )
         else:
-            await interaction.response.edit_message(embed=embed, view=view)
+            # Le lanceur +poll est déjà un message Components V2 : on l'édite avec
+            # un autre panneau V2, jamais avec embed= + view=.
+            await panels.editer(interaction.response, panel)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         await _report_interaction_error(interaction, error)
@@ -221,15 +243,7 @@ class AddAnswersModal(discord.ui.Modal, title="Ajouter des réponses"):
             return await _interaction_notice(interaction, error)
 
         self.builder.answers = candidate
-        await interaction.response.edit_message(
-            embed=_builder_embed(
-                self.builder.question,
-                self.builder.answers,
-                self.builder.duration_hours,
-                self.builder.multiple,
-            ),
-            view=self.builder,
-        )
+        await panels.editer(interaction.response, _builder_panel(self.builder))
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         await _report_interaction_error(interaction, error)
@@ -367,20 +381,7 @@ class PollBuilderView(discord.ui.View):
 
     async def refresh(self, interaction: discord.Interaction):
         self._update_buttons()
-        await panels.editer(
-            interaction.response,
-            panels.avec_composants(
-                panels.depuis_embed(
-                    _builder_embed(
-                        self.question,
-                        self.answers,
-                        self.duration_hours,
-                        self.multiple,
-                    )
-                ),
-                self,
-            ),
-        )
+        await panels.editer(interaction.response, _builder_panel(self))
 
     @discord.ui.button(label="Ajouter des réponses", emoji="➕", style=discord.ButtonStyle.secondary, row=2)
     async def add_answers(self, interaction: discord.Interaction, button: discord.ui.Button):
