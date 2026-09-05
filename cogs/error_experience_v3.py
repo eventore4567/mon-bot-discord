@@ -90,6 +90,17 @@ def _can_reply_unknown(bot: commands.Bot, ctx: commands.Context) -> bool:
     return True
 
 
+async def _send_plain(ctx: commands.Context, text: str):
+    """Envoie du vrai texte Discord sans passer par la conversion globale en embed.
+
+    La politique visuelle finale remplace Context.send et convertit normalement tout texte
+    de commande en carte SentriX. Une commande inconnue n'a volontairement pas de carte :
+    on appelle donc le transport Discord original conservé par le wrapper final.
+    """
+    sender = getattr(commands.Context.send, "_sentrix_original", commands.Context.send)
+    return await sender(ctx, text)
+
+
 async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: commands.CommandError) -> bool:
     base = getattr(error, "original", error)
     prefix = _prefix(ctx)
@@ -116,7 +127,7 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
     if isinstance(base, commands.CommandNotFound):
         if not _can_reply_unknown(bot, ctx):
             return True
-        await ctx.send("Commande introuvable. Utilisez `/help` pour voir les commandes disponibles.")
+        await _send_plain(ctx, "Commande introuvable. Utilisez `/help` pour voir les commandes disponibles.")
         return True
 
     if isinstance(base, commands.MissingRequiredArgument):
