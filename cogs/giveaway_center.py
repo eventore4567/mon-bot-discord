@@ -1,22 +1,8 @@
-"""Racine `+giveaway`, cible de fusion annoncée par le catalogue.
+"""Centre `+giveaway` et point d'installation des ajouts interactifs de fin de chantier.
 
-``cogs/command_catalog_cleanup.py`` déclare depuis toujours que les six commandes
-``giveaway-*`` sont *fusionnées* vers une racine ``giveaway`` (comme ``ticket``,
-``security`` et ``setup``). Cette racine était fournie par
-``cogs/command_giveaway_center_v3.py``, supprimé par le commit 2a130d7 en même
-temps que d'authentiques modules morts. La destination annoncée n'existait donc
-plus : le catalogue et l'aide renvoyaient vers ``+giveaway``, qui répondait
-« commande inconnue ».
-
-Ce module rétablit la racine **sur l'architecture actuelle**, en suivant le
-patron de ``security_command_center`` : un groupe fin qui **délègue** aux
-implémentations existantes de ``cogs/events.py``. Aucune logique métier n'est
-dupliquée — il n'y a toujours qu'un seul moteur de giveaway.
-
-Point de sécurité : ``ctx.invoke`` n'exécute PAS les checks de la commande
-appelée. Chaque sous-commande porte donc explicitement le même contrôle
-d'autorisation que sa cible, faute de quoi la racine deviendrait un contournement
-de permissions.
+Le moteur historique `giveaway-*` reste chargé pour compatibilité. La nouvelle racine
+`+giveaway create` ouvre toutefois le builder V2 sans argument, avec ses propres données
+persistantes et ses conditions avancées.
 """
 from __future__ import annotations
 
@@ -27,12 +13,14 @@ from discord.ext import commands
 
 from utils import checks, embeds
 from utils import sentrix_panels as panels
+from .giveaway_v2 import GiveawayV2
+from .infinite_counter import InfiniteCounter
+from .setup_invitations import install as install_invitation_setup
+from .dashboard_runtime_patch import install as install_dashboard_patch
 
 logger = logging.getLogger("bot.giveaway-center")
+RUNTIME_MARKER = "Giveaway Center V2"
 
-RUNTIME_MARKER = "Giveaway Center"
-
-# Sous-commande -> commande historique réellement exécutée.
 _CIBLES = {
     "create": "giveaway-create",
     "end": "giveaway-end",
@@ -48,86 +36,107 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    def _v2(self) -> GiveawayV2 | None:
+        cog = self.bot.get_cog("GiveawayV2")
+        return cog if isinstance(cog, GiveawayV2) else None
+
     async def _deleguer(self, ctx: commands.Context, cle: str, /, *args, **kwargs):
-        """Exécute la commande historique correspondante."""
         commande = self.bot.get_command(_CIBLES[cle])
         if commande is None:
             logger.error("Giveaway : commande interne %s introuvable.", _CIBLES[cle])
             return await panels.envoyer(
                 ctx,
-                panels.depuis_embed(
-                    embeds.error("Le moteur de giveaway n'est pas chargé sur cette instance.")
-                ),
+                panels.depuis_embed(embeds.error("Le moteur de giveaway n'est pas chargé sur cette instance.")),
             )
         return await ctx.invoke(commande, *args, **kwargs)
 
-    @commands.group(
-        name="giveaway",
-        aliases=["giveaways", "concours"],
-        invoke_without_command=True,
-    )
+    @commands.group(name="giveaway", aliases=["giveaways", "concours"], invoke_without_command=True)
     @commands.guild_only()
     async def giveaway(self, ctx: commands.Context):
         """Centre des giveaways. Sans sous-commande, affiche ceux en cours."""
-        await self._deleguer(ctx, "list")
+        await self.giveaway_list(ctx)
 
     @giveaway.command(name="list", aliases=["liste", "en-cours"])
     async def giveaway_list(self, ctx: commands.Context):
-        """Lister les giveaways actifs."""
-        await self._deleguer(ctx, "list")
+        """Lister ensemble les giveaways V2 et historiques actifs."""
+        v2 = self._v2()
+        if v2 is None:
+            return await self._deleguer(ctx, "list")
+        await v2.ensure_schema()
+        rows_v2 = await self.bot.db.fetchall(
+            "SELECT message_id,channel_id,prize,end_at FROM giveaways_v2 WHERE guild_id=? AND status='actif' ORDER BY end_at LIMIT 20",
+            (ctx.guild.id,),
+        )
+        try:
+            rows_old = await self.bot.db.fetchall(
+                "SELECT message_id,channel_id,prize,end_at FROM giveaways WHERE guild_id=? AND status='actif' ORDER BY end_at LIMIT 20",
+                (ctx.guild.id,),
+            )
+        except Exception:
+            rows_old = []
+        rows = [("V2", row) for row in rows_v2] + [("historique", row) for row in rows_old]
+        if not rows:
+            return await ctx.send(embed=embeds.info("Aucun giveaway actif sur ce serveur.", title="Giveaways"))
+        lines = []
+        for engine, row in rows[:25]:
+            lines.append(
+                f"• **{row['prize']}** — <#{row['channel_id']}> — <t:{int(row['end_at'])}:R> "
+                f"· `{row['message_id']}` · {engine}"
+            )
+        await ctx.send(embed=embeds.info("\n".join(lines), title="Giveaways actifs"))
 
     @giveaway.command(name="create", aliases=["creer", "créer", "nouveau", "start"])
     @checks.is_owner_or_admin()
-    async def giveaway_create(
-        self,
-        ctx: commands.Context,
-        prix: str,
-        duree: str,
-        gagnants: int = 1,
-        image: str = None,
-        role_requis: discord.Role = None,
-        niveau_requis: int = None,
-        role_exclu: discord.Role = None,
-        role_bonus: discord.Role = None,
-        entrees_bonus: int = 2,
-    ):
-        """Créer un giveaway."""
-        await self._deleguer(
-            ctx,
-            "create",
-            prix=prix,
-            duree=duree,
-            gagnants=gagnants,
-            image=image,
-            role_requis=role_requis,
-            niveau_requis=niveau_requis,
-            role_exclu=role_exclu,
-            role_bonus=role_bonus,
-            entrees_bonus=entrees_bonus,
-        )
+    async def giveaway_create(self, ctx: commands.Context):
+        """Ouvrir le setup interactif complet. Aucun argument n'est requis."""
+        v2 = self._v2()
+        if v2 is None:
+            return await ctx.send(embed=embeds.error("Le builder giveaway V2 n’est pas chargé."))
+        await v2.open_builder(ctx)
 
     @giveaway.command(name="end", aliases=["terminer", "fin", "stop"])
     @checks.is_owner_or_admin()
     async def giveaway_end(self, ctx: commands.Context, message_id: str):
-        """Terminer un giveaway immédiatement."""
+        """Terminer immédiatement un giveaway V2 ou historique."""
+        try:
+            numeric_id = int(message_id)
+        except ValueError:
+            return await ctx.send(embed=embeds.error("L’ID du message doit être un nombre."))
+        v2 = self._v2()
+        if v2 and await v2.handle_end(ctx, numeric_id):
+            return
         await self._deleguer(ctx, "end", message_id=message_id)
 
     @giveaway.command(name="reroll", aliases=["relancer", "retirage"])
     @checks.is_owner_or_admin()
     async def giveaway_reroll(self, ctx: commands.Context, message_id: str):
-        """Tirer un nouveau gagnant pour un giveaway terminé."""
+        """Refaire un tirage sans doublonner un ancien gagnant si possible."""
+        try:
+            numeric_id = int(message_id)
+        except ValueError:
+            return await ctx.send(embed=embeds.error("L’ID du message doit être un nombre."))
+        v2 = self._v2()
+        if v2 and await v2.handle_reroll(ctx, numeric_id):
+            return
         await self._deleguer(ctx, "reroll", message_id=message_id)
 
     @giveaway.command(name="cancel", aliases=["annuler"])
     @checks.is_owner_or_admin()
     async def giveaway_cancel(self, ctx: commands.Context, message_id: str):
-        """Annuler un giveaway sans désigner de gagnant."""
+        """Annuler un giveaway V2 ou historique."""
+        try:
+            numeric_id = int(message_id)
+        except ValueError:
+            return await ctx.send(embed=embeds.error("L’ID du message doit être un nombre."))
+        v2 = self._v2()
+        if v2 and await v2.handle_cancel(ctx, numeric_id):
+            return
         await self._deleguer(ctx, "cancel", message_id=message_id)
 
     @giveaway.command(name="blacklist", aliases=["liste-noire", "exclure"])
     @checks.is_owner_or_admin()
     async def giveaway_blacklist(self, ctx: commands.Context, membre: discord.Member):
-        """Empêcher un membre de participer aux giveaways."""
+        """Empêcher un membre de participer aux giveaways, V2 inclus."""
         await self._deleguer(ctx, "blacklist", membre=membre)
 
     @giveaway.command(name="unblacklist", aliases=["reautoriser", "réautoriser"])
@@ -138,11 +147,20 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
 
 
 async def setup(bot: commands.Bot) -> None:
+    # Ces patchs doivent être en place avant le démarrage aiohttp et avant le chargement
+    # du cog Invites, qui utilisera ainsi directement la catégorie dédiée.
+    install_dashboard_patch()
+    install_invitation_setup(bot)
+
+    if bot.get_cog("GiveawayV2") is None:
+        await bot.add_cog(GiveawayV2(bot))
+    if bot.get_cog("InfiniteCounter") is None:
+        await bot.add_cog(InfiniteCounter(bot))
+
     if bot.get_cog("GiveawayCenter") is not None:
         return
     if bot.get_command("giveaway") is not None:
-        # Une autre couche fournit déjà la racine : ne jamais la doubler.
-        logger.info("Racine +giveaway déjà présente : centre non installé.")
+        logger.info("Racine +giveaway déjà présente : centre V2 non installé.")
         return
     await bot.add_cog(GiveawayCenter(bot))
-    logger.info("%s chargé : racine +giveaway rétablie sur le moteur existant.", RUNTIME_MARKER)
+    logger.info("%s chargé : builder interactif, compteur infini, invitations et dashboard actifs.", RUNTIME_MARKER)
