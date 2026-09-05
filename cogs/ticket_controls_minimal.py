@@ -1,13 +1,9 @@
-"""Contrôles de ticket minimaux : seulement « Prendre en charge » et « Fermer ».
+"""Compatibilité des contrôles opérationnels de tickets SentriX.
 
-Cette couche est volontairement petite et non destructive :
-- les handlers historiques restent dans cogs.tickets pour compatibilité/transcripts ;
-- les nouvelles vues n'affichent que claim + close, même si une ancienne configuration
-  enregistrée active encore add/remove/rename/note/etc. ;
-- les anciens boutons retirés sont bloqués côté serveur s'ils existent encore sur un
-  message Discord historique ;
-- les tickets ouverts sont migrés en arrière-plan après le démarrage pour retirer
-  visuellement les anciens composants sans bloquer le boot.
+La configuration des tickets vit dans le dashboard, mais une fois un ticket ouvert le staff
+doit conserver tous les contrôles utiles : prise en charge, abandon, ajout/retrait de membre,
+renommage, transfert, note, relance et fermeture. Cette couche garde aussi la migration des
+anciens messages afin que les tickets déjà ouverts récupèrent les contrôles disponibles.
 """
 from __future__ import annotations
 
@@ -16,9 +12,19 @@ import logging
 
 import discord
 
-logger = logging.getLogger("bot.ticket-controls-minimal")
+logger = logging.getLogger("bot.ticket-controls-operational")
 
-_ALLOWED_KEYS = ("claim", "close")
+_ALLOWED_KEYS = (
+    "claim",
+    "unclaim",
+    "add",
+    "remove",
+    "rename",
+    "transfer",
+    "note",
+    "bump",
+    "close",
+)
 _INSTALLED = False
 _MIGRATION_STARTED = False
 
@@ -36,9 +42,6 @@ def _is_ticket_control_message(message: discord.Message) -> bool:
 async def _migrate_open_ticket_messages(bot) -> None:
     global _MIGRATION_STARTED
     try:
-        # Les audits CI construisent parfois le Bot sans appeler login(). Dans ce cas
-        # discord.py lève RuntimeError : ce n'est pas une erreur de ticket et aucune tâche
-        # ne doit rester en exception non récupérée.
         try:
             await bot.wait_until_ready()
         except RuntimeError:
@@ -69,7 +72,6 @@ async def _migrate_open_ticket_messages(bot) -> None:
             scanned += 1
             try:
                 control_message = None
-                # Le message d'ouverture est normalement parmi les tout premiers du salon.
                 async for message in channel.history(limit=25, oldest_first=True):
                     if bot.user is not None and message.author.id != bot.user.id:
                         continue
@@ -81,7 +83,6 @@ async def _migrate_open_ticket_messages(bot) -> None:
                 settings = await tickets_mod.get_button_settings(bot, guild.id)
                 await control_message.edit(view=tickets_mod.TicketControlView(settings))
                 updated += 1
-                # Étale légèrement les edits pour rester doux avec l'API Discord.
                 await asyncio.sleep(0.08)
             except (discord.Forbidden, discord.NotFound):
                 continue
@@ -95,7 +96,7 @@ async def _migrate_open_ticket_messages(bot) -> None:
                 logger.debug("Erreur pendant la migration d'un ticket ouvert.", exc_info=True)
 
         logger.info(
-            "Tickets : contrôles minimaux appliqués — %s/%s panneau(x) ouvert(s) actualisé(s).",
+            "Tickets : contrôles opérationnels réappliqués — %s/%s panneau(x) ouvert(s) actualisé(s).",
             updated,
             scanned,
         )
@@ -104,7 +105,7 @@ async def _migrate_open_ticket_messages(bot) -> None:
 
 
 def install(bot, extension_name: str = "") -> None:
-    """Installe le mode minimal dès que le Cog Tickets est chargé. Idempotent."""
+    """Conserve tous les contrôles runtime après le chargement du Cog Tickets."""
     global _INSTALLED, _MIGRATION_STARTED
 
     cog = bot.get_cog("Tickets")
@@ -114,8 +115,9 @@ def install(bot, extension_name: str = "") -> None:
     from . import tickets as tickets_mod
 
     if not _INSTALLED:
-        # La source de vérité de toutes les vues créées après ce point ne contient plus
-        # que ces deux contrôles. Les anciennes clés restent dans la DB sans être utilisées.
+        # Cette extension historique était autrefois limitée à claim + close. On garde
+        # maintenant toute la surface opérationnelle, tandis que les commandes de setup
+        # sont retirées séparément par sentrix_product_update.
         original_buttons = dict(tickets_mod.STAFF_BUTTONS)
         tickets_mod.STAFF_BUTTONS.clear()
         for key in _ALLOWED_KEYS:
@@ -123,13 +125,10 @@ def install(bot, extension_name: str = "") -> None:
                 tickets_mod.STAFF_BUTTONS[key] = original_buttons[key]
         tickets_mod.DEFAULT_ENABLED_BUTTONS = set(_ALLOWED_KEYS)
 
-        # Si le menu de configuration des boutons a déjà été construit à l'import, ses
-        # options ont été figées par le décorateur. On filtre donc les options de chaque
-        # nouvelle instance afin de ne plus proposer les contrôles supprimés.
         view_cls = tickets_mod.ButtonSettingsView
         original_view_init = view_cls.__init__
-        if not getattr(original_view_init, "_sentrix_minimal_ticket_controls", False):
-            def minimal_settings_init(self, *args, **kwargs):
+        if not getattr(original_view_init, "_sentrix_operational_ticket_controls", False):
+            def operational_settings_init(self, *args, **kwargs):
                 original_view_init(self, *args, **kwargs)
                 for item in self.children:
                     if isinstance(item, discord.ui.Select):
@@ -139,43 +138,41 @@ def install(bot, extension_name: str = "") -> None:
                                 if str(getattr(option, "value", "")) in _ALLOWED_KEYS
                             ]
                         except Exception:
-                            logger.debug("Impossible de filtrer les options ticket setup.", exc_info=True)
+                            logger.debug("Impossible de filtrer les options ticket runtime.", exc_info=True)
 
-            minimal_settings_init._sentrix_minimal_ticket_controls = True
-            view_cls.__init__ = minimal_settings_init
+            operational_settings_init._sentrix_operational_ticket_controls = True
+            view_cls.__init__ = operational_settings_init
 
-        # Même si un vieux message contient encore un custom_id supprimé, l'action métier
-        # correspondante est refusée. Cela ferme le contournement avant même la migration UI.
         tickets_cls = type(cog)
         original_handler = tickets_cls.handle_control_button
-        if not getattr(original_handler, "_sentrix_minimal_ticket_controls", False):
-            async def minimal_control_handler(self, interaction: discord.Interaction, key: str):
+        if not getattr(original_handler, "_sentrix_operational_ticket_controls", False):
+            async def operational_control_handler(self, interaction: discord.Interaction, key: str):
                 if str(key) not in _ALLOWED_KEYS:
                     if not interaction.response.is_done():
                         await interaction.response.send_message(
-                            "Ce contrôle a été retiré. Utilisez uniquement « Prendre en charge » ou « Fermer ».",
+                            "Ce contrôle de ticket n'est pas disponible.",
                             ephemeral=True,
                         )
                     return None
                 return await original_handler(self, interaction, key)
 
-            minimal_control_handler._sentrix_minimal_ticket_controls = True
-            tickets_cls.handle_control_button = minimal_control_handler
+            operational_control_handler._sentrix_operational_ticket_controls = True
+            tickets_cls.handle_control_button = operational_control_handler
 
         _INSTALLED = True
-        logger.info("Tickets : seuls les boutons Prendre en charge et Fermer sont désormais autorisés.")
+        logger.info(
+            "Tickets : contrôles opérationnels complets actifs (%s).",
+            ", ".join(_ALLOWED_KEYS),
+        )
 
-    # Une migration par processus suffit. Elle est asynchrone pour ne jamais ralentir
-    # setup_hook/tree.sync ni le démarrage Railway.
     if not _MIGRATION_STARTED:
         try:
             _MIGRATION_STARTED = True
             task = asyncio.get_running_loop().create_task(
                 _migrate_open_ticket_messages(bot),
-                name="sentrix-ticket-controls-minimal-migration",
+                name="sentrix-ticket-controls-operational-migration",
             )
-            # Consomme toute exception inattendue afin qu'une migration auxiliaire ne puisse
-            # jamais produire « Task exception was never retrieved » ni polluer les logs.
+
             def _consume_result(done: asyncio.Task) -> None:
                 try:
                     done.result()
@@ -183,9 +180,10 @@ def install(bot, extension_name: str = "") -> None:
                     pass
                 except Exception:
                     logger.exception("Migration asynchrone des boutons ticket interrompue.")
+
             task.add_done_callback(_consume_result)
         except RuntimeError:
             _MIGRATION_STARTED = False
 
 
-__all__ = ["install"]
+__all__ = ["install", "_ALLOWED_KEYS"]
