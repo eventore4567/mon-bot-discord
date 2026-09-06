@@ -6,11 +6,16 @@ from .dashboard_major_v5 import apply_major_v5
 from .dashboard_v5_reliability import apply_v5_reliability
 from .dashboard_clarity_v51 import apply_clarity_v51
 from .dashboard_compact_v52 import apply_compact_v52
+from .dashboard_frontend_freeze_v55 import install_product_prestart_hook
 
 
 # dashboard.py imports this module after its handlers are defined. Patch the guild reader
 # immediately so a secondary/optional table can never leave the whole dashboard blank.
 patch_dashboard_runtime()
+# Railway appelle sentrix_product_update.install_dashboard_prestart() avant build_app().
+# Armer V55 ici garantit que le HTML de /app est figé exactement à ce moment-là, avant
+# que les cogs/finaliseurs tardifs puissent encore réécrire dashboard.INDEX_HTML.
+install_product_prestart_hook()
 
 
 _OVERVIEW_SCOPE_FIX = r"""
