@@ -12,32 +12,33 @@ BASE = """<html><head><style>.old{color:red}
 </script></body></html>"""
 
 
-def test_dashboard_pages_produce_a_navigable_page():
-    """Le dashboard est passe en V4 « Oxyde » : on teste ce qu'il garantit aujourd'hui.
+def test_dashboard_pages_v3_is_now_a_small_compatibility_layer():
+    """V3 ne doit plus reconstruire toute l'UI : V60 possède le document final.
 
-    Les anciennes assertions epinglaient des noms de fonctions et une couleur de la
-    generation V3 (installPageShell, #398bff, absence d'« Oxyde »). Elles decrivaient
-    une page qui n'existe plus. Ce qui doit rester vrai, c'est que la fonction enrichit
-    la page de base sans la casser et qu'elle installe une vraie navigation.
+    Cette fonction reste utilisée pour les anciennes extensions qui ont besoin du créateur
+    d'embeds. Son contrat actuel est donc d'enrichir sans remplacer la page reçue et sans
+    réintroduire les générations Oxyde/V5/Clarity/Compact.
     """
     dashboard = apply_dashboard_pages(BASE)
-
-    # La page de base doit avoir ete enrichie, pas remplacee.
-    assert len(dashboard) > len(BASE) * 10
     assert "<html>" in dashboard and "</html>" in dashboard
     assert 'id="navigation"' in dashboard
-
-    # Navigation par ancre : chaque onglet est adressable.
-    assert "location.hash" in dashboard
-    assert "data-tab" in dashboard
-
-
-def test_dashboard_covers_every_configurable_domain():
-    dashboard = apply_dashboard_pages(BASE).casefold()
-    for domain in ("bienvenue", "sécurité", "ticket", "logs", "antiraid"):
-        assert domain.casefold() in dashboard, domain
-
-
-def test_dashboard_drops_the_old_guided_advanced_mode():
-    dashboard = apply_dashboard_pages(BASE)
+    assert ".old{color:red}" in dashboard
+    assert "sentrix-v56-embeds" in dashboard
+    assert "renderEmbeds" in dashboard
+    assert "Oxyde" not in dashboard
     assert "Mode avancé guidé" not in dashboard
+
+
+def test_dashboard_pages_v3_keeps_the_original_boot_program():
+    dashboard = apply_dashboard_pages(BASE)
+    assert "Promise.all([loadPublic(),loadSession()])" in dashboard
+    assert "const tabs=" in dashboard
+    # La couche de compatibilité n'invente plus de navigation/hash ou de domaines :
+    # le frontend V60 complet les possède directement dans dashboard_rework_v60.py.
+    assert "sentrix-v56-embeds" in dashboard
+
+
+def test_dashboard_pages_v3_is_idempotent():
+    once = apply_dashboard_pages(BASE)
+    twice = apply_dashboard_pages(once)
+    assert twice == once
