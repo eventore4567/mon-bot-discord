@@ -59,15 +59,6 @@ def _emoji_key(value: Any) -> str:
     return f"unicode:{parsed.name or text}"
 
 
-def _message_text(message: discord.Message) -> str:
-    parts = [message.content or ""]
-    for embed in message.embeds:
-        parts.extend([str(embed.title or ""), str(embed.description or "")])
-        for field in embed.fields:
-            parts.extend([str(field.name or ""), str(field.value or "")])
-    return "\n".join(parts).casefold()
-
-
 def _install_dashboard_loader_fix() -> bool:
     """Make the actual HTML served by /app obey the hidden state."""
     try:
@@ -642,46 +633,12 @@ class SentriXRegressionRuntime(commands.Cog, name="SentriXRegressionFix"):
     async def reaction_removed(self, payload: discord.RawReactionActionEvent):
         await self._apply_reaction(payload, add=False)
 
-    @commands.Cog.listener("on_member_join")
-    async def remove_duplicate_welcome(self, member: discord.Member):
-        await asyncio.sleep(4.0)
-        try:
-            conf = await self.bot.db.get_guild_config(member.guild.id)
-            channel_id = int(conf["welcome_channel_id"] or 0) if conf else 0
-        except Exception:
-            return
-        channel = member.guild.get_channel(channel_id)
-        if not isinstance(channel, discord.TextChannel) or self.bot.user is None:
-            return
-        now = discord.utils.utcnow()
-        recent: list[discord.Message] = []
-        try:
-            async for message in channel.history(limit=20):
-                if message.author.id == self.bot.user.id and abs((now - message.created_at).total_seconds()) <= 15:
-                    recent.append(message)
-        except (discord.Forbidden, discord.HTTPException):
-            return
-        identity = {member.mention.casefold(), member.name.casefold(), member.display_name.casefold()}
-        direct = [msg for msg in recent if any(value and value in _message_text(msg) for value in identity)]
-        if not direct:
-            return
-        anchor = min(direct, key=lambda msg: msg.created_at)
-        related = [
-            msg for msg in recent
-            if abs((msg.created_at - anchor.created_at).total_seconds()) <= 6
-            and (any(value and value in _message_text(msg) for value in identity) or "bienvenue" in _message_text(msg))
-        ]
-        if len(related) < 2:
-            return
-        keep = max(related, key=lambda msg: (int(bool(msg.embeds)) * 4 + int(any(getattr(embed.image, "url", None) for embed in msg.embeds)) * 3, -msg.created_at.timestamp()))
-        for msg in related:
-            if msg.id == keep.id:
-                continue
-            try:
-                await msg.delete()
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                pass
-
+    # remove_duplicate_welcome (ancien filet de sécurité "envoyer puis nettoyer après
+    # coup") a été retiré : il était déjà mort en pratique (mauvaise colonne de config,
+    # welcome_channel_id au lieu de welcome_channel) et redondant avec le verrou
+    # utils.join_dedup qui empêche maintenant l'envoi en double à la source — voir
+    # cogs/setup_v2_completion.py. cogs/bot_tracker.py::_cleanup_presence_duplicates
+    # reste l'unique filet de sécurité après coup, branché sur le seul système officiel.
 
 async def setup(bot: commands.Bot) -> None:
     await bot.db.execute(_REACTION_SCHEMA)
