@@ -59,6 +59,28 @@ def run() -> int:
     if sig_attachment.parameters["file"].annotation is not discord.Attachment:
         fail("sélecteur Attachment Discord non conservé", errors)
 
+    # Test réel de remplacement : le diagnostic V2.5 inspecte les commandes + et peut encore
+    # voir un ancien ctx, mais l'arbre Discord /setup doit n'exposer que l'option utilisateur.
+    bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
+
+    @bot.command(name="setup")
+    async def legacy_setup(ctx, *args):
+        pass
+
+    if not v97._replace_setup_slash(bot):
+        fail("remplacement concret de /setup impossible", errors)
+    else:
+        slash_setup = bot.tree.get_command("setup")
+        if slash_setup is None:
+            fail("/setup absent de CommandTree après remplacement V97", errors)
+        else:
+            callback_sig = inspect.signature(slash_setup.callback)
+            public_names = tuple(callback_sig.parameters)
+            if public_names != ("interaction", "arguments"):
+                fail(f"/setup expose une mauvaise signature: {callback_sig}", errors)
+            if any(name in public_names for name in ("ctx", "context", "args", "kwargs")):
+                fail(f"/setup expose encore un paramètre interne: {callback_sig}", errors)
+
     # Le dashboard doit conserver le backend existant et n'ajouter qu'une couche UX tardive.
     from web import dashboard
     from sentrix_product_update import install_dashboard_prestart
@@ -92,7 +114,7 @@ def run() -> int:
             print("[ERROR]", error)
         print(f"ECHEC V97: {len(errors)} problème(s)")
         return 1
-    print("OK V97: slash fiables (gaps/attachments/setup) + dashboard Tickets guidé")
+    print("OK V97: slash fiables (gaps/attachments/setup concret) + dashboard Tickets guidé")
     return 0
 
 
