@@ -14,8 +14,10 @@ def test_v63_final_document_contains_dense_inline_editors():
     assert getattr(dashboard, "_sentrix_dashboard_version", None) == "v63-polish"
     for marker in (
         'id="sentrix-v61-unified"',
+        'id="sentrix-v62-compat"',
         'id="sentrix-v62-dense"',
         'id="sentrix-v63-polish"',
+        "function categoryOptions(current='')",
         "Vérification & règlement",
         "Enregistrer et publier",
         "ticket_panel_save",
@@ -28,11 +30,12 @@ def test_v63_final_document_contains_dense_inline_editors():
     ):
         assert marker in document, marker
 
+    # categoryOptions doit être déclaré AVANT le script V62 qui l'utilise.
+    assert document.index('id="sentrix-v62-compat"') < document.index('id="sentrix-v62-dense"')
+
 
 def test_v63_removes_empty_secondary_navigation_from_final_sidebar_program():
     _dashboard, document = _document()
-    # Ces anciennes pages génériques étaient essentiellement des cartes « Ouvrir ».
-    # V62 ne les remet plus dans la sidebar finale.
     v62_start = document.index("const V62_GROUPS")
     v62_end = document.index("tabMeta.verification", v62_start)
     groups = document[v62_start:v62_end]
