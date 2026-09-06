@@ -28,11 +28,7 @@ def _snapshot_is_usable(html: str) -> tuple[bool, list[str]]:
 
 
 def _ensure_v60_features_final(dashboard) -> bool:
-    """Compatibilité ancienne : la Feature Suite générique est volontairement supprimée.
-
-    Cette fonction existait dans quelques audits. Elle ne doit plus injecter quoi que ce soit :
-    V61 expose directement les réglages utiles dans le dashboard principal.
-    """
+    """Compatibilité ancienne : la Feature Suite générique est volontairement supprimée."""
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     return 'data-tab="features"' not in html and 'id="sentrix-v60-features-inline"' not in html
 
@@ -54,8 +50,16 @@ def install(dashboard) -> bool:
         logger.error("Dashboard frontend non figé : snapshot pré-start incomplet, marqueurs absents=%s.", missing)
         return False
 
-    # Post-conditions V61 : une seule interface et aucun retour de la Feature Suite générique.
-    required_v61 = ('id="sentrix-v61-unified"', 'data-tab="setup"', 'data-tab="games"', 'data-tab="design"', 'data-tab="status"')
+    # Les boutons V61 sont construits en JavaScript ; on vérifie donc des marqueurs stables
+    # du programme final plutôt que le HTML généré après exécution du navigateur.
+    required_v61 = (
+        'id="sentrix-v61-unified"',
+        "Configuration serveur",
+        "Mini-jeux",
+        "Design",
+        "Statut SentriX",
+        "v61Built",
+    )
     absent = [marker for marker in required_v61 if marker not in snapshot]
     forbidden = [marker for marker in ('data-tab="features"', 'id="sentrix-v60-features-inline"') if marker in snapshot]
     if absent or forbidden:
@@ -135,8 +139,6 @@ def install_product_prestart_hook() -> bool:
             except Exception:
                 logger.exception("Dashboard bootguard : installation impossible.")
 
-        # V61 est TOUJOURS la dernière couche visuelle. Elle reconstruit la navigation,
-        # supprime « Fonctions avancées » et redirige les anciens centres vers /app.
         v61_ok = False
         if suite_ok:
             try:
@@ -145,10 +147,19 @@ def install_product_prestart_hook() -> bool:
             except Exception:
                 logger.exception("Dashboard V61 : installation impossible.")
 
-        if not v61_ok:
-            logger.error("Dashboard V61 absent : refus de considérer le frontend comme final.")
+        # Postfix final : retire tout reliquat Feature Suite et stabilise le DOM de la sidebar.
+        final_ok = False
+        if v61_ok:
+            try:
+                from .dashboard_v61_postfix import install as install_v61_postfix
+                final_ok = bool(install_v61_postfix(dashboard))
+            except Exception:
+                logger.exception("Dashboard V61 postfix : installation impossible.")
+
+        if not final_ok:
+            logger.error("Dashboard V61 final absent : refus de considérer le frontend comme final.")
         elif not _ensure_v60_features_final(dashboard):
-            logger.error("Dashboard V61 : l'ancien onglet Fonctions avancées est encore présent.")
+            logger.error("Dashboard V61 : l'ancien onglet Fonctions avancées est encore présent après postfix.")
 
         if not install(dashboard):
             logger.error("Dashboard frontend : gel final échoué.")
