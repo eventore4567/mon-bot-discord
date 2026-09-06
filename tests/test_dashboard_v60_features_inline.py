@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -40,9 +41,10 @@ def test_old_feature_suite_url_redirects_back_to_v60_shell():
 
 def test_feature_suite_embed_path_is_reserved_for_the_v60_iframe():
     document = _prestart_html()
-    # Le frontend principal est le seul à ouvrir le document V37 brut : l'utilisateur
-    # navigue toujours dans /app et ne retombe plus sur le vieux centre autonome.
-    assert 'request.query.get("embed") == "1"' in __import__(
-        "web.dashboard_v60_features_inline", fromlist=["dashboard"]
-    ).__dict__["_install_route_redirect"].__doc__ or True
+    from web import dashboard_v60_features_inline as inline
+
+    source = inspect.getsource(inline)
+    assert 'request.query.get("embed") == "1"' in source
+    assert 'X-SentriX-Feature-Suite' in source
+    assert 'v60-embedded' in source
     assert "iframe" in document
