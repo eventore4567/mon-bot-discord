@@ -66,13 +66,15 @@ def run() -> int:
     if not v97.install_dashboard(dashboard):
         fail("installation dashboard V97 a retourné False", errors)
     html = dashboard.INDEX_HTML
+    # Les numéros sont assemblés dynamiquement dans JS (`${n}. ...`), on valide donc les
+    # libellés et les marqueurs réellement présents dans la source injectée.
     for marker in (
         'id="sentrix-ticket-simple-v97-js"',
         'id="sentrix-ticket-simple-v97-css"',
-        "1. Général",
-        "2. Équipe",
-        "3. Panel",
-        "4. Publication",
+        "Général",
+        "Équipe",
+        "Panel",
+        "Publication",
         "Réglages avancés du serveur",
     ):
         if marker not in html:
