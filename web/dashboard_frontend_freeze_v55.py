@@ -76,6 +76,56 @@ def _ensure_v60_features_final(dashboard) -> bool:
     return route_ok
 
 
+def _theme_secondary_pages_final() -> bool:
+    """Harmonise TOUTES les pages d'administration isolées avec l'identité V60.
+
+    Ce point est volontairement juste avant le gel : les modules Setup/Feature Suite ont déjà
+    appliqué leurs anciens reworks, donc la feuille V60 arrive réellement en dernier. Le
+    document principal ``/app`` n'est jamais passé à cet installateur.
+    """
+    try:
+        from .dashboard_v60_secondary_theme import install as install_secondary_theme
+        from . import setup_center
+        from . import setup_dashboard
+        from . import design_setup_dashboard
+        from . import embed_center
+        from . import owner_server_manager
+        from . import operations_center
+        from . import community_growth
+        from . import engagement_hub
+        from . import feature_suite_dashboard_v37
+        from . import log_settings_dashboard_v32
+        from . import ticket_center_v35
+        from . import ticket_buttons_editor_v53
+        from . import dashboard_control_center
+        from . import feature_control_v36
+    except Exception:
+        logger.exception("Dashboard V60 : impossible de charger le thème commun des pages secondaires.")
+        return False
+
+    count = install_secondary_theme(
+        setup_center,
+        setup_dashboard,
+        design_setup_dashboard,
+        embed_center,
+        owner_server_manager,
+        operations_center,
+        community_growth,
+        engagement_hub,
+        feature_suite_dashboard_v37,
+        log_settings_dashboard_v32,
+        ticket_center_v35,
+        ticket_buttons_editor_v53,
+        dashboard_control_center,
+        feature_control_v36,
+    )
+    if count <= 0:
+        logger.error("Dashboard V60 : aucune page secondaire n'a reçu le thème commun.")
+        return False
+    logger.info("Dashboard V60 : %s document(s) secondaire(s) utilisent maintenant la même palette et les mêmes formes que /app.", count)
+    return True
+
+
 def install(dashboard) -> bool:
     """Fige le HTML de ``/app`` avant que le serveur aiohttp ne lie ses routes."""
     current = dashboard.handle_index
@@ -122,7 +172,7 @@ def install(dashboard) -> bool:
 
 
 def install_product_prestart_hook() -> bool:
-    """Installe V60 final + fonctions avancées intégrées, puis fige le document."""
+    """Installe V60 final + fonctions avancées intégrées, harmonise les centres puis gèle."""
     try:
         import sentrix_product_update as product
     except Exception:
@@ -188,10 +238,13 @@ def install_product_prestart_hook() -> bool:
                 logger.exception("Dashboard V60 bootguard : installation impossible.")
 
         # IMPORTANT : vérification finale indépendante de l'ordre des anciennes couches.
-        # Si l'intégrateur normal a été court-circuité, on réinjecte directement ici avant
-        # la capture immuable de /app. Le snapshot ne peut donc plus repartir sans ce panneau.
         if v60_ok and not _ensure_v60_features_final(dashboard):
             logger.error("Dashboard V60 : les fonctions avancées ne sont pas garanties ; snapshot signalé incomplet.")
+
+        # Les centres autonomes sont harmonisés après TOUS leurs anciens reworks, mais sans
+        # modifier dashboard.INDEX_HTML. L'accueil V60 reste donc inchangé pixel pour pixel.
+        if v60_ok and not _theme_secondary_pages_final():
+            logger.error("Dashboard V60 : harmonisation visuelle des pages secondaires incomplète.")
 
         if not install(dashboard):
             logger.error(
@@ -201,8 +254,14 @@ def install_product_prestart_hook() -> bool:
     no_store_then_freeze._sentrix_frontend_freeze_hook_v55 = True
     no_store_then_freeze._sentrix_original = current
     product._install_no_store_index = no_store_then_freeze
-    logger.info("Dashboard V60 final armé : fonctions avancées inline + diagnostics + accès commandes + DM + bootguard + gel.")
+    logger.info("Dashboard V60 final armé : accueil + centres secondaires unifiés + fonctions inline + diagnostics + DM + bootguard + gel.")
     return True
 
 
-__all__ = ["install", "install_product_prestart_hook", "_snapshot_is_usable", "_ensure_v60_features_final"]
+__all__ = [
+    "install",
+    "install_product_prestart_hook",
+    "_snapshot_is_usable",
+    "_ensure_v60_features_final",
+    "_theme_secondary_pages_final",
+]
