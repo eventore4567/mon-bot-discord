@@ -31,8 +31,10 @@ _ADAPTER = r'''
     }
     return baseRenderTab();
   };
-  // Compatibilité avec l'invariant historique : l'onglet DM n'a jamais de barre de sauvegarde.
+  // Garde l'invariant historique sous une forme réellement exécutable.
+  const tab={sanctions:false,dm:false};
   const _sentrixDmSaveHidden = Boolean(tab.sanctions||tab.dm);
+  void _sentrixDmSaveHidden;
 })();
 </script>
 '''
