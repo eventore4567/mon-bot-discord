@@ -9,12 +9,11 @@ def _prestart_html() -> str:
     return str(dashboard.INDEX_HTML)
 
 
-def test_v60_max_suite_is_the_final_prestart_frontend():
+def test_v61_is_the_final_prestart_frontend():
     document = _prestart_html()
     module = __import__("web.dashboard", fromlist=["dashboard"])
-    assert getattr(module, "_sentrix_dashboard_version", None) == "v60-max-suite-guarded"
+    assert getattr(module, "_sentrix_dashboard_version", None) == "v61-draft-unified"
     assert "SENTR<em>IX</em>" in document
-    assert "DraftBot" not in document
     assert "--accent:#d66f55" in document
     assert 'class="server-rail"' in document
     assert 'class="sidebar"' in document
@@ -22,14 +21,23 @@ def test_v60_max_suite_is_the_final_prestart_frontend():
     assert 'id="sentrix-v60-suite"' in document
     assert 'id="sentrix-v60-dm-adapter"' in document
     assert 'id="sentrix-v60-bootguard"' in document
+    assert 'id="sentrix-v61-unified"' in document
     for tab in (
-        "welcome", "roles", "security", "sanctions", "logs", "tickets",
-        "notifications", "ai", "embeds", "dm",
+        "overview", "welcome", "roles", "security", "sanctions", "logs", "tickets",
+        "notifications", "ai", "embeds", "games", "design", "setup", "access", "dm", "status",
     ):
         assert f'data-tab="{tab}"' in document
 
 
-def test_v60_max_suite_keeps_real_api_wiring():
+def test_v61_removes_the_broken_generic_feature_suite():
+    document = _prestart_html()
+    assert 'data-tab="features"' not in document
+    assert 'id="sentrix-v60-features-inline"' not in document
+    assert "Fonctions avancées</button>" not in document
+    assert "L’ancien centre « Fonctions avancées » a été supprimé" in document
+
+
+def test_v61_keeps_real_api_wiring_inside_one_app():
     document = _prestart_html()
     required = (
         'async function loadSession()',
@@ -40,9 +48,11 @@ def test_v60_max_suite_keeps_real_api_wiring():
         '/settings`,{method:"PUT"',
         '/notifications`,{method:"POST"',
         '/embeds`,{method:"POST"',
-        '/sanctions/${encodeURIComponent(userId)}/${encodeURIComponent(action)}`',
         '/diagnostics`',
         '/setup-tools`',
+        '/systems`',
+        '/games`',
+        '/design`',
         '/dm/apercu',
         '/dm/all',
         '/dm/job',
@@ -53,35 +63,22 @@ def test_v60_max_suite_keeps_real_api_wiring():
         assert marker in document, marker
 
 
-def test_v60_max_suite_exposes_the_advanced_requested_controls():
+def test_v61_uses_one_draftbot_like_navigation_and_internal_admin_links():
     document = _prestart_html()
-    markers = (
-        "Vue d’ensemble",
-        "Accès & commandes",
-        "Permissions du bot",
-        "Accès aux commandes",
-        "Gestionnaires SentriX",
-        "sx-state",
-        "Rechercher une fonction",
-        "Rechercher dans la liste",
-        "welcome_image_url",
-        "warn_ban_threshold",
-        "verification_channel",
-        "giveaway_channel",
-        "partner_channel",
-        "stats_channel",
-        "afk_channel",
-        "notifImage",
-        "embedAuthorName",
-        "embedThumbnail",
-        "embedFooter",
-        "sxAddEmbedField",
-        "clear-warnings",
-        "Ctrl/⌘ + S",
-        "new AbortController()",
-        "Messages privés",
-    )
-    for marker in markers:
+    for marker in (
+        "Membres & rôles",
+        "Modération",
+        "Outils",
+        "Configuration serveur",
+        "Mini-jeux",
+        "Design",
+        "Statut SentriX",
+        "oldMap",
+        "'/setup-center':'setup'",
+        "'/operations':'status'",
+        "'/feature-suite':'setup'",
+        "history.replaceState",
+    ):
         assert marker in document, marker
 
 
