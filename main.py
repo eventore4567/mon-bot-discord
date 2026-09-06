@@ -502,6 +502,14 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning("Impossible d'enregistrer les boutons de /setup :\n" + traceback.format_exc())
 
+        # Étoiles de notation envoyées en DM après la fermeture d'un ticket (RatingView) :
+        # même mécanisme que SetupNavButton, custom_id encodant la note ET l'ID du ticket.
+        try:
+            from cogs.tickets import TicketRatingButton
+            self.add_dynamic_items(TicketRatingButton)
+        except Exception:
+            logger.warning("Impossible d'enregistrer les boutons de notation tickets :\n" + traceback.format_exc())
+
         self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
         self.add_check(self.global_permission_check)

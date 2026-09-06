@@ -560,6 +560,39 @@ class TicketControlView(discord.ui.View):
                 count_in_row = 0
 
 
+class TicketRatingButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"ticket_rate:(?P<value>[1-5]):(?P<ticket_id>[0-9]+)",
+):
+    """Bouton de notation post-ticket. Son custom_id encode la note ET l'ID du ticket,
+    ce qui permet à Discord de le faire fonctionner même si le bot a redémarré depuis
+    l'envoi du message en DM — voir RatingView. Avant ce correctif, les 5 boutons
+    partageaient le custom_id fixe "rate_1".."rate_5" (jamais liés à un ticket précis)
+    et n'étaient jamais réenregistrés via bot.add_view()/add_dynamic_items() au
+    démarrage : un redémarrage dans les 24h suivant l'envoi cassait définitivement la
+    notation (voir l'audit tickets livré)."""
+
+    def __init__(self, value: int, ticket_id: int):
+        super().__init__(
+            discord.ui.Button(
+                label="⭐" * value, style=discord.ButtonStyle.secondary,
+                custom_id=f"ticket_rate:{value}:{ticket_id}",
+            )
+        )
+        self.value = value
+        self.ticket_id = ticket_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match, /):
+        return cls(int(match["value"]), int(match["ticket_id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.client.db.execute(
+            "UPDATE tickets SET rating = ? WHERE id = ?", (self.value, self.ticket_id)
+        )
+        await interaction.response.edit_message(content=f"Merci pour votre note : {'⭐' * self.value}", view=None)
+
+
 class RatingView(discord.ui.View):
     """5 étoiles envoyées après la fermeture d'un ticket pour noter le support reçu."""
 
@@ -568,20 +601,7 @@ class RatingView(discord.ui.View):
         self.cog = cog
         self.ticket_id = ticket_id
         for i in range(1, 6):
-            self.add_item(self._make_button(i))
-
-    def _make_button(self, value: int) -> discord.ui.Button:
-        btn = discord.ui.Button(label="⭐" * value, style=discord.ButtonStyle.secondary, custom_id=f"rate_{value}")
-
-        async def callback(interaction: discord.Interaction):
-            await self.cog.bot.db.execute("UPDATE tickets SET rating = ? WHERE id = ?", (value, self.ticket_id))
-            for item in self.children:
-                item.disabled = True
-            await interaction.response.edit_message(content=f"Merci pour votre note : {'⭐' * value}", view=self)
-            self.stop()
-
-        btn.callback = callback
-        return btn
+            self.add_item(TicketRatingButton(i, ticket_id))
 
 
 class PanelEditView(discord.ui.View):
