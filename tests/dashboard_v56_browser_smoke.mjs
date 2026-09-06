@@ -19,6 +19,56 @@ function response(payload, status = 200) {
   };
 }
 
+const diagnosticsPayload = {
+  ok: true,
+  score: 82,
+  summary: { active: 7, inactive: 1, missing: 2, errors: 0 },
+  modules: {
+    welcome: { code: "active", status: "ACTIF", detail: "Bienvenue configurée." },
+    levels: { code: "missing", status: "NON CONFIGURÉ", detail: "Salon absent." },
+    suggestions: { code: "active", status: "ACTIF", detail: "Suggestions configurées." },
+    reports: { code: "active", status: "ACTIF", detail: "Signalements configurés." },
+    logs: { code: "active", status: "ACTIF", detail: "Logs configurés." },
+    roles: { code: "active", status: "ACTIF", detail: "Rôles configurés." },
+    tickets: { code: "active", status: "ACTIF", detail: "Tickets configurés." },
+    automod: { code: "active", status: "ACTIF", detail: "AutoMod actif." },
+    ai: { code: "inactive", status: "INACTIF", detail: "IA désactivée." },
+    notifications: { code: "missing", status: "NON CONFIGURÉ", detail: "Aucune source." },
+    moderation: { code: "active", status: "ACTIF", detail: "Permissions disponibles." },
+  },
+  permissions: [
+    { key: "administrator", name: "Administrateur", granted: true },
+    { key: "manage_roles", name: "Gérer les rôles", granted: true },
+    { key: "ban_members", name: "Bannir des membres", granted: true },
+  ],
+  invalid_resources: [],
+  bot: { id: "999", top_role_position: 10 },
+};
+
+const setupPayload = {
+  ok: true,
+  commands: [
+    { name: "help", description: "Aide", protected: true },
+    { name: "ban", description: "Bannir un membre", protected: false },
+    { name: "ticket", description: "Gérer les tickets", protected: false },
+  ],
+  disabled_commands: ["ticket"],
+  ignored_channels: [],
+  automod_exempt_roles: [],
+  antinuke_whitelist: [],
+  managers: [],
+  manager_categories: {
+    configuration: "Configuration",
+    tickets: "Tickets",
+    moderation: "Modération",
+    securite: "Sécurité",
+    economie: "Économie et jeux",
+    complete: "Accès complet",
+  },
+  history: [],
+  verification: { role_id: "", channel_id: "" },
+};
+
 const dom = new JSDOM(html, {
   url: "https://sentrix.test/app",
   runScripts: "dangerously",
@@ -27,7 +77,8 @@ const dom = new JSDOM(html, {
   beforeParse(window) {
     window.fetch = async (input, options = {}) => {
       const url = new URL(typeof input === "string" ? input : input.url, window.location.href);
-      requests.push({ path: url.pathname, method: String(options.method || "GET").toUpperCase() });
+      const method = String(options.method || "GET").toUpperCase();
+      requests.push({ path: url.pathname, method });
       if (url.pathname === "/api/public") {
         return response({
           ok: true,
@@ -61,28 +112,51 @@ const dom = new JSDOM(html, {
             id: "1",
             name: "Serveur Test",
             members: 12,
-            channels_count: 1,
-            roles_count: 1,
+            channels_count: 7,
+            roles_count: 7,
           },
-          metrics: { commands_24h: 3, open_tickets: 1, warnings: 0 },
+          metrics: { commands_24h: 3, open_tickets: 1, warnings: 0, economy_accounts: 2 },
           settings: {},
           automod: {},
           ai: {},
-          roles: [{ id: "10", name: "Staff" }],
-          channels: [{ id: "20", name: "general", type: "text" }],
+          roles: [
+            { id: "10", name: "Staff" },
+            { id: "11", name: "Membre" },
+            { id: "12", name: "Booster" },
+            { id: "13", name: "Modérateur" },
+            { id: "14", name: "Admin" },
+            { id: "15", name: "Vérifié" },
+          ],
+          channels: [
+            { id: "20", name: "general", type: "text" },
+            { id: "21", name: "logs", type: "text" },
+            { id: "22", name: "welcome", type: "text" },
+            { id: "23", name: "tickets", type: "text" },
+            { id: "24", name: "reports", type: "text" },
+            { id: "25", name: "staff", type: "text" },
+            { id: "26", name: "Tickets", type: "category" },
+          ],
           social_notifications: [],
         });
       }
       if (url.pathname === "/api/guilds/1/sanctions") {
         return response({ ok: true, sanctions: [], next_offset: null, total: 0 });
       }
+      if (url.pathname === "/api/guilds/1/diagnostics") {
+        return response(diagnosticsPayload);
+      }
+      if (url.pathname === "/api/guilds/1/setup-tools") {
+        if (method === "POST") return response({ ok: true, message: "Configuration appliquée." });
+        return response(setupPayload);
+      }
       return response({ error: `Route mock inconnue: ${url.pathname}` }, 404);
     };
+    window.confirm = () => true;
     window.scrollTo = () => {};
   },
 });
 
-await new Promise(resolve => setTimeout(resolve, 1200));
+await new Promise(resolve => setTimeout(resolve, 1300));
 
 const paths = requests.map(item => item.path);
 for (const required of ["/api/public", "/api/me", "/api/guilds", "/api/guilds/1"]) {
@@ -104,7 +178,7 @@ if (!serverContent || serverContent.classList.contains("hidden")) {
 }
 
 const expectedTabs = [
-  "general", "security", "sanctions", "logs", "welcome", "levels", "tickets",
+  "overview", "general", "access", "security", "sanctions", "logs", "welcome", "levels", "tickets",
   "ai", "notifications", "embeds", "roles",
 ];
 const buttons = [...dom.window.document.querySelectorAll("#navigation button[data-tab]")];
@@ -116,16 +190,29 @@ for (const tab of expectedTabs) {
 for (const tab of expectedTabs) {
   const button = dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
   button.click();
-  await new Promise(resolve => setTimeout(resolve, 40));
+  await new Promise(resolve => setTimeout(resolve, tab === "overview" || tab === "access" ? 100 : 50));
   if (!button.classList.contains("active")) {
     throw new Error(`Le clic sidebar n'active pas la page ${tab}`);
   }
   const title = dom.window.document.getElementById("tabTitle")?.textContent?.trim();
   if (!title) throw new Error(`La page ${tab} n'a plus de titre central`);
-  if (tab === "embeds" && !dom.window.document.querySelector(".embed-builder")) {
+  if (tab === "embeds" && !dom.window.document.querySelector(".sx-embed-layout,.embed-builder")) {
     console.error("Erreurs runtime:", runtimeErrors.join("\n"));
-    throw new Error("La page Embeds s'ouvre mais son créateur n'est pas rendu.");
+    throw new Error("La page Embeds s'ouvre mais son créateur avancé n'est pas rendu.");
   }
+  if (tab === "overview" && !dom.window.document.querySelector(".sx-config-hero")) {
+    throw new Error("La vue d'ensemble n'affiche pas le score de configuration réel.");
+  }
+  if (tab === "access" && !dom.window.document.querySelector(".sx-permission-grid,.sx-command-list")) {
+    throw new Error("La page Accès & commandes ne rend pas les permissions/commandes.");
+  }
+}
+
+if (!paths.includes("/api/guilds/1/diagnostics")) {
+  throw new Error("Les diagnostics V60 n'ont jamais été chargés.");
+}
+if (!paths.includes("/api/guilds/1/setup-tools")) {
+  throw new Error("La page Accès & commandes n'a jamais chargé setup-tools.");
 }
 
 if (runtimeErrors.some(message => /SyntaxError|ReferenceError|TypeError/.test(message))) {
@@ -133,6 +220,6 @@ if (runtimeErrors.some(message => /SyntaxError|ReferenceError|TypeError/.test(me
   throw new Error(`Erreur JavaScript dashboard: ${runtimeErrors.join("\n")}`);
 }
 
-console.log("Dashboard V56 browser smoke OK:", paths.join(" -> "));
+console.log("Dashboard V60 MAX suite browser smoke OK:", paths.join(" -> "));
 console.log("Pages sidebar OK:", expectedTabs.join(", "));
 dom.window.close();
