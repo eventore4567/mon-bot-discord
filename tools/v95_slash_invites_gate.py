@@ -21,6 +21,12 @@ async def run() -> int:
     with tempfile.TemporaryDirectory(prefix="sentrix-v95-") as temp_dir:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-v95.db")
 
+        # Le gate est lance depuis tools/, donc sitecustomize n'est pas garanti d'avoir
+        # vu la racine du repo au demarrage de Python. On installe explicitement V95 ici
+        # afin de tester exactement le runtime que Railway reçoit avant son sync Discord.
+        import sentrix_v95_bootstrap
+        sentrix_v95_bootstrap.install()
+
         # railway_boot ajoute les extensions réellement chargées en production, sans
         # exécuter run() lors d'un simple import.
         import railway_boot
@@ -51,6 +57,8 @@ async def run() -> int:
         try:
             mapping = await v95.prepare_bot(bot)
         except Exception as exc:
+            import traceback
+            traceback.print_exc()
             errors.append(f"prepare_bot: {type(exc).__name__}: {exc}")
             mapping = {}
 
