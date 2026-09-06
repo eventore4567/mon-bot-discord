@@ -62,8 +62,8 @@ def test_legacy_inline_installer_remains_idempotent(monkeypatch):
     assert fake.INDEX_HTML.count('id="sentrix-v60-features-inline"') == 1
 
 
-def test_final_freeze_guard_never_resurrects_features_inside_v61(monkeypatch):
-    """Régression importante : la post-condition V60 ne doit plus recréer l'onglet supprimé."""
+def test_final_freeze_guard_accepts_clean_v61_without_resurrecting_features(monkeypatch):
+    """La garde finale valide V61 propre sans modifier le document ni recréer l'ancien onglet."""
     from web import dashboard_frontend_freeze_v55 as freeze
     from web import dashboard_v60_features_inline as inline
 
@@ -74,7 +74,7 @@ def test_final_freeze_guard_never_resurrects_features_inside_v61(monkeypatch):
     )
     fake = SimpleNamespace(INDEX_HTML=v61_html)
 
-    assert freeze._ensure_v60_features_final(fake) is False
+    assert freeze._ensure_v60_features_final(fake) is True
     assert fake.INDEX_HTML == v61_html
     assert 'id="sentrix-v60-features-inline"' not in fake.INDEX_HTML
     assert 'data-tab="features"' not in fake.INDEX_HTML
