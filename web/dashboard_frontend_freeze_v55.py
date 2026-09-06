@@ -28,9 +28,13 @@ def _snapshot_is_usable(html: str) -> tuple[bool, list[str]]:
 
 
 def _ensure_v60_features_final(dashboard) -> bool:
-    """Compatibilité ancienne : la Feature Suite générique est volontairement supprimée."""
+    """Compatibilité ancienne : vérifie qu'aucune vraie UI Feature Suite ne reste."""
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
-    return 'data-tab="features"' not in html and 'id="sentrix-v60-features-inline"' not in html
+    try:
+        from .dashboard_v61_postfix import _legacy_feature_ui_present
+        return not _legacy_feature_ui_present(html)
+    except Exception:
+        return 'id="sentrix-v60-features-inline"' not in html and 'id="sxFeaturesFrame"' not in html
 
 
 def _theme_secondary_pages_final() -> bool:
@@ -50,8 +54,6 @@ def install(dashboard) -> bool:
         logger.error("Dashboard frontend non figé : snapshot pré-start incomplet, marqueurs absents=%s.", missing)
         return False
 
-    # Les boutons V61 sont construits en JavaScript ; on vérifie donc des marqueurs stables
-    # du programme final plutôt que le HTML généré après exécution du navigateur.
     required_v61 = (
         'id="sentrix-v61-unified"',
         "Configuration serveur",
@@ -61,9 +63,13 @@ def install(dashboard) -> bool:
         "v61Built",
     )
     absent = [marker for marker in required_v61 if marker not in snapshot]
-    forbidden = [marker for marker in ('data-tab="features"', 'id="sentrix-v60-features-inline"') if marker in snapshot]
-    if absent or forbidden:
-        logger.error("Dashboard V61 non figé : requis absents=%s interdits présents=%s.", absent, forbidden)
+    try:
+        from .dashboard_v61_postfix import _legacy_feature_ui_present
+        legacy_present = _legacy_feature_ui_present(snapshot)
+    except Exception:
+        legacy_present = 'id="sentrix-v60-features-inline"' in snapshot or 'id="sxFeaturesFrame"' in snapshot
+    if absent or legacy_present:
+        logger.error("Dashboard V61 non figé : requis absents=%s ancienne UI features=%s.", absent, legacy_present)
         return False
 
     digest = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()[:16]
@@ -147,7 +153,6 @@ def install_product_prestart_hook() -> bool:
             except Exception:
                 logger.exception("Dashboard V61 : installation impossible.")
 
-        # Postfix final : retire tout reliquat Feature Suite et stabilise le DOM de la sidebar.
         final_ok = False
         if v61_ok:
             try:
@@ -159,7 +164,7 @@ def install_product_prestart_hook() -> bool:
         if not final_ok:
             logger.error("Dashboard V61 final absent : refus de considérer le frontend comme final.")
         elif not _ensure_v60_features_final(dashboard):
-            logger.error("Dashboard V61 : l'ancien onglet Fonctions avancées est encore présent après postfix.")
+            logger.error("Dashboard V61 : l'ancienne Feature Suite est encore rendue après postfix.")
 
         if not install(dashboard):
             logger.error("Dashboard frontend : gel final échoué.")
