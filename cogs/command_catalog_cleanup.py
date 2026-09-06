@@ -104,6 +104,17 @@ MERGED_COMMANDS = (
     | SECURITY_MERGED_COMMANDS
     | LOW_VALUE_HIDDEN_COMMANDS
 )
+
+# +ticketsetup ouvre le hub de config tickets (panels/types/formulaires/logs...) —
+# c'était le SEUL point d'entrée resté invisible de +help dans tout MERGED_COMMANDS.
+# /setup ne fait qu'auto-créer UN panel "Support" par défaut (setup_ticket_autoconfig_v72.py) ;
+# un serveur voulant plusieurs types de tickets (Achat, Partenariat, Signalement...) n'avait
+# donc AUCUN chemin découvrable pour y arriver. Les sous-commandes qu'il ouvre restent
+# masquées (ticketpanel, tickettype...) : on ne rend visible que la porte d'entrée, sans
+# toucher au budget slash (ticketsetup n'est volontairement PAS ajoutée à
+# NORMAL_DIRECT_COMMANDS, qui contrôle aussi l'éligibilité slash — voir
+# command_hybrid_slash_restore_v3.py).
+HELP_VISIBLE_HUB_ENTRYPOINTS = frozenset({"ticketsetup"})
 INTENTIONALLY_REMOVED_COMMANDS = PURE_DUPLICATE_COMMANDS
 CONFIRMED_DUPLICATE_COMMANDS = PURE_DUPLICATE_COMMANDS
 RESTORED_COMMANDS = NORMAL_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS
@@ -145,7 +156,7 @@ def _install_short_command_names() -> None:
 
 def apply_surface(bot: commands.Bot) -> None:
     """Rend visibles uniquement les commandes directes, sans casser les anciennes +."""
-    direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS
+    direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS | HELP_VISIBLE_HUB_ENTRYPOINTS
     for command in bot.commands:
         name = command.name.casefold()
         if name in direct:
