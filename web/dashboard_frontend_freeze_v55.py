@@ -75,7 +75,7 @@ def install(dashboard) -> bool:
 
 
 def install_product_prestart_hook() -> bool:
-    """Installe V60 MAX suite + diagnostics après les routes produit puis fige le document."""
+    """Installe V60 MAX Suite + diagnostics + DM + garde-fous, puis fige le document."""
     try:
         import sentrix_product_update as product
     except Exception:
@@ -90,6 +90,7 @@ def install_product_prestart_hook() -> bool:
         current(dashboard)
         v60_ok = False
         max_ok = False
+        suite_ok = False
         try:
             from .dashboard_rework_v60 import install as install_v60
             v60_ok = bool(install_v60(dashboard))
@@ -114,10 +115,24 @@ def install_product_prestart_hook() -> bool:
         if max_ok:
             try:
                 from .dashboard_v60_suite import install as install_v60_suite
-                if not install_v60_suite(dashboard):
+                suite_ok = bool(install_v60_suite(dashboard))
+                if not suite_ok:
                     logger.error("Dashboard V60 suite : installation refusée avant le gel.")
             except Exception:
                 logger.exception("Dashboard V60 suite : installation impossible avant le gel.")
+        if suite_ok:
+            try:
+                from .dashboard_v60_dm import install as install_v60_dm
+                if not install_v60_dm(dashboard):
+                    logger.error("Dashboard V60 DM : interface propriétaire non restaurée.")
+            except Exception:
+                logger.exception("Dashboard V60 DM : restauration impossible.")
+            try:
+                from .dashboard_v60_bootguard import install as install_v60_bootguard
+                if not install_v60_bootguard(dashboard):
+                    logger.error("Dashboard V60 bootguard : installation refusée.")
+            except Exception:
+                logger.exception("Dashboard V60 bootguard : installation impossible.")
         if not install(dashboard):
             logger.error(
                 "Dashboard frontend : le gel pré-start a échoué ; /app ne doit pas être considéré stable."
@@ -126,7 +141,7 @@ def install_product_prestart_hook() -> bool:
     no_store_then_freeze._sentrix_frontend_freeze_hook_v55 = True
     no_store_then_freeze._sentrix_original = current
     product._install_no_store_index = no_store_then_freeze
-    logger.info("Dashboard V60 MAX suite armé : rework + diagnostics + accès commandes + gel pré-start.")
+    logger.info("Dashboard V60 final armé : rework + diagnostics + accès commandes + DM + bootguard + gel pré-start.")
     return True
 
 
