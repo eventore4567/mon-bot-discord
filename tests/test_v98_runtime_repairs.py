@@ -4,6 +4,7 @@ import inspect
 from collections import OrderedDict
 
 import discord
+from discord.ext import commands
 
 import sentrix_v98_runtime as v98
 
@@ -40,6 +41,11 @@ def test_fallback_signature_keeps_native_attachment():
     assert "file" in option_names
     assert signature.parameters["file"].annotation is discord.Attachment
     assert signature.parameters["file"].default is inspect.Parameter.empty
+
+
+def test_greedy_annotation_falls_back_to_text_without_hash_crash():
+    annotation = commands.Greedy[discord.Member]
+    assert v98._native_annotation(annotation) is str
 
 
 def test_ai_legacy_command_is_exposed_as_ask():
