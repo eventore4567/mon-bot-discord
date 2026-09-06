@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from discord import app_commands
 from web import dashboard as dashboard_web
 from sentrix_product_update import install_dashboard_prestart
 from sentrix_final_product_finish import _install_embed_dashboard_finish
@@ -40,6 +41,20 @@ _install_dashboard_before_ha()
 # Import volontairement tardif : railway_ha_boot importe railway_boot, qui construit le
 # bootstrap du bot. Aucune application aiohttp ne doit être construite avant la réparation.
 import railway_ha_boot as ha_boot  # noqa: E402
+
+
+# V95 doit être branchée explicitement dans le véritable entrypoint Railway. Le précédent
+# branchement reposait uniquement sur l'import implicite de sitecustomize ; en production,
+# on pouvait alors démarrer et synchroniser l'ancien catalogue (100 racines) sans jamais
+# passer par la préparation V95. L'installation est idempotente : si sitecustomize l'a déjà
+# faite, cet appel ne change rien ; sinon il garantit que CommandTree.sync prépare le
+# catalogue groupé juste avant la synchronisation Discord.
+from sentrix_v95_bootstrap import install as _install_v95_bootstrap  # noqa: E402
+
+_install_v95_bootstrap()
+if not getattr(app_commands.CommandTree.sync, "_sentrix_v95", False):
+    raise RuntimeError("V95 slash non branchée sur CommandTree.sync avant le démarrage Railway.")
+logger.warning("V95 bootstrap explicitement confirmé dans l'entrypoint Railway HA produit.")
 
 
 # Certaines couches dashboard historiques sont importées pendant le bootstrap HA. Elles
