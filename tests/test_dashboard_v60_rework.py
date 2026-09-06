@@ -49,14 +49,16 @@ def test_v60_max_suite_keeps_real_api_wiring():
 
 def test_v60_max_suite_exposes_the_advanced_requested_controls():
     document = _prestart_html()
+    # Les libellés ACTIF / INACTIF / NON CONFIGURÉ / ERREUR DE CONFIGURATION viennent
+    # volontairement de l'API diagnostics au runtime. Ici on vérifie le composant de statut
+    # et son branchement ; le smoke JSDOM vérifie ensuite les vraies valeurs mockées.
     markers = (
         "Vue d’ensemble",
         "Accès & commandes",
         "Permissions du bot",
         "Accès aux commandes",
         "Gestionnaires SentriX",
-        "NON CONFIGURÉ",
-        "ERREUR DE CONFIGURATION",
+        "sx-state",
         "Rechercher une fonction",
         "Rechercher dans la liste",
         "welcome_image_url",
@@ -78,14 +80,20 @@ def test_v60_max_suite_exposes_the_advanced_requested_controls():
         assert marker in document, marker
 
 
+def test_v60_diagnostics_defines_all_requested_runtime_states():
+    from web import dashboard_v60_diagnostics as diagnostics
+
+    assert diagnostics._status("active", "x")["status"] == "ACTIF"
+    assert diagnostics._status("inactive", "x")["status"] == "INACTIF"
+    assert diagnostics._status("missing", "x")["status"] == "NON CONFIGURÉ"
+    assert diagnostics._status("error", "x")["status"] == "ERREUR DE CONFIGURATION"
+
+
 def test_v60_diagnostics_route_is_bound_before_aiohttp_build():
     from web import dashboard
     import sentrix_product_update
 
     sentrix_product_update.install_dashboard_prestart(dashboard)
-
-    class Bot:
-        pass
 
     # On ne construit pas réellement l'app sans bot Discord complet ici : ce test vérifie
     # que le wrapper build_app des diagnostics a bien été installé avant le gel.
