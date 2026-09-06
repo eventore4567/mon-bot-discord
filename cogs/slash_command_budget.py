@@ -98,7 +98,25 @@ def install(bot: commands.Bot) -> None:
             kwargs["guild"] = guild
         if guilds is not None:
             kwargs["guilds"] = guilds
-        return original_add(command, **kwargs)
+        try:
+            return original_add(command, **kwargs)
+        except app_commands.CommandLimitReached:
+            # Dernier filet : le budget ci-dessus recompte les racines à chaque appel, mais
+            # un déploiement Railway peut charger des extensions supplémentaires
+            # (railway_boot.py en ajoute une vingtaine après main.EXTENSIONS) dans un ordre
+            # et avec un état (variables d'environnement, features activées) différents de
+            # ce qu'un simple `bot.load_extension()` local reproduit — le comptage peut donc
+            # diverger de la limite réelle de discord.py. Sans ce filet, cette seule racine
+            # en trop faisait échouer TOUTE l'extension (ExtensionFailed), donc TOUTES ses
+            # commandes, plutôt que de perdre uniquement celle-ci.
+            name = str(getattr(command, "name", "") or "").casefold()
+            skipped.append(name)
+            logger.warning(
+                "Budget slash : « %s » écartée après échec réel de discord.py "
+                "(limite 100 déjà atteinte malgré le comptage local).",
+                name,
+            )
+            return None
 
     def budgeted_add(
         _tree,
