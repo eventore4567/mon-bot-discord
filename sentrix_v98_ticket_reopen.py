@@ -16,6 +16,8 @@ import logging
 
 from discord.ext import commands
 
+import sentrix_v95_runtime as v95
+
 logger = logging.getLogger("bot.v98-ticket-reopen")
 
 
@@ -46,4 +48,27 @@ def install(bot: commands.Bot) -> bool:
     return True
 
 
-__all__ = ["install"]
+def install_global() -> None:
+    """Branche la correction après la préparation V98 de l'arbre slash.
+
+    On intervient après la restauration de signatures V98 afin que celle-ci ne remette pas
+    l'ancien callback V17. Le callback slash dynamique conserve l'objet Command historique ;
+    remplacer son callback ici affecte donc aussi son exécution via ``/ticket ...`` sans
+    reconstruire une seconde surface.
+    """
+    current = v95.prepare_bot
+    if getattr(current, "_sentrix_v98_reopen_global", False):
+        return
+
+    async def prepare_with_reopen(bot: commands.Bot):
+        mapping = await current(bot)
+        install(bot)
+        return mapping
+
+    prepare_with_reopen._sentrix_v98_reopen_global = True
+    prepare_with_reopen._sentrix_original = current
+    v95.prepare_bot = prepare_with_reopen
+    logger.info("V98 : unification ticket-reopen/reopenticket branchée après prepare_bot.")
+
+
+__all__ = ["install", "install_global"]
