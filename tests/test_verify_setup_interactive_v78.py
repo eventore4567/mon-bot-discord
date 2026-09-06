@@ -5,6 +5,7 @@ import inspect
 import discord
 from discord.ext import commands
 
+import cogs.verify_setup_interactive_v78 as v78
 from cogs.verify_setup_interactive_v78 import VerifySetupView, _safe_image, install
 
 
@@ -31,7 +32,8 @@ def test_v78_replaces_legacy_verification_commands_with_zero_argument_setup():
 
 
 def test_v78_contains_the_complete_discord_configuration_flow():
-    source = inspect.getsource(VerifySetupView)
+    source = inspect.getsource(v78)
+    view_source = inspect.getsource(VerifySetupView)
     for marker in (
         "ChannelSelect",
         "RoleSelect",
@@ -45,8 +47,12 @@ def test_v78_contains_the_complete_discord_configuration_flow():
         "verify_captcha_enabled",
         "dashboard_verification_panels",
         "VerifyView",
+        "panels.avec_composants",
+        "panels.editer",
     ):
         assert marker in source, marker
+    assert "interaction.response.edit_message(embed=" not in view_source
+    assert "self.message.edit(embed=" not in view_source
 
 
 def test_v78_only_accepts_public_https_images():
