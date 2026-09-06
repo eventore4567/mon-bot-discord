@@ -1,114 +1,105 @@
-"""Compatibility entry point for the SentriX dashboard presentation layer."""
+"""Entrée de compatibilité du dashboard SentriX V56.
 
-from .dashboard_oxyde_rebuild import apply_dashboard_pages as _apply_oxyde_dashboard
-from .dashboard_oxyde_hotfix import apply_dashboard_hotfix, patch_dashboard_runtime
-from .dashboard_major_v5 import apply_major_v5
-from .dashboard_v5_reliability import apply_v5_reliability
-from .dashboard_clarity_v51 import apply_clarity_v51
-from .dashboard_compact_v52 import apply_compact_v52
+Le dashboard a longtemps été réécrit par plusieurs générations de couches visuelles
+(Oxyde, V5, fiabilité, clarté, compact puis hotfixes). Ces transformations dépendaient de
+fragments HTML exacts et rendaient ``/app`` difficile à stabiliser.
+
+V56 conserve le backend/API existant mais publie une seule base frontend. Les outils qui ont
+réellement besoin d'UI (notamment Embeds) sont intégrés une seule fois ici, avec des points
+d'insertion génériques et testés. Le snapshot V55 fige ensuite ce document avant le bind HTTP.
+"""
+
+from .dashboard_oxyde_hotfix import patch_dashboard_runtime
 from .dashboard_frontend_freeze_v55 import install_product_prestart_hook
+from . import embed_dashboard as _embed_dashboard
 
 
-# dashboard.py imports this module after its handlers are defined. Patch the guild reader
-# immediately so a secondary/optional table can never leave the whole dashboard blank.
+# Correction backend uniquement : une table secondaire absente ne doit jamais vider /app.
 patch_dashboard_runtime()
-# Railway appelle sentrix_product_update.install_dashboard_prestart() avant build_app().
-# Armer V55 ici garantit que le HTML de /app est figé exactement à ce moment-là, avant
-# que les cogs/finaliseurs tardifs puissent encore réécrire dashboard.INDEX_HTML.
+# Fige le document final après les extensions produit pré-start, avant build_app().
 install_product_prestart_hook()
 
 
-_OVERVIEW_SCOPE_FIX = r"""
-    /* The detailed server diagnostic belongs to Vue d'ensemble only. */
-    body:not([data-tab="overview"]) #sentrixSafeOverview{display:none!important}
-    body[data-tab="overview"] #sentrixSafeOverview{display:block!important}
-
-    /* The overview renderer is itself a child of .fields: make it span the full grid.
-       Without this, the hero is squeezed into half a column and all cards become tall. */
-    body[data-tab="overview"] #fields>.sx-overview{
-      grid-column:1/-1!important;
-      width:100%!important;
-      min-width:0!important;
-      max-width:none!important;
-    }
-    body[data-tab="overview"] .sx-summary{
-      width:100%!important;
-      min-width:0!important;
-      align-items:stretch!important;
-    }
-    body[data-tab="overview"] .sx-summary-main,
-    body[data-tab="overview"] .sx-summary-stat{
-      min-width:0!important;
-      height:auto!important;
-    }
-    @media(max-width:1180px){
-      body[data-tab="overview"] .sx-summary{grid-template-columns:repeat(2,minmax(0,1fr))!important}
-      body[data-tab="overview"] .sx-summary-main{grid-column:1/-1!important}
-    }
-    @media(max-width:700px){
-      body[data-tab="overview"] .sx-summary{grid-template-columns:1fr!important}
-      body[data-tab="overview"] .sx-summary-main{grid-column:auto!important}
-    }
-"""
-
-
-_EMBEDS_PAGE_FIX = r"""
-    /* Embeds has its own secure builder route; keep it as a real dashboard page. */
-    body[data-tab="embeds"] #sxV4Save,
-    body[data-tab="embeds"] .savebar{display:none!important}
-"""
-
-_EMBEDS_PAGE_JS = r"""
+_EMBEDS_V56_JS = r"""
     (() => {
       "use strict";
       tabs.embeds={
         title:"Embeds",
-        description:"Créez et publiez vos messages enrichis depuis l'éditeur SentriX.",
+        description:"Créez, prévisualisez et envoyez un message enrichi dans Discord.",
+        embeds:true,
         fields:[]
       };
-      const sxRenderWithEmbeds=renderTab;
+
+      const navigation=document.getElementById("navigation");
+      if(navigation && !navigation.querySelector('[data-tab="embeds"]')){
+        const button=document.createElement("button");
+        button.type="button";
+        button.dataset.tab="embeds";
+        button.textContent="Embeds";
+        const roles=navigation.querySelector('[data-tab="roles"]');
+        navigation.insertBefore(button,roles||null);
+      }
+
+      const renderTabV56Base=renderTab;
       renderTab=function(){
-        if(state.tab!=="embeds")return sxRenderWithEmbeds();
-        if(!state.guildData)return;
+        if(state.tab!=="embeds") return renderTabV56Base();
+        if(!state.guildData) return;
+        const tab=tabs.embeds;
         document.body.dataset.tab="embeds";
-        const title=document.getElementById("tabTitle");
-        const description=document.getElementById("tabDescription");
-        const crumb=document.getElementById("sxV4Crumb");
-        const eyebrow=document.getElementById("sxV4Eyebrow");
-        if(title)title.textContent="Embeds";
-        if(description)description.textContent="Préparez vos annonces et messages Discord avec l'éditeur dédié de SentriX.";
-        if(crumb)crumb.textContent="Embeds";
-        if(eyebrow)eyebrow.textContent="OUTILS";
-        document.getElementById("navigation")?.querySelectorAll("button[data-tab]").forEach(btn=>btn.classList.toggle("active",btn.dataset.tab==="embeds"));
-        const fields=document.getElementById("fields");
-        if(fields){
-          const guild=encodeURIComponent(String(state.guildId||""));
-          fields.innerHTML='<div class="sx-section-head"><small>OUTILS</small><h2>Créateur d embeds</h2><p>Utilisez l éditeur sécurisé déjà relié à votre serveur.</p></div><article class="sx-hub-card" style="grid-column:1/-1;min-height:240px"><div><div class="sx-kicker">MESSAGES DISCORD</div><h3>Créer un message enrichi</h3><p>Composez le contenu, choisissez le salon, prévisualisez le rendu et publiez depuis le créateur SentriX.</p></div><div class="sx-hub-actions"><button type="button" class="sx-hub-button primary" id="sxOpenEmbedBuilder">Ouvrir le créateur</button></div></article>';
-          fields.querySelector("#sxOpenEmbedBuilder")?.addEventListener("click",()=>{location.href="/embed-builder"+(guild?"?guild="+guild:"");});
-        }
-        document.getElementById("saveBar")?.classList.add("hidden");
-        document.getElementById("sxV4Save")?.classList.add("hidden");
-        state.dirty=false;
+        $("tabTitle").textContent=tab.title;
+        $("tabDescription").textContent=tab.description;
+        document.querySelectorAll("#navigation button[data-tab]").forEach(
+          button=>button.classList.toggle("active",button.dataset.tab==="embeds")
+        );
+        renderEmbeds();
+        $("saveBar").classList.remove("hidden");
+        $("saveButton").textContent="Envoyer l'embed";
+        $("saveStatus").textContent="Aperçu en direct";
+      };
+
+      const saveV56Base=save;
+      save=async function(event){
+        if(state.tab!=="embeds") return saveV56Base(event);
+        event.preventDefault();
+        if(!state.guildId||!state.guildData) return;
+        await sendEmbed();
       };
     })();
 """
 
 
+def _noop_embed_html_patch(html: str) -> str:
+    """Le backend Embeds reste installé, mais son ancien patch HTML n'est plus nécessaire."""
+    return html
+
+
 def apply_dashboard_pages(html: str) -> str:
-    """Install the stable router, clarity layer and final compact V5.2 scale."""
-    html = _apply_oxyde_dashboard(html)
-    if "body:not([data-tab=\"overview\"]) #sentrixSafeOverview" not in html:
-        html = html.replace("  </style>", _OVERVIEW_SCOPE_FIX + "\n  </style>", 1)
-    if "body[data-tab=\"embeds\"] #sxV4Save" not in html:
-        html = html.replace("  </style>", _EMBEDS_PAGE_FIX + "\n  </style>", 1)
-    marker = "    Promise.all([loadPublic(),loadSession()]).catch(e=>toast(e.message,true));"
-    if marker in html and "sxRenderWithEmbeds" not in html:
-        html = html.replace(marker, _EMBEDS_PAGE_JS + "\n" + marker, 1)
-    html = apply_dashboard_hotfix(html)
-    html = apply_major_v5(html)
-    html = apply_v5_reliability(html)
-    html = apply_clarity_v51(html)
-    return apply_compact_v52(html)
+    """Construit le frontend canonique V56 sans réappliquer les anciennes générations UI."""
+    if "/* sentrix-v56-embeds */" in html:
+        return html
+
+    boot_marker = "    Promise.all([loadPublic(),loadSession()])"
+    style_marker = "  </style>"
+    if boot_marker not in html or style_marker not in html:
+        # Échec fermé : mieux vaut conserver le dashboard canonique que servir un document
+        # partiellement réécrit. V55 vérifiera encore la chaîne session/guilds avant de figer.
+        return html
+
+    html = html.replace(
+        style_marker,
+        "    /* sentrix-v56-embeds */\n" + _embed_dashboard.EMBED_CSS + "\n" + style_marker,
+        1,
+    )
+    html = html.replace(
+        boot_marker,
+        _embed_dashboard.EMBED_JS + "\n" + _EMBEDS_V56_JS + "\n" + boot_marker,
+        1,
+    )
+
+    # L'extension historique continue d'installer sa route POST et ses headers de sécurité,
+    # mais elle ne doit plus tenter de réécrire une seconde fois le document V56.
+    _embed_dashboard._patch_html = _noop_embed_html_patch
+    return html
 
 
 __all__ = ["apply_dashboard_pages"]

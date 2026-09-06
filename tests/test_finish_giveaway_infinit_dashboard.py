@@ -46,18 +46,20 @@ def test_weighted_draw_is_unique_even_with_multiple_winners():
 
 
 def test_dashboard_uses_single_canonical_switch_loader():
-    """Le runtime tardif ne doit plus remplacer le selectGuild canonique.
+    """Une ancienne réponse serveur ne doit jamais écraser le serveur courant.
 
-    Depuis la correction de la course dashboard, l'annulation de requête appartient à
-    web/dashboard.py. Un rewriter tardif basé sur guildLoadToken recréerait le bug où un
-    ancien serveur ou un écran « Chargement du serveur… » écrase le rendu courant.
+    V60 possède un loader canonique basé sur AbortController : chaque nouveau changement
+    annule la requête précédente et vérifie encore l'identité du contrôleur après l'attente
+    réseau. Le runtime tardif ne doit ajouter aucun second système de token/loader.
     """
     html = dashboard.INDEX_HTML
     runtime_source = (ROOT / "cogs/dashboard_runtime_patch.py").read_text(encoding="utf-8")
 
     assert "new AbortController()" in html
     assert "state.guildAbort" in html
-    assert "state.guildId!==value" in html
+    assert "if(state.guildAbort)state.guildAbort.abort();" in html
+    assert "controller!==state.guildAbort" in html
+    assert "controller.signal.aborted" in html
     assert "guildLoadToken" not in runtime_source
     assert "Les données précédentes ont été retirées" not in runtime_source
     assert "dashboard.INDEX_HTML =" not in runtime_source
