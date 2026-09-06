@@ -430,6 +430,18 @@ class BotAllInOne(commands.Bot):
         rows = await self.db.blacklist_list()
         self.blacklist_cache = {r["user_id"]: (r["reason"] or "Aucune raison fournie") for r in rows}
 
+        # Installé explicitement ICI, avant la toute première extension, plutôt que de
+        # compter sur le monkeypatch de cogs/__init__.py (_load_extension_with_sentrix_patches
+        # appelle install_slash_command_budget avant chaque load_extension, mais seulement à
+        # partir du moment où le package cogs a déjà été importé une première fois — ce qui
+        # n'arrive qu'AU MILIEU de cette boucle, une fois qu'un premier appel a fini de tirer
+        # cogs/__init__.py). cogs.embed_builder (24e extension) tombait dans cette fenêtre et
+        # perdait TOUTE l'extension (ExtensionFailed), donc +embed aussi, pas seulement sa
+        # racine slash — voir CommandLimitReached dans les journaux Railway du 2026-09-06.
+        from cogs.slash_command_budget import install as _install_slash_command_budget
+
+        _install_slash_command_budget(self)
+
         for ext in EXTENSIONS:
             try:
                 await self.load_extension(ext)
