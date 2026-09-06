@@ -77,11 +77,15 @@ def install(dashboard) -> bool:
 
     version = str(getattr(dashboard, "_sentrix_dashboard_version", "") or "")
     if version.startswith(("v62", "v63", "v64")):
+        # Vérifier des marqueurs réellement présents dans le programme final plutôt qu'un
+        # ancien libellé de carte supprimé par la refonte compacte.
         required_v62 = (
             'id="sentrix-v62-compat"',
             'id="sentrix-v62-dense"',
             "Vérification & règlement",
-            "Tickets v2 inline",
+            "ticket_panel_save",
+            "ticket_type_save",
+            "ticket_question_save",
             "/api/guilds/${encodeURIComponent(state.guildId)}/v62",
         )
         absent_v62 = [marker for marker in required_v62 if marker not in snapshot]
