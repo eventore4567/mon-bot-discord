@@ -12,7 +12,7 @@ def _prestart_html() -> str:
 def test_v61_is_the_final_prestart_frontend():
     document = _prestart_html()
     module = __import__("web.dashboard", fromlist=["dashboard"])
-    assert getattr(module, "_sentrix_dashboard_version", None) == "v61-draft-unified"
+    assert getattr(module, "_sentrix_dashboard_version", None) == "v61-draft-unified-final"
     assert "SENTR<em>IX</em>" in document
     assert "--accent:#d66f55" in document
     assert 'class="server-rail"' in document
@@ -22,18 +22,23 @@ def test_v61_is_the_final_prestart_frontend():
     assert 'id="sentrix-v60-dm-adapter"' in document
     assert 'id="sentrix-v60-bootguard"' in document
     assert 'id="sentrix-v61-unified"' in document
+    # Les boutons V61 sont générés depuis `groups` au runtime : valider les clés du programme,
+    # puis le smoke JSDOM valide les vrais boutons DOM après exécution.
     for tab in (
         "overview", "welcome", "roles", "security", "sanctions", "logs", "tickets",
         "notifications", "ai", "embeds", "games", "design", "setup", "access", "dm", "status",
     ):
-        assert f'data-tab="{tab}"' in document
+        assert f'["{tab}",' in document or f"['{tab}'," in document or f'data-tab="{tab}"' in document, tab
 
 
 def test_v61_removes_the_broken_generic_feature_suite():
     document = _prestart_html()
-    assert 'data-tab="features"' not in document
+    from web.dashboard_v61_postfix import _legacy_feature_ui_present
+
+    assert not _legacy_feature_ui_present(document)
     assert 'id="sentrix-v60-features-inline"' not in document
-    assert "Fonctions avancées</button>" not in document
+    assert 'id="sxFeaturesFrame"' not in document
+    assert 'class="sx-features-shell"' not in document
     assert "L’ancien centre « Fonctions avancées » a été supprimé" in document
 
 
@@ -78,6 +83,7 @@ def test_v61_uses_one_draftbot_like_navigation_and_internal_admin_links():
         "'/operations':'status'",
         "'/feature-suite':'setup'",
         "history.replaceState",
+        "v61Built",
     ):
         assert marker in document, marker
 
