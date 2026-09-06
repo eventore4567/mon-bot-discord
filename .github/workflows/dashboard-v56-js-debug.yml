@@ -9,6 +9,8 @@ jobs:
   browser-program:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    env:
+      DISCORD_TOKEN: static-ci-token
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
