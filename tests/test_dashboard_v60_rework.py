@@ -9,12 +9,13 @@ def _prestart_html() -> str:
     return str(dashboard.INDEX_HTML)
 
 
-def test_v61_is_the_final_prestart_frontend():
+def test_v64_is_the_final_prestart_frontend():
     document = _prestart_html()
     module = __import__("web.dashboard", fromlist=["dashboard"])
-    assert getattr(module, "_sentrix_dashboard_version", None) == "v61-draft-unified-final"
+    assert getattr(module, "_sentrix_dashboard_version", None) == "v64-final"
     assert "SENTR<em>IX</em>" in document
     assert "--accent:#d66f55" in document
+    assert "--sx-blue:#4da3ff" in document
     assert 'class="server-rail"' in document
     assert 'class="sidebar"' in document
     assert 'id="sentrix-v60-max"' in document
@@ -22,16 +23,19 @@ def test_v61_is_the_final_prestart_frontend():
     assert 'id="sentrix-v60-dm-adapter"' in document
     assert 'id="sentrix-v60-bootguard"' in document
     assert 'id="sentrix-v61-unified"' in document
-    # Les boutons V61 sont générés depuis `groups` au runtime : valider les clés du programme,
-    # puis le smoke JSDOM valide les vrais boutons DOM après exécution.
+    assert 'id="sentrix-v62-compat"' in document
+    assert 'id="sentrix-v62-dense"' in document
+    assert 'id="sentrix-v63-polish"' in document
+    assert 'id="sentrix-v64-final"' in document
     for tab in (
-        "overview", "welcome", "roles", "security", "sanctions", "logs", "tickets",
-        "notifications", "ai", "embeds", "games", "design", "setup", "access", "dm", "status",
+        "overview", "welcome", "roles", "verification", "security", "sanctions", "logs",
+        "tickets", "notifications", "economy", "ai", "embeds", "games", "design", "setup",
+        "access", "dm", "status",
     ):
         assert f'["{tab}",' in document or f"['{tab}'," in document or f'data-tab="{tab}"' in document, tab
 
 
-def test_v61_removes_the_broken_generic_feature_suite():
+def test_v64_removes_the_broken_generic_feature_suite():
     document = _prestart_html()
     from web.dashboard_v61_postfix import _legacy_feature_ui_present
 
@@ -39,10 +43,12 @@ def test_v61_removes_the_broken_generic_feature_suite():
     assert 'id="sentrix-v60-features-inline"' not in document
     assert 'id="sxFeaturesFrame"' not in document
     assert 'class="sx-features-shell"' not in document
-    assert "L’ancien centre « Fonctions avancées » a été supprimé" in document
+    final_groups = document[document.index("const FINAL_GROUPS"):document.index("let lastSearch", document.index("const FINAL_GROUPS"))]
+    assert "Fonctions avancées" not in final_groups
+    assert "Messages récurrents" not in final_groups
 
 
-def test_v61_keeps_real_api_wiring_inside_one_app():
+def test_v64_keeps_real_api_wiring_inside_one_app():
     document = _prestart_html()
     required = (
         'async function loadSession()',
@@ -58,6 +64,7 @@ def test_v61_keeps_real_api_wiring_inside_one_app():
         '/systems`',
         '/games`',
         '/design`',
+        '/v62`',
         '/dm/apercu',
         '/dm/all',
         '/dm/job',
@@ -68,22 +75,21 @@ def test_v61_keeps_real_api_wiring_inside_one_app():
         assert marker in document, marker
 
 
-def test_v61_uses_one_draftbot_like_navigation_and_internal_admin_links():
+def test_v64_uses_one_draftbot_like_shell_with_sentrix_blue_details():
     document = _prestart_html()
     for marker in (
         "Membres & rôles",
         "Modération",
+        "Communauté",
         "Outils",
         "Configuration serveur",
+        "Vérification & règlement",
         "Mini-jeux",
         "Design",
         "Statut SentriX",
-        "oldMap",
-        "'/setup-center':'setup'",
-        "'/operations':'status'",
-        "'/feature-suite':'setup'",
-        "history.replaceState",
-        "v61Built",
+        "const FINAL_GROUPS",
+        "sx-v63-discord",
+        "sx-v62-grid",
     ):
         assert marker in document, marker
 
@@ -97,9 +103,11 @@ def test_v60_diagnostics_defines_all_requested_runtime_states():
     assert diagnostics._status("error", "x")["status"] == "ERREUR DE CONFIGURATION"
 
 
-def test_v60_diagnostics_route_is_bound_before_aiohttp_build():
+def test_v62_routes_wrap_the_diagnostics_build_before_aiohttp_build():
     from web import dashboard
     import sentrix_product_update
 
     sentrix_product_update.install_dashboard_prestart(dashboard)
-    assert dashboard.build_app.__module__ == "web.dashboard_v60_diagnostics"
+    function = getattr(dashboard.build_app, "__func__", dashboard.build_app)
+    assert getattr(function, "_sentrix_v62_routes", False)
+    assert dashboard.build_app.__module__ == "web.dashboard_v62_dense"
