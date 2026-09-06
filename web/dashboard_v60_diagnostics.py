@@ -2,12 +2,14 @@
 
 Expose un état synthétique calculé depuis Discord + la base, sans recopier la logique de
 configuration dans le navigateur. Les états sont volontairement textuels : ACTIF, INACTIF,
-NON CONFIGURÉ ou ERREUR DE CONFIGURATION.
+NON CONFIGURÉ ou ERREUR DE CONFIGURATION. Une ressource existante mais inutilisable par le
+bot (permissions de salon ou hiérarchie de rôle) est également considérée en erreur.
 """
 from __future__ import annotations
 
 import logging
 
+import discord
 from aiohttp import web
 
 logger = logging.getLogger("bot.dashboard-v60-diagnostics")
@@ -93,24 +95,63 @@ def install(dashboard) -> bool:
             "stats_channel", "afk_channel", "error_channel", "log_messages", "log_members",
             "log_voice", "log_roles", "log_server", "log_automod", "log_moderation",
         }
+        # Ces destinations doivent pouvoir recevoir un message du bot. AFK peut être vocal.
+        message_channel_fields = channel_fields - {"afk_channel"}
         role_fields = {
             "mod_role", "admin_role", "mute_role", "verification_role", "verify_role",
             "autorole", "warn_role", "member_role", "booster_role",
         }
+        # Ces rôles peuvent être attribués/retirés par SentriX et doivent donc être sous son rôle.
+        assignable_role_fields = {
+            "mute_role", "verification_role", "verify_role", "autorole",
+            "warn_role", "member_role", "booster_role",
+        }
+
         invalid_resources: list[dict] = []
+
+        def add_invalid(field: str, value: int, kind: str, reason: str) -> None:
+            invalid_resources.append({"field": field, "id": str(value), "type": kind, "reason": reason})
+
         for field in sorted(channel_fields):
             value = _optional_id(conf.get(field))
-            if value is not None and guild.get_channel(value) is None:
-                invalid_resources.append({"field": field, "id": str(value), "type": "channel"})
+            if value is None:
+                continue
+            channel = guild.get_channel(value)
+            if channel is None:
+                add_invalid(field, value, "channel", "deleted")
+                continue
+            if bot_member is not None and field in message_channel_fields and hasattr(channel, "permissions_for"):
+                perms = channel.permissions_for(bot_member)
+                if not getattr(perms, "view_channel", False) or not getattr(perms, "send_messages", False):
+                    add_invalid(field, value, "channel", "missing_send_permission")
+                    continue
+                if field.startswith("log_") or field in {"log_channel", "ticket_log_channel"}:
+                    if not getattr(perms, "embed_links", False):
+                        add_invalid(field, value, "channel", "missing_embed_permission")
+
         category_id = _optional_id(conf.get("ticket_category"))
         if category_id is not None:
-            channel = guild.get_channel(category_id)
-            if channel is None or channel.__class__.__name__ != "CategoryChannel":
-                invalid_resources.append({"field": "ticket_category", "id": str(category_id), "type": "category"})
+            category = guild.get_channel(category_id)
+            if not isinstance(category, discord.CategoryChannel):
+                add_invalid("ticket_category", category_id, "category", "deleted_or_wrong_type")
+            elif bot_member is not None:
+                category_perms = category.permissions_for(bot_member)
+                if not getattr(category_perms, "view_channel", False):
+                    add_invalid("ticket_category", category_id, "category", "missing_view_permission")
+
         for field in sorted(role_fields):
             value = _optional_id(conf.get(field))
-            if value is not None and guild.get_role(value) is None:
-                invalid_resources.append({"field": field, "id": str(value), "type": "role"})
+            if value is None:
+                continue
+            role = guild.get_role(value)
+            if role is None:
+                add_invalid(field, value, "role", "deleted")
+                continue
+            if field in assignable_role_fields and bot_member is not None:
+                if not getattr(permissions, "manage_roles", False):
+                    add_invalid(field, value, "role", "missing_manage_roles")
+                elif role >= bot_member.top_role:
+                    add_invalid(field, value, "role", "above_bot_role")
 
         invalid_by_field = {item["field"] for item in invalid_resources}
 
@@ -119,7 +160,11 @@ def install(dashboard) -> bool:
             if value is None:
                 return _status("missing", missing_detail)
             if field in invalid_by_field:
-                return _status("error", f"La ressource configurée pour {field} n'existe plus.", configured=True)
+                return _status(
+                    "error",
+                    "Le salon configuré n'existe plus ou SentriX n'a pas les permissions nécessaires.",
+                    configured=True,
+                )
             return _status("active", active_detail, configured=True)
 
         modules: dict[str, dict] = {}
@@ -142,7 +187,7 @@ def install(dashboard) -> bool:
         ]
         configured_logs = [field for field in log_fields if _optional_id(conf.get(field)) is not None]
         if any(field in invalid_by_field for field in configured_logs):
-            modules["logs"] = _status("error", "Au moins un salon de logs configuré n'existe plus.", configured=True)
+            modules["logs"] = _status("error", "Au moins un salon de logs est supprimé ou inutilisable par SentriX.", configured=True)
         elif configured_logs:
             modules["logs"] = _status("active", f"{len(configured_logs)} type(s) de logs ont un salon valide.", configured=True)
         else:
@@ -150,7 +195,7 @@ def install(dashboard) -> bool:
 
         configured_roles = [field for field in role_fields if _optional_id(conf.get(field)) is not None]
         if any(field in invalid_by_field for field in configured_roles):
-            modules["roles"] = _status("error", "Au moins un rôle configuré n'existe plus.", configured=True)
+            modules["roles"] = _status("error", "Au moins un rôle est supprimé ou placé au-dessus de SentriX.", configured=True)
         elif configured_roles:
             modules["roles"] = _status("active", f"{len(configured_roles)} rôle(s) SentriX sont configurés.", configured=True)
         else:
@@ -158,7 +203,7 @@ def install(dashboard) -> bool:
 
         ticket_values = [conf.get("ticket_category"), conf.get("ticket_log_channel")]
         if "ticket_category" in invalid_by_field or "ticket_log_channel" in invalid_by_field:
-            modules["tickets"] = _status("error", "Une ressource du système de tickets n'existe plus.", configured=True)
+            modules["tickets"] = _status("error", "Une ressource du système de tickets est supprimée ou inaccessible.", configured=True)
         elif any(_optional_id(value) is not None for value in ticket_values):
             modules["tickets"] = _status("active", "La base du système de tickets est configurée.", configured=True)
         else:
@@ -182,10 +227,21 @@ def install(dashboard) -> bool:
             if not bool(row["enabled"]):
                 continue
             active_social += 1
-            if guild.get_channel(int(row["discord_channel_id"])) is None or guild.get_role(int(row["role_id"])) is None:
+            try:
+                social_channel = guild.get_channel(int(row["discord_channel_id"]))
+                social_role = guild.get_role(int(row["role_id"]))
+            except (TypeError, ValueError):
+                social_channel = None
+                social_role = None
+            if social_channel is None or social_role is None:
                 invalid_social += 1
+                continue
+            if bot_member is not None and hasattr(social_channel, "permissions_for"):
+                social_perms = social_channel.permissions_for(bot_member)
+                if not getattr(social_perms, "view_channel", False) or not getattr(social_perms, "send_messages", False):
+                    invalid_social += 1
         if invalid_social:
-            modules["notifications"] = _status("error", f"{invalid_social} notification(s) pointent vers une ressource supprimée.", configured=True)
+            modules["notifications"] = _status("error", f"{invalid_social} notification(s) pointent vers une ressource supprimée ou inaccessible.", configured=True)
         elif active_social:
             modules["notifications"] = _status("active", f"{active_social} source(s) sociales sont actives.", configured=True)
         else:
@@ -238,7 +294,7 @@ def install(dashboard) -> bool:
         return app
 
     dashboard.build_app = build_app
-    logger.info("Dashboard V60 : API diagnostics installée.")
+    logger.info("Dashboard V60 : API diagnostics installée avec validation des permissions et de la hiérarchie.")
     return True
 
 
