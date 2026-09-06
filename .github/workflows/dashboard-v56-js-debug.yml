@@ -21,5 +21,11 @@ jobs:
           node-version: '22'
       - name: Install project dependencies
         run: python -m pip install --disable-pip-version-check pytest -r requirements.txt
+      - name: Install browser smoke dependency
+        run: npm install --no-save jsdom@26
       - name: Check the exact pre-start browser program
         run: python -m pytest -q tests/test_dashboard_browser_program_v56.py
+      - name: Build the exact pre-start dashboard
+        run: python tests/dump_dashboard_prestart_v56.py /tmp/sentrix-app.html
+      - name: Execute the dashboard bootstrap in a DOM
+        run: node tests/dashboard_v56_browser_smoke.mjs /tmp/sentrix-app.html
