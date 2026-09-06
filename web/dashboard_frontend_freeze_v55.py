@@ -29,6 +29,53 @@ def _snapshot_is_usable(html: str) -> tuple[bool, list[str]]:
     return not missing, missing
 
 
+def _ensure_v60_features_final(dashboard) -> bool:
+    """Post-condition de production : le snapshot final DOIT contenir l'onglet avancé.
+
+    L'intégrateur normal ``dashboard_v60_features_inline.install`` reste utilisé. Ce garde-fou
+    travaille directement sur le document final juste avant son gel, afin qu'un ordre de
+    chargement historique ou un état d'installation déjà marqué ne puisse plus faire perdre
+    l'onglet ``Fonctions avancées`` en production.
+    """
+    try:
+        from . import dashboard_v60_features_inline as features
+    except Exception:
+        logger.exception("Dashboard V60 : module des fonctions avancées introuvable au gel final.")
+        return False
+
+    html = str(getattr(dashboard, "INDEX_HTML", "") or "")
+    marker = 'id="sentrix-v60-features-inline"'
+    injected = False
+    if marker not in html:
+        if "</style>" not in html or "</body>" not in html:
+            logger.error("Dashboard V60 : document final sans points d'insertion pour les fonctions avancées.")
+            return False
+        html = html.replace("</style>", features.INLINE_CSS + "\n</style>", 1)
+        html = html.replace("</body>", features.INLINE_JS + "\n</body>", 1)
+        dashboard.INDEX_HTML = html
+        injected = True
+
+    try:
+        route_ok = bool(features._install_route_redirect())
+    except Exception:
+        logger.exception("Dashboard V60 : impossible d'armer la redirection de l'ancien centre des fonctions.")
+        route_ok = False
+
+    final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
+    present = marker in final_html and 'data-tab="features"' in final_html and "/feature-suite?embed=1&guild=" in final_html
+    if not present:
+        logger.error("Dashboard V60 : post-condition fonctions avancées ÉCHEC avant gel.")
+        return False
+
+    logger.info(
+        "Dashboard V60 : fonctions avancées garanties dans le document final (injecté=%s route_redirect=%s octets=%s).",
+        injected,
+        route_ok,
+        len(final_html.encode("utf-8")),
+    )
+    return route_ok
+
+
 def install(dashboard) -> bool:
     """Fige le HTML de ``/app`` avant que le serveur aiohttp ne lie ses routes."""
     current = dashboard.handle_index
@@ -124,9 +171,9 @@ def install_product_prestart_hook() -> bool:
             try:
                 from .dashboard_v60_features_inline import install as install_v60_features_inline
                 if not install_v60_features_inline(dashboard):
-                    logger.error("Dashboard V60 : intégration des fonctions avancées refusée.")
+                    logger.error("Dashboard V60 : intégration initiale des fonctions avancées refusée.")
             except Exception:
-                logger.exception("Dashboard V60 : intégration des fonctions avancées impossible.")
+                logger.exception("Dashboard V60 : intégration initiale des fonctions avancées impossible.")
             try:
                 from .dashboard_v60_dm import install as install_v60_dm
                 if not install_v60_dm(dashboard):
@@ -139,6 +186,13 @@ def install_product_prestart_hook() -> bool:
                     logger.error("Dashboard V60 bootguard : installation refusée.")
             except Exception:
                 logger.exception("Dashboard V60 bootguard : installation impossible.")
+
+        # IMPORTANT : vérification finale indépendante de l'ordre des anciennes couches.
+        # Si l'intégrateur normal a été court-circuité, on réinjecte directement ici avant
+        # la capture immuable de /app. Le snapshot ne peut donc plus repartir sans ce panneau.
+        if v60_ok and not _ensure_v60_features_final(dashboard):
+            logger.error("Dashboard V60 : les fonctions avancées ne sont pas garanties ; snapshot signalé incomplet.")
+
         if not install(dashboard):
             logger.error(
                 "Dashboard frontend : le gel pré-start a échoué ; /app ne doit pas être considéré stable."
@@ -151,4 +205,4 @@ def install_product_prestart_hook() -> bool:
     return True
 
 
-__all__ = ["install", "install_product_prestart_hook", "_snapshot_is_usable"]
+__all__ = ["install", "install_product_prestart_hook", "_snapshot_is_usable", "_ensure_v60_features_final"]
