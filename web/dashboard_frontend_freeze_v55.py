@@ -1,8 +1,8 @@
 """Gel final du dashboard SentriX.
 
-V63 conserve le mécanisme de snapshot immuable introduit en V55. V61 remplace les anciens
+V64 conserve le mécanisme de snapshot immuable introduit en V55. V61 remplace les anciens
 centres visuels par une seule application ``/app``, V62 apporte les éditeurs denses
-Vérification/Tickets et V63 termine l'aperçu, l'économie et le design.
+Vérification/Tickets, V63 termine l'aperçu/design et V64 verrouille la navigation finale.
 """
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ def _snapshot_is_usable(html: str) -> tuple[bool, list[str]]:
 
 
 def _ensure_v60_features_final(dashboard) -> bool:
-    """Compatibilité ancienne : vérifie qu'aucune vraie UI Feature Suite ne reste."""
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     try:
         from .dashboard_v61_postfix import _legacy_feature_ui_present
@@ -43,7 +42,7 @@ def _theme_secondary_pages_final() -> bool:
 
 def _is_v61_document(dashboard, html: str) -> bool:
     version = str(getattr(dashboard, "_sentrix_dashboard_version", "") or "")
-    return version.startswith(("v61", "v62", "v63")) or 'id="sentrix-v61-unified"' in html
+    return version.startswith(("v61", "v62", "v63", "v64")) or 'id="sentrix-v61-unified"' in html
 
 
 def install(dashboard) -> bool:
@@ -77,7 +76,7 @@ def install(dashboard) -> bool:
             return False
 
     version = str(getattr(dashboard, "_sentrix_dashboard_version", "") or "")
-    if version.startswith(("v62", "v63")):
+    if version.startswith(("v62", "v63", "v64")):
         required_v62 = (
             'id="sentrix-v62-compat"',
             'id="sentrix-v62-dense"',
@@ -89,8 +88,11 @@ def install(dashboard) -> bool:
         if absent_v62:
             logger.error("Dashboard V62+ non figé : marqueurs denses absents=%s.", absent_v62)
             return False
-    if version.startswith("v63") and 'id="sentrix-v63-polish"' not in snapshot:
-        logger.error("Dashboard V63 non figé : polish final absent.")
+    if version.startswith(("v63", "v64")) and 'id="sentrix-v63-polish"' not in snapshot:
+        logger.error("Dashboard V63+ non figé : polish absent.")
+        return False
+    if version.startswith("v64") and 'id="sentrix-v64-final"' not in snapshot:
+        logger.error("Dashboard V64 non figé : verrou de navigation absent.")
         return False
 
     digest = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()[:16]
@@ -118,7 +120,7 @@ def install(dashboard) -> bool:
 
 
 def install_product_prestart_hook() -> bool:
-    """Construit V60, pose V61/V62/V63 en dernier et fige ``/app``."""
+    """Construit V60 puis V61/V62/V63/V64 et fige ``/app``."""
     try:
         import sentrix_product_update as product
     except Exception:
@@ -206,6 +208,14 @@ def install_product_prestart_hook() -> bool:
             except Exception:
                 logger.exception("Dashboard V63 polish : installation impossible.")
 
+        v64_ok = False
+        if v63_ok:
+            try:
+                from .dashboard_v64_final import install as install_v64
+                v64_ok = bool(install_v64(dashboard))
+            except Exception:
+                logger.exception("Dashboard V64 final : installation impossible.")
+
         if v61_ok and not postfix_ok:
             logger.error("Dashboard V61 final absent : refus de considérer le frontend comme final.")
         elif postfix_ok and not _ensure_v60_features_final(dashboard):
@@ -216,6 +226,8 @@ def install_product_prestart_hook() -> bool:
             logger.error("Dashboard V62 dense absent : Tickets/Vérification ne sont pas finalisés.")
         elif v62_ok and not v63_ok:
             logger.error("Dashboard V63 polish absent : aperçu/design/économie non finalisés.")
+        elif v63_ok and not v64_ok:
+            logger.error("Dashboard V64 absent : navigation finale non verrouillée.")
 
         if not install(dashboard):
             logger.error("Dashboard frontend : gel final échoué.")
@@ -223,7 +235,7 @@ def install_product_prestart_hook() -> bool:
     no_store_then_freeze._sentrix_frontend_freeze_hook_v55 = True
     no_store_then_freeze._sentrix_original = current
     product._install_no_store_index = no_store_then_freeze
-    logger.info("Dashboard V63 armé : V61 unifié + V62 dense + polish final + gel immuable.")
+    logger.info("Dashboard V64 armé : V61 unifié + V62 dense + V63 polish + navigation finale + gel immuable.")
     return True
 
 
