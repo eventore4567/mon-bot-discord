@@ -79,6 +79,7 @@ def install(dashboard) -> bool:
     version = str(getattr(dashboard, "_sentrix_dashboard_version", "") or "")
     if version.startswith(("v62", "v63")):
         required_v62 = (
+            'id="sentrix-v62-compat"',
             'id="sentrix-v62-dense"',
             "Vérification & règlement",
             "Tickets v2 inline",
@@ -181,8 +182,16 @@ def install_product_prestart_hook() -> bool:
             except Exception:
                 logger.exception("Dashboard V61 postfix : installation impossible.")
 
-        v62_ok = False
+        compat_ok = False
         if postfix_ok:
+            try:
+                from .dashboard_v62_compat import install as install_v62_compat
+                compat_ok = bool(install_v62_compat(dashboard))
+            except Exception:
+                logger.exception("Dashboard V62 compat : installation impossible.")
+
+        v62_ok = False
+        if compat_ok:
             try:
                 from .dashboard_v62_dense import install as install_v62
                 v62_ok = bool(install_v62(dashboard))
@@ -201,7 +210,9 @@ def install_product_prestart_hook() -> bool:
             logger.error("Dashboard V61 final absent : refus de considérer le frontend comme final.")
         elif postfix_ok and not _ensure_v60_features_final(dashboard):
             logger.error("Dashboard V61 : l'ancienne Feature Suite est encore rendue après postfix.")
-        elif postfix_ok and not v62_ok:
+        elif postfix_ok and not compat_ok:
+            logger.error("Dashboard V62 compat absent : sélecteur de catégories indisponible.")
+        elif compat_ok and not v62_ok:
             logger.error("Dashboard V62 dense absent : Tickets/Vérification ne sont pas finalisés.")
         elif v62_ok and not v63_ok:
             logger.error("Dashboard V63 polish absent : aperçu/design/économie non finalisés.")
