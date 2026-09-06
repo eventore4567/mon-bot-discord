@@ -65,6 +65,17 @@ from sentrix_v97_reliability import install as _install_v97_reliability  # noqa:
 _install_v97_reliability(dashboard_web)
 logger.warning("V97 fiabilité slash + dashboard Tickets simplifié branchés.")
 
+# V98 est chargé immédiatement après V97 et AVANT toute synchronisation. Il conserve le
+# fallback V97 mais fait réellement passer les slash par Bot.invoke, rend ctx.defer idempotent
+# (important pour l'IA), conserve les attachments en fallback, répare les tickets fantômes,
+# aligne /setup sur Gérer le serveur et complète le groupe /ai.
+from sentrix_v98_runtime import install as _install_v98_runtime  # noqa: E402
+
+_install_v98_runtime()
+if not getattr(__import__("sentrix_v95_runtime"), "_sentrix_v98_runtime", False):
+    raise RuntimeError("V98 slash non branchée avant le démarrage Railway.")
+logger.warning("V98 exécution slash/tickets/setup/IA explicitement branchée.")
+
 
 # V96 doit être installée APRES l'import de railway_ha_boot : railway_boot remplace
 # commands.Bot par la classe AutoSharded de production. On branche donc ici le hook de
