@@ -23,13 +23,27 @@ def _remove_script(html: str, script_id: str) -> str:
     return html[:start] + html[end + len("</script>"):]
 
 
+def _legacy_feature_ui_present(html: str) -> bool:
+    """Détecte une vraie ancienne UI, sans confondre le code de migration V61.
+
+    V61 mentionne encore le mot ``features`` dans sa redirection de compatibilité et dans le
+    sélecteur qui supprime un vieux bouton au runtime. Ces chaînes ne créent aucun onglet.
+    """
+    rendered_markers = (
+        'id="sentrix-v60-features-inline"',
+        'class="sx-features-shell"',
+        'id="sxFeaturesFrame"',
+        '<button type="button" data-tab="features"><span class="nav-icon">⚙</span>Fonctions avancées</button>',
+        '<button data-tab="features"><span class="nav-icon">⚙</span>Fonctions avancées</button>',
+    )
+    return any(marker in html for marker in rendered_markers)
+
+
 def install(dashboard) -> bool:
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if not html:
         return False
 
-    # Retire le script et le CSS historiques de « Fonctions avancées » quel que soit l'ordre
-    # ayant mené à leur injection. Le backend V37 reste intact et ses API restent utilisables.
     try:
         from . import dashboard_v60_features_inline as legacy
         html = html.replace(legacy.INLINE_CSS, "")
@@ -38,24 +52,19 @@ def install(dashboard) -> bool:
         logger.exception("V61 postfix : constantes Feature Suite indisponibles.")
     html = _remove_script(html, "sentrix-v60-features-inline")
 
-    # Les boutons statiques/dynamiques éventuellement présents dans le document final sont
-    # éliminés. Le nouveau tableau de navigation V61 ne comporte volontairement pas ce tab.
     for exact in (
         '<button type="button" data-tab="features"><span class="nav-icon">⚙</span>Fonctions avancées</button>',
         '<button data-tab="features"><span class="nav-icon">⚙</span>Fonctions avancées</button>',
     ):
         html = html.replace(exact, "")
 
-    # V61 reconstruisait toute la navigation à chaque renderTab(). Ça remplaçait les noeuds
-    # DOM pendant un clic et faisait perdre focus/scroll/état actif. On la construit une fois.
     old_nav = "const nav=$('navigation');if(!nav)return;\n    nav.innerHTML=groups.map"
     new_nav = "const nav=$('navigation');if(!nav)return;\n    if(nav.dataset.v61Built==='1'){nav.querySelectorAll('button[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===state.tab));return;}\n    nav.dataset.v61Built='1';\n    nav.innerHTML=groups.map"
     if old_nav in html:
         html = html.replace(old_nav, new_nav, 1)
-    else:
+    elif "v61Built" not in html:
         logger.warning("V61 postfix : garde de navigation introuvable.")
 
-    # Aperçu Design : $() est getElementById, pas querySelector.
     html = html.replace(
         "const primary=$('[data-design=\"primary_color\"]')?.value||'#d66f55';",
         "const primary=document.querySelector('[data-design=\"primary_color\"]')?.value||'#d66f55';",
@@ -69,9 +78,9 @@ def install(dashboard) -> bool:
 
     dashboard.INDEX_HTML = html
     dashboard._sentrix_dashboard_version = "v61-draft-unified-final"
-    legacy_present = 'data-tab="features"' in html or 'id="sentrix-v60-features-inline"' in html
-    logger.info("Dashboard V61 postfix : legacy features=%s, navigation stable=%s.", legacy_present, "v61Built" in html)
+    legacy_present = _legacy_feature_ui_present(html)
+    logger.info("Dashboard V61 postfix : ancienne UI features=%s, navigation stable=%s.", legacy_present, "v61Built" in html)
     return not legacy_present and 'id="sentrix-v61-unified"' in html
 
 
-__all__ = ["install"]
+__all__ = ["install", "_legacy_feature_ui_present"]
