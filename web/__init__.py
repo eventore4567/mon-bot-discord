@@ -130,8 +130,14 @@ _CORE_RECOVERY_JS = r"""
   const login = document.getElementById("loginButton");
   if (login) login.classList.remove("hidden");
 
+  // Ne touche plus à state.guildId/state.guildData/loadGuilds() : ce sondage tournait
+  // en parallèle du propre mécanisme de nouvelle tentative de loadGuilds() (voir
+  // dashboard_recovery_v54.py, qui se replanifie lui-même quand discord_ready=false),
+  // sans coordination entre les deux. Deux déclencheurs indépendants pour le même appel
+  // /api/guilds pouvaient se chevaucher — exactement le genre d'appel en double observé
+  // dans les journaux Railway. Ce script se limite maintenant au statut/bouton visibles
+  // ici, qui ne dépendent d'aucune autre couche.
   let attempts = 0;
-  let guildReloading = false;
   let delai = 2000;
   let timer = null;
   let arrete = false;
@@ -152,19 +158,6 @@ _CORE_RECOVERY_JS = r"""
         login.classList.remove("hidden");
         login.setAttribute("aria-disabled", data.oauth_ready ? "false" : "true");
         login.title = data.oauth_ready ? "Se connecter avec Discord" : "SentriX termine son démarrage — réessayez dans quelques secondes";
-      }
-
-      if (
-        data.online &&
-        typeof state !== "undefined" &&
-        state.user &&
-        typeof loadGuilds === "function" &&
-        !guildReloading &&
-        (!state.guildId || !state.guildData)
-      ) {
-        guildReloading = true;
-        try { await loadGuilds(); } catch (_) {}
-        finally { guildReloading = false; }
       }
 
       if (data.online && data.oauth_ready && attempts >= 6) arreter();

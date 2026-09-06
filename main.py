@@ -717,48 +717,17 @@ class BotAllInOne(commands.Bot):
         await self.db.ensure_guild(guild.id)
         logger.info(f"Bot ajouté au serveur : {guild.name} ({guild.id})")
 
-    async def on_member_join(self, member: discord.Member):
-        conf = await self.db.get_guild_config(member.guild.id)
-        if not conf:
-            return
-        if conf["autorole"]:
-            role = member.guild.get_role(conf["autorole"])
-            if role:
-                try:
-                    await member.add_roles(role, reason="Rôle automatique à l'arrivée")
-                except discord.Forbidden:
-                    pass
-        if conf["welcome_channel"]:
-            channel = member.guild.get_channel(conf["welcome_channel"])
-            if channel:
-                text = conf["welcome_message"] or "Bienvenue {member} sur **{server}** !"
-                text = (
-                    text.replace("{member}", member.mention)
-                    .replace("{server}", member.guild.name)
-                    .replace("{username}", member.display_name)
-                    .replace("{member_count}", str(member.guild.member_count or 0))
-                )
-                try:
-                    welcome_embed = embeds.success(text, title=f"Bienvenue {member.display_name}")
-                    welcome_embed.set_thumbnail(url=member.display_avatar.url)
-                    if conf["welcome_image_url"]:
-                        welcome_embed.set_image(url=conf["welcome_image_url"])
-                    await channel.send(embed=welcome_embed)
-                except discord.HTTPException:
-                    pass
-
-    async def on_member_remove(self, member: discord.Member):
-        conf = await self.db.get_guild_config(member.guild.id)
-        if not conf or not conf["goodbye_channel"]:
-            return
-        channel = member.guild.get_channel(conf["goodbye_channel"])
-        if channel:
-            text = conf["goodbye_message"] or "{member} a quitté **{server}**."
-            text = text.replace("{member}", str(member)).replace("{server}", member.guild.name)
-            try:
-                await channel.send(embed=embeds.neutral("👋 Départ", text))
-            except discord.HTTPException:
-                pass
+    # on_member_join / on_member_remove : pas de méthode ici volontairement. Une méthode
+    # définie directement sur cette classe serait dispatchée par discord.py via
+    # getattr(self, "on_member_join") AVANT même bot.extra_events — donc invisible au
+    # verrou join_dedup et à _replace_welcome_listeners, qui ne surveillent que
+    # extra_events. C'était exactement ça qui causait un message de bienvenue en double
+    # sur CHAQUE arrivée (celui-ci, inconditionnel, plus celui du gagnant du verrou dans
+    # cogs/setup_v2_completion.py). L'implémentation officielle unique — message, image,
+    # rôle automatique, verrou HA/Redis, message de départ — vit dans
+    # cogs/setup_v2_completion.py (_send_welcome/_send_goodbye), branchée via
+    # bot.add_listener sur les mêmes colonnes de configuration (welcome_channel,
+    # welcome_message, welcome_image_url, autorole, goodbye_channel, goodbye_message).
 
     async def on_command_completion(self, ctx: commands.Context):
         if ctx.guild:

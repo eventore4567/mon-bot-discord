@@ -1186,7 +1186,14 @@ INDEX_HTML = r"""<!doctype html>
 </head>
 <body>
   <div id="bootLoader"><div class="boot-mark">S</div></div>
-  <section id="landing">
+  <!-- Masquée par défaut : / est entièrement pris en charge séparément par
+       brand_avatar_v39.py (_public_home_html), donc /app ne devrait plus jamais
+       avoir besoin d'afficher cette landing intégrée. Avant ce correctif, elle
+       restait visible par défaut et n'était masquée que par loadSession() une
+       fois /api/me résolu — tout ralentissement de cet appel (reconnexion HA,
+       contention DB) la rendait visible, superposée au dashboard, exactement le
+       bug rapporté : landing et dashboard affichés en même temps sur /app. -->
+  <section id="landing" class="hidden">
     <header class="top">
       <div class="brand"><div class="brand-logo" id="publicLogo">S</div><span>SentriX</span></div>
       <div class="status"><i id="publicDot"></i><span id="publicStatus">Connexion au bot…</span></div>
@@ -1264,7 +1271,8 @@ INDEX_HTML = r"""<!doctype html>
 
   <div id="toast" class="toast hidden"></div>
   <script>
-    const state={publicData:null,user:null,csrf:null,guilds:[],guildData:null,guildId:null,tab:"general",dirty:false,sanctions:[],sanctionNext:null,sanctionLoading:false};
+    const state={publicData:null,user:null,csrf:null,guilds:[],guildData:null,guildId:null,guildAbort:null,guildRetryTimer:null,tab:"general",dirty:false,sanctions:[],sanctionNext:null,sanctionLoading:false};
+    const EMPTY_STATE_DEFAULT="Sélectionnez un serveur pour commencer. Les serveurs sans SentriX proposent directement le bouton d'invitation.";
     const tabs={
       general:{title:"Configuration générale",description:"Préfixe, niveau de sécurité et sanctions automatiques.",fields:[
         {key:"prefix",label:"Préfixe des commandes",type:"text",hint:"Entre 1 et 5 caractères. Le préfixe par défaut est +."},
@@ -1314,11 +1322,53 @@ INDEX_HTML = r"""<!doctype html>
     const number=v=>Number(v||0).toLocaleString("fr-FR");
     function duration(sec){const d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60);return d?`${d} j ${h} h`:h?`${h} h ${m} min`:`${m} min`;}
     function toast(message,bad=false){const el=$("toast");el.textContent=message;el.className=`toast${bad?" bad":""}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.add("hidden"),4200);}
-    async function json(url,options={}){const res=await fetch(url,options);let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||"Une erreur est survenue.");return data;}
+    async function json(url,options={}){const res=await fetch(url,options);let data={};try{data=await res.json()}catch{}if(!res.ok){const err=new Error(data.error||"Une erreur est survenue.");err.status=res.status;throw err;}return data;}
     async function loadPublic(){state.publicData=await json("/api/public");const d=state.publicData;$("publicGuilds").textContent=number(d.guilds);$("publicMembers").textContent=number(d.members);$("publicLatency").textContent=d.latency_ms===null?"—":`${d.latency_ms} ms`;$("publicUptime").textContent=duration(d.uptime_seconds);$("publicStatus").textContent=d.online?"SentriX est opérationnel":"Connexion Discord en cours";$("publicDot").style.background=d.online?"var(--ok)":"var(--warn)";for(const id of ["inviteButton","appInvite"]){$(id).href=d.invite_url||"#";}if(d.avatar_url){for(const id of ["publicLogo","appLogo"]){$(id).innerHTML=`<img src="${esc(d.avatar_url)}" alt="">`;}}if(!d.oauth_ready){$("loginButton").classList.add("hidden");$("authMessage").textContent="La connexion Discord sera disponible après l'ajout du secret OAuth dans Railway.";}const auth=new URLSearchParams(location.search).get("auth");if(auth)$("authMessage").textContent=auth==="missing"?"La connexion Discord n'est pas encore configurée.":"La connexion Discord a été annulée ou a échoué.";}
-    async function loadSession(){try{const me=await json("/api/me");state.user=me.user;state.csrf=me.csrf;$("landing").classList.add("hidden");$("dashboard").classList.remove("hidden");$("userName").textContent=me.user.username;if(me.user.avatar_url)$("userAvatar").innerHTML=`<img class="avatar" src="${esc(me.user.avatar_url)}" alt="">`;await loadGuilds();}catch{if(location.pathname==="/app")history.replaceState({},"","/");}}
+    async function loadSession(){try{const me=await json("/api/me");state.user=me.user;state.csrf=me.csrf;$("dashboard").classList.remove("hidden");$("userName").textContent=me.user.username;if(me.user.avatar_url)$("userAvatar").innerHTML=`<img class="avatar" src="${esc(me.user.avatar_url)}" alt="">`;await loadGuilds();}catch{if(location.pathname==="/app")location.href="/";}}
     async function loadGuilds(){const data=await json("/api/guilds");state.guilds=data.guilds;const select=$("serverSelect");select.innerHTML='<option value="">Choisissez un serveur</option>'+data.guilds.map(g=>`<option value="${g.installed?esc(g.id):"invite:"+esc(g.id)}">${esc(g.name)}${g.installed?"":" — ajouter SentriX"}</option>`).join("");const first=data.guilds.find(g=>g.installed);if(first){select.value=first.id;await selectGuild(first.id);}}
-    async function selectGuild(value){if(!value){state.guildId=null;$("serverContent").classList.add("hidden");$("emptyState").classList.remove("hidden");return;}if(String(value).startsWith("invite:")){const id=String(value).slice(7),g=state.guilds.find(x=>x.id===id);if(g?.invite_url)window.open(g.invite_url,"_blank","noopener");$("serverSelect").value=state.guildId||"";return;}state.guildId=value;$("serverContent").classList.add("loading");try{state.guildData=await json(`/api/guilds/${value}`);const d=state.guildData;$("pageTitle").textContent=d.guild.name;$("pageSubtitle").textContent=`${number(d.guild.members)} membres · ${d.guild.channels_count} salons · ${d.guild.roles_count} rôles`;$("metricMembers").textContent=number(d.guild.members);$("metricCommands").textContent=number(d.metrics.commands_24h);$("metricTickets").textContent=number(d.metrics.open_tickets);$("metricWarnings").textContent=number(d.metrics.warnings);$("emptyState").classList.add("hidden");$("serverContent").classList.remove("hidden");renderTab();}catch(e){toast(e.message,true);}finally{$("serverContent").classList.remove("loading");}}
+    async function selectGuild(value){
+      if(state.guildRetryTimer){clearTimeout(state.guildRetryTimer);state.guildRetryTimer=null;}
+      if(!value){
+        if(state.guildAbort)state.guildAbort.abort();
+        state.guildId=null;$("serverContent").classList.add("hidden");
+        $("emptyState").classList.remove("sx-empty-premium");$("emptyState").textContent=EMPTY_STATE_DEFAULT;$("emptyState").classList.remove("hidden");
+        return;
+      }
+      if(String(value).startsWith("invite:")){const id=String(value).slice(7),g=state.guilds.find(x=>x.id===id);if(g?.invite_url)window.open(g.invite_url,"_blank","noopener");$("serverSelect").value=state.guildId||"";return;}
+      // Un changement de serveur pendant qu'un chargement précédent est encore en vol
+      // annule ce dernier : sans ça, une réponse tardive pour l'ANCIEN serveur peut
+      // arriver après celle du nouveau et réafficher ses données par-dessus.
+      if(state.guildAbort)state.guildAbort.abort();
+      const controller=new AbortController();state.guildAbort=controller;
+      state.guildId=value;$("serverContent").classList.add("loading");
+      try{
+        const data=await json(`/api/guilds/${value}`,{signal:controller.signal});
+        if(state.guildId!==value)return;
+        state.guildData=data;
+        $("pageTitle").textContent=data.guild.name;$("pageSubtitle").textContent=`${number(data.guild.members)} membres · ${data.guild.channels_count} salons · ${data.guild.roles_count} rôles`;
+        $("metricMembers").textContent=number(data.guild.members);$("metricCommands").textContent=number(data.metrics.commands_24h);$("metricTickets").textContent=number(data.metrics.open_tickets);$("metricWarnings").textContent=number(data.metrics.warnings);
+        $("emptyState").classList.remove("sx-empty-premium");$("emptyState").classList.add("hidden");$("serverContent").classList.remove("hidden");
+        renderTab();
+      }catch(e){
+        if(e.name==="AbortError"||state.guildId!==value)return;
+        if(e.status===503){
+          // Le bot vient de basculer (HA) ou termine sa connexion à Discord : ce n'est
+          // ni une session expirée ni un serveur introuvable — une seule nouvelle
+          // tentative, après un délai raisonnable, suffit une fois la reconnexion faite.
+          $("serverContent").classList.add("hidden");
+          $("emptyState").classList.add("sx-empty-premium");
+          $("emptyState").innerHTML='<div class="sx-load-card"><div class="sx-load-orb"></div><h3>Reconnexion Discord en cours…</h3><p>SentriX termine sa connexion à Discord. Cette page réessaie automatiquement dans quelques secondes.</p></div>';
+          $("emptyState").classList.remove("hidden");
+          state.guildRetryTimer=setTimeout(()=>{if(state.guildId===value)selectGuild(value);},3000);
+        }else if(e.status===401){
+          history.replaceState({},"","/");location.reload();
+        }else{
+          toast(e.message,true);
+        }
+      }finally{
+        if(state.guildId===value)$("serverContent").classList.remove("loading");
+      }
+    }
     function optionList(type,current){const list=type==="role"?state.guildData.roles:state.guildData.channels.filter(c=>type!=="category"||c.type==="category");return '<option value="">Non configuré</option>'+list.map(item=>`<option value="${esc(item.id)}" ${String(current||"")===String(item.id)?"selected":""}>${esc(item.name)}${type!=="role"?` — ${esc(item.type)}`:""}</option>`).join("");}
     function fieldHTML(field){const source=state.tab==="security"?state.guildData.automod:state.tab==="ai"?state.guildData.ai:state.guildData.settings;const value=source[field.key];const hint=field.hint?`<div class="hint">${esc(field.hint)}</div>`:"";if(field.type==="switch")return `<label class="switch full"><div><b>${esc(field.label)}</b><span>${esc(field.hint||"Activation immédiate sur ce serveur.")}</span></div><input data-key="${esc(field.key)}" type="checkbox" ${Number(value)?"checked":""}></label>`;let control="";if(field.type==="choice")control=`<select class="select" data-key="${esc(field.key)}">${field.options.map(o=>`<option value="${esc(o[0])}" ${value===o[0]?"selected":""}>${esc(o[1])}</option>`).join("")}</select>`;else if(["role","channel","category"].includes(field.type))control=`<select class="select" data-key="${esc(field.key)}">${optionList(field.type,value)}</select>`;else if(field.type==="textarea")control=`<textarea data-key="${esc(field.key)}">${esc(value||"")}</textarea>`;else control=`<input data-key="${esc(field.key)}" type="${field.type}" value="${esc(value??"")}" ${field.min!==undefined?`min="${field.min}"`:""} ${field.max!==undefined?`max="${field.max}"`:""} ${field.step!==undefined?`step="${field.step}"`:""}>`;return `<div class="field ${field.type==="textarea"?"full":""}"><label>${esc(field.label)}</label>${control}${hint}</div>`;}
     function sanctionLabel(action){return ({ban:"Bannissement",tempban:"Ban temporaire",unban:"Débannissement",mute:"Mute",unmute:"Retrait du mute",warn:"Avertissement",clearwarnings:"Warns effacés"})[action]||action;}
@@ -1330,7 +1380,7 @@ INDEX_HTML = r"""<!doctype html>
     async function sanctionAction(userId,action){const labels={unban:"débannir cet utilisateur",unmute:"retirer le mute de ce membre","clear-warnings":"effacer tous les avertissements actifs de ce membre"};if(!confirm(`Confirmer : ${labels[action]||"effectuer cette action"} ?`))return;try{const result=await json(`/api/guilds/${state.guildId}/sanctions/${userId}/${action}`,{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:"{}"});toast(result.message);await loadSanctions(true);}catch(e){toast(e.message,true);}}
     function renderNotifications(){const rows=state.guildData.social_notifications||[];const textChannels=state.guildData.channels.filter(c=>["text","news"].includes(c.type));const channelOptions='<option value="">Choisissez un salon</option>'+textChannels.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");const roleOptions='<option value="">Choisissez un rôle</option>'+state.guildData.roles.map(r=>`<option value="${esc(r.id)}">${esc(r.name)}</option>`).join("");const list=rows.length?rows.map(n=>`<div class="notification-item"><div><b>${esc(n.platform)} · ${esc(state.guildData.roles.find(r=>String(r.id)===String(n.role_id))?.name||"Rôle supprimé")}</b><span>${esc(n.source_url)} · #${esc(state.guildData.channels.find(c=>String(c.id)===String(n.discord_channel_id))?.name||"salon supprimé")}</span></div><button class="btn danger" type="button" data-delete-notification="${esc(n.id)}">Supprimer</button></div>`).join(""):'<div class="notification-empty">Aucune notification configurée. Ajoutez votre première chaîne ci-dessus.</div>';$("fields").innerHTML=`<div class="notification-builder"><div class="field full"><label>Lien de la chaîne ou du profil</label><input data-key="source_url" type="url" placeholder="https://youtube.com/@votrechaine"><div class="hint">YouTube, TikTok, Twitch, Instagram, X, Facebook, Dailymotion, Vimeo et Kick.</div></div><div class="field"><label>Salon de publication</label><select class="select" data-key="discord_channel_id">${channelOptions}</select></div><div class="field"><label>Rôle à notifier</label><select class="select" data-key="role_id">${roleOptions}</select></div><div class="field full"><label>Texte personnalisé (facultatif)</label><textarea data-key="custom_text" placeholder="Une nouvelle publication vient de sortir !"></textarea></div><div class="field full"><label>Image ou GIF (facultatif)</label><input data-key="image_url" type="url" placeholder="https://exemple.com/image.png"><div class="hint">Utilisez une URL HTTPS directe. Sans image, SentriX utilise la miniature de la publication.</div></div></div><div class="notification-list"><h3>Notifications actives</h3>${list}</div>`;$("fields").querySelectorAll("[data-delete-notification]").forEach(button=>button.addEventListener("click",()=>removeNotification(button.dataset.deleteNotification)));}
     function fieldsHTML(fields){let lastGroup,out="";for(const field of fields){if(field.group&&field.group!==lastGroup){out+=`<h3 class="field-group-title">${esc(field.group)}</h3>`;lastGroup=field.group;}out+=fieldHTML(field);}return out;}
-    function renderTab(){if(!state.guildData)return;const tab=tabs[state.tab];$("tabTitle").textContent=tab.title;$("tabDescription").textContent=tab.description;if(tab.sanctions)renderSanctions();else if(tab.notifications)renderNotifications();else $("fields").innerHTML=fieldsHTML(tab.fields);$("saveBar").classList.toggle("hidden",Boolean(tab.sanctions));$("saveButton").textContent=tab.notifications?"Ajouter la notification":"Enregistrer";$("saveStatus").textContent=tab.notifications?"Surveillance toutes les 5 minutes":"Aucune modification";state.dirty=false;$("fields").querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",()=>{if(tab.sanctions)return;state.dirty=true;$("saveStatus").textContent="Modifications non enregistrées";}));}
+    function renderTab(){if(!state.guildData)return;if(!tabs[state.tab])state.tab="general";const tab=tabs[state.tab];$("tabTitle").textContent=tab.title;$("tabDescription").textContent=tab.description;if(tab.sanctions)renderSanctions();else if(tab.notifications)renderNotifications();else $("fields").innerHTML=fieldsHTML(tab.fields);$("saveBar").classList.toggle("hidden",Boolean(tab.sanctions));$("saveButton").textContent=tab.notifications?"Ajouter la notification":"Enregistrer";$("saveStatus").textContent=tab.notifications?"Surveillance toutes les 5 minutes":"Aucune modification";state.dirty=false;$("fields").querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",()=>{if(tab.sanctions)return;state.dirty=true;$("saveStatus").textContent="Modifications non enregistrées";}));}
     async function save(event){event.preventDefault();if(!state.guildId||!state.guildData)return;const tab=tabs[state.tab];if(tab.sanctions){await loadSanctions(true);return;}const values={};$("fields").querySelectorAll("[data-key]").forEach(el=>{let value=el.type==="checkbox"?el.checked:el.value;if(el.type==="number"&&value!=="")value=Number(value);values[el.dataset.key]=value;});const endpoint=tab.notifications?`/api/guilds/${state.guildId}/notifications`:`/api/guilds/${state.guildId}/settings`;const body=tab.notifications?values:tab.automod?{automod:values}:tab.ai?{ai:values}:{settings:values};$("settingsForm").classList.add("loading");try{const result=await json(endpoint,{method:tab.notifications?"POST":"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:JSON.stringify(body)});toast(result.message);state.dirty=false;$("saveStatus").textContent="Configuration enregistrée";await selectGuild(state.guildId);}catch(e){toast(e.message,true);$("saveStatus").textContent="Enregistrement impossible";}finally{$("settingsForm").classList.remove("loading");}}
     async function removeNotification(id){if(!state.guildId||!id)return;if(!confirm("Supprimer cette notification automatique ?"))return;try{const result=await json(`/api/guilds/${state.guildId}/notifications/${id}`,{method:"DELETE",headers:{"X-CSRF-Token":state.csrf}});toast(result.message);await selectGuild(state.guildId);}catch(e){toast(e.message,true);}}
     $("serverSelect").addEventListener("change",e=>selectGuild(e.target.value));$("settingsForm").addEventListener("submit",save);$("navigation").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(!button)return;state.tab=button.dataset.tab;$("navigation").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===button));renderTab();});$("logoutButton").addEventListener("click",async()=>{try{await json("/logout",{method:"POST",headers:{"X-CSRF-Token":state.csrf}});}finally{location.href="/";}});window.addEventListener("beforeunload",e=>{if(state.dirty){e.preventDefault();e.returnValue="";}});
