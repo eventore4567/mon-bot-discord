@@ -116,19 +116,23 @@ async def _enforce_gateway_transport(bot: commands.Bot) -> None:
             if verification.get("interactions_endpoint_url"):
                 raise RuntimeError("INTERACTIONS_ENDPOINT_STILL_CONFIGURED")
             state["cleared_at"] = int(time.time())
+
+            # On republie uniquement lorsqu'on vient réellement de modifier le transport.
+            # L'ancien code synchronisait à CHAQUE démarrage même quand l'endpoint était
+            # déjà vide, doublant le sync global effectué par le bootstrap normal et pouvant
+            # republier un arbre différent pendant le démarrage.
+            synced = await bot.tree.sync()
+            state["resynced_commands"] = len(synced)
         else:
             state["clear_attempted"] = False
+            state["resynced_commands"] = None
 
-        # Une fois le transport Gateway confirme, republie aussi le catalogue actuel afin
-        # que les commandes visibles correspondent exactement au runtime qui les recevra.
-        synced = await bot.tree.sync()
-        state["resynced_commands"] = len(synced)
         state["gateway_confirmed"] = True
         logger.info(
-            "Transport interactions Discord confirme sur Gateway (application=%s, endpoint_http_avant=%s, slash=%s).",
+            "Transport interactions Discord confirme sur Gateway (application=%s, endpoint_http_avant=%s, resync=%s).",
             application_id,
             endpoint_configured,
-            len(synced),
+            state.get("resynced_commands"),
         )
     except discord.HTTPException as exc:
         state["gateway_confirmed"] = False
