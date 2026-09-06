@@ -81,4 +81,36 @@ def install(dashboard) -> bool:
     return True
 
 
-__all__ = ["install", "_snapshot_is_usable"]
+def install_product_prestart_hook() -> bool:
+    """Branche V55 exactement au point où le HTML pré-start est prêt.
+
+    ``sentrix_product_update.install_dashboard_prestart`` installe d'abord les pages Tickets,
+    Embeds et ping-role puis appelle ``_install_no_store_index``. On entoure ce dernier appel :
+    le snapshot contient donc les fonctions utiles, mais il est capturé avant les cogs et
+    finaliseurs asynchrones qui réécrivent encore ``INDEX_HTML`` après le bind HTTP.
+    """
+    try:
+        import sentrix_product_update as product
+    except Exception:
+        logger.exception("Dashboard V55 : sentrix_product_update indisponible.")
+        return False
+
+    current = product._install_no_store_index
+    if getattr(current, "_sentrix_frontend_freeze_hook_v55", False):
+        return True
+
+    def no_store_then_freeze(dashboard) -> None:
+        current(dashboard)
+        if not install(dashboard):
+            logger.error(
+                "Dashboard V55 : le gel pré-start a échoué ; /app ne doit pas être considéré stable."
+            )
+
+    no_store_then_freeze._sentrix_frontend_freeze_hook_v55 = True
+    no_store_then_freeze._sentrix_original = current
+    product._install_no_store_index = no_store_then_freeze
+    logger.info("Dashboard V55 armé : gel automatique au pré-start produit.")
+    return True
+
+
+__all__ = ["install", "install_product_prestart_hook", "_snapshot_is_usable"]
