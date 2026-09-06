@@ -23,11 +23,13 @@ REQUIRED_ROOTS = {
     "ai", "economy", "levels", "games", "music", "ticket", "moderation",
     "security", "config", "server", "roles", "sentrix",
 }
-# Racines spéciales qui ne sont créées que si les commandes correspondantes existent dans le
-# registre historique de cette release. Elles sont auditées si présentes, mais leur absence
-# n'est pas artificiellement transformée en fonctionnalité.
-OPTIONAL_SPECIAL_ROOTS = {"giveaway", "invites", "notifications", "events", "social", "info", "utility", "embeds", "stats", "owner", "more"}
+OPTIONAL_SPECIAL_ROOTS = {
+    "giveaway", "invites", "notifications", "events", "social", "info", "utility",
+    "embeds", "stats", "owner", "more",
+}
 FORBIDDEN_USER_PARAMS = {"ctx", "context", "self", "args", "kwargs"}
+EXTENSION_TIMEOUT = 12.0
+PREPARE_TIMEOUT = 45.0
 
 
 def _walk_app(command, prefix: str = ""):
@@ -41,6 +43,10 @@ def _walk_app(command, prefix: str = ""):
         yield path, command
 
 
+async def _load_extension_with_timeout(bot, extension: str):
+    await asyncio.wait_for(bot.load_extension(extension), timeout=EXTENSION_TIMEOUT)
+
+
 async def run() -> int:
     errors: list[str] = []
     warnings: list[str] = []
@@ -52,6 +58,7 @@ async def run() -> int:
         import main
         import sentrix_v95_runtime as v95
         import sentrix_v98_runtime as v98
+        import sentrix_v98_ticket_reopen as reopen_v98
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -59,18 +66,26 @@ async def run() -> int:
         loaded = []
         for extension in main.EXTENSIONS:
             try:
-                await bot.load_extension(extension)
+                await _load_extension_with_timeout(bot, extension)
                 loaded.append(extension)
+            except asyncio.TimeoutError:
+                errors.append(f"extension {extension}: TIMEOUT après {EXTENSION_TIMEOUT:g}s")
             except Exception as exc:
                 errors.append(f"extension {extension}: {type(exc).__name__}: {exc}")
 
         if len(loaded) != len(main.EXTENSIONS):
             errors.append(f"extensions chargées: {len(loaded)}/{len(main.EXTENSIONS)}")
 
-        # Reproduit l'ordre produit : V97 est installé dans V98, puis V98 entoure prepare_bot.
+        # Reproduit l'ordre produit : V98 entoure V97/V95, puis la cohérence de réouverture
+        # s'installe après cette préparation afin de ne pas être annulée par les restaurations
+        # de signatures historiques.
         v98.install()
+        reopen_v98.install_global()
         try:
-            mapping = await v95.prepare_bot(bot)
+            mapping = await asyncio.wait_for(v95.prepare_bot(bot), timeout=PREPARE_TIMEOUT)
+        except asyncio.TimeoutError:
+            errors.append(f"construction V98: TIMEOUT après {PREPARE_TIMEOUT:g}s")
+            mapping = {}
         except Exception as exc:
             errors.append(f"construction V98 impossible: {type(exc).__name__}: {exc}")
             mapping = {}
@@ -105,9 +120,8 @@ async def run() -> int:
                 if leaked:
                     errors.append(f"paramètre interne exposé {path}: {', '.join(leaked)}")
 
-        # La mapping V95 est la preuve que chaque leaf dynamique pointe vers une vraie commande
-        # historique. Les callbacks synthétiques explicites (ex. /ai enable) sont volontairement
-        # en plus de ce mapping et sont contrôlés séparément ci-dessous.
+        # La mapping V95 prouve que chaque leaf dynamique pointe vers une vraie commande
+        # historique. Les callbacks synthétiques explicites (ex. /ai enable) sont en plus.
         if len(mapping) < 300:
             errors.append(f"inventaire slash anormalement petit: {len(mapping)} (<300)")
         missing_mapped_paths = sorted(path for path in mapping if path not in leaves)
@@ -130,8 +144,8 @@ async def run() -> int:
             )
 
         # Toutes les commandes historiques destinées à être exposées doivent apparaître une
-        # fois dans le mapping. Cela audite automatiquement logs/automod/roles/levels/economy/
-        # giveaway/games/notifications/server/emoji/image/music/sentrix et les autres familles.
+        # fois dans le mapping. Ce contrôle couvre automatiquement logs/automod/roles/levels/
+        # economy/giveaway/games/notifications/server/emoji/image/music/sentrix et le reste.
         targets = v95._build_targets(bot)
         expected_originals = {target.original_name.casefold() for target in targets}
         mapped_originals = {str(meta.get("original") or "").casefold() for meta in mapping.values()}
@@ -148,12 +162,11 @@ async def run() -> int:
                 + ", ".join(extra_originals[:30])
             )
 
-        # Le bridge commun est le cœur de toutes les familles : il doit passer par Bot.invoke.
         source = inspect.getsource(v98._invoke_original)
         if "await bot.invoke(ctx)" not in source or "await root.invoke(ctx)" in source:
             errors.append("bridge V98: les slash ne passent pas exclusivement par Bot.invoke")
 
-        # Contrats utilisateur observés dans les captures.
+        # Contrats directement issus des bugs reproduits dans Discord.
         ai_group = bot.tree.get_command("ai")
         ai_names = {child.name for child in getattr(ai_group, "commands", ())} if ai_group else set()
         required_ai = {"ask", "translate", "enable", "disable", "search", "reset", "memory", "model", "help"}
@@ -174,8 +187,10 @@ async def run() -> int:
             if setup_params & FORBIDDEN_USER_PARAMS:
                 errors.append("/setup expose encore ctx/args/kwargs")
 
-        # Les wrappers V17 peuvent garder *args/**kwargs en interne uniquement si leur
-        # commande expose finalement une signature utilisateur propre.
+        legacy_reopen = bot.get_command("reopenticket")
+        if legacy_reopen is None or not getattr(legacy_reopen.callback, "_sentrix_v98_reopen_alias", False):
+            errors.append("reopenticket n'utilise pas encore le moteur canonique ticket-reopen")
+
         polluted = []
         for command in bot.walk_commands():
             try:
@@ -192,31 +207,39 @@ async def run() -> int:
             )
 
         present_optional = sorted(root_names & OPTIONAL_SPECIAL_ROOTS)
-        print(f"V98 audit: {len(loaded)}/{len(main.EXTENSIONS)} extensions chargées")
-        print(f"V98 audit: {len(mapping)} actions historiques mappées")
-        print(f"V98 audit: {len(roots)} racines /, {len(leaves)} feuilles slash")
-        print("V98 audit: familles spéciales présentes=" + ",".join(present_optional))
+        print(f"V98 audit: {len(loaded)}/{len(main.EXTENSIONS)} extensions chargées", flush=True)
+        print(f"V98 audit: {len(mapping)} actions historiques mappées", flush=True)
+        print(f"V98 audit: {len(roots)} racines /, {len(leaves)} feuilles slash", flush=True)
+        print("V98 audit: familles spéciales présentes=" + ",".join(present_optional), flush=True)
         for warning in warnings:
-            print("[WARN]", warning)
+            print("[WARN]", warning, flush=True)
         for error in errors:
-            print("[ERROR]", error)
+            print("[ERROR]", error, flush=True)
 
+        # Certaines extensions lancent des boucles de maintenance. On les annule sans laisser
+        # un cleanup récalcitrant masquer le résultat de l'audit pendant plusieurs minutes.
         current = asyncio.current_task()
         pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
         for task in pending:
             task.cancel()
         if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=2.0,
+                )
+            except asyncio.TimeoutError:
+                warnings.append(f"{len(pending)} tâche(s) de fond n'ont pas fini leur annulation en 2s")
         close = getattr(bot.db, "close", None)
         if close:
             result = close()
             if inspect.isawaitable(result):
-                await result
+                await asyncio.wait_for(result, timeout=3.0)
 
     if errors:
-        print(f"ECHEC V98: {len(errors)} problème(s)")
+        print(f"ECHEC V98: {len(errors)} problème(s)", flush=True)
         return 1
-    print("OK V98: toutes les familles slash sont structurellement reliées au runtime commun")
+    print("OK V98: toutes les familles slash sont structurellement reliées au runtime commun", flush=True)
     return 0
 
 
