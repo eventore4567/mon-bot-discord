@@ -2,8 +2,8 @@
 
 V61 garde encore un renderer de compatibilité qui reconstruit son ancienne sidebar lorsqu'une
 page historique (Accueil, Logs, IA, etc.) est affichée. V62 reconstruit la bonne sidebar avant
-cet appel, mais V61 pouvait ensuite l'écraser. V64 est la dernière couche et réaffirme la
-navigation finale APRÈS chaque rendu, sans toucher aux API ni aux données métier.
+cet appel. V64 est la dernière couche : elle restaure la navigation finale seulement si une
+couche héritée l'a réellement remplacée, puis ne fait plus que synchroniser l'état actif.
 """
 from __future__ import annotations
 
@@ -35,15 +35,18 @@ JS = r'''
     ["Outils",[["tickets","Tickets","▰"],["ai","Intelligence artificielle","AI"],["embeds","Embeds","E"],["games","Mini-jeux","◆"],["design","Design","◫"]]],
     ["Configuration",[["setup","Configuration serveur","⚙"],["access","Accès & commandes","⌘"],["dm","Messages privés","✉"],["status","Statut SentriX","●"]]],
   ];
+  const FINAL_TABS=new Set(FINAL_GROUPS.flatMap(([,items])=>items.map(([tab])=>tab)));
   let lastSearch='';
   function normalize(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('fr')}
   function filterNav(nav){const q=normalize(lastSearch).trim();nav.querySelectorAll('button[data-tab]').forEach(b=>b.classList.toggle('sx-empty-filter',Boolean(q)&&!normalize(b.textContent).includes(q)));nav.querySelectorAll('.sx-nav-group').forEach(group=>{let node=group.nextElementSibling,visible=false;while(node&&!node.classList.contains('sx-nav-group')){if(node.matches?.('button[data-tab]')&&!node.classList.contains('sx-empty-filter'))visible=true;node=node.nextElementSibling}group.style.display=visible?'':'none'})}
-  function lockNavigation(){
-    const nav=$('navigation');if(!nav)return;
+  function finalNavPresent(nav){const tabs=[...nav.querySelectorAll('button[data-tab]')].map(b=>b.dataset.tab);return tabs.length===FINAL_TABS.size&&tabs.every(tab=>FINAL_TABS.has(tab))&&Boolean(nav.querySelector('.sx-nav-group'))}
+  function syncNavigation(nav){nav.querySelectorAll('button[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===state.tab));filterNav(nav)}
+  function buildNavigation(nav){
     const currentInput=nav.querySelector('#sxNavSearch');if(currentInput)lastSearch=currentInput.value||lastSearch;
     nav.innerHTML='<div class="sx-nav-tools"><input id="sxNavSearch" class="sx-nav-search" type="search" placeholder="Rechercher une fonction…" aria-label="Rechercher une fonction"></div>'+FINAL_GROUPS.map(([label,items])=>`<div class="sx-nav-group">${label}</div>`+items.map(([tab,label,icon])=>`<button type="button" data-tab="${tab}" class="${state.tab===tab?'active':''}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')).join('');
     const input=nav.querySelector('#sxNavSearch');input.value=lastSearch;input.addEventListener('input',event=>{lastSearch=event.target.value;filterNav(nav)});filterNav(nav);
   }
+  function lockNavigation(){const nav=$('navigation');if(!nav)return;if(finalNavPresent(nav)){syncNavigation(nav);return}buildNavigation(nav)}
   function stripExternalCards(){
     document.querySelectorAll('#fields a[href],#fields button').forEach(el=>{
       const text=(el.textContent||'').trim().toLocaleLowerCase('fr');
@@ -51,7 +54,7 @@ JS = r'''
     });
   }
   const beforeV64=renderTab;
-  renderTab=function(){const result=beforeV64();setTimeout(()=>{lockNavigation();stripExternalCards()},0);return result};
+  renderTab=function(){const result=beforeV64();lockNavigation();stripExternalCards();return result};
   lockNavigation();stripExternalCards();
 })();
 </script>
@@ -69,7 +72,7 @@ def install(dashboard) -> bool:
         return False
     dashboard.INDEX_HTML = html.replace("</style>", CSS + "\n</style>", 1).replace("</body>", JS + "\n</body>", 1)
     dashboard._sentrix_dashboard_version = "v64-final"
-    logger.info("Dashboard V64 final installé : sidebar dense verrouillée après tous les renderers hérités.")
+    logger.info("Dashboard V64 final installé : sidebar dense stable et restaurée uniquement si une couche héritée la remplace.")
     return True
 
 
