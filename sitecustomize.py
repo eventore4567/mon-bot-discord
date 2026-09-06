@@ -212,7 +212,22 @@ def _install_sentrix_v95() -> None:
         )
 
 
+def _install_sentrix_verification_v96() -> None:
+    """Branche l'assistant de vérification après V95, sans casser les audits sans discord.py."""
+    try:
+        from sentrix_verification_v96 import install
+    except (ImportError, ModuleNotFoundError):
+        return
+    try:
+        install()
+    except Exception:
+        logging.getLogger("bot.verification-v96").exception(
+            "Installation précoce de la vérification V96 impossible."
+        )
+
+
 _configure_railway_logging()
 _install_railway_dashboard_ha_proxy()
 _install_railway_dashboard_focus_ui()
 _install_sentrix_v95()
+_install_sentrix_verification_v96()
