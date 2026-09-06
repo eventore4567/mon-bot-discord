@@ -1,0 +1,23 @@
+name: Dashboard V56 JS debug
+
+on:
+  push:
+    branches:
+      - debug/dashboard-v56-js-runtime
+
+jobs:
+  browser-program:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install project dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Check the exact pre-start browser program
+        run: python -m pytest -q tests/test_dashboard_browser_program_v56.py
