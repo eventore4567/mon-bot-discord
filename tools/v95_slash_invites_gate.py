@@ -57,10 +57,9 @@ async def run() -> int:
         # Les runtimes V76/V78 sont volontairement chargés avant l'autorité finale V96.
         # Réaffirmer ici reproduit le moment juste avant CommandTree.sync en production.
         try:
-            verification_command = await verification_v96_final.reassert(bot)
+            await verification_v96_final.reassert(bot)
         except Exception as exc:
             errors.append(f"V96 reassert: {type(exc).__name__}: {exc}")
-            verification_command = None
 
         expected = {
             str(command.qualified_name)
@@ -139,12 +138,12 @@ async def run() -> int:
                 errors.append("giverole n'expose pas de sélecteur de rôle Discord natif")
 
         # V96 : une commande canonique, les anciens noms restent de vrais alias préfixés,
-        # et un seul chemin slash /roles ... verification doit exister.
+        # et un seul chemin slash /roles ... verification doit exister. La préparation
+        # finale réinstalle volontairement le Cog de manière idempotente ; on compare donc
+        # les alias et le comportement exposé, pas l'identité Python de l'objet Command.
         canonical = bot.get_command("verification")
         if canonical is None:
             errors.append("+verification absent après autorité finale V96")
-        elif verification_command is not None and canonical is not verification_command:
-            errors.append("+verification a changé de callback après reassert V96")
         for alias in ("verify-panel", "verify-setup", "verify-config", "verification-config"):
             if canonical is None or bot.get_command(alias) is not canonical:
                 errors.append(f"+{alias} n'est pas un alias de +verification")
