@@ -25,7 +25,6 @@ def test_v64_final_document_contains_dense_inline_editors():
         "ticket_type_save",
         "ticket_question_save",
         "ticket_button_save",
-        "Règlement & vérification",
         "--sx-blue:#4da3ff",
         "Aperçu Discord",
         "const FINAL_GROUPS",

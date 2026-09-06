@@ -11,6 +11,7 @@ la publication fait maintenant partie de l'enregistrement du Setup.
 """
 from __future__ import annotations
 
+import inspect
 import logging
 from types import MethodType
 
@@ -18,6 +19,7 @@ import discord
 from discord.ext import commands
 
 import config
+from utils import sentrix_panels as panels
 from .command_runtime_hardening_v18 import repair_wrapped_signatures
 
 logger = logging.getLogger("bot.command-final-guard-v76")
@@ -37,6 +39,43 @@ def _needs_repair(command: commands.Command | None) -> bool:
         return True
     reserved = {name.casefold().lstrip("_") for name in _INTERNAL_PARAMS}
     return bool(names & reserved)
+
+
+def _repair_command_fallback(command: commands.Command | None) -> bool:
+    """Reconstruit le cache des paramètres sans retirer le wrapper exécuté.
+
+    V18 couvre normalement ce cas. Ce fallback final utilise une Command temporaire bâtie
+    sur le callback métier pour les rares wrappers auxquels discord.py laisse encore
+    ``args``/``kwargs`` dans ``Command.params`` après une affectation tardive.
+    """
+    if command is None or not _needs_repair(command):
+        return False
+    wrapper = getattr(command, "callback", None)
+    original = getattr(wrapper, "_sentrix_original", None) or getattr(wrapper, "__wrapped__", None)
+    if not callable(original):
+        return False
+    try:
+        probe = commands.Command(original, name=f"{getattr(command, 'name', 'sentrix')}-signature-probe")
+        command.params = dict(getattr(probe, "params", {}) or {})
+        try:
+            wrapper.__signature__ = inspect.signature(original)
+        except (AttributeError, TypeError, ValueError):
+            pass
+        return not _needs_repair(command)
+    except Exception:
+        logger.exception(
+            "V76 : fallback de signature impossible pour +%s.",
+            getattr(command, "qualified_name", getattr(command, "name", "?")),
+        )
+        return False
+
+
+def _repair_dirty_commands(bot: commands.Bot) -> int:
+    repaired = repair_wrapped_signatures(bot)
+    for command in list(bot.walk_commands()):
+        if _needs_repair(command) and _repair_command_fallback(command):
+            repaired += 1
+    return repaired
 
 
 def _dashboard_url(guild_id: int) -> str | None:
@@ -79,7 +118,10 @@ def _remove_old_verification_commands(bot: commands.Bot) -> None:
         if url:
             view = discord.ui.View(timeout=120)
             view.add_item(discord.ui.Button(label="Configurer la vérification", url=url))
-        await ctx.send(embed=embed, view=view)
+        panneau = panels.depuis_embed(embed, kind="configuration")
+        if view is not None:
+            panneau = panels.avec_composants(panneau, view)
+        await panels.envoyer(ctx, panneau)
 
     command = commands.Command(
         verify_setup,
@@ -96,12 +138,12 @@ def install(bot: commands.Bot) -> None:
 
     # Première réparation maintenant, puis une réparation ciblée juste avant chaque commande
     # si une couche tardive a de nouveau contaminé ses paramètres.
-    repair_wrapped_signatures(bot)
+    _repair_dirty_commands(bot)
     current_invoke = bot.invoke
 
     async def invoke_v76(_bot: commands.Bot, ctx: commands.Context):
         if _needs_repair(getattr(ctx, "command", None)):
-            repaired = repair_wrapped_signatures(_bot)
+            repaired = _repair_dirty_commands(_bot)
             logger.warning(
                 "V76 : signature préfixée réparée juste avant +%s (%s commande(s) réparée(s)).",
                 getattr(getattr(ctx, "command", None), "qualified_name", "?"),
@@ -126,7 +168,7 @@ class CommandFinalGuardV76(commands.Cog):
     async def on_ready(self):
         # on_ready se produit après les derniers hooks de boot : cette passe constitue aussi
         # un audit/rattrapage de tout le registre vivant.
-        repaired = repair_wrapped_signatures(self.bot)
+        repaired = _repair_dirty_commands(self.bot)
         if repaired:
             logger.info("V76 on_ready : %s signature(s) finale(s) restaurée(s).", repaired)
 
