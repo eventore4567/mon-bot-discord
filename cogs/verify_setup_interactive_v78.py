@@ -1,8 +1,8 @@
-"""SentriX V78 — ``+verify-setup`` devient un configurateur Discord complet.
+"""SentriX V78 — configurateur complet pour ``+verify-setup``.
 
-Aucun ``verify-panel`` séparé : l'administrateur choisit le salon, le rôle, écrit son
-propre règlement, ajoute éventuellement une image, règle le CAPTCHA puis publie directement
-le panneau persistant dans le salon choisi.
+Le configurateur reste volontairement en composants Discord classiques (embed + View) :
+son message doit pouvoir être réédité à chaque choix. Le panneau public de règlement utilise
+ensuite le vrai ``VerifyView`` persistant.
 """
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ import time
 
 import discord
 from discord.ext import commands
-
-from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.verify-setup-v78")
 
@@ -77,14 +75,13 @@ class ImageModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            value = _safe_image(str(self.image.value))
+            self.parent_view.image_url = _safe_image(str(self.image.value))
         except ValueError as exc:
             return await interaction.response.send_message(str(exc), ephemeral=True)
-        self.parent_view.image_url = value
         await interaction.response.defer(ephemeral=True)
         await self.parent_view.refresh_message()
         await interaction.followup.send(
-            "Image mise à jour." if value else "Image retirée du règlement.",
+            "Image mise à jour." if self.parent_view.image_url else "Image retirée du règlement.",
             ephemeral=True,
         )
 
@@ -128,7 +125,7 @@ class VerifySetupView(discord.ui.View):
     def _build_components(self) -> None:
         self.clear_items()
 
-        channels = discord.ui.ChannelSelect(
+        channel_select = discord.ui.ChannelSelect(
             placeholder="1. Choisir le salon du règlement",
             min_values=1,
             max_values=1,
@@ -137,14 +134,13 @@ class VerifySetupView(discord.ui.View):
         )
 
         async def choose_channel(interaction: discord.Interaction):
-            chosen = channels.values[0]
-            self.channel_id = int(chosen.id)
+            self.channel_id = int(channel_select.values[0].id)
             await interaction.response.edit_message(embed=self.embed(), view=self)
 
-        channels.callback = choose_channel
-        self.add_item(channels)
+        channel_select.callback = choose_channel
+        self.add_item(channel_select)
 
-        roles = discord.ui.RoleSelect(
+        role_select = discord.ui.RoleSelect(
             placeholder="2. Choisir le rôle Vérifié",
             min_values=1,
             max_values=1,
@@ -152,12 +148,11 @@ class VerifySetupView(discord.ui.View):
         )
 
         async def choose_role(interaction: discord.Interaction):
-            chosen = roles.values[0]
-            self.role_id = int(chosen.id)
+            self.role_id = int(role_select.values[0].id)
             await interaction.response.edit_message(embed=self.embed(), view=self)
 
-        roles.callback = choose_role
-        self.add_item(roles)
+        role_select.callback = choose_role
+        self.add_item(role_select)
 
         rules_button = discord.ui.Button(
             label="Écrire / modifier le règlement",
@@ -169,24 +164,17 @@ class VerifySetupView(discord.ui.View):
             style=discord.ButtonStyle.secondary,
             row=2,
         )
-
-        async def edit_rules(interaction: discord.Interaction):
-            await interaction.response.send_modal(RulesModal(self))
-
-        async def edit_image(interaction: discord.Interaction):
-            await interaction.response.send_modal(ImageModal(self))
-
-        rules_button.callback = edit_rules
-        image_button.callback = edit_image
+        rules_button.callback = lambda interaction: interaction.response.send_modal(RulesModal(self))
+        image_button.callback = lambda interaction: interaction.response.send_modal(ImageModal(self))
         self.add_item(rules_button)
         self.add_item(image_button)
 
-        captcha = discord.ui.Button(
+        captcha_button = discord.ui.Button(
             label=f"CAPTCHA : {'ACTIF' if self.captcha_enabled else 'INACTIF'}",
             style=discord.ButtonStyle.primary if self.captcha_enabled else discord.ButtonStyle.secondary,
             row=3,
         )
-        attempts = discord.ui.Button(
+        attempts_button = discord.ui.Button(
             label=f"Tentatives : {self.captcha_max_attempts}",
             style=discord.ButtonStyle.secondary,
             row=3,
@@ -200,38 +188,37 @@ class VerifySetupView(discord.ui.View):
         async def cycle_attempts(interaction: discord.Interaction):
             choices = (1, 3, 5, 10)
             try:
-                index = choices.index(self.captcha_max_attempts)
-                self.captcha_max_attempts = choices[(index + 1) % len(choices)]
+                self.captcha_max_attempts = choices[(choices.index(self.captcha_max_attempts) + 1) % len(choices)]
             except ValueError:
                 self.captcha_max_attempts = 3
             self._build_components()
             await interaction.response.edit_message(embed=self.embed(), view=self)
 
-        captcha.callback = toggle_captcha
-        attempts.callback = cycle_attempts
-        self.add_item(captcha)
-        self.add_item(attempts)
+        captcha_button.callback = toggle_captcha
+        attempts_button.callback = cycle_attempts
+        self.add_item(captcha_button)
+        self.add_item(attempts_button)
 
-        publish = discord.ui.Button(
+        publish_button = discord.ui.Button(
             label="Enregistrer et publier",
             style=discord.ButtonStyle.success,
             row=4,
         )
-        cancel = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger, row=4)
+        close_button = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger, row=4)
 
         async def publish_callback(interaction: discord.Interaction):
             await self.publish(interaction)
 
-        async def cancel_callback(interaction: discord.Interaction):
+        async def close_callback(interaction: discord.Interaction):
             for item in self.children:
                 item.disabled = True
             self.stop()
             await interaction.response.edit_message(embed=self.embed(closed=True), view=self)
 
-        publish.callback = publish_callback
-        cancel.callback = cancel_callback
-        self.add_item(publish)
-        self.add_item(cancel)
+        publish_button.callback = publish_callback
+        close_button.callback = close_callback
+        self.add_item(publish_button)
+        self.add_item(close_button)
 
     def embed(self, *, closed: bool = False) -> discord.Embed:
         channel = self.guild.get_channel(self.channel_id) if self.channel_id else None
@@ -245,7 +232,7 @@ class VerifySetupView(discord.ui.View):
             title="Vérification & règlement",
             description=(
                 "Configurez tout ici. **Le règlement est écrit par vous**, SentriX ne le génère pas.\n"
-                "Quand vous cliquez sur **Enregistrer et publier**, le panneau est envoyé directement dans le salon choisi."
+                "Le bouton **Enregistrer et publier** envoie ou met à jour le panneau dans le salon choisi."
             ),
             colour=discord.Colour(0x4DA3FF),
         )
@@ -253,15 +240,16 @@ class VerifySetupView(discord.ui.View):
         embed.add_field(name="Rôle Vérifié", value=role.mention if role else "Non configuré", inline=True)
         embed.add_field(
             name="CAPTCHA",
-            value=(f"ACTIF · {self.captcha_max_attempts} tentative(s)" if self.captcha_enabled else "INACTIF"),
+            value=f"ACTIF · {self.captcha_max_attempts} tentative(s)" if self.captcha_enabled else "INACTIF",
             inline=True,
         )
         embed.add_field(name="Votre règlement", value=preview, inline=False)
         embed.add_field(name="Image", value=self.image_url or "Aucune image", inline=False)
-        if closed:
-            embed.set_footer(text="Configurateur fermé — relancez +verify-setup pour le modifier.")
-        else:
-            embed.set_footer(text="SentriX • Configuration enregistrée seulement au moment de la publication")
+        embed.set_footer(
+            text="Configurateur fermé — relancez +verify-setup pour modifier."
+            if closed
+            else "SentriX • Les changements sont persistés lors de la publication"
+        )
         return embed
 
     async def refresh_message(self) -> None:
@@ -277,7 +265,7 @@ class VerifySetupView(discord.ui.View):
 
         channel = self.guild.get_channel(self.channel_id) if self.channel_id else None
         role = self.guild.get_role(self.role_id) if self.role_id else None
-        if not isinstance(channel, (discord.TextChannel, discord.NewsChannel)):
+        if not isinstance(channel, discord.TextChannel):
             return await interaction.response.send_message("Choisissez d'abord un salon textuel valide.", ephemeral=True)
         problem = role_grant_problem(self.guild, role)
         if problem:
@@ -303,11 +291,9 @@ class VerifySetupView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=True)
         await self.bot.db.execute(_SCHEMA)
 
-        # Conserver l'ancien emplacement pour pouvoir supprimer proprement un panneau
-        # déplacé vers un autre salon.
         old_channel = self.guild.get_channel(self.previous_channel_id) if self.previous_channel_id else None
         old_message = None
-        if self.message_id and isinstance(old_channel, (discord.TextChannel, discord.NewsChannel)):
+        if self.message_id and isinstance(old_channel, discord.TextChannel):
             try:
                 old_message = await old_channel.fetch_message(self.message_id)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
@@ -409,8 +395,7 @@ async def _open_setup(ctx: commands.Context) -> None:
         captcha_max_attempts=int(_conf(conf, "verify_captcha_max_attempts", 3) or 3),
         message_id=row.get("message_id"),
     )
-    message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(view.embed(), kind="configuration"), view))
-    view.message = message
+    view.message = await ctx.send(embed=view.embed(), view=view)
 
 
 def install(bot: commands.Bot) -> bool:
