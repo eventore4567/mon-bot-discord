@@ -10,8 +10,9 @@ une fois, les rafales sont davantage bornées et SentriX bascule automatiquement
 modèle de secours si la limite du modèle demandé est atteinte.
 
 V57 garantit enfin qu'un message naturel « sentrix ... » ne produit qu'une seule réponse :
-le service Railway SentriX principal est le seul à publier les réponses passives, et une
-même ID de message Discord est dédupliquée localement par sécurité.
+une même ID de message Discord est dédupliquée localement par sécurité. En HA, on ne lie
+jamais cette réponse au nom du service Railway : seul le processus réellement connecté au
+Gateway Discord reçoit le message et doit pouvoir répondre après une bascule.
 """
 from __future__ import annotations
 
@@ -121,15 +122,18 @@ def _rate_limit_fallbacks(model_key: str) -> tuple[str, ...]:
 
 
 def _install_single_passive_reply() -> None:
-    """Empêche deux services/listeners de répondre au même message naturel Discord.
+    """Empêche deux listeners du processus actif de répondre au même message naturel.
 
     Les commandes explicites (+ai, /sentrix, etc.) restent inchangées. Cette protection ne
     s'applique que lorsque send_sentrix_reply() reçoit reply_to, c'est-à-dire le chemin
     passif on_message déclenché par « sentrix ... » ou une mention.
+
+    Important en HA : le rôle leader/standby du Gateway Discord est la source d'autorité.
+    Tester ici le nom « primary » du service Railway casserait les réponses IA après une
+    bascule légitime vers le standby alors que celui-ci est justement le seul client connecté.
     """
     try:
         from .ai import Ai
-        from .log_rectangle_v25 import _is_primary_process
     except Exception:
         logger.exception("Impossible d'installer l'anti-double réponse IA passive V57.")
         return
@@ -142,12 +146,6 @@ def _install_single_passive_reply() -> None:
     @functools.wraps(original_send_sentrix_reply)
     async def single_send_sentrix_reply(self, destination, author, question: str, *, reply_to=None):
         if reply_to is not None:
-            # Les deux services Railway partagent le même code et peuvent recevoir le même
-            # message Discord. Comme pour les logs, une seule instance doit publier pour le
-            # bot SentriX afin d'éviter deux réponses IA différentes au même message.
-            if not _is_primary_process():
-                return None
-
             try:
                 message_id = int(reply_to.id)
             except (TypeError, ValueError, AttributeError):
@@ -178,7 +176,7 @@ def _install_single_passive_reply() -> None:
 
     Ai.send_sentrix_reply = single_send_sentrix_reply
     Ai._sentrix_single_passive_reply_v57 = True
-    logger.info("IA V57 active : une seule réponse passive SentriX par message Discord.")
+    logger.info("IA V57 active : une seule réponse passive SentriX par message du Gateway actif.")
 
 
 def install() -> None:
