@@ -71,6 +71,9 @@ const dom = new JSDOM(html, {
           },
         });
       }
+      if (url.pathname === "/api/guilds/1/sanctions") {
+        return response({ ok: true, sanctions: [], next_cursor: null });
+      }
       return response({ error: `Route mock inconnue: ${url.pathname}` }, 404);
     };
     window.scrollTo = () => {};
@@ -88,15 +91,40 @@ for (const required of ["/api/public", "/api/me", "/api/guilds"]) {
   }
 }
 
-if (runtimeErrors.some(message => /SyntaxError|ReferenceError|TypeError/.test(message))) {
-  console.error("Requetes observees:", JSON.stringify(requests, null, 2));
-  throw new Error(`Erreur JavaScript dashboard: ${runtimeErrors.join("\n")}`);
-}
-
 const dashboard = dom.window.document.getElementById("dashboard");
 if (!dashboard || dashboard.classList.contains("hidden")) {
   throw new Error("La session est chargée mais le dashboard reste masqué.");
 }
 
+const expectedTabs = [
+  "general", "security", "sanctions", "logs", "welcome", "levels", "tickets",
+  "ai", "notifications", "embeds", "roles",
+];
+const buttons = [...dom.window.document.querySelectorAll("#navigation button[data-tab]")];
+const actualTabs = buttons.map(button => button.dataset.tab);
+for (const tab of expectedTabs) {
+  if (!actualTabs.includes(tab)) throw new Error(`Page dashboard absente: ${tab}`);
+}
+
+for (const tab of expectedTabs) {
+  const button = dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
+  button.click();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  if (!button.classList.contains("active")) {
+    throw new Error(`Le clic sidebar n'active pas la page ${tab}`);
+  }
+  const title = dom.window.document.getElementById("tabTitle")?.textContent?.trim();
+  if (!title) throw new Error(`La page ${tab} n'a plus de titre central`);
+  if (tab === "embeds" && !dom.window.document.querySelector(".embed-builder")) {
+    throw new Error("La page Embeds s'ouvre mais son créateur n'est pas rendu.");
+  }
+}
+
+if (runtimeErrors.some(message => /SyntaxError|ReferenceError|TypeError/.test(message))) {
+  console.error("Requetes observees:", JSON.stringify(requests, null, 2));
+  throw new Error(`Erreur JavaScript dashboard: ${runtimeErrors.join("\n")}`);
+}
+
 console.log("Dashboard V56 browser smoke OK:", paths.join(" -> "));
+console.log("Pages sidebar OK:", expectedTabs.join(", "));
 dom.window.close();
