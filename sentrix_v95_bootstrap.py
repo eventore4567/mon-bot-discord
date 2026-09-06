@@ -1,17 +1,87 @@
 """Bootstrap correctif V95.
 
 Séparé du module métier afin de garder le branchement Python minuscule dans sitecustomize.
+Cette couche corrige aussi les incompatibilités introduites par les anciens runtimes qui
+sont chargés après le catalogue principal sur Railway.
 """
 from __future__ import annotations
 
 import logging
+import re
+import types
+import typing
 
 import discord
 from discord import app_commands
 
 import sentrix_v95_runtime as v95
+from utils import log_categories, log_service
 
 logger = logging.getLogger("bot.v95-bootstrap")
+
+
+def _unwrap_optional_safe(annotation):
+    """Version sûre : certains objets Greedy de discord.py ne sont pas hashables."""
+    origin = typing.get_origin(annotation)
+    if origin is typing.Union or origin is types.UnionType:
+        args = [item for item in typing.get_args(annotation) if item is not type(None)]
+        if len(args) == 1:
+            return args[0]
+    return annotation
+
+
+def _repair_invite_registry() -> None:
+    """Réaffirme le routage final après les anciens runtimes logs V5/V6."""
+    log_categories.CATEGORIES["resources"] = "Ressources"
+    log_categories.LOG_REGISTRY["invite_create"] = ("resources", "🔗", "success")
+    log_categories.LOG_REGISTRY["invite_delete"] = ("resources", "🔗", "error")
+    log_categories.EVENT_EMOJI["invite_create"] = "🔗"
+    log_categories.EVENT_EMOJI["invite_delete"] = "🔗"
+    log_categories.LEGACY_CATEGORY_KEYS["resources"] = "resources"
+    log_categories.LEGACY_CATEGORY_KEYS["dossiers"] = "resources"
+    log_categories.LEGACY_CATEGORY_KEYS["log_resources"] = "resources"
+    log_categories.LEGACY_CATEGORY_KEYS["log_dossiers"] = "resources"
+
+
+def _install_invite_semantic_dedup_fixed() -> None:
+    current = log_service.semantic_event_key
+    if getattr(current, "_sentrix_v95_fixed", False):
+        return
+
+    def semantic_event_key_v95(guild_id: int, log_type: str, embed: discord.Embed):
+        event_type = str(log_type or "").strip().casefold().replace("-", "_")
+        if event_type in {"invite_create", "invite_delete"}:
+            code = ""
+            for field in embed.fields:
+                if "invitation" not in str(field.name or "").casefold():
+                    continue
+                value = str(field.value or "")
+                match = re.search(r"discord\.gg/([A-Za-z0-9_-]{2,})", value, re.I)
+                if match:
+                    code = match.group(1)
+                    break
+                stripped = value.strip().strip("`").strip()
+                if re.fullmatch(r"[A-Za-z0-9_-]{2,}", stripped):
+                    code = stripped
+                    break
+            if not code:
+                sample = "\n".join(
+                    [str(embed.title or ""), str(embed.description or "")]
+                    + [f"{field.name}\n{field.value}" for field in embed.fields]
+                )
+                match = re.search(
+                    r"(?:discord\.gg/|code\s*[:：]?\s*`?)([A-Za-z0-9_-]{2,})",
+                    sample,
+                    re.I,
+                )
+                if match:
+                    code = match.group(1)
+            return f"semantic:{int(guild_id)}:{event_type}:{(code or 'unknown').casefold()}"
+        return current(guild_id, log_type, embed)
+
+    semantic_event_key_v95._sentrix_v95_fixed = True
+    semantic_event_key_v95._sentrix_original = current
+    log_service.semantic_event_key = semantic_event_key_v95
 
 
 def _add_grouped_surface_fixed(bot):
@@ -40,7 +110,6 @@ def _add_grouped_surface_fixed(bot):
 
         for page_index, page_members in enumerate(chunks, start=1):
             if paged:
-                # Le constructeur avec parent=root ajoute déjà le sous-groupe à root.
                 parent = app_commands.Group(
                     name=f"page-{page_index}",
                     description=f"Page {page_index} des commandes {root_name}."[:100],
@@ -81,8 +150,28 @@ def _add_grouped_surface_fixed(bot):
     return report
 
 
+def _wrap_prepare_bot() -> None:
+    current = v95.prepare_bot
+    if getattr(current, "_sentrix_v95_bootstrap", False):
+        return
+
+    async def prepare_bot_fixed(bot):
+        _repair_invite_registry()
+        result = await current(bot)
+        _repair_invite_registry()
+        return result
+
+    prepare_bot_fixed._sentrix_v95_bootstrap = True
+    prepare_bot_fixed._sentrix_original = current
+    v95.prepare_bot = prepare_bot_fixed
+
+
 def install() -> None:
+    v95._unwrap_optional = _unwrap_optional_safe
+    v95._install_invite_semantic_dedup = _install_invite_semantic_dedup_fixed
     v95._add_grouped_surface = _add_grouped_surface_fixed
+    _wrap_prepare_bot()
+    _repair_invite_registry()
     v95.install_global()
     logger.info("V95 bootstrap actif.")
 
