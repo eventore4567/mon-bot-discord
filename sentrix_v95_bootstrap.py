@@ -30,6 +30,45 @@ def _unwrap_optional_safe(annotation):
     return annotation
 
 
+def _native_annotation_safe(annotation):
+    """Convertit une annotation legacy vers un type App Command sans hash() fragile.
+
+    ``commands.Greedy[...]`` est un objet et non un type hashable. Le runtime initial
+    testait son appartenance à un set, ce qui faisait échouer l'inventaire entier avant
+    la première commande slash. On compare ici par identité puis on dégrade proprement
+    vers ``str`` pour les convertisseurs historiques non représentables nativement.
+    """
+    annotation = _unwrap_optional_safe(annotation)
+    supported = (
+        str,
+        int,
+        float,
+        bool,
+        discord.Member,
+        discord.User,
+        discord.Role,
+        discord.Attachment,
+        discord.TextChannel,
+        discord.VoiceChannel,
+        discord.StageChannel,
+        discord.CategoryChannel,
+        discord.ForumChannel,
+    )
+    if any(annotation is item for item in supported):
+        return annotation
+    origin = typing.get_origin(annotation)
+    if origin is typing.Literal:
+        values = typing.get_args(annotation)
+        if values and all(isinstance(item, (str, int, float)) for item in values):
+            return annotation
+    try:
+        if isinstance(annotation, type) and issubclass(annotation, discord.abc.GuildChannel):
+            return annotation
+    except (TypeError, AttributeError):
+        pass
+    return str
+
+
 def _repair_invite_registry() -> None:
     """Réaffirme le routage final après les anciens runtimes logs V5/V6."""
     log_categories.CATEGORIES["resources"] = "Ressources"
@@ -168,6 +207,7 @@ def _wrap_prepare_bot() -> None:
 
 def install() -> None:
     v95._unwrap_optional = _unwrap_optional_safe
+    v95._native_annotation = _native_annotation_safe
     v95._install_invite_semantic_dedup = _install_invite_semantic_dedup_fixed
     v95._add_grouped_surface = _add_grouped_surface_fixed
     _wrap_prepare_bot()
