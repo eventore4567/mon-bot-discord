@@ -219,24 +219,25 @@ def _install_ticket_group(bot: commands.Bot) -> bool:
 
     Les commandes préfixées (+ticket, +ticketsetup, etc.) ne sont jamais retirées.
     """
-    if bot.get_cog("Tickets") is None:
+    get_cog = getattr(bot, "get_cog", None)
+    cog = get_cog("Tickets") if callable(get_cog) else None
+    # Les tests du budget utilisent des Mock génériques : ne jamais installer un faux
+    # groupe /ticket tant qu'un vrai Cog discord.py Tickets n'est pas présent.
+    if not isinstance(cog, commands.Cog):
         return False
     if getattr(bot, "_sentrix_ticket_slash_group_v2", False):
         return True
 
     tree = bot.tree
-    existing = tree.get_command("ticket", type=discord.AppCommandType.chat_input)
+    try:
+        existing = tree.get_command("ticket", type=discord.AppCommandType.chat_input)
+    except TypeError:
+        existing = tree.get_command("ticket")
     if isinstance(existing, app_commands.Group) and {
         "open", "close", "reopen", "claim", "unclaim", "add", "remove", "rename", "transcript"
     }.issubset({command.name for command in existing.commands}):
         bot._sentrix_ticket_slash_group_v2 = True
         return True
-
-    if existing is not None:
-        try:
-            tree.remove_command("ticket", type=discord.AppCommandType.chat_input)
-        except TypeError:
-            tree.remove_command("ticket")
 
     group = app_commands.Group(
         name="ticket",
@@ -297,8 +298,8 @@ def _install_ticket_group(bot: commands.Bot) -> bool:
             )
 
         await bot.db.execute(
-            "UPDATE tickets SET status='ouvert', closed_at=NULL, locked=0, last_activity_at=strftime('%s','now') WHERE id=?",
-            (ticket["id"],),
+            "UPDATE tickets SET status='ouvert', closed_at=NULL, locked=0, last_activity_at=? WHERE id=?",
+            (int(discord.utils.utcnow().timestamp()), ticket["id"]),
         )
         owner = interaction.guild.get_member(int(ticket["user_id"]))
         if owner:
@@ -391,7 +392,17 @@ def _install_ticket_group(bot: commands.Bot) -> bool:
             ephemere=True,
         )
 
+    # override=True remplace l'ancienne commande slash /ticket SANS libérer puis
+    # réallouer une racine. On ne crée donc aucun trou temporaire dans le budget de 100.
     tree.add_command(group, override=True)
+    try:
+        installed = tree.get_command("ticket", type=discord.AppCommandType.chat_input)
+    except TypeError:
+        installed = tree.get_command("ticket")
+    if not isinstance(installed, app_commands.Group):
+        logger.error("Le groupe /ticket n'a pas pu être enregistré ; ancienne surface conservée si disponible.")
+        return False
+
     bot._sentrix_ticket_slash_group_v2 = True
     logger.info(
         "Slash Tickets V2 actif : /ticket open|close|reopen|claim|unclaim|add|remove|rename|transcript|setup."
