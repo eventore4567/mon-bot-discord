@@ -102,16 +102,6 @@ HOTFIX_JS = r"""
   if (window.__sentrixOxydeHotfix) return;
   window.__sentrixOxydeHotfix = true;
 
-  let recoveryBusy = false;
-  let lastRecoveryGuild = "";
-
-  const getState = () => {
-    try { return typeof state !== "undefined" ? state : null; }
-    catch (_) { return null; }
-  };
-
-  const formatNumber = value => Number(value || 0).toLocaleString("fr-FR");
-
   function cleanupSidebar(){
     for (const id of ["sentrixOperationsLink","sentrixEnterpriseLink"]) {
       const node=document.getElementById(id);
@@ -141,116 +131,21 @@ HOTFIX_JS = r"""
     box.append(label,select);
   }
 
-  function loadingState(text="Chargement du serveur…"){
-    const empty=document.getElementById("emptyState");
-    if(!empty) return;
-    empty.classList.add("sx-empty-premium");
-    empty.innerHTML='<div class="sx-load-card"><div class="sx-load-orb"></div><h3>'+text+'</h3><p>SentriX récupère les rôles, salons et réglages du serveur. Cette page se remplit automatiquement.</p></div>';
-  }
-
-  function errorState(message,guildId){
-    const empty=document.getElementById("emptyState");
-    if(!empty) return;
-    empty.classList.remove("hidden");
-    empty.classList.add("sx-empty-premium");
-    empty.innerHTML='<div class="sx-load-card"><div class="sx-load-orb" style="filter:saturate(.45)"></div><h3>Impossible de charger ce serveur</h3><p>'+escapeHtml(message||"Une erreur inconnue est survenue.")+'</p><button type="button" class="btn primary" id="sxRetryGuild">Réessayer</button></div>';
-    document.getElementById("sxRetryGuild")?.addEventListener("click",()=>directLoadGuild(guildId,true));
-  }
-
-  function escapeHtml(value){
-    return String(value ?? "").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
-  }
-
-  function applyGuildData(guildId,data){
-    const s=getState();
-    if(!s || !data?.guild) return false;
-    s.guildId=String(guildId);
-    s.guildData=data;
-
-    const select=document.getElementById("serverSelect");
-    if(select && [...select.options].some(option=>String(option.value)===String(guildId))) select.value=String(guildId);
-
-    const title=document.getElementById("pageTitle");
-    const subtitle=document.getElementById("pageSubtitle");
-    if(title) title.textContent=data.guild.name || "Serveur";
-    if(subtitle) subtitle.textContent=`${formatNumber(data.guild.members)} membres · ${formatNumber(data.guild.channels_count)} salons · ${formatNumber(data.guild.roles_count)} rôles`;
-
-    const metricMap={metricMembers:data.guild.members,metricCommands:data.metrics?.commands_24h,metricTickets:data.metrics?.open_tickets,metricWarnings:data.metrics?.warnings};
-    for(const [id,value] of Object.entries(metricMap)){
-      const el=document.getElementById(id);if(el)el.textContent=formatNumber(value);
-    }
-
-    document.getElementById("emptyState")?.classList.add("hidden");
-    document.getElementById("serverContent")?.classList.remove("hidden","loading");
-
-    const hash=(location.hash||"").replace(/^#/,"");
-    try{if(hash && typeof tabs!=="undefined" && tabs[hash]) s.tab=hash;}catch(_){}
-    try{if(typeof renderTab==="function") renderTab();}catch(error){console.error("SentriX render recovery",error);return false;}
-    return true;
-  }
-
-  async function directLoadGuild(guildId,force=false){
-    const id=String(guildId||"").trim();
-    if(!id || id.startsWith("invite:") || recoveryBusy) return;
-    const s=getState();
-    if(!force && s?.guildData && String(s.guildId)===id){
-      document.getElementById("emptyState")?.classList.add("hidden");
-      document.getElementById("serverContent")?.classList.remove("hidden");
-      return;
-    }
-    recoveryBusy=true;
-    lastRecoveryGuild=id;
-    loadingState("Chargement de "+(document.getElementById("serverSelect")?.selectedOptions?.[0]?.textContent||"votre serveur"));
-    try{
-      const response=await fetch("/api/guilds/"+encodeURIComponent(id),{cache:"no-store",credentials:"same-origin"});
-      let data={};try{data=await response.json();}catch(_){}
-      if(!response.ok) throw new Error(data.error||`Erreur HTTP ${response.status}`);
-      if(!applyGuildData(id,data)) throw new Error("Les données du serveur ont été reçues mais leur affichage a échoué.");
-      try{localStorage.setItem("sentrix:main:guild",id);}catch(_){}
-    }catch(error){
-      console.error("SentriX guild recovery",error);
-      errorState(error?.message||"Chargement impossible.",id);
-    }finally{
-      recoveryBusy=false;
-    }
-  }
-
-  function candidateGuild(){
-    const select=document.getElementById("serverSelect");
-    if(!(select instanceof HTMLSelectElement)) return "";
-    const current=String(select.value||"");
-    if(current && !current.startsWith("invite:")) return current;
-    const first=[...select.options].find(option=>option.value && !String(option.value).startsWith("invite:"));
-    return first?String(first.value):"";
-  }
-
-  async function recoverIfNeeded(){
-    cleanupSidebar();beautifyServerPicker();
-    const s=getState();
-    if(!s || !s.user) return;
-    if(s.guildData && s.guildId){
-      document.getElementById("emptyState")?.classList.add("hidden");
-      document.getElementById("serverContent")?.classList.remove("hidden");
-      return;
-    }
-    const id=candidateGuild();
-    if(!id) return;
-    if(lastRecoveryGuild===id && recoveryBusy) return;
-    await directLoadGuild(id);
-  }
-
-  document.addEventListener("change",event=>{
-    if(event.target?.id!=="serverSelect") return;
-    const value=String(event.target.value||"");
-    if(value && !value.startsWith("invite:")) setTimeout(()=>directLoadGuild(value),450);
-  },true);
-
+  // directLoadGuild/recoverIfNeeded/applyGuildData ont été retirés (audit dashboard) :
+  // ce module réimplémentait sa propre récupération de /api/guilds/<id> en parallèle de
+  // selectGuild() (web/dashboard.py), avec son PROPRE écouteur "change" sur #serverSelect
+  // en plus de celui déjà posé par le dashboard canonique. Les deux écoutaient le même
+  // événement et écrivaient dans le même state.guildId/state.guildData sans se
+  // coordonner : lors d'un changement rapide de serveur, celui-ci pouvait réafficher les
+  // données d'un serveur déjà remplacé si sa propre requête revenait après. Son polling
+  // (4 setTimeout + un setInterval toutes les 5s, tant qu'aucune donnée n'était encore
+  // chargée) ajoutait aussi de la charge exactement pendant les moments où le serveur
+  // était déjà lent. selectGuild() gère maintenant lui-même l'annulation de requête
+  // (AbortController) et la reconnexion Discord (503) avec une seule tentative différée.
   const observer=new MutationObserver(()=>{cleanupSidebar();beautifyServerPicker();});
   const start=()=>{
     cleanupSidebar();beautifyServerPicker();
     if(document.body) observer.observe(document.body,{childList:true,subtree:true});
-    [260,850,1800,3600].forEach(delay=>setTimeout(recoverIfNeeded,delay));
-    setInterval(()=>{cleanupSidebar();recoverIfNeeded();},5000);
   };
   if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",start,{once:true});
   else start();
