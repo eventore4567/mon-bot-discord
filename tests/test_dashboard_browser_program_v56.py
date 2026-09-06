@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html as html_lib
 import re
 import subprocess
 from pathlib import Path
@@ -17,7 +16,10 @@ def _classic_inline_scripts(document: str) -> list[str]:
         type_match = re.search(r"\btype\s*=\s*['\"]([^'\"]+)['\"]", attrs, re.I)
         if type_match and type_match.group(1).lower() not in {"text/javascript", "application/javascript", "module"}:
             continue
-        scripts.append(html_lib.unescape(body))
+        # <script> est un élément raw-text HTML : les entités comme &quot; ne sont pas
+        # décodées par le parseur HTML dans le corps du script. Garder exactement le texte
+        # livré au navigateur évite un faux positif du test Node.
+        scripts.append(body)
     return scripts
 
 
@@ -43,9 +45,8 @@ def test_prestart_dashboard_javascript_parses_in_node(tmp_path: Path):
     scripts = _classic_inline_scripts(document)
     assert scripts, "Aucun script inline classique trouvé dans /app"
 
-    # Les balises <script> classiques partagent le même environnement global dans le
-    # navigateur. Les concaténer détecte à la fois les erreurs de syntaxe et les
-    # redéclarations lexicales globales introduites par les anciennes couches UI.
+    # Les scripts classiques partagent le même environnement global dans le navigateur.
+    # Les concaténer détecte les erreurs de syntaxe et les redéclarations lexicales globales.
     bundle = "\n;/* --- script boundary --- */\n".join(scripts)
     target = tmp_path / "sentrix-dashboard-prestart.js"
     target.write_text(bundle, encoding="utf-8")
