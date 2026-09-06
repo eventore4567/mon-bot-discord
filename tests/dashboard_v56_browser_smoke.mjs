@@ -105,7 +105,7 @@ const serverContent = dom.window.document.getElementById("serverContent");
 if (!serverContent || serverContent.classList.contains("hidden")) throw new Error("Le serveur est chargé mais sa zone centrale reste masquée.");
 
 const expectedTabs = [
-  "overview", "general", "access", "security", "sanctions", "logs", "welcome", "levels", "tickets",
+  "overview", "general", "access", "features", "security", "sanctions", "logs", "welcome", "levels", "tickets",
   "ai", "notifications", "embeds", "roles", "dm",
 ];
 const buttons = [...dom.window.document.querySelectorAll("#navigation button[data-tab]")];
@@ -115,13 +115,19 @@ for (const tab of expectedTabs) if (!actualTabs.includes(tab)) throw new Error(`
 for (const tab of expectedTabs) {
   const button = dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
   button.click();
-  await new Promise(resolve => setTimeout(resolve, ["overview","access","dm"].includes(tab) ? 120 : 50));
+  await new Promise(resolve => setTimeout(resolve, ["overview","access","features","dm"].includes(tab) ? 120 : 50));
   if (!button.classList.contains("active")) throw new Error(`Le clic sidebar n'active pas la page ${tab}`);
   const title = dom.window.document.getElementById("tabTitle")?.textContent?.trim();
   if (!title) throw new Error(`La page ${tab} n'a plus de titre central`);
   if (tab === "embeds" && !dom.window.document.querySelector(".sx-embed-layout,.embed-builder")) throw new Error("La page Embeds s'ouvre mais son créateur avancé n'est pas rendu.");
   if (tab === "overview" && !dom.window.document.querySelector(".sx-config-hero")) throw new Error("La vue d'ensemble n'affiche pas le score de configuration réel.");
   if (tab === "access" && !dom.window.document.querySelector(".sx-permission-grid,.sx-command-list")) throw new Error("La page Accès & commandes ne rend pas les permissions/commandes.");
+  if (tab === "features") {
+    const frame = dom.window.document.querySelector("#sxFeaturesFrame");
+    if (!frame) throw new Error("Les fonctions avancées quittent encore le shell V60 au lieu de rendre leur panneau intégré.");
+    if (!String(frame.getAttribute("src") || "").includes("/feature-suite?embed=1&guild=1")) throw new Error("Le panneau avancé ne conserve pas le serveur sélectionné.");
+    if (!dom.window.document.querySelector(".sx-features-shell")) throw new Error("Le shell V60 des fonctions avancées est absent.");
+  }
   if (tab === "dm" && !dom.window.document.querySelector("#dmAllMessage,#dmOneMessage")) throw new Error("La page Messages privés ne rend pas le formulaire autorisé.");
 }
 
