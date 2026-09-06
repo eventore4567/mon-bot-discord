@@ -6,6 +6,7 @@ sont chargés après le catalogue principal sur Railway.
 """
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 import types
@@ -31,13 +32,7 @@ def _unwrap_optional_safe(annotation):
 
 
 def _native_annotation_safe(annotation):
-    """Convertit une annotation legacy vers un type App Command sans hash() fragile.
-
-    ``commands.Greedy[...]`` est un objet et non un type hashable. Le runtime initial
-    testait son appartenance à un set, ce qui faisait échouer l'inventaire entier avant
-    la première commande slash. On compare ici par identité puis on dégrade proprement
-    vers ``str`` pour les convertisseurs historiques non représentables nativement.
-    """
+    """Convertit une annotation legacy vers un type App Command sans hash() fragile."""
     annotation = _unwrap_optional_safe(annotation)
     supported = (
         str,
@@ -67,6 +62,66 @@ def _native_annotation_safe(annotation):
     except (TypeError, AttributeError):
         pass
     return str
+
+
+def _build_signature_safe(command):
+    """Construit des options Discord sans copier les defaults typés du parser +.
+
+    Les defaults des anciennes commandes appartiennent au callback historique. Un slash
+    omis ne doit donc jamais injecter artificiellement ``0``, ``False`` ou un sentinel
+    dans la signature App Command. On expose ``None`` et on laisse ``Command.invoke``
+    appliquer le default d'origine lorsque l'argument n'est pas sérialisé.
+    """
+    try:
+        params = list(command.clean_params.items())
+    except Exception:
+        params = []
+
+    unsupported_shape = (
+        len(params) > v95.MAX_OPTIONS
+        or any(
+            p.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+            for _, p in params
+        )
+    )
+    interaction_param = inspect.Parameter(
+        "interaction",
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        annotation=discord.Interaction,
+    )
+    if unsupported_shape:
+        arg = inspect.Parameter(
+            "arguments",
+            inspect.Parameter.KEYWORD_ONLY,
+            annotation=str,
+            default="",
+        )
+        return inspect.Signature([interaction_param, arg]), False, ("arguments",)
+
+    output = [interaction_param]
+    names: list[str] = []
+    native = True
+    for raw_name, parameter in params:
+        name = v95._safe_name(raw_name, fallback="option").replace("-", "_")
+        if name in names:
+            name = f"{name[:25]}_{len(names) + 1}"[:32]
+        names.append(name)
+
+        original_annotation = _unwrap_optional_safe(parameter.annotation)
+        annotation = _native_annotation_safe(parameter.annotation)
+        if annotation is str and original_annotation is not str:
+            native = False
+
+        required = bool(getattr(parameter, "required", False))
+        output.append(
+            inspect.Parameter(
+                name,
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=annotation,
+                default=inspect.Parameter.empty if required else None,
+            )
+        )
+    return inspect.Signature(output), native, tuple(names)
 
 
 def _repair_invite_registry() -> None:
@@ -208,6 +263,7 @@ def _wrap_prepare_bot() -> None:
 def install() -> None:
     v95._unwrap_optional = _unwrap_optional_safe
     v95._native_annotation = _native_annotation_safe
+    v95._build_signature = _build_signature_safe
     v95._install_invite_semantic_dedup = _install_invite_semantic_dedup_fixed
     v95._add_grouped_surface = _add_grouped_surface_fixed
     _wrap_prepare_bot()
