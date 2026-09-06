@@ -436,12 +436,13 @@ class V17TicketsLogs(commands.Cog, name="V17TicketsLogs"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
         if ticket["status"] != "ferme":
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("Ce ticket n'est pas fermé.")))
-        setting = await self.bot.db.fetchone("SELECT reopen_minutes FROM v17_ticket_settings WHERE guild_id=?", (ctx.guild.id,))
-        minutes = int(setting["reopen_minutes"] if setting else 0)
-        if minutes <= 0:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("La réouverture n'est pas activée. Un administrateur peut utiliser `+ticketreopenwindow`.")))
-        if not ticket["closed_at"] or now() > int(ticket["closed_at"]) + minutes * 60:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('La fenêtre de réouverture est terminée.')))
+        # ticketreopenwindow/reopen_minutes contrôle uniquement combien de temps le salon
+        # SURVIT avant suppression définitive (auto_delete_v17) — ce n'est pas une
+        # permission de réouverture séparée. Avant ce correctif, `+reopenticket`
+        # refusait par défaut ("réouverture non activée") un ticket que
+        # `+ticket-reopen` (cogs/tickets.py) aurait pourtant rouvert sans problème,
+        # tant que le salon existe encore (status='ferme') : deux commandes, deux
+        # règles incompatibles pour la même action. Voir l'audit tickets livré.
         await self.bot.db.execute("UPDATE tickets SET status='ouvert',closed_at=NULL,locked=0,last_activity_at=? WHERE id=? AND status='ferme'", (now(), ticket["id"]))
         owner = ctx.guild.get_member(ticket["user_id"])
         if owner:
