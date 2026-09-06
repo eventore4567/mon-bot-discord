@@ -12,14 +12,27 @@ import logging
 logger = logging.getLogger("bot.dashboard-v64-final")
 
 CSS = r'''
-/* V64 : navigation finale et suppression des vestiges vides */
+/* V64 : navigation finale, thème corail SentriX et suppression des vestiges vides */
+:root{
+  /* Certaines couches V62/V63 utilisaient encore un alias bleu. V64 est injecté en dernier :
+     il le remappe vers l'accent corail demandé pour que /app reste visuellement uniforme. */
+  --sx-blue:var(--accent,#d66f55);
+  --sx-blue2:var(--accent2,#ef8568);
+}
 .sx-empty-filter{display:none!important}
 .navigation{padding-bottom:30px}
 .navigation .sx-nav-tools{padding:8px 12px 4px}
 .navigation .sx-nav-search{width:100%;border:1px solid #454d55;background:#252a2f;color:#eef3f7;border-radius:6px;padding:9px 10px;outline:0}
-.navigation .sx-nav-search:focus{border-color:var(--sx-blue,#4da3ff);box-shadow:0 0 0 2px #4da3ff18}
+.navigation .sx-nav-search:focus{border-color:var(--accent,#d66f55);box-shadow:0 0 0 2px #d66f5524}
 #fields .action-grid:empty,#fields .sx-unified-grid:empty{display:none!important}
 #fields .action-card a[href^="/"],#fields a[href="/setup-center"],#fields a[href="/feature-suite"],#fields a[href="/community"],#fields a[href="/operations"]{display:none!important}
+
+/* Les CTA ajoutés par V62/V63 doivent suivre la même identité que le shell V60. */
+.btn.blue{background:var(--accent,#d66f55)!important;border-color:var(--accent,#d66f55)!important;color:#fff!important}
+.btn.blue:hover{background:var(--accent2,#ef8568)!important;border-color:var(--accent2,#ef8568)!important}
+.sx-v63-hero-main{border-color:#785044!important;background:linear-gradient(135deg,#34302f,#2f2c2c)!important}
+.sx-v63-chip.blue{border-color:#785044!important;background:#3d2d29!important;color:#ffd4c7!important}
+.sx-v62-card.info{border-color:#69483f!important}
 '''
 
 JS = r'''
@@ -85,7 +98,7 @@ def install(dashboard) -> bool:
         return False
     dashboard.INDEX_HTML = html.replace("</style>", CSS + "\n</style>", 1).replace("</body>", JS + "\n</body>", 1)
     dashboard._sentrix_dashboard_version = "v64-final"
-    logger.info("Dashboard V64 final installé : sidebar dense stable et restaurée uniquement si une couche héritée la remplace.")
+    logger.info("Dashboard V64 final installé : sidebar dense stable, thème corail final et restauration uniquement si une couche héritée remplace la navigation.")
     return True
 
 
