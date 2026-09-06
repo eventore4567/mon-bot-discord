@@ -28,10 +28,20 @@ jobs:
           pip install -r requirements.txt
 
       - name: Compile V98 sources
-        run: python -m compileall -q sentrix_v95_runtime.py sentrix_v97_reliability.py sentrix_v98_runtime.py cogs tools/v98_grouped_slash_audit.py
+        run: python -m compileall -q sentrix_v95_runtime.py sentrix_v95_bootstrap.py sentrix_v97_reliability.py sentrix_v98_runtime.py cogs tools/v98_grouped_slash_audit.py
 
       - name: Audit every grouped slash family
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-v98-grouped-slash.db"
-        run: python tools/v98_grouped_slash_audit.py
+        run: |
+          python - <<'PY'
+          import asyncio
+          from sentrix_v95_bootstrap import install as install_v95_bootstrap
+          from tools.v98_grouped_slash_audit import run
+
+          # Reproduit exactement l'entrypoint Railway : V95 bootstrap corrige le paging
+          # des groupes avant que V97/V98 enveloppent le runtime commun.
+          install_v95_bootstrap()
+          raise SystemExit(asyncio.run(run()))
+          PY
