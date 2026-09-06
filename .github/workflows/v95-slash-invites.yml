@@ -23,12 +23,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Compile V95/V96
+      - name: Compile V95/V96/V97
         run: |
-          python -m compileall -q sentrix_v95_runtime.py sentrix_v95_bootstrap.py sentrix_verification_v96.py sentrix_verification_v96_finalizer.py sitecustomize.py railway_ha_product_boot.py tools/v95_slash_invites_gate.py
+          python -m compileall -q sentrix_v95_runtime.py sentrix_v95_bootstrap.py sentrix_v97_reliability.py sentrix_verification_v96.py sentrix_verification_v96_finalizer.py sitecustomize.py railway_ha_product_boot.py tools/v95_slash_invites_gate.py tools/v97_reliability_gate.py
 
       - name: Full V95/V96 registry gate
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-v95.db"
         run: python tools/v95_slash_invites_gate.py
+
+      - name: V97 slash execution + ticket dashboard gate
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v97.db"
+        run: python tools/v97_reliability_gate.py
