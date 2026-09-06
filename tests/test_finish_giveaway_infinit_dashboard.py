@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cogs.dashboard_runtime_patch import MANAGE_GUILD, _patch_recovery_loader, _patch_switch_html
+from cogs.dashboard_runtime_patch import MANAGE_GUILD
 from cogs.giveaway_v2 import BuilderState, _weighted_unique
 from cogs.setup_invitations import CATEGORY as INVITATIONS_CATEGORY
+from web import dashboard
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,29 +45,32 @@ def test_weighted_draw_is_unique_even_with_multiple_winners():
     assert set(winners) == {10, 20, 30, 40}
 
 
-def test_dashboard_switch_patch_drops_stale_native_payloads():
-    source = (
-        "before\n"
-        "    async function selectGuild(value){OLD}\n"
-        "    function optionList(type,current){return '';}\n"
-        "after"
-    )
-    patched, ok = _patch_switch_html(source)
-    assert ok is True
-    assert "guildLoadToken" in patched
-    # value est normalisé par value=String(value) avant le fetch ; comparer à value est donc
-    # le garde stale canonique et évite une conversion redondante à chaque retour API.
-    assert "String(state.guildId)!==value" in patched
-    assert "Les données précédentes ont été retirées" in patched
-    assert "{OLD}" not in patched
+def test_dashboard_uses_single_canonical_switch_loader():
+    """Le runtime tardif ne doit plus remplacer le selectGuild canonique.
+
+    Depuis la correction de la course dashboard, l'annulation de requête appartient à
+    web/dashboard.py. Un rewriter tardif basé sur guildLoadToken recréerait le bug où un
+    ancien serveur ou un écran « Chargement du serveur… » écrase le rendu courant.
+    """
+    html = dashboard.INDEX_HTML
+    runtime_source = (ROOT / "cogs/dashboard_runtime_patch.py").read_text(encoding="utf-8")
+
+    assert "new AbortController()" in html
+    assert "state.guildAbort" in html
+    assert "state.guildId!==value" in html
+    assert "guildLoadToken" not in runtime_source
+    assert "Les données précédentes ont été retirées" not in runtime_source
+    assert "dashboard.INDEX_HTML =" not in runtime_source
 
 
-def test_dashboard_recovery_loader_checks_current_selector_too():
-    marker = '      if(!applyGuildData(id,data)) throw new Error("Les données du serveur ont été reçues mais leur affichage a échoué.");'
-    patched, ok = _patch_recovery_loader(marker)
-    assert ok is True
-    assert "selectedNow" in patched
-    assert "selectedNow!==id" in patched
+def test_dashboard_runtime_patch_is_permissions_only():
+    source = (ROOT / "cogs/dashboard_runtime_patch.py").read_text(encoding="utf-8")
+    assert "def _patch_initial_load" not in source
+    assert "def _patch_switch_html" not in source
+    assert "def _patch_recovery_loader" not in source
+    assert "perms.manage_guild" in source
+    assert "perms.administrator" in source
+    assert "guild.owner_id == user_id" in source
 
 
 def test_manage_server_bit_and_live_permission_are_explicit():
