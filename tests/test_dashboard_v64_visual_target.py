@@ -9,26 +9,43 @@ def _final_document() -> str:
     return str(dashboard.INDEX_HTML)
 
 
-def test_v64_matches_requested_sentrix_coral_shell():
+def test_v64_matches_requested_sentrix_shell_with_blue_details():
     document = _final_document()
 
     # Identité SentriX : le dashboard s'inspire du shell fourni sans reprendre son branding.
     assert "<title>SentriX — Dashboard</title>" in document
     assert "SENTR<em>IX</em>" in document
 
-    # Palette demandée : charbon + corail/orange. V64 remappe aussi les anciens alias bleus
-    # afin qu'une couche V62/V63 ne puisse pas reprendre le dessus visuellement.
+    # Palette finale : charbon/corail pour le shell et vraies touches bleues SentriX.
     assert "--accent:#d66f55" in document
     assert "--accent2:#ef8568" in document
-    assert "--sx-blue:var(--accent,#d66f55)" in document
-    assert ".btn.blue{background:var(--accent,#d66f55)!important" in document
-    assert ".navigation .sx-nav-search:focus{border-color:var(--accent,#d66f55)" in document
+    assert "--sx-blue:#4da3ff" in document
+    assert "--sx-blue2:#78bdff" in document
+    assert "--sx-blue:var(--accent,#d66f55)" not in document
+    assert ".btn.blue{background:var(--sx-blue,#4da3ff)!important" in document
+    assert ".navigation .sx-nav-search:focus{border-color:var(--sx-blue,#4da3ff)" in document
 
     # Le shell final doit rester monolithique : rail serveurs + sidebar + zone centrale.
     assert 'class="server-rail"' in document
     assert 'class="sidebar"' in document
     assert 'class="workspace"' in document
     assert "const FINAL_GROUPS" in document
+
+
+def test_v64_mobile_and_tablet_layout_is_explicitly_hardened():
+    document = _final_document()
+
+    for marker in (
+        "@media(max-width:1180px)",
+        "@media(max-width:820px)",
+        "@media(max-width:540px)",
+        "width:min(86vw,300px)!important",
+        "overflow-x:hidden!important",
+        ".grid2,.embed-builder,.fields-grid,.action-grid,.sx-v62-grid,.sx-v63-modules,.sx-v63-palette,.sx-v63-economy{grid-template-columns:1fr!important}",
+        ".metrics{grid-template-columns:1fr!important}",
+        "if(innerWidth<821)$('sidebar')?.classList.remove('open')",
+    ):
+        assert marker in document, marker
 
 
 def test_v64_keeps_requested_pages_inside_the_same_app():
