@@ -59,3 +59,19 @@ def test_inline_installer_keeps_v60_shell_and_injects_once(monkeypatch):
     assert fake.INDEX_HTML.count('id="sentrix-v60-features-inline"') == 1
     assert inline.install(fake) is True
     assert fake.INDEX_HTML.count('id="sentrix-v60-features-inline"') == 1
+
+
+def test_final_freeze_guard_reinjects_features_even_if_normal_installer_was_skipped(monkeypatch):
+    from web import dashboard_frontend_freeze_v55 as freeze
+    from web import dashboard_v60_features_inline as inline
+
+    monkeypatch.setattr(inline, "_install_route_redirect", lambda: True)
+    fake = SimpleNamespace(
+        INDEX_HTML='<!doctype html><html><head><style>.base{}</style></head><body><nav id="navigation"></nav></body></html>'
+    )
+
+    assert freeze._ensure_v60_features_final(fake) is True
+    assert 'id="sentrix-v60-features-inline"' in fake.INDEX_HTML
+    assert 'data-tab="features"' in fake.INDEX_HTML
+    assert "/feature-suite?embed=1&guild=" in fake.INDEX_HTML
+    assert len(fake.INDEX_HTML) > 5000
