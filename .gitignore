@@ -20,6 +20,10 @@ __pycache__/
 .coverage
 htmlcov/
 
+# JavaScript / browser-test dependencies
+node_modules/
+npm-debug.log*
+
 # Virtual environments
 .venv/
 venv/
