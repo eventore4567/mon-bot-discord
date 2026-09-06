@@ -57,6 +57,17 @@ if not getattr(app_commands.CommandTree.sync, "_sentrix_v95", False):
 logger.warning("V95 bootstrap explicitement confirmé dans l'entrypoint Railway HA produit.")
 
 
+# V96 doit être installée APRES l'import de railway_ha_boot : railway_boot remplace
+# commands.Bot par la classe AutoSharded de production. On branche donc ici le hook de
+# chargement sur la vraie classe utilisée en production, avant que run() charge
+# cogs.verification. Le moteur CAPTCHA historique reste la seule source de vérité ; V96
+# remplace seulement l'ancienne configuration par l'assistant guidé règlement/salon/rôle.
+from sentrix_verification_v96 import install as _install_verification_v96  # noqa: E402
+
+_install_verification_v96()
+logger.warning("V96 vérification guidée explicitement branchée dans l'entrypoint Railway HA produit.")
+
+
 # Certaines couches dashboard historiques sont importées pendant le bootstrap HA. Elles
 # peuvent encore modifier INDEX_HTML après la première réparation. On entoure donc la
 # fonction build_app réellement utilisée : juste avant que les routes aiohttp soient figées,
