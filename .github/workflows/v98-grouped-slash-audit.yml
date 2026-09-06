@@ -1,0 +1,47 @@
+name: SentriX V98 Grouped Slash Audit
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  grouped-slash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile V98 sources
+        run: python -m compileall -q sentrix_v95_runtime.py sentrix_v95_bootstrap.py sentrix_v97_reliability.py sentrix_v98_runtime.py cogs tools/v98_grouped_slash_audit.py
+
+      - name: Audit every grouped slash family
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v98-grouped-slash.db"
+        run: |
+          python - <<'PY'
+          import asyncio
+          from sentrix_v95_bootstrap import install as install_v95_bootstrap
+          from tools.v98_grouped_slash_audit import run
+
+          # Reproduit exactement l'entrypoint Railway : V95 bootstrap corrige le paging
+          # des groupes avant que V97/V98 enveloppent le runtime commun.
+          install_v95_bootstrap()
+          raise SystemExit(asyncio.run(run()))
+          PY
