@@ -16,6 +16,8 @@ def test_v64_is_the_final_prestart_frontend():
     assert "SENTR<em>IX</em>" in document
     assert "--accent:#d66f55" in document
     assert "--sx-blue:#4da3ff" in document
+    assert "--sx-blue2:#78bdff" in document
+    assert "--sx-blue:var(--accent,#d66f55)" not in document
     assert 'class="server-rail"' in document
     assert 'class="sidebar"' in document
     assert 'id="sentrix-v60-max"' in document
@@ -75,7 +77,7 @@ def test_v64_keeps_real_api_wiring_inside_one_app():
         assert marker in document, marker
 
 
-def test_v64_uses_one_draftbot_like_shell_with_sentrix_blue_details():
+def test_v64_uses_one_draftbot_like_shell_with_sentrix_details():
     document = _prestart_html()
     for marker in (
         "Membres & rôles",
@@ -90,6 +92,19 @@ def test_v64_uses_one_draftbot_like_shell_with_sentrix_blue_details():
         "const FINAL_GROUPS",
         "sx-v63-discord",
         "sx-v62-grid",
+    ):
+        assert marker in document, marker
+
+
+def test_v64_has_mobile_and_tablet_breakpoints_without_secondary_pages():
+    document = _prestart_html()
+    for marker in (
+        "@media(max-width:1180px)",
+        "@media(max-width:820px)",
+        "@media(max-width:540px)",
+        "width:min(86vw,300px)!important",
+        "overflow-x:hidden!important",
+        "if(innerWidth<821)$('sidebar')?.classList.remove('open')",
     ):
         assert marker in document, marker
 
