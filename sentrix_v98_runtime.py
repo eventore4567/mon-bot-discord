@@ -54,6 +54,29 @@ def _is_attachment(annotation) -> bool:
     return _unwrap_optional(annotation) is discord.Attachment
 
 
+_ORIGINAL_NATIVE_ANNOTATION = v95._native_annotation
+
+
+def _native_annotation(annotation):
+    """Convertit une annotation legacy en option slash sans supposer qu'elle est hashable.
+
+    discord.py représente notamment ``commands.Greedy[...]`` par un objet non hashable.
+    V95 utilisait un ``set`` de types supportés et levait alors ``TypeError`` avant même de
+    construire le catalogue slash. Ces annotations complexes doivent simplement repasser par
+    le parseur texte historique, exactement comme les convertisseurs non natifs.
+    """
+    unwrapped = _unwrap_optional(annotation)
+    try:
+        hash(unwrapped)
+    except TypeError:
+        return str
+    try:
+        return _ORIGINAL_NATIVE_ANNOTATION(unwrapped)
+    except TypeError:
+        # Garde défensive pour tout futur objet d'annotation exotique fourni par discord.py.
+        return str
+
+
 def _build_signature(command: commands.Command):
     """Version V97 corrigée : le fallback texte garde aussi les attachments natifs."""
     try:
@@ -450,6 +473,7 @@ def install() -> None:
     # V97 reste utile pour le fallback texte et le dashboard ; V98 corrige son chemin
     # d'exécution et sa gestion des attachments en fallback.
     v97.install_slash()
+    v95._native_annotation = _native_annotation
     v95._build_signature = _build_signature
     v95._argument_text = _argument_text
     v95._invoke_original = _invoke_original
@@ -475,6 +499,7 @@ def install() -> None:
 
 __all__ = [
     "install",
+    "_native_annotation",
     "_build_signature",
     "_argument_text",
     "_invoke_original",
