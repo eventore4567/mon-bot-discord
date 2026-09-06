@@ -158,9 +158,9 @@ const dom = new JSDOM(html, {
 
 await new Promise(resolve => setTimeout(resolve, 1300));
 
-const paths = requests.map(item => item.path);
+const bootstrapPaths = requests.map(item => item.path);
 for (const required of ["/api/public", "/api/me", "/api/guilds", "/api/guilds/1"]) {
-  if (!paths.includes(required)) {
+  if (!bootstrapPaths.includes(required)) {
     console.error("Requetes observees:", JSON.stringify(requests, null, 2));
     console.error("Erreurs runtime:", runtimeErrors.join("\n"));
     throw new Error(`Le bootstrap dashboard n'a jamais appelé ${required}`);
@@ -208,10 +208,11 @@ for (const tab of expectedTabs) {
   }
 }
 
-if (!paths.includes("/api/guilds/1/diagnostics")) {
+const interactivePaths = requests.map(item => item.path);
+if (!interactivePaths.includes("/api/guilds/1/diagnostics")) {
   throw new Error("Les diagnostics V60 n'ont jamais été chargés.");
 }
-if (!paths.includes("/api/guilds/1/setup-tools")) {
+if (!interactivePaths.includes("/api/guilds/1/setup-tools")) {
   throw new Error("La page Accès & commandes n'a jamais chargé setup-tools.");
 }
 
@@ -220,6 +221,6 @@ if (runtimeErrors.some(message => /SyntaxError|ReferenceError|TypeError/.test(me
   throw new Error(`Erreur JavaScript dashboard: ${runtimeErrors.join("\n")}`);
 }
 
-console.log("Dashboard V60 MAX suite browser smoke OK:", paths.join(" -> "));
+console.log("Dashboard V60 MAX suite browser smoke OK:", interactivePaths.join(" -> "));
 console.log("Pages sidebar OK:", expectedTabs.join(", "));
 dom.window.close();
