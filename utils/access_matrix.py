@@ -145,6 +145,12 @@ SUBCOMMAND_TIERS: dict[str, str] = {
     "sentrixpro security": "securite",
     "sentrixpro ticket-summary": "tickets",
     "sentrixpro welcome": "configuration",
+    # /ai est désormais un groupe (voir cogs/ai.py) : ask/search/reset/memory/model
+    # restent publics en héritant de leur racine "ai" (PUBLIC_COMMANDS), mais
+    # enable/disable activent/désactivent l'IA pour TOUT le serveur — même niveau
+    # qu'aisetup (catégorie "ai" de CATEGORY_COMMANDS), pas public.
+    "ai enable": "ai",
+    "ai disable": "ai",
 }
 
 DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
@@ -273,7 +279,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
     }),
     "ai": frozenset({
         "aisetup", "aidiag", "aicenter", "aicontext", "aimemorychannel",
-        "airolequota",
+        "airolequota", "ai enable", "ai disable",
     }),
     "logs": frozenset({"createalllogs", "testlogs", "logevent", "logsearch"}),
     "complete": frozenset({"wipe-server", "roleall", "massrole"}),
