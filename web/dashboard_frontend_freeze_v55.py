@@ -1,8 +1,8 @@
 """Gel final du dashboard SentriX.
 
-V61 conserve le mécanisme de snapshot immuable introduit en V55, mais remplace définitivement
-les anciens centres visuels par une seule application ``/app``. Les routes/API historiques
-restent disponibles au backend ; leurs pages autonomes sont redirigées par V61.
+V62 conserve le mécanisme de snapshot immuable introduit en V55. V61 remplace les anciens
+centres visuels par une seule application ``/app`` et V62 termine cette application avec les
+éditeurs denses Vérification/Tickets et la navigation sans raccourcis externes.
 """
 from __future__ import annotations
 
@@ -38,21 +38,17 @@ def _ensure_v60_features_final(dashboard) -> bool:
 
 
 def _theme_secondary_pages_final() -> bool:
-    """Compatibilité ancienne : V61 ne sert plus les centres comme interfaces utilisateur."""
+    """Compatibilité ancienne : V61/V62 ne servent plus les centres comme interfaces utilisateur."""
     return True
 
 
 def _is_v61_document(dashboard, html: str) -> bool:
     version = str(getattr(dashboard, "_sentrix_dashboard_version", "") or "")
-    return version.startswith("v61") or 'id="sentrix-v61-unified"' in html
+    return version.startswith(("v61", "v62")) or 'id="sentrix-v61-unified"' in html
 
 
 def install(dashboard) -> bool:
-    """Fige le HTML de ``/app`` avant que le serveur aiohttp ne lie ses routes.
-
-    Les invariants V61 ne s'appliquent qu'au vrai document V61. Le helper de gel reste ainsi
-    générique/testable avec un petit document contenant uniquement la chaîne d'authentification.
-    """
+    """Fige le HTML de ``/app`` avant que le serveur aiohttp ne lie ses routes."""
     current = dashboard.handle_index
     if getattr(current, "_sentrix_frontend_freeze_v55", False):
         return True
@@ -79,7 +75,20 @@ def install(dashboard) -> bool:
         except Exception:
             legacy_present = 'id="sentrix-v60-features-inline"' in snapshot or 'id="sxFeaturesFrame"' in snapshot
         if absent or legacy_present:
-            logger.error("Dashboard V61 non figé : requis absents=%s ancienne UI features=%s.", absent, legacy_present)
+            logger.error("Dashboard V61/V62 non figé : requis absents=%s ancienne UI features=%s.", absent, legacy_present)
+            return False
+
+    version = str(getattr(dashboard, "_sentrix_dashboard_version", "") or "")
+    if version.startswith("v62"):
+        required_v62 = (
+            'id="sentrix-v62-dense"',
+            "Vérification & règlement",
+            "Tickets v2 inline",
+            "/api/guilds/${encodeURIComponent(state.guildId)}/v62",
+        )
+        absent_v62 = [marker for marker in required_v62 if marker not in snapshot]
+        if absent_v62:
+            logger.error("Dashboard V62 non figé : marqueurs finaux absents=%s.", absent_v62)
             return False
 
     digest = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()[:16]
@@ -107,7 +116,7 @@ def install(dashboard) -> bool:
 
 
 def install_product_prestart_hook() -> bool:
-    """Construit V60, ajoute les fonctions sûres, pose V61 en dernier puis fige ``/app``."""
+    """Construit V60, pose V61 puis V62 en dernier et fige ``/app``."""
     try:
         import sentrix_product_update as product
     except Exception:
@@ -125,8 +134,6 @@ def install_product_prestart_hook() -> bool:
             from .dashboard_rework_v60 import install as install_v60
             v60_ok = bool(install_v60(dashboard))
         except Exception:
-            # Les tests unitaires du helper utilisent volontairement un faux dashboard minimal.
-            # Le gel générique reste alors utilisable sans prétendre avoir construit V61.
             logger.debug("Dashboard V60 non applicable à ce document minimal.", exc_info=True)
         if v60_ok:
             try:
@@ -165,18 +172,28 @@ def install_product_prestart_hook() -> bool:
             except Exception:
                 logger.exception("Dashboard V61 : installation impossible.")
 
-        final_ok = False
+        postfix_ok = False
         if v61_ok:
             try:
                 from .dashboard_v61_postfix import install as install_v61_postfix
-                final_ok = bool(install_v61_postfix(dashboard))
+                postfix_ok = bool(install_v61_postfix(dashboard))
             except Exception:
                 logger.exception("Dashboard V61 postfix : installation impossible.")
 
-        if v61_ok and not final_ok:
+        v62_ok = False
+        if postfix_ok:
+            try:
+                from .dashboard_v62_dense import install as install_v62
+                v62_ok = bool(install_v62(dashboard))
+            except Exception:
+                logger.exception("Dashboard V62 dense : installation impossible.")
+
+        if v61_ok and not postfix_ok:
             logger.error("Dashboard V61 final absent : refus de considérer le frontend comme final.")
-        elif final_ok and not _ensure_v60_features_final(dashboard):
+        elif postfix_ok and not _ensure_v60_features_final(dashboard):
             logger.error("Dashboard V61 : l'ancienne Feature Suite est encore rendue après postfix.")
+        elif postfix_ok and not v62_ok:
+            logger.error("Dashboard V62 dense absent : Tickets/Vérification ne sont pas considérés finalisés.")
 
         if not install(dashboard):
             logger.error("Dashboard frontend : gel final échoué.")
@@ -184,7 +201,7 @@ def install_product_prestart_hook() -> bool:
     no_store_then_freeze._sentrix_frontend_freeze_hook_v55 = True
     no_store_then_freeze._sentrix_original = current
     product._install_no_store_index = no_store_then_freeze
-    logger.info("Dashboard V61 armé : interface DraftBot-like unique, anciens centres retirés, gel final activé.")
+    logger.info("Dashboard V62 armé : V61 unifié + configuration dense + gel final.")
     return True
 
 
