@@ -41,12 +41,25 @@ JS = r'''
   function filterNav(nav){const q=normalize(lastSearch).trim();nav.querySelectorAll('button[data-tab]').forEach(b=>b.classList.toggle('sx-empty-filter',Boolean(q)&&!normalize(b.textContent).includes(q)));nav.querySelectorAll('.sx-nav-group').forEach(group=>{let node=group.nextElementSibling,visible=false;while(node&&!node.classList.contains('sx-nav-group')){if(node.matches?.('button[data-tab]')&&!node.classList.contains('sx-empty-filter'))visible=true;node=node.nextElementSibling}group.style.display=visible?'':'none'})}
   function finalNavPresent(nav){const tabs=[...nav.querySelectorAll('button[data-tab]')].map(b=>b.dataset.tab);return tabs.length===FINAL_TABS.size&&tabs.every(tab=>FINAL_TABS.has(tab))&&Boolean(nav.querySelector('.sx-nav-group'))}
   function syncNavigation(nav){nav.querySelectorAll('button[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===state.tab));filterNav(nav)}
+  function bindNavigation(nav){
+    if(nav.dataset.v64Bound==='1')return;nav.dataset.v64Bound='1';
+    nav.addEventListener('click',event=>{
+      const button=event.target.closest?.('button[data-tab]');if(!button||!nav.contains(button))return;
+      event.preventDefault();event.stopImmediatePropagation();
+      state.tab=button.dataset.tab;
+      nav.querySelectorAll('button[data-tab]').forEach(b=>b.classList.toggle('active',b===button));
+      try{localStorage.setItem('sentrix:v61:tab',state.tab)}catch(_){}
+      renderTab();
+      try{history.replaceState({},'',`/app?tab=${encodeURIComponent(state.tab)}&guild=${encodeURIComponent(state.guildId||'')}`)}catch(_){}
+      if(innerWidth<821)$('sidebar')?.classList.remove('open');
+    },true);
+  }
   function buildNavigation(nav){
     const currentInput=nav.querySelector('#sxNavSearch');if(currentInput)lastSearch=currentInput.value||lastSearch;
     nav.innerHTML='<div class="sx-nav-tools"><input id="sxNavSearch" class="sx-nav-search" type="search" placeholder="Rechercher une fonction…" aria-label="Rechercher une fonction"></div>'+FINAL_GROUPS.map(([label,items])=>`<div class="sx-nav-group">${label}</div>`+items.map(([tab,label,icon])=>`<button type="button" data-tab="${tab}" class="${state.tab===tab?'active':''}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')).join('');
     const input=nav.querySelector('#sxNavSearch');input.value=lastSearch;input.addEventListener('input',event=>{lastSearch=event.target.value;filterNav(nav)});filterNav(nav);
   }
-  function lockNavigation(){const nav=$('navigation');if(!nav)return;if(finalNavPresent(nav)){syncNavigation(nav);return}buildNavigation(nav)}
+  function lockNavigation(){const nav=$('navigation');if(!nav)return;bindNavigation(nav);if(finalNavPresent(nav)){syncNavigation(nav);return}buildNavigation(nav)}
   function stripExternalCards(){
     document.querySelectorAll('#fields a[href],#fields button').forEach(el=>{
       const text=(el.textContent||'').trim().toLocaleLowerCase('fr');
