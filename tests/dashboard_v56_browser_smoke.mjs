@@ -42,7 +42,18 @@ const setupPayload = {
 
 const designPayload = {
   ok:true,
-  design:{primary_color:0xd66f55,secondary_color:0x5865f2,success_color:0x35d66f,warning_color:0xe9bd67,danger_color:0xe36b78,footer:"SentriX",progress_length:10,progress_filled:"■",progress_empty:"□",show_avatars:true,compact_mode:false,charts_enabled:true},
+  design:{primary_color:0x4da3ff,secondary_color:0x5865f2,success_color:0x35d66f,warning_color:0xe9bd67,danger_color:0xe36b78,footer:"SentriX",progress_length:10,progress_filled:"■",progress_empty:"□",show_avatars:true,compact_mode:false,charts_enabled:true},
+};
+
+const v62Payload = {
+  ok:true,
+  verification:{role_id:"15",channel_id:"22",captcha_enabled:true,captcha_max_attempts:3,rules_text:"1. Respectez les membres.\n2. Pas de spam.",image_url:"",message_id:null},
+  tickets:{
+    panels:[{id:1,guild_id:1,name:"Support",title:"Support",description:"Choisissez une option.",color:5088255,image_url:null,thumbnail_url:null,footer_text:"SentriX",channel_id:23,message_id:null,style:"button",max_per_member:1,enabled:1}],
+    types:[{id:2,panel_id:1,guild_id:1,name:"Support",description:"Besoin d'aide",emoji:"🎫",button_label:"Support",button_style:"bleu",staff_role_id:10,category_id:26,name_format:"ticket-{pseudo}",open_message:"Décrivez votre problème.",max_per_member:1,autoclose_hours:0,log_channel_id:21,mention_staff:1,use_form:1,position:0}],
+    questions:[{id:3,ticket_type_id:2,position:0,label:"Votre problème ?",placeholder:"Expliquez…",style:"long",required:1,min_length:0,max_length:500}],
+    buttons:{claim:{enabled:true,label:"Prendre en charge",emoji:"🙋",style:"bleu",role_id:null},close:{enabled:true,label:"Fermer",emoji:"🔒",style:"rouge",role_id:null}},
+  },
 };
 
 const dom = new JSDOM(html, {
@@ -58,7 +69,7 @@ const dom = new JSDOM(html, {
       if(url.pathname==="/api/guilds/1") return response({
         ok:true,guild:{id:"1",name:"Serveur Test",members:12,channels_count:7,roles_count:7},metrics:{commands_24h:3,open_tickets:1,warnings:0,economy_accounts:2},settings:{},automod:{},ai:{},
         roles:[{id:"10",name:"Staff"},{id:"11",name:"Membre"},{id:"12",name:"Booster"},{id:"13",name:"Modérateur"},{id:"14",name:"Admin"},{id:"15",name:"Vérifié"}],
-        channels:[{id:"20",name:"general",type:"text"},{id:"21",name:"logs",type:"text"},{id:"22",name:"welcome",type:"text"},{id:"23",name:"tickets",type:"text"},{id:"24",name:"reports",type:"text"},{id:"25",name:"staff",type:"text"},{id:"26",name:"Tickets",type:"category"}],social_notifications:[],
+        channels:[{id:"20",name:"general",type:"text"},{id:"21",name:"logs",type:"text"},{id:"22",name:"reglement",type:"text"},{id:"23",name:"tickets",type:"text"},{id:"24",name:"reports",type:"text"},{id:"25",name:"staff",type:"text"},{id:"26",name:"Tickets",type:"category"}],social_notifications:[],
       });
       if(url.pathname==="/api/guilds/1/sanctions") return response({ok:true,sanctions:[],next_offset:null,total:0});
       if(url.pathname==="/api/guilds/1/diagnostics") return response(diagnosticsPayload);
@@ -66,6 +77,7 @@ const dom = new JSDOM(html, {
       if(url.pathname==="/api/guilds/1/systems") return method==="PUT" ? response({ok:true,message:"Système mis à jour.",systems:{economy_enabled:false,levels_enabled:true}}) : response({ok:true,systems:{economy_enabled:true,levels_enabled:true}});
       if(url.pathname==="/api/guilds/1/games") return response({ok:true,message:"Mini-jeux enregistrés.",games:setupPayload.games});
       if(url.pathname==="/api/guilds/1/design") return method==="PUT" ? response({ok:true,message:"Design enregistré.",design:designPayload.design}) : response(designPayload);
+      if(url.pathname==="/api/guilds/1/v62") return method==="POST" ? response({ok:true,message:"Configuration V62 enregistrée.",panel_id:"1",type_id:"2",question_id:"3"}) : response(v62Payload);
       if(url.pathname==="/api/guilds/1/dm/apercu") return response({guild:{id:"1",name:"Serveur Test"},destinataires:11,bots_ignores:1,duree_estimee_secondes:8});
       if(url.pathname==="/api/guilds/1/dm/job") return response({actif:false,etat:null});
       return response({error:`Route mock inconnue: ${url.pathname}`},404);
@@ -74,7 +86,7 @@ const dom = new JSDOM(html, {
   },
 });
 
-await new Promise(resolve=>setTimeout(resolve,1400));
+await new Promise(resolve=>setTimeout(resolve,1500));
 const bootstrapPaths=requests.map(x=>x.path);
 for(const required of ["/api/public","/api/me","/api/guilds","/api/guilds/1"]){
   if(!bootstrapPaths.includes(required)) throw new Error(`Bootstrap manquant: ${required}`);
@@ -85,40 +97,46 @@ if(!dashboard||dashboard.classList.contains("hidden")) throw new Error("Dashboar
 if(dom.window.document.querySelector('[data-tab="features"]')) throw new Error("L'ancien onglet Fonctions avancées est encore visible.");
 if(dom.window.document.querySelector("#sxFeaturesFrame,.sx-features-shell")) throw new Error("L'ancien centre avancé est encore embarqué.");
 
-const expectedTabs=["overview","welcome","messages","levels","roles","secure_roles","reaction_roles","sanctions","security","reports","logs","tickets","notifications","ai","embeds","games","design","setup","access","dm","status","general"];
+const expectedTabs=["overview","welcome","messages","levels","roles","secure_roles","reaction_roles","verification","sanctions","security","reports","logs","economy","suggestions","notifications","tickets","ai","embeds","games","design","setup","access","dm","status"];
 const actualTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
-for(const tab of expectedTabs) if(!actualTabs.includes(tab)) throw new Error(`Page V61 absente: ${tab}`);
+for(const tab of expectedTabs) if(!actualTabs.includes(tab)) throw new Error(`Page V63 absente: ${tab}`);
+for(const removed of ["features","recurring","community","infinity"]) if(actualTabs.includes(removed)) throw new Error(`Ancienne page vide encore visible: ${removed}`);
 
-for(const group of ["Général","Membres & rôles","Modération","Outils","Configuration"]){
+for(const group of ["Général","Membres & rôles","Modération","Communauté","Outils","Configuration"]){
   if(![...dom.window.document.querySelectorAll(".sx-nav-group")].some(n=>n.textContent.trim()===group)) throw new Error(`Groupe sidebar absent: ${group}`);
 }
 
-for(const tab of ["overview","welcome","security","sanctions","logs","tickets","ai","notifications","embeds","roles","reaction_roles","games","design","setup","access","dm","status","general"]){
+for(const tab of ["overview","welcome","verification","economy","security","sanctions","logs","tickets","ai","notifications","embeds","roles","reaction_roles","games","design","setup","access","dm","status"]){
   const button=dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);button.click();
-  await new Promise(resolve=>setTimeout(resolve,["overview","access","dm","status","setup","games","design"].includes(tab)?140:60));
+  await new Promise(resolve=>setTimeout(resolve,["overview","verification","economy","tickets","access","dm","status","setup","games","design"].includes(tab)?170:70));
   if(!button.classList.contains("active")) throw new Error(`L'onglet ${tab} ne devient pas actif.`);
   const title=dom.window.document.getElementById("tabTitle")?.textContent?.trim();if(!title) throw new Error(`Titre vide: ${tab}`);
-  if(tab==="overview"&&!dom.window.document.querySelector(".sx-config-hero")) throw new Error("Vue d'ensemble sans diagnostic.");
+  if(tab==="overview"&&!dom.window.document.querySelector(".sx-v63-hero")) throw new Error("Vue d'ensemble V63 absente.");
+  if(tab==="verification"&&!dom.window.document.querySelector("#v62Rules,#v62VerifyPublish")) throw new Error("Vérification V62 incomplète.");
+  if(tab==="economy"&&!dom.window.document.querySelector("#v63EconomyToggle")) throw new Error("Économie V63 vide.");
+  if(tab==="tickets"&&!dom.window.document.querySelector("#v62PanelSave,#v62TypeSave,#v62Buttons")) throw new Error("Éditeur Tickets V62 incomplet.");
   if(tab==="access"&&!dom.window.document.querySelector(".sx-permission-grid,.sx-command-list")) throw new Error("Accès & commandes vide.");
   if(tab==="dm"&&!dom.window.document.querySelector("#dmAllMessage,#dmOneMessage")) throw new Error("Messages privés vide.");
   if(tab==="setup"&&!dom.window.document.querySelector(".sx-unified-grid")) throw new Error("Configuration V61 vide.");
   if(tab==="games"&&!dom.window.document.querySelector(".sx-games-grid")) throw new Error("Mini-jeux V61 vides.");
-  if(tab==="design"&&!dom.window.document.querySelector(".sx-design-preview")) throw new Error("Design V61 vide.");
+  if(tab==="design"&&!dom.window.document.querySelector("#v63DesignSave,.sx-v63-discord")) throw new Error("Design V63 vide.");
   if(tab==="status"&&!dom.window.document.querySelector(".sx-status-grid")) throw new Error("Statut V61 vide.");
   if(tab==="reaction_roles"&&!dom.window.document.querySelector("#rr_publish")) throw new Error("Rôles-réactions V61 vide.");
+  const legacyButtons=[...dom.window.document.querySelectorAll('#fields a,#fields button')].filter(el=>['ouvrir','configuration avancée','éditeur complet'].includes((el.textContent||'').trim().toLocaleLowerCase('fr')));
+  if(legacyButtons.length) throw new Error(`CTA legacy encore visible dans ${tab}: ${legacyButtons.map(x=>x.textContent).join(', ')}`);
 }
 
 const topLinks=[...dom.window.document.querySelectorAll(".topnav a")];
 if(topLinks.some(a=>["/setup-center","/feature-suite","/operations","/community"].includes(new URL(a.href,dom.window.location.href).pathname))) throw new Error("La topbar mène encore vers un ancien centre.");
 
 const interactivePaths=requests.map(x=>x.path);
-for(const required of ["/api/guilds/1/diagnostics","/api/guilds/1/setup-tools","/api/guilds/1/systems","/api/guilds/1/design","/api/guilds/1/dm/apercu","/api/guilds/1/dm/job"]){
-  if(!interactivePaths.includes(required)) throw new Error(`Route V61 jamais chargée: ${required}`);
+for(const required of ["/api/guilds/1/diagnostics","/api/guilds/1/setup-tools","/api/guilds/1/systems","/api/guilds/1/design","/api/guilds/1/v62","/api/guilds/1/dm/apercu","/api/guilds/1/dm/job"]){
+  if(!interactivePaths.includes(required)) throw new Error(`Route V63 jamais chargée: ${required}`);
 }
 
 if(runtimeErrors.some(message=>/SyntaxError|ReferenceError|TypeError/.test(message))){
-  console.error(runtimeErrors.join("\n"));throw new Error("Erreur JavaScript V61.");
+  console.error(runtimeErrors.join("\n"));throw new Error("Erreur JavaScript V63.");
 }
-console.log("Dashboard V61 browser smoke OK:",interactivePaths.join(" -> "));
-console.log("Pages V61 OK:",expectedTabs.join(", "));
+console.log("Dashboard V63 browser smoke OK:",interactivePaths.join(" -> "));
+console.log("Pages V63 OK:",expectedTabs.join(", "));
 dom.window.close();
