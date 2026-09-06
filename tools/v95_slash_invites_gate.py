@@ -167,6 +167,14 @@ async def run() -> int:
             "Publier",
             "verify_captcha_enabled",
             "VerifyView",
+            "5. Accès salons : NON",
+            "_apply_auto_access",
+            "verification_auto_access",
+            "manage_channels",
+            "manage_roles",
+            "category_targets",
+            "annulation après échec",
+            "_SENSITIVE_CHANNEL_WORDS",
         ):
             if required_fragment not in source_v96:
                 errors.append(f"V96 incomplet : élément absent {required_fragment}")
@@ -204,6 +212,7 @@ async def run() -> int:
             "V96: +verification aliases=verify-panel,verify-setup,verify-config,verification-config "
             f"slash={verification_paths[0] if len(verification_paths) == 1 else 'INVALID'}"
         )
+        print("V96: accès salons auto optionnel + protection staff/logs + rollback vérifiés")
         print("V95: invite_create/delete -> resources; producteur unique vérifié")
 
         current = asyncio.current_task()
