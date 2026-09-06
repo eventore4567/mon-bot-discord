@@ -63,9 +63,13 @@ logger.warning("V95 bootstrap explicitement confirmé dans l'entrypoint Railway 
 # cogs.verification. Le moteur CAPTCHA historique reste la seule source de vérité ; V96
 # remplace seulement l'ancienne configuration par l'assistant guidé règlement/salon/rôle.
 from sentrix_verification_v96 import install as _install_verification_v96  # noqa: E402
+from sentrix_verification_v96_finalizer import install as _install_verification_v96_final  # noqa: E402
 
 _install_verification_v96()
-logger.warning("V96 vérification guidée explicitement branchée dans l'entrypoint Railway HA produit.")
+_install_verification_v96_final()
+logger.warning(
+    "V96 vérification guidée + finalizer explicitement branchés dans l'entrypoint Railway HA produit."
+)
 
 
 # Certaines couches dashboard historiques sont importées pendant le bootstrap HA. Elles
