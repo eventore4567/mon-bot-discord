@@ -3,13 +3,14 @@
 Ce module complète le cog historique ``cogs.verification`` sans recopier son moteur
 CAPTCHA. Il remplace les anciennes entrées +verify-panel / +verify-setup par un seul
 assistant de configuration : salon, rôle, texte du règlement, image facultative,
-apercu puis publication.
+apercu, permissions automatiques facultatives puis publication.
 """
 from __future__ import annotations
 
 import logging
 import re
 import time
+import unicodedata
 
 import discord
 from discord.ext import commands
@@ -25,6 +26,47 @@ _DEFAULT_RULES = (
     "Un CAPTCHA vous sera ensuite demandé avant l'attribution du rôle vérifié."
 )
 _IMAGE_RE = re.compile(r"^https?://[^\s]+$", re.I)
+_SENSITIVE_CHANNEL_WORDS = frozenset(
+    {
+        "admin",
+        "admins",
+        "administration",
+        "audit",
+        "audits",
+        "direction",
+        "fondateur",
+        "fondateurs",
+        "log",
+        "logs",
+        "moderation",
+        "modo",
+        "modos",
+        "owner",
+        "owners",
+        "prive",
+        "private",
+        "staff",
+        "team",
+        "transcript",
+        "transcripts",
+    }
+)
+
+
+def _normalized_words(value: str) -> set[str]:
+    text = unicodedata.normalize("NFKD", str(value or "").casefold())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return set(re.findall(r"[a-z0-9]+", text))
+
+
+def _sensitive_surface(channel: discord.abc.GuildChannel) -> bool:
+    """Protège les espaces staff/logs/admin même s'ils ont été rendus publics par erreur."""
+    return bool(_normalized_words(getattr(channel, "name", "")) & _SENSITIVE_CHANNEL_WORDS)
+
+
+def _clone_overwrite(overwrite: discord.PermissionOverwrite) -> discord.PermissionOverwrite:
+    allow, deny = overwrite.pair()
+    return discord.PermissionOverwrite.from_pair(allow, deny)
 
 
 class VerificationRulesModal(discord.ui.Modal, title="Configurer le règlement"):
@@ -122,6 +164,7 @@ class VerificationSetupView(discord.ui.View):
         self.panel_title = _DEFAULT_TITLE
         self.rules_text = _DEFAULT_RULES
         self.image_url: str | None = None
+        self.auto_access = False
 
         self.add_item(VerificationChannelSelect(self))
         self.add_item(VerificationRoleSelect(self))
@@ -169,6 +212,17 @@ class VerificationSetupView(discord.ui.View):
         embed.add_field(
             name="4 • Image",
             value=self.image_url or "Aucune image — facultatif",
+            inline=False,
+        )
+        embed.add_field(
+            name="5 • Accès automatiques aux salons",
+            value=(
+                "**ACTIVÉ** — SentriX cachera les espaces publics aux membres non vérifiés, "
+                "les ouvrira au rôle choisi et laissera le salon de vérification visible. "
+                "Les espaces déjà privés et les salons/catégories staff, admin, modération, logs et audits restent intacts."
+                if self.auto_access
+                else "**DÉSACTIVÉ** — les permissions des salons ne seront pas modifiées."
+            ),
             inline=False,
         )
         embed.set_footer(text="SentriX • Vérification • CAPTCHA activé")
@@ -229,15 +283,30 @@ class VerificationSetupView(discord.ui.View):
                 "SentriX doit pouvoir **Voir le salon**, **Envoyer des messages** et **Intégrer des liens** dans ce salon.",
                 ephemeral=True,
             )
+        if self.auto_access:
+            bot_permissions = guild.me.guild_permissions if guild.me else None
+            if (
+                bot_permissions is None
+                or not bot_permissions.manage_channels
+                or not bot_permissions.manage_roles
+            ):
+                return await interaction.response.send_message(
+                    "Pour configurer automatiquement les accès, SentriX doit avoir **Gérer les salons** "
+                    "et **Gérer les rôles**. Désactivez l'option d'accès automatique ou donnez ces permissions au bot.",
+                    ephemeral=True,
+                )
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         await self.cog._ensure_table()
 
-        # Les trois clés historiques sont maintenues pour toutes les couches Setup existantes.
+        # Les clés historiques sont maintenues pour toutes les couches Setup existantes.
         await self.bot.db.set_guild_config(guild.id, "verify_role", role.id)
         await self.bot.db.set_guild_config(guild.id, "verification_role", role.id)
         await self.bot.db.set_guild_config(guild.id, "verification_channel", channel.id)
         await self.bot.db.set_guild_config(guild.id, "verify_captcha_enabled", 1)
+        await self.bot.db.set_guild_config(
+            guild.id, "verification_auto_access", int(self.auto_access)
+        )
 
         existing = await self.bot.db.fetchone(
             "SELECT channel_id, message_id FROM verification_panels_v96 WHERE guild_id = ?",
@@ -277,11 +346,48 @@ class VerificationSetupView(discord.ui.View):
                 int(time.time()),
             ),
         )
+
+        access_message = "Accès automatiques désactivés : permissions Discord inchangées."
+        if self.auto_access:
+            try:
+                changed, protected = await self.cog._apply_auto_access(
+                    guild,
+                    verification_channel=channel,
+                    verified_role=role,
+                    actor=interaction.user,
+                )
+            except Exception as exc:
+                logger.exception("Échec de la configuration automatique des accès de vérification.")
+                return await interaction.followup.send(
+                    "Le panneau de vérification a bien été publié, mais **les accès automatiques n'ont pas été appliqués**. "
+                    "SentriX a annulé les modifications de permissions déjà commencées afin d'éviter un serveur partiellement configuré.\n"
+                    f"Détail : `{type(exc).__name__}: {str(exc)[:500]}`",
+                    ephemeral=True,
+                )
+            access_message = (
+                f"Accès automatiques appliqués sur **{changed}** catégorie(s)/salon(s) public(s). "
+                f"**{protected}** espace(s) privé(s) ou sensible(s) ont été laissés intacts."
+            )
+
         await interaction.followup.send(
             f"Vérification configurée et publiée dans {channel.mention}.\n"
             f"Après le règlement + CAPTCHA, le membre recevra {role.mention}.\n"
-            "Les accès aux salons restent gérés par les permissions Discord de ce rôle, ce qui évite d'ouvrir les tickets privés aux autres membres.",
+            f"{access_message}",
             ephemeral=True,
+        )
+
+    @discord.ui.button(label="5. Accès salons : NON", style=discord.ButtonStyle.secondary, row=3)
+    async def toggle_auto_access(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        self.auto_access = not self.auto_access
+        button.label = "5. Accès salons : OUI" if self.auto_access else "5. Accès salons : NON"
+        button.style = (
+            discord.ButtonStyle.success if self.auto_access else discord.ButtonStyle.secondary
+        )
+        await interaction.response.edit_message(
+            embed=self.configuration_embed(),
+            view=self,
         )
 
 
@@ -312,6 +418,146 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             )
             """
         )
+
+    async def _apply_auto_access(
+        self,
+        guild: discord.Guild,
+        *,
+        verification_channel: discord.TextChannel,
+        verified_role: discord.Role,
+        actor: discord.abc.User,
+    ) -> tuple[int, int]:
+        """Ferme uniquement les espaces actuellement publics et protège les espaces privés.
+
+        La modification est transactionnelle au mieux : si Discord refuse une écriture,
+        toutes les permissions déjà modifiées pendant cette passe sont restaurées.
+        """
+        everyone = guild.default_role
+        channels = list(guild.channels)
+        public_before = {
+            item.id: bool(item.permissions_for(everyone).view_channel)
+            for item in channels
+        }
+        sensitive_ids = {
+            item.id for item in channels if _sensitive_surface(item)
+        }
+
+        category_targets: set[int] = set()
+        protected_ids: set[int] = set()
+        for category in guild.categories:
+            children = list(category.channels)
+            risky_child = any(
+                child.id != verification_channel.id
+                and (
+                    child.id in sensitive_ids
+                    or not public_before.get(child.id, False)
+                )
+                for child in children
+            )
+            if (
+                not public_before.get(category.id, False)
+                or category.id in sensitive_ids
+                or risky_child
+            ):
+                protected_ids.add(category.id)
+                continue
+            category_targets.add(category.id)
+
+        surfaces: list[discord.abc.GuildChannel] = []
+        surfaces.extend(
+            category for category in guild.categories if category.id in category_targets
+        )
+
+        for item in channels:
+            if isinstance(item, discord.CategoryChannel):
+                continue
+            if item.id == verification_channel.id:
+                continue
+            if item.id in sensitive_ids or not public_before.get(item.id, False):
+                protected_ids.add(item.id)
+                continue
+            parent = getattr(item, "category", None)
+            covered_by_category = (
+                parent is not None
+                and parent.id in category_targets
+                and bool(getattr(item, "permissions_synced", False))
+            )
+            if not covered_by_category:
+                surfaces.append(item)
+
+        # Le salon de vérification doit toujours rester visible avant le CAPTCHA, même si
+        # sa catégorie vient d'être fermée à @everyone.
+        surfaces.append(verification_channel)
+
+        operations: list[
+            tuple[
+                discord.abc.GuildChannel,
+                discord.Role,
+                bool,
+                discord.PermissionOverwrite,
+                discord.PermissionOverwrite,
+            ]
+        ] = []
+        seen: set[tuple[int, int]] = set()
+
+        def plan(
+            surface: discord.abc.GuildChannel,
+            target: discord.Role,
+            *,
+            view_channel: bool,
+        ) -> None:
+            key = (surface.id, target.id)
+            if key in seen:
+                return
+            seen.add(key)
+            old = surface.overwrites_for(target)
+            new = _clone_overwrite(old)
+            new.view_channel = view_channel
+            had_overwrite = target in surface.overwrites
+            operations.append((surface, target, had_overwrite, old, new))
+
+        for surface in surfaces:
+            if surface.id == verification_channel.id:
+                plan(surface, everyone, view_channel=True)
+                plan(surface, verified_role, view_channel=True)
+            else:
+                plan(surface, everyone, view_channel=False)
+                plan(surface, verified_role, view_channel=True)
+
+        changed: list[
+            tuple[
+                discord.abc.GuildChannel,
+                discord.Role,
+                bool,
+                discord.PermissionOverwrite,
+                discord.PermissionOverwrite,
+            ]
+        ] = []
+        reason = f"SentriX vérification : accès automatiques configurés par {actor} ({actor.id})"
+        try:
+            for surface, target, had_overwrite, old, new in operations:
+                await surface.set_permissions(target, overwrite=new, reason=reason)
+                changed.append((surface, target, had_overwrite, old, new))
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            rollback_reason = "SentriX vérification : annulation après échec de configuration automatique"
+            for surface, target, had_overwrite, old, _new in reversed(changed):
+                try:
+                    await surface.set_permissions(
+                        target,
+                        overwrite=old if had_overwrite else None,
+                        reason=rollback_reason,
+                    )
+                except (discord.Forbidden, discord.HTTPException):
+                    logger.exception(
+                        "Rollback permission impossible sur %s pour %s",
+                        getattr(surface, "id", "?"),
+                        getattr(target, "id", "?"),
+                    )
+            raise RuntimeError(f"Discord a refusé une permission sur {surface!s}") from exc
+
+        changed_surfaces = {surface.id for surface, *_rest in changed}
+        protected_ids.discard(verification_channel.id)
+        return len(changed_surfaces), len(protected_ids)
 
     @commands.hybrid_command(
         name="verification",
