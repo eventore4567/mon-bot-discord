@@ -55,24 +55,28 @@ const dom = new JSDOM(html, {
         });
       }
       if (url.pathname === "/api/guilds/1") {
+        // Même contrat que handle_guild : guild/metrics pour les compteurs et les
+        // collections/configurations à la racine pour les pages du formulaire.
         return response({
           ok: true,
           guild: {
             id: "1",
             name: "Serveur Test",
-            member_count: 12,
-            settings: {},
-            automod: {},
-            ai: {},
-            roles: [],
-            channels: [],
-            stats: { commands_24h: 0, tickets_open: 0, warnings: 0 },
-            notifications: [],
+            members: 12,
+            channels_count: 1,
+            roles_count: 1,
           },
+          metrics: { commands_24h: 3, open_tickets: 1, warnings: 0 },
+          settings: {},
+          automod: {},
+          ai: {},
+          roles: [{ id: "10", name: "Staff" }],
+          channels: [{ id: "20", name: "general", type: "text" }],
+          social_notifications: [],
         });
       }
       if (url.pathname === "/api/guilds/1/sanctions") {
-        return response({ ok: true, sanctions: [], next_cursor: null });
+        return response({ ok: true, sanctions: [], next_offset: null, total: 0 });
       }
       return response({ error: `Route mock inconnue: ${url.pathname}` }, 404);
     };
@@ -83,7 +87,7 @@ const dom = new JSDOM(html, {
 await new Promise(resolve => setTimeout(resolve, 1200));
 
 const paths = requests.map(item => item.path);
-for (const required of ["/api/public", "/api/me", "/api/guilds"]) {
+for (const required of ["/api/public", "/api/me", "/api/guilds", "/api/guilds/1"]) {
   if (!paths.includes(required)) {
     console.error("Requetes observees:", JSON.stringify(requests, null, 2));
     console.error("Erreurs runtime:", runtimeErrors.join("\n"));
@@ -94,6 +98,11 @@ for (const required of ["/api/public", "/api/me", "/api/guilds"]) {
 const dashboard = dom.window.document.getElementById("dashboard");
 if (!dashboard || dashboard.classList.contains("hidden")) {
   throw new Error("La session est chargée mais le dashboard reste masqué.");
+}
+const serverContent = dom.window.document.getElementById("serverContent");
+if (!serverContent || serverContent.classList.contains("hidden")) {
+  console.error("Erreurs runtime:", runtimeErrors.join("\n"));
+  throw new Error("Le serveur est chargé mais sa zone centrale reste masquée.");
 }
 
 const expectedTabs = [
@@ -109,13 +118,14 @@ for (const tab of expectedTabs) {
 for (const tab of expectedTabs) {
   const button = dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
   button.click();
-  await new Promise(resolve => setTimeout(resolve, 30));
+  await new Promise(resolve => setTimeout(resolve, 40));
   if (!button.classList.contains("active")) {
     throw new Error(`Le clic sidebar n'active pas la page ${tab}`);
   }
   const title = dom.window.document.getElementById("tabTitle")?.textContent?.trim();
   if (!title) throw new Error(`La page ${tab} n'a plus de titre central`);
   if (tab === "embeds" && !dom.window.document.querySelector(".embed-builder")) {
+    console.error("Erreurs runtime:", runtimeErrors.join("\n"));
     throw new Error("La page Embeds s'ouvre mais son créateur n'est pas rendu.");
   }
 }
