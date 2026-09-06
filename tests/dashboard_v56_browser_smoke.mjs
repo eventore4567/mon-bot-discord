@@ -12,16 +12,11 @@ virtualConsole.on("jsdomError", error => runtimeErrors.push(String(error?.stack 
 virtualConsole.on("error", (...args) => runtimeErrors.push(args.map(String).join(" ")));
 
 function response(payload, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    async json() { return payload; },
-  };
+  return { ok: status >= 200 && status < 300, status, async json() { return payload; } };
 }
 
 const diagnosticsPayload = {
-  ok: true,
-  score: 82,
+  ok: true, score: 82,
   summary: { active: 7, inactive: 1, missing: 2, errors: 0 },
   modules: {
     welcome: { code: "active", status: "ACTIF", detail: "Bienvenue configurée." },
@@ -41,8 +36,7 @@ const diagnosticsPayload = {
     { key: "manage_roles", name: "Gérer les rôles", granted: true },
     { key: "ban_members", name: "Bannir des membres", granted: true },
   ],
-  invalid_resources: [],
-  bot: { id: "999", top_role_position: 10 },
+  invalid_resources: [], bot: { id: "999", top_role_position: 10 },
 };
 
 const setupPayload = {
@@ -52,103 +46,41 @@ const setupPayload = {
     { name: "ban", description: "Bannir un membre", protected: false },
     { name: "ticket", description: "Gérer les tickets", protected: false },
   ],
-  disabled_commands: ["ticket"],
-  ignored_channels: [],
-  automod_exempt_roles: [],
-  antinuke_whitelist: [],
-  managers: [],
-  manager_categories: {
-    configuration: "Configuration",
-    tickets: "Tickets",
-    moderation: "Modération",
-    securite: "Sécurité",
-    economie: "Économie et jeux",
-    complete: "Accès complet",
-  },
-  history: [],
-  verification: { role_id: "", channel_id: "" },
+  disabled_commands: ["ticket"], ignored_channels: [], automod_exempt_roles: [], antinuke_whitelist: [], managers: [],
+  manager_categories: { configuration: "Configuration", tickets: "Tickets", moderation: "Modération", securite: "Sécurité", economie: "Économie et jeux", complete: "Accès complet" },
+  history: [], verification: { role_id: "", channel_id: "" },
 };
 
 const dom = new JSDOM(html, {
-  url: "https://sentrix.test/app",
-  runScripts: "dangerously",
-  pretendToBeVisual: true,
-  virtualConsole,
+  url: "https://sentrix.test/app", runScripts: "dangerously", pretendToBeVisual: true, virtualConsole,
   beforeParse(window) {
     window.fetch = async (input, options = {}) => {
       const url = new URL(typeof input === "string" ? input : input.url, window.location.href);
       const method = String(options.method || "GET").toUpperCase();
       requests.push({ path: url.pathname, method });
-      if (url.pathname === "/api/public") {
-        return response({
-          ok: true,
-          online: true,
-          guilds: 20,
-          members: 1000,
-          latency_ms: 42,
-          uptime_seconds: 3600,
-          invite_url: "https://discord.com/oauth2/authorize?client_id=1",
-          avatar_url: null,
-          oauth_ready: true,
-        });
-      }
-      if (url.pathname === "/api/me") {
-        return response({
-          ok: true,
-          user: { id: "42", username: "SentriX Test", avatar_url: null },
-          csrf: "test-csrf",
-        });
-      }
-      if (url.pathname === "/api/guilds") {
-        return response({
-          ok: true,
-          guilds: [{ id: "1", name: "Serveur Test", icon_url: null, installed: true }],
-        });
-      }
-      if (url.pathname === "/api/guilds/1") {
-        return response({
-          ok: true,
-          guild: {
-            id: "1",
-            name: "Serveur Test",
-            members: 12,
-            channels_count: 7,
-            roles_count: 7,
-          },
-          metrics: { commands_24h: 3, open_tickets: 1, warnings: 0, economy_accounts: 2 },
-          settings: {},
-          automod: {},
-          ai: {},
-          roles: [
-            { id: "10", name: "Staff" },
-            { id: "11", name: "Membre" },
-            { id: "12", name: "Booster" },
-            { id: "13", name: "Modérateur" },
-            { id: "14", name: "Admin" },
-            { id: "15", name: "Vérifié" },
-          ],
-          channels: [
-            { id: "20", name: "general", type: "text" },
-            { id: "21", name: "logs", type: "text" },
-            { id: "22", name: "welcome", type: "text" },
-            { id: "23", name: "tickets", type: "text" },
-            { id: "24", name: "reports", type: "text" },
-            { id: "25", name: "staff", type: "text" },
-            { id: "26", name: "Tickets", type: "category" },
-          ],
-          social_notifications: [],
-        });
-      }
-      if (url.pathname === "/api/guilds/1/sanctions") {
-        return response({ ok: true, sanctions: [], next_offset: null, total: 0 });
-      }
-      if (url.pathname === "/api/guilds/1/diagnostics") {
-        return response(diagnosticsPayload);
-      }
-      if (url.pathname === "/api/guilds/1/setup-tools") {
-        if (method === "POST") return response({ ok: true, message: "Configuration appliquée." });
-        return response(setupPayload);
-      }
+      if (url.pathname === "/api/public") return response({ ok: true, online: true, guilds: 20, members: 1000, latency_ms: 42, uptime_seconds: 3600, invite_url: "https://discord.com/oauth2/authorize?client_id=1", avatar_url: null, oauth_ready: true });
+      if (url.pathname === "/api/me") return response({ ok: true, user: { id: "42", username: "SentriX Test", avatar_url: null }, csrf: "test-csrf" });
+      if (url.pathname === "/api/guilds") return response({ ok: true, guilds: [{ id: "1", name: "Serveur Test", icon_url: null, installed: true }] });
+      if (url.pathname === "/api/guilds/1") return response({
+        ok: true,
+        guild: { id: "1", name: "Serveur Test", members: 12, channels_count: 7, roles_count: 7 },
+        metrics: { commands_24h: 3, open_tickets: 1, warnings: 0, economy_accounts: 2 }, settings: {}, automod: {}, ai: {},
+        roles: [
+          { id: "10", name: "Staff" }, { id: "11", name: "Membre" }, { id: "12", name: "Booster" },
+          { id: "13", name: "Modérateur" }, { id: "14", name: "Admin" }, { id: "15", name: "Vérifié" },
+        ],
+        channels: [
+          { id: "20", name: "general", type: "text" }, { id: "21", name: "logs", type: "text" },
+          { id: "22", name: "welcome", type: "text" }, { id: "23", name: "tickets", type: "text" },
+          { id: "24", name: "reports", type: "text" }, { id: "25", name: "staff", type: "text" },
+          { id: "26", name: "Tickets", type: "category" },
+        ], social_notifications: [],
+      });
+      if (url.pathname === "/api/guilds/1/sanctions") return response({ ok: true, sanctions: [], next_offset: null, total: 0 });
+      if (url.pathname === "/api/guilds/1/diagnostics") return response(diagnosticsPayload);
+      if (url.pathname === "/api/guilds/1/setup-tools") return method === "POST" ? response({ ok: true, message: "Configuration appliquée." }) : response(setupPayload);
+      if (url.pathname === "/api/guilds/1/dm/apercu") return response({ guild: { id: "1", name: "Serveur Test" }, destinataires: 11, bots_ignores: 1, duree_estimee_secondes: 8 });
+      if (url.pathname === "/api/guilds/1/dm/job") return response({ actif: false, etat: null });
       return response({ error: `Route mock inconnue: ${url.pathname}` }, 404);
     };
     window.confirm = () => true;
@@ -168,52 +100,34 @@ for (const required of ["/api/public", "/api/me", "/api/guilds", "/api/guilds/1"
 }
 
 const dashboard = dom.window.document.getElementById("dashboard");
-if (!dashboard || dashboard.classList.contains("hidden")) {
-  throw new Error("La session est chargée mais le dashboard reste masqué.");
-}
+if (!dashboard || dashboard.classList.contains("hidden")) throw new Error("La session est chargée mais le dashboard reste masqué.");
 const serverContent = dom.window.document.getElementById("serverContent");
-if (!serverContent || serverContent.classList.contains("hidden")) {
-  console.error("Erreurs runtime:", runtimeErrors.join("\n"));
-  throw new Error("Le serveur est chargé mais sa zone centrale reste masquée.");
-}
+if (!serverContent || serverContent.classList.contains("hidden")) throw new Error("Le serveur est chargé mais sa zone centrale reste masquée.");
 
 const expectedTabs = [
   "overview", "general", "access", "security", "sanctions", "logs", "welcome", "levels", "tickets",
-  "ai", "notifications", "embeds", "roles",
+  "ai", "notifications", "embeds", "roles", "dm",
 ];
 const buttons = [...dom.window.document.querySelectorAll("#navigation button[data-tab]")];
 const actualTabs = buttons.map(button => button.dataset.tab);
-for (const tab of expectedTabs) {
-  if (!actualTabs.includes(tab)) throw new Error(`Page dashboard absente: ${tab}`);
-}
+for (const tab of expectedTabs) if (!actualTabs.includes(tab)) throw new Error(`Page dashboard absente: ${tab}`);
 
 for (const tab of expectedTabs) {
   const button = dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
   button.click();
-  await new Promise(resolve => setTimeout(resolve, tab === "overview" || tab === "access" ? 100 : 50));
-  if (!button.classList.contains("active")) {
-    throw new Error(`Le clic sidebar n'active pas la page ${tab}`);
-  }
+  await new Promise(resolve => setTimeout(resolve, ["overview","access","dm"].includes(tab) ? 120 : 50));
+  if (!button.classList.contains("active")) throw new Error(`Le clic sidebar n'active pas la page ${tab}`);
   const title = dom.window.document.getElementById("tabTitle")?.textContent?.trim();
   if (!title) throw new Error(`La page ${tab} n'a plus de titre central`);
-  if (tab === "embeds" && !dom.window.document.querySelector(".sx-embed-layout,.embed-builder")) {
-    console.error("Erreurs runtime:", runtimeErrors.join("\n"));
-    throw new Error("La page Embeds s'ouvre mais son créateur avancé n'est pas rendu.");
-  }
-  if (tab === "overview" && !dom.window.document.querySelector(".sx-config-hero")) {
-    throw new Error("La vue d'ensemble n'affiche pas le score de configuration réel.");
-  }
-  if (tab === "access" && !dom.window.document.querySelector(".sx-permission-grid,.sx-command-list")) {
-    throw new Error("La page Accès & commandes ne rend pas les permissions/commandes.");
-  }
+  if (tab === "embeds" && !dom.window.document.querySelector(".sx-embed-layout,.embed-builder")) throw new Error("La page Embeds s'ouvre mais son créateur avancé n'est pas rendu.");
+  if (tab === "overview" && !dom.window.document.querySelector(".sx-config-hero")) throw new Error("La vue d'ensemble n'affiche pas le score de configuration réel.");
+  if (tab === "access" && !dom.window.document.querySelector(".sx-permission-grid,.sx-command-list")) throw new Error("La page Accès & commandes ne rend pas les permissions/commandes.");
+  if (tab === "dm" && !dom.window.document.querySelector("#dmAllMessage,#dmOneMessage")) throw new Error("La page Messages privés ne rend pas le formulaire autorisé.");
 }
 
 const interactivePaths = requests.map(item => item.path);
-if (!interactivePaths.includes("/api/guilds/1/diagnostics")) {
-  throw new Error("Les diagnostics V60 n'ont jamais été chargés.");
-}
-if (!interactivePaths.includes("/api/guilds/1/setup-tools")) {
-  throw new Error("La page Accès & commandes n'a jamais chargé setup-tools.");
+for (const required of ["/api/guilds/1/diagnostics", "/api/guilds/1/setup-tools", "/api/guilds/1/dm/apercu", "/api/guilds/1/dm/job"]) {
+  if (!interactivePaths.includes(required)) throw new Error(`Route interactive jamais chargée: ${required}`);
 }
 
 if (runtimeErrors.some(message => /SyntaxError|ReferenceError|TypeError/.test(message))) {
@@ -221,6 +135,6 @@ if (runtimeErrors.some(message => /SyntaxError|ReferenceError|TypeError/.test(me
   throw new Error(`Erreur JavaScript dashboard: ${runtimeErrors.join("\n")}`);
 }
 
-console.log("Dashboard V60 MAX suite browser smoke OK:", interactivePaths.join(" -> "));
+console.log("Dashboard V60 final browser smoke OK:", interactivePaths.join(" -> "));
 console.log("Pages sidebar OK:", expectedTabs.join(", "));
 dom.window.close();
