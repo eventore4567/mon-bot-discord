@@ -1,10 +1,8 @@
-"""Dashboard frontend freeze — publication immuable de ``/app``.
+"""Gel final du dashboard SentriX.
 
-Le gel V55 reste le mécanisme de stabilité : le document final est capturé une seule fois
-avant ``build_app()`` puis servi tel quel pendant tout le runtime. Depuis V60, le frontend
-reconstruit est installé exactement à ce point, après les routes produit (Tickets, Embeds,
-ping-role...) mais avant le snapshot. Les anciennes couches conservent donc leurs endpoints
-sans pouvoir réécrire l'interface finalement publiée.
+V61 conserve le mécanisme de snapshot immuable introduit en V55, mais remplace définitivement
+les anciens centres visuels par une seule application ``/app``. Les routes/API historiques
+restent disponibles au backend ; leurs pages autonomes sont redirigées par V61.
 """
 from __future__ import annotations
 
@@ -30,99 +28,17 @@ def _snapshot_is_usable(html: str) -> tuple[bool, list[str]]:
 
 
 def _ensure_v60_features_final(dashboard) -> bool:
-    """Post-condition de production : le snapshot final DOIT contenir l'onglet avancé.
+    """Compatibilité ancienne : la Feature Suite générique est volontairement supprimée.
 
-    L'intégrateur normal ``dashboard_v60_features_inline.install`` reste utilisé. Ce garde-fou
-    travaille directement sur le document final juste avant son gel, afin qu'un ordre de
-    chargement historique ou un état d'installation déjà marqué ne puisse plus faire perdre
-    l'onglet ``Fonctions avancées`` en production.
+    Cette fonction existait dans quelques audits. Elle ne doit plus injecter quoi que ce soit :
+    V61 expose directement les réglages utiles dans le dashboard principal.
     """
-    try:
-        from . import dashboard_v60_features_inline as features
-    except Exception:
-        logger.exception("Dashboard V60 : module des fonctions avancées introuvable au gel final.")
-        return False
-
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
-    marker = 'id="sentrix-v60-features-inline"'
-    injected = False
-    if marker not in html:
-        if "</style>" not in html or "</body>" not in html:
-            logger.error("Dashboard V60 : document final sans points d'insertion pour les fonctions avancées.")
-            return False
-        html = html.replace("</style>", features.INLINE_CSS + "\n</style>", 1)
-        html = html.replace("</body>", features.INLINE_JS + "\n</body>", 1)
-        dashboard.INDEX_HTML = html
-        injected = True
-
-    try:
-        route_ok = bool(features._install_route_redirect())
-    except Exception:
-        logger.exception("Dashboard V60 : impossible d'armer la redirection de l'ancien centre des fonctions.")
-        route_ok = False
-
-    final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
-    present = marker in final_html and 'data-tab="features"' in final_html and "/feature-suite?embed=1&guild=" in final_html
-    if not present:
-        logger.error("Dashboard V60 : post-condition fonctions avancées ÉCHEC avant gel.")
-        return False
-
-    logger.info(
-        "Dashboard V60 : fonctions avancées garanties dans le document final (injecté=%s route_redirect=%s octets=%s).",
-        injected,
-        route_ok,
-        len(final_html.encode("utf-8")),
-    )
-    return route_ok
+    return 'data-tab="features"' not in html and 'id="sentrix-v60-features-inline"' not in html
 
 
 def _theme_secondary_pages_final() -> bool:
-    """Harmonise TOUTES les pages d'administration isolées avec l'identité V60.
-
-    Ce point est volontairement juste avant le gel : les modules Setup/Feature Suite ont déjà
-    appliqué leurs anciens reworks, donc la feuille V60 arrive réellement en dernier. Le
-    document principal ``/app`` n'est jamais passé à cet installateur.
-    """
-    try:
-        from .dashboard_v60_secondary_theme import install as install_secondary_theme
-        from . import setup_center
-        from . import setup_dashboard
-        from . import design_setup_dashboard
-        from . import embed_center
-        from . import owner_server_manager
-        from . import operations_center
-        from . import community_growth
-        from . import engagement_hub
-        from . import feature_suite_dashboard_v37
-        from . import log_settings_dashboard_v32
-        from . import ticket_center_v35
-        from . import ticket_buttons_editor_v53
-        from . import dashboard_control_center
-        from . import feature_control_v36
-    except Exception:
-        logger.exception("Dashboard V60 : impossible de charger le thème commun des pages secondaires.")
-        return False
-
-    count = install_secondary_theme(
-        setup_center,
-        setup_dashboard,
-        design_setup_dashboard,
-        embed_center,
-        owner_server_manager,
-        operations_center,
-        community_growth,
-        engagement_hub,
-        feature_suite_dashboard_v37,
-        log_settings_dashboard_v32,
-        ticket_center_v35,
-        ticket_buttons_editor_v53,
-        dashboard_control_center,
-        feature_control_v36,
-    )
-    if count <= 0:
-        logger.error("Dashboard V60 : aucune page secondaire n'a reçu le thème commun.")
-        return False
-    logger.info("Dashboard V60 : %s document(s) secondaire(s) utilisent maintenant la même palette et les mêmes formes que /app.", count)
+    """Compatibilité ancienne : V61 ne sert plus les centres comme interfaces utilisateur."""
     return True
 
 
@@ -135,14 +51,19 @@ def install(dashboard) -> bool:
     snapshot = str(getattr(dashboard, "INDEX_HTML", "") or "")
     usable, missing = _snapshot_is_usable(snapshot)
     if not usable:
-        logger.error(
-            "Dashboard frontend non figé : snapshot pré-start incomplet, marqueurs absents=%s.",
-            missing,
-        )
+        logger.error("Dashboard frontend non figé : snapshot pré-start incomplet, marqueurs absents=%s.", missing)
+        return False
+
+    # Post-conditions V61 : une seule interface et aucun retour de la Feature Suite générique.
+    required_v61 = ('id="sentrix-v61-unified"', 'data-tab="setup"', 'data-tab="games"', 'data-tab="design"', 'data-tab="status"')
+    absent = [marker for marker in required_v61 if marker not in snapshot]
+    forbidden = [marker for marker in ('data-tab="features"', 'id="sentrix-v60-features-inline"') if marker in snapshot]
+    if absent or forbidden:
+        logger.error("Dashboard V61 non figé : requis absents=%s interdits présents=%s.", absent, forbidden)
         return False
 
     digest = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()[:16]
-    version = str(getattr(dashboard, "_sentrix_dashboard_version", "v55"))
+    version = str(getattr(dashboard, "_sentrix_dashboard_version", "v61"))
 
     async def frozen_handle_index(request: web.Request):
         if request.path == "/app":
@@ -158,21 +79,15 @@ def install(dashboard) -> bool:
     frozen_handle_index._sentrix_frontend_freeze_v55 = True
     frozen_handle_index._sentrix_original = current
     frozen_handle_index._sentrix_snapshot_sha = digest
-
     dashboard.handle_index = frozen_handle_index
     dashboard._sentrix_frontend_snapshot_v55 = snapshot
     dashboard._sentrix_frontend_snapshot_sha_v55 = digest
-    logger.info(
-        "Dashboard %s figé avant build_app : %s octets, sha256=%s.",
-        version,
-        len(snapshot.encode("utf-8")),
-        digest,
-    )
+    logger.info("Dashboard %s figé : %s octets, sha256=%s.", version, len(snapshot.encode("utf-8")), digest)
     return True
 
 
 def install_product_prestart_hook() -> bool:
-    """Installe V60 final + fonctions avancées intégrées, harmonise les centres puis gèle."""
+    """Construit V60, ajoute les fonctions sûres, pose V61 en dernier puis fige ``/app``."""
     try:
         import sentrix_product_update as product
     except Exception:
@@ -185,83 +100,64 @@ def install_product_prestart_hook() -> bool:
 
     def no_store_then_freeze(dashboard) -> None:
         current(dashboard)
-        v60_ok = False
-        max_ok = False
-        suite_ok = False
+        v60_ok = max_ok = suite_ok = False
         try:
             from .dashboard_rework_v60 import install as install_v60
             v60_ok = bool(install_v60(dashboard))
-            if not v60_ok:
-                logger.error("Dashboard V60 : installation refusée avant le gel.")
         except Exception:
-            logger.exception("Dashboard V60 : installation impossible avant le gel.")
+            logger.exception("Dashboard V60 : installation impossible.")
         if v60_ok:
             try:
                 from .dashboard_v60_max import install as install_v60_max
                 max_ok = bool(install_v60_max(dashboard))
-                if not max_ok:
-                    logger.error("Dashboard V60 MAX : installation refusée avant le gel.")
             except Exception:
-                logger.exception("Dashboard V60 MAX : installation impossible avant le gel.")
+                logger.exception("Dashboard V60 MAX : installation impossible.")
             try:
                 from .dashboard_v60_diagnostics import install as install_v60_diagnostics
-                if not install_v60_diagnostics(dashboard):
-                    logger.error("Dashboard V60 diagnostics : installation refusée avant le bind HTTP.")
+                install_v60_diagnostics(dashboard)
             except Exception:
-                logger.exception("Dashboard V60 diagnostics : installation impossible avant le bind HTTP.")
+                logger.exception("Dashboard diagnostics : installation impossible.")
         if max_ok:
             try:
                 from .dashboard_v60_suite import install as install_v60_suite
                 suite_ok = bool(install_v60_suite(dashboard))
-                if not suite_ok:
-                    logger.error("Dashboard V60 suite : installation refusée avant le gel.")
             except Exception:
-                logger.exception("Dashboard V60 suite : installation impossible avant le gel.")
+                logger.exception("Dashboard V60 suite : installation impossible.")
         if suite_ok:
             try:
-                from .dashboard_v60_features_inline import install as install_v60_features_inline
-                if not install_v60_features_inline(dashboard):
-                    logger.error("Dashboard V60 : intégration initiale des fonctions avancées refusée.")
-            except Exception:
-                logger.exception("Dashboard V60 : intégration initiale des fonctions avancées impossible.")
-            try:
                 from .dashboard_v60_dm import install as install_v60_dm
-                if not install_v60_dm(dashboard):
-                    logger.error("Dashboard V60 DM : interface propriétaire non restaurée.")
+                install_v60_dm(dashboard)
             except Exception:
-                logger.exception("Dashboard V60 DM : restauration impossible.")
+                logger.exception("Dashboard DM : restauration impossible.")
             try:
                 from .dashboard_v60_bootguard import install as install_v60_bootguard
-                if not install_v60_bootguard(dashboard):
-                    logger.error("Dashboard V60 bootguard : installation refusée.")
+                install_v60_bootguard(dashboard)
             except Exception:
-                logger.exception("Dashboard V60 bootguard : installation impossible.")
+                logger.exception("Dashboard bootguard : installation impossible.")
 
-        # IMPORTANT : vérification finale indépendante de l'ordre des anciennes couches.
-        if v60_ok and not _ensure_v60_features_final(dashboard):
-            logger.error("Dashboard V60 : les fonctions avancées ne sont pas garanties ; snapshot signalé incomplet.")
+        # V61 est TOUJOURS la dernière couche visuelle. Elle reconstruit la navigation,
+        # supprime « Fonctions avancées » et redirige les anciens centres vers /app.
+        v61_ok = False
+        if suite_ok:
+            try:
+                from .dashboard_v61_unified import install as install_v61
+                v61_ok = bool(install_v61(dashboard))
+            except Exception:
+                logger.exception("Dashboard V61 : installation impossible.")
 
-        # Les centres autonomes sont harmonisés après TOUS leurs anciens reworks, mais sans
-        # modifier dashboard.INDEX_HTML. L'accueil V60 reste donc inchangé pixel pour pixel.
-        if v60_ok and not _theme_secondary_pages_final():
-            logger.error("Dashboard V60 : harmonisation visuelle des pages secondaires incomplète.")
+        if not v61_ok:
+            logger.error("Dashboard V61 absent : refus de considérer le frontend comme final.")
+        elif not _ensure_v60_features_final(dashboard):
+            logger.error("Dashboard V61 : l'ancien onglet Fonctions avancées est encore présent.")
 
         if not install(dashboard):
-            logger.error(
-                "Dashboard frontend : le gel pré-start a échoué ; /app ne doit pas être considéré stable."
-            )
+            logger.error("Dashboard frontend : gel final échoué.")
 
     no_store_then_freeze._sentrix_frontend_freeze_hook_v55 = True
     no_store_then_freeze._sentrix_original = current
     product._install_no_store_index = no_store_then_freeze
-    logger.info("Dashboard V60 final armé : accueil + centres secondaires unifiés + fonctions inline + diagnostics + DM + bootguard + gel.")
+    logger.info("Dashboard V61 armé : interface DraftBot-like unique, anciens centres retirés, gel final activé.")
     return True
 
 
-__all__ = [
-    "install",
-    "install_product_prestart_hook",
-    "_snapshot_is_usable",
-    "_ensure_v60_features_final",
-    "_theme_secondary_pages_final",
-]
+__all__ = ["install", "install_product_prestart_hook", "_snapshot_is_usable", "_ensure_v60_features_final", "_theme_secondary_pages_final"]
