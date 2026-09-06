@@ -1,8 +1,8 @@
 """Gel final du dashboard SentriX.
 
-V62 conserve le mécanisme de snapshot immuable introduit en V55. V61 remplace les anciens
-centres visuels par une seule application ``/app`` et V62 termine cette application avec les
-éditeurs denses Vérification/Tickets et la navigation sans raccourcis externes.
+V63 conserve le mécanisme de snapshot immuable introduit en V55. V61 remplace les anciens
+centres visuels par une seule application ``/app``, V62 apporte les éditeurs denses
+Vérification/Tickets et V63 termine l'aperçu, l'économie et le design.
 """
 from __future__ import annotations
 
@@ -38,17 +38,15 @@ def _ensure_v60_features_final(dashboard) -> bool:
 
 
 def _theme_secondary_pages_final() -> bool:
-    """Compatibilité ancienne : V61/V62 ne servent plus les centres comme interfaces utilisateur."""
     return True
 
 
 def _is_v61_document(dashboard, html: str) -> bool:
     version = str(getattr(dashboard, "_sentrix_dashboard_version", "") or "")
-    return version.startswith(("v61", "v62")) or 'id="sentrix-v61-unified"' in html
+    return version.startswith(("v61", "v62", "v63")) or 'id="sentrix-v61-unified"' in html
 
 
 def install(dashboard) -> bool:
-    """Fige le HTML de ``/app`` avant que le serveur aiohttp ne lie ses routes."""
     current = dashboard.handle_index
     if getattr(current, "_sentrix_frontend_freeze_v55", False):
         return True
@@ -60,7 +58,7 @@ def install(dashboard) -> bool:
         return False
 
     if _is_v61_document(dashboard, snapshot):
-        required_v61 = (
+        required = (
             'id="sentrix-v61-unified"',
             "Configuration serveur",
             "Mini-jeux",
@@ -68,18 +66,18 @@ def install(dashboard) -> bool:
             "Statut SentriX",
             "v61Built",
         )
-        absent = [marker for marker in required_v61 if marker not in snapshot]
+        absent = [marker for marker in required if marker not in snapshot]
         try:
             from .dashboard_v61_postfix import _legacy_feature_ui_present
             legacy_present = _legacy_feature_ui_present(snapshot)
         except Exception:
             legacy_present = 'id="sentrix-v60-features-inline"' in snapshot or 'id="sxFeaturesFrame"' in snapshot
         if absent or legacy_present:
-            logger.error("Dashboard V61/V62 non figé : requis absents=%s ancienne UI features=%s.", absent, legacy_present)
+            logger.error("Dashboard V61+ non figé : requis absents=%s ancienne UI features=%s.", absent, legacy_present)
             return False
 
     version = str(getattr(dashboard, "_sentrix_dashboard_version", "") or "")
-    if version.startswith("v62"):
+    if version.startswith(("v62", "v63")):
         required_v62 = (
             'id="sentrix-v62-dense"',
             "Vérification & règlement",
@@ -88,8 +86,11 @@ def install(dashboard) -> bool:
         )
         absent_v62 = [marker for marker in required_v62 if marker not in snapshot]
         if absent_v62:
-            logger.error("Dashboard V62 non figé : marqueurs finaux absents=%s.", absent_v62)
+            logger.error("Dashboard V62+ non figé : marqueurs denses absents=%s.", absent_v62)
             return False
+    if version.startswith("v63") and 'id="sentrix-v63-polish"' not in snapshot:
+        logger.error("Dashboard V63 non figé : polish final absent.")
+        return False
 
     digest = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()[:16]
     version = str(getattr(dashboard, "_sentrix_dashboard_version", "v55"))
@@ -116,7 +117,7 @@ def install(dashboard) -> bool:
 
 
 def install_product_prestart_hook() -> bool:
-    """Construit V60, pose V61 puis V62 en dernier et fige ``/app``."""
+    """Construit V60, pose V61/V62/V63 en dernier et fige ``/app``."""
     try:
         import sentrix_product_update as product
     except Exception:
@@ -188,12 +189,22 @@ def install_product_prestart_hook() -> bool:
             except Exception:
                 logger.exception("Dashboard V62 dense : installation impossible.")
 
+        v63_ok = False
+        if v62_ok:
+            try:
+                from .dashboard_v63_polish import install as install_v63
+                v63_ok = bool(install_v63(dashboard))
+            except Exception:
+                logger.exception("Dashboard V63 polish : installation impossible.")
+
         if v61_ok and not postfix_ok:
             logger.error("Dashboard V61 final absent : refus de considérer le frontend comme final.")
         elif postfix_ok and not _ensure_v60_features_final(dashboard):
             logger.error("Dashboard V61 : l'ancienne Feature Suite est encore rendue après postfix.")
         elif postfix_ok and not v62_ok:
-            logger.error("Dashboard V62 dense absent : Tickets/Vérification ne sont pas considérés finalisés.")
+            logger.error("Dashboard V62 dense absent : Tickets/Vérification ne sont pas finalisés.")
+        elif v62_ok and not v63_ok:
+            logger.error("Dashboard V63 polish absent : aperçu/design/économie non finalisés.")
 
         if not install(dashboard):
             logger.error("Dashboard frontend : gel final échoué.")
@@ -201,7 +212,7 @@ def install_product_prestart_hook() -> bool:
     no_store_then_freeze._sentrix_frontend_freeze_hook_v55 = True
     no_store_then_freeze._sentrix_original = current
     product._install_no_store_index = no_store_then_freeze
-    logger.info("Dashboard V62 armé : V61 unifié + configuration dense + gel final.")
+    logger.info("Dashboard V63 armé : V61 unifié + V62 dense + polish final + gel immuable.")
     return True
 
 
