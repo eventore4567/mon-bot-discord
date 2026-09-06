@@ -12,7 +12,7 @@ def _prestart_html() -> str:
 def test_v60_max_suite_is_the_final_prestart_frontend():
     document = _prestart_html()
     module = __import__("web.dashboard", fromlist=["dashboard"])
-    assert getattr(module, "_sentrix_dashboard_version", None) == "v60-max-suite"
+    assert getattr(module, "_sentrix_dashboard_version", None) == "v60-max-suite-guarded"
     assert "SENTR<em>IX</em>" in document
     assert "DraftBot" not in document
     assert "--accent:#d66f55" in document
@@ -20,9 +20,11 @@ def test_v60_max_suite_is_the_final_prestart_frontend():
     assert 'class="sidebar"' in document
     assert 'id="sentrix-v60-max"' in document
     assert 'id="sentrix-v60-suite"' in document
+    assert 'id="sentrix-v60-dm-adapter"' in document
+    assert 'id="sentrix-v60-bootguard"' in document
     for tab in (
         "welcome", "roles", "security", "sanctions", "logs", "tickets",
-        "notifications", "ai", "embeds",
+        "notifications", "ai", "embeds", "dm",
     ):
         assert f'data-tab="{tab}"' in document
 
@@ -41,6 +43,10 @@ def test_v60_max_suite_keeps_real_api_wiring():
         '/sanctions/${encodeURIComponent(userId)}/${encodeURIComponent(action)}`',
         '/diagnostics`',
         '/setup-tools`',
+        '/dm/apercu',
+        '/dm/all',
+        '/dm/job',
+        '/dm/user',
         'Promise.all([loadPublic(),loadSession()])',
     )
     for marker in required:
@@ -49,9 +55,6 @@ def test_v60_max_suite_keeps_real_api_wiring():
 
 def test_v60_max_suite_exposes_the_advanced_requested_controls():
     document = _prestart_html()
-    # Les libellés ACTIF / INACTIF / NON CONFIGURÉ / ERREUR DE CONFIGURATION viennent
-    # volontairement de l'API diagnostics au runtime. Ici on vérifie le composant de statut
-    # et son branchement ; le smoke JSDOM vérifie ensuite les vraies valeurs mockées.
     markers = (
         "Vue d’ensemble",
         "Accès & commandes",
@@ -75,6 +78,8 @@ def test_v60_max_suite_exposes_the_advanced_requested_controls():
         "sxAddEmbedField",
         "clear-warnings",
         "Ctrl/⌘ + S",
+        "new AbortController()",
+        "Messages privés",
     )
     for marker in markers:
         assert marker in document, marker
@@ -94,7 +99,4 @@ def test_v60_diagnostics_route_is_bound_before_aiohttp_build():
     import sentrix_product_update
 
     sentrix_product_update.install_dashboard_prestart(dashboard)
-
-    # On ne construit pas réellement l'app sans bot Discord complet ici : ce test vérifie
-    # que le wrapper build_app des diagnostics a bien été installé avant le gel.
     assert dashboard.build_app.__module__ == "web.dashboard_v60_diagnostics"
