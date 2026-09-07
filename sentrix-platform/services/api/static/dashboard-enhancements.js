@@ -8,6 +8,118 @@
   const content = $("main.content");
   if (!nav || !content) return;
 
+  function simplifyProjectModal() {
+    const dialog = document.getElementById("project-dialog");
+    const form = document.getElementById("project-wizard");
+    if (!dialog || !form) return;
+
+    // The X buttons used to submit their form, which meant the app submit
+    // handler prevented the native <dialog> close action. Close dialogs
+    // explicitly instead.
+    $$("dialog .modal-head .icon-btn").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        button.closest("dialog")?.close();
+      });
+    });
+
+    // Clicking the dark backdrop also closes the project dialog.
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+
+    const steps = $$(".wizard-step", form);
+    const projectStep = steps.find((step) => step.dataset.step === "1");
+    const botStep = steps.find((step) => step.dataset.step === "2");
+    const envStep = steps.find((step) => step.dataset.step === "3");
+    if (!projectStep || !botStep || !envStep) return;
+
+    const stepper = $(".stepper", form);
+    if (stepper) stepper.style.display = "none";
+
+    const firstHeading = $("h3", projectStep);
+    const firstCopy = $("p", projectStep);
+    if (firstHeading) firstHeading.textContent = "Ajouter ton bot";
+    if (firstCopy) {
+      firstCopy.textContent = "Renseigne juste l'essentiel. SentriX configure le reste automatiquement.";
+    }
+
+    const botName = document.getElementById("bot-name");
+    const botNameLabel = botName?.closest("label");
+    if (botNameLabel) {
+      const divider = document.createElement("div");
+      divider.className = "simple-project-divider";
+      divider.innerHTML = "<small>BOT DISCORD</small>";
+      projectStep.append(divider, botNameLabel);
+    }
+
+    const advanced = document.createElement("details");
+    advanced.className = "simple-project-advanced";
+    advanced.innerHTML = "<summary>Options avancées</summary>";
+
+    const libraryLabel = document.getElementById("bot-library")?.closest("label");
+    const appIdLabel = document.getElementById("discord-app-id")?.closest("label");
+    if (libraryLabel) advanced.append(libraryLabel);
+    if (appIdLabel) advanced.append(appIdLabel);
+    projectStep.append(advanced);
+
+    // Keep the advanced environment fields in the DOM because the existing
+    // creation API reads them, but remove the third setup screen from the UX.
+    botStep.style.display = "none";
+    envStep.style.display = "none";
+
+    const backButton = document.getElementById("wizard-back");
+    const nextButton = document.getElementById("wizard-next");
+    const createButton = document.getElementById("wizard-create");
+    const projectName = document.getElementById("project-name");
+
+    function applySimpleDefaults() {
+      if (backButton) backButton.classList.add("hidden");
+      if (nextButton) nextButton.classList.add("hidden");
+      if (createButton) {
+        createButton.classList.remove("hidden");
+        createButton.textContent = "Créer mon bot";
+      }
+
+      projectStep.classList.add("active");
+      botStep.classList.remove("active");
+      envStep.classList.remove("active");
+
+      const kind = document.getElementById("env-kind");
+      const runtime = document.getElementById("env-runtime");
+      const provider = document.getElementById("secret-provider");
+      const library = document.getElementById("bot-library");
+      if (kind) kind.value = "prod";
+      if (runtime) runtime.value = "managed";
+      if (provider) provider.value = "tmpfs_file";
+      if (library && !library.value) library.value = "discordpy";
+
+      if (projectName && botName && !botName.value.trim()) {
+        botName.value = projectName.value.trim();
+      }
+    }
+
+    projectName?.addEventListener("input", () => {
+      if (botName && (!botName.dataset.edited || !botName.value.trim())) {
+        botName.value = projectName.value.trim();
+      }
+    });
+    botName?.addEventListener("input", () => {
+      botName.dataset.edited = "1";
+    });
+
+    // app.js resets the original 3-step controls every time the dialog opens.
+    // Re-apply the simple one-screen layout immediately after showModal().
+    const observer = new MutationObserver(() => {
+      if (dialog.open) applySimpleDefaults();
+    });
+    observer.observe(dialog, { attributes: true, attributeFilter: ["open"] });
+    applySimpleDefaults();
+  }
+
+  simplifyProjectModal();
+
   const settingsButton = nav.querySelector('[data-view="settings"]');
   const hostingButton = document.createElement("button");
   hostingButton.dataset.view = "hosting";
