@@ -29,9 +29,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Compile V95 V98 V99
+      - name: Compile complete slash runtime chain
         run: |
-          python -m compileall -q sentrix_v95_runtime.py sentrix_v98_slash.py tools/v98_grouped_slash_gate.py tools/v99_slash_runtime_audit.py tests/test_v99_slash_runtime_audit.py
+          python -m compileall -q \
+            sentrix_v95_runtime.py \
+            sentrix_v95_bootstrap.py \
+            sentrix_v97_reliability.py \
+            sentrix_v98_slash.py \
+            sentrix_v98_boot.py \
+            sentrix_verification_v96.py \
+            sentrix_verification_v96_finalizer.py \
+            tools/v98_grouped_slash_gate.py \
+            tools/v99_slash_runtime_audit.py \
+            tests/test_v99_slash_runtime_audit.py
 
       - name: Keep V98 grouped slash invariants green
         env:
@@ -39,7 +49,7 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-v99-v98.db"
         run: python tools/v98_grouped_slash_gate.py
 
-      - name: V99 public callback audit
+      - name: V99 public callback and bootstrap audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-v99.db"
