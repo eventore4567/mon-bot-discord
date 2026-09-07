@@ -2,9 +2,10 @@
 """Lance le gate V95 hors-ligne avec un journal strictement actionnable.
 
 Le gate charge le runtime produit complet mais ne se connecte volontairement ni à Discord
-ni à OpenAI. Deux messages historiques sont donc du bruit dans CE contexte uniquement :
-la clé OpenAI absente et l'état transitoire V18 avant l'audit final du registre. Toute autre
-erreur ou tout autre warning garde son niveau et reste visible.
+ni à OpenAI. Trois messages historiques sont donc du bruit dans CE contexte uniquement :
+la clé OpenAI absente, l'état transitoire V18 avant l'audit final du registre, et l'échec
+attendu de restauration d'une vue persistante avant login Discord. Toute autre erreur ou
+tout autre warning garde son niveau et reste visible.
 """
 from __future__ import annotations
 
@@ -34,13 +35,22 @@ class _ExpectedOfflineNoise(logging.Filter):
             and "paramètres internes encore exposés" in message
         ):
             return False
+        if (
+            record.name == "bot.sentrix-regression-runtime"
+            and "Role panel persistent view restore failed" in message
+        ):
+            return False
         return True
 
 
 def _install_filter() -> None:
     noise_filter = _ExpectedOfflineNoise()
-    logging.getLogger("bot.ai-api-hotfix").addFilter(noise_filter)
-    logging.getLogger("bot.command-runtime-hardening-v18").addFilter(noise_filter)
+    for logger_name in (
+        "bot.ai-api-hotfix",
+        "bot.command-runtime-hardening-v18",
+        "bot.sentrix-regression-runtime",
+    ):
+        logging.getLogger(logger_name).addFilter(noise_filter)
 
 
 def main() -> int:
