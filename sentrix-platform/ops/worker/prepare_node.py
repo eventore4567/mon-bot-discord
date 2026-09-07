@@ -54,6 +54,49 @@ def render_cloud_init(
     return rendered
 
 
+def _render_worker_file(
+    args: argparse.Namespace,
+    node_id: UUID,
+    node_token: str,
+) -> tuple[Path, str]:
+    """Perform local path/template work outside the async database loop."""
+    template = TEMPLATE.read_text(encoding="utf-8")
+    rendered = render_cloud_init(
+        template,
+        control_plane_url=args.control_plane_url,
+        control_plane_cidrs=args.control_plane_cidrs,
+        node_id=node_id,
+        node_token=node_token,
+        repo_url=args.repo_url,
+        repo_ref=args.repo_ref,
+    )
+    output = Path(args.output).expanduser().resolve()
+    return output, rendered
+
+
+def _write_private_output(output: Path, rendered: str) -> None:
+    """Create the credential file atomically and never overwrite an old token."""
+    output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd: int | None = None
+    created = False
+    try:
+        fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        created = True
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = None
+            handle.write(rendered)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "--output already exists; refusing to overwrite a node credential"
+        ) from exc
+    except Exception:
+        if fd is not None:
+            os.close(fd)
+        if created:
+            output.unlink(missing_ok=True)
+        raise
+
+
 async def prepare(args: argparse.Namespace) -> tuple[UUID, Path]:
     if not args.control_plane_url.startswith("https://"):
         raise RuntimeError("--control-plane-url must use HTTPS")
@@ -65,21 +108,12 @@ async def prepare(args: argparse.Namespace) -> tuple[UUID, Path]:
     node_id = uuid7()
     node_token = secrets.token_urlsafe(48)
     token_digest = hashlib.sha256(node_token.encode()).digest()
-    template = TEMPLATE.read_text(encoding="utf-8")
-    rendered = render_cloud_init(
-        template,
-        control_plane_url=args.control_plane_url,
-        control_plane_cidrs=args.control_plane_cidrs,
-        node_id=node_id,
-        node_token=node_token,
-        repo_url=args.repo_url,
-        repo_ref=args.repo_ref,
+    output, rendered = await asyncio.to_thread(
+        _render_worker_file,
+        args,
+        node_id,
+        node_token,
     )
-
-    output = Path(args.output).expanduser().resolve()
-    output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if output.exists():
-        raise RuntimeError("--output already exists; refusing to overwrite a node credential")
 
     conn = await asyncpg.connect(args.database_url)
     inserted = False
@@ -104,17 +138,16 @@ async def prepare(args: argparse.Namespace) -> tuple[UUID, Path]:
         inserted = True
 
         try:
-            output.write_text(rendered, encoding="utf-8")
-            os.chmod(output, 0o600)
+            await asyncio.to_thread(_write_private_output, output, rendered)
         except Exception:
             await conn.execute("DELETE FROM nodes WHERE id = $1", node_id)
             inserted = False
             raise
     finally:
         await conn.close()
-        if not inserted and output.exists():
-            output.unlink(missing_ok=True)
 
+    if not inserted:
+        raise RuntimeError("node registration did not complete")
     return node_id, output
 
 
