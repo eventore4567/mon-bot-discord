@@ -21,7 +21,11 @@ def test_user_org_directory_is_not_directly_readable_by_app_role() -> None:
     text = MIGRATION.read_text(encoding="utf-8")
     assert "REVOKE ALL ON user_org_directory FROM sentrix_app" in text
     assert "SECURITY DEFINER" in text
-    assert "GRANT EXECUTE ON FUNCTION public.sentrix_list_user_organizations(uuid) TO sentrix_app" in text
+    grant = (
+        "GRANT EXECUTE ON FUNCTION "
+        "public.sentrix_list_user_organizations(uuid) TO sentrix_app"
+    )
+    assert grant in text
 
 
 def test_directory_is_synced_from_tenant_scoped_membership_changes() -> None:
