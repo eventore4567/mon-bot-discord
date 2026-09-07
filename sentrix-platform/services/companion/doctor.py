@@ -21,6 +21,7 @@ from services.companion.models import (
     Incident,
     RescueReport,
     SentrixEndpointReport,
+    Severity,
 )
 
 _HTTP_TIMEOUT_SECONDS = 4.0
@@ -54,14 +55,10 @@ class SentrixDoctor:
         postgres_url: str | None = None,
         http_timeout: float = _HTTP_TIMEOUT_SECONDS,
     ) -> None:
-        self.primary_url = (
-            primary_url or os.environ.get("SENTRIX_PRIMARY_URL", "")
-        ).rstrip("/")
-        self.standby_url = (
-            standby_url or os.environ.get("SENTRIX_STANDBY_URL", "")
-        ).rstrip("/")
-        self.redis_url = redis_url or os.environ.get("COMPANION_REDIS_URL") or os.environ.get(
-            "REDIS_URL", ""
+        self.primary_url = (primary_url or os.environ.get("SENTRIX_PRIMARY_URL", "")).rstrip("/")
+        self.standby_url = (standby_url or os.environ.get("SENTRIX_STANDBY_URL", "")).rstrip("/")
+        self.redis_url = (
+            redis_url or os.environ.get("COMPANION_REDIS_URL") or os.environ.get("REDIS_URL", "")
         )
         self.postgres_url = (
             postgres_url
@@ -204,8 +201,7 @@ class SentrixDoctor:
                     title="Deux leaders detectes",
                     detail="Le principal et le standby declarent simultanement l'etat leader.",
                     recommendation=(
-                        "Bloquer toute promotion manuelle et verifier immediatement "
-                        "le lease Redis."
+                        "Bloquer toute promotion manuelle et verifier immediatement le lease Redis."
                     ),
                 )
             )
@@ -232,8 +228,7 @@ class SentrixDoctor:
                         "ne peuvent pas etre verifies."
                     ),
                     recommendation=(
-                        "Retablir PostgreSQL puis verifier un snapshot avant "
-                        "de tester Rescue."
+                        "Retablir PostgreSQL puis verifier un snapshot avant de tester Rescue."
                     ),
                 )
             )
@@ -246,8 +241,7 @@ class SentrixDoctor:
                     title="Cluster SentriX injoignable",
                     detail="Aucune des deux instances ne repond au healthcheck.",
                     recommendation=(
-                        "Verifier l'hebergeur, les domaines et les derniers "
-                        "deploiements."
+                        "Verifier l'hebergeur, les domaines et les derniers deploiements."
                     ),
                 )
             )
@@ -269,8 +263,7 @@ class SentrixDoctor:
                     title="Standby injoignable",
                     detail="SentriX fonctionne, mais la redondance n'est plus disponible.",
                     recommendation=(
-                        "Retablir le standby avant le prochain deploiement "
-                        "du principal."
+                        "Retablir le standby avant le prochain deploiement du principal."
                     ),
                 )
             )
@@ -287,8 +280,7 @@ class SentrixDoctor:
                         "actuellement le lease leader."
                     ),
                     recommendation=(
-                        "Verifier Redis et les journaux HA avant de redemarrer "
-                        "une instance."
+                        "Verifier Redis et les journaux HA avant de redemarrer une instance."
                     ),
                 )
             )
@@ -343,6 +335,7 @@ class SentrixDoctor:
         else:
             rescue_reason = "La chaine de failover n'est pas completement prete."
 
+        severity: Severity
         if any(incident.severity == "critical" for incident in incidents):
             severity = "critical"
         elif incidents:
