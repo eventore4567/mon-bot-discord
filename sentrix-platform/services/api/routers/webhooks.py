@@ -106,7 +106,7 @@ async def github_webhook(
             for row in rows:
                 environment_id = UUID(str(row["environment_id"]))
                 cache_key = hashlib.sha256(
-                    f"{environment_id}:{push.commit_sha}".encode("utf-8")
+                    f"{environment_id}:{push.commit_sha}".encode()
                 ).hexdigest()
                 result = await conn.execute(
                     """
@@ -126,6 +126,9 @@ async def github_webhook(
                 if result.endswith(" 1"):
                     queued += 1
     except asyncpg.PostgresError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, "push GitHub impossible a mettre en file") from exc
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "push GitHub impossible a mettre en file",
+        ) from exc
 
     return GitHubPushResult(accepted=True, queued_builds=queued)
