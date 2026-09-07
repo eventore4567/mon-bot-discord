@@ -9,7 +9,7 @@ from typing import Annotated
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -98,7 +98,6 @@ async def discord_callback(
         access_token = await oauth.exchange_code(code)
         profile = await oauth.fetch_user(access_token)
     except Exception as exc:
-        # Never reflect Discord response bodies/tokens to the caller.
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "connexion Discord impossible") from exc
 
     discord_id = str(profile.get("id") or "").strip()
@@ -218,8 +217,8 @@ async def create_first_organization(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout() -> RedirectResponse:
-    response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+async def logout() -> Response:
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         SESSION_COOKIE,
         domain=_cookie_domain(),
