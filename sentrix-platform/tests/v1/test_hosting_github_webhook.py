@@ -96,7 +96,10 @@ async def test_github_push_is_hmac_verified_and_durably_deduplicated(
         assert rows[0]["delivery_id"] == delivery_id
     finally:
         await admin_conn.execute("DELETE FROM builds WHERE environment_id = $1", env_id)
-        await admin_conn.execute("DELETE FROM webhook_deliveries WHERE delivery_id = $1", delivery_id)
+        await admin_conn.execute(
+            "DELETE FROM webhook_deliveries WHERE delivery_id = $1",
+            delivery_id,
+        )
         await admin_conn.execute("DELETE FROM environments WHERE id = $1", env_id)
         await admin_conn.execute(
             "UPDATE projects SET repo_full_name = NULL WHERE id = $1",
