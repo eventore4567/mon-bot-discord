@@ -72,8 +72,9 @@ def create_app(
                 await store.close()
 
     app = FastAPI(
-        title="SentriX Platform - Control Plane",
-        version="0.4.1",
+        title="SentriX Hosting Control Plane",
+        description="Provider-neutral application hosting control plane.",
+        version="0.5.0",
         lifespan=lifespan,
     )
     if injected:
@@ -94,11 +95,24 @@ def create_app(
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; img-src 'self' data:; script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; connect-src 'self'; "
-            "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-        )
+
+        # FastAPI's Swagger/ReDoc pages load their official static bundles from
+        # jsDelivr. The previous global 'self'-only CSP blocked those scripts,
+        # producing the completely blank /docs page seen in production.
+        if request.url.path in {"/docs", "/redoc"}:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; img-src 'self' data: https://fastapi.tiangolo.com; "
+                "script-src 'self' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; "
+                "form-action 'self'"
+            )
+        else:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; img-src 'self' data:; script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; connect-src 'self'; "
+                "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            )
         return response
 
     app.include_router(auth_routes.router)
@@ -124,7 +138,10 @@ def create_app(
     async def dashboard_page() -> HTMLResponse:
         return _render_static_html(
             "app.html",
-            ("/static/dashboard-enhancements.js",),
+            (
+                "/static/dashboard-enhancements.js",
+                "/static/generic-hosting.js",
+            ),
         )
 
     @app.get("/healthz", tags=["meta"])
