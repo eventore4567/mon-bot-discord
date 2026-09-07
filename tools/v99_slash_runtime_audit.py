@@ -277,11 +277,12 @@ def _build_representative_tree() -> tuple[commands.Bot, dict[str, dict], list[v9
     async def legacy_setup(ctx: commands.Context) -> None:
         return None
 
-    @bot.hybrid_command(name="help", description="Aide SentriX.")
-    async def hybrid_help(ctx: commands.Context) -> None:
+    # Racine directe distincte du help_command fourni par défaut par commands.Bot.
+    @bot.hybrid_command(name="sentrix", description="Assistant SentriX.")
+    async def hybrid_sentrix(ctx: commands.Context) -> None:
         return None
 
-    # Le /setup hybride historique est volontairement remplacé par V97. /help reste
+    # Le /setup hybride historique est volontairement remplacé par V97. /sentrix reste
     # hybride afin que l'audit vérifie aussi le comportement officiel discord.py.
     if not v97._replace_setup_slash(bot):
         raise RuntimeError("Gate V99: impossible de remplacer /setup via V97")
@@ -319,13 +320,13 @@ def main() -> int:
     elif setup_audit.first_parameter != "interaction":
         errors.append(f"/setup expose {setup_audit.first_parameter!r} au lieu de 'interaction' après V97")
 
-    help_audit = by_name.get("help")
-    if help_audit is None:
-        errors.append("/help hybride a disparu de la surface publique")
-    elif not help_audit.ok:
-        errors.append(f"/help hybride rejeté à tort: {help_audit.reason}")
-    elif help_audit.first_parameter not in LEGACY_CONTEXT_NAMES:
-        errors.append(f"/help hybride n'expose plus son Context attendu: {help_audit.first_parameter!r}")
+    hybrid_audit = by_name.get("sentrix")
+    if hybrid_audit is None:
+        errors.append("/sentrix hybride a disparu de la surface publique")
+    elif not hybrid_audit.ok:
+        errors.append(f"/sentrix hybride rejeté à tort: {hybrid_audit.reason}")
+    elif hybrid_audit.first_parameter not in LEGACY_CONTEXT_NAMES:
+        errors.append(f"/sentrix hybride n'expose plus son Context attendu: {hybrid_audit.first_parameter!r}")
 
     for audit in audits:
         if not audit.ok:
