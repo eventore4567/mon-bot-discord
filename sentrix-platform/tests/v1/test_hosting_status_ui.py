@@ -22,7 +22,8 @@ def test_dashboard_exposes_real_hosting_readiness_not_fake_online_copy() -> None
     dashboard = (STATIC / "dashboard-enhancements.js").read_text(encoding="utf-8")
     assert "/v1/infra/status" in dashboard
     assert "AUCUN WORKER" in dashboard
-    assert "VPS/serveur" in dashboard
+    assert "worker Linux" in dashboard
+    assert "Docker + gVisor" in dashboard
 
 
 def test_worker_status_preserves_private_node_table() -> None:
