@@ -8,7 +8,6 @@ is queued durably and must be consumed by a privileged external builder/worker.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 from typing import Annotated, Literal
 from uuid import UUID
@@ -21,6 +20,7 @@ from libs import audit
 from libs.ids import uuid7
 from services.api.deps import AppState, OrgContext, get_state, map_pg_error, require_org
 from services.api.routers.resources import DEFAULT_CELL
+from services.secrets.runtime import KmsConfigurationError, cipher_from_env
 
 router = APIRouter(prefix="/v1/orgs/{org_id}/hosting", tags=["hosting"])
 
@@ -411,6 +411,74 @@ async def list_secret_metadata(
             environment_id,
         )
     return [dict(row) for row in rows]
+
+
+@router.put("/services/{environment_id}/secrets", status_code=status.HTTP_201_CREATED)
+async def put_secret(
+    environment_id: UUID,
+    payload: SecretWrite,
+    request: Request,
+    ctx: Annotated[OrgContext, Depends(require_org)],
+    state: Annotated[AppState, Depends(get_state)],
+) -> dict[str, object]:
+    try:
+        cipher = cipher_from_env()
+    except KmsConfigurationError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+
+    plaintext = payload.value.encode("utf-8")
+    fingerprint = hashlib.sha256(plaintext).hexdigest()[:16]
+    secret_id = uuid7()
+    async with state.db.tenant_tx(ctx.org_id) as conn:
+        env = await conn.fetchrow(
+            "SELECT id FROM environments WHERE id = $1 AND status = 'active' FOR UPDATE",
+            environment_id,
+        )
+        if env is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "service introuvable")
+        version = await conn.fetchval(
+            "SELECT COALESCE(max(version), 0) + 1 FROM environment_secrets "
+            "WHERE environment_id = $1 AND name = $2",
+            environment_id,
+            payload.name,
+        )
+        assert isinstance(version, int)
+        envelope = cipher.encrypt(plaintext, environment_id=str(environment_id), version=version)
+        row = await conn.fetchrow(
+            """
+            INSERT INTO environment_secrets (
+                id, org_id, environment_id, name, provider, version,
+                ciphertext, wrapped_dek, fingerprint
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            RETURNING name, provider, version, fingerprint, created_at
+            """,
+            secret_id,
+            ctx.org_id,
+            environment_id,
+            payload.name,
+            payload.provider,
+            version,
+            envelope.ciphertext,
+            envelope.wrapped_dek,
+            fingerprint,
+        )
+        assert row is not None
+        await audit.record(
+            conn,
+            org_id=ctx.org_id,
+            actor_user_id=ctx.user_id,
+            action="hosting.secret.rotate",
+            target_type="environment",
+            target_id=environment_id,
+            metadata={
+                "name": payload.name,
+                "provider": payload.provider,
+                "version": version,
+                "fingerprint": fingerprint,
+            },
+            source_ip=_client_ip(request),
+        )
+    return {**dict(row), "value": None}
 
 
 @router.get("/services/{environment_id}/usage")
