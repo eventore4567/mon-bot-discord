@@ -1,10 +1,13 @@
-"""Ajout automatique d'emojis par nom pour ``+addemoji`` / ``+addemogi``.
+"""Ajout d'emojis simple pour ``+addemoji`` / ``+addemogi``.
 
-Utilisation principale : ``+addemoji tete``.
-SentriX cherche automatiquement l'emoji correspondant puis l'ajoute au serveur.
+Modes pris en charge :
+- emoji Discord/Nitro colle directement dans la commande ;
+- nom simple, avec ou sans ``:`` autour, recherche automatiquement ;
+- image jointe + nom, geree par le pipeline historique de ``cogs.utility``.
 
-Les anciens formats restent acceptes en interne pour ne pas casser les usages existants,
-mais l'utilisateur n'a besoin que du nom de l'emoji.
+La copie d'un emoji Discord/Nitro contourne volontairement Pillow : l'asset existe deja
+au bon format sur le CDN Discord, donc le redecoder ne sert a rien et peut echouer selon
+les codecs installes sur l'hebergeur.
 """
 from __future__ import annotations
 
@@ -174,8 +177,8 @@ def _plain_name_request(ctx: commands.Context, nom: str, source: str | None) -> 
     value = (nom or "").strip()
     if not value or value.startswith("<") or value.startswith("http://") or value.startswith("https://"):
         return False
-    # Les emojis Unicode restent geres par cogs.utility. Ici on prend le nom simple
-    # tape par l'utilisateur, par exemple : +addemoji tete.
+    # Les emojis Unicode restent geres par cogs.utility. Ici on ne prend que du texte
+    # comme tete ou :tete:.
     return all(ord(ch) < 0x2300 for ch in value)
 
 
@@ -258,19 +261,20 @@ def install(bot: commands.Bot) -> bool:
 
     @functools.wraps(original)
     async def wrapped(cog_self, ctx: commands.Context, nom: str, url: str = None):
-        # Les anciens formats restent compatibles, mais la voie normale est simplement
-        # +addemoji <nom>.
+        # Quand Nitro remplace :nom: par un vrai emoji, Discord envoie <a?:nom:id>.
+        # On le copie directement depuis son CDN : aucun decodage Pillow.
         if not url:
             direct_match = CUSTOM_EMOJI_RE.fullmatch((nom or "").strip())
             if direct_match is not None:
                 return await _copy_custom_emoji_direct(cog_self, ctx, nom)
 
         if not _plain_name_request(ctx, nom, url):
+            # Unicode, image jointe ou ancienne syntaxe : pipeline historique.
             return await original(cog_self, ctx, nom, url)
 
         query = (nom or "").strip().strip(":").strip()
         if not query:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Indiquez simplement le nom de l'emoji, par exemple `+addemoji tete`.")))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Indiquez un nom d'emoji, par exemple `+addemogi :tete:`, ou envoyez directement un emoji.")))
 
         if ctx.guild is not None:
             wanted = _search_key(query)
@@ -281,7 +285,7 @@ def install(bot: commands.Bot) -> bool:
         try:
             source, matched_title = await _resolve_by_name(bot, query)
         except LookupError:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Aucun emoji assez proche de **{query}** n'a ete trouve. Essaie un autre nom.")))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Aucun emoji assez proche de **{query}** n'a ete trouve. Vous pouvez aussi envoyer directement l'emoji Discord/Nitro ou joindre une image.")))
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("La recherche automatique d'emojis est momentanement indisponible. Reessayez dans quelques secondes.")))
 
@@ -291,11 +295,11 @@ def install(bot: commands.Bot) -> bool:
     wrapped._sentrix_name_lookup = True
     command.callback = wrapped
     command.params = original_params
-    command.usage = "<nom>"
-    command.description = "Ajouter automatiquement un emoji a partir de son nom."
+    command.usage = ":nom:"
+    command.description = "Ajouter un emoji en l'envoyant directement, par son nom ou avec une image jointe."
     command.help = (
-        "Exemple : `+addemoji tete`. SentriX cherche automatiquement l'emoji correspondant "
-        "et l'ajoute au serveur. Aucun lien ni image n'est necessaire."
+        "Exemples : `+addemogi :tete:` ou `+addemogi` suivi d'un emoji Discord/Nitro. "
+        "Pour une image : joignez PNG/JPG/WebP/GIF et tapez `+addemogi nom`."
     )
     return True
 
