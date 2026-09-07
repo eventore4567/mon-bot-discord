@@ -38,6 +38,11 @@ def docker_command(name: str, spec: BuildSandboxSpec) -> list[str]:
         "--tmpfs",
         "/work:rw,nosuid,nodev,size=1073741824",
     ]
+    for mount in spec.mounts:
+        option = f"type=bind,src={mount.source},dst={mount.target}"
+        if mount.read_only:
+            option += ",readonly"
+        cmd.extend(["--mount", option])
     for key, value in sorted(spec.env.items()):
         cmd.extend(["--env", f"{key}={value}"])
     cmd.append(spec.image)
