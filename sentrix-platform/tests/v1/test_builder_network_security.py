@@ -7,6 +7,10 @@ import pytest
 
 from services.builder_ctl import network
 from services.builder_ctl.models import BuildSandboxSpec
+from services.builder_ctl.worker import WorkerConfig
+
+ROOT = Path(__file__).resolve().parents[2]
+WORKER_SOURCE = ROOT / "services" / "builder_ctl" / "worker.py"
 
 
 def test_build_sandbox_rejects_default_docker_bridge() -> None:
@@ -35,6 +39,41 @@ def test_safe_build_network_name_rejects_unmanaged_names(value: str) -> None:
     else:
         with pytest.raises(network.BuildNetworkError):
             network.safe_build_network_name(value)
+
+
+def _worker_env(monkeypatch: pytest.MonkeyPatch, api_url: str) -> None:
+    monkeypatch.setenv("SENTRIX_API_URL", api_url)
+    monkeypatch.setenv("SENTRIX_CONTROL_WORKER_ID", "01920000-0000-7000-8000-000000000111")
+    monkeypatch.setenv("SENTRIX_CONTROL_WORKER_TOKEN", "w" * 48)
+    monkeypatch.setenv("SENTRIX_REGISTRY_PREFIX", "registry.example/sentrix")
+    monkeypatch.delenv("SENTRIX_BUILD_NETWORK", raising=False)
+
+
+def test_worker_config_defaults_to_managed_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    _worker_env(monkeypatch, "https://control.example")
+    assert WorkerConfig.from_env().build_network == network.DEFAULT_BUILD_NETWORK
+
+
+def test_worker_token_cannot_be_sent_over_remote_plain_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _worker_env(monkeypatch, "http://control.example")
+    with pytest.raises(RuntimeError, match="HTTPS outside localhost"):
+        WorkerConfig.from_env()
+
+
+def test_local_http_remains_available_for_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    _worker_env(monkeypatch, "http://127.0.0.1:8000")
+    assert WorkerConfig.from_env().api_url == "http://127.0.0.1:8000"
+
+
+def test_registry_tag_is_fenced_by_build_and_lease_attempt() -> None:
+    text = WORKER_SOURCE.read_text(encoding="utf-8")
+    marker = "A lease-retried build must never share a mutable registry tag"
+    assert marker in text
+    section = text[text.index(marker) : text.index(marker) + 900]
+    assert "job.lease_attempt" in section
+    assert "job.build_id.hex" in section
 
 
 def test_managed_network_is_created_and_policy_applied(
