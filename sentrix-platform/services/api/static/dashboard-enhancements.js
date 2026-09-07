@@ -13,9 +13,6 @@
     const form = document.getElementById("project-wizard");
     if (!dialog || !form) return;
 
-    // The X buttons used to submit their form, which meant the app submit
-    // handler prevented the native <dialog> close action. Close dialogs
-    // explicitly instead.
     $$("dialog .modal-head .icon-btn").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.preventDefault();
@@ -24,93 +21,105 @@
       });
     });
 
-    // Clicking the dark backdrop also closes the project dialog.
     dialog.addEventListener("click", (event) => {
       if (event.target === dialog) dialog.close();
     });
 
     const steps = $$(".wizard-step", form);
     const projectStep = steps.find((step) => step.dataset.step === "1");
-    const botStep = steps.find((step) => step.dataset.step === "2");
+    const serviceStep = steps.find((step) => step.dataset.step === "2");
     const envStep = steps.find((step) => step.dataset.step === "3");
-    if (!projectStep || !botStep || !envStep) return;
+    if (!projectStep || !serviceStep || !envStep) return;
 
     const stepper = $(".stepper", form);
     if (stepper) stepper.style.display = "none";
 
     const firstHeading = $("h3", projectStep);
     const firstCopy = $("p", projectStep);
-    if (firstHeading) firstHeading.textContent = "Ajouter ton bot";
+    if (firstHeading) firstHeading.textContent = "Déployer une application";
     if (firstCopy) {
-      firstCopy.textContent = "Renseigne juste l'essentiel. SentriX configure le reste automatiquement.";
+      firstCopy.textContent = "Ajoute ton dépôt GitHub et choisis le runtime. SentriX prépare le reste.";
     }
 
-    const botName = document.getElementById("bot-name");
-    const botNameLabel = botName?.closest("label");
-    if (botNameLabel) {
+    const projectName = document.getElementById("project-name");
+    const serviceName = document.getElementById("bot-name");
+    const serviceNameLabel = serviceName?.closest("label");
+    if (serviceNameLabel) {
       const divider = document.createElement("div");
       divider.className = "simple-project-divider";
-      divider.innerHTML = "<small>BOT DISCORD</small>";
-      projectStep.append(divider, botNameLabel);
+      divider.innerHTML = "<small>SERVICE</small>";
+      projectStep.append(divider, serviceNameLabel);
+      serviceNameLabel.childNodes[0].textContent = "Nom du service";
+    }
+
+    const library = document.getElementById("bot-library");
+    const libraryLabel = library?.closest("label");
+    if (library) {
+      library.innerHTML = [
+        '<option value="python">Python</option>',
+        '<option value="node">Node.js</option>',
+        '<option value="docker">Dockerfile</option>',
+      ].join("");
+      library.value = "python";
+    }
+    if (libraryLabel) {
+      libraryLabel.childNodes[0].textContent = "Runtime";
+      projectStep.append(libraryLabel);
     }
 
     const advanced = document.createElement("details");
     advanced.className = "simple-project-advanced";
     advanced.innerHTML = "<summary>Options avancées</summary>";
-
-    const libraryLabel = document.getElementById("bot-library")?.closest("label");
-    const appIdLabel = document.getElementById("discord-app-id")?.closest("label");
-    if (libraryLabel) advanced.append(libraryLabel);
-    if (appIdLabel) advanced.append(appIdLabel);
+    const branchLabel = document.getElementById("project-branch")?.closest("label");
+    if (branchLabel) advanced.append(branchLabel);
     projectStep.append(advanced);
 
-    // Keep the advanced environment fields in the DOM because the existing
-    // creation API reads them, but remove the third setup screen from the UX.
-    botStep.style.display = "none";
+    const appIdLabel = document.getElementById("discord-app-id")?.closest("label");
+    if (appIdLabel) appIdLabel.style.display = "none";
+
+    serviceStep.style.display = "none";
     envStep.style.display = "none";
 
     const backButton = document.getElementById("wizard-back");
     const nextButton = document.getElementById("wizard-next");
     const createButton = document.getElementById("wizard-create");
-    const projectName = document.getElementById("project-name");
 
     function applySimpleDefaults() {
       if (backButton) backButton.classList.add("hidden");
       if (nextButton) nextButton.classList.add("hidden");
       if (createButton) {
         createButton.classList.remove("hidden");
-        createButton.textContent = "Créer mon bot";
+        createButton.textContent = "Créer le service";
       }
 
       projectStep.classList.add("active");
-      botStep.classList.remove("active");
+      serviceStep.classList.remove("active");
       envStep.classList.remove("active");
 
       const kind = document.getElementById("env-kind");
       const runtime = document.getElementById("env-runtime");
       const provider = document.getElementById("secret-provider");
-      const library = document.getElementById("bot-library");
+      const appId = document.getElementById("discord-app-id");
       if (kind) kind.value = "prod";
-      if (runtime) runtime.value = "managed";
+      if (runtime) runtime.value = "generic";
       if (provider) provider.value = "tmpfs_file";
-      if (library && !library.value) library.value = "discordpy";
+      if (appId) appId.value = "";
+      if (library && !["python", "node", "docker"].includes(library.value)) library.value = "python";
 
-      if (projectName && botName && !botName.value.trim()) {
-        botName.value = projectName.value.trim();
+      if (projectName && serviceName && !serviceName.value.trim()) {
+        serviceName.value = projectName.value.trim();
       }
     }
 
     projectName?.addEventListener("input", () => {
-      if (botName && (!botName.dataset.edited || !botName.value.trim())) {
-        botName.value = projectName.value.trim();
+      if (serviceName && (!serviceName.dataset.edited || !serviceName.value.trim())) {
+        serviceName.value = projectName.value.trim();
       }
     });
-    botName?.addEventListener("input", () => {
-      botName.dataset.edited = "1";
+    serviceName?.addEventListener("input", () => {
+      serviceName.dataset.edited = "1";
     });
 
-    // app.js resets the original 3-step controls every time the dialog opens.
-    // Re-apply the simple one-screen layout immediately after showModal().
     const observer = new MutationObserver(() => {
       if (dialog.open) applySimpleDefaults();
     });
@@ -123,7 +132,7 @@
   const settingsButton = nav.querySelector('[data-view="settings"]');
   const hostingButton = document.createElement("button");
   hostingButton.dataset.view = "hosting";
-  hostingButton.innerHTML = "<span>⬡</span>Hébergement";
+  hostingButton.innerHTML = "<span>⬡</span>Infrastructure";
   nav.insertBefore(hostingButton, settingsButton || null);
 
   const hostingView = document.createElement("section");
@@ -131,15 +140,15 @@
   hostingView.className = "view";
   hostingView.innerHTML = `
     <div class="view-heading">
-      <div><span class="eyebrow">EXECUTION PLANE</span><h1>Hébergement</h1><p>État réel du moteur qui exécute les bots utilisateurs.</p></div>
+      <div><span class="eyebrow">EXECUTION PLANE</span><h1>Infrastructure</h1><p>État réel des machines qui exécutent tes applications.</p></div>
       <button id="hosting-refresh" class="btn btn-secondary">Vérifier maintenant</button>
     </div>
     <div class="hosting-hero">
       <article class="panel hosting-card">
-        <div class="panel-head"><div><small>HÉBERGEUR</small><h3>Worker d'exécution</h3></div><span id="hosting-badge" class="status-badge warn">Vérification…</span></div>
+        <div class="panel-head"><div><small>COMPUTE</small><h3>Workers d'exécution</h3></div><span id="hosting-badge" class="status-badge warn">Vérification…</span></div>
         <div class="hosting-state">
           <span class="hosting-state-icon">⬡</span>
-          <div><strong id="hosting-title">Recherche d'un worker…</strong><small id="hosting-detail">Lecture du plan d'exécution SentriX.</small></div>
+          <div><strong id="hosting-title">Recherche de workers…</strong><small id="hosting-detail">Lecture du plan d'exécution SentriX.</small></div>
         </div>
         <div class="hosting-kpis">
           <div><small>WORKERS CONFIGURÉS</small><b id="hosting-configured">—</b></div>
@@ -154,13 +163,13 @@
       </article>
     </div>
     <article id="hosting-notice" class="hosting-notice">
-      <span>!</span><div><b id="hosting-notice-title">Vérification de l'hébergement</b><small id="hosting-notice-copy">Un bot n'est réellement hébergé que lorsqu'au moins un node-agent d'exécution répond au control plane.</small></div>
+      <span>!</span><div><b id="hosting-notice-title">Vérification de l'infrastructure</b><small id="hosting-notice-copy">Une application n'est réellement hébergée que lorsqu'au moins un worker d'exécution répond au control plane.</small></div>
     </article>
     <article class="panel" style="margin-top:16px">
-      <div class="panel-head"><div><small>COMMENT ÇA TOURNE</small><h3>Chaîne d'hébergement SentriX</h3></div></div>
-      <div class="code-strip"><span>GitHub</span><b>→</b><span>Build</span><b>→</b><span>Release</span><b>→</b><span>Worker gVisor</span><b>→</b><span class="green">Bot en ligne</span></div>
-      <p class="panel-copy">Le control plane gère les projets et les déploiements. Le worker est la machine Linux qui exécute réellement les conteneurs des bots.</p>
-      <div class="hosting-actions"><button id="hosting-projects" class="btn btn-primary">Configurer un bot</button><button id="hosting-runtime" class="btn btn-secondary">Ouvrir Runtime</button></div>
+      <div class="panel-head"><div><small>PIPELINE</small><h3>Chaîne de déploiement</h3></div></div>
+      <div class="code-strip"><span>GitHub</span><b>→</b><span>Build</span><b>→</b><span>Release</span><b>→</b><span>Worker gVisor</span><b>→</b><span class="green">Service en ligne</span></div>
+      <p class="panel-copy">Le control plane gère les projets et les déploiements. Les workers Linux exécutent réellement les conteneurs de tes applications.</p>
+      <div class="hosting-actions"><button id="hosting-projects" class="btn btn-primary">Créer un service</button><button id="hosting-runtime" class="btn btn-secondary">Ouvrir Runtime</button></div>
     </article>
   `;
   const settingsView = $("#view-settings");
@@ -217,24 +226,24 @@
       const notice = document.getElementById("hosting-notice");
       if (status.hosting_ready) {
         setBadge("hosting-badge", "PRÊT", "good");
-        document.getElementById("hosting-title").textContent = "Hébergeur connecté";
+        document.getElementById("hosting-title").textContent = "Compute connecté";
         document.getElementById("hosting-detail").textContent = `${status.online_nodes} worker(s) répondent au control plane.`;
         document.getElementById("hosting-notice-title").textContent = "Hébergement disponible";
-        document.getElementById("hosting-notice-copy").textContent = "Le plan d'exécution dispose d'au moins un worker actif pour lancer des bots.";
+        document.getElementById("hosting-notice-copy").textContent = "Le plan d'exécution dispose d'au moins un worker actif pour lancer des applications.";
         notice.classList.add("good");
       } else {
         setBadge("hosting-badge", "AUCUN WORKER", "warn");
-        document.getElementById("hosting-title").textContent = "Pas encore de machine d'hébergement";
-        document.getElementById("hosting-detail").textContent = "Le site et l'API fonctionnent, mais aucun node-agent n'est actuellement en ligne.";
-        document.getElementById("hosting-notice-title").textContent = "Le vrai hébergeur manque encore";
-        document.getElementById("hosting-notice-copy").textContent = "Les boutons Start/Restart ne peuvent pas faire tourner un bot sans worker Linux connecté. Il faut une machine d'exécution (VPS/serveur) avec Docker + gVisor + node-agent SentriX.";
+        document.getElementById("hosting-title").textContent = "Pas encore de machine d'exécution";
+        document.getElementById("hosting-detail").textContent = "Le site et l'API fonctionnent, mais aucun worker n'est actuellement en ligne.";
+        document.getElementById("hosting-notice-title").textContent = "Le compute manque encore";
+        document.getElementById("hosting-notice-copy").textContent = "Start/Restart ne peuvent pas exécuter une application sans worker Linux connecté. Il faut une machine avec Docker + gVisor + node-agent SentriX.";
         notice.classList.remove("good");
       }
     } catch (error) {
       if (error.status === 401) {
         setBadge("hosting-badge", "CONNEXION REQUISE", "warn");
-        document.getElementById("hosting-title").textContent = "Connectez-vous avec Discord";
-        document.getElementById("hosting-detail").textContent = "Le statut de l'hébergeur est visible après connexion.";
+        document.getElementById("hosting-title").textContent = "Connecte-toi au dashboard";
+        document.getElementById("hosting-detail").textContent = "Le statut détaillé de l'infrastructure est visible après connexion.";
       } else {
         setBadge("hosting-badge", "INDISPONIBLE", "bad");
         document.getElementById("hosting-title").textContent = "Statut worker indisponible";
@@ -254,8 +263,8 @@
     const title = document.getElementById("page-title");
     const breadcrumb = document.getElementById("breadcrumb");
     const newProject = document.getElementById("new-project-btn");
-    if (title) title.textContent = "Hébergement";
-    if (breadcrumb) breadcrumb.textContent = "SENTRIX / HÉBERGEMENT";
+    if (title) title.textContent = "Infrastructure";
+    if (breadcrumb) breadcrumb.textContent = "SENTRIX / INFRASTRUCTURE";
     if (newProject) newProject.style.display = "none";
     $(".sidebar")?.classList.remove("open");
     void refreshHostingStatus();
