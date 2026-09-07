@@ -38,9 +38,7 @@ def test_render_cloud_init_shell_quotes_operator_values() -> None:
 
     assert all(placeholder not in rendered for placeholder in PLACEHOLDERS)
     assert "SENTRIX_CONTROL_PLANE_URL=https://control.example.invalid" in rendered
-    assert (
-        "SENTRIX_REPO_URL='https://example.invalid/repo.git?x=1&echo injected'" in rendered
-    )
+    assert "SENTRIX_REPO_URL='https://example.invalid/repo.git?x=1&echo injected'" in rendered
     assert "SENTRIX_REPO_REF='feature/test ref'" in rendered
     assert "SENTRIX_NODE_TOKEN=node-token-with-safe-generated-characters" in rendered
 
