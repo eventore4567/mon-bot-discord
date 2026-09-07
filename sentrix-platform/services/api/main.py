@@ -14,6 +14,7 @@ from services.api.auth import SessionCodec
 from services.api.deps import AppState
 from services.api.routers import (
     agents,
+    auth_routes,
     control,
     hosting,
     hosting_github,
@@ -30,13 +31,7 @@ def create_app(
     sessions: SessionCodec | None = None,
     status_store: StatusStore | None = None,
 ) -> FastAPI:
-    """Fabrique l'application. Les dependances sont injectables pour les tests.
-
-    IMPORTANT : quand db et sessions sont fournis, l'etat est pose IMMEDIATEMENT,
-    sans attendre le lifespan. httpx.ASGITransport n'execute pas les evenements
-    de lifespan : si l'etat n'etait construit que la, chaque test echouerait sur
-    un AttributeError a la premiere requete.
-    """
+    """Fabrique l'application. Les dependances sont injectables pour les tests."""
     injected = db is not None and sessions is not None
 
     @asynccontextmanager
@@ -60,7 +55,7 @@ def create_app(
 
     app = FastAPI(
         title="SentriX Platform - Control Plane",
-        version="0.2.0",
+        version="0.3.0",
         lifespan=lifespan,
     )
     if injected:
@@ -71,6 +66,7 @@ def create_app(
             status_store=status_store or MemoryStatusStore(),
         )
 
+    app.include_router(auth_routes.router)
     app.include_router(resources.router)
     app.include_router(instances.router)
     app.include_router(agents.router)
