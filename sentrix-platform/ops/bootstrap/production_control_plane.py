@@ -161,7 +161,7 @@ async def bootstrap() -> str:
             raise BootstrapError("role applicatif inattendu")
         if bool(row["rolsuper"]) or bool(row["rolbypassrls"]):
             raise BootstrapError("sentrix_app ne doit jamais etre superuser/BYPASSRLS")
-        await verifier.fetchval("SELECT count(*) FROM schema_migrations")
+        await verifier.fetchval("SELECT count(*) FROM cells")
     finally:
         await verifier.close()
 
