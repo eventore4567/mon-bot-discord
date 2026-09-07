@@ -101,6 +101,12 @@ def main() -> int:
     if "product_boot.ha_boot.run()" not in ha_source:
         fail("entrypoint V98 HA ne relance pas le moteur HA historique", errors)
 
+    product_source = Path("railway_ha_product_boot.py").read_text(encoding="utf-8")
+    if "from sentrix_v98_slash import install as _install_v98_grouped_slash" not in product_source:
+        fail("bootstrap Railway HA produit n'importe pas explicitement V98", errors)
+    if "_install_v98_grouped_slash()" not in product_source:
+        fail("bootstrap Railway HA produit n'installe pas explicitement V98", errors)
+
     if errors:
         for error in errors:
             print("[ERROR]", error)
@@ -109,7 +115,7 @@ def main() -> int:
 
     print(
         "OK V98: racines normalisées, sous-groupes sémantiques, "
-        "aucun page-N, budget <=25, entrypoint Railway HA conservé"
+        "aucun page-N, budget <=25, vrai bootstrap Railway HA verrouillé"
     )
     return 0
 
