@@ -8,7 +8,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from services.api.deps import AppState, OrgContext, get_state, require_org
+from services.api.deps import AppState, OrgContext, get_state, require_org_admin
 
 router = APIRouter(
     prefix="/v1/orgs/{org_id}/hosting/github",
@@ -22,7 +22,7 @@ class GitHubRefreshOut(BaseModel):
 
 @router.post("/refresh", response_model=GitHubRefreshOut)
 async def refresh_github_targets(
-    ctx: Annotated[OrgContext, Depends(require_org)],
+    ctx: Annotated[OrgContext, Depends(require_org_admin)],
     state: Annotated[AppState, Depends(get_state)],
 ) -> GitHubRefreshOut:
     try:
