@@ -30,7 +30,6 @@ jobs:
       - name: Full V95/V96 registry gate
         env:
           DISCORD_TOKEN: "ci.fake.token"
-          OPENAI_API_KEY: "ci.fake.key"
           SENTRIX_CI_OFFLINE: "1"
           DATABASE_PATH: "/tmp/sentrix-v95.db"
         run: |
@@ -39,10 +38,26 @@ jobs:
           import asyncio
           import logging
 
-          # V18 peut signaler un état intermédiaire pendant le chargement des extensions.
-          # Le registre final est audité juste après ; en CI hors-ligne ce warning transitoire
-          # n'apporte donc aucune information actionnable.
-          logging.getLogger("bot.command-runtime-hardening-v18").setLevel(logging.ERROR)
+          class OfflineNoiseFilter(logging.Filter):
+              """Masque uniquement deux états attendus du gate hors-ligne, jamais les vraies erreurs."""
+
+              def filter(self, record):
+                  message = record.getMessage()
+                  if (
+                      record.name == "bot.command-runtime-hardening-v18"
+                      and "paramètres internes encore exposés" in message
+                  ):
+                      return False
+                  if (
+                      record.name == "bot.ai-api-hotfix"
+                      and "OPENAI_API_KEY is missing" in message
+                  ):
+                      return False
+                  return True
+
+          offline_filter = OfflineNoiseFilter()
+          logging.getLogger("bot.command-runtime-hardening-v18").addFilter(offline_filter)
+          logging.getLogger("bot.ai-api-hotfix").addFilter(offline_filter)
 
           from tools.v95_slash_invites_gate import run
           raise SystemExit(asyncio.run(run()))
