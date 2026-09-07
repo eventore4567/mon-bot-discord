@@ -62,7 +62,9 @@ async def _safe_role_password_sql(
     conn: asyncpg.Connection[asyncpg.Record], role: str, password: str
 ) -> str:
     sql = await conn.fetchval(
-        "SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', $1, $2)", role, password
+        "SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', $1::text, $2::text)",
+        role,
+        password,
     )
     if not isinstance(sql, str):
         raise BootstrapError("impossible de preparer le mot de passe PostgreSQL")
@@ -77,7 +79,7 @@ async def _safe_database_ddl(
         if exists
         else "CREATE DATABASE %I OWNER sentrix_migrator"
     )
-    sql = await conn.fetchval("SELECT format($1, $2)", template, database)
+    sql = await conn.fetchval("SELECT format($1::text, $2::text)", template, database)
     if not isinstance(sql, str):
         raise BootstrapError("impossible de preparer le DDL PostgreSQL")
     return sql
