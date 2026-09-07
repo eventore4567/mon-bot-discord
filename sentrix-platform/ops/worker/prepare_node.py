@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import os
 import secrets
+import shlex
 from pathlib import Path
 from uuid import UUID
 
@@ -35,13 +36,14 @@ def render_cloud_init(
     repo_url: str,
     repo_ref: str,
 ) -> str:
+    """Render only shell-quoted values into EnvironmentFile-style assignments."""
     replacements = {
-        "__SENTRIX_CONTROL_PLANE_URL__": control_plane_url.rstrip("/"),
-        "__SENTRIX_CONTROL_PLANE_CIDRS__": control_plane_cidrs,
-        "__SENTRIX_NODE_ID__": str(node_id),
-        "__SENTRIX_NODE_TOKEN__": node_token,
-        "__SENTRIX_REPO_URL__": repo_url,
-        "__SENTRIX_REPO_REF__": repo_ref,
+        "__SENTRIX_CONTROL_PLANE_URL__": shlex.quote(control_plane_url.rstrip("/")),
+        "__SENTRIX_CONTROL_PLANE_CIDRS__": shlex.quote(control_plane_cidrs),
+        "__SENTRIX_NODE_ID__": shlex.quote(str(node_id)),
+        "__SENTRIX_NODE_TOKEN__": shlex.quote(node_token),
+        "__SENTRIX_REPO_URL__": shlex.quote(repo_url),
+        "__SENTRIX_REPO_REF__": shlex.quote(repo_ref),
     }
     rendered = template
     for placeholder, value in replacements.items():
@@ -75,6 +77,8 @@ async def prepare(args: argparse.Namespace) -> tuple[UUID, Path]:
 
     output = Path(args.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if output.exists():
+        raise RuntimeError("--output already exists; refusing to overwrite a node credential")
 
     conn = await asyncpg.connect(args.database_url)
     inserted = False
