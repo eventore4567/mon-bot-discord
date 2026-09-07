@@ -32,6 +32,20 @@ def test_p4_fencing_and_attempt_tables_exist() -> None:
     assert "deployment_effects" in sql
 
 
+def test_p4_rollback_waits_for_restored_generation_health() -> None:
+    sql = migration("0021_verified_rollback_health.sql")
+    assert "step = 'rollback_health'" in sql
+    assert "'rollback requested; waiting for healthy restored generation'" in sql
+    assert "v_status.generation = v_dep.target_generation" in sql
+    assert "SET status = 'rolled_back'" in sql
+    rollback_branch = sql.split("IF v_dep.step = 'rollback_health' THEN", 1)[1]
+    healthy_branch = rollback_branch.split("IF v_status.instance_id IS NOT NULL", 1)[1]
+    assert "v_status.health = 'healthy'" in healthy_branch
+    assert healthy_branch.index("v_status.health = 'healthy'") < healthy_branch.index(
+        "SET status = 'rolled_back'"
+    )
+
+
 def test_p5_database_has_no_plaintext_secret_column() -> None:
     sql = migration("0013_secrets_observability.sql")
     assert "ciphertext bytea" in sql and "wrapped_dek bytea" in sql
