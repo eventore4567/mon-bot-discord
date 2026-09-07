@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """Lance le gate V95 hors-ligne avec un journal strictement actionnable.
 
-Le gate charge le runtime produit complet mais ne se connecte volontairement ni à Discord
-ni à OpenAI. Trois messages historiques sont donc du bruit dans CE contexte uniquement :
-la clé OpenAI absente, l'état transitoire V18 avant l'audit final du registre, et l'échec
-attendu de restauration d'une vue persistante avant login Discord. Toute autre erreur ou
-tout autre warning garde son niveau et reste visible.
+Le gate produit est exécuté exactement comme un script ``__main__``. Cette enveloppe ne
+change donc ni son event loop ni son chargement d'extensions ; elle filtre seulement trois
+messages connus qui sont attendus lorsque la CI n'ouvre volontairement aucune session
+Discord/OpenAI. Toute autre erreur ou tout autre warning reste visible.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import pathlib
+import runpy
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -25,10 +24,7 @@ os.environ.setdefault("SENTRIX_CI_OFFLINE", "1")
 class _ExpectedOfflineNoise(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        if (
-            record.name == "bot.ai-api-hotfix"
-            and "OPENAI_API_KEY is missing" in message
-        ):
+        if record.name == "bot.ai-api-hotfix" and "OPENAI_API_KEY is missing" in message:
             return False
         if (
             record.name == "bot.command-runtime-hardening-v18"
@@ -53,12 +49,10 @@ def _install_filter() -> None:
         logging.getLogger(logger_name).addFilter(noise_filter)
 
 
-def main() -> int:
+def main() -> None:
     _install_filter()
-    from tools.v95_slash_invites_gate import run
-
-    return asyncio.run(run())
+    runpy.run_path(str(ROOT / "tools" / "v95_slash_invites_gate.py"), run_name="__main__")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
