@@ -278,9 +278,7 @@ def _prepare_node_dependencies(
     spec = BuildSandboxSpec(
         image="node:22-bookworm-slim",
         command=command,
-        env=sanitized_build_environment(
-            {"npm_config_audit": "false", "npm_config_fund": "false"}
-        ),
+        env=sanitized_build_environment({"npm_config_audit": "false", "npm_config_fund": "false"}),
         mounts=(BuildMount(str(node_work.resolve()), "/workspace", read_only=False),),
         network_name=config.build_network,
         memory_mb=1536,
@@ -402,9 +400,7 @@ def execute_build(job: RemoteBuildJob, config: WorkerConfig) -> BuildResult:
                 timeout=config.command_timeout,
             )
             _run(["docker", "push", tag], timeout=config.command_timeout)
-            inspected = _run(
-                ["docker", "inspect", "--format", "{{json .RepoDigests}}", tag]
-            )
+            inspected = _run(["docker", "inspect", "--format", "{{json .RepoDigests}}", tag])
             return _immutable_ref(tag, inspected)
         finally:
             _run(["docker", "image", "rm", "-f", tag], check=False, timeout=120)
