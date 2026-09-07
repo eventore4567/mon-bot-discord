@@ -48,7 +48,8 @@ def render_cloud_init(
     rendered = template
     for placeholder, value in replacements.items():
         rendered = rendered.replace(placeholder, value)
-    if "__SENTRIX_" in rendered:
+    unresolved = [placeholder for placeholder in replacements if placeholder in rendered]
+    if unresolved:
         raise RuntimeError("cloud-init template still contains unresolved placeholders")
     return rendered
 
