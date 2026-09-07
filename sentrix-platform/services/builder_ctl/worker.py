@@ -1,8 +1,8 @@
 """Executable managed build worker for SentriX Hosting.
 
-Untrusted dependency installation runs inside gVisor. The host-side Docker build
-uses a generated Dockerfile containing only FROM/COPY/CMD instructions, so user
-Dockerfiles are never executed by the daemon.
+Dependency installation runs inside gVisor. The host-side Docker build uses a
+trusted generated Dockerfile, so a tenant Dockerfile is never executed by the
+daemon.
 """
 
 from __future__ import annotations
@@ -23,7 +23,11 @@ from uuid import UUID
 import httpx
 from pydantic import BaseModel, Field
 
-from services.builder_ctl.controller import BuildRejected, preflight_source, sanitized_build_environment
+from services.builder_ctl.controller import (
+    BuildRejected,
+    preflight_source,
+    sanitized_build_environment,
+)
 from services.builder_ctl.models import BuildMount, BuildSandboxSpec
 from services.builder_ctl.sandbox import docker_command
 
@@ -31,7 +35,7 @@ _REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _REGISTRY = re.compile(r"^[a-z0-9._:-]+(?:/[a-z0-9._-]+)*$")
 
 
-class SourceRejected(RuntimeError):
+class SourceRejectedError(RuntimeError):
     pass
 
 
@@ -89,13 +93,12 @@ class WorkerConfig:
 
 class ControlApi:
     def __init__(self, config: WorkerConfig) -> None:
-        self._headers = {
-            "X-Sentrix-Worker-Id": str(config.worker_id),
-            "X-Sentrix-Worker-Token": config.worker_token,
-        }
         self._client = httpx.AsyncClient(
             base_url=config.api_url,
-            headers=self._headers,
+            headers={
+                "X-Sentrix-Worker-Id": str(config.worker_id),
+                "X-Sentrix-Worker-Token": config.worker_token,
+            },
             timeout=httpx.Timeout(30.0),
         )
 
@@ -124,15 +127,17 @@ class ControlApi:
         result: BuildResult | None = None,
         error: str | None = None,
     ) -> None:
-        payload: dict[str, object] = {
-            "build_id": str(job.build_id),
-            "lease_attempt": job.lease_attempt,
-            "outcome": outcome,
-            "image_ref": result.image_ref if result else None,
-            "image_digest": result.image_digest if result else None,
-            "error": error[:4000] if error else None,
-        }
-        response = await self._client.post("/v1/control/builder/report", json=payload)
+        response = await self._client.post(
+            "/v1/control/builder/report",
+            json={
+                "build_id": str(job.build_id),
+                "lease_attempt": job.lease_attempt,
+                "outcome": outcome,
+                "image_ref": result.image_ref if result else None,
+                "image_digest": result.image_digest if result else None,
+                "error": error[:4000] if error else None,
+            },
+        )
         response.raise_for_status()
 
 
@@ -141,7 +146,6 @@ def _run(
     *,
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
-    input_text: str | None = None,
     timeout: int = 900,
     check: bool = True,
 ) -> str:
@@ -150,12 +154,10 @@ def _run(
     binary = shutil.which(command[0])
     if binary is None:
         raise BuildExecutionError(f"required executable missing: {command[0]}")
-    safe_command = [binary, *command[1:]]
-    completed = subprocess.run(  # noqa: S603 - argv only; executable resolved above
-        safe_command,
+    completed = subprocess.run(  # noqa: S603 - argv only; executable is resolved
+        [binary, *command[1:]],
         cwd=cwd,
         env=env,
-        input=input_text,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -173,8 +175,7 @@ def _run(
 def _validate_source_tree(root: Path) -> None:
     for path in root.rglob("*"):
         if path.is_symlink():
-            relative = path.relative_to(root)
-            raise SourceRejected(f"symbolic link rejected: {relative}")
+            raise SourceRejectedError(f"symbolic link rejected: {path.relative_to(root)}")
 
 
 def _git_environment(home: Path) -> dict[str, str]:
@@ -188,14 +189,17 @@ def _git_environment(home: Path) -> dict[str, str]:
 
 def _checkout(job: RemoteBuildJob, target: Path, config: WorkerConfig) -> None:
     if not _REPOSITORY.fullmatch(job.repository):
-        raise SourceRejected("invalid GitHub repository name")
+        raise SourceRejectedError("invalid GitHub repository name")
     home = target.parent / "git-home"
     home.mkdir(mode=0o700)
     env = _git_environment(home)
     if config.github_token:
         credential = home / ".git-credentials"
         encoded = quote(config.github_token, safe="")
-        credential.write_text(f"https://x-access-token:{encoded}@github.com\n", encoding="utf-8")
+        credential.write_text(
+            f"https://x-access-token:{encoded}@github.com\n",
+            encoding="utf-8",
+        )
         credential.chmod(0o600)
         _run(["git", "config", "--global", "credential.helper", "store"], env=env)
 
@@ -216,8 +220,7 @@ def _checkout(job: RemoteBuildJob, target: Path, config: WorkerConfig) -> None:
 
 
 def _sandbox_run(name: str, spec: BuildSandboxSpec, config: WorkerConfig) -> None:
-    command = docker_command(name, spec)
-    _run(command, timeout=config.command_timeout)
+    _run(docker_command(name, spec), timeout=config.command_timeout)
 
 
 def _prepare_python_dependencies(
@@ -226,8 +229,7 @@ def _prepare_python_dependencies(
     job: RemoteBuildJob,
     config: WorkerConfig,
 ) -> None:
-    requirements = source / "requirements.txt"
-    if not requirements.exists():
+    if not (source / "requirements.txt").exists():
         return
     spec = BuildSandboxSpec(
         image="python:3.12-slim",
@@ -265,18 +267,20 @@ def _prepare_node_dependencies(
 ) -> None:
     package_json = source / "package.json"
     if not package_json.exists():
-        raise SourceRejected("discord.js build requires package.json")
+        raise SourceRejectedError("discord.js build requires package.json")
     shutil.copy2(package_json, node_work / "package.json")
     package_lock = source / "package-lock.json"
     if package_lock.exists():
         shutil.copy2(package_lock, node_work / "package-lock.json")
-        install = "npm ci --omit=dev"
+        command = ("npm", "ci", "--omit=dev", "--prefix", "/workspace")
     else:
-        install = "npm install --omit=dev"
+        command = ("npm", "install", "--omit=dev", "--prefix", "/workspace")
     spec = BuildSandboxSpec(
         image="node:22-bookworm-slim",
-        command=("sh", "-lc", f"cd /workspace && {install}"),
-        env=sanitized_build_environment({"npm_config_audit": "false", "npm_config_fund": "false"}),
+        command=command,
+        env=sanitized_build_environment(
+            {"npm_config_audit": "false", "npm_config_fund": "false"}
+        ),
         mounts=(BuildMount(str(node_work.resolve()), "/workspace", read_only=False),),
         network_name=config.build_network,
         memory_mb=1536,
@@ -290,21 +294,24 @@ def _python_entrypoint(source: Path) -> str:
     for candidate in ("main.py", "bot.py", "app.py"):
         if (source / candidate).is_file():
             return candidate
-    raise SourceRejected("no Python entrypoint found (main.py, bot.py or app.py)")
+    raise SourceRejectedError("no Python entrypoint found (main.py, bot.py or app.py)")
 
 
 def _copy_source(source: Path, destination: Path) -> None:
-    ignored = shutil.ignore_patterns(
-        ".git",
-        ".env",
-        ".env.*",
-        ".venv",
-        "venv",
-        "node_modules",
-        "__pycache__",
-        "*.pyc",
+    shutil.copytree(
+        source,
+        destination,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".env",
+            ".env.*",
+            ".venv",
+            "venv",
+            "node_modules",
+            "__pycache__",
+            "*.pyc",
+        ),
     )
-    shutil.copytree(source, destination, ignore=ignored)
 
 
 def _write_trusted_context(
@@ -344,23 +351,22 @@ def _write_trusted_context(
             'CMD ["npm", "start", "--silent"]\n'
         )
     else:
-        raise SourceRejected(f"unsupported Discord library: {job.library}")
+        raise SourceRejectedError(f"unsupported Discord library: {job.library}")
 
     (context / "Dockerfile").write_text(dockerfile, encoding="utf-8")
     return context
 
 
 def _immutable_ref(tag: str, inspect_output: str) -> BuildResult:
-    raw = cast(object, json.loads(inspect_output))
+    raw = cast(list[object], json.loads(inspect_output))
     if not isinstance(raw, list):
         raise BuildExecutionError("Docker RepoDigests response is not a list")
     for value in raw:
         if not isinstance(value, str) or "@sha256:" not in value:
             continue
-        image_ref = value
         digest = "sha256:" + value.rsplit("@sha256:", 1)[1]
         if re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
-            return BuildResult(image_ref=image_ref, image_digest=digest)
+            return BuildResult(image_ref=value, image_digest=digest)
     raise BuildExecutionError(f"registry did not return an immutable digest for {tag}")
 
 
@@ -382,7 +388,7 @@ def execute_build(job: RemoteBuildJob, config: WorkerConfig) -> BuildResult:
         elif job.library == "discordjs":
             _prepare_node_dependencies(source, node_work, job, config)
         else:
-            raise SourceRejected(f"unsupported Discord library: {job.library}")
+            raise SourceRejectedError(f"unsupported Discord library: {job.library}")
 
         context = _write_trusted_context(source, workspace, job, deps, node_work)
         tag = (
@@ -396,7 +402,9 @@ def execute_build(job: RemoteBuildJob, config: WorkerConfig) -> BuildResult:
                 timeout=config.command_timeout,
             )
             _run(["docker", "push", tag], timeout=config.command_timeout)
-            inspected = _run(["docker", "inspect", "--format", "{{json .RepoDigests}}", tag])
+            inspected = _run(
+                ["docker", "inspect", "--format", "{{json .RepoDigests}}", tag]
+            )
             return _immutable_ref(tag, inspected)
         finally:
             _run(["docker", "image", "rm", "-f", tag], check=False, timeout=120)
@@ -415,7 +423,7 @@ async def process_job(api: ControlApi, job: RemoteBuildJob, config: WorkerConfig
     renewer = asyncio.create_task(_renew_lease(api, job, stop))
     try:
         result = await asyncio.to_thread(execute_build, job, config)
-    except (BuildRejected, SourceRejected) as exc:
+    except (BuildRejected, SourceRejectedError) as exc:
         await api.report(job, outcome="rejected", error=str(exc))
     except (BuildExecutionError, OSError, subprocess.SubprocessError) as exc:
         await api.report(job, outcome="failed", error=str(exc))
