@@ -9,11 +9,12 @@ from discord import app_commands
 from discord.ext import commands
 
 import sentrix_v95_runtime as v95
+import sentrix_v97_reliability as v97
 from tools import v99_slash_runtime_audit as v99
 
 
 class V99SlashRuntimeAuditTests(unittest.TestCase):
-    def test_native_setup_exposes_interaction(self):
+    def test_native_app_command_exposes_interaction(self):
         async def setup(interaction: discord.Interaction) -> None:
             return None
 
@@ -26,6 +27,59 @@ class V99SlashRuntimeAuditTests(unittest.TestCase):
 
         self.assertTrue(audit.ok, audit.reason)
         self.assertEqual(audit.first_parameter, "interaction")
+
+    def test_hybrid_ctx_is_valid_discord_py_contract(self):
+        bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
+
+        @bot.hybrid_command(name="help", description="Aide SentriX")
+        async def hybrid_help(ctx: commands.Context) -> None:
+            return None
+
+        command = bot.tree.get_command("help")
+        self.assertIsNotNone(command)
+        self.assertTrue(getattr(command, "__commands_is_hybrid_app_command__", False))
+
+        audit = v99.audit_public_callback(command)
+        self.assertTrue(audit.ok, audit.reason)
+        self.assertEqual(audit.first_parameter, "ctx")
+        self.assertIn("HybridAppCommand", audit.reason)
+
+    def test_native_ctx_is_rejected_even_when_annotated_interaction(self):
+        async def leaked(ctx: discord.Interaction) -> None:
+            return None
+
+        command = app_commands.Command(
+            name="leaked-ctx",
+            description="Contrôle négatif V99.",
+            callback=leaked,
+        )
+        audit = v99.audit_public_callback(command)
+
+        self.assertFalse(audit.ok)
+        self.assertEqual(audit.first_parameter, "ctx")
+        self.assertIn("native", audit.reason)
+
+    def test_v97_replaces_hybrid_setup_with_native_interaction(self):
+        bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
+
+        @bot.hybrid_command(name="setup", description="Configuration SentriX")
+        async def setup_legacy(ctx: commands.Context) -> None:
+            return None
+
+        before = bot.tree.get_command("setup")
+        self.assertIsNotNone(before)
+        self.assertTrue(getattr(before, "__commands_is_hybrid_app_command__", False))
+        self.assertTrue(v99.audit_public_callback(before).ok)
+
+        self.assertTrue(v97._replace_setup_slash(bot))
+        after = bot.tree.get_command("setup")
+        self.assertIsNotNone(after)
+        self.assertFalse(getattr(after, "__commands_is_hybrid_app_command__", False))
+
+        audit = v99.audit_public_callback(after)
+        self.assertTrue(audit.ok, audit.reason)
+        self.assertEqual(audit.first_parameter, "interaction")
+        self.assertEqual(getattr(after.callback, "_sentrix_original_command", None), "setup")
 
     def test_legacy_ctx_is_internal_after_v95_adapter(self):
         bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
@@ -48,20 +102,20 @@ class V99SlashRuntimeAuditTests(unittest.TestCase):
         self.assertTrue(public_audit.ok, public_audit.reason)
         self.assertEqual(public_audit.first_parameter, "interaction")
 
-    def test_public_ctx_is_rejected_even_when_annotated_interaction(self):
-        async def leaked(ctx: discord.Interaction) -> None:
+    def test_v97_optional_gap_uses_safe_text_fallback(self):
+        async def legacy(ctx, first: str = "", second: str = "") -> None:
             return None
 
-        command = app_commands.Command(
-            name="leaked-ctx",
-            description="Contrôle négatif V99.",
-            callback=leaked,
+        command = commands.Command(
+            legacy,
+            name="optional-gap",
+            description="Contrôle fallback V97",
         )
-        audit = v99.audit_public_callback(command)
+        signature, native, names = v97._build_signature(command)
 
-        self.assertFalse(audit.ok)
-        self.assertEqual(audit.first_parameter, "ctx")
-        self.assertIn("legacy", audit.reason)
+        self.assertFalse(native)
+        self.assertEqual(names, ("arguments",))
+        self.assertEqual(tuple(signature.parameters), ("interaction", "arguments"))
 
     def test_v98_representative_surface_is_clean(self):
         bot, report, targets = v99._build_representative_tree()
@@ -70,9 +124,13 @@ class V99SlashRuntimeAuditTests(unittest.TestCase):
         self.assertTrue(audits)
         self.assertTrue(all(audit.ok for audit in audits), [audit for audit in audits if not audit.ok])
 
-        setup = next((audit for audit in audits if audit.qualified_name == "setup"), None)
+        by_name = {audit.qualified_name: audit for audit in audits}
+        setup = by_name.get("setup")
+        help_command = by_name.get("help")
         self.assertIsNotNone(setup)
-        self.assertTrue(setup.ok)
+        self.assertIsNotNone(help_command)
+        self.assertEqual(setup.first_parameter, "interaction")
+        self.assertEqual(help_command.first_parameter, "ctx")
 
         originals = {str(meta.get("original")) for meta in report.values()}
         self.assertTrue(
@@ -116,6 +174,9 @@ class V99SlashRuntimeAuditTests(unittest.TestCase):
         self.assertIs(interaction, marker)
         self.assertEqual(option_names, ("text",))
         self.assertEqual(kwargs, {"text": "bonjour"})
+
+    def test_real_railway_bootstrap_contract(self):
+        self.assertEqual(v99.bootstrap_contract_errors(), [])
 
 
 if __name__ == "__main__":
