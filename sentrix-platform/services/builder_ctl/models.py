@@ -59,5 +59,11 @@ class BuildSandboxSpec:
             raise ValueError("invalid build image")
         if not self.network_name or any(char.isspace() for char in self.network_name):
             raise ValueError("invalid build network")
+        # Dependency installation requires public package access.  It must never
+        # fall back to Docker's unmanaged bridge/host network.  The production
+        # entrypoint provisions and labels a dedicated sentrix-build-* bridge and
+        # applies the host egress policy before any sandbox starts.
+        if not self.network_name.startswith("sentrix-build-"):
+            raise ValueError("build sandbox requires a managed sentrix-build-* network")
         for mount in self.mounts:
             mount.validate()
