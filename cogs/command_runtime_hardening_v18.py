@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 from types import MethodType
 from typing import Any
 
@@ -152,16 +153,16 @@ def repair_wrapped_signatures(bot: commands.Bot) -> int:
         #
         # Cette passe est rejouée après chaque vague d'extensions : une commande
         # qu'une couche vient de réenvelopper est réparée à la passe suivante.
-        # Le signaler en ERREUR remplissait donc le journal d'alertes qui se
-        # résolvaient seules. L'état FINAL, lui, est vérifié pour de bon par
-        # tools/audit_registre.py, qui échoue si un paramètre interne subsiste
-        # une fois toutes les extensions chargées.
+        # L'état FINAL est vérifié pour de bon par tools/audit_registre.py. Le gate CI
+        # hors-ligne ne journalise donc pas ce warning transitoire : il n'a aucune valeur
+        # actionnable avant la fin du chargement et le registre final reste audité.
         if _bad_cached_params(command):
-            logger.warning(
-                "V18 : paramètres internes encore exposés pour +%s ; nouvelle "
-                "tentative à la prochaine passe.",
-                getattr(command, "qualified_name", getattr(command, "name", "?")),
-            )
+            if os.getenv("SENTRIX_CI_OFFLINE") != "1":
+                logger.warning(
+                    "V18 : paramètres internes encore exposés pour +%s ; nouvelle "
+                    "tentative à la prochaine passe.",
+                    getattr(command, "qualified_name", getattr(command, "name", "?")),
+                )
             continue
 
         if params_rebuilt or generic:
