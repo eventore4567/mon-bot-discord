@@ -1,0 +1,1 @@
+"""SentriX Cloud web application."""
