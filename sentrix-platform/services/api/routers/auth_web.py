@@ -1,8 +1,8 @@
 """Discord OAuth web flow for SentriX Cloud.
 
 The OAuth state is stored only in an HttpOnly cookie and the Discord access
- token is never persisted. The signed SentriX session contains only the global
- user id; tenant membership is re-checked on every tenant request.
+token is never persisted. The signed SentriX session contains only the global
+user id; tenant membership is re-checked on every tenant request.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Annotated
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 
 from libs.ids import uuid7
