@@ -1,0 +1,52 @@
+name: SentriX V99 Slash Runtime Audit
+
+on:
+  push:
+    branches:
+      - fix/v99-slash-runtime-audit
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  v99-runtime-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile V95 V98 V99
+        run: |
+          python -m compileall -q sentrix_v95_runtime.py sentrix_v98_slash.py tools/v98_grouped_slash_gate.py tools/v99_slash_runtime_audit.py tests/test_v99_slash_runtime_audit.py
+
+      - name: Keep V98 grouped slash invariants green
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v99-v98.db"
+        run: python tools/v98_grouped_slash_gate.py
+
+      - name: V99 public callback audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v99.db"
+        run: python tools/v99_slash_runtime_audit.py
+
+      - name: V99 deterministic runtime tests
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v99-tests.db"
+        run: python -m unittest discover -s tests -p 'test_v99_slash_runtime_audit.py' -v
