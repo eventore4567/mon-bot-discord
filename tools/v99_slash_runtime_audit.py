@@ -1,14 +1,16 @@
-"""SentriX V99 — audit déterministe des callbacks slash publics.
+"""SentriX V99 — audit déterministe des callbacks slash et du bootstrap Railway.
 
-Le runtime V95/V98 adapte encore les commandes ``commands.Command`` historiques, dont
-la callback métier reçoit naturellement un ``commands.Context`` nommé ``ctx``. Ce
-``ctx`` est interne au pont d'exécution et ne doit jamais être confondu avec la
-signature publique enregistrée auprès de Discord, qui reçoit une
-``discord.Interaction``.
+Le runtime SentriX expose trois formes différentes qu'il ne faut pas confondre :
 
-Ce module audite donc exclusivement les callbacks ``discord.app_commands`` réellement
-exposés dans l'arbre slash. Il peut être importé par d'autres diagnostics et possède un
-gate autonome, sans connexion Discord, pour verrouiller le comportement V99.
+- une ``app_commands.Command`` native reçoit directement ``discord.Interaction`` ;
+- une ``HybridAppCommand`` discord.py conserve légitimement un callback métier ``ctx``
+  car discord.py transforme lui-même l'Interaction en Context avant l'appel ;
+- les commandes legacy regroupées par V95/V98 reçoivent publiquement ``interaction`` puis
+  passent en interne par ``commands.Context``.
+
+V99 audite ces trois contrats séparément et verrouille aussi le véritable point d'entrée
+Railway afin que V95/V97/V98/V96 soient installées avant la synchronisation Discord.
+Aucun token ni appel réseau Discord n'est nécessaire.
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import sentrix_v95_runtime as v95
+import sentrix_v97_reliability as v97
 import sentrix_v98_slash as v98
 
 LEGACY_CONTEXT_NAMES = frozenset({"ctx", "context"})
@@ -55,40 +58,91 @@ def _callback_parameters(callback) -> list[inspect.Parameter]:
     return parameters
 
 
-def _is_interaction_annotation(annotation: object) -> bool:
-    if annotation is discord.Interaction:
+def _annotation_matches(annotation: object, expected_type: type, *names: str) -> bool:
+    if annotation is expected_type:
         return True
     if annotation is inspect.Parameter.empty:
         return False
     name = getattr(annotation, "__name__", None)
-    if name == "Interaction":
+    if name in names:
         return True
     text = str(annotation).replace("typing.", "").strip("'\"")
-    return text in {"Interaction", "discord.Interaction", "<class 'discord.interactions.Interaction'>"}
+    return text in set(names)
+
+
+def _is_interaction_annotation(annotation: object) -> bool:
+    return _annotation_matches(
+        annotation,
+        discord.Interaction,
+        "Interaction",
+        "discord.Interaction",
+        "<class 'discord.interactions.Interaction'>",
+    )
+
+
+def _is_context_annotation(annotation: object) -> bool:
+    return _annotation_matches(
+        annotation,
+        commands.Context,
+        "Context",
+        "commands.Context",
+        "discord.ext.commands.Context",
+        "<class 'discord.ext.commands.context.Context'>",
+    )
+
+
+def _is_hybrid_app_command(command: object) -> bool:
+    """Détecte le wrapper officiel discord.py sans dépendre d'une classe privée."""
+
+    return bool(getattr(command, "__commands_is_hybrid_app_command__", False))
 
 
 def audit_public_callback(command: app_commands.Command) -> CallbackAudit:
-    """Audite la signature enregistrée auprès de Discord, jamais la cible legacy.
+    """Audite la signature selon le type réel de commande Discord.
 
-    Une callback publique qui expose ``ctx``/``context`` est explicitement rejetée,
-    même si ce paramètre est annoté ``discord.Interaction``. À l'inverse, un ``ctx``
-    présent derrière ``v95._invoke_original`` est normal et n'entre pas dans cet audit.
+    ``ctx`` est interdit sur une App Command native mais attendu sur une HybridAppCommand :
+    discord.py possède alors son propre pont Interaction -> Context. Les wrappers V95/V98,
+    eux, sont des App Commands natives et doivent donc toujours exposer ``interaction``.
     """
 
     qualified = str(getattr(command, "qualified_name", None) or getattr(command, "name", "?"))
     callback = getattr(command, "callback", None)
     parameters = _callback_parameters(callback)
     if not parameters:
-        return CallbackAudit(qualified, False, None, "callback publique sans paramètre Interaction")
+        return CallbackAudit(qualified, False, None, "callback publique sans premier paramètre exploitable")
 
     first = parameters[0]
     first_name = first.name.casefold()
-    if first_name in LEGACY_CONTEXT_NAMES:
+    hybrid = _is_hybrid_app_command(command)
+
+    if hybrid:
+        if first_name in LEGACY_CONTEXT_NAMES or _is_context_annotation(first.annotation):
+            return CallbackAudit(
+                qualified,
+                True,
+                first.name,
+                "HybridAppCommand valide : discord.py transforme Interaction en Context",
+            )
+        if first_name in INTERACTION_NAMES or _is_interaction_annotation(first.annotation):
+            return CallbackAudit(
+                qualified,
+                True,
+                first.name,
+                "HybridAppCommand avec paramètre Interaction identifiable",
+            )
         return CallbackAudit(
             qualified,
             False,
             first.name,
-            f"callback publique expose le paramètre legacy {first.name!r}",
+            "HybridAppCommand sans Context/Interaction identifiable",
+        )
+
+    if first_name in LEGACY_CONTEXT_NAMES or _is_context_annotation(first.annotation):
+        return CallbackAudit(
+            qualified,
+            False,
+            first.name,
+            f"App Command native expose un Context legacy via {first.name!r}",
         )
 
     if first_name not in INTERACTION_NAMES and not _is_interaction_annotation(first.annotation):
@@ -96,14 +150,14 @@ def audit_public_callback(command: app_commands.Command) -> CallbackAudit:
             qualified,
             False,
             first.name,
-            "premier paramètre public non identifiable comme discord.Interaction",
+            "premier paramètre natif non identifiable comme discord.Interaction",
         )
 
     return CallbackAudit(
         qualified,
         True,
         first.name,
-        "callback publique Interaction valide",
+        "App Command native Interaction valide",
     )
 
 
@@ -122,6 +176,76 @@ def audit_tree(tree: app_commands.CommandTree) -> list[CallbackAudit]:
 
     roots = tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)
     return [audit_public_callback(command) for command in iter_public_leaf_commands(roots)]
+
+
+def bootstrap_contract_errors(root: Path = ROOT) -> list[str]:
+    """Valide le chemin de démarrage réellement utilisé par Railway/Docker.
+
+    Le contrat interdit de dépendre uniquement de ``sitecustomize`` pour les correctifs
+    slash critiques. Le bootstrap normal doit reproduire les garanties déjà présentes sur
+    l'entrypoint HA produit, avant la création du bot et avant ``CommandTree.sync``.
+    """
+
+    errors: list[str] = []
+    required_files = {
+        "Procfile": root / "Procfile",
+        "Dockerfile": root / "Dockerfile",
+        "sentrix_v98_boot.py": root / "sentrix_v98_boot.py",
+    }
+    texts: dict[str, str] = {}
+    for label, path in required_files.items():
+        try:
+            texts[label] = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append(f"{label} illisible: {type(exc).__name__}")
+
+    procfile = texts.get("Procfile", "")
+    dockerfile = texts.get("Dockerfile", "")
+    source = texts.get("sentrix_v98_boot.py", "")
+
+    if "sentrix_v98_boot.py" not in procfile:
+        errors.append("Procfile ne démarre pas sentrix_v98_boot.py")
+    if "sentrix_v98_boot.py" not in dockerfile:
+        errors.append("Dockerfile ne démarre pas sentrix_v98_boot.py")
+
+    required_tokens = (
+        "install_v95()",
+        "import railway_boot as runtime_boot",
+        "install_v97(runtime_boot.dashboard_web)",
+        "install_v98()",
+        "install_v96()",
+        "install_v96_finalizer()",
+        "asyncio.run(runtime_boot.run())",
+    )
+    for token in required_tokens:
+        if token not in source:
+            errors.append(f"bootstrap Railway incomplet: {token!r} absent")
+
+    def before(first: str, second: str, message: str) -> None:
+        first_pos = source.find(first)
+        second_pos = source.find(second)
+        if first_pos < 0 or second_pos < 0:
+            return
+        if first_pos >= second_pos:
+            errors.append(message)
+
+    before(
+        "install_v95()",
+        "import railway_boot as runtime_boot",
+        "V95 doit être installée avant l'import du bootstrap Railway",
+    )
+    before(
+        "import railway_boot as runtime_boot",
+        "install_v96()",
+        "V96 doit patcher la vraie classe Bot après l'import de railway_boot",
+    )
+    before(
+        "install_v97(runtime_boot.dashboard_web)",
+        "install_v98()",
+        "V97 doit fiabiliser le bridge avant que V98 ne fige la surface sémantique",
+    )
+
+    return errors
 
 
 def _legacy_target(original: str, root: str, leaf: str | None = None) -> v95.SlashTarget:
@@ -145,20 +269,22 @@ def _legacy_target(original: str, root: str, leaf: str | None = None) -> v95.Sla
 
 
 def _build_representative_tree() -> tuple[commands.Bot, dict[str, dict], list[v95.SlashTarget]]:
-    """Reproduit la surface V98 critique sans token ni appel réseau Discord."""
+    """Reproduit les trois chemins slash critiques sans token ni réseau Discord."""
 
     bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
 
-    async def setup(interaction: discord.Interaction) -> None:
+    @bot.hybrid_command(name="setup", description="Configuration SentriX.")
+    async def legacy_setup(ctx: commands.Context) -> None:
         return None
 
-    bot.tree.add_command(
-        app_commands.Command(
-            name="setup",
-            description="Configuration SentriX.",
-            callback=setup,
-        )
-    )
+    @bot.hybrid_command(name="help", description="Aide SentriX.")
+    async def hybrid_help(ctx: commands.Context) -> None:
+        return None
+
+    # Le /setup hybride historique est volontairement remplacé par V97. /help reste
+    # hybride afin que l'audit vérifie aussi le comportement officiel discord.py.
+    if not v97._replace_setup_slash(bot):
+        raise RuntimeError("Gate V99: impossible de remplacer /setup via V97")
 
     targets = [
         _legacy_target("ai", "ai", "ask"),
@@ -189,13 +315,21 @@ def main() -> int:
     if setup_audit is None:
         errors.append("/setup a disparu de la surface publique")
     elif not setup_audit.ok:
-        errors.append(f"/setup rejeté à tort: {setup_audit.reason}")
+        errors.append(f"/setup invalide: {setup_audit.reason}")
     elif setup_audit.first_parameter != "interaction":
-        errors.append(f"/setup expose {setup_audit.first_parameter!r} au lieu de 'interaction'")
+        errors.append(f"/setup expose {setup_audit.first_parameter!r} au lieu de 'interaction' après V97")
 
-    failures = [audit for audit in audits if not audit.ok]
-    for audit in failures:
-        errors.append(f"/{audit.qualified_name}: {audit.reason}")
+    help_audit = by_name.get("help")
+    if help_audit is None:
+        errors.append("/help hybride a disparu de la surface publique")
+    elif not help_audit.ok:
+        errors.append(f"/help hybride rejeté à tort: {help_audit.reason}")
+    elif help_audit.first_parameter not in LEGACY_CONTEXT_NAMES:
+        errors.append(f"/help hybride n'expose plus son Context attendu: {help_audit.first_parameter!r}")
+
+    for audit in audits:
+        if not audit.ok:
+            errors.append(f"/{audit.qualified_name}: {audit.reason}")
 
     expected_originals = {"ai", "ai-translate", "ban", "permission-audit", "ticketpanel"}
     mapped_originals = {str(meta.get("original")) for meta in report.values()}
@@ -203,14 +337,13 @@ def main() -> int:
     if missing:
         errors.append(f"familles V99 absentes du mapping: {', '.join(sorted(missing))}")
 
-    # Le ctx legacy doit rester présent derrière le pont : c'est précisément ce que
-    # l'ancien diagnostic confondait avec la callback slash publique.
+    # Les commandes legacy V95/V98 gardent ctx uniquement derrière leur wrapper public.
     for target in targets:
         legacy_params = _callback_parameters(target.command.callback)
         if not legacy_params or legacy_params[0].name != "ctx":
             errors.append(f"cible legacy {target.original_name!r}: ctx interne attendu")
 
-    # Test négatif : le détecteur doit réellement refuser un ctx PUBLIC.
+    # Contrôle négatif : un vrai App Command natif ne doit jamais exposer ctx.
     async def leaked_ctx(ctx: discord.Interaction) -> None:
         return None
 
@@ -221,7 +354,9 @@ def main() -> int:
     )
     leaked_audit = audit_public_callback(leaked)
     if leaked_audit.ok:
-        errors.append("le détecteur V99 accepte à tort un ctx exposé publiquement")
+        errors.append("le détecteur V99 accepte à tort un ctx sur une App Command native")
+
+    errors.extend(bootstrap_contract_errors())
 
     if errors:
         for error in errors:
@@ -229,9 +364,10 @@ def main() -> int:
         print(f"ECHEC V99: {len(errors)} problème(s)")
         return 1
 
-    print("OK V99: /setup expose interaction; ctx legacy reste interne au pont V95.")
-    print("OK V99: ai, ai-translate, modération, permissions et tickets ont une callback publique valide.")
-    print("OK V99: le contrôle négatif rejette bien un ctx exposé publiquement.")
+    print("OK V99: /setup V97 expose Interaction et les HybridAppCommand ctx restent valides.")
+    print("OK V99: wrappers V95/V98 Interaction -> Context valides pour IA, modération, permissions et tickets.")
+    print("OK V99: Procfile + Dockerfile verrouillent le bootstrap Railway V95/V97/V98/V96.")
+    print("OK V99: le contrôle négatif rejette un ctx sur une App Command native.")
     print("Mappings représentatifs:")
     for path, meta in sorted(report.items()):
         print(f"  {path} <- {meta['original']}")
