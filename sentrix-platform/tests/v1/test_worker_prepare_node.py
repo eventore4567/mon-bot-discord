@@ -9,6 +9,14 @@ from uuid import UUID
 ROOT = Path(__file__).resolve().parents[2]
 PREPARE_NODE = ROOT / "ops" / "worker" / "prepare_node.py"
 CLOUD_INIT = ROOT / "ops" / "worker" / "cloud-init.yaml"
+PLACEHOLDERS = (
+    "__SENTRIX_CONTROL_PLANE_URL__",
+    "__SENTRIX_CONTROL_PLANE_CIDRS__",
+    "__SENTRIX_NODE_ID__",
+    "__SENTRIX_NODE_TOKEN__",
+    "__SENTRIX_REPO_URL__",
+    "__SENTRIX_REPO_REF__",
+)
 
 
 def _renderer() -> Callable[..., str]:
@@ -28,7 +36,7 @@ def test_render_cloud_init_shell_quotes_operator_values() -> None:
         repo_ref="feature/test ref",
     )
 
-    assert "__SENTRIX_" not in rendered
+    assert all(placeholder not in rendered for placeholder in PLACEHOLDERS)
     assert "SENTRIX_CONTROL_PLANE_URL=https://control.example.invalid" in rendered
     assert (
         "SENTRIX_REPO_URL='https://example.invalid/repo.git?x=1&echo injected'" in rendered
