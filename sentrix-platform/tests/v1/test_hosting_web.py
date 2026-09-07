@@ -67,4 +67,4 @@ def test_resource_lists_exist_for_dashboard() -> None:
 def test_authenticated_organization_list_exists() -> None:
     auth = AUTH.read_text(encoding="utf-8")
     assert '@router.get("/organizations", response_model=list[OrganizationOut])' in auth
-    assert "JOIN org_members" in auth
+    assert "sentrix_list_user_organizations" in auth
