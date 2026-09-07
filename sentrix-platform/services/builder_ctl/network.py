@@ -93,9 +93,7 @@ def ensure_managed_build_network(
             ]
         )
     elif inspect.stdout.strip().lower() != "true":
-        raise BuildNetworkError(
-            f"refusing unmanaged pre-existing Docker network: {name}"
-        )
+        raise BuildNetworkError(f"refusing unmanaged pre-existing Docker network: {name}")
 
     if not egress_script.is_absolute() or not egress_script.is_file():
         raise BuildNetworkError(f"egress policy script missing: {egress_script}")
