@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080b14">
+  <meta name="description" content="SentriX Hosting — déployez, surveillez et gérez vos bots Discord depuis une seule interface.">
+  <title>SentriX Hosting</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="landing">
+  <div class="noise"></div>
+  <header class="site-header wrap">
+    <a class="brand" href="/" aria-label="SentriX Hosting">
+      <span class="brand-mark">S</span>
+      <span>SentriX <b>Hosting</b></span>
+    </a>
+    <nav class="site-nav" aria-label="Navigation principale">
+      <a href="#features">Fonctions</a>
+      <a href="#security">Sécurité</a>
+      <a href="#status">Infrastructure</a>
+    </nav>
+    <div class="header-actions">
+      <a class="btn btn-ghost" href="/app">Dashboard</a>
+      <a class="btn btn-primary" href="/v1/auth/discord/login">Connexion Discord</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="status-dot"></span> Control plane en production</div>
+        <h1>Votre bot Discord.<br><span>Une infrastructure sérieuse.</span></h1>
+        <p class="hero-text">Importez votre projet, déployez une release, contrôlez le runtime et suivez l'état de votre bot depuis SentriX. Le dashboard est relié directement au control plane sécurisé.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="/v1/auth/discord/login">Commencer avec Discord</a>
+          <a class="btn btn-secondary btn-lg" href="/app">Ouvrir le dashboard</a>
+        </div>
+        <div class="trust-row">
+          <span>OAuth Discord</span><i></i><span>PostgreSQL RLS</span><i></i><span>gVisor ready</span><i></i><span>Rollback</span>
+        </div>
+      </div>
+
+      <div class="hero-console" aria-label="Aperçu du dashboard">
+        <div class="console-top"><span></span><span></span><span></span><strong>sentrix / production</strong></div>
+        <div class="console-body">
+          <div class="console-side">
+            <div class="mini-logo">S</div>
+            <span class="active"></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div class="console-main">
+            <div class="console-title-row"><div><small>ENVIRONNEMENT</small><h3>Production</h3></div><span class="pill success">Healthy</span></div>
+            <div class="metric-grid compact">
+              <div><small>CPU</small><b>18%</b><em class="spark s1"></em></div>
+              <div><small>RAM</small><b>284 MB</b><em class="spark s2"></em></div>
+              <div><small>UPTIME</small><b>99.99%</b><em class="spark s3"></em></div>
+            </div>
+            <div class="deploy-card">
+              <div><span class="deploy-icon">↗</span><div><b>Release déployée</b><small>sha256:8de4…ad91</small></div></div>
+              <span class="pill success">Live</span>
+            </div>
+            <div class="terminal-preview">
+              <p><span>22:04:04</span> Application startup complete.</p>
+              <p><span>22:04:04</span> Uvicorn running on 0.0.0.0:8080</p>
+              <p><span>22:04:04</span> <b>GET /healthz 200 OK</b></p>
+              <p class="cursor-line"><span>22:04:05</span> Runtime ready <i></i></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section wrap">
+      <div class="section-heading"><span>Plateforme</span><h2>Tout ce qu'il faut pour exploiter un bot.</h2><p>Pas seulement un bouton Start. SentriX suit le cycle complet du projet jusqu'au runtime.</p></div>
+      <div class="feature-grid">
+        <article class="feature-card feature-wide"><div class="feature-icon">⌘</div><h3>Déploiements pilotés</h3><p>Builds immuables, releases versionnées, historique des déploiements et rollback contrôlé.</p><div class="code-strip"><span>commit</span><b>→</b><span>build</span><b>→</b><span>release</span><b>→</b><span class="green">production</span></div></article>
+        <article class="feature-card"><div class="feature-icon">◫</div><h3>Runtime</h3><p>Démarrez, arrêtez ou redémarrez un environnement depuis le dashboard.</p></article>
+        <article class="feature-card"><div class="feature-icon">◌</div><h3>Observabilité</h3><p>CPU, mémoire, egress, logs et état des builds dans une vue unique.</p></article>
+        <article class="feature-card"><div class="feature-icon">⌁</div><h3>GitHub</h3><p>Associez un dépôt et préparez la chaîne de build depuis votre commit.</p></article>
+        <article class="feature-card"><div class="feature-icon">◇</div><h3>Multi-projets</h3><p>Organisations, projets, bots et environnements isolés par tenant.</p></article>
+        <article class="feature-card"><div class="feature-icon">↺</div><h3>Rollback</h3><p>Revenez vers une release saine sans bricoler votre conteneur à la main.</p></article>
+      </div>
+    </section>
+
+    <section id="security" class="section wrap split-section">
+      <div class="section-heading left"><span>Sécurité</span><h2>Isolation par défaut.</h2><p>Le control plane n'exécute pas les bots utilisateurs avec les privilèges de l'API. Les rôles PostgreSQL sont séparés et les workloads sont prévus pour un worker gVisor dédié.</p><a class="text-link" href="/docs">Voir l'API technique →</a></div>
+      <div class="security-stack">
+        <div><b>01</b><span><strong>OAuth Discord</strong><small>Session signée, cookie HttpOnly et Secure.</small></span><i>OK</i></div>
+        <div><b>02</b><span><strong>Row-Level Security</strong><small>Isolation organisation par organisation dans PostgreSQL.</small></span><i>OK</i></div>
+        <div><b>03</b><span><strong>Secrets write-only</strong><small>Le dashboard n'affiche jamais une valeur stockée.</small></span><i>OK</i></div>
+        <div><b>04</b><span><strong>gVisor</strong><small>Exécution des workloads sur un worker isolé.</small></span><i>READY</i></div>
+      </div>
+    </section>
+
+    <section id="status" class="section wrap status-panel">
+      <div><span class="status-dot"></span><div><strong>Control plane opérationnel</strong><small>API, PostgreSQL et Redis disponibles</small></div></div>
+      <a class="btn btn-secondary" href="/healthz">Health check</a>
+    </section>
+
+    <section class="cta wrap">
+      <div><span>SentriX Hosting</span><h2>Prêt à centraliser votre bot ?</h2><p>Connectez Discord et créez votre premier projet.</p></div>
+      <a class="btn btn-primary btn-lg" href="/v1/auth/discord/login">Ouvrir SentriX</a>
+    </section>
+  </main>
+
+  <footer class="site-footer wrap"><a class="brand" href="/"><span class="brand-mark">S</span><span>SentriX Hosting</span></a><p>Control plane V1 • infrastructure sécurisée pour bots Discord</p></footer>
+</body>
+</html>

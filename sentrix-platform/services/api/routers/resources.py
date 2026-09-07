@@ -84,8 +84,6 @@ async def get_project(
     state: Annotated[AppState, Depends(get_state)],
 ) -> ProjectOut:
     async with state.db.tenant_tx(ctx.org_id) as conn:
-        # Pas de filtre org_id : RLS s'en charge. Une ressource d'une autre org
-        # est simplement invisible -> 404, jamais 403.
         row = await conn.fetchrow("SELECT * FROM projects WHERE id = $1", project_id)
 
     if row is None:
@@ -115,12 +113,6 @@ async def create_bot(
     ctx: Annotated[OrgContext, Depends(require_org)],
     state: Annotated[AppState, Depends(get_state)],
 ) -> BotOut:
-    """Creation d'un bot.
-
-    Si project_id appartient a une autre org, la FK composite
-    (project_id, org_id) -> projects(id, org_id) leve 23503, traduit en 404.
-    Le rejet vient de PostgreSQL, pas d'une verification applicative.
-    """
     bot_id = uuid7()
     try:
         async with state.db.tenant_tx(ctx.org_id) as conn:
@@ -166,6 +158,18 @@ async def get_bot(
     return BotOut.model_validate(dict(row))
 
 
+@router.get("/bots", response_model=list[BotOut])
+async def list_bots(
+    ctx: Annotated[OrgContext, Depends(require_org)],
+    state: Annotated[AppState, Depends(get_state)],
+) -> list[BotOut]:
+    async with state.db.tenant_tx(ctx.org_id) as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM bots WHERE status = 'active' ORDER BY created_at DESC"
+        )
+    return [BotOut.model_validate(dict(r)) for r in rows]
+
+
 # ---------------------------------------------------------------------- environnements
 
 
@@ -176,13 +180,6 @@ async def create_environment(
     ctx: Annotated[OrgContext, Depends(require_org)],
     state: Annotated[AppState, Depends(get_state)],
 ) -> EnvironmentOut:
-    """Creation d'un environnement.
-
-    Une declaration NON VERIFIEE de discord_application_id ne reserve pas l'ID
-    globalement : sinon un tenant pourrait squatter l'application publique d'un
-    tiers. L'unicite cross-tenant s'active seulement quand la propriete a ete
-    verifiee et que discord_application_verified_at est renseigne (P3).
-    """
     env_id = uuid7()
     try:
         async with state.db.tenant_tx(ctx.org_id) as conn:
@@ -231,3 +228,15 @@ async def get_environment(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "ressource introuvable")
     return EnvironmentOut.model_validate(dict(row))
+
+
+@router.get("/environments", response_model=list[EnvironmentOut])
+async def list_environments(
+    ctx: Annotated[OrgContext, Depends(require_org)],
+    state: Annotated[AppState, Depends(get_state)],
+) -> list[EnvironmentOut]:
+    async with state.db.tenant_tx(ctx.org_id) as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM environments WHERE status = 'active' ORDER BY created_at DESC"
+        )
+    return [EnvironmentOut.model_validate(dict(r)) for r in rows]
