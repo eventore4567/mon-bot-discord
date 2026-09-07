@@ -9,12 +9,12 @@ import os
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from libs.ids import uuid7
 from libs.release_identity import ReleaseIdentity, hash_config
-from services.api.deps import AppState
+from services.api.deps import AppState, get_state
 from services.builder_ctl.queue import BuildQueue
 
 router = APIRouter(prefix="/v1/internal/builder", tags=["builder-internal"])
@@ -73,11 +73,6 @@ def _config_hash(command: list[str], cpu: int, memory: int, pids: int) -> str:
     return hash_config(payload)
 
 
-def install_builder_routes(app_state: AppState) -> None:
-    """Compatibility hook retained for explicit startup wiring/tests."""
-    del app_state
-
-
 @router.get("/claim")
 async def claim_build(
     worker_id: Annotated[str, Query(min_length=1, max_length=100)],
@@ -85,6 +80,7 @@ async def claim_build(
         str,
         Header(alias="X-Sentrix-Builder-Token", min_length=32, max_length=512),
     ],
+    state: Annotated[AppState, Depends(get_state)],
 ) -> dict[str, object]:
     _authorize(builder_token)
     queue = _queue()
@@ -95,7 +91,27 @@ async def claim_build(
     if claim is None:
         return {"job": None}
 
-    # The worker receives only public source coordinates and opaque tenant ids.
+    org_id = UUID(claim.job.org_id)
+    async with state.db.tenant_tx(org_id) as conn:
+        updated = await conn.fetchrow(
+            """
+            UPDATE builds
+               SET status = 'building', updated_at = now()
+             WHERE id = $1 AND environment_id = $2
+               AND status IN ('queued','building')
+             RETURNING id
+            """,
+            UUID(claim.job.build_id),
+            UUID(claim.job.environment_id),
+        )
+    if updated is None:
+        queue = _queue()
+        try:
+            await queue.ack(claim.message_id)
+        finally:
+            await queue.close()
+        raise HTTPException(status.HTTP_409_CONFLICT, "build non reclamable")
+
     return {
         "message_id": claim.message_id,
         "job": {
@@ -116,7 +132,7 @@ async def complete_build(
         str,
         Header(alias="X-Sentrix-Builder-Token", min_length=32, max_length=512),
     ],
-    state: AppState,
+    state: Annotated[AppState, Depends(get_state)],
 ) -> dict[str, object]:
     _authorize(builder_token)
     node_id = _default_node_id()
@@ -298,7 +314,7 @@ async def fail_build(
         str,
         Header(alias="X-Sentrix-Builder-Token", min_length=32, max_length=512),
     ],
-    state: AppState,
+    state: Annotated[AppState, Depends(get_state)],
 ) -> None:
     _authorize(builder_token)
     async with state.db.tenant_tx(payload.org_id) as conn:
