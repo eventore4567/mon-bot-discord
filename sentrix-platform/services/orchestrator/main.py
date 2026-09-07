@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
@@ -33,8 +34,11 @@ class OrchestratorConfig:
     @classmethod
     def from_env(cls) -> OrchestratorConfig:
         api_url = os.environ["SENTRIX_API_URL"].rstrip("/")
-        if not api_url.startswith(("https://", "http://")):
-            raise RuntimeError("SENTRIX_API_URL must be http(s)")
+        parsed = urlparse(api_url)
+        if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+            raise RuntimeError("SENTRIX_API_URL must be an absolute http(s) URL")
+        if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise RuntimeError("SENTRIX_API_URL must use HTTPS outside localhost")
         return cls(
             api_url=api_url,
             worker_id=UUID(os.environ["SENTRIX_CONTROL_WORKER_ID"]),
