@@ -393,7 +393,6 @@ def _add_semantic_root(
                 ),
                 parent=root,
             )
-            root.add_command(subgroup)
 
             used_leaf_names: set[str] = set()
             for target in chunk:
