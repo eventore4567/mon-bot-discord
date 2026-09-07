@@ -1,7 +1,14 @@
 """Gate V98 : arborescence slash sémantique et entrypoint Railway HA."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+# Un script lancé via ``python tools/...`` reçoit ``tools/`` comme premier chemin Python.
+# Réinjecter explicitement la racine du dépôt rend le gate identique en local et sur Actions.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import discord
 from discord import app_commands
