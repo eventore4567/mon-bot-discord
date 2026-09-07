@@ -19,7 +19,7 @@ def test_cloud_init_keeps_credentials_as_placeholders() -> None:
     ):
         assert placeholder in text
     assert "curl | sh" not in text
-    assert "permissions: \"0600\"" in text
+    assert 'permissions: "0600"' in text
 
 
 def test_cloud_init_installs_and_smoke_tests_gvisor() -> None:
