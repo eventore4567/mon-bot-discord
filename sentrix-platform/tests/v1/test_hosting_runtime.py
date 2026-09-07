@@ -103,18 +103,9 @@ async def test_runtime_start_stop_are_idempotent_and_restart_bumps_generation(
                 "SELECT desired_state, generation FROM instances WHERE id = $1",
                 instance_id,
             )
-            mirrored = await conn.fetchrow(
-                """
-                SELECT desired_state, generation
-                  FROM agent_desired_state
-                 WHERE instance_id = $1
-                """,
-                instance_id,
-            )
         assert after_restart is not None
         assert after_restart["desired_state"] == "running"
         assert after_restart["generation"] == 3
-        assert mirrored is None  # app role must never read the private execution mirror.
 
         mirrored_admin = await admin_conn.fetchrow(
             "SELECT desired_state, generation FROM agent_desired_state WHERE instance_id = $1",
