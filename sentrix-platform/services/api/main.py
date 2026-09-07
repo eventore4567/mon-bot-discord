@@ -19,6 +19,7 @@ from services.api.routers import (
     agents,
     auth_routes,
     control,
+    generic_resources,
     hosting,
     hosting_github,
     infra_status,
@@ -115,11 +116,12 @@ def create_app(
             )
         return response
 
-    # Authentication is intentionally omitted from the public OpenAPI schema.
-    # In production SentriX uses its provider-neutral local session endpoint;
-    # legacy OAuth compatibility routes stay disabled and invisible.
+    # Local auth and the legacy resource endpoints stay available to the current
+    # dashboard, but are intentionally omitted from public OpenAPI. The API docs
+    # expose the provider-neutral workspace/project/service surface instead.
     app.include_router(auth_routes.router, include_in_schema=False)
-    app.include_router(resources.router)
+    app.include_router(resources.router, include_in_schema=False)
+    app.include_router(generic_resources.router)
     app.include_router(instances.router)
     app.include_router(agents.router)
     app.include_router(hosting.router)
