@@ -177,17 +177,10 @@ async def list_organizations(
     user: Annotated[CurrentUser, Depends(require_user)],
     state_app: Annotated[AppState, Depends(get_state)],
 ) -> list[OrganizationOut]:
-    """List organizations visible to the signed-in user."""
+    """List organizations visible to the signed-in user before an org is selected."""
     async with state_app.db.admin_tx() as conn:
         rows = await conn.fetch(
-            """
-            SELECT o.id, o.name, o.slug, m.role
-              FROM organizations o
-              JOIN org_members m ON m.org_id = o.id
-             WHERE m.user_id = $1
-               AND o.status = 'active'
-             ORDER BY o.created_at ASC
-            """,
+            "SELECT * FROM public.sentrix_list_user_organizations($1)",
             user.id,
         )
     return [OrganizationOut.model_validate(dict(row)) for row in rows]
