@@ -67,6 +67,20 @@ async def _safe_role_password_sql(
     return sql
 
 
+async def _safe_database_ddl(
+    conn: asyncpg.Connection[asyncpg.Record], database: str, *, exists: bool
+) -> str:
+    template = (
+        "ALTER DATABASE %I OWNER TO sentrix_migrator"
+        if exists
+        else "CREATE DATABASE %I OWNER sentrix_migrator"
+    )
+    sql = await conn.fetchval("SELECT format($1, $2)", template, database)
+    if not isinstance(sql, str):
+        raise BootstrapError("impossible de preparer le DDL PostgreSQL")
+    return sql
+
+
 async def _ensure_roles(
     conn: asyncpg.Connection[asyncpg.Record], *, app_password: str, migrator_password: str
 ) -> None:
@@ -97,10 +111,7 @@ async def _ensure_roles(
 
 async def _ensure_database(conn: asyncpg.Connection[asyncpg.Record], database: str) -> None:
     exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", database)
-    if exists is None:
-        await conn.execute(f'CREATE DATABASE "{database}" OWNER sentrix_migrator')
-    else:
-        await conn.execute(f'ALTER DATABASE "{database}" OWNER TO sentrix_migrator')
+    await conn.execute(await _safe_database_ddl(conn, database, exists=exists is not None))
 
 
 async def bootstrap() -> str:
