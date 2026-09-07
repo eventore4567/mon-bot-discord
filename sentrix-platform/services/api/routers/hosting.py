@@ -124,9 +124,12 @@ async def overview(
               (SELECT count(*) FROM projects WHERE status = 'active') AS projects,
               (SELECT count(*) FROM bots WHERE status = 'active') AS bots,
               (SELECT count(*) FROM environments WHERE status = 'active') AS environments,
-              (SELECT count(*) FROM instances WHERE desired_state = 'running') AS running_instances,
-              (SELECT count(*) FROM builds WHERE status IN ('queued','building','scanning')) AS queued_builds,
-              (SELECT count(*) FROM deployments WHERE status IN ('pending','running')) AS active_deployments
+              (SELECT count(*) FROM instances
+                 WHERE desired_state = 'running') AS running_instances,
+              (SELECT count(*) FROM builds
+                 WHERE status IN ('queued','building','scanning')) AS queued_builds,
+              (SELECT count(*) FROM deployments
+                 WHERE status IN ('pending','running')) AS active_deployments
             """
         )
     assert row is not None
