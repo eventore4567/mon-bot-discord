@@ -115,7 +115,10 @@ def create_app(
             )
         return response
 
-    app.include_router(auth_routes.router)
+    # Authentication is intentionally omitted from the public OpenAPI schema.
+    # In production SentriX uses its provider-neutral local session endpoint;
+    # legacy OAuth compatibility routes stay disabled and invisible.
+    app.include_router(auth_routes.router, include_in_schema=False)
     app.include_router(resources.router)
     app.include_router(instances.router)
     app.include_router(agents.router)
