@@ -111,7 +111,10 @@ async def local_login(
     expected_user = os.environ.get("SENTRIX_ADMIN_USERNAME", "admin")
     expected_password = os.environ.get("SENTRIX_ADMIN_PASSWORD", "")
     if not expected_password:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "acces administrateur non configure")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "acces administrateur non configure",
+        )
 
     username_ok = hmac.compare_digest(payload.username.strip(), expected_user)
     password_ok = hmac.compare_digest(payload.password, expected_password)
@@ -280,7 +283,11 @@ async def auth_me(
 ) -> AuthMeOut:
     async with state_app.db.admin_tx() as conn:
         row = await conn.fetchrow(
-            "SELECT id, auth_subject, discord_user_id, email, display_name FROM users WHERE id = $1",
+            """
+            SELECT id, auth_subject, discord_user_id, email, display_name
+            FROM users
+            WHERE id = $1
+            """,
             user.id,
         )
     if row is None:
