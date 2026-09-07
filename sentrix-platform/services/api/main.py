@@ -12,7 +12,7 @@ from libs.db import Database
 from libs.status_store import MemoryStatusStore, RedisStatusStore, StatusStore
 from services.api.auth import SessionCodec
 from services.api.deps import AppState
-from services.api.routers import agents, hosting, instances, resources
+from services.api.routers import agents, control, hosting, instances, resources
 
 __all__ = ["create_app"]
 
@@ -67,6 +67,7 @@ def create_app(
     app.include_router(instances.router)
     app.include_router(agents.router)
     app.include_router(hosting.router)
+    app.include_router(control.router)
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:
