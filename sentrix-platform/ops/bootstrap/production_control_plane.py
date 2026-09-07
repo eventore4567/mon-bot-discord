@@ -1,9 +1,9 @@
 """Production bootstrap for the SentriX Hosting control plane.
 
-The Railway PostgreSQL superuser is used only during bootstrap to create the
+The Railway PostgreSQL superuser is used only during bootstrap to create a
 logical database and least-privilege roles. Uvicorn is then exec'd with only the
-`sentrix_app` DSN in its environment, so the long-lived API cannot use the
-superuser or migration credentials.
+`sentrix_app` DSN in its environment, so the long-lived API cannot use bootstrap
+or migration credentials.
 """
 
 from __future__ import annotations
@@ -12,18 +12,16 @@ import asyncio
 import os
 import re
 import sys
+from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import asyncpg
 
-from libs.db.migrator import MIGRATIONS_DIR if False else None  # type: ignore[syntax]
 from libs.db.migrator import apply_all
 
 _PLATFORM_DB_DEFAULT = "sentrix_platform"
 _DB_NAME = re.compile(r"^[a-z][a-z0-9_]{2,47}$")
-_MIGRATIONS_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "migrations")
-)
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
 
 class BootstrapError(RuntimeError):
@@ -35,6 +33,14 @@ def _database_name() -> str:
     if not _DB_NAME.fullmatch(name):
         raise BootstrapError("SENTRIX_PLATFORM_DB_NAME invalide")
     return name
+
+
+def database_dsn(source: str, *, database: str) -> str:
+    """Switch only the logical database while preserving Railway credentials verbatim."""
+    parsed = urlsplit(source)
+    if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
+        raise BootstrapError("POSTGRES_SUPERUSER_URL doit etre une URL PostgreSQL absolue")
+    return urlunsplit((parsed.scheme, parsed.netloc, f"/{quote(database, safe='')}", parsed.query, ""))
 
 
 def role_dsn(source: str, *, username: str, password: str, database: str) -> str:
@@ -86,13 +92,10 @@ async def _ensure_roles(
     await conn.execute(
         "ALTER ROLE sentrix_app NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION"
     )
-    # Defence in depth if these roles existed before this bootstrap.
     await conn.execute("REVOKE sentrix_migrator FROM sentrix_app")
 
 
-async def _ensure_database(
-    conn: asyncpg.Connection[asyncpg.Record], database: str
-) -> None:
+async def _ensure_database(conn: asyncpg.Connection[asyncpg.Record], database: str) -> None:
     exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", database)
     if exists is None:
         await conn.execute(f'CREATE DATABASE "{database}" OWNER sentrix_migrator')
@@ -112,10 +115,6 @@ async def bootstrap() -> str:
         raise BootstrapError("les roles app et migrator doivent avoir des secrets distincts")
 
     database = _database_name()
-    source = urlsplit(superuser_url)
-    superuser_name = source.username or "postgres"
-    superuser_password = source.password or ""
-    superuser_db = source.path.lstrip("/") or "postgres"
 
     admin = await asyncpg.connect(superuser_url)
     try:
@@ -128,13 +127,7 @@ async def bootstrap() -> str:
     finally:
         await admin.close()
 
-    platform_admin_dsn = role_dsn(
-        superuser_url,
-        username=superuser_name,
-        password=superuser_password,
-        database=database,
-    )
-    platform_admin = await asyncpg.connect(platform_admin_dsn)
+    platform_admin = await asyncpg.connect(database_dsn(superuser_url, database=database))
     try:
         await platform_admin.execute("GRANT CREATE, USAGE ON SCHEMA public TO sentrix_migrator")
         await platform_admin.execute("GRANT USAGE ON SCHEMA public TO sentrix_app")
@@ -149,7 +142,7 @@ async def bootstrap() -> str:
     )
     migrator = await asyncpg.connect(migrator_dsn)
     try:
-        await apply_all(migrator, os.path.abspath(_MIGRATIONS_DIR))  # type: ignore[arg-type]
+        await apply_all(migrator, _MIGRATIONS_DIR)
     finally:
         await migrator.close()
 
@@ -172,17 +165,12 @@ async def bootstrap() -> str:
     finally:
         await verifier.close()
 
-    # Avoid accidentally retaining the name of the source database; it has no
-    # effect on the API but makes the bootstrap intent explicit.
-    del superuser_db
     return app_dsn
 
 
 def main() -> None:
     app_dsn = asyncio.run(bootstrap())
     os.environ["DATABASE_URL"] = app_dsn
-    # Replace the process after dropping every bootstrap-only secret from its
-    # environment. The long-lived API keeps only its least-privilege DSN.
     for name in (
         "POSTGRES_SUPERUSER_URL",
         "SENTRIX_MIGRATOR_DB_PASSWORD",
