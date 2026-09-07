@@ -17,7 +17,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from uuid import UUID
 
 import httpx
@@ -29,6 +29,7 @@ from services.builder_ctl.controller import (
     sanitized_build_environment,
 )
 from services.builder_ctl.models import BuildMount, BuildSandboxSpec
+from services.builder_ctl.network import safe_build_network_name
 from services.builder_ctl.sandbox import docker_command
 
 _REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -67,7 +68,7 @@ class WorkerConfig:
     worker_token: str
     registry_prefix: str
     github_token: str | None = None
-    build_network: str = "bridge"
+    build_network: str = "sentrix-build-egress"
     poll_seconds: float = 2.0
     command_timeout: int = 900
 
@@ -75,8 +76,11 @@ class WorkerConfig:
     def from_env(cls) -> WorkerConfig:
         api_url = os.environ["SENTRIX_API_URL"].rstrip("/")
         registry = os.environ["SENTRIX_REGISTRY_PREFIX"].strip("/")
-        if not api_url.startswith(("https://", "http://")):
-            raise RuntimeError("SENTRIX_API_URL must be http(s)")
+        parsed = urlparse(api_url)
+        if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+            raise RuntimeError("SENTRIX_API_URL must be an absolute http(s) URL")
+        if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise RuntimeError("SENTRIX_API_URL must use HTTPS outside localhost")
         if not _REGISTRY.fullmatch(registry):
             raise RuntimeError("invalid SENTRIX_REGISTRY_PREFIX")
         return cls(
@@ -85,7 +89,7 @@ class WorkerConfig:
             worker_token=os.environ["SENTRIX_CONTROL_WORKER_TOKEN"],
             registry_prefix=registry,
             github_token=os.environ.get("SENTRIX_GITHUB_TOKEN") or None,
-            build_network=os.environ.get("SENTRIX_BUILD_NETWORK", "bridge"),
+            build_network=safe_build_network_name(os.environ.get("SENTRIX_BUILD_NETWORK")),
             poll_seconds=float(os.environ.get("SENTRIX_BUILD_POLL_SECONDS", "2")),
             command_timeout=int(os.environ.get("SENTRIX_BUILD_TIMEOUT", "900")),
         )
@@ -389,9 +393,12 @@ def execute_build(job: RemoteBuildJob, config: WorkerConfig) -> BuildResult:
             raise SourceRejectedError(f"unsupported Discord library: {job.library}")
 
         context = _write_trusted_context(source, workspace, job, deps, node_work)
+        # A lease-retried build must never share a mutable registry tag with a
+        # stale worker.  The immutable digest is still the release identity, but
+        # this attempt-scoped tag fences the external registry side effect too.
         tag = (
             f"{config.registry_prefix}/sentrix/{job.org_id}/{job.environment_id}:"
-            f"{job.commit_sha[:12]}"
+            f"{job.commit_sha[:12]}-a{job.lease_attempt}-{job.build_id.hex[:8]}"
         )
         try:
             _run(
