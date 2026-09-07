@@ -12,7 +12,15 @@ from libs.db import Database
 from libs.status_store import MemoryStatusStore, RedisStatusStore, StatusStore
 from services.api.auth import SessionCodec
 from services.api.deps import AppState
-from services.api.routers import agents, instances, resources
+from services.api.routers import (
+    agents,
+    control,
+    hosting,
+    hosting_github,
+    instances,
+    resources,
+    webhooks,
+)
 
 __all__ = ["create_app"]
 
@@ -34,8 +42,6 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if injected:
-            # Dependances deja posees ci-dessous : leur cycle de vie appartient
-            # a l'appelant (la fixture de test), pas a l'application.
             yield
             return
 
@@ -54,18 +60,24 @@ def create_app(
 
     app = FastAPI(
         title="SentriX Platform - Control Plane",
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
     if injected:
         assert db is not None and sessions is not None
         app.state.app_state = AppState(
-            db=db, sessions=sessions, status_store=status_store or MemoryStatusStore()
+            db=db,
+            sessions=sessions,
+            status_store=status_store or MemoryStatusStore(),
         )
 
     app.include_router(resources.router)
     app.include_router(instances.router)
     app.include_router(agents.router)
+    app.include_router(hosting.router)
+    app.include_router(hosting_github.router)
+    app.include_router(control.router)
+    app.include_router(webhooks.router)
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:

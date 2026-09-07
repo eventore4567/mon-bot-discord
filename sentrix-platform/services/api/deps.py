@@ -13,7 +13,14 @@ from libs.db import Database
 from libs.status_store import StatusStore
 from services.api.auth import SessionCodec, SessionError
 
-__all__ = ["AppState", "CurrentUser", "get_state", "require_org", "require_user"]
+__all__ = [
+    "AppState",
+    "CurrentUser",
+    "get_state",
+    "require_org",
+    "require_org_admin",
+    "require_user",
+]
 
 SESSION_COOKIE = "sentrix_session"
 
@@ -91,6 +98,15 @@ async def require_org(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "ressource introuvable")
 
     return OrgContext(org_id=org_id, user_id=user.id, role=row["role"])
+
+
+async def require_org_admin(
+    ctx: Annotated[OrgContext, Depends(require_org)],
+) -> OrgContext:
+    """Restrict tenant mutations to organisation owners and administrators."""
+    if ctx.role not in {"owner", "admin"}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "permission administrateur requise")
+    return ctx
 
 
 def map_pg_error(exc: asyncpg.PostgresError) -> HTTPException:
