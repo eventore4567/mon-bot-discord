@@ -73,9 +73,7 @@ class BuildReport(BaseModel):
 
     @model_validator(mode="after")
     def validate_success_payload(self) -> BuildReport:
-        if self.outcome == "succeeded" and (
-            self.image_ref is None or self.image_digest is None
-        ):
+        if self.outcome == "succeeded" and (self.image_ref is None or self.image_digest is None):
             raise ValueError("successful build requires immutable image reference")
         return self
 
