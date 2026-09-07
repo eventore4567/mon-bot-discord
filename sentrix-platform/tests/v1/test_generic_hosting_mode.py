@@ -18,9 +18,9 @@ def test_docs_csp_allows_fastapi_swagger_assets() -> None:
 
 def test_production_can_authenticate_without_discord() -> None:
     text = AUTH.read_text(encoding="utf-8")
-    assert 'SENTRIX_AUTH_MODE' in text
+    assert "SENTRIX_AUTH_MODE" in text
     assert '@router.post("/login"' in text
-    assert 'SENTRIX_ADMIN_PASSWORD' in text
+    assert "SENTRIX_ADMIN_PASSWORD" in text
     assert 'auth_subject = f"local:{expected_user}"' in text
 
 
@@ -29,7 +29,7 @@ def test_public_experience_is_provider_neutral() -> None:
     generic = GENERIC.read_text(encoding="utf-8")
     assert "Aucun compte Discord n'est nécessaire" in landing
     assert 'href="/app">Dashboard</a>' in landing
-    assert '/v1/auth/discord/login' not in landing
+    assert "/v1/auth/discord/login" not in landing
     assert 'fetch("/v1/auth/login"' in generic
 
 
