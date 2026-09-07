@@ -43,7 +43,7 @@ def test_bootstrap_contains_no_development_database_passwords() -> None:
     assert "app_dev_only" not in text
     assert "admin_dev_only" not in text
     assert "NOBYPASSRLS NOSUPERUSER" in text
-    assert 'os.environ.pop(name, None)' in text
+    assert "os.environ.pop(name, None)" in text
     assert 'os.environ["DATABASE_URL"] = app_dsn' in text
 
 
