@@ -24,7 +24,8 @@ fi
 
 [[ -n "${SENTRIX_CONTROL_PLANE_URL:-}" ]] || fail "SENTRIX_CONTROL_PLANE_URL is missing"
 [[ -n "${SENTRIX_NODE_ID:-}" ]] || fail "SENTRIX_NODE_ID is missing"
-[[ ${#SENTRIX_NODE_TOKEN:-0} -ge 16 ]] || fail "SENTRIX_NODE_TOKEN must be at least 16 chars"
+node_token="${SENTRIX_NODE_TOKEN:-}"
+[[ ${#node_token} -ge 16 ]] || fail "SENTRIX_NODE_TOKEN must be at least 16 chars"
 
 install -d -m 0700 /var/lib/sentrix-agent
 install -d -m 0755 /etc/sentrix
