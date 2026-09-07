@@ -64,11 +64,28 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
     v_project_id uuid;
+    v_previous_org text;
 BEGIN
     IF NEW.status = 'active' THEN
+        -- environments/bots are FORCE RLS. Infrastructure/bootstrap inserts can
+        -- legitimately arrive without app.current_org, while tenant writes have
+        -- already passed the environment WITH CHECK policy before this AFTER
+        -- trigger runs. Scope the lookup to NEW.org_id, then restore the caller's
+        -- original transaction-local context so this trigger never leaks tenant
+        -- state into the rest of the transaction.
+        v_previous_org := current_setting('app.current_org', true);
+        PERFORM set_config('app.current_org', NEW.org_id::text, true);
+
         SELECT b.project_id INTO v_project_id
           FROM public.bots b
          WHERE b.id = NEW.bot_id AND b.org_id = NEW.org_id;
+
+        PERFORM set_config(
+            'app.current_org',
+            COALESCE(v_previous_org, ''),
+            true
+        );
+
         IF v_project_id IS NOT NULL THEN
             INSERT INTO public.github_control_targets (
                 environment_id, org_id, project_id
