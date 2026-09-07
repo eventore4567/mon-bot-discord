@@ -1,0 +1,37 @@
+[Unit]
+Description=SentriX isolated managed build worker
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/sentrix-platform
+Environment=SENTRIX_BUILD_NETWORK=sentrix-build-egress
+Environment=SENTRIX_EGRESS_SCRIPT=/opt/sentrix-platform/ops/execution/apply-egress-policy.sh
+EnvironmentFile=/etc/sentrix/builder.env
+ExecStartPre=/opt/sentrix-platform/ops/worker/preflight.sh
+ExecStart=/opt/sentrix-platform/.venv/bin/python -m services.builder_ctl.main
+Restart=always
+RestartSec=5
+TimeoutStopSec=45
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/run /var/run /var/lib/docker /var/lib/sentrix-builder
+
+[Install]
+WantedBy=multi-user.target

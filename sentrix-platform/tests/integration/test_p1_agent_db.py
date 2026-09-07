@@ -34,44 +34,61 @@ async def test_agent_pull_requires_token_and_only_returns_assigned(
         f"node-b-{node_b}",
         hashlib.sha256(token_b).digest(),
     )
-    await admin_conn.execute(
-        (
-            "INSERT INTO environments (id,org_id,bot_id,kind,cell_id) "
-            "VALUES ($1,$2,$3,'prod',$4),($5,$6,$7,'prod',$4)"
-        ),
-        env_a,
-        a.org_id,
-        a.bot_id,
-        CELL,
-        env_b,
-        b.org_id,
-        b.bot_id,
-    )
-    await admin_conn.execute(
-        (
-            "INSERT INTO instances (id,org_id,env_id,cell_id,node_id,image_ref) "
-            "VALUES ($1,$2,$3,$4,$5,'img-a'),($6,$7,$8,$4,$9,'img-b')"
-        ),
-        inst_a,
-        a.org_id,
-        env_a,
-        CELL,
-        node_a,
-        inst_b,
-        b.org_id,
-        env_b,
-        node_b,
-    )
-    async with app_db.admin_tx() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM public.sentrix_agent_pull($1,$2)",
-            node_a,
-            hashlib.sha256(token_a).digest(),
+    try:
+        await admin_conn.execute(
+            (
+                "INSERT INTO environments (id,org_id,bot_id,kind,cell_id) "
+                "VALUES ($1,$2,$3,'prod',$4),($5,$6,$7,'prod',$4)"
+            ),
+            env_a,
+            a.org_id,
+            a.bot_id,
+            CELL,
+            env_b,
+            b.org_id,
+            b.bot_id,
         )
-        assert [row["instance_id"] for row in rows] == [inst_a]
-        with pytest.raises(asyncpg.InsufficientPrivilegeError):
-            await conn.fetch(
+        await admin_conn.execute(
+            (
+                "INSERT INTO instances (id,org_id,env_id,cell_id,node_id,image_ref) "
+                "VALUES ($1,$2,$3,$4,$5,'img-a'),($6,$7,$8,$4,$9,'img-b')"
+            ),
+            inst_a,
+            a.org_id,
+            env_a,
+            CELL,
+            node_a,
+            inst_b,
+            b.org_id,
+            env_b,
+            node_b,
+        )
+        async with app_db.admin_tx() as conn:
+            rows = await conn.fetch(
                 "SELECT * FROM public.sentrix_agent_pull($1,$2)",
                 node_a,
-                hashlib.sha256(token_b).digest(),
+                hashlib.sha256(token_a).digest(),
             )
+            assert [row["instance_id"] for row in rows] == [inst_a]
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await conn.fetch(
+                    "SELECT * FROM public.sentrix_agent_pull($1,$2)",
+                    node_a,
+                    hashlib.sha256(token_b).digest(),
+                )
+    finally:
+        # Nodes are global infrastructure rows, so the tenant fixture cannot
+        # safely clean them. Leaving them behind makes later scheduler tests
+        # depend on execution order and can route a deployment to stale nodes.
+        await admin_conn.execute(
+            "DELETE FROM instances WHERE id = ANY($1::uuid[])",
+            [inst_a, inst_b],
+        )
+        await admin_conn.execute(
+            "DELETE FROM environments WHERE id = ANY($1::uuid[])",
+            [env_a, env_b],
+        )
+        await admin_conn.execute(
+            "DELETE FROM nodes WHERE id = ANY($1::uuid[])",
+            [node_a, node_b],
+        )

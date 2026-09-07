@@ -81,11 +81,17 @@ def test_build_sandbox_is_disposable_gvisor_and_secret_free() -> None:
         image="python:3.12-alpine",
         command=("python", "-c", "print('ok')"),
         env=sanitized_build_environment(),
-        network_name="none",
+        network_name="sentrix-build-test",
     )
     cmd = docker_command("sx-build-abc", spec)
     joined = " ".join(cmd)
-    for required in ("--rm", "--runtime=runsc", "--read-only", "--cap-drop=ALL", "--network none"):
+    for required in (
+        "--rm",
+        "--runtime=runsc",
+        "--read-only",
+        "--cap-drop=ALL",
+        "--network sentrix-build-test",
+    ):
         assert required in joined
     for forbidden in ("DISCORD_TOKEN", "DATABASE_URL", "/var/run/docker.sock", "--privileged"):
         assert forbidden not in joined
