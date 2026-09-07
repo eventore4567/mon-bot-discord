@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 
 import sentrix_regression_runtime as _regression_runtime
+from sentrix_regression_runtime import setup as _regression_setup
 from sentrix_product_update import install_runtime
 from sentrix_final_product_finish import install as install_final_product_finish
 from .command_final_guard_v76 import install as install_command_final_guard_v76
@@ -33,7 +34,7 @@ async def setup(bot):
         _regression_runtime._restore_dropdown_views = _offline_restore
 
     try:
-        await _regression_runtime.setup(bot)
+        await _regression_setup(bot)
     finally:
         if original_restore is not None:
             _regression_runtime._restore_dropdown_views = original_restore
