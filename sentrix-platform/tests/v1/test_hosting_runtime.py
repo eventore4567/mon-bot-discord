@@ -63,7 +63,9 @@ async def test_runtime_start_stop_are_idempotent_and_restart_bumps_generation(
     request = Request({"type": "http", "client": ("127.0.0.1", 12345)})
 
     try:
-        first_start = await runtime_action(env_id, RuntimeAction(action="start"), request, ctx, state)
+        first_start = await runtime_action(
+            env_id, RuntimeAction(action="start"), request, ctx, state
+        )
         assert first_start.affected_instances == 0
 
         stopped = await runtime_action(env_id, RuntimeAction(action="stop"), request, ctx, state)
