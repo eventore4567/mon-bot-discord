@@ -9,6 +9,8 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/sentrix-platform
+Environment=SENTRIX_BUILD_NETWORK=sentrix-build-egress
+Environment=SENTRIX_EGRESS_SCRIPT=/opt/sentrix-platform/ops/execution/apply-egress-policy.sh
 EnvironmentFile=/etc/sentrix/builder.env
 ExecStartPre=/opt/sentrix-platform/ops/worker/preflight.sh
 ExecStart=/opt/sentrix-platform/.venv/bin/python -m services.builder_ctl.main
