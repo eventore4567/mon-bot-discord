@@ -55,6 +55,11 @@ class BuildJob(BaseModel):
     lease_attempt: int = Field(ge=1)
 
 
+class BuildLease(BaseModel):
+    build_id: UUID
+    lease_attempt: int = Field(ge=1)
+
+
 class BuildReport(BaseModel):
     build_id: UUID
     lease_attempt: int = Field(ge=1)
@@ -100,13 +105,34 @@ async def claim_build(
                 "SELECT * FROM public.sentrix_builder_claim($1, $2, $3)",
                 worker_id,
                 digest,
-                120,
+                300,
             )
     except asyncpg.PostgresError as exc:
         raise _map_worker_error(exc) from exc
     if row is None:
         return None
     return BuildJob.model_validate(dict(row))
+
+
+@router.post("/builder/renew", status_code=status.HTTP_204_NO_CONTENT)
+async def renew_build(
+    payload: BuildLease,
+    auth: Annotated[tuple[UUID, bytes], Depends(_worker_headers)],
+    state: Annotated[AppState, Depends(get_state)],
+) -> None:
+    worker_id, digest = auth
+    try:
+        async with state.db.admin_tx() as conn:
+            await conn.fetchval(
+                "SELECT public.sentrix_builder_renew($1,$2,$3,$4,$5)",
+                worker_id,
+                digest,
+                payload.build_id,
+                payload.lease_attempt,
+                300,
+            )
+    except asyncpg.PostgresError as exc:
+        raise _map_worker_error(exc) from exc
 
 
 @router.post("/builder/report", response_model=BuildReportOut)
