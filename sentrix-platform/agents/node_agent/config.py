@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 from uuid import UUID
 
 
@@ -28,13 +29,21 @@ class AgentConfig:
         runtime = os.environ.get("SENTRIX_SANDBOX_RUNTIME", "runsc")
         if runtime != "runsc":
             raise RuntimeError("P1 exige le runtime gVisor 'runsc'")
+
+        control_plane_url = os.environ["SENTRIX_CONTROL_PLANE_URL"].rstrip("/")
+        parsed = urlparse(control_plane_url)
+        if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+            raise RuntimeError("SENTRIX_CONTROL_PLANE_URL doit etre une URL http(s) absolue")
+        if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise RuntimeError("SENTRIX_CONTROL_PLANE_URL doit utiliser HTTPS hors localhost")
+
         cidrs = tuple(
             value.strip()
             for value in os.environ.get("SENTRIX_CONTROL_PLANE_CIDRS", "").split(",")
             if value.strip()
         )
         return cls(
-            control_plane_url=os.environ["SENTRIX_CONTROL_PLANE_URL"].rstrip("/"),
+            control_plane_url=control_plane_url,
             node_id=UUID(os.environ["SENTRIX_NODE_ID"]),
             node_token=token,
             cache_path=Path(
