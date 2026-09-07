@@ -75,8 +75,6 @@ class _RailwayFloodFilter(logging.Filter):
         self._low_priority_count = 0
         self._repeats: dict[tuple[str, int, str], _RepeatState] = {}
 
-        # Railway avait deja signale 500 logs/s. On reste tres loin dessous tout en
-        # gardant assez de marge pour observer un demarrage charge de SentriX.
         self._max_low_priority_per_second = _env_int(
             "SENTRIX_LOG_MAX_PER_SECOND", 100, 20, 300
         )
@@ -92,13 +90,8 @@ class _RailwayFloodFilter(logging.Filter):
         except Exception:
             message = str(record.msg)
 
-        # Le standby passif n'est volontairement pas connecte a Discord. L'audit V45
-        # historique produit alors un faux ERROR apres 90 s : on ignore uniquement ce cas
-        # precisement identifie, sans toucher aux autres erreurs.
         if _expected_ha_standby_not_ready(record, message):
             return False
-
-        # Une vraie erreur ne doit jamais etre cachee par le garde anti-flood.
         if record.levelno >= logging.ERROR:
             return True
 
@@ -106,13 +99,10 @@ class _RailwayFloodFilter(logging.Filter):
         key = (record.name, record.levelno, message)
 
         with self._lock:
-            # Fenetre globale d'une seconde pour DEBUG/INFO uniquement.
             if now - self._second_started >= 1.0:
                 self._second_started = now
                 self._low_priority_count = 0
 
-            # Deduplication des messages strictement identiques. Les WARNING restent
-            # visibles plus souvent que les INFO afin de ne pas masquer un incident.
             state = self._repeats.get(key)
             if state is None or now - state.started_at >= self._repeat_window:
                 state = _RepeatState(started_at=now)
@@ -132,7 +122,6 @@ class _RailwayFloodFilter(logging.Filter):
                 if self._low_priority_count > self._max_low_priority_per_second:
                     return False
 
-            # Nettoyage leger pour empecher le dictionnaire de grossir indefiniment.
             if len(self._repeats) > 5000:
                 cutoff = now - self._repeat_window
                 self._repeats = {
@@ -150,9 +139,6 @@ def _configure_railway_logging() -> None:
 
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-
-    # Installer notre handler avant l'import de main.py : son logging.basicConfig()
-    # devient alors volontairement un no-op et on evite plusieurs handlers identiques.
     if not root.handlers:
         handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(logging.Formatter(_LOG_FORMAT))
@@ -163,8 +149,6 @@ def _configure_railway_logging() -> None:
         if not any(isinstance(current, _RailwayFloodFilter) for current in handler.filters):
             handler.addFilter(flood_filter)
 
-    # Ces bibliotheques peuvent produire enormement de details reseau au niveau INFO.
-    # Les WARNING/ERROR restent integralement disponibles.
     for logger_name in (
         "aiohttp.access",
         "aiosqlite",
@@ -189,8 +173,6 @@ def _install_railway_dashboard_ha_proxy() -> None:
 
         install(dashboard_web)
     except Exception:
-        # Un probleme de proxy ne doit jamais empecher le bot Discord de demarrer. L'erreur
-        # reste visible dans les logs Railway afin d'etre diagnostiquee.
         logging.getLogger("bot.dashboard-ha-proxy").exception(
             "Installation precoce du proxy dashboard HA impossible."
         )
@@ -206,13 +188,46 @@ def _install_railway_dashboard_focus_ui() -> None:
 
         install(dashboard_web)
     except Exception:
-        # Purement visuel : le dashboard et Discord doivent continuer a demarrer meme si
-        # cette couche optionnelle rencontre un probleme.
         logging.getLogger("bot.dashboard-focus-loading").exception(
             "Installation de l'interface dashboard focalisee impossible."
+        )
+
+
+def _install_sentrix_v95() -> None:
+    """Prépare V95 sans rendre Python dépendant de discord.py pour les audits statiques.
+
+    Certains jobs CI exécutent Python avant ``pip install -r requirements.txt``. Dans ce
+    cas, l'absence temporaire de discord.py est normale : l'installation V95 se fera dans
+    le processus runtime, où la dépendance est présente.
+    """
+    try:
+        from sentrix_v95_bootstrap import install
+    except (ImportError, ModuleNotFoundError):
+        return
+    try:
+        install()
+    except Exception:
+        logging.getLogger("bot.v95-bootstrap").exception(
+            "Installation précoce de SentriX V95 impossible."
+        )
+
+
+def _install_sentrix_verification_v96() -> None:
+    """Branche l'assistant de vérification après V95, sans casser les audits sans discord.py."""
+    try:
+        from sentrix_verification_v96 import install
+    except (ImportError, ModuleNotFoundError):
+        return
+    try:
+        install()
+    except Exception:
+        logging.getLogger("bot.verification-v96").exception(
+            "Installation précoce de la vérification V96 impossible."
         )
 
 
 _configure_railway_logging()
 _install_railway_dashboard_ha_proxy()
 _install_railway_dashboard_focus_ui()
+_install_sentrix_v95()
+_install_sentrix_verification_v96()
