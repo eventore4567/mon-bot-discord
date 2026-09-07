@@ -65,6 +65,15 @@ from sentrix_v97_reliability import install as _install_v97_reliability  # noqa:
 _install_v97_reliability(dashboard_web)
 logger.warning("V97 fiabilité slash + dashboard Tickets simplifié branchés.")
 
+# V98 doit être installé dans CE véritable bootstrap produit, pas uniquement dans un wrapper
+# alternatif. Railway principal et standby utilisent historiquement ce module ; l'installation
+# ici garantit donc que le constructeur V95 est remplacé par l'arborescence sémantique V98
+# avant tout CommandTree.sync, quel que soit l'entrypoint externe utilisé.
+from sentrix_v98_slash import install as _install_v98_grouped_slash  # noqa: E402
+
+_install_v98_grouped_slash()
+logger.warning("V98 slash sémantique explicitement branché dans l'entrypoint Railway HA produit.")
+
 
 # V96 doit être installée APRES l'import de railway_ha_boot : railway_boot remplace
 # commands.Bot par la classe AutoSharded de production. On branche donc ici le hook de
