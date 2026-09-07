@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from libs.db import Database
@@ -21,6 +21,7 @@ from services.api.routers import (
     control,
     hosting,
     hosting_github,
+    infra_status,
     instances,
     resources,
     webhooks,
@@ -29,6 +30,18 @@ from services.api.routers import (
 __all__ = ["create_app"]
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def _render_static_html(name: str, scripts: tuple[str, ...]) -> HTMLResponse:
+    html = (_STATIC_DIR / name).read_text(encoding="utf-8")
+    html = html.replace(
+        "</head>",
+        '  <link rel="stylesheet" href="/static/enhancements.css">\n</head>',
+        1,
+    )
+    script_tags = "\n".join(f'  <script src="{src}" defer></script>' for src in scripts)
+    html = html.replace("</body>", f"{script_tags}\n</body>", 1)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 def create_app(
@@ -60,7 +73,7 @@ def create_app(
 
     app = FastAPI(
         title="SentriX Platform - Control Plane",
-        version="0.4.0",
+        version="0.4.1",
         lifespan=lifespan,
     )
     if injected:
@@ -94,18 +107,25 @@ def create_app(
     app.include_router(agents.router)
     app.include_router(hosting.router)
     app.include_router(hosting_github.router)
+    app.include_router(infra_status.router)
     app.include_router(control.router)
     app.include_router(webhooks.router)
 
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
-    async def landing_page() -> FileResponse:
-        return FileResponse(_STATIC_DIR / "index.html")
+    async def landing_page() -> HTMLResponse:
+        return _render_static_html(
+            "index.html",
+            ("/static/landing-enhancements.js",),
+        )
 
     @app.get("/app", include_in_schema=False)
-    async def dashboard_page() -> FileResponse:
-        return FileResponse(_STATIC_DIR / "app.html")
+    async def dashboard_page() -> HTMLResponse:
+        return _render_static_html(
+            "app.html",
+            ("/static/dashboard-enhancements.js",),
+        )
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:
