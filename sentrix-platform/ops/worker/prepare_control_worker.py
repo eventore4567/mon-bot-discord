@@ -23,6 +23,11 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _ensure_absent(path: Path) -> None:
+    if path.exists():
+        raise FileExistsError(f"refusing to overwrite {path}")
+
+
 def _write_private(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -39,8 +44,7 @@ async def _register(kind: str, name: str, output: Path) -> None:
     dsn = os.environ.get("MIGRATIONS_DATABASE_URL")
     if not dsn:
         raise RuntimeError("MIGRATIONS_DATABASE_URL is required")
-    if output.exists():
-        raise FileExistsError(f"refusing to overwrite {output}")
+    await asyncio.to_thread(_ensure_absent, output)
 
     worker_id = uuid7()
     token = secrets.token_urlsafe(48)
@@ -64,7 +68,8 @@ async def _register(kind: str, name: str, output: Path) -> None:
         await conn.close()
 
     try:
-        _write_private(
+        await asyncio.to_thread(
+            _write_private,
             output,
             "\n".join(
                 (
