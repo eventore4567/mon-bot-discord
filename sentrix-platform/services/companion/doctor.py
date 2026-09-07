@@ -76,7 +76,10 @@ class SentrixDoctor:
 
         started = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=self.http_timeout, follow_redirects=False) as client:
+            async with httpx.AsyncClient(
+                timeout=self.http_timeout,
+                follow_redirects=False,
+            ) as client:
                 response = await client.get(f"{base_url}/health")
             latency_ms = round((time.perf_counter() - started) * 1000)
             try:
@@ -200,7 +203,10 @@ class SentrixDoctor:
                     severity="critical",
                     title="Deux leaders detectes",
                     detail="Le principal et le standby declarent simultanement l'etat leader.",
-                    recommendation="Bloquer toute promotion manuelle et verifier immediatement le lease Redis.",
+                    recommendation=(
+                        "Bloquer toute promotion manuelle et verifier immediatement "
+                        "le lease Redis."
+                    ),
                 )
             )
 
@@ -221,8 +227,14 @@ class SentrixDoctor:
                     code="POSTGRES_UNAVAILABLE",
                     severity="warning",
                     title="PostgreSQL indisponible",
-                    detail="La restauration durable et les snapshots de secours ne peuvent pas etre verifies.",
-                    recommendation="Retablir PostgreSQL puis verifier un snapshot avant de tester Rescue.",
+                    detail=(
+                        "La restauration durable et les snapshots de secours "
+                        "ne peuvent pas etre verifies."
+                    ),
+                    recommendation=(
+                        "Retablir PostgreSQL puis verifier un snapshot avant "
+                        "de tester Rescue."
+                    ),
                 )
             )
 
@@ -233,7 +245,10 @@ class SentrixDoctor:
                     severity="critical",
                     title="Cluster SentriX injoignable",
                     detail="Aucune des deux instances ne repond au healthcheck.",
-                    recommendation="Verifier l'hebergeur, les domaines et les derniers deploiements.",
+                    recommendation=(
+                        "Verifier l'hebergeur, les domaines et les derniers "
+                        "deploiements."
+                    ),
                 )
             )
         elif not primary.reachable and standby.state == "leader":
@@ -253,7 +268,10 @@ class SentrixDoctor:
                     severity="warning",
                     title="Standby injoignable",
                     detail="SentriX fonctionne, mais la redondance n'est plus disponible.",
-                    recommendation="Retablir le standby avant le prochain deploiement du principal.",
+                    recommendation=(
+                        "Retablir le standby avant le prochain deploiement "
+                        "du principal."
+                    ),
                 )
             )
 
@@ -264,8 +282,14 @@ class SentrixDoctor:
                     code="NO_LEADER",
                     severity="critical",
                     title="Aucun leader HA",
-                    detail="Les instances repondent, mais aucune ne possede actuellement le lease leader.",
-                    recommendation="Verifier Redis et les journaux HA avant de redemarrer une instance.",
+                    detail=(
+                        "Les instances repondent, mais aucune ne possede "
+                        "actuellement le lease leader."
+                    ),
+                    recommendation=(
+                        "Verifier Redis et les journaux HA avant de redemarrer "
+                        "une instance."
+                    ),
                 )
             )
 
