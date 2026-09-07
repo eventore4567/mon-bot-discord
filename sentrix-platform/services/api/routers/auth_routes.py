@@ -134,7 +134,7 @@ async def discord_callback(
     user_id = UUID(str(row["id"]))
 
     token = state_app.sessions.issue(user_id, ttl=SESSION_TTL)
-    destination = os.environ.get("SENTRIX_APP_URL", "/docs").strip() or "/docs"
+    destination = os.environ.get("SENTRIX_APP_URL", "/app").strip() or "/app"
     response = RedirectResponse(destination, status_code=status.HTTP_302_FOUND)
     response.set_cookie(
         SESSION_COOKIE,
@@ -170,6 +170,27 @@ async def auth_me(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "utilisateur introuvable")
     return AuthMeOut.model_validate(dict(row))
+
+
+@router.get("/organizations", response_model=list[OrganizationOut])
+async def list_organizations(
+    user: Annotated[CurrentUser, Depends(require_user)],
+    state_app: Annotated[AppState, Depends(get_state)],
+) -> list[OrganizationOut]:
+    """List organizations visible to the signed-in user."""
+    async with state_app.db.admin_tx() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT o.id, o.name, o.slug, m.role
+              FROM organizations o
+              JOIN org_members m ON m.org_id = o.id
+             WHERE m.user_id = $1
+               AND o.status = 'active'
+             ORDER BY o.created_at ASC
+            """,
+            user.id,
+        )
+    return [OrganizationOut.model_validate(dict(row)) for row in rows]
 
 
 @router.post(
