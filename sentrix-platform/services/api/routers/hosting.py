@@ -18,7 +18,14 @@ from pydantic import BaseModel, Field
 
 from libs import audit
 from libs.ids import uuid7
-from services.api.deps import AppState, OrgContext, get_state, map_pg_error, require_org
+from services.api.deps import (
+    AppState,
+    OrgContext,
+    get_state,
+    map_pg_error,
+    require_org,
+    require_org_admin,
+)
 
 router = APIRouter(prefix="/v1/orgs/{org_id}/hosting", tags=["hosting"])
 
@@ -140,7 +147,7 @@ async def overview(
 async def queue_build(
     payload: BuildRequest,
     request: Request,
-    ctx: Annotated[OrgContext, Depends(require_org)],
+    ctx: Annotated[OrgContext, Depends(require_org_admin)],
     state: Annotated[AppState, Depends(get_state)],
 ) -> BuildOut:
     """Queue an immutable build for an environment.
@@ -245,7 +252,7 @@ async def list_releases(
 async def queue_deployment(
     payload: DeployRequest,
     request: Request,
-    ctx: Annotated[OrgContext, Depends(require_org)],
+    ctx: Annotated[OrgContext, Depends(require_org_admin)],
     state: Annotated[AppState, Depends(get_state)],
 ) -> DeploymentOut:
     deployment_id = uuid7()
@@ -334,7 +341,7 @@ async def runtime_action(
     environment_id: UUID,
     payload: RuntimeAction,
     request: Request,
-    ctx: Annotated[OrgContext, Depends(require_org)],
+    ctx: Annotated[OrgContext, Depends(require_org_admin)],
     state: Annotated[AppState, Depends(get_state)],
 ) -> RuntimeActionOut:
     desired = "stopped" if payload.action == "stop" else "running"
@@ -393,7 +400,7 @@ async def runtime_action(
 @router.get("/environments/{environment_id}/secrets", response_model=list[SecretMetadata])
 async def list_secret_metadata(
     environment_id: UUID,
-    ctx: Annotated[OrgContext, Depends(require_org)],
+    ctx: Annotated[OrgContext, Depends(require_org_admin)],
     state: Annotated[AppState, Depends(get_state)],
 ) -> list[SecretMetadata]:
     """Return metadata only; ciphertext, wrapped DEKs and values never leave storage."""
