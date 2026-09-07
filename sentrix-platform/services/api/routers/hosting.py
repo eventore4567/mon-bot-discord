@@ -340,20 +340,35 @@ async def runtime_action(
         if exists is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "environnement introuvable")
 
-        # Restart is represented by a new generation while keeping desired=running;
-        # agents reconcile the generation change instead of exposing Docker directly.
-        rows = await conn.fetch(
-            """
-            UPDATE instances
-               SET desired_state = $2,
-                   generation = generation + 1,
-                   updated_at = now()
-             WHERE env_id = $1
-            RETURNING id
-            """,
-            environment_id,
-            desired,
-        )
+        if payload.action == "restart":
+            # Restart always forces a fresh generation. Agents reconcile that
+            # change and recreate the runtime without exposing Docker directly.
+            rows = await conn.fetch(
+                """
+                UPDATE instances
+                   SET desired_state = 'running',
+                       generation = generation + 1,
+                       updated_at = now()
+                 WHERE env_id = $1
+                RETURNING id
+                """,
+                environment_id,
+            )
+        else:
+            # Start/stop are idempotent: a repeated request is a no-op and does
+            # not manufacture a new generation for an already-correct runtime.
+            rows = await conn.fetch(
+                """
+                UPDATE instances
+                   SET desired_state = $2,
+                       updated_at = now()
+                 WHERE env_id = $1
+                   AND desired_state IS DISTINCT FROM $2
+                RETURNING id
+                """,
+                environment_id,
+                desired,
+            )
         await audit.record(
             conn,
             org_id=ctx.org_id,
