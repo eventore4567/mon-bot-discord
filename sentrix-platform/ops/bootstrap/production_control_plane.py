@@ -40,7 +40,9 @@ def database_dsn(source: str, *, database: str) -> str:
     parsed = urlsplit(source)
     if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
         raise BootstrapError("POSTGRES_SUPERUSER_URL doit etre une URL PostgreSQL absolue")
-    return urlunsplit((parsed.scheme, parsed.netloc, f"/{quote(database, safe='')}", parsed.query, ""))
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, f"/{quote(database, safe='')}", parsed.query, "")
+    )
 
 
 def role_dsn(source: str, *, username: str, password: str, database: str) -> str:
@@ -190,7 +192,9 @@ def main() -> None:
     ):
         os.environ.pop(name, None)
     port = os.environ.get("PORT", "8080")
-    os.execv(
+    # Intentional exec: replace the bootstrap process so privileged DB secrets
+    # cannot remain reachable by the long-lived API process.
+    os.execv(  # noqa: S606
         sys.executable,
         [
             sys.executable,
@@ -198,7 +202,7 @@ def main() -> None:
             "uvicorn",
             "services.api.main:app",
             "--host",
-            "0.0.0.0",
+            "0.0.0.0",  # noqa: S104 - Railway container must listen on all interfaces.
             "--port",
             port,
             "--proxy-headers",
