@@ -31,11 +31,11 @@ class V99SlashRuntimeAuditTests(unittest.TestCase):
     def test_hybrid_ctx_is_valid_discord_py_contract(self):
         bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
 
-        @bot.hybrid_command(name="help", description="Aide SentriX")
-        async def hybrid_help(ctx: commands.Context) -> None:
+        @bot.hybrid_command(name="sentrix", description="Assistant SentriX")
+        async def hybrid_sentrix(ctx: commands.Context) -> None:
             return None
 
-        command = bot.tree.get_command("help")
+        command = bot.tree.get_command("sentrix")
         self.assertIsNotNone(command)
         self.assertTrue(getattr(command, "__commands_is_hybrid_app_command__", False))
 
@@ -126,11 +126,11 @@ class V99SlashRuntimeAuditTests(unittest.TestCase):
 
         by_name = {audit.qualified_name: audit for audit in audits}
         setup = by_name.get("setup")
-        help_command = by_name.get("help")
+        hybrid = by_name.get("sentrix")
         self.assertIsNotNone(setup)
-        self.assertIsNotNone(help_command)
+        self.assertIsNotNone(hybrid)
         self.assertEqual(setup.first_parameter, "interaction")
-        self.assertEqual(help_command.first_parameter, "ctx")
+        self.assertEqual(hybrid.first_parameter, "ctx")
 
         originals = {str(meta.get("original")) for meta in report.values()}
         self.assertTrue(
