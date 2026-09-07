@@ -52,7 +52,7 @@ class HostingEnvironmentCreate(_In):
     service_id: UUID
     kind: EnvironmentKind = "prod"
     runtime_mode: RuntimeMode = "generic"
-    secret_provider: SecretProvider = "tmpfs_file"
+    secret_provider: SecretProvider = "tmpfs_file"  # noqa: S105 - provider name, not a secret
 
 
 class HostingEnvironmentOut(_Out):
