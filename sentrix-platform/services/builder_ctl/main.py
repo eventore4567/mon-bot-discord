@@ -1,11 +1,9 @@
-"""Builder controller entrypoint placeholder.
+"""Compatibility entrypoint for the production SentriX build worker."""
 
-Production wiring is intentionally thin: transport-specific queue/registry
-adapters wrap the tested core in :mod:`services.builder_ctl.controller`.
-"""
+from agents.build_worker.main import main
 
-from services.builder_ctl.controller import BuildCache
+__all__ = ["main"]
 
 
-def create_state() -> BuildCache:
-    return BuildCache()
+if __name__ == "__main__":
+    main()
