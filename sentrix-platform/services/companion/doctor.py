@@ -158,12 +158,13 @@ class SentrixDoctor:
         started = time.perf_counter()
         connection: asyncpg.Connection | None = None
         try:
-            connection = await asyncio.wait_for(
+            conn = await asyncio.wait_for(
                 asyncpg.connect(self.postgres_url, timeout=_DEPENDENCY_TIMEOUT_SECONDS),
                 timeout=_DEPENDENCY_TIMEOUT_SECONDS,
             )
+            connection = conn
             value = await asyncio.wait_for(
-                connection.fetchval("SELECT 1"), timeout=_DEPENDENCY_TIMEOUT_SECONDS
+                conn.fetchval("SELECT 1"), timeout=_DEPENDENCY_TIMEOUT_SECONDS
             )
             return DependencyReport(
                 name="postgres",
