@@ -1,4 +1,4 @@
-"""Modeles P1 : etat desire et rapports du node-agent."""
+"""Modeles P1 : etat desire, secrets runtime et rapports du node-agent."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 DesiredState = Literal["running", "stopped"]
 ObservedState = Literal["running", "stopped", "failed", "unknown"]
 HealthState = Literal["healthy", "unhealthy", "unknown"]
+SecretProvider = Literal["tmpfs_file", "env"]
 
 
 class _In(BaseModel):
@@ -76,6 +77,15 @@ class AgentDesiredInstance(_Out):
     memory_mb: int
     pids_limit: int
     generation: int
+
+
+class AgentRuntimeSecret(_In):
+    """Secret en clair transmis uniquement au node-agent authentifie via TLS."""
+
+    name: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$", min_length=1, max_length=128)
+    provider: SecretProvider
+    version: int = Field(ge=1)
+    value: str = Field(min_length=1, max_length=16384)
 
 
 class AgentObservedInstance(_In):

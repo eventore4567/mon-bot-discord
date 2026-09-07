@@ -2,7 +2,8 @@
 
 Le node-agent est un composant de confiance du noeud et pilote Docker. Les
 sandboxes, elles, ne recoivent aucun socket Docker, aucune capability Linux et
-aucun bind mount hote.
+aucun bind mount hote. Les secrets ne sont jamais places dans les arguments de
+``docker run`` : ils sont injectes via stdin dans un tmpfs apres creation.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
-from libs.runtime_models import AgentDesiredInstance, AgentObservedInstance
+from libs.runtime_models import AgentDesiredInstance, AgentObservedInstance, AgentRuntimeSecret
 
 
 class RuntimeErrorP1(RuntimeError):  # noqa: N818 - stable public P1 exception
@@ -31,13 +32,19 @@ class ContainerObservation:
 
 
 class CommandRunner:
-    async def run(self, *args: str, check: bool = True) -> str:
+    async def run(
+        self,
+        *args: str,
+        check: bool = True,
+        input_data: bytes | None = None,
+    ) -> str:
         proc = await asyncio.create_subprocess_exec(
             *args,
+            stdin=asyncio.subprocess.PIPE if input_data is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        out, err = await proc.communicate()
+        out, err = await proc.communicate(input_data)
         stdout = out.decode("utf-8", "replace").strip()
         stderr = err.decode("utf-8", "replace").strip()
         if check and proc.returncode != 0:
@@ -46,6 +53,26 @@ class CommandRunner:
 
 
 class DockerRuntime:
+    _SECRET_ROOT = "/run/sentrix-secrets"
+    _SECRET_ENTRYPOINT = """set -eu
+while [ ! -f /run/sentrix-secrets/.ready ]; do sleep 0.05; done
+if [ -d /run/sentrix-secrets/env ]; then
+  for f in /run/sentrix-secrets/env/*; do
+    [ -f "$f" ] || continue
+    name=${f##*/}
+    export "$name=$(cat "$f")"
+  done
+fi
+if [ -d /run/sentrix-secrets/files ]; then
+  for f in /run/sentrix-secrets/files/*; do
+    [ -f "$f" ] || continue
+    name=${f##*/}
+    export "${name}_FILE=$f"
+  done
+fi
+exec "$@"
+"""
+
     def __init__(
         self,
         docker_bin: str,
@@ -162,7 +189,36 @@ class DockerRuntime:
             exit_code=int(exit_code) if isinstance(exit_code, int) else None,
         )
 
-    async def start(self, spec: AgentDesiredInstance) -> ContainerObservation:
+    async def _inject_secret(self, container_id: str, secret: AgentRuntimeSecret) -> None:
+        folder = "env" if secret.provider == "env" else "files"
+        path = f"{self._SECRET_ROOT}/{folder}/{secret.name}"
+        command = f"umask 077; mkdir -p {self._SECRET_ROOT}/{folder}; cat > {path}; chmod 400 {path}"
+        await self.runner.run(
+            self.docker,
+            "exec",
+            "-i",
+            container_id,
+            "/bin/sh",
+            "-c",
+            command,
+            input_data=secret.value.encode("utf-8"),
+        )
+
+    async def _release_secret_gate(self, container_id: str) -> None:
+        await self.runner.run(
+            self.docker,
+            "exec",
+            container_id,
+            "/bin/sh",
+            "-c",
+            f"umask 077; : > {self._SECRET_ROOT}/.ready; chmod 400 {self._SECRET_ROOT}/.ready",
+        )
+
+    async def start(
+        self,
+        spec: AgentDesiredInstance,
+        secrets: list[AgentRuntimeSecret] | None = None,
+    ) -> ContainerObservation:
         current = await self.observe(spec.instance_id)
         if (
             current.container_id
@@ -172,6 +228,10 @@ class DockerRuntime:
             return current
         if current.container_id:
             await self.runner.run(self.docker, "rm", "-f", current.container_id, check=False)
+
+        runtime_secrets = secrets or []
+        if runtime_secrets and not spec.command:
+            raise RuntimeErrorP1("une commande explicite est requise quand des secrets sont injectes")
 
         await self.ensure_network(spec.instance_id)
         memory = f"{spec.memory_mb}m"
@@ -207,10 +267,37 @@ class DockerRuntime:
             f"sentrix.instance_id={spec.instance_id}",
             "--label",
             f"sentrix.generation={spec.generation}",
-            spec.image_ref,
-            *spec.command,
         ]
-        await self.runner.run(*args)
+        if runtime_secrets:
+            args.extend(
+                [
+                    "--tmpfs",
+                    f"{self._SECRET_ROOT}:rw,noexec,nosuid,nodev,size=16m",
+                ]
+            )
+        args.append(spec.image_ref)
+        if runtime_secrets:
+            args.extend(
+                [
+                    "/bin/sh",
+                    "-c",
+                    self._SECRET_ENTRYPOINT,
+                    "sentrix-entry",
+                    *spec.command,
+                ]
+            )
+        else:
+            args.extend(spec.command)
+
+        container_id = await self.runner.run(*args)
+        if runtime_secrets:
+            try:
+                for secret in runtime_secrets:
+                    await self._inject_secret(container_id, secret)
+                await self._release_secret_gate(container_id)
+            except Exception:
+                await self.runner.run(self.docker, "rm", "-f", container_id, check=False)
+                raise
         return await self.observe(spec.instance_id)
 
     async def stop(self, instance_id: UUID) -> ContainerObservation:

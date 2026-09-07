@@ -12,7 +12,8 @@ from libs.db import Database
 from libs.status_store import MemoryStatusStore, RedisStatusStore, StatusStore
 from services.api.auth import SessionCodec
 from services.api.deps import AppState
-from services.api.routers import agents, instances, resources
+from services.api.routers import agents, auth_web, builders, hosting, instances, resources
+from services.cloud import routes as cloud_routes
 
 __all__ = ["create_app"]
 
@@ -22,23 +23,13 @@ def create_app(
     sessions: SessionCodec | None = None,
     status_store: StatusStore | None = None,
 ) -> FastAPI:
-    """Fabrique l'application. Les dependances sont injectables pour les tests.
-
-    IMPORTANT : quand db et sessions sont fournis, l'etat est pose IMMEDIATEMENT,
-    sans attendre le lifespan. httpx.ASGITransport n'execute pas les evenements
-    de lifespan : si l'etat n'etait construit que la, chaque test echouerait sur
-    un AttributeError a la premiere requete.
-    """
     injected = db is not None and sessions is not None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if injected:
-            # Dependances deja posees ci-dessous : leur cycle de vie appartient
-            # a l'appelant (la fixture de test), pas a l'application.
             yield
             return
-
         database = db or Database(os.environ["DATABASE_URL"])
         codec = sessions or SessionCodec.from_env()
         await database.connect()
@@ -54,18 +45,24 @@ def create_app(
 
     app = FastAPI(
         title="SentriX Platform - Control Plane",
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
     if injected:
         assert db is not None and sessions is not None
         app.state.app_state = AppState(
-            db=db, sessions=sessions, status_store=status_store or MemoryStatusStore()
+            db=db,
+            sessions=sessions,
+            status_store=status_store or MemoryStatusStore(),
         )
 
+    app.include_router(auth_web.router)
     app.include_router(resources.router)
+    app.include_router(hosting.router)
     app.include_router(instances.router)
     app.include_router(agents.router)
+    app.include_router(builders.router)
+    app.include_router(cloud_routes.router)
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:

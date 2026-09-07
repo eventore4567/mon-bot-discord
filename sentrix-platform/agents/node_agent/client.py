@@ -6,7 +6,12 @@ from uuid import UUID
 
 import httpx
 
-from libs.runtime_models import AgentDesiredInstance, AgentObservedInstance, AgentReport
+from libs.runtime_models import (
+    AgentDesiredInstance,
+    AgentObservedInstance,
+    AgentReport,
+    AgentRuntimeSecret,
+)
 
 
 class ControlPlaneClient:
@@ -23,6 +28,15 @@ class ControlPlaneClient:
         )
         response.raise_for_status()
         return [AgentDesiredInstance.model_validate(item) for item in response.json()]
+
+    async def secrets(self, instance_id: UUID) -> list[AgentRuntimeSecret]:
+        """Fetch runtime secrets only when an instance must be recreated."""
+        response = await self._client.get(
+            f"{self._base}/v1/agent/nodes/{self._node_id}/instances/{instance_id}/secrets",
+            headers={**self._headers, "Cache-Control": "no-store"},
+        )
+        response.raise_for_status()
+        return [AgentRuntimeSecret.model_validate(item) for item in response.json()]
 
     async def report(self, statuses: list[AgentObservedInstance]) -> None:
         payload = AgentReport(statuses=statuses)

@@ -41,11 +41,24 @@ class Reconciler:
         desired_ids = {item.instance_id for item in desired}
         for spec in desired:
             try:
-                observation = await (
-                    self.runtime.start(spec)
-                    if spec.desired_state == "running"
-                    else self.runtime.stop(spec.instance_id)
-                )
+                if spec.desired_state == "running":
+                    current = await self.runtime.observe(spec.instance_id)
+                    already_current = bool(
+                        current.container_id
+                        and current.state == "running"
+                        and current.generation == spec.generation
+                    )
+                    if already_current:
+                        observation = current
+                    else:
+                        # Les valeurs en clair ne sont jamais cachees sur disque.
+                        # Une recreation pendant une panne du Control Plane
+                        # echoue donc fermee, plutot que de reutiliser un secret
+                        # obsolete ou persiste localement.
+                        runtime_secrets = await self.client.secrets(spec.instance_id)
+                        observation = await self.runtime.start(spec, secrets=runtime_secrets)
+                else:
+                    observation = await self.runtime.stop(spec.instance_id)
                 statuses.append(self.runtime.to_report(observation))
             except Exception as exc:  # noqa: BLE001 - une instance ne bloque pas les voisines
                 log.exception("echec reconcile instance %s", spec.instance_id)

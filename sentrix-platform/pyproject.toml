@@ -1,6 +1,6 @@
 [project]
 name = "sentrix-platform"
-version = "0.1.0"
+version = "0.2.0"
 description = "Plateforme d'hebergement specialisee pour bots Discord - Control Plane"
 requires-python = ">=3.12"
 dependencies = [
@@ -26,14 +26,12 @@ dev = [
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-# find: et non une liste figee. Avec packages = ["libs", "services"], les
-# sous-paquets (libs.db, services.api.routers...) ne sont PAS installes et
-# `import libs.db` echoue apres `pip install -e .`.
 [tool.setuptools.packages.find]
 include = ["libs*", "services*", "agents*"]
 
 [tool.setuptools.package-data]
 "services.companion" = ["index.html"]
+"services.cloud" = ["index.html"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
