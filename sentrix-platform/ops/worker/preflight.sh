@@ -26,19 +26,36 @@ if ! iptables -S DOCKER-USER >/dev/null 2>&1; then
   fail "Docker DOCKER-USER chain is required for fail-closed egress policy"
 fi
 
-[[ -n "${SENTRIX_CONTROL_PLANE_URL:-}" ]] || fail "SENTRIX_CONTROL_PLANE_URL is missing"
-[[ -n "${SENTRIX_NODE_ID:-}" ]] || fail "SENTRIX_NODE_ID is missing"
-node_token="${SENTRIX_NODE_TOKEN:-}"
-[[ ${#node_token} -ge 16 ]] || fail "SENTRIX_NODE_TOKEN must be at least 16 chars"
-
 egress_script="${SENTRIX_EGRESS_SCRIPT:-/opt/sentrix-platform/ops/execution/apply-egress-policy.sh}"
 [[ -x "$egress_script" ]] || fail "SentriX egress policy script is missing or not executable"
 
-install -d -m 0700 /var/lib/sentrix-agent
+# The same host prerequisite checker is used by runtime nodes and dedicated
+# build workers, but their credentials are intentionally different.  Detect a
+# control worker by its machine credential and validate the builder contract
+# instead of incorrectly requiring a node token.
+if [[ -n "${SENTRIX_CONTROL_WORKER_ID:-}" || -n "${SENTRIX_CONTROL_WORKER_TOKEN:-}" ]]; then
+  [[ -n "${SENTRIX_CONTROL_WORKER_ID:-}" ]] || fail "SENTRIX_CONTROL_WORKER_ID is missing"
+  worker_token="${SENTRIX_CONTROL_WORKER_TOKEN:-}"
+  [[ ${#worker_token} -ge 16 ]] || fail "SENTRIX_CONTROL_WORKER_TOKEN must be at least 16 chars"
+  [[ -n "${SENTRIX_API_URL:-}" ]] || fail "SENTRIX_API_URL is missing"
+  [[ -n "${SENTRIX_REGISTRY_PREFIX:-}" ]] || fail "SENTRIX_REGISTRY_PREFIX is missing"
+  build_network="${SENTRIX_BUILD_NETWORK:-sentrix-build-egress}"
+  [[ "$build_network" =~ ^sentrix-build-[a-z0-9][a-z0-9_.-]{0,47}$ ]] \
+    || fail "SENTRIX_BUILD_NETWORK must be a dedicated sentrix-build-* network"
+  install -d -m 0700 /var/lib/sentrix-builder
+  ok "SentriX dedicated builder environment"
+else
+  [[ -n "${SENTRIX_CONTROL_PLANE_URL:-}" ]] || fail "SENTRIX_CONTROL_PLANE_URL is missing"
+  [[ -n "${SENTRIX_NODE_ID:-}" ]] || fail "SENTRIX_NODE_ID is missing"
+  node_token="${SENTRIX_NODE_TOKEN:-}"
+  [[ ${#node_token} -ge 16 ]] || fail "SENTRIX_NODE_TOKEN must be at least 16 chars"
+  install -d -m 0700 /var/lib/sentrix-agent
+  ok "SentriX node-agent environment"
+fi
+
 install -d -m 0755 /etc/sentrix
 
 ok "Linux + cgroups v2"
 ok "Docker + gVisor runsc"
 ok "iptables DOCKER-USER egress enforcement"
-ok "SentriX worker environment"
 printf 'SentriX worker preflight passed.\n'
