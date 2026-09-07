@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080b14">
+  <title>Dashboard — SentriX Hosting</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="dashboard-body">
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+  <div id="boot-screen" class="boot-screen">
+    <div class="loader-logo">S</div><p>Connexion au control plane…</p>
+  </div>
+
+  <div id="auth-screen" class="auth-screen hidden">
+    <a class="brand" href="/"><span class="brand-mark">S</span><span>SentriX <b>Hosting</b></span></a>
+    <div class="auth-card">
+      <span class="eyebrow">DASHBOARD</span>
+      <h1>Gérez votre infrastructure SentriX.</h1>
+      <p>Connectez votre compte Discord pour accéder aux projets, déploiements et environnements autorisés.</p>
+      <a class="btn btn-primary btn-lg full" href="/v1/auth/discord/login">Continuer avec Discord</a>
+      <a class="text-link centered" href="/">← Retour au site</a>
+    </div>
+  </div>
+
+  <div id="onboarding-screen" class="auth-screen hidden">
+    <a class="brand" href="/"><span class="brand-mark">S</span><span>SentriX <b>Hosting</b></span></a>
+    <form id="org-form" class="auth-card">
+      <span class="eyebrow">PREMIÈRE CONFIGURATION</span>
+      <h1>Créez votre organisation.</h1>
+      <p>Elle contiendra vos projets, bots et environnements. Vous en serez propriétaire.</p>
+      <label>Nom de l'organisation<input id="org-name" required minlength="2" maxlength="80" placeholder="Mon équipe"></label>
+      <label>Identifiant URL<input id="org-slug" required minlength="3" maxlength="48" pattern="[a-z0-9][a-z0-9-]{2,47}" placeholder="mon-equipe"></label>
+      <button class="btn btn-primary btn-lg full" type="submit">Créer l'organisation</button>
+    </form>
+  </div>
+
+  <div id="dashboard" class="dashboard hidden">
+    <aside class="sidebar">
+      <a class="brand side-brand" href="/"><span class="brand-mark">S</span><span>SentriX <b>Hosting</b></span></a>
+      <div class="org-switcher">
+        <small>ORGANISATION</small>
+        <select id="org-select" aria-label="Organisation"></select>
+      </div>
+      <nav class="side-nav">
+        <button class="active" data-view="overview"><span>⌂</span>Vue d'ensemble</button>
+        <button data-view="projects"><span>◇</span>Projets & bots</button>
+        <button data-view="deployments"><span>↗</span>Déploiements</button>
+        <button data-view="runtime"><span>◫</span>Runtime</button>
+        <button data-view="observability"><span>◌</span>Observabilité</button>
+        <button data-view="secrets"><span>⌾</span>Secrets</button>
+        <button data-view="settings"><span>⚙</span>Configuration</button>
+      </nav>
+      <div class="side-bottom">
+        <div class="infra-state"><span class="status-dot"></span><div><b>Control plane</b><small>Opérationnel</small></div></div>
+        <a href="/docs" target="_blank" rel="noreferrer">Documentation API ↗</a>
+      </div>
+    </aside>
+
+    <div class="main-shell">
+      <header class="topbar">
+        <button id="menu-toggle" class="icon-btn mobile-only" aria-label="Menu">☰</button>
+        <div><small id="breadcrumb">SENTRIX / OVERVIEW</small><h2 id="page-title">Vue d'ensemble</h2></div>
+        <div class="top-actions">
+          <button id="refresh-btn" class="icon-btn" title="Actualiser">↻</button>
+          <button id="new-project-btn" class="btn btn-primary">+ Nouveau projet</button>
+          <div class="user-menu"><span id="user-avatar">S</span><div><b id="user-name">Utilisateur</b><small id="user-email">Discord</small></div><button id="logout-btn" class="icon-btn" title="Déconnexion">↪</button></div>
+        </div>
+      </header>
+
+      <main class="content">
+        <section id="view-overview" class="view active">
+          <div class="welcome-row"><div><span class="eyebrow">PRODUCTION</span><h1>Bonjour, <span id="welcome-name">vous</span>.</h1><p>Voici l'état actuel de votre infrastructure.</p></div><div class="live-chip"><span class="status-dot"></span>API connectée</div></div>
+          <div id="metric-cards" class="metric-cards">
+            <article><small>PROJETS</small><strong id="m-projects">—</strong><span>actifs</span></article>
+            <article><small>BOTS</small><strong id="m-bots">—</strong><span>configurés</span></article>
+            <article><small>ENVIRONNEMENTS</small><strong id="m-envs">—</strong><span>actifs</span></article>
+            <article><small>RUNTIMES</small><strong id="m-running">—</strong><span>désirés actifs</span></article>
+          </div>
+          <div class="two-col">
+            <article class="panel">
+              <div class="panel-head"><div><small>ACTIVITÉ</small><h3>Déploiements récents</h3></div><button class="link-btn" data-jump="deployments">Tout voir →</button></div>
+              <div id="overview-deployments" class="list"><div class="empty-mini">Chargement…</div></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><div><small>ENVIRONNEMENTS</small><h3>État du runtime</h3></div><button class="link-btn" data-jump="runtime">Gérer →</button></div>
+              <div id="overview-envs" class="list"><div class="empty-mini">Chargement…</div></div>
+            </article>
+          </div>
+          <article class="panel quick-panel">
+            <div class="panel-head"><div><small>ACTIONS RAPIDES</small><h3>Control plane</h3></div></div>
+            <div class="quick-actions">
+              <button data-action="new-project"><span>+</span><b>Créer un projet</b><small>Projet + bot + environnement</small></button>
+              <button data-jump="deployments"><span>↗</span><b>Lancer un build</b><small>Depuis un commit GitHub</small></button>
+              <button data-jump="runtime"><span>◫</span><b>Contrôler le runtime</b><small>Start, stop, restart</small></button>
+              <button data-action="github-refresh"><span>⌁</span><b>Actualiser GitHub</b><small>Synchroniser les cibles</small></button>
+            </div>
+          </article>
+        </section>
+
+        <section id="view-projects" class="view">
+          <div class="view-heading"><div><span class="eyebrow">RESSOURCES</span><h1>Projets & bots</h1><p>Organisez vos dépôts et les bots associés.</p></div><button class="btn btn-primary" data-action="new-project">+ Nouveau projet</button></div>
+          <div id="projects-grid" class="resource-grid"></div>
+        </section>
+
+        <section id="view-deployments" class="view">
+          <div class="view-heading"><div><span class="eyebrow">CI / CD</span><h1>Builds & déploiements</h1><p>Transformez un commit en release immuable puis déployez-la.</p></div><button id="open-build-btn" class="btn btn-primary">+ Nouveau build</button></div>
+          <div class="filter-row"><select id="deploy-env-filter"><option value="">Tous les environnements</option></select><button id="github-refresh-btn" class="btn btn-secondary">Synchroniser GitHub</button></div>
+          <div class="three-col stats-small"><article class="panel"><small>BUILDS EN ATTENTE</small><strong id="stat-queued">—</strong></article><article class="panel"><small>DÉPLOIEMENTS ACTIFS</small><strong id="stat-deploying">—</strong></article><article class="panel"><small>DERNIÈRE RELEASE</small><strong id="stat-release">—</strong></article></div>
+          <article class="panel"><div class="panel-head"><div><small>PIPELINE</small><h3>Builds récents</h3></div></div><div id="builds-table" class="table-wrap"></div></article>
+          <article class="panel"><div class="panel-head"><div><small>HISTORIQUE</small><h3>Déploiements</h3></div></div><div id="deployments-table" class="table-wrap"></div></article>
+        </section>
+
+        <section id="view-runtime" class="view">
+          <div class="view-heading"><div><span class="eyebrow">WORKLOADS</span><h1>Runtime</h1><p>Contrôlez l'état désiré de chaque environnement.</p></div></div>
+          <div id="runtime-grid" class="runtime-grid"></div>
+        </section>
+
+        <section id="view-observability" class="view">
+          <div class="view-heading"><div><span class="eyebrow">MÉTRIQUES</span><h1>Observabilité</h1><p>Consommation et santé de l'environnement sélectionné.</p></div><select id="usage-env-select"></select></div>
+          <div class="metric-cards usage-cards"><article><small>CPU</small><strong id="u-cpu">—</strong><span>millicores</span></article><article><small>MÉMOIRE</small><strong id="u-memory">—</strong><span>dernier échantillon</span></article><article><small>EGRESS</small><strong id="u-egress">—</strong><span>réseau</span></article><article><small>LOGS</small><strong id="u-logs">—</strong><span>volume</span></article></div>
+          <article class="panel chart-panel"><div class="panel-head"><div><small>HISTORIQUE</small><h3>Utilisation récente</h3></div><span id="usage-samples-count" class="muted">0 échantillon</span></div><div id="usage-chart" class="usage-chart"><div class="empty-state"><span>◌</span><h3>Aucune donnée</h3><p>Les métriques apparaîtront lorsque le worker enverra des échantillons.</p></div></div></article>
+        </section>
+
+        <section id="view-secrets" class="view">
+          <div class="view-heading"><div><span class="eyebrow">SÉCURITÉ</span><h1>Secrets</h1><p>SentriX n'affiche jamais la valeur d'un secret enregistré.</p></div><select id="secret-env-select"></select></div>
+          <div class="security-banner"><span>⌾</span><div><b>Valeurs write-only</b><p>Seules les métadonnées (nom, version, empreinte, provider) sont exposées par l'API publique.</p></div></div>
+          <article class="panel"><div class="panel-head"><div><small>ENVIRONNEMENT</small><h3>Secrets enregistrés</h3></div></div><div id="secrets-table" class="table-wrap"></div></article>
+        </section>
+
+        <section id="view-settings" class="view">
+          <div class="view-heading"><div><span class="eyebrow">ORGANISATION</span><h1>Configuration</h1><p>Informations et intégrations de votre espace.</p></div></div>
+          <div class="settings-grid">
+            <article class="panel"><div class="panel-head"><div><small>ESPACE</small><h3>Organisation active</h3></div></div><dl class="details"><div><dt>Nom</dt><dd id="settings-org-name">—</dd></div><div><dt>Slug</dt><dd id="settings-org-slug">—</dd></div><div><dt>Rôle</dt><dd id="settings-org-role">—</dd></div><div><dt>ID</dt><dd id="settings-org-id" class="mono">—</dd></div></dl></article>
+            <article class="panel"><div class="panel-head"><div><small>GITHUB</small><h3>Routage des dépôts</h3></div><span class="pill neutral">Control plane</span></div><p class="panel-copy">Rafraîchit les cibles GitHub configurées pour les environnements de cette organisation.</p><button class="btn btn-secondary full" data-action="github-refresh">Actualiser les cibles GitHub</button></article>
+            <article class="panel"><div class="panel-head"><div><small>API</small><h3>Accès technique</h3></div></div><p class="panel-copy">La documentation OpenAPI reste disponible pour les intégrations avancées.</p><a class="btn btn-secondary full centered-btn" href="/docs" target="_blank" rel="noreferrer">Ouvrir /docs ↗</a></article>
+            <article class="panel danger-panel"><div class="panel-head"><div><small>SESSION</small><h3>Compte Discord</h3></div></div><p class="panel-copy">Déconnecte uniquement votre session SentriX Hosting de ce navigateur.</p><button id="settings-logout-btn" class="btn btn-danger full">Se déconnecter</button></article>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="project-dialog" class="modal">
+    <form id="project-wizard" method="dialog">
+      <div class="modal-head"><div><small>NOUVELLE RESSOURCE</small><h2>Créer un projet SentriX</h2></div><button class="icon-btn" value="cancel" formnovalidate>×</button></div>
+      <div class="stepper"><span class="active" data-step-dot="1">1</span><i></i><span data-step-dot="2">2</span><i></i><span data-step-dot="3">3</span></div>
+      <div class="wizard-step active" data-step="1">
+        <h3>Projet GitHub</h3><p>Le dépôt peut être ajouté maintenant ou plus tard.</p>
+        <label>Nom du projet<input id="project-name" required maxlength="100" placeholder="SentriX Bot"></label>
+        <label>Dépôt GitHub <span>optionnel</span><input id="project-repo" maxlength="255" placeholder="owner/repository"></label>
+        <label>Branche par défaut<input id="project-branch" maxlength="100" value="main"></label>
+      </div>
+      <div class="wizard-step" data-step="2">
+        <h3>Bot Discord</h3><p>Choisissez le runtime de votre projet.</p>
+        <label>Nom du bot<input id="bot-name" required maxlength="100" placeholder="Mon Bot"></label>
+        <label>Bibliothèque<select id="bot-library"><option value="discordpy">discord.py</option><option value="discordjs">discord.js</option><option value="nextcord">nextcord</option><option value="disnake">disnake</option></select></label>
+      </div>
+      <div class="wizard-step" data-step="3">
+        <h3>Environnement</h3><p>Créez le premier environnement du bot.</p>
+        <div class="form-grid"><label>Type<select id="env-kind"><option value="prod">Production</option><option value="canary">Canary</option></select></label><label>Mode runtime<select id="env-runtime"><option value="generic">Generic</option><option value="managed">Managed</option></select></label></div>
+        <label>Discord Application ID <span>optionnel</span><input id="discord-app-id" maxlength="32" inputmode="numeric" placeholder="123456789012345678"></label>
+        <label>Provider de secrets<select id="secret-provider"><option value="env">Variables d'environnement</option><option value="tmpfs_file">Fichier tmpfs</option></select></label>
+      </div>
+      <div class="modal-actions"><button id="wizard-back" class="btn btn-secondary hidden" type="button">Retour</button><span></span><button id="wizard-next" class="btn btn-primary" type="button">Continuer</button><button id="wizard-create" class="btn btn-primary hidden" type="submit">Créer le projet</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="build-dialog" class="modal modal-small">
+    <form id="build-form" method="dialog">
+      <div class="modal-head"><div><small>PIPELINE</small><h2>Nouveau build</h2></div><button class="icon-btn" value="cancel" formnovalidate>×</button></div>
+      <p class="modal-copy">Le commit doit être un SHA Git complet de 40 caractères.</p>
+      <label>Environnement<select id="build-env" required></select></label>
+      <label>Commit SHA<input id="build-sha" required minlength="40" maxlength="40" pattern="[0-9a-f]{40}" placeholder="0123456789abcdef…"></label>
+      <div class="modal-actions"><span></span><button class="btn btn-primary" type="submit">Mettre en file</button></div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
