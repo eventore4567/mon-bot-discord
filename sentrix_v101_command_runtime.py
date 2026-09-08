@@ -1,20 +1,20 @@
-"""SentriX V101 — réparation centrale des commandes slash encore cassées après V100.
+"""SentriX V101 — réparation centrale et défensive des commandes slash.
 
-V101 traite trois défauts observés en production :
-- certains Commands de Cog ont perdu leur liaison au Cog lors de la façade slash et leur
-  callback est appelé sans ``self``/``ctx`` ;
-- des wrappers internes peuvent polluer la signature publique avec ``ctx``, ``*args`` ou
-  ``**kwargs`` alors que la déclaration de la commande n'expose aucune de ces options ;
-- les demandes IA de code peuvent dépasser le plafond texte historique alors que Discord
-  a déjà correctement différé l'interaction.
-
-La correction reste centrale : aucune commande métier n'est patchée individuellement.
+V101 traite les défauts observés en production sans patcher les commandes métier une par une :
+- les wrappers internes ne peuvent plus exposer ``ctx``, ``*args`` ou ``**kwargs`` comme
+  options Discord ;
+- une Command de Cog détachée ne récupère son Cog que si la correspondance est unique ;
+- les valeurs Discord déjà typées restent transportées nativement ;
+- les demandes IA de code disposent d'un délai raisonnable après defer ;
+- une trace runtime minimale permet de diagnostiquer les commandes restantes sans journaliser
+  le contenu utilisateur, les tokens, les paramètres SQL ni les prompts IA.
 """
 from __future__ import annotations
 
 import inspect
 import logging
 import shlex
+import time
 from typing import Any
 
 import discord
@@ -40,19 +40,17 @@ def _is_required(parameter: Any) -> bool:
 
 
 def _callback_declaration(command: commands.Command):
-    """Retourne la fonction de déclaration la plus proche et sa signature.
-
-    Plusieurs couches SentriX décorent les callbacks. ``inspect.unwrap`` restaure la vraie
-    méthode lorsque functools.wraps a été utilisé. Si la commande a perdu ``command.cog``,
-    le ``__qualname__`` reste souvent suffisant pour retrouver la méthode de classe.
-    """
+    """Retourne la déclaration de callback la plus proche et sa signature."""
     callback = getattr(command, "callback", None)
     if callback is None:
         return None, None
-    candidate = inspect.unwrap(callback)
+    try:
+        candidate = inspect.unwrap(callback)
+    except (TypeError, ValueError):
+        candidate = callback
 
-    # Si un wrapper non transparent garde malgré tout le qualname de la méthode, tenter la
-    # déclaration sur la classe du Cog encore attaché.
+    # Si le Cog est encore attaché, la méthode déclarée sur sa classe est plus fiable qu'un
+    # wrapper d'instance pour découvrir la signature publique.
     cog = getattr(command, "cog", None)
     method_name = getattr(candidate, "__name__", None) or getattr(callback, "__name__", None)
     if cog is not None and method_name:
@@ -61,8 +59,8 @@ def _callback_declaration(command: commands.Command):
             declared = getattr(declared, "callback", declared)
             try:
                 candidate = inspect.unwrap(declared)
-            except Exception:
-                pass
+            except (TypeError, ValueError):
+                candidate = declared
 
     try:
         return candidate, inspect.signature(candidate)
@@ -76,12 +74,32 @@ def _declared_user_params(command: commands.Command) -> list[tuple[str, Any]] | 
         return None
 
     params = list(signature.parameters.items())
-    # Une méthode de Cog déclarée ``self, ctx, ...`` ; une commande globale ``ctx, ...``.
     if params and params[0][0].casefold() in {"self", "cls"}:
         params.pop(0)
     if params and params[0][0].casefold() in {"ctx", "context"}:
         params.pop(0)
     return params
+
+
+def _is_opaque_runtime_wrapper(command: commands.Command) -> bool:
+    """Détecte un décorateur non transparent de forme ``(*args, **kwargs)``.
+
+    Une vraie commande legacy ``(ctx, *args)`` n'est PAS considérée opaque : la présence du
+    contexte explicite prouve que les varargs appartiennent à la déclaration métier.
+    """
+    _callback, signature = _callback_declaration(command)
+    if signature is None:
+        return False
+    params = list(signature.parameters.items())
+    if params and params[0][0].casefold() in {"self", "cls"}:
+        params.pop(0)
+    if params and params[0][0].casefold() in {"ctx", "context"}:
+        return False
+    return bool(params) and all(
+        parameter.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+        and str(name).casefold() in _WRAPPER_VAR_NAMES
+        for name, parameter in params
+    )
 
 
 def _effective_params(command: commands.Command) -> list[tuple[str, Any]]:
@@ -94,41 +112,49 @@ def _effective_params(command: commands.Command) -> list[tuple[str, Any]]:
     clean_map = {str(name): parameter for name, parameter in clean}
     declared = _declared_user_params(command)
 
-    # Si la déclaration d'origine est exploitable, elle est la source d'autorité sur les
-    # NOMS. On réutilise toutefois les Parameter discord.py déjà calculés (converters,
-    # defaults, required) lorsqu'ils correspondent.
     if declared is not None:
         declared_has_only_wrapper_vars = bool(declared) and all(
             parameter.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
-            and name.casefold() in _WRAPPER_VAR_NAMES
+            and str(name).casefold() in _WRAPPER_VAR_NAMES
             for name, parameter in declared
         )
-        clean_looks_polluted = any(
-            str(name).casefold() in _INTERNAL_CONTEXT_NAMES
-            or (
-                getattr(parameter, "kind", None)
-                in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
-                and str(name).casefold() in _WRAPPER_VAR_NAMES
-            )
+        clean_has_internal_context = any(
+            str(name).casefold() in _INTERNAL_CONTEXT_NAMES for name, _parameter in clean
+        )
+        clean_has_wrapper_vars = any(
+            getattr(parameter, "kind", None)
+            in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+            and str(name).casefold() in _WRAPPER_VAR_NAMES
             for name, parameter in clean
         )
 
-        # Une vraie déclaration ``*args`` est conservée en fallback texte. En revanche un
-        # wrapper runtime pollué ne doit jamais fabriquer /setup [args...] <kwargs>.
-        if not declared_has_only_wrapper_vars or clean_looks_polluted:
+        # Cas exact reproduit par /setup : un wrapper opaque (*args, **kwargs) a contaminé
+        # clean_params avec ctx/args/kwargs. Exposer ces noms serait à la fois faux et une
+        # fuite d'implémentation. On échoue fermé : zéro option publique.
+        if (
+            declared_has_only_wrapper_vars
+            and _is_opaque_runtime_wrapper(command)
+            and (clean_has_internal_context or clean_has_wrapper_vars)
+        ):
+            logger.warning(
+                "V101: paramètres internes d'un wrapper opaque masqués command=%s",
+                getattr(command, "qualified_name", "unknown"),
+            )
+            return []
+
+        # Une déclaration exploitable est la source d'autorité sur les NOMS ; les Parameter
+        # discord.py restent prioritaires pour converters/defaults lorsqu'ils correspondent.
+        if not declared_has_only_wrapper_vars:
             output: list[tuple[str, Any]] = []
             for name, parameter in declared:
                 lowered = str(name).casefold()
                 if lowered in _INTERNAL_CONTEXT_NAMES:
                     continue
                 output.append((str(name), clean_map.get(str(name), parameter)))
-            # Si la déclaration est propre (ex. setup(self, ctx)), une liste vide est une
-            # information valide : la commande n'a réellement aucune option publique.
-            if not declared_has_only_wrapper_vars:
-                return output
+            return output
 
-    # Repli prudent : retire uniquement les paramètres d'implémentation manifestes. Les
-    # vrais *args d'une commande legacy restent disponibles via l'option texte arguments.
+    # Repli prudent : masque toujours le contexte interne. Les vrais varargs legacy restent
+    # disponibles via l'option texte ``arguments``.
     return [
         (str(name), parameter)
         for name, parameter in clean
@@ -219,48 +245,102 @@ def _callback_needs_cog(command: commands.Command) -> bool:
     return bool(params and params[0].casefold() in {"self", "cls"})
 
 
+def _declared_method(candidate: Any, method_name: str):
+    if not method_name:
+        return None
+    declared = getattr(type(candidate), method_name, None)
+    declared = getattr(declared, "callback", declared)
+    if declared is None:
+        return None
+    try:
+        return inspect.unwrap(declared)
+    except (TypeError, ValueError):
+        return declared
+
+
+def _raise_ambiguous_cog(command: commands.Command, candidates: list[Any]) -> None:
+    names = sorted({type(item).__name__ for item in candidates})
+    logger.error(
+        "V101: liaison Cog ambiguë refusée command=%s candidates=%s count=%s",
+        getattr(command, "qualified_name", "unknown"),
+        names,
+        len(candidates),
+    )
+    raise commands.CommandError(
+        f"Liaison Cog ambiguë pour {getattr(command, 'qualified_name', 'commande')}."
+    )
+
+
 def _resolve_cog(command: commands.Command, ctx: commands.Context):
+    """Restaure un Cog détaché uniquement si la correspondance est unique.
+
+    Ordre de confiance : identité/code du callback > classe+méthode unique. Aucun premier
+    résultat arbitraire n'est accepté.
+    """
     cog = getattr(command, "cog", None)
     if cog is not None:
         return cog
 
     callback, _signature = _callback_declaration(command)
-    qualname = str(getattr(callback, "__qualname__", "") or getattr(command.callback, "__qualname__", ""))
-    owner_name = qualname.split(".", 1)[0] if "." in qualname else ""
     bot = getattr(ctx, "bot", None)
     if bot is None:
         return None
+    cogs = list(getattr(bot, "cogs", {}).values())
+    if not cogs:
+        return None
 
-    # Priorité au nom de classe présent dans le qualname : c'est stable même lorsqu'un
-    # Command a été copié/détaché pendant la construction V98.
-    for candidate in getattr(bot, "cogs", {}).values():
-        if owner_name and type(candidate).__name__ == owner_name:
-            logger.warning(
-                "V101: liaison Cog restaurée command=%s cog=%s",
-                command.qualified_name,
-                owner_name,
-            )
-            return candidate
-
-    # Repli par identité/code de méthode pour les wrappers qui ont perdu leur qualname.
-    target = inspect.unwrap(getattr(command, "callback", None))
+    try:
+        target = inspect.unwrap(getattr(command, "callback", None))
+    except (TypeError, ValueError):
+        target = getattr(command, "callback", None)
     target_code = getattr(target, "__code__", None)
-    target_name = getattr(target, "__name__", None)
-    for candidate in getattr(bot, "cogs", {}).values():
-        if not target_name:
-            continue
-        declared = getattr(type(candidate), target_name, None)
-        declared = getattr(declared, "callback", declared)
-        if declared is None:
-            continue
-        declared = inspect.unwrap(declared)
-        if declared is target or (target_code is not None and getattr(declared, "__code__", None) is target_code):
-            logger.warning(
-                "V101: liaison Cog restaurée par callback command=%s cog=%s",
-                command.qualified_name,
-                type(candidate).__name__,
-            )
-            return candidate
+    target_name = getattr(target, "__name__", None) or getattr(callback, "__name__", None)
+
+    exact: list[Any] = []
+    if target_name:
+        for candidate in cogs:
+            declared = _declared_method(candidate, target_name)
+            if declared is None:
+                continue
+            if declared is target or (
+                target_code is not None and getattr(declared, "__code__", None) is target_code
+            ):
+                exact.append(candidate)
+    if len(exact) == 1:
+        chosen = exact[0]
+        logger.warning(
+            "V101: liaison Cog restaurée par callback command=%s cog=%s",
+            getattr(command, "qualified_name", "unknown"),
+            type(chosen).__name__,
+        )
+        return chosen
+    if len(exact) > 1:
+        _raise_ambiguous_cog(command, exact)
+
+    # Repli moins fort : qualname + méthode, uniquement si un seul Cog enregistré convient.
+    qualname = str(
+        getattr(callback, "__qualname__", "")
+        or getattr(getattr(command, "callback", None), "__qualname__", "")
+    )
+    qual_parts = [part for part in qualname.split(".") if part and part != "<locals>"]
+    owner_name = qual_parts[-2] if len(qual_parts) >= 2 else ""
+    class_matches = [
+        candidate
+        for candidate in cogs
+        if owner_name
+        and type(candidate).__name__ == owner_name
+        and (not target_name or _declared_method(candidate, target_name) is not None)
+    ]
+    if len(class_matches) == 1:
+        chosen = class_matches[0]
+        logger.warning(
+            "V101: liaison Cog restaurée par classe unique command=%s cog=%s",
+            getattr(command, "qualified_name", "unknown"),
+            type(chosen).__name__,
+        )
+        return chosen
+    if len(class_matches) > 1:
+        _raise_ambiguous_cog(command, class_matches)
     return None
 
 
@@ -319,12 +399,8 @@ async def _bind_native_arguments(
 
 
 def _install_ai_timeout() -> None:
-    # Le HTTP 200 d'OpenAI peut être reçu avant la fin du corps de réponse. 45 s restait
-    # insuffisant pour certaines réponses de code Sol. Discord est déjà defer(), on peut
-    # donc laisser une marge raisonnable sans risquer l'expiration de l'interaction.
     old = float(getattr(ai_service, "REQUEST_TIMEOUT_SECONDS", 15.0))
     ai_service.REQUEST_TIMEOUT_SECONDS = max(old, _AI_TIMEOUT_SECONDS)
-    # Force la recréation du client afin que son objet timeout reprenne la nouvelle valeur.
     if getattr(ai_service, "_TEXT_CLIENT", None) is not None:
         ai_service._TEXT_CLIENT = None
     logger.info(
@@ -334,20 +410,69 @@ def _install_ai_timeout() -> None:
     )
 
 
+def _option_type_summary(values: dict) -> dict[str, str]:
+    """Résumé de diagnostic sans aucune valeur utilisateur."""
+    return {
+        str(name)[:64]: type(value).__name__
+        for name, value in values.items()
+    }
+
+
+def _install_runtime_trace() -> None:
+    current = v95._invoke_original
+    if getattr(current, "_sentrix_v101_trace", False):
+        return
+
+    async def traced_invoke(bot, command, interaction, option_names, kwargs):
+        trace_id = str(getattr(interaction, "id", "unknown"))
+        command_name = str(getattr(command, "qualified_name", "unknown"))
+        started = time.monotonic()
+        logger.info(
+            "V101 slash trace id=%s command=%s phase=start options=%s option_types=%s",
+            trace_id,
+            command_name,
+            tuple(str(name) for name in option_names),
+            _option_type_summary(kwargs),
+        )
+        try:
+            return await current(bot, command, interaction, option_names, kwargs)
+        except BaseException:
+            logger.exception(
+                "V101 slash trace id=%s command=%s phase=raised",
+                trace_id,
+                command_name,
+            )
+            raise
+        finally:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            logger.info(
+                "V101 slash trace id=%s command=%s phase=end duration_ms=%s",
+                trace_id,
+                command_name,
+                duration_ms,
+            )
+
+    traced_invoke._sentrix_v101_trace = True
+    traced_invoke._sentrix_original = current
+    if getattr(current, "_sentrix_grouped_fix", False):
+        traced_invoke._sentrix_grouped_fix = True
+    v95._invoke_original = traced_invoke
+
+
 def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
 
-    # V101 devient la source de vérité de signature après les gardes V97/V100.
     v95._build_signature = _build_signature
     v95._argument_text = _argument_text
     grouped._bind_native_arguments = _bind_native_arguments
 
     _install_ai_timeout()
+    _install_runtime_trace()
     _INSTALLED = True
     logger.warning(
-        "SentriX V101 installé : signatures slash assainies, liaison Cog restaurable et timeout IA renforcé."
+        "SentriX V101 installé : signatures assainies, Cog fail-closed, timeout IA renforcé et traces privées actives."
     )
 
 
@@ -357,4 +482,6 @@ __all__ = [
     "_build_signature",
     "_bind_native_arguments",
     "_resolve_cog",
+    "_is_opaque_runtime_wrapper",
+    "_option_type_summary",
 ]
