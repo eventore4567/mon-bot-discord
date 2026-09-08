@@ -391,21 +391,20 @@ class Economy(commands.Cog, name="Economy"):
         if now() - last < ROB_COOLDOWN:
             remaining = ROB_COOLDOWN - (now() - last)
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning(f'Vous devez attendre {remaining // 60} minutes avant de retenter un vol.')))
-        await self.bot.db.ensure_economy(ctx.guild.id, membre.id)
-        target_bal = await self.bot.db.get_balance(ctx.guild.id, membre.id)
         self.rob_cooldowns[ctx.author.id] = now()
-        if target_bal["cash"] < 50:
+        # attempt_rob lit le solde de la victime ET applique le résultat dans la même
+        # section critique (database/db.py::_economy_lock) : deux vols concurrents sur
+        # la même victime ne peuvent plus la voler deux fois (solde négatif possible
+        # avant ce correctif — vérifié par exécution).
+        result = await self.bot.db.attempt_rob(ctx.guild.id, ctx.author.id, membre.id)
+        if result["outcome"] == "too_poor":
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")))
-        success = random.random() < 0.4
-        if success:
-            amount = random.randint(1, min(target_bal["cash"], 300))
-            await self.bot.db.add_balance(ctx.guild.id, membre.id, -amount)
-            await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, amount)
+        if result["outcome"] == "success":
+            amount = result["amount"]
             await self.bot.db.log_transaction(ctx.guild.id, membre.id, ctx.author.id, "rob", amount, "Vol réussi")
             await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'🕵️ Vous avez volé **{stats_service.format_number(amount)} 🪙** à {membre.display_name} !')))
         else:
-            penalty = random.randint(20, 100)
-            await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, -penalty)
+            penalty = result["penalty"]
             await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, None, "rob_fail", penalty, "Vol raté, amende")
             await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f"🚨 Vous avez été attrapé et payé **{stats_service.format_number(penalty)} 🪙** d'amende !")))
 
@@ -940,30 +939,30 @@ class Economy(commands.Cog, name="Economy"):
     async def gamble(self, ctx: commands.Context, montant: int):
         if montant <= 0:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Le montant doit être positif.')))
-        await self.bot.db.ensure_economy(ctx.guild.id, ctx.author.id)
-        bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
-        if bal["cash"] < montant:
+        won = random.random() < 0.5
+        # gamble() vérifie le solde ET débite/crédite dans la même section critique
+        # (database/db.py::_economy_lock) : deux mises concurrentes ne peuvent plus
+        # rendre le solde négatif (vérifié par exécution avant ce correctif).
+        staked = await self.bot.db.gamble(ctx.guild.id, ctx.author.id, montant, won)
+        if not staked:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent.")))
-        if random.random() < 0.5:
-            await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, montant)
+        if won:
             await self.bot.db.log_transaction(ctx.guild.id, None, ctx.author.id, "gamble_win", montant, "Casino")
             await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'🎰 Vous avez gagné **{stats_service.format_number(montant)} 🪙** !')))
         else:
-            await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, -montant)
             await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, None, "gamble_loss", montant, "Casino")
             await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'🎰 Vous avez perdu **{stats_service.format_number(montant)} 🪙**.')))
 
     async def _deposit_to_bank(self, ctx: commands.Context, montant: str):
-        """Transfère un montant du portefeuille vers la banque."""
-        await self.bot.db.ensure_economy(ctx.guild.id, ctx.author.id)
-        bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
-        amount = _parse_amount(montant, bal["cash"])
-        if amount is None or amount <= 0 or amount > bal["cash"]:
+        """Transfère un montant du portefeuille vers la banque.
+
+        move_cash_bank() résout 'all'/le montant ET vérifie/écrit dans la même
+        section critique (database/db.py::_economy_lock) : deux dépôts concurrents
+        ne peuvent plus dupliquer d'argent (cash négatif, banque créditée deux fois —
+        vérifié par exécution avant ce correctif)."""
+        amount = await self.bot.db.move_cash_bank(ctx.guild.id, ctx.author.id, montant, direction="deposit")
+        if amount is None:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide. Utilisez un nombre positif ou `all`.')))
-        await self.bot.db.execute(
-            "UPDATE economy SET cash = cash - ?, bank = bank + ? WHERE guild_id = ? AND user_id = ?",
-            (amount, amount, ctx.guild.id, ctx.author.id),
-        )
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'{stats_service.format_number(amount)} 🪙 transférés dans votre banque. Cet argent ne peut pas être volé.')))
 
     @commands.hybrid_command(name="deposit", description="Déposer de l'argent à la banque (ou 'all').", with_app_command=False)
@@ -974,15 +973,9 @@ class Economy(commands.Cog, name="Economy"):
     @commands.hybrid_command(name="withdraw", description="Retirer de l'argent de la banque (ou 'all').", with_app_command=False)
     @app_commands.describe(montant="Le montant à retirer (ou 'all')")
     async def withdraw(self, ctx: commands.Context, montant: str):
-        await self.bot.db.ensure_economy(ctx.guild.id, ctx.author.id)
-        bal = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
-        amount = _parse_amount(montant, bal["bank"])
-        if amount is None or amount <= 0 or amount > bal["bank"]:
+        amount = await self.bot.db.move_cash_bank(ctx.guild.id, ctx.author.id, montant, direction="withdraw")
+        if amount is None:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide.')))
-        await self.bot.db.execute(
-            "UPDATE economy SET cash = cash + ?, bank = bank - ? WHERE guild_id = ? AND user_id = ?",
-            (amount, amount, ctx.guild.id, ctx.author.id),
-        )
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'💵 {stats_service.format_number(amount)} 🪙 retirés de la banque.')))
 
     @commands.hybrid_command(
