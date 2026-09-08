@@ -1069,7 +1069,7 @@ class Ai(commands.Cog, name="Ai"):
         await self._handle_ai_command(ctx, question)
 
     @ai_command.command(name="search", description="Poser une question à l'IA en forçant une vraie recherche web.")
-    @app_commands.describe(question="Votre question — une recherche web sera toujours effectuée, pas seulement si détectée automatiquement")
+    @app_commands.describe(question="Votre question (recherche web toujours forcée, pas seulement si détectée)")
     async def ai_search_command(self, ctx: commands.Context, *, question: str):
         await self._handle_ai_command(ctx, question, force_web_search=True)
 
