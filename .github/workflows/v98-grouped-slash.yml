@@ -38,4 +38,5 @@ jobs:
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-v99.db"
-        run: pytest -q tests/test_grouped_slash_arguments_v99.py
+          PYTHONPATH: "."
+        run: python -m pytest -q tests/test_grouped_slash_arguments_v99.py
