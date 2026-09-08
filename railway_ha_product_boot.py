@@ -65,6 +65,17 @@ from sentrix_v97_reliability import install as _install_v97_reliability  # noqa:
 _install_v97_reliability(dashboard_web)
 logger.warning("V97 fiabilité slash + dashboard Tickets simplifié branchés.")
 
+# V99 corrige le transport des sous-commandes slash groupées dans le VERITABLE bootstrap
+# Railway utilisé par la production. Les valeurs déjà transformées par Discord (texte,
+# Member, Role, Channel, Attachment...) sont transmises directement au callback historique
+# lorsque la signature est native ; les formes non natives gardent le parseur V95/V97.
+# Cette installation doit arriver avant la construction V98, car les callbacks slash créés
+# par V95 capturent v95._invoke_original au moment de leur exécution.
+from sentrix_grouped_slash_fix import install as _install_v99_grouped_transport  # noqa: E402
+
+_install_v99_grouped_transport()
+logger.warning("V99 transport slash groupé natif + erreurs compactes branché dans l'entrypoint Railway HA produit.")
+
 # V98 doit être installé dans CE véritable bootstrap produit, pas uniquement dans un wrapper
 # alternatif. Railway principal et standby utilisent historiquement ce module ; l'installation
 # ici garantit donc que le constructeur V95 est remplacé par l'arborescence sémantique V98
