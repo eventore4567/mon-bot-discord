@@ -76,6 +76,18 @@ from sentrix_grouped_slash_fix import install as _install_v99_grouped_transport 
 _install_v99_grouped_transport()
 logger.warning("V99 transport slash groupé natif + erreurs compactes branché dans l'entrypoint Railway HA produit.")
 
+# V100 corrige les deux régressions runtime réellement vues en production :
+# - plusieurs commandes historiques defer() alors que la passerelle V99 a déjà defer l'interaction ;
+# - certains anciens callbacks tentent encore edit_message(embed=...) sur un message déjà
+#   créé en Components V2. Les garde-fous sont installés avant V98 afin que les signatures
+#   slash soient aussi filtrées avant leur construction.
+from sentrix_v100_defer_fix import install as _install_v100_defer_fix  # noqa: E402
+from sentrix_v100_runtime_fix import install as _install_v100_runtime_fix  # noqa: E402
+
+_install_v100_defer_fix()
+_install_v100_runtime_fix()
+logger.warning("V100 interactions : defer idempotent, ack unique et compatibilité Components V2 branchés.")
+
 # V98 doit être installé dans CE véritable bootstrap produit, pas uniquement dans un wrapper
 # alternatif. Railway principal et standby utilisent historiquement ce module ; l'installation
 # ici garantit donc que le constructeur V95 est remplacé par l'arborescence sémantique V98
