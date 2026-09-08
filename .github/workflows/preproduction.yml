@@ -50,6 +50,9 @@ jobs:
       - name: Command contracts
         run: python tools/command_runtime_audit.py
 
+      - name: Command callback integrity audit (slash/prefix divergence)
+        run: python tools/command_callback_integrity_audit.py
+
       - name: Command error ownership
         run: python tools/command_error_ownership_gate.py
 

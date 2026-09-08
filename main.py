@@ -514,6 +514,24 @@ class BotAllInOne(commands.Bot):
         self.add_check(self.global_cooldown_check)
         self.add_check(self.global_permission_check)
 
+        # Corrige la cause structurelle commune trouvée le 2026-09-08 : une quinzaine
+        # de modules font `command.callback = wrapper` (dédoublonnage, sécurité, logs)
+        # sur des commandes DÉJÀ slash-actives. discord.py fige une copie de la
+        # référence de fonction dans app_command._callback à la construction — la
+        # réassignation ultérieure n'est jamais vue par le chemin slash, seulement par
+        # le chemin préfixe. Concrètement : /ban /kick /mute /warn n'étaient JAMAIS
+        # protégées par le dédoublonnage de sanctions (cogs/v17_moderation_security.py),
+        # seules +ban/+kick/+mute/+warn l'étaient. Voir
+        # cogs/hybrid_callback_resync.py et tools/command_callback_integrity_audit.py.
+        try:
+            from cogs.hybrid_callback_resync import resync as _resync_hybrid_callbacks
+
+            _resync_hybrid_callbacks(self)
+        except Exception:
+            logger.warning(
+                "Resynchronisation callback slash/préfixe impossible :\n" + traceback.format_exc()
+            )
+
         # Dernier alignement de l'AFFICHAGE slash, juste avant la synchronisation.
         # permission_guard.install() fait deja cette passe, mais il tourne pendant
         # le chargement : trois commandes enregistrees apres lui (+whitelist,

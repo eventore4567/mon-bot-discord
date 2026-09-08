@@ -104,6 +104,48 @@ class ModerationSlashRestorationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(mute_after)
 
 
+class ModerationSlashPrefixDivergenceTests(unittest.IsolatedAsyncioTestCase):
+    """Bug distinct trouvé le 2026-09-08, plus grave que le premier : /mute (déjà
+    slash-active dès la décoration, contrairement à /unmute) n'a jamais été touchée
+    par le TypeError de restauration — mais install_moderation_guards() fait
+    `command.callback = dedupe_callback` APRÈS que mute.app_command existait déjà.
+    discord.py fige une copie de la référence de fonction dans
+    HybridAppCommand._callback à la construction (voir cogs/hybrid_callback_resync.py
+    pour la preuve complète) : /mute a donc continué à exécuter l'ANCIEN callback,
+    SANS dédoublonnage de sanctions, pour toujours — alors que +mute était protégée.
+    Confirmé en production sur ban/kick/mute/warn/unban/clear (entre autres)."""
+
+    async def asyncSetUp(self):
+        intents = discord.Intents.none()
+        self.bot = commands.Bot(command_prefix="+", intents=intents)
+        await self.bot.add_cog(_FakeModerationCog())
+
+    async def test_mute_divergeait_reellement_avant_le_correctif_general(self):
+        mute = self.bot.get_command("mute")
+        original_callback = mute.callback
+
+        v17_moderation_security.install_moderation_guards(self.bot)
+
+        self.assertIsNot(mute.callback, original_callback)  # + est bien protégée
+        self.assertIs(
+            mute.app_command._callback, original_callback,
+            "/mute exécutait encore l'ancien callback, sans dédoublonnage — c'est le bug.",
+        )
+
+    async def test_hybrid_callback_resync_repare_mute_avec_le_vrai_wrapper_de_production(self):
+        from cogs.hybrid_callback_resync import resync
+
+        mute = self.bot.get_command("mute")
+        v17_moderation_security.install_moderation_guards(self.bot)
+        self.assertIsNot(mute.callback, mute.app_command._callback)  # bug présent
+
+        fixed = resync(self.bot)
+
+        self.assertIn("mute", fixed)
+        self.assertIs(mute.callback, mute.app_command._callback)
+        self.assertTrue(getattr(mute.app_command._callback, "_sentrix_v17_dedupe", False))
+
+
 class ModerationCatalogSurfaceTests(unittest.TestCase):
     def test_unmute_lock_unlock_clearwarnings_slowmode_sont_dans_la_surface_directe(self):
         for name in ("unmute", "lock", "unlock", "clearwarnings", "slowmode"):
