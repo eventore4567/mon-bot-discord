@@ -37,7 +37,11 @@ def _render_static_html(name: str, scripts: tuple[str, ...]) -> HTMLResponse:
     html = (_STATIC_DIR / name).read_text(encoding="utf-8")
     html = html.replace(
         "</head>",
-        '  <link rel="stylesheet" href="/static/enhancements.css">\n</head>',
+        (
+            '  <link rel="stylesheet" href="/static/enhancements.css">\n'
+            '  <link rel="stylesheet" href="/static/premium-v2.css">\n'
+            "</head>"
+        ),
         1,
     )
     script_tags = "\n".join(f'  <script src="{src}" defer></script>' for src in scripts)
@@ -75,7 +79,7 @@ def create_app(
     app = FastAPI(
         title="SentriX Hosting Control Plane",
         description="Provider-neutral application hosting control plane.",
-        version="0.5.0",
+        version="0.6.0",
         lifespan=lifespan,
     )
     if injected:
@@ -136,7 +140,10 @@ def create_app(
     async def landing_page() -> HTMLResponse:
         return _render_static_html(
             "index.html",
-            ("/static/landing-enhancements.js",),
+            (
+                "/static/landing-enhancements.js",
+                "/static/landing-premium-v2.js",
+            ),
         )
 
     @app.get("/app", include_in_schema=False)
@@ -146,6 +153,7 @@ def create_app(
             (
                 "/static/dashboard-enhancements.js",
                 "/static/generic-hosting.js",
+                "/static/premium-v2.js",
             ),
         )
 
