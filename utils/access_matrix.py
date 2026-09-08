@@ -58,7 +58,14 @@ PUBLIC_COMMANDS = frozenset({
     "stats", "me", "level", "rank", "leaderboard-levels", "level-roles",
     "profile", "set-bio", "rep", "reputation", "repleaderboard", "voice-time",
     # Tickets, événements, invitations
-    "ticket", "ticketcenter", "giveaway-list", "event-join", "event-leave",
+    # "giveaway" (bare, ou "giveaway list") n'affiche que les giveaways en cours —
+    # aussi public que l'ancienne commande "giveaway-list" qu'elle remplace. Les
+    # actions dangereuses du même groupe (create/end/reroll/cancel/blacklist/
+    # unblacklist) restent admin via SUBCOMMAND_TIERS plus bas, qui les rend PLUS
+    # strictes que cette racine — sans lui, TOUT +giveaway (y compris +giveaway
+    # create) était bloqué aux membres normaux, alors que +giveaway-list restait
+    # public : incohérence confirmée par exécution (utils/access_matrix.py::evaluate).
+    "ticket", "ticketcenter", "giveaway-list", "giveaway", "event-join", "event-leave",
     "event-list", "tournament-join", "tournament-list", "invites",
     "invite-leaderboard", "invited-by",
     # Statistiques publiques
@@ -151,6 +158,16 @@ SUBCOMMAND_TIERS: dict[str, str] = {
     # qu'aisetup (catégorie "ai" de CATEGORY_COMMANDS), pas public.
     "ai enable": "ai",
     "ai disable": "ai",
+    # "giveaway" (racine, PUBLIC_COMMANDS plus haut) affiche juste les giveaways en
+    # cours. Ces six actions modifient/détruisent un giveaway ou gèrent sa liste
+    # noire — elles doivent rester au niveau que "giveaway" avait AVANT de devenir
+    # public (categorie "configuration", comme "giveaway-create" l'ancien plat).
+    "giveaway create": "configuration",
+    "giveaway end": "configuration",
+    "giveaway reroll": "configuration",
+    "giveaway cancel": "configuration",
+    "giveaway blacklist": "configuration",
+    "giveaway unblacklist": "configuration",
 }
 
 DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
@@ -234,7 +251,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "levelrepair", "repconfig", "repadd", "repremove", "represet",
         "rephistory", "statsconfig", "levelroles", "addbonusinvites",
         "removebonusinvites", "invitebonushistory", "designsetup",
-        "design-theme", "iconsetup", "embedconfig", "giveaway", "giveaway-create",
+        "design-theme", "iconsetup", "embedconfig", "giveaway-create",
         "giveaway-end", "giveaway-reroll", "giveaway-cancel",
         "giveaway-blacklist", "giveaway-unblacklist", "event-create",
         "event-cancel", "tournament-create", "tournament-start", "announce",
