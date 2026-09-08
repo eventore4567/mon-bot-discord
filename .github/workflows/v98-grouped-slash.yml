@@ -23,12 +23,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Compile V98
+      - name: Compile V98/V99
         run: |
-          python -m compileall -q sentrix_v98_slash.py sentrix_v98_boot.py sentrix_v98_ha_product_boot.py tools/v98_grouped_slash_gate.py
+          python -m compileall -q sentrix_v98_slash.py sentrix_grouped_slash_fix.py sentrix_v98_boot.py sentrix_v98_ha_product_boot.py tools/v98_grouped_slash_gate.py
 
       - name: V98 semantic slash gate
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-v98.db"
         run: python tools/v98_grouped_slash_gate.py
+
+      - name: V99 grouped argument binding tests
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v99.db"
+        run: pytest -q tests/test_grouped_slash_arguments_v99.py
