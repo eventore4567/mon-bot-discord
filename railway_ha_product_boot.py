@@ -76,17 +76,23 @@ from sentrix_grouped_slash_fix import install as _install_v99_grouped_transport 
 _install_v99_grouped_transport()
 logger.warning("V99 transport slash groupé natif + erreurs compactes branché dans l'entrypoint Railway HA produit.")
 
-# V100 corrige les deux régressions runtime réellement vues en production :
-# - plusieurs commandes historiques defer() alors que la passerelle V99 a déjà defer l'interaction ;
-# - certains anciens callbacks tentent encore edit_message(embed=...) sur un message déjà
-#   créé en Components V2. Les garde-fous sont installés avant V98 afin que les signatures
-#   slash soient aussi filtrées avant leur construction.
+# V100 corrige les doubles acknowledgements/defer et les éditions d'anciens embeds sur
+# Components V2. Il reste installé avant V101 : V101 ne remplace que la découverte des
+# paramètres métier et la liaison des Commands de Cog.
 from sentrix_v100_defer_fix import install as _install_v100_defer_fix  # noqa: E402
 from sentrix_v100_runtime_fix import install as _install_v100_runtime_fix  # noqa: E402
 
 _install_v100_defer_fix()
 _install_v100_runtime_fix()
 logger.warning("V100 interactions : defer idempotent, ack unique et compatibilité Components V2 branchés.")
+
+# V101 est installé en dernier dans la pile runtime, juste avant V98. Il assainit les
+# signatures publiques à partir de la déclaration réelle du callback, restaure le Cog si
+# une copie de Command l'a perdu et donne davantage de marge aux réponses IA de code.
+from sentrix_v101_command_runtime import install as _install_v101_command_runtime  # noqa: E402
+
+_install_v101_command_runtime()
+logger.warning("V101 runtime commandes : signatures, liaison Cog et délai IA branchés.")
 
 # V98 doit être installé dans CE véritable bootstrap produit, pas uniquement dans un wrapper
 # alternatif. Railway principal et standby utilisent historiquement ce module ; l'installation

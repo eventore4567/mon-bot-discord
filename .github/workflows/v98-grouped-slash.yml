@@ -22,11 +22,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
+          pip install pytest pytest-asyncio
 
-      - name: Compile V98/V99
+      - name: Compile V98/V99/V101
         run: |
-          python -m compileall -q sentrix_v98_slash.py sentrix_grouped_slash_fix.py sentrix_v98_boot.py sentrix_v98_ha_product_boot.py tools/v98_grouped_slash_gate.py
+          python -m compileall -q sentrix_v98_slash.py sentrix_grouped_slash_fix.py sentrix_v98_boot.py sentrix_v98_ha_product_boot.py sentrix_v101_command_runtime.py web/giveaway_dashboard_v101.py cogs/dashboard_runtime_patch.py tools/v98_grouped_slash_gate.py
 
       - name: V98 semantic slash gate
         env:
@@ -40,3 +40,17 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-v99.db"
           PYTHONPATH: "."
         run: python -m pytest -q tests/test_grouped_slash_arguments_v99.py
+
+      - name: V101 command runtime regression tests
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v101.db"
+          PYTHONPATH: "."
+        run: python -m pytest -q tests/test_v101_command_runtime.py
+
+      - name: V101 giveaway dashboard regression tests
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v101-giveaway.db"
+          PYTHONPATH: "."
+        run: python -m pytest -q tests/test_giveaway_dashboard_v101.py
