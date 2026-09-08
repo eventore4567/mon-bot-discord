@@ -11,17 +11,15 @@ Ne pas changer le nom du bot pour le référencement. Le texte SEO reste dans le
 ## General Information — Description (max 400 caractères)
 
 SentriX — bot Discord tout-en-un pour la modération, la sécurité, les tickets, l’IA et l’automatisation.
-Site : https://mon-bot-discord-production-8944.up.railway.app/
 Dashboard : https://mon-bot-discord-production-8944.up.railway.app/app
 Hosting : https://sentrix-hosting-control-plane-production.up.railway.app/
 
 ## Bio / liens à afficher sur le profil SentriX
 
-- Accueil SentriX : https://mon-bot-discord-production-8944.up.railway.app/
 - Dashboard SentriX : https://mon-bot-discord-production-8944.up.railway.app/app
 - SentriX Hosting : https://sentrix-hosting-control-plane-production.up.railway.app/
 
-Ces trois liens sont les liens publics prioritaires du profil. Le Hosting est une plateforme d’hébergement généraliste distincte du dashboard de gestion du bot Discord.
+Ces deux liens sont les liens publics prioritaires du profil. Le Hosting est une plateforme d’hébergement généraliste distincte du dashboard de gestion du bot Discord.
 
 ## Discovery — Summary (max 200 caractères)
 
@@ -90,11 +88,11 @@ Ne jamais sélectionner un tag non représentatif juste pour gagner de la visibi
 
 Discord autorise jusqu'à 5 liens externes. Utiliser en priorité :
 
-1. Site officiel — https://mon-bot-discord-production-8944.up.railway.app/
-2. Dashboard — https://mon-bot-discord-production-8944.up.railway.app/app
-3. SentriX Hosting — https://sentrix-hosting-control-plane-production.up.railway.app/
-4. Support — https://mon-bot-discord-production-8944.up.railway.app/support
-5. Politique de confidentialité — https://mon-bot-discord-production-8944.up.railway.app/privacy
+1. Dashboard — https://mon-bot-discord-production-8944.up.railway.app/app
+2. SentriX Hosting — https://sentrix-hosting-control-plane-production.up.railway.app/
+3. Support — https://mon-bot-discord-production-8944.up.railway.app/support
+4. Politique de confidentialité — https://mon-bot-discord-production-8944.up.railway.app/privacy
+5. Conditions d'utilisation — https://mon-bot-discord-production-8944.up.railway.app/terms
 
 ## Support Server — BLOQUANT AVANT PUBLICATION
 
