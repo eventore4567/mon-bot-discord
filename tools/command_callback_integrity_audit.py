@@ -210,6 +210,21 @@ async def run() -> int:
                 + ", ".join(sorted(missing_slash_should_exist))
             )
 
+        # ------------------------------------------------------------------
+        # 5. self/ctx/interaction exposés à tort comme option Discord réelle
+        # ------------------------------------------------------------------
+        suspicious_option_names = {"self", "ctx", "context", "interaction", "cls", "cog"}
+        leaked_params: list[str] = []
+        for app_command in bot.tree.walk_commands():
+            for parameter in getattr(app_command, "parameters", None) or []:
+                if parameter.name.casefold() in suspicious_option_names:
+                    leaked_params.append(f"{app_command.qualified_name}:{parameter.name}")
+        if leaked_params:
+            errors.append(
+                "self/ctx/interaction exposé(s) comme option Discord réelle : "
+                + ", ".join(sorted(leaked_params))
+            )
+
         print(f"Commandes hybrides restées + uniquement (with_app_command=False, jamais restaurées): {len(no_app_command)}")
 
         for warning in warnings:
