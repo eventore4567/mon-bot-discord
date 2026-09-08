@@ -83,7 +83,7 @@ def build_about_embed(bot: commands.Bot) -> discord.Embed:
     embed = _base(
         bot,
         "À propos",
-        "Assistant complet pour protéger, configurer et animer une communauté Discord.",
+        "Bot tout-en-un : modération, sécurité, tickets, IA et automatisations. Gérez SentriX depuis le dashboard ou utilisez SentriX Hosting pour vos projets.",
     )
     embed.add_field(name="Version", value=f"V{VERSION} • Expérience visuelle", inline=True)
     embed.add_field(name="Créateur", value=PRIMARY_CREATOR_DISPLAY_NAME, inline=True)
