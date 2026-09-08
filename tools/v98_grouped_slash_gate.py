@@ -1,4 +1,4 @@
-"""Gate V98 : arborescence slash sémantique et entrypoint Railway HA."""
+"""Gate V98/V99 : arborescence slash sémantique et entrypoint Railway HA."""
 from __future__ import annotations
 
 import sys
@@ -106,16 +106,22 @@ def main() -> int:
         fail("bootstrap Railway HA produit n'importe pas explicitement V98", errors)
     if "_install_v98_grouped_slash()" not in product_source:
         fail("bootstrap Railway HA produit n'installe pas explicitement V98", errors)
+    if "from sentrix_grouped_slash_fix import install as _install_v99_grouped_transport" not in product_source:
+        fail("bootstrap Railway HA produit n'importe pas le transport V99", errors)
+    if "_install_v99_grouped_transport()" not in product_source:
+        fail("bootstrap Railway HA produit n'installe pas le transport V99", errors)
+    if product_source.find("_install_v99_grouped_transport()") > product_source.find("_install_v98_grouped_slash()"):
+        fail("transport V99 doit être installé avant la surface V98 dans le bootstrap produit", errors)
 
     if errors:
         for error in errors:
             print("[ERROR]", error)
-        print(f"ECHEC V98: {len(errors)} problème(s)")
+        print(f"ECHEC V98/V99: {len(errors)} problème(s)")
         return 1
 
     print(
-        "OK V98: racines normalisées, sous-groupes sémantiques, "
-        "aucun page-N, budget <=25, vrai bootstrap Railway HA verrouillé"
+        "OK V98/V99: racines normalisées, sous-groupes sémantiques, "
+        "aucun page-N, budget <=25, vrai bootstrap Railway HA verrouillé avec transport V99"
     )
     return 0
 
