@@ -1291,13 +1291,17 @@ class Levels(commands.Cog, name="Levels"):
     async def set_xp(self, ctx: commands.Context, membre: discord.Member, xp: int):
         if membre.bot:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Un bot ne peut pas avoir d'XP.")))
+        # +set-xp écrivait directement la colonne xp sans jamais recalculer le niveau —
+        # exactement le bug que _apply_xp_delta a été créé pour corriger sur +add-xp
+        # (voir son docstring), resté présent ici. En passant par _apply_xp_delta avec
+        # le delta nécessaire pour atteindre la valeur demandée, le niveau remonte
+        # correctement si la nouvelle XP dépasse le seuil du niveau courant.
         await self.bot.db.ensure_level(ctx.guild.id, membre.id)
-        await self.bot.db.execute(
-            "UPDATE levels SET xp = ?, updated_at = ? WHERE guild_id = ? AND user_id = ?",
-            (max(0, xp), now(), ctx.guild.id, membre.id),
-        )
-        stats_service.invalidate_rank_cache(self.bot, ctx.guild.id, membre.id)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'XP de {membre.mention} défini à **{max(0, xp)}**.')))
+        current = await self.bot.db.get_level(ctx.guild.id, membre.id)
+        delta = max(0, xp) - current["xp"]
+        new_xp, level, leveled_up = await self._apply_xp_delta(ctx.guild.id, membre.id, delta)
+        suffix = f" — passe au niveau **{level}** 🎉" if leveled_up else ""
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'XP de {membre.mention} défini à **{new_xp}** (niveau {level}){suffix}.')))
 
     @commands.hybrid_command(name="add-xp", description="[Admin] Ajouter de l'XP à un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé", xp="La quantité d'XP à ajouter")
