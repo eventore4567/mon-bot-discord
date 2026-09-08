@@ -19,29 +19,28 @@ __all__ = [
     "UserOut",
 ]
 
-Library = Literal["discordpy", "discordjs", "nextcord", "disnake"]
+Library = Literal[
+    "python",
+    "node",
+    "docker",
+    "discordpy",
+    "discordjs",
+    "nextcord",
+    "disnake",
+]
 EnvKind = Literal["prod", "canary"]
 RuntimeMode = Literal["managed", "generic"]
 SecretProvider = Literal["tmpfs_file", "env"]
 
 
 class _In(BaseModel):
-    """Charge utile entrante : tout champ inconnu est REFUSE.
-
-    Un client qui envoie org_id ou status doit recevoir une erreur, jamais voir
-    son champ ignore silencieusement.
-    """
+    """Charge utile entrante : tout champ inconnu est REFUSE."""
 
     model_config = ConfigDict(extra="forbid")
 
 
 class _Out(BaseModel):
-    """Reponse sortante : construite depuis une ligne SQL complete.
-
-    extra="ignore" est indispensable : les lignes portent des colonnes non
-    exposees (updated_at, github_installation_id...). Avec extra="forbid",
-    model_validate(dict(row)) leverait une ValidationError sur chaque reponse.
-    """
+    """Reponse sortante construite depuis une ligne SQL complete."""
 
     model_config = ConfigDict(from_attributes=True, extra="ignore")
 
@@ -57,9 +56,10 @@ class OrganizationOut(_Out):
 
 class UserOut(_Out):
     id: UUID
-    discord_user_id: str
     display_name: str
     email: str | None = None
+    auth_subject: str | None = None
+    discord_user_id: str | None = None
 
 
 class ProjectCreate(_In):
@@ -81,7 +81,7 @@ class ProjectOut(_Out):
 class BotCreate(_In):
     project_id: UUID
     name: str = Field(min_length=1, max_length=100)
-    library: Library = "discordpy"
+    library: Library = "python"
 
 
 class BotOut(_Out):

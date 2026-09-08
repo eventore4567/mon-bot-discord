@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from libs.db import Database
 from libs.status_store import MemoryStatusStore, RedisStatusStore, StatusStore
@@ -14,9 +17,12 @@ from services.api.auth import SessionCodec
 from services.api.deps import AppState
 from services.api.routers import (
     agents,
+    auth_routes,
     control,
+    generic_resources,
     hosting,
     hosting_github,
+    infra_status,
     instances,
     resources,
     webhooks,
@@ -24,19 +30,27 @@ from services.api.routers import (
 
 __all__ = ["create_app"]
 
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def _render_static_html(name: str, scripts: tuple[str, ...]) -> HTMLResponse:
+    html = (_STATIC_DIR / name).read_text(encoding="utf-8")
+    html = html.replace(
+        "</head>",
+        '  <link rel="stylesheet" href="/static/enhancements.css">\n</head>',
+        1,
+    )
+    script_tags = "\n".join(f'  <script src="{src}" defer></script>' for src in scripts)
+    html = html.replace("</body>", f"{script_tags}\n</body>", 1)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
 
 def create_app(
     db: Database | None = None,
     sessions: SessionCodec | None = None,
     status_store: StatusStore | None = None,
 ) -> FastAPI:
-    """Fabrique l'application. Les dependances sont injectables pour les tests.
-
-    IMPORTANT : quand db et sessions sont fournis, l'etat est pose IMMEDIATEMENT,
-    sans attendre le lifespan. httpx.ASGITransport n'execute pas les evenements
-    de lifespan : si l'etat n'etait construit que la, chaque test echouerait sur
-    un AttributeError a la premiere requete.
-    """
+    """Fabrique l'application. Les dependances sont injectables pour les tests."""
     injected = db is not None and sessions is not None
 
     @asynccontextmanager
@@ -59,8 +73,9 @@ def create_app(
                 await store.close()
 
     app = FastAPI(
-        title="SentriX Platform - Control Plane",
-        version="0.2.0",
+        title="SentriX Hosting Control Plane",
+        description="Provider-neutral application hosting control plane.",
+        version="0.5.0",
         lifespan=lifespan,
     )
     if injected:
@@ -71,13 +86,68 @@ def create_app(
             status_store=status_store or MemoryStatusStore(),
         )
 
-    app.include_router(resources.router)
+    @app.middleware("http")
+    async def security_headers(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+
+        # FastAPI's Swagger/ReDoc pages load their official static bundles from
+        # jsDelivr. The previous global 'self'-only CSP blocked those scripts,
+        # producing the completely blank /docs page seen in production.
+        if request.url.path in {"/docs", "/redoc"}:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; img-src 'self' data: https://fastapi.tiangolo.com; "
+                "script-src 'self' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; "
+                "form-action 'self'"
+            )
+        else:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; img-src 'self' data:; script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; connect-src 'self'; "
+                "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            )
+        return response
+
+    # Local auth and the legacy resource endpoints stay available to the current
+    # dashboard, but are intentionally omitted from public OpenAPI. The API docs
+    # expose the provider-neutral workspace/project/service surface instead.
+    app.include_router(auth_routes.router, include_in_schema=False)
+    app.include_router(resources.router, include_in_schema=False)
+    app.include_router(generic_resources.router)
     app.include_router(instances.router)
     app.include_router(agents.router)
     app.include_router(hosting.router)
     app.include_router(hosting_github.router)
+    app.include_router(infra_status.router)
     app.include_router(control.router)
     app.include_router(webhooks.router)
+
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+    @app.get("/", include_in_schema=False)
+    async def landing_page() -> HTMLResponse:
+        return _render_static_html(
+            "index.html",
+            ("/static/landing-enhancements.js",),
+        )
+
+    @app.get("/app", include_in_schema=False)
+    async def dashboard_page() -> HTMLResponse:
+        return _render_static_html(
+            "app.html",
+            (
+                "/static/dashboard-enhancements.js",
+                "/static/generic-hosting.js",
+            ),
+        )
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:

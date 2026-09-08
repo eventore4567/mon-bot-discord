@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080b14">
+  <meta name="description" content="SentriX Hosting — déployez et gérez vos applications depuis GitHub.">
+  <title>SentriX Hosting</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="landing">
+  <div class="noise"></div>
+  <header class="site-header wrap">
+    <a class="brand" href="/" aria-label="SentriX Hosting">
+      <span class="brand-mark">S</span>
+      <span>SentriX <b>Hosting</b></span>
+    </a>
+    <nav class="site-nav" aria-label="Navigation principale">
+      <a href="#features">Fonctions</a>
+      <a href="#security">Sécurité</a>
+      <a href="#status">Infrastructure</a>
+    </nav>
+    <div class="header-actions">
+      <a class="btn btn-ghost" href="/docs">API</a>
+      <a class="btn btn-primary" href="/app">Dashboard</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="status-dot"></span> Control plane en production</div>
+        <h1>Déploie tes applications.<br><span>Pas seulement des bots.</span></h1>
+        <p class="hero-text">SentriX Hosting devient une plateforme d'hébergement généraliste : projets GitHub, builds, releases, variables, runtime, métriques, rollback et workers isolés. Aucun compte Discord n'est nécessaire.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="/app">Ouvrir le dashboard</a>
+          <a class="btn btn-secondary btn-lg" href="/docs">Documentation API</a>
+        </div>
+        <div class="trust-row">
+          <span>GitHub</span><i></i><span>PostgreSQL RLS</span><i></i><span>gVisor</span><i></i><span>Rollback</span>
+        </div>
+      </div>
+
+      <div class="hero-console" aria-label="Aperçu du dashboard">
+        <div class="console-top"><span></span><span></span><span></span><strong>sentrix / production</strong></div>
+        <div class="console-body">
+          <div class="console-side">
+            <div class="mini-logo">S</div>
+            <span class="active"></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div class="console-main">
+            <div class="console-title-row"><div><small>SERVICE</small><h3>web-api</h3></div><span class="pill success">Healthy</span></div>
+            <div class="metric-grid compact">
+              <div><small>CPU</small><b>18%</b><em class="spark s1"></em></div>
+              <div><small>RAM</small><b>284 MB</b><em class="spark s2"></em></div>
+              <div><small>UPTIME</small><b>99.99%</b><em class="spark s3"></em></div>
+            </div>
+            <div class="deploy-card">
+              <div><span class="deploy-icon">↗</span><div><b>Release déployée</b><small>sha256:8de4…ad91</small></div></div>
+              <span class="pill success">Live</span>
+            </div>
+            <div class="terminal-preview">
+              <p><span>22:04:04</span> Build completed.</p>
+              <p><span>22:04:04</span> Container started on worker-01</p>
+              <p><span>22:04:04</span> <b>Health check 200 OK</b></p>
+              <p class="cursor-line"><span>22:04:05</span> Runtime ready <i></i></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section wrap">
+      <div class="section-heading"><span>Plateforme</span><h2>Un hébergeur généraliste, façon Railway.</h2><p>Le dépôt peut contenir une API Python, une app Node.js, un worker, un site ou un Dockerfile.</p></div>
+      <div class="feature-grid">
+        <article class="feature-card feature-wide"><div class="feature-icon">⌘</div><h3>CI/CD</h3><p>Commit GitHub → build → release immuable → déploiement → rollback.</p><div class="code-strip"><span>commit</span><b>→</b><span>build</span><b>→</b><span>release</span><b>→</b><span class="green">production</span></div></article>
+        <article class="feature-card"><div class="feature-icon">◫</div><h3>Services</h3><p>Python, Node.js ou Dockerfile avec Start, Stop et Restart.</p></article>
+        <article class="feature-card"><div class="feature-icon">◌</div><h3>Observabilité</h3><p>CPU, mémoire, réseau, logs et santé des workloads.</p></article>
+        <article class="feature-card"><div class="feature-icon">⌁</div><h3>GitHub</h3><p>Associe un dépôt et une branche à chaque projet.</p></article>
+        <article class="feature-card"><div class="feature-icon">◇</div><h3>Multi-projets</h3><p>Workspaces, projets, services et environnements isolés.</p></article>
+        <article class="feature-card"><div class="feature-icon">↺</div><h3>Rollback</h3><p>Reviens vers une release saine en quelques secondes.</p></article>
+      </div>
+    </section>
+
+    <section id="security" class="section wrap split-section">
+      <div class="section-heading left"><span>Sécurité</span><h2>Isolation par défaut.</h2><p>Le control plane ne lance pas les workloads avec ses propres privilèges. Les données sont isolées par workspace et les applications sont prévues pour tourner sur des workers gVisor dédiés.</p><a class="text-link" href="/docs">Voir l'API technique →</a></div>
+      <div class="security-stack">
+        <div><b>01</b><span><strong>Accès local</strong><small>Session signée, cookie HttpOnly et Secure.</small></span><i>OK</i></div>
+        <div><b>02</b><span><strong>Row-Level Security</strong><small>Isolation workspace par workspace dans PostgreSQL.</small></span><i>OK</i></div>
+        <div><b>03</b><span><strong>Secrets write-only</strong><small>Les valeurs sensibles ne sont jamais affichées en clair.</small></span><i>OK</i></div>
+        <div><b>04</b><span><strong>gVisor</strong><small>Exécution isolée sur les workers.</small></span><i>READY</i></div>
+      </div>
+    </section>
+
+    <section id="status" class="section wrap status-panel">
+      <div><span class="status-dot"></span><div><strong>Control plane opérationnel</strong><small>API, PostgreSQL et Redis disponibles</small></div></div>
+      <a class="btn btn-secondary" href="/healthz">Health check</a>
+    </section>
+
+    <section class="cta wrap">
+      <div><span>SentriX Hosting</span><h2>Prêt à déployer ?</h2><p>Ouvre le dashboard, ajoute un dépôt et crée ton premier service.</p></div>
+      <a class="btn btn-primary btn-lg" href="/app">Ouvrir SentriX</a>
+    </section>
+  </main>
+
+  <footer class="site-footer wrap"><a class="brand" href="/"><span class="brand-mark">S</span><span>SentriX Hosting</span></a><p>Control plane • hébergement d'applications</p></footer>
+</body>
+</html>
