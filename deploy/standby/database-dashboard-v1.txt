@@ -1,2 +1,3 @@
-SentriX standby redeploy marker for Database Center release.
-Release: b702186f11bed0ca95e1f257e8a4cd59d0972b93
+SentriX standby redeploy marker for grouped slash V99 release.
+Release: 5438a299b7675fabde38019e19291452808448b7
+Reason: refresh standby so active/passive HA nodes run the same grouped-slash transport fix.
