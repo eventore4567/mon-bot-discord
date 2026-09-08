@@ -1,0 +1,2 @@
+SentriX standby redeploy marker for Database Center release.
+Release: b702186f11bed0ca95e1f257e8a4cd59d0972b93
