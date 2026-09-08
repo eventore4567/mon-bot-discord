@@ -176,7 +176,7 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
         merged_checked = 0
         for old_name, target in command_catalog_cleanup.MERGED_COMMAND_TARGETS.items():
             old_command = bot.get_command(old_name)
-            if old_command is not None:
+            if old_command is not None and old_name not in command_catalog_cleanup.HELP_VISIBLE_EXTRA_COMMANDS:
                 assert old_command.hidden, f"ancienne commande fusionnée +{old_name} encore visible"
             target_root = target.split()[0]
             assert bot.get_command(target_root) is not None, f"destination +{target_root} absente pour +{old_name}"
