@@ -91,6 +91,14 @@ def build_about_embed(bot: commands.Bot) -> discord.Embed:
     embed.add_field(name="Membres", value=premium_style.format_number(members), inline=True)
     embed.add_field(name="Commandes", value=premium_style.format_number(len(bot.commands)), inline=True)
     embed.add_field(name="Interface", value="Texte + slash • Mobile", inline=True)
+    embed.add_field(
+        name="Liens",
+        value=(
+            "[Dashboard SentriX](https://mon-bot-discord-production-8944.up.railway.app/app) • "
+            "[SentriX Hosting](https://sentrix-hosting-control-plane-production.up.railway.app/)"
+        ),
+        inline=False,
+    )
     avatar = _avatar(bot)
     if avatar:
         embed.set_thumbnail(url=avatar)
