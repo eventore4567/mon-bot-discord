@@ -21,6 +21,7 @@ from discord.ext import commands, tasks
 
 from utils import design_system, premium_style
 from utils import sentrix_panels as panels
+from utils.music.audio_buffer import BufferedPCMAudio
 from utils.music import (
     MusicEngineError,
     NoPlayableSource,
@@ -161,23 +162,36 @@ class Music(commands.Cog, name="Music"):
         if seek_seconds > 0:
             options["before_options"] = f"{options['before_options']} -ss {seek_seconds:.2f}"
 
-        source = discord.PCMVolumeTransformer(
-            discord.FFmpegPCMAudio(url, **options), volume=queue.volume
+        ffmpeg_source = discord.FFmpegPCMAudio(url, **options)
+        buffered_source = BufferedPCMAudio(
+            ffmpeg_source,
+            prebuffer_seconds=4.0,
+            max_buffer_seconds=12.0,
+            startup_timeout=5.0,
+            label=f"guild={queue.guild_id}",
         )
+        source = discord.PCMVolumeTransformer(buffered_source, volume=queue.volume)
 
         def _after(error: Exception | None):
             if error:
                 logger.error("music playback error -> guild=%s: %s", queue.guild_id, error)
+            if buffered_source.underruns:
+                logger.warning(
+                    "music jitter buffer stats -> guild=%s underruns=%s",
+                    queue.guild_id,
+                    buffered_source.underruns,
+                )
             asyncio.run_coroutine_threadsafe(self._on_track_finished(queue), self.bot.loop)
 
         if not (queue.voice_client and queue.voice_client.is_connected()):
+            source.cleanup()
             return False
         queue.voice_client.play(source, after=_after)
         queue.current = track
         queue.elapsed_offset = seek_seconds
         queue.started_at = time.monotonic()
         logger.info(
-            "playback started -> %s (metadata=%s, playback=%s)",
+            "playback started -> %s (metadata=%s, playback=%s, jitter_buffer=4s/12s)",
             track.display_title(), track.provider, track.playback_provider,
         )
         return True
@@ -212,12 +226,10 @@ class Music(commands.Cog, name="Music"):
             started = await self._play_track(queue, candidate)
             if started:
                 return
-            # Source cassée entre résolution et lecture : on log et on retente avec
-            # la piste suivante plutôt que de laisser la file bloquée en silence.
             logger.warning("music track skipped, source unavailable -> %s", candidate.display_title())
             queue.current = None
             if queue.loop_track:
-                queue.loop_track = False  # évite une boucle infinie sur une piste cassée
+                queue.loop_track = False
 
     async def _autoplay_candidate(self, queue: GuildMusicQueue) -> Track | None:
         last = queue.history[-1] if queue.history else None
@@ -363,7 +375,7 @@ class Music(commands.Cog, name="Music"):
     async def music_skip(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
         if queue.voice_client and (queue.voice_client.is_playing() or queue.voice_client.is_paused()):
-            queue.loop_track = False  # sinon stop() relirait la même piste
+            queue.loop_track = False
             queue.voice_client.stop()
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Musique passée", kind="success")))
         else:
@@ -380,7 +392,7 @@ class Music(commands.Cog, name="Music"):
         queue.tracks.insert(0, previous_track)
         queue.loop_track = False
         if queue.voice_client and (queue.voice_client.is_playing() or queue.voice_client.is_paused()):
-            queue.voice_client.stop()  # déclenche after= -> _advance() reprendra tracks[0]
+            queue.voice_client.stop()
         else:
             await self._advance(queue)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Retour en arrière", description=f"⏮️ **{previous_track.display_title()}**", kind="success")))
