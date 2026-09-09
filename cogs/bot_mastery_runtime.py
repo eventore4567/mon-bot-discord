@@ -80,8 +80,9 @@ MONEY_COMMANDS = frozenset({
     "pay", "rob", "gamble", "daily", "weekly", "work", "sell", "deposit", "withdraw", "banque"
 })
 MUSIC_COMMANDS = frozenset({
-    "join", "leave", "play", "pause", "resume", "skip", "stop", "queue", "nowplaying",
-    "volume", "loop", "shuffle", "remove-from-queue", "clear-queue", "playlist-load",
+    # "music" est la racine du groupe /music (utils/music/) : root_parent.name vaut
+    # "music" pour toutes ses sous-commandes. "play" reste aussi une racine autonome.
+    "music", "play",
 })
 URGENT_TICKET_WORDS = (
     "urgent", "urgence", "raid", "nuke", "hack", "pirat", "compte vol", "arnaque",
@@ -734,6 +735,12 @@ def _install_music_mastery(bot: commands.Bot) -> None:
     if cog is None:
         return
     cls = type(cog)
+    if not hasattr(cls, "ytdl_extract") or not hasattr(cls, "play_next"):
+        # Le moteur musique multi-provider (utils/music/) a son propre retry/circuit-
+        # breaker par provider (ProviderManager.mark_unavailable, cooldown 120s) : ce
+        # patch ciblait l'ancien moteur mono-provider (yt-dlp seul) et n'a plus de cible.
+        _MUSIC_PATCHED = True
+        return
     original_extract = cls.ytdl_extract
     original_next = cls.play_next
     if getattr(original_extract, "_sentrix_mastery_music", False):
@@ -1100,9 +1107,13 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
 
     async def _persist_music(self, guild_id: int):
         music = self.bot.get_cog("Music")
-        if music is None:
+        states = getattr(music, "states", None)
+        if states is None:
+            # Moteur musique multi-provider (utils/music/) : pas de persistance
+            # inter-redémarrage compatible avec ce modèle pour l'instant, voir
+            # _install_music_mastery ci-dessus pour le contexte complet.
             return
-        state = music.states.get(guild_id)
+        state = states.get(guild_id)
         if state is None:
             return
         channel_id = None
@@ -1123,14 +1134,15 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
 
     async def _persist_all_music(self):
         music = self.bot.get_cog("Music")
-        if music is None:
+        states = getattr(music, "states", None)
+        if states is None:
             return
-        for guild_id in list(music.states):
+        for guild_id in list(states):
             await self._persist_music(guild_id)
 
     async def _restore_music(self):
         music = self.bot.get_cog("Music")
-        if music is None:
+        if music is None or not hasattr(music, "get_state"):
             return
         rows = await self.bot.db.fetchall("SELECT * FROM music_recovery_state WHERE updated_at >= ?", (now() - 3600,))
         for row in rows:
@@ -1165,9 +1177,10 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
 
     async def _recover_music_disconnects(self):
         music = self.bot.get_cog("Music")
-        if music is None:
+        states = getattr(music, "states", None)
+        if states is None:
             return
-        for guild_id, state in list(music.states.items()):
+        for guild_id, state in list(states.items()):
             if not (state.current or state.queue):
                 continue
             if state.voice_client and state.voice_client.is_connected():
@@ -1617,9 +1630,10 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
         if not self.bot.user or member.id != self.bot.user.id:
             return
         music = self.bot.get_cog("Music")
-        if music is None:
+        states = getattr(music, "states", None)
+        if states is None:
             return
-        state = music.states.get(member.guild.id)
+        state = states.get(member.guild.id)
         if state is None:
             return
         if after.channel:
@@ -1643,8 +1657,9 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
         if name in MUSIC_COMMANDS:
             try:
                 music = self.bot.get_cog("Music")
-                if music:
-                    state = music.states.get(ctx.guild.id)
+                states = getattr(music, "states", None)
+                if states is not None:
+                    state = states.get(ctx.guild.id)
                     if state and isinstance(ctx.author, discord.Member) and ctx.author.voice and ctx.author.voice.channel:
                         state._sentrix_last_channel_id = ctx.author.voice.channel.id
                 await self._persist_music(ctx.guild.id)
