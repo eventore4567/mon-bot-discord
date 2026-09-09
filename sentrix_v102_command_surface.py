@@ -24,13 +24,13 @@ ROOTS = {
     "music": "musique", "events": "evenements", "ticket": "tickets",
     "sanctions": "moderation", "moderation": "moderation", "security": "securite",
     "config": "configuration", "server": "serveur", "role": "roles", "roles": "roles",
-    "embeds": "messages", "owner": "proprietaire", "more": "autres",
+    "embeds": "messages", "owner": "proprietaire", "more": "divers",
     "giveaway": "concours", "invites": "invitations",
 }
 ROOT_BACK = {
     "tickets": "ticket", "moderation": "moderation", "securite": "security",
     "configuration": "config", "economie": "economy", "niveaux": "level",
-    "jeux": "game", "roles": "role", "serveur": "server",
+    "jeux": "game", "roles": "role", "serveur": "server", "musique": "music",
 }
 ROOT_DESC = {
     "ia": "Assistant IA, images et outils intelligents.",
@@ -49,7 +49,7 @@ ROOT_DESC = {
     "roles": "Rôles, panels et vérification.",
     "messages": "Embeds, annonces et design des messages.",
     "proprietaire": "Commandes réservées au propriétaire de SentriX.",
-    "autres": "Autres fonctions utiles de SentriX.",
+    "divers": "Fonctions complémentaires de SentriX.",
     "concours": "Concours et tirages au sort.",
     "invitations": "Invitations, classements et bonus.",
 }
@@ -96,10 +96,10 @@ LEAVES = {
     "removebonusinvites": "retirer-bonus", "invitebonushistory": "historique-bonus",
     "notifs-ping": "ajouter", "notifs-list": "liste", "notifs-remove": "supprimer",
     "welcome-config": "bienvenue", "join": "rejoindre", "leave": "quitter", "play": "jouer",
-    "resume": "reprendre", "skip": "suivant", "queue": "file", "nowplaying": "en-cours",
-    "loop": "boucle", "shuffle": "melanger", "remove-from-queue": "retirer-file",
-    "clear-queue": "vider-file", "playlist-save": "playlist-sauvegarder",
-    "playlist-load": "playlist-charger", "rps": "pierre-feuille-ciseaux", "guess-number": "devine-nombre",
+    "resume": "reprendre", "skip": "suivant", "queue": "voir", "nowplaying": "en-cours",
+    "loop": "boucle", "shuffle": "melanger", "remove-from-queue": "retirer",
+    "clear-queue": "vider", "playlist-save": "sauvegarder",
+    "playlist-load": "charger", "rps": "pierre-feuille-ciseaux", "guess-number": "devine-nombre",
     "trivia": "quiz", "tictactoe": "morpion", "hangman": "pendu", "math-quiz": "calcul",
     "slots": "machine-a-sous", "coinflip": "pile-ou-face", "dice": "des", "highlow": "plus-ou-moins",
     "memory": "memoire", "scramble": "mot-melange", "wordgame": "jeu-mots", "emojiquiz": "quiz-emoji",
@@ -132,10 +132,10 @@ BUCKETS = {
     ("economy", "admin"): "administration", ("economy", "general"): "outils",
     ("level", "profile"): "profil", ("level", "ranking"): "classement",
     ("level", "general"): "outils", ("game", "quick"): "rapides",
-    ("game", "races"): "courses", ("game", "adventure"): "aventure", ("game", "general"): "autres",
+    ("game", "races"): "courses", ("game", "adventure"): "aventure", ("game", "general"): "divers",
     ("role", "manage"): "gestion", ("role", "panels"): "panneaux", ("role", "reactions"): "reactions",
-    ("role", "general"): "autres", ("server", "build"): "creation", ("server", "channels"): "salons",
-    ("server", "backup"): "sauvegarde", ("server", "manage"): "gestion", ("server", "general"): "autres",
+    ("role", "general"): "divers", ("server", "build"): "creation", ("server", "channels"): "salons",
+    ("server", "backup"): "sauvegarde", ("server", "manage"): "gestion", ("server", "general"): "divers",
 }
 
 
@@ -184,7 +184,7 @@ def _patch_playlists(bot: commands.Bot) -> None:
         )
         return await _reply(
             self, ctx, "Playlist sauvegardée",
-            f"**{name}** contient **{len(tracks)} titre(s)**. Utilisez **playlist charger** pour la relancer.", "success",
+            f"**{name}** contient **{len(tracks)} titre(s)**. Utilisez **`/musique playlist charger`** pour la relancer.", "success",
         )
 
     async def load_fixed(self, ctx: commands.Context, *, nom: str):
@@ -291,6 +291,14 @@ def install() -> None:
 
     def bucket(root_name: str, target: v95.SlashTarget) -> str:
         original_root = ROOT_BACK.get(str(root_name).casefold(), str(root_name).casefold())
+        if original_root == "music":
+            command_name = str(target.original_name or "").casefold().strip()
+            simple = command_name.split(" ")[-1]
+            if simple in {"playlist-save", "playlist-load"}:
+                return "playlist"
+            if simple in {"queue", "shuffle", "remove-from-queue", "clear-queue"}:
+                return "file"
+            return "lecture"
         original_bucket = old_bucket(original_root, target)
         return BUCKETS.get((original_root, original_bucket), original_bucket)
 
@@ -312,9 +320,14 @@ def install() -> None:
     v98.semantic_leaf = leaf
     v98._chunk_group_names = chunks
     v98.FORCED_SEMANTIC_ROOTS = frozenset({
-        "tickets", "moderation", "securite", "configuration", "economie", "niveaux", "jeux", "roles", "serveur",
+        "tickets", "moderation", "securite", "configuration", "economie", "niveaux", "jeux", "roles", "serveur", "musique",
     })
     v95.GROUP_DESCRIPTIONS.update(ROOT_DESC)
+    v98.SUBGROUP_DESCRIPTIONS.update({
+        ("musique", "lecture"): "Lecture et contrôle du lecteur musical.",
+        ("musique", "file"): "Afficher et gérer la file d’attente.",
+        ("musique", "playlist"): "Sauvegarder et charger vos playlists.",
+    })
     logger.warning("V102 actif : slash nettoyé/francisé, doublons masqués et playlists réparées.")
 
 
