@@ -3,6 +3,7 @@ name: Soundboard validation
 on:
   pull_request:
     paths:
+      - 'main.py'
       - 'cogs/soundboard_logs.py'
       - 'utils/log_categories.py'
       - 'utils/log_service.py'
@@ -35,7 +36,7 @@ jobs:
 
       - name: Compile Soundboard modules
         run: |
-          python -m py_compile cogs/soundboard_logs.py utils/log_categories.py utils/log_service.py tests/test_soundboard_logs.py
+          python -m py_compile main.py cogs/soundboard_logs.py utils/log_categories.py utils/log_service.py tests/test_soundboard_logs.py
 
       - name: Run Soundboard tests
         env:

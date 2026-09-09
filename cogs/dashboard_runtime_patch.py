@@ -31,7 +31,7 @@ async def _manager_member(guild: discord.Guild, user_id: int) -> discord.Member 
 
 
 def install() -> None:
-    """Installe uniquement la politique d'accès serveur.
+    """Installe la politique d'accès serveur et les surfaces web tardives sûres.
 
     Historique important : cette extension réécrivait auparavant ``loadSession()``,
     ``loadGuilds()`` et ``selectGuild()`` dans ``dashboard.INDEX_HTML``. Comme elle est
@@ -41,8 +41,16 @@ def install() -> None:
     nombreuses réponses HTTP 499 et contenu central vide malgré des réponses API 200.
 
     La logique de chargement appartient maintenant exclusivement à ``web/dashboard.py``.
+    Le centre Giveaway V101 est ajouté ici car ``cogs.giveaway_center`` appelle cet
+    installateur avant le bind aiohttp ; il ajoute ses propres routes sans remplacer la
+    chaîne de chargement principale.
     """
     from web import dashboard
+    from web.giveaway_dashboard_v101 import install as install_giveaway_dashboard
+
+    # L'installation Giveaway est idempotente et doit être tentée même si la politique
+    # d'accès avait déjà été posée par un autre chemin de boot.
+    install_giveaway_dashboard(dashboard)
 
     if getattr(dashboard, "_sentrix_runtime_patch_installed", False):
         return
@@ -58,9 +66,10 @@ def install() -> None:
 
     # Ne jamais toucher à dashboard.INDEX_HTML ici. La chaîne frontend canonique et son
     # AbortController doivent rester la dernière autorité, y compris après le chargement
-    # de cette extension tardive.
+    # de cette extension tardive. Le centre Giveaway n'injecte qu'un lien de navigation
+    # et sa page dédiée, sans wrapper loadSession/loadGuilds/selectGuild.
     dashboard._sentrix_runtime_patch_installed = True
     logger.info(
-        "Dashboard runtime patch actif : permissions live uniquement, "
+        "Dashboard runtime patch actif : permissions live + Giveaway V101, "
         "aucune réécriture de loadSession/loadGuilds/selectGuild."
     )

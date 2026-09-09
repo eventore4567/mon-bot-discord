@@ -15,6 +15,6 @@ COPY . .
 # variable PORT au runtime, cette ligne ne sert que de documentation pour Docker.
 EXPOSE 8080
 
-# Démarre d'abord le serveur HTTP du dashboard, puis le bot Discord. Cela évite les
-# 502 Railway pendant que les cogs et les commandes slash terminent leur initialisation.
-CMD ["python3", "railway_boot.py"]
+# V98 installe la nouvelle arborescence slash puis délègue au bootstrap Railway historique.
+# Le dashboard démarre toujours avant Discord afin de préserver le healthcheck existant.
+CMD ["python3", "sentrix_v98_boot.py"]

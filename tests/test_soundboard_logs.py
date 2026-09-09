@@ -5,9 +5,11 @@ compatibilité des anciennes configurations et les quatre listeners introduits p
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import os
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -29,6 +31,20 @@ from utils.log_categories import (  # noqa: E402
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def test_soundboard_cog_is_loaded_by_main():
+    tree = ast.parse(Path("main.py").read_text(encoding="utf-8"))
+    extensions = None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if any(isinstance(target, ast.Name) and target.id == "EXTENSIONS" for target in node.targets):
+            extensions = ast.literal_eval(node.value)
+            break
+
+    assert extensions is not None, "main.py doit définir EXTENSIONS"
+    assert "cogs.soundboard_logs" in extensions
 
 
 class FakeGuild:

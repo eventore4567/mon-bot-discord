@@ -236,7 +236,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
     "configuration": frozenset({
         # Classees explicitement : elles tombaient en fail-closed, donc admin
         # par accident plutot que par declaration.
-        "server-managed", "verification-review", "verification-calibration",
+        "server-managed", "verification", "verification-review", "verification-calibration",
         "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs-status",
         "logsetup", "logs", "setwelcomechannel", "setgoodbyechannel",
         "setwelcomemessage", "setgoodbyemessage", "setticketlogchannel",

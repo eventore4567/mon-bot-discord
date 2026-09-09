@@ -45,6 +45,7 @@ EXTENSIONS = [
     "cogs.configuration",
     "cogs.server_builder",
     "cogs.logs",
+    "cogs.soundboard_logs",
     "cogs.utility",
     "cogs.guild_arrival",
     "cogs.notifications",
@@ -315,10 +316,6 @@ class SentriXContext(commands.Context):
         try:
             return await super().send(*args, **kwargs)
         except discord.HTTPException:
-            # Filet de sécurité : si la réponse en tant que "réponse à un message" échoue
-            # pour une raison quelconque (message d'origine supprimé entre-temps, par
-            # exemple par +clear, permissions insuffisantes...), on retombe sur un envoi
-            # normal plutôt que de faire planter la commande.
             kwargs.pop("reference", None)
             kwargs.pop("mention_author", None)
             return await super().send(*args, **kwargs)
@@ -329,9 +326,6 @@ async def get_prefix(bot: "BotAllInOne", message: discord.Message):
     if message.guild is None:
         return commands.when_mentioned_or(default)(bot, message)
 
-    # Sur un gros serveur, un message arrive plusieurs fois par seconde : on ne veut
-    # surtout pas interroger la base de données à chaque message. On garde donc le
-    # préfixe de chaque serveur en mémoire (rafraîchi uniquement par /setprefix).
     cached = bot.prefix_cache.get(message.guild.id)
     if cached is not None:
         return commands.when_mentioned_or(cached)(bot, message)
@@ -355,27 +349,14 @@ class BotAllInOne(commands.Bot):
         )
         self.db = Database(config.DATABASE_PATH)
         self.expected_extension_count = len(EXTENSIONS)
-        # Un gestionnaire unique garantit des réponses françaises et utiles aussi pour les commandes slash.
         self.tree.on_error = self.on_app_command_error
         self._cooldown_bucket = commands.CooldownMapping.from_cooldown(
             config.GLOBAL_COOLDOWN_RATE, config.GLOBAL_COOLDOWN_PER, commands.BucketType.user
         )
-        # Cache mémoire des préfixes par serveur (voir get_prefix ci-dessus) : évite
-        # une requête DB à chaque message sur un serveur actif.
         self.prefix_cache: dict[int, str] = {}
-        # Cache mémoire de la liste noire GLOBALE d'utilisation du bot (/bl) : ce check
-        # tourne sur QUASIMENT CHAQUE commande, tous serveurs confondus. Sur un gros
-        # serveur très actif, interroger la base à chaque fois serait inutilement lourd
-        # pour une liste qui change rarement (owner.py tient ce cache à jour).
         self.blacklist_cache: dict[int, str] = {}
 
     def _prune_redundant_commands(self) -> list[str]:
-        """Retire les anciennes entrées de commande sans supprimer leurs implémentations.
-
-        Les panneaux setup appellent directement leurs services et la base de données :
-        conserver les méthodes internes permet donc aux boutons persistants et aux anciens
-        panneaux de continuer à fonctionner, tout en allégeant +help et les commandes slash.
-        """
         removed_names: list[str] = []
         for requested_name in sorted(PRUNED_COMMANDS):
             command = self.get_command(requested_name)
@@ -404,14 +385,6 @@ class BotAllInOne(commands.Bot):
         await self.db.connect()
         logger.info("Base de données connectée.")
 
-        # DIAGNOSTIC DE PERSISTANCE — Railway (et la plupart des hébergeurs par conteneurs)
-        # utilisent un disque JETABLE par défaut : si aucun volume persistant n'est monté
-        # au bon endroit, le fichier SQLite repart de zéro à CHAQUE redémarrage/redéploiement,
-        # et TOUTES les données (niveaux, économie, avertissements, tickets...) sont perdues
-        # sans aucune erreur visible — ça ressemble juste à "les niveaux ne montent jamais".
-        # Ce log permet de vérifier en un coup d'œil dans les logs Railway si la base est
-        # bien conservée d'un déploiement à l'autre (le nombre de profils ne doit PAS
-        # retomber à 0 après un redéploiement si un volume persistant est correctement monté).
         try:
             level_count = await self.db.fetchone("SELECT COUNT(*) AS n FROM levels")
             economy_count = await self.db.fetchone("SELECT COUNT(*) AS n FROM economy")
@@ -430,14 +403,6 @@ class BotAllInOne(commands.Bot):
         rows = await self.db.blacklist_list()
         self.blacklist_cache = {r["user_id"]: (r["reason"] or "Aucune raison fournie") for r in rows}
 
-        # Installé explicitement ICI, avant la toute première extension, plutôt que de
-        # compter sur le monkeypatch de cogs/__init__.py (_load_extension_with_sentrix_patches
-        # appelle install_slash_command_budget avant chaque load_extension, mais seulement à
-        # partir du moment où le package cogs a déjà été importé une première fois — ce qui
-        # n'arrive qu'AU MILIEU de cette boucle, une fois qu'un premier appel a fini de tirer
-        # cogs/__init__.py). cogs.embed_builder (24e extension) tombait dans cette fenêtre et
-        # perdait TOUTE l'extension (ExtensionFailed), donc +embed aussi, pas seulement sa
-        # racine slash — voir CommandLimitReached dans les journaux Railway du 2026-09-06.
         from cogs.slash_command_budget import install as _install_slash_command_budget
 
         _install_slash_command_budget(self)
@@ -449,26 +414,15 @@ class BotAllInOne(commands.Bot):
             except Exception:
                 logger.error(f"Échec du chargement du module {ext} :\n{traceback.format_exc()}")
 
-        # Le nettoyage se fait après le chargement des cogs et avant tree.sync() : les
-        # commandes disparaissent donc à la fois du préfixe, de +help et des slash Discord.
         self._prune_redundant_commands()
         self._audit_command_permissions()
 
-        # Enregistrement des vues persistantes (boutons qui survivent aux redémarrages).
-        # Le panel d'ouverture est propre à chaque panel configuré (options dynamiques) :
-        # on le reconstruit avec ses VRAIES données depuis la base (restore_panel_views).
-        # La vue de contrôle est générique (custom_id fixes) : un seul enregistrement suffit.
         try:
             from cogs.tickets import TicketControlView
             self.add_view(TicketControlView())
             tickets_cog = self.get_cog("Tickets")
             if tickets_cog:
                 panels_restored = await tickets_cog.restore_panel_views()
-                # Diagnostic demandé : confirmer en un coup d'œil, à chaque démarrage, que le
-                # module tickets est bien chargé et que ses panels/vues survivent au redémarrage
-                # (utile pour retrouver la cause d'un "L'application ne répond plus" — si ce
-                # log manque ou affiche 0 alors qu'il devrait y avoir des panels, le problème
-                # vient du chargement, pas d'une commande précise).
                 ticket_cmd_count = len([c for c in self.commands if c.cog_name == "Tickets"])
                 logger.info(
                     "Cog Tickets : chargé — %s commande(s) tickets, %s panel(s) actif(s) restauré(s) en vue persistante.",
@@ -491,11 +445,6 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning("Impossible d'enregistrer la vue de giveaway.")
 
-        # Boutons de navigation du /setup (◀ 💾 ▶ 👁️ ○) : contrairement aux vues ci-dessus,
-        # ce sont des "dynamic items" (discord.py >= 2.4) dont le custom_id encode l'ID du
-        # message. add_dynamic_items() permet à Discord de les faire fonctionner même après
-        # un redémarrage, en reconstruisant l'assistant depuis la table setup_sessions
-        # (voir Configuration.handle_setup_nav) — c'est ce qui rend /setup persistant.
         try:
             from cogs.configuration import SetupNavButton
             self.add_dynamic_items(SetupNavButton)
@@ -522,15 +471,11 @@ class BotAllInOne(commands.Bot):
         self.add_check(self.global_cooldown_check)
         self.add_check(self.global_permission_check)
 
-        # Corrige la cause structurelle commune trouvée le 2026-09-08 : une quinzaine
-        # de modules font `command.callback = wrapper` (dédoublonnage, sécurité, logs)
-        # sur des commandes DÉJÀ slash-actives. discord.py fige une copie de la
-        # référence de fonction dans app_command._callback à la construction — la
-        # réassignation ultérieure n'est jamais vue par le chemin slash, seulement par
-        # le chemin préfixe. Concrètement : /ban /kick /mute /warn n'étaient JAMAIS
-        # protégées par le dédoublonnage de sanctions (cogs/v17_moderation_security.py),
-        # seules +ban/+kick/+mute/+warn l'étaient. Voir
-        # cogs/hybrid_callback_resync.py et tools/command_callback_integrity_audit.py.
+
+        # Corrige la cause structurelle commune : quand un wrapper remplace
+        # command.callback après la construction d'une HybridCommand, discord.py garde
+        # une ancienne référence dans app_command._callback. On réaligne tout juste
+        # avant le sync global afin que / et + exécutent exactement le même callback.
         try:
             from cogs.hybrid_callback_resync import resync as _resync_hybrid_callbacks
 
@@ -540,11 +485,6 @@ class BotAllInOne(commands.Bot):
                 "Resynchronisation callback slash/préfixe impossible :\n" + traceback.format_exc()
             )
 
-        # Dernier alignement de l'AFFICHAGE slash, juste avant la synchronisation.
-        # permission_guard.install() fait deja cette passe, mais il tourne pendant
-        # le chargement : trois commandes enregistrees apres lui (+whitelist,
-        # +unwhitelist, +server-managed) restaient visibles de tous les membres.
-        # Le garde les refusait bien au runtime — c'est l'affichage qui mentait.
         try:
             from cogs.permission_guard import apply_slash_default_permissions
 
@@ -565,18 +505,9 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.error(f"Échec de la synchronisation des commandes slash :\n{traceback.format_exc()}")
 
-        # Dashboard web (voir web/dashboard.py) : tourne dans le même processus, sur le
-        # port fourni par Railway (variable PORT). Ne bloque jamais le démarrage du bot
-        # si ça échoue (ex: port déjà utilisé en local).
         asyncio.create_task(start_dashboard(self))
 
     def _audit_command_permissions(self) -> None:
-        """Signale au démarrage toute nouvelle commande non classée.
-
-        Une commande non classée reste bloquée pour les membres ordinaires par
-        global_permission_check(). Ce diagnostic empêche qu'une future commande sensible
-        soit ajoutée silencieusement sans décision explicite sur son niveau d'accès.
-        """
         registered = {command.name.lower() for command in self.commands}
         unknown = sorted(registered - access_matrix.KNOWN_COMMANDS)
         if unknown:
@@ -593,7 +524,6 @@ class BotAllInOne(commands.Bot):
             )
 
     async def _has_manager_access(self, ctx: commands.Context, category: str) -> bool:
-        """Vérifie propriétaire, administrateur ou gestionnaire autorisé pour une catégorie."""
         if await is_verified_bot_owner(ctx):
             return True
         if not isinstance(ctx.author, discord.Member) or ctx.guild is None:
@@ -605,13 +535,6 @@ class BotAllInOne(commands.Bot):
         return await self.db.has_manager_permission(ctx.guild.id, ctx.author.id, category)
 
     async def global_permission_check(self, ctx: commands.Context) -> bool:
-        """Délégation stricte à la matrice unique (utils/access_matrix.py).
-
-        Ce check est enregistré par add_check() APRÈS le chargement des cogs.
-        permission_guard.install() a alors déjà remplacé cet attribut par sa
-        propre fonction ; ce corps ne sert que si le guard n'a pas pu
-        s'installer. Il doit donc rendre EXACTEMENT la même décision.
-        """
         command = ctx.command
         if command is None:
             return True
@@ -627,21 +550,6 @@ class BotAllInOne(commands.Bot):
         raise BotPermissionError(decision.message)
 
     async def _is_extra_bot_creator(self, user_id: int) -> bool:
-        """is_bot_creator() sans jamais bloquer une commande sur un incident SQLite.
-
-        Le créateur principal contourne déjà cette lecture (voir les deux appelants),
-        mais TOUT LE MONDE D'AUTRE la déclenchait à chaque commande, sans protection.
-        Un verrou SQLite ("database is locked", contention en écriture) faisait alors
-        planter le check global AVANT la commande elle-même — pour n'importe quel
-        membre, tandis que le créateur principal restait épargné par son raccourci.
-        C'est exactement ce qui peut produire « seul le propriétaire arrive à utiliser
-        les commandes » : un incident base de données invisible pour lui, bloquant pour
-        tous les autres.
-
-        Repli sûr : en cas d'erreur, l'utilisateur n'est PAS traité comme créateur — ça
-        n'accorde aucun privilège en trop — et le check appelant continue normalement
-        au lieu de planer.
-        """
         try:
             return await self.db.is_bot_creator(user_id)
         except Exception:
@@ -649,10 +557,6 @@ class BotAllInOne(commands.Bot):
             return False
 
     async def global_blacklist_check(self, ctx: commands.Context) -> bool:
-        """Bloque tout utilisateur inscrit sur la liste noire GLOBALE d'utilisation du bot
-        (/bl, cog Owner) — sur n'importe quelle commande, n'importe quel serveur."""
-        # Le créateur principal doit rester reconnu même si SQLite est verrouillée :
-        # sinon le check global plante AVANT la commande et produit une erreur générique.
         if ctx.author.id == PRIMARY_CREATOR_ID or ctx.author.id in config.OWNER_IDS:
             return True
         if await self._is_extra_bot_creator(ctx.author.id):
@@ -668,14 +572,6 @@ class BotAllInOne(commands.Bot):
         if await self._is_extra_bot_creator(ctx.author.id):
             return True
         bucket = self._cooldown_bucket.get_bucket(ctx.message if not ctx.interaction else ctx)
-        # bucket peut valoir None : cogs/no_cooldown_final.py vide volontairement ce mapping
-        # (CooldownMapping(None, BucketType.default)) pour desactiver tout cooldown global.
-        # Ce vidage tourne PENDANT le chargement des extensions, alors que ce check n'est
-        # enregistre qu'apres (voir add_check plus bas) : il ne peut donc jamais retirer ce
-        # check lui-meme, qui continuait a planter ici pour TOUT LE MONDE SAUF le proprietaire
-        # (seul le proprietaire evite cette ligne, via les deux `return True` ci-dessus) — un
-        # AttributeError n'etant pas un commands.CommandError, il ne declenchait meme pas
-        # on_command_error : la commande ne repondait rigoureusement rien.
         if bucket is None:
             return True
         retry_after = bucket.update_rate_limit()
@@ -684,13 +580,6 @@ class BotAllInOne(commands.Bot):
         return True
 
     async def get_context(self, message, *, cls=SentriXContext):
-        """Ajoute la résolution des alias de commandes (/alias, cog Owner) : si le mot tapé
-        après le préfixe ne correspond à aucune commande connue, on regarde si c'est un alias
-        configuré sur ce serveur et, si oui, on redirige vers la vraie commande.
-
-        cls=SentriXContext par défaut (au lieu de commands.Context) : voir la classe
-        SentriXContext plus haut — fait que chaque réponse à une commande texte soit
-        visuellement liée au message qui l'a déclenchée (réponse Discord + ping)."""
         ctx = await super().get_context(message, cls=cls)
         if ctx.command is None and ctx.guild is not None and ctx.invoked_with:
             row = await self.db.get_alias(ctx.guild.id, ctx.invoked_with.lower())
@@ -704,11 +593,6 @@ class BotAllInOne(commands.Bot):
         logger.info(f"Connecté en tant que {self.user} (ID: {self.user.id})")
         logger.info(f"Présent sur {len(self.guilds)} serveur(s).")
 
-        # Vérification de persistance (complète le diagnostic de setup_hook, ici self.guilds
-        # est enfin peuplé) : si le bot est réellement présent sur des serveurs mais qu'AUCUNE
-        # configuration ni donnée n'existe en base, c'est le signe très probable d'un disque
-        # Railway non persistant qui vient de repartir de zéro (perte niveaux/économie/etc.).
-        # Ne se déclenche qu'une fois par processus pour ne pas spammer en cas de reconnexion.
         if not getattr(self, "_persistence_check_done", False):
             self._persistence_check_done = True
             try:
@@ -741,11 +625,8 @@ class BotAllInOne(commands.Bot):
         await self.change_presence(
             activity=discord.Activity(type=discord.ActivityType.watching, name=f"{config.DEFAULT_PREFIX}help")
         )
-        # Identité visuelle : une fois connecté, on affiche l'avatar du bot dans le footer de tous les embeds.
         embeds.set_footer_icon(self.user.display_avatar.url)
 
-        # Recharge les réglages de branding persistés (/footer, /theme) : sans ça, ils
-        # reviendraient aux valeurs par défaut à chaque redémarrage/redéploiement Railway.
         saved_footer = await self.db.get_setting("footer_text")
         if saved_footer:
             embeds.set_footer_text(saved_footer)
@@ -763,22 +644,8 @@ class BotAllInOne(commands.Bot):
         await self.db.ensure_guild(guild.id)
         logger.info(f"Bot ajouté au serveur : {guild.name} ({guild.id})")
 
-    # on_member_join / on_member_remove : pas de méthode ici volontairement. Une méthode
-    # définie directement sur cette classe serait dispatchée par discord.py via
-    # getattr(self, "on_member_join") AVANT même bot.extra_events — donc invisible au
-    # verrou join_dedup et à _replace_welcome_listeners, qui ne surveillent que
-    # extra_events. C'était exactement ça qui causait un message de bienvenue en double
-    # sur CHAQUE arrivée (celui-ci, inconditionnel, plus celui du gagnant du verrou dans
-    # cogs/setup_v2_completion.py). L'implémentation officielle unique — message, image,
-    # rôle automatique, verrou HA/Redis, message de départ — vit dans
-    # cogs/setup_v2_completion.py (_send_welcome/_send_goodbye), branchée via
-    # bot.add_listener sur les mêmes colonnes de configuration (welcome_channel,
-    # welcome_message, welcome_image_url, autorole, goodbye_channel, goodbye_message).
-
     async def on_command_completion(self, ctx: commands.Context):
         if ctx.guild:
-            # Écriture en tâche de fond : la réponse à la commande est déjà partie,
-            # pas la peine de faire attendre quoi que ce soit pour un simple journal.
             asyncio.create_task(self._log_command(ctx))
 
     async def _log_command(self, ctx: commands.Context):
@@ -825,9 +692,6 @@ class BotAllInOne(commands.Bot):
             ))
 
         if isinstance(error, commands.UserNotFound):
-            # /bl (et blinfo/unbl/editbl) attendent un UTILISATEUR (mention ou ID) : ce n'est pas
-            # la même chose que la liste de mots interdits, qui est une commande différente.
-            # Erreur fréquente si on essaie de blacklister un mot avec /bl : on redirige clairement.
             if ctx.command and ctx.command.qualified_name in {"bl", "blinfo", "unbl", "editbl"}:
                 return await ctx.send(embed=embeds.error(
                     f"`{error.argument}` n'est pas un membre valide (mention `@membre` ou ID attendu).\n\n"
@@ -893,7 +757,6 @@ class BotAllInOne(commands.Bot):
         interaction: discord.Interaction,
         error: discord.app_commands.AppCommandError,
     ):
-        """Affiche les erreurs slash au membre au lieu du vague « interaction échouée »."""
         original = getattr(error, "original", error)
 
         if isinstance(original, BotPermissionError):
