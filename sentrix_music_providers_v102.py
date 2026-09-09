@@ -13,6 +13,9 @@ Le correctif est installé très tôt depuis le véritable bootstrap Railway et 
 les réglages FFmpeg anti-jitter au Cog Music moderne : reconnexion réseau plus tolérante,
 normalisation 48 kHz stéréo et resampling asynchrone pour absorber les micro-coupures de
 flux sans désactiver le contrôle de volume PCM.
+
+V104 branche en plus la persistance vocale : une connexion créée par Music reste dans
+le salon jusqu'à ``/music leave`` et est restaurée après restart/failover.
 """
 from __future__ import annotations
 
@@ -300,10 +303,21 @@ def _install_smooth_ffmpeg_defaults(cog) -> None:
         logger.exception("Installation des réglages audio V103 impossible.")
 
 
-def _patch_music_cog(cog) -> None:
+def _install_persistent_voice(bot, cog) -> None:
+    """Branche V104 sans dupliquer les commandes Music ni leur logique métier."""
+    try:
+        from sentrix_music_voice_persistence import install_on_cog
+
+        install_on_cog(bot, cog)
+    except Exception:
+        logger.exception("Installation de la persistance vocale V104 impossible.")
+
+
+def _patch_music_cog(bot, cog) -> None:
     # Cette partie s'applique aussi au nouveau moteur utils/music/, qui n'expose plus
     # _extract_info/ytdl_extract mais utilise toujours le FFMPEG_OPTIONS de cogs.music.
     _install_smooth_ffmpeg_defaults(cog)
+    _install_persistent_voice(bot, cog)
 
     # Compatibilité avec l'ancien moteur V102 encore présent dans certaines branches.
     if getattr(cog, "_sentrix_music_v102", False):
@@ -333,14 +347,14 @@ def install() -> None:
     async def add_cog_with_music_v102(bot, cog, *args, **kwargs):
         result = await original(bot, cog, *args, **kwargs)
         if cog.__class__.__name__ == "Music" or getattr(cog, "qualified_name", None) == "Music":
-            _patch_music_cog(cog)
+            _patch_music_cog(bot, cog)
         return result
 
     add_cog_with_music_v102._sentrix_music_v102_loader = True
     add_cog_with_music_v102.__wrapped__ = original
     commands.Bot.add_cog = add_cog_with_music_v102
     _INSTALLED = True
-    logger.info("Chargeur musique V102/V103 préparé avant le chargement des Cogs.")
+    logger.info("Chargeur musique V102/V103/V104 préparé avant le chargement des Cogs.")
 
 
 __all__ = ["install"]
