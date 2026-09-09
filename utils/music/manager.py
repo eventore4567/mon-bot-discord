@@ -116,7 +116,12 @@ class ProviderManager:
             logger.info("playback started candidate -> %s", best.playback_provider)
             track.playable_url = best.playable_url
             track.playback_provider = best.playback_provider
-            track.original_url = track.original_url or best.original_url
+            # refresh_playable_url() doit ré-extraire la PAGE du provider qui a
+            # réellement fourni l'audio. Garder ici l'URL Spotify/Deezer/YouTube de
+            # métadonnées ferait par exemple demander au provider SoundCloud de
+            # rafraîchir une URL YouTube juste avant FFmpeg, ce qui annulerait le
+            # fallback pourtant résolu avec succès.
+            track.original_url = best.original_url or track.original_url
             resolved.append(track)
 
         if not resolved:

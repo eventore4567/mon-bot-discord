@@ -4,6 +4,8 @@
   conserver les métadonnées publiques sans contourner le challenge et chercher une
   autre source autorisée.
 - Un seul résultat SoundCloud DRM ne doit pas tuer toute la recherche SoundCloud.
+- Quand le playback bascule vers un autre provider, le refresh FFmpeg doit réutiliser
+  l'URL de CE provider, pas l'URL de métadonnées d'origine.
 
 Aucun test ici ne touche au réseau réel.
 """
@@ -120,6 +122,10 @@ class ManagerCooldownPreservationTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.tracks[0].playback_provider, "soundcloud")
+        self.assertEqual(
+            result.tracks[0].original_url,
+            "https://soundcloud.com/example/faded",
+        )
         self.assertEqual(youtube.search_calls, 0)
         self.assertEqual(soundcloud.search_calls, 1)
         self.assertTrue(youtube.is_temporarily_unavailable)
