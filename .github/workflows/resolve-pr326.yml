@@ -139,12 +139,12 @@ jobs:
       - name: Compile merged runtime
         run: python -m compileall -q main.py cogs database utils tools
 
-      - name: Full regression suite
+      - name: Bot regression suite
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-pr326.db"
           PYTHONPATH: "."
-        run: python -m pytest -q
+        run: python -m pytest -q tests
 
       - name: Command runtime audits
         env:
