@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import time
@@ -98,6 +99,7 @@ def install_moderation_guards(bot: commands.Bot) -> None:
             continue
         original = command.callback
 
+        @functools.wraps(original)
         async def dedupe_callback(*args, __original=original, __name=command_name, **kwargs):
             ctx = _ctx_from_args(args, kwargs)
             target_id = _target_id_from_args(args, kwargs)

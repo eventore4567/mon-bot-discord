@@ -49,9 +49,9 @@ async def _edit_original(interaction: discord.Interaction, *, content: str) -> N
 async def _followup(interaction: discord.Interaction, *, content: str) -> None:
     _, raw_webhook = _raw_transports()
     if raw_webhook is not None:
-        await raw_webhook(interaction.followup, content=content, ephemeral=True)
+        await raw_webhook(interaction.followup, content=content)
         return
-    await interaction.followup.send(content=content, ephemeral=True)
+    await interaction.followup.send(content=content)
 
 
 async def _deliver_plain(interaction: discord.Interaction, text: str) -> None:
@@ -67,8 +67,11 @@ def _build_callback(bot: commands.Bot):
     @app_commands.describe(question="Votre question, sur n'importe quel sujet")
     async def direct_sentrix(interaction: discord.Interaction, question: str) -> None:
         # Un seul acquittement de l'interaction. Aucun Context.defer/typing n'intervient.
+        # ephemeral=False : +sentrix et le déclencheur passif « SentriX ... » répondent
+        # tous deux publiquement (cogs/ai.py) — /sentrix doit faire pareil, pas répondre
+        # en privé à l'appelant seul (incohérence trouvée par l'audit du 2026-09-09).
         if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            await interaction.response.defer(thinking=True)
 
         ai_cog = bot.get_cog("Ai")
         if ai_cog is None or not hasattr(ai_cog, "ask_ai"):

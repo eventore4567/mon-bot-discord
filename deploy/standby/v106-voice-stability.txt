@@ -1,0 +1,2 @@
+Deploy marker for V106 voice stability / PR #336.
+Keeps planned HA handoffs from interrupting persistent voice sessions.

@@ -119,16 +119,25 @@ async def _enforce_gateway_transport(bot: commands.Bot) -> None:
         else:
             state["clear_attempted"] = False
 
-        # Une fois le transport Gateway confirme, republie aussi le catalogue actuel afin
-        # que les commandes visibles correspondent exactement au runtime qui les recevra.
-        synced = await bot.tree.sync()
-        state["resynced_commands"] = len(synced)
+        # Un second sync global inconditionnel ici doublait systématiquement celui déjà
+        # fait par main.py au démarrage (aucune mutation de l'arbre entre les deux sur
+        # le chemin sain) — voir l'audit de synchronisation des commandes slash. Il
+        # n'est utile que quand un ancien Interactions Endpoint HTTP vient d'être
+        # retiré : Discord doit alors reconfirmer que le catalogue sert bien via le
+        # Gateway. Sur le chemin sain (aucun endpoint trouvé), rien n'a changé depuis
+        # le sync de main.py : inutile de reproduire l'appel réseau.
+        synced_count = state.get("resynced_commands") or 0
+        if endpoint_configured:
+            synced = await bot.tree.sync()
+            synced_count = len(synced)
+            state["resynced_commands"] = synced_count
         state["gateway_confirmed"] = True
         logger.info(
-            "Transport interactions Discord confirme sur Gateway (application=%s, endpoint_http_avant=%s, slash=%s).",
+            "Transport interactions Discord confirme sur Gateway (application=%s, endpoint_http_avant=%s, resync_effectue=%s, slash=%s).",
             application_id,
             endpoint_configured,
-            len(synced),
+            endpoint_configured,
+            synced_count,
         )
     except discord.HTTPException as exc:
         state["gateway_confirmed"] = False

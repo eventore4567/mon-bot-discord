@@ -35,7 +35,14 @@ MEMBER_JOURNEYS = {
     "tickets": ("ticket",),
     "evenements": ("giveaway-list", "event-join", "event-list", "tournament-join", "tournament-list"),
     "invites": ("invites", "invite-leaderboard", "invited-by"),
-    "musique": ("join", "play", "queue", "nowplaying"),
+    # +play reste une racine directe autonome ; le reste vit sous le groupe /music
+    # (voir cogs/music.py) — noms qualifiés "music <sous-commande>" pour que
+    # bot.get_command() résolve la vraie sous-commande plutôt que la racine seule.
+    "musique": (
+        "play", "music play", "music pause", "music skip", "music stop",
+        "music queue", "music nowplaying", "music volume", "music loop",
+        "music shuffle",
+    ),
     "jeux_classiques": ("rps", "guess-number", "trivia", "blackjack", "slots"),
     "jeux_recuperes": ("coinflip", "dice", "luckyroll", "connect4", "adventure", "gameprofile", "gametop", "dailygames"),
 }
@@ -149,7 +156,11 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
             for name in commands:
                 command = bot.get_command(name)
                 assert command is not None, f"parcours membre {journey}: +{name} absent"
-                assert name in main.PUBLIC_COMMANDS, f"parcours membre {journey}: +{name} bloqué par la politique d'accès"
+                # La politique d'accès classe par racine ("music"), pas par nom qualifié
+                # complet ("music play") : un groupe public rend déjà publiques toutes
+                # ses sous-commandes (voir utils/access_matrix.py et main.py).
+                root = name.split(maxsplit=1)[0]
+                assert root in main.PUBLIC_COMMANDS, f"parcours membre {journey}: +{name} bloqué par la politique d'accès"
                 category = help_complete._category_for(command)
                 assert category.key != "other", f"parcours membre {journey}: +{name} mal classé dans +help"
                 member_checked += 1
@@ -176,7 +187,7 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
         merged_checked = 0
         for old_name, target in command_catalog_cleanup.MERGED_COMMAND_TARGETS.items():
             old_command = bot.get_command(old_name)
-            if old_command is not None:
+            if old_command is not None and old_name not in command_catalog_cleanup.HELP_VISIBLE_EXTRA_COMMANDS:
                 assert old_command.hidden, f"ancienne commande fusionnée +{old_name} encore visible"
             target_root = target.split()[0]
             assert bot.get_command(target_root) is not None, f"destination +{target_root} absente pour +{old_name}"

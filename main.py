@@ -138,10 +138,12 @@ PUBLIC_COMMANDS = frozenset({
     "emoji-race", "adventure", "dungeon", "mining", "fishing", "treasure",
     "hunt", "explore", "gamehistory", "gameprofile", "gamestats", "gametop",
     "dailygames",
-    # Musique
-    "join", "leave", "play", "pause", "resume", "skip", "stop", "queue",
-    "nowplaying", "volume", "loop", "shuffle", "remove-from-queue",
-    "clear-queue", "playlist-save", "playlist-load",
+    # Musique — "music" est la racine du groupe (join/leave/play/pause/resume/
+    # skip/previous/stop/queue/nowplaying/volume/loop/shuffle/remove/clear/
+    # seek/autoplay en heritent tous comme sous-commandes publiques, exactement
+    # comme "ai" plus haut). "play" reste aussi une commande racine autonome
+    # (+play / /play), alias direct de "music play".
+    "music", "play",
 })
 
 OWNER_ONLY_COMMANDS = frozenset({
@@ -451,9 +453,39 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning("Impossible d'enregistrer les boutons de /setup :\n" + traceback.format_exc())
 
+        # Étoiles de notation envoyées en DM après la fermeture d'un ticket (RatingView) :
+        # même mécanisme que SetupNavButton, custom_id encodant la note ET l'ID du ticket.
+        try:
+            from cogs.tickets import TicketRatingButton
+            self.add_dynamic_items(TicketRatingButton)
+        except Exception:
+            logger.warning("Impossible d'enregistrer les boutons de notation tickets :\n" + traceback.format_exc())
+
+        # Boutons "Copier l'ID" des logs (utils/log_service.py::RevealIdButton) : même
+        # mécanisme, custom_id encodant l'ID à réafficher.
+        try:
+            from utils.log_service import RevealIdButton
+            self.add_dynamic_items(RevealIdButton)
+        except Exception:
+            logger.warning("Impossible d'enregistrer les boutons de logs :\n" + traceback.format_exc())
+
         self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
         self.add_check(self.global_permission_check)
+
+
+        # Corrige la cause structurelle commune : quand un wrapper remplace
+        # command.callback après la construction d'une HybridCommand, discord.py garde
+        # une ancienne référence dans app_command._callback. On réaligne tout juste
+        # avant le sync global afin que / et + exécutent exactement le même callback.
+        try:
+            from cogs.hybrid_callback_resync import resync as _resync_hybrid_callbacks
+
+            _resync_hybrid_callbacks(self)
+        except Exception:
+            logger.warning(
+                "Resynchronisation callback slash/préfixe impossible :\n" + traceback.format_exc()
+            )
 
         try:
             from cogs.permission_guard import apply_slash_default_permissions

@@ -48,9 +48,13 @@ async def run() -> int:
         if not command_catalog_cleanup._INSTALLED:
             errors.append("politique canonique du catalogue non installée")
 
-        if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != 100:
+        # 97 depuis le passage volontaire de la musique en groupe /music (pause/skip/
+        # stop/queue/nowplaying/volume/loop/shuffle/join/leave ne sont plus des racines
+        # directes) : seul +play reste une racine directe autonome. Ne pas relever ce
+        # nombre en réintroduisant d'anciennes commandes plates pour "revenir à 100".
+        if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != 97:
             errors.append(
-                "la surface normale doit contenir exactement 100 commandes directes, "
+                "la surface normale doit contenir exactement 97 commandes directes, "
                 f"obtenu: {len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)}"
             )
         if len(command_catalog_cleanup.GAME_COMMANDS) != 43:
@@ -131,7 +135,8 @@ async def run() -> int:
 
         merged_visible = sorted(
             name for name in command_catalog_cleanup.MERGED_COMMANDS
-            if (command := bot.get_command(name)) is not None and not command.hidden
+            if name not in command_catalog_cleanup.HELP_VISIBLE_EXTRA_COMMANDS
+            and (command := bot.get_command(name)) is not None and not command.hidden
         )
         if merged_visible:
             errors.append("anciennes commandes fusionnées encore visibles: " + ", ".join(merged_visible))

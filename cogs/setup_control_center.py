@@ -109,13 +109,28 @@ async def _can_setup(bot, member, guild):
 
     ctx = Ctx()
     ctx.author, ctx.bot, ctx.guild = member, bot, guild
-    return bool(await checks.is_verified_bot_owner(ctx) or member.guild_permissions.administrator)
+    if await checks.is_verified_bot_owner(ctx) or member.guild_permissions.administrator:
+        return True
+
+    # +setup et /setup appartiennent à la catégorie "configuration" de la matrice
+    # centrale (utils/access_matrix.py), qui exige "Gérer le serveur" — pas
+    # Administrateur. C'est déjà ce que Discord affiche (default_permissions posé par
+    # cogs/permission_guard.py), ce que utils/access_matrix.evaluate()/secure_evaluate_v68
+    # décident, et ce que teste le projet lui-même
+    # (test_manage_guild_allows_configuration_command). Seul ce second verrou local,
+    # plus strict et jamais synchronisé avec les trois, bloquait encore à tort un staff
+    # "Gérer le serveur" sans "Administrateur" — import différé pour éviter le cycle
+    # avec permission_setup_hardening_v65 (qui importe déjà ce module).
+    from .permission_setup_hardening_v65 import CATEGORY_REQUIRED_PERMISSION
+
+    required = CATEGORY_REQUIRED_PERMISSION.get("configuration", "manage_guild")
+    return bool(getattr(member.guild_permissions, required, False))
 
 
 async def _permission_error(target):
     panel = embeds.error(
         "Vous ne pouvez pas ouvrir la configuration de ce serveur.\n\n"
-        "**Permission requise :** Administrateur"
+        "**Permission requise :** Administrateur ou Gérer le serveur"
     )
     if isinstance(target, commands.Context):
         return await panels.envoyer(target, panels.depuis_embed(panel))

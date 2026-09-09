@@ -58,7 +58,14 @@ PUBLIC_COMMANDS = frozenset({
     "stats", "me", "level", "rank", "leaderboard-levels", "level-roles",
     "profile", "set-bio", "rep", "reputation", "repleaderboard", "voice-time",
     # Tickets, événements, invitations
-    "ticket", "ticketcenter", "giveaway-list", "event-join", "event-leave",
+    # "giveaway" (bare, ou "giveaway list") n'affiche que les giveaways en cours —
+    # aussi public que l'ancienne commande "giveaway-list" qu'elle remplace. Les
+    # actions dangereuses du même groupe (create/end/reroll/cancel/blacklist/
+    # unblacklist) restent admin via SUBCOMMAND_TIERS plus bas, qui les rend PLUS
+    # strictes que cette racine — sans lui, TOUT +giveaway (y compris +giveaway
+    # create) était bloqué aux membres normaux, alors que +giveaway-list restait
+    # public : incohérence confirmée par exécution (utils/access_matrix.py::evaluate).
+    "ticket", "ticketcenter", "giveaway-list", "giveaway", "event-join", "event-leave",
     "event-list", "tournament-join", "tournament-list", "invites",
     "invite-leaderboard", "invited-by",
     # Statistiques publiques
@@ -73,10 +80,12 @@ PUBLIC_COMMANDS = frozenset({
     "emoji-race", "adventure", "dungeon", "mining", "fishing", "treasure",
     "hunt", "explore", "gamehistory", "gameprofile", "gamestats", "gametop",
     "dailygames", "drop", "season",
-    # Musique
-    "join", "leave", "play", "pause", "resume", "skip", "stop", "queue",
-    "nowplaying", "volume", "loop", "shuffle", "remove-from-queue",
-    "clear-queue", "playlist-save", "playlist-load",
+    # Musique — "music" est la racine du groupe (join/leave/play/pause/resume/
+    # skip/previous/stop/queue/nowplaying/volume/loop/shuffle/remove/clear/
+    # seek/autoplay en heritent tous comme sous-commandes publiques, exactement
+    # comme "ai" plus haut). "play" reste aussi une commande racine autonome
+    # (+play / /play), alias direct de "music play".
+    "music", "play",
     # Hubs et profils membre (anciennement fail-closed par oubli)
     "home", "gamehub", "economyhub", "checkin", "progress", "profilecard",
     "achievements", "challenges", "missions", "gamelobby", "matchmake",
@@ -145,6 +154,22 @@ SUBCOMMAND_TIERS: dict[str, str] = {
     "sentrixpro security": "securite",
     "sentrixpro ticket-summary": "tickets",
     "sentrixpro welcome": "configuration",
+    # /ai est désormais un groupe (voir cogs/ai.py) : ask/search/reset/memory/model
+    # restent publics en héritant de leur racine "ai" (PUBLIC_COMMANDS), mais
+    # enable/disable activent/désactivent l'IA pour TOUT le serveur — même niveau
+    # qu'aisetup (catégorie "ai" de CATEGORY_COMMANDS), pas public.
+    "ai enable": "ai",
+    "ai disable": "ai",
+    # "giveaway" (racine, PUBLIC_COMMANDS plus haut) affiche juste les giveaways en
+    # cours. Ces six actions modifient/détruisent un giveaway ou gèrent sa liste
+    # noire — elles doivent rester au niveau que "giveaway" avait AVANT de devenir
+    # public (categorie "configuration", comme "giveaway-create" l'ancien plat).
+    "giveaway create": "configuration",
+    "giveaway end": "configuration",
+    "giveaway reroll": "configuration",
+    "giveaway cancel": "configuration",
+    "giveaway blacklist": "configuration",
+    "giveaway unblacklist": "configuration",
 }
 
 DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
@@ -213,7 +238,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
     "configuration": frozenset({
         # Classees explicitement : elles tombaient en fail-closed, donc admin
         # par accident plutot que par declaration.
-        "server-managed", "verification-review", "verification-calibration",
+        "server-managed", "verification", "verification-review", "verification-calibration",
         "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs-status",
         "logsetup", "logs", "setwelcomechannel", "setgoodbyechannel",
         "setwelcomemessage", "setgoodbyemessage", "setticketlogchannel",
@@ -228,7 +253,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "levelrepair", "repconfig", "repadd", "repremove", "represet",
         "rephistory", "statsconfig", "levelroles", "addbonusinvites",
         "removebonusinvites", "invitebonushistory", "designsetup",
-        "design-theme", "iconsetup", "embedconfig", "giveaway", "giveaway-create",
+        "design-theme", "iconsetup", "embedconfig", "giveaway-create",
         "giveaway-end", "giveaway-reroll", "giveaway-cancel",
         "giveaway-blacklist", "giveaway-unblacklist", "event-create",
         "event-cancel", "tournament-create", "tournament-start", "announce",
@@ -273,7 +298,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
     }),
     "ai": frozenset({
         "aisetup", "aidiag", "aicenter", "aicontext", "aimemorychannel",
-        "airolequota",
+        "airolequota", "ai enable", "ai disable",
     }),
     "logs": frozenset({"createalllogs", "testlogs", "logevent", "logsearch"}),
     "complete": frozenset({"wipe-server", "roleall", "massrole"}),

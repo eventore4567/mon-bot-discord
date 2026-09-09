@@ -1,0 +1,4 @@
+SentriX standby deployment marker — V102 entrypoint sync
+
+Rebuild the standby from the latest branch revision so the explicit Railway V102 music
+installer is present during failover as well as on the primary service.

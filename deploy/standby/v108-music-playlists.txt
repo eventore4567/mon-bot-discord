@@ -1,0 +1,3 @@
+SentriX V108 standby sync
+merge=836a1176e3685b9bc28035543efcffa3481aba70
+features=music-finish-ping,music-playlists

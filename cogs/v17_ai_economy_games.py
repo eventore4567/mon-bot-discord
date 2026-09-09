@@ -195,7 +195,7 @@ def install_ai_pipeline(bot: commands.Bot) -> None:
     if not getattr(current_prepare, "_sentrix_v17_ai_pipeline", False):
         async def prepare_v17(self, *, guild_id, channel_id, user_id, author_name,
                               question, forced_advanced: bool = False, suffix: str = "",
-                              command: str = "ai") -> dict:
+                              command: str = "ai", force_web_search: bool = False) -> dict:
             settings = await ai_service.get_settings(self.bot, guild_id) if guild_id else dict(ai_service.DEFAULT_AI_SETTINGS)
             if guild_id and not settings["enabled"]:
                 return {"ok": False, "error": "L'IA est désactivée sur ce serveur (voir `+aisetup`)."}
@@ -259,7 +259,7 @@ def install_ai_pipeline(bot: commands.Bot) -> None:
                     channel_id=channel_id,
                     user_id=user_id,
                     command=command,
-                    web_search=ai_service.needs_web_search(question),
+                    web_search=force_web_search or ai_service.needs_web_search(question),
                 )
             if not result.ok:
                 return {"ok": False, "error": ai_service.error_message(result.error)}

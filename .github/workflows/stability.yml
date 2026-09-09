@@ -52,6 +52,11 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-command-audit.db"
         run: python tools/command_runtime_audit.py
 
+      - name: Command callback integrity audit (slash/prefix divergence)
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python tools/command_callback_integrity_audit.py
+
       - name: V18 all-command regression gate
         env:
           DISCORD_TOKEN: "ci.fake.token"
@@ -63,6 +68,11 @@ jobs:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-permission-audit.db"
         run: python tools/permission_guard_audit.py
+
+      - name: Command permission group consistency audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python tools/command_permission_group_consistency_audit.py
 
       - name: Security runtime hardening audit
         env:

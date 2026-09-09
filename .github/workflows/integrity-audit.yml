@@ -40,6 +40,9 @@ jobs:
       - name: Command runtime audit
         run: python tools/command_runtime_audit.py
 
+      - name: Command callback integrity audit (slash/prefix divergence)
+        run: python tools/command_callback_integrity_audit.py
+
       - name: Command error ownership gate
         run: python tools/command_error_ownership_gate.py
 
@@ -51,6 +54,9 @@ jobs:
 
       - name: Permission matrix gate
         run: python tools/permission_matrix_gate.py
+
+      - name: Command permission group consistency audit
+        run: python tools/command_permission_group_consistency_audit.py
 
       - name: Natural intent fuzz gate
         run: python tools/ai_intent_fuzz_gate.py
