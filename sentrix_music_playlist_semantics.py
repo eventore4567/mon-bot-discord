@@ -153,7 +153,9 @@ async def _import_external(bot, music_cog, ctx: commands.Context, nom: str, url:
     try:
         resolved = await music_cog.manager.resolve(external_url, requested_by=ctx.author.id)
     except ProviderUnavailable as exc:
-        if exc.provider.casefold() == "spotify" and "SPOTIFY_CLIENT_ID" in exc.reason:
+        reason = str(exc.reason or "")
+        lowered = reason.casefold()
+        if exc.provider.casefold() == "spotify" and "spotify_client_id" in lowered:
             return await _send(
                 music_cog,
                 ctx,
@@ -162,11 +164,22 @@ async def _import_external(bot, music_cog, ctx: commands.Context, nom: str, url:
                 "dans les variables Railway. Aucun secret ne doit etre envoye dans Discord.",
                 kind="danger",
             )
+        if exc.provider.casefold() == "spotify" and "playlist-spotify-2026" in lowered:
+            return await _send(
+                music_cog,
+                ctx,
+                "Playlist Spotify non accessible",
+                "Le lien Spotify est valide, mais Spotify limite depuis 2026 le contenu des "
+                "playlists aux playlists possedees/collaboratives du compte authentifie. "
+                "Une playlist Spotify tierce peut donc renvoyer 403. Utilisez une playlist "
+                "que vous possedez/collaborez, ou un lien YouTube, SoundCloud ou Deezer.",
+                kind="danger",
+            )
         return await _send(
             music_cog,
             ctx,
             f"{exc.provider.title()} indisponible",
-            f"Le fournisseur est temporairement indisponible : `{exc.reason[:180]}`",
+            f"Le fournisseur est temporairement indisponible : `{reason[:180]}`",
             kind="danger",
         )
     except MusicEngineError as exc:
