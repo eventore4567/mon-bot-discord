@@ -29,7 +29,7 @@ from utils.music import MusicEngineError, Track
 logger = logging.getLogger("bot.music-playlists-v108")
 
 _MAX_PLAYLISTS = 20
-_MAX_TRACKS = 100
+_MAX_TRACKS = 1000
 _MAX_NAME = 40
 _MAX_QUERY = 1000
 

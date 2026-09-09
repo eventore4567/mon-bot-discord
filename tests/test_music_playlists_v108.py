@@ -26,11 +26,11 @@ def test_playlist_name_rejects_empty_and_too_long():
 
 def test_decode_playlist_items_is_defensive_and_bounded():
     assert decode_playlist_items("not-json") == []
-    raw = json.dumps([{"title": f"t{i}"} for i in range(150)])
+    raw = json.dumps([{"title": f"t{i}"} for i in range(1001)])
     items = decode_playlist_items(raw)
-    assert len(items) == 100
+    assert len(items) == 1000
     assert items[0]["title"] == "t0"
-    assert items[-1]["title"] == "t99"
+    assert items[-1]["title"] == "t999"
 
 
 def test_track_roundtrip_keeps_refresh_metadata_and_rebinds_requester():
