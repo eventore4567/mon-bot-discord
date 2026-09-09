@@ -62,6 +62,9 @@ jobs:
       - name: Permission matrix
         run: python tools/permission_matrix_gate.py
 
+      - name: Command permission group consistency audit
+        run: python tools/command_permission_group_consistency_audit.py
+
       - name: AI intent fuzz
         run: python tools/ai_intent_fuzz_gate.py
 

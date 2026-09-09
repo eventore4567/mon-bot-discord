@@ -31,8 +31,11 @@ SHARED_SLASH_ROOTS = frozenset({
     "giveaway-create", "giveaway-list", "event-create", "event-join", "event-leave",
     "event-list", "tournament-create", "tournament-start", "tournament-join",
     "tournament-list", "rolepanel", "verify-panel",
-    "play", "pause", "resume", "skip", "stop", "queue", "nowplaying", "volume",
-    "loop", "shuffle", "remove-from-queue", "clear-queue",
+    # "music" est la racine du groupe /music (utils/music/) : play/pause/resume/
+    # skip/previous/stop/queue/nowplaying/volume/loop/shuffle/remove/clear/seek/
+    # autoplay/join/leave en heritent tous via root. "play" reste aussi une
+    # racine autonome (+play / /play).
+    "music", "play",
     "rps", "guess-number", "trivia", "tictactoe", "hangman", "math-quiz",
     "blackjack", "slots", "coinflip", "dice", "luckyroll", "highlow", "memory",
     "reaction", "scramble", "wordgame", "emojiquiz", "colorquiz", "fasttype",
