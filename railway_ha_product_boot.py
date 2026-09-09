@@ -104,12 +104,12 @@ logger.warning("V101 runtime commandes : signatures, liaison Cog et délai IA br
 # V102 prépare la passerelle musique avant que cogs.music soit chargé. Elle ne crée aucune
 # nouvelle commande : elle remplace uniquement la résolution de source du Cog Music afin
 # que /music play et +play acceptent un titre, YouTube/YouTube Music, Spotify et Deezer.
-# Spotify/Deezer sont résolus via leurs métadonnées publiques puis recherchés sur YouTube ;
-# aucune lecture directe de flux DRM n'est tentée.
+# Spotify/Deezer sont résolus via leurs métadonnées publiques puis recherchés sur une source
+# audio autorisée ; aucune lecture directe de flux DRM n'est tentée.
 from sentrix_music_providers_v102 import install as _install_music_v102  # noqa: E402
 
 _install_music_v102()
-logger.warning("V102 musique : YouTube/Spotify/Deezer branchés avant le chargement des Cogs.")
+logger.warning("V102 musique : multi-provider branché avant le chargement des Cogs.")
 
 # V98 doit être installé dans CE véritable bootstrap produit, pas uniquement dans un wrapper
 # alternatif. Railway principal et standby utilisent historiquement ce module ; l'installation
@@ -119,6 +119,24 @@ from sentrix_v98_slash import install as _install_v98_grouped_slash  # noqa: E40
 
 _install_v98_grouped_slash()
 logger.warning("V98 slash sémantique explicitement branché dans l'entrypoint Railway HA produit.")
+
+# Surface canonique : cette couche est maintenant installée dans le VRAI bootstrap partagé
+# par primary et standby. Elle ne dépend donc plus d'un wrapper alternatif jamais exécuté.
+# Elle garde les commandes + intactes, mais publie des racines/sous-commandes slash lisibles
+# et françaises, notamment /musique playlist sauvegarder/importer/charger.
+from sentrix_canonical_command_surface import install as _install_canonical_surface  # noqa: E402
+
+_install_canonical_surface()
+logger.warning("Surface slash canonique SentriX branchée sur le bootstrap HA réel.")
+
+# V108 est installé par le wrapper Bot.add_cog de la passerelle musique V102. Ce second
+# wrapper s'exécute juste après V108 afin de corriger la sémantique playlist sans dupliquer
+# son stockage : create devient une vraie sauvegarde de la lecture/file et import devient
+# une opération externe explicite.
+from sentrix_music_playlist_semantics import install as _install_playlist_semantics  # noqa: E402
+
+_install_playlist_semantics()
+logger.warning("Sémantique playlist sauvegarder/importer/charger branchée après V108.")
 
 
 # V96 doit être installée APRES l'import de railway_ha_boot : railway_boot remplace
