@@ -40,6 +40,10 @@ _BASE_OPTS = {
 _NOT_FOUND_MARKERS = ("404", "not found", "unavailable", "no longer available")
 _DRM_MARKERS = ("drm protected", "drm-protected", "protected by drm")
 _HLS_PROTOCOL_MARKERS = ("m3u8", "hls")
+# On garde 5 résultats utiles maximum, mais on regarde plus loin dans la liste quand
+# les premiers résultats sont DRM/non diffusables. Cela évite qu'un seul upload
+# protégé fasse échouer un +play alors qu'un miroir lisible existe juste après.
+_SEARCH_FALLBACK_LIMIT = 12
 
 
 def _is_drm_reason(reason: str) -> bool:
@@ -166,15 +170,15 @@ class SoundCloudProvider(MusicProvider):
     ) -> list[Track]:
         """Cherche plusieurs candidats puis résout chacun individuellement.
 
-        Avant ce correctif, yt-dlp résolvait tout ``scsearch5`` en une fois : si le
-        premier résultat était DRM, l'exception interrompait la recherche entière et
-        SoundCloud était marqué indisponible 120 s. Désormais une piste DRM est un
-        échec local au candidat ; les suivantes restent essayées.
+        Le listing regarde jusqu'à ``_SEARCH_FALLBACK_LIMIT`` résultats quand les
+        premiers sont DRM/non diffusables, tout en ne renvoyant jamais plus de
+        ``limit`` pistes utiles au moteur de matching.
         """
         query_text = f"{artist} {title}" if artist else title
+        listing_limit = max(limit, _SEARCH_FALLBACK_LIMIT)
         try:
             listing = await self._extract(
-                f"scsearch{limit}:{query_text}",
+                f"scsearch{listing_limit}:{query_text}",
                 opts_override={"extract_flat": True, "noplaylist": True},
             )
         except ProviderUnavailable as exc:
@@ -185,7 +189,7 @@ class SoundCloudProvider(MusicProvider):
 
         flat_entries = [e for e in (listing.get("entries") or []) if e]
         results: list[Track] = []
-        for flat in flat_entries[:limit]:
+        for flat in flat_entries[:listing_limit]:
             candidate_url = _candidate_page_url(flat)
             if not candidate_url:
                 continue
@@ -210,6 +214,8 @@ class SoundCloudProvider(MusicProvider):
                 if track.playable_url:
                     results.append(track)
                     break
+            if len(results) >= limit:
+                break
 
         return results
 
