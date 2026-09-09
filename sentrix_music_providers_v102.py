@@ -1,4 +1,4 @@
-"""SentriX V102 — passerelle musique multi-fournisseurs.
+"""SentriX V102 — passerelle musique multi-fournisseurs + transport audio stable.
 
 Objectif utilisateur : ``/music play`` et ``+play`` acceptent un titre, un lien
 YouTube/YouTube Music, un lien Spotify ou un lien Deezer.
@@ -8,9 +8,11 @@ pages sont protégées/DRM. On résout donc proprement le titre via leurs métad
 publiques puis on recherche la piste équivalente sur YouTube. Aucune tentative de
 contournement DRM n'est faite.
 
-Le correctif est installé très tôt depuis ``sitecustomize`` et enveloppe ``Bot.add_cog``
-plutôt que d'ajouter une nouvelle commande. Ainsi le Cog ``Music`` historique reste le
-propriétaire unique de /play, de la file, du volume et des contrôles vocaux.
+Le correctif est installé très tôt depuis le véritable bootstrap Railway et enveloppe
+``Bot.add_cog`` plutôt que d'ajouter une nouvelle commande. La même couche applique aussi
+les réglages FFmpeg anti-jitter au Cog Music moderne : reconnexion réseau plus tolérante,
+normalisation 48 kHz stéréo et resampling asynchrone pour absorber les micro-coupures de
+flux sans désactiver le contrôle de volume PCM.
 """
 from __future__ import annotations
 
@@ -29,6 +31,19 @@ logger = logging.getLogger("bot.music-v102")
 
 _INSTALLED = False
 _ORIGINAL_ADD_COG = None
+
+# Les flux distants (notamment les fallbacks SoundCloud) peuvent présenter de très petits
+# trous réseau ou des timestamps légèrement irréguliers. Discord attend du PCM 48 kHz à
+# cadence régulière. Ces options laissent FFmpeg reconnecter proprement et ``aresample``
+# compense les petits écarts de timestamps au lieu de transmettre une micro-coupure audible.
+# On évite volontairement ``-fflags nobuffer`` : il diminuerait la marge anti-jitter.
+_SMOOTH_FFMPEG_OPTIONS = {
+    "before_options": (
+        "-reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 "
+        "-reconnect_delay_max 10 -rw_timeout 15000000"
+    ),
+    "options": "-vn -ar 48000 -ac 2 -af aresample=48000:async=1000:first_pts=0",
+}
 
 _YOUTUBE_HOSTS = {
     "youtube.com",
@@ -267,7 +282,30 @@ async def _patched_ytdl_extract(self, query: str) -> dict:
     raise ValueError("aucun flux audio disponible")
 
 
+def _install_smooth_ffmpeg_defaults(cog) -> None:
+    """Applique les réglages audio au Cog moderne sans remplacer sa logique métier."""
+    if getattr(cog, "_sentrix_music_audio_v103", False):
+        return
+    try:
+        music_module = __import__(cog.__class__.__module__, fromlist=["FFMPEG_OPTIONS"])
+        current = getattr(music_module, "FFMPEG_OPTIONS", {})
+        options = dict(current) if isinstance(current, dict) else {}
+        options.update(_SMOOTH_FFMPEG_OPTIONS)
+        music_module.FFMPEG_OPTIONS = options
+        cog._sentrix_music_audio_v103 = True
+        logger.warning(
+            "Musique V103 audio fluide active : reconnexion renforcée + PCM 48 kHz stéréo + anti-jitter aresample."
+        )
+    except Exception:
+        logger.exception("Installation des réglages audio V103 impossible.")
+
+
 def _patch_music_cog(cog) -> None:
+    # Cette partie s'applique aussi au nouveau moteur utils/music/, qui n'expose plus
+    # _extract_info/ytdl_extract mais utilise toujours le FFMPEG_OPTIONS de cogs.music.
+    _install_smooth_ffmpeg_defaults(cog)
+
+    # Compatibilité avec l'ancien moteur V102 encore présent dans certaines branches.
     if getattr(cog, "_sentrix_music_v102", False):
         return
     if not hasattr(cog, "_extract_info") or not hasattr(cog, "ytdl_extract"):
@@ -302,7 +340,7 @@ def install() -> None:
     add_cog_with_music_v102.__wrapped__ = original
     commands.Bot.add_cog = add_cog_with_music_v102
     _INSTALLED = True
-    logger.info("Chargeur musique V102 préparé avant le chargement des Cogs.")
+    logger.info("Chargeur musique V102/V103 préparé avant le chargement des Cogs.")
 
 
 __all__ = ["install"]
