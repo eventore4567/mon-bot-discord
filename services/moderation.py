@@ -16,7 +16,13 @@ demande initiale (section 17) : « Si Discord exécute le ban mais que le log
 persistance), seule l'action Discord change : les deux partagent maintenant
 _run_sanction_pipeline() plutôt que de dupliquer la même séquence deux fois.
 
-tempban, mute, unmute, warn, unban restent sur leur code existant dans
++mute a une forme différente (durée à valider, MP envoyé APRÈS l'exécution —
+un membre muet reste sur le serveur, contrairement à ban/kick, donc l'ordre
+DM-avant-exécution n'est pas requis pour la délivrabilité, et le code existant
+ne le fait pas) : reste une fonction séparée plutôt que de forcer
+_run_sanction_pipeline à couvrir une forme qu'elle ne représente pas.
+
+tempban, unmute, warn, unban restent sur leur code existant dans
 cogs/moderation.py, inchangé — migrés un par un dans des étapes suivantes,
 chacun testé indépendamment.
 """
@@ -25,22 +31,33 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 import discord
 
-from utils import checks
+from utils import checks, helpers
 
 logger = logging.getLogger("services.moderation")
+
+MAX_MUTE_SECONDS = 2419200  # 28 jours — limite native du timeout Discord
 
 
 @dataclass
 class SanctionOutcome:
     executed: bool
     hierarchy_error: str | None = None
+    validation_error: str | None = None
     dm_sent: bool = False
     case_number: int | None = None
     persistence_error: str | None = None
+    duration_seconds: int | None = None
+
+    @property
+    def rejection_reason(self) -> str | None:
+        """Motif de refus, quelle que soit sa nature — hiérarchie ou validation
+        métier (ex: durée invalide). None si la sanction a été exécutée."""
+        return self.hierarchy_error or self.validation_error
 
 
 async def persist_sanction(
@@ -177,4 +194,71 @@ async def kick(
         dm_text=dm_text,
         action="kick",
         execute=lambda: guild.kick(target, reason=f"{actor} : {reason}"),
+    )
+
+
+async def mute(
+    bot: Any,
+    *,
+    guild: discord.Guild,
+    actor: discord.Member,
+    target: discord.Member,
+    reason: str,
+    duree: str,
+    render_dm_text: Callable[[int], str | None] | None = None,
+) -> SanctionOutcome:
+    """Pipeline complet du mute (timeout Discord natif) : hiérarchie -> durée ->
+    exécution Discord -> notification -> persistance.
+
+    Forme volontairement différente de ban()/kick() : le MP part APRÈS le
+    timeout (un membre muet reste sur le serveur, joignable dans tous les cas
+    — pas la même contrainte de délivrabilité que ban/kick), et il y a une
+    étape de validation supplémentaire (durée) avant toute exécution. C'est le
+    comportement du code existant, conservé à l'identique.
+
+    ``render_dm_text`` reçoit la durée VALIDÉE en secondes et retourne le texte
+    du MP déjà substitué, ou None si aucun gabarit n'est configuré — le texte
+    ne peut être construit qu'une fois la durée connue (contrairement à
+    ban()/kick(), où il l'est déjà avant l'appel), donc cette étape de rendu
+    est confiée à l'appelant plutôt que dupliquée ici.
+    """
+    hierarchy_error = checks.check_hierarchy(actor, target) or checks.check_bot_hierarchy(guild, target)
+    if hierarchy_error:
+        return SanctionOutcome(executed=False, hierarchy_error=hierarchy_error)
+
+    seconds = helpers.parse_duration(duree)
+    if seconds is None or seconds > MAX_MUTE_SECONDS:
+        return SanctionOutcome(
+            executed=False,
+            validation_error="Durée invalide (maximum 28 jours). Exemple : `10m`, `1h`, `1j`.",
+        )
+
+    until = discord.utils.utcnow() + timedelta(seconds=seconds)
+    await target.timeout(until, reason=f"{actor} : {reason}")
+
+    dm_sent = False
+    dm_text = render_dm_text(seconds) if render_dm_text else None
+    if dm_text:
+        try:
+            await target.send(dm_text, allowed_mentions=discord.AllowedMentions.none())
+            dm_sent = True
+        except discord.HTTPException:
+            dm_sent = False
+
+    case_number, persistence_error = await persist_sanction(
+        bot,
+        guild_id=guild.id,
+        target_id=target.id,
+        actor_id=actor.id,
+        action="mute",
+        reason=reason,
+        duration_seconds=seconds,
+    )
+
+    return SanctionOutcome(
+        executed=True,
+        dm_sent=dm_sent,
+        case_number=case_number,
+        persistence_error=persistence_error,
+        duration_seconds=seconds,
     )

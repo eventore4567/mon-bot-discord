@@ -17,7 +17,6 @@ confondus, pas seulement les avertissements comme avec /warnings).
 """
 
 import logging
-from datetime import timedelta
 
 import discord
 from discord import app_commands
@@ -549,16 +548,37 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
     async def mute(self, ctx: commands.Context, membre: discord.Member, duree: str = "10m", *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : troisième commande de
+        sanction migrée. Forme différente de ban()/kick() (durée à valider, MP
+        après l'exécution) — voir services/moderation.py::mute()."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        seconds = helpers.parse_duration(duree)
-        if seconds is None or seconds > 2419200:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide (maximum 28 jours). Exemple : `10m`, `1h`, `1j`.')))
-        until = discord.utils.utcnow() + timedelta(seconds=seconds)
-        await membre.timeout(until, reason=f"{ctx.author} : {raison}")
-        await self._send_sanction_dm(ctx, membre, "mute", raison, seconds)
-        e = await self.log_sanction(ctx, "mute", membre, raison, duration_seconds=seconds)
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "mute")
+
+        def render_dm_text(seconds: int) -> str | None:
+            if template is None:
+                return None
+            return self._render_sanction_dm_text(
+                template,
+                target=membre,
+                guild=ctx.guild,
+                reason=raison,
+                duration_seconds=seconds,
+                actor=ctx.author,
+                action_label=self.DM_ACTION_LABELS["mute"],
+            )
+
+        outcome = await moderation_service.mute(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison,
+            duree=duree, render_dm_text=render_dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+
+        e = await self.log_sanction(
+            ctx, "mute", membre, raison,
+            duration_seconds=outcome.duration_seconds, case_number=outcome.case_number,
+        )
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     @commands.hybrid_command(name="unmute", description="Retirer le mute (timeout) d'un membre.", with_app_command=False)
