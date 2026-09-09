@@ -41,7 +41,15 @@ CRITICAL = {
 # Validation de cible attendue dans le CORPS (les checks tournent avant le
 # parsing des arguments, la cible n'y est donc pas disponible).
 BODY_VALIDATOR = {
-    "member_moderation": ("check_targetable", "check_hierarchy"),
+    # "moderation_service.ban" : Core V2, Phase 2 (docs/core-v2-plan.md) — +ban
+    # valide la hiérarchie DANS services/moderation.py::ban() plutôt que dans le
+    # corps de la commande elle-même (checks.check_hierarchy/check_bot_hierarchy
+    # y sont bien appelés, testé sans Discord dans
+    # tests/test_services_moderation_ban.py). La recherche textuelle ne voit pas
+    # à travers cet appel, donc le motif est ajouté explicitement ici — même
+    # esprit que "purge" pour channel_target ou "fetch_user" pour external_user
+    # juste en dessous : plusieurs formes valides pour une même cible.
+    "member_moderation": ("check_targetable", "check_hierarchy", "moderation_service.ban"),
     "role_target": ("check_role_target",),
     "channel_target": ("check_channel_target", "purge"),
     # La cible de +unban n'est pas membre du serveur : la hiérarchie n'a pas

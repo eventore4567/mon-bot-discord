@@ -27,8 +27,14 @@ import config
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as panels
 from database.db import now
+from services import moderation as moderation_service
 
 logger = logging.getLogger("bot.moderation")
+
+# Sentinelle distincte de None : None est une valeur légitime pour case_number
+# quand la persistance a déjà été tentée par le service et a ÉCHOUÉ (Core V2,
+# Phase 2) — log_sanction ne doit alors PAS retenter un appel non protégé.
+_CASE_NUMBER_UNSET = object()
 
 
 class Moderation(commands.Cog):
@@ -186,19 +192,32 @@ class Moderation(commands.Cog):
     async def log_sanction(
         self, ctx: commands.Context, action: str, target: discord.abc.User, reason: str,
         duration_seconds: int | None = None, extra_fields: dict | None = None,
+        case_number: int | None = _CASE_NUMBER_UNSET,
     ) -> discord.Embed:
         """Point de passage UNIQUE pour toute sanction réelle : enregistre le dossier en
         base (numéro de dossier séquentiel réel), construit la fiche visuelle, l'envoie
-        dans le salon de logs, et retourne l'embed pour l'affichage dans le salon courant."""
-        case_number = await self.bot.db.record_sanction(
-            ctx.guild.id, target.id, ctx.author.id, action, reason, duration_seconds
-        )
+        dans le salon de logs, et retourne l'embed pour l'affichage dans le salon courant.
+
+        ``case_number`` : optionnel, rétrocompatible. Si fourni — y compris explicitement
+        None (Core V2, Phase 2 — services/moderation.py::persist_sanction() déjà tenté par
+        l'appelant, et échoué) — la persistance n'est PAS retentée ici : un None explicite
+        veut dire « déjà essayé, ne recommence pas sans protection ». Seule l'ABSENCE
+        d'argument (comportement historique, inchangé pour tempban/kick/mute/unmute/warn/
+        unban tant qu'ils ne sont pas migrés) déclenche encore la persistance directe,
+        non protégée, ici."""
+        if case_number is _CASE_NUMBER_UNSET:
+            case_number = await self.bot.db.record_sanction(
+                ctx.guild.id, target.id, ctx.author.id, action, reason, duration_seconds
+            )
         kind = self.SANCTION_KIND.get(action, "danger")
         colour = {"success": config.COLOR_SUCCESS, "warning": config.COLOR_WARNING, "danger": config.COLOR_ERROR}[kind]
         label = self.SANCTION_LABELS.get(action, action)
         style = design_system.CATEGORY_STYLES["moderation"]
+        # La sanction Discord a réussi même quand case_number est None (échec de
+        # persistance, Core V2 Phase 2) — jamais "Dossier #None", un texte honnête.
+        titre_dossier = f"Dossier #{case_number}" if case_number is not None else "Sanction (dossier non enregistré)"
         e = design_system.create_embed(
-            title=f"{style['emoji']} Dossier #{case_number} — {label}",
+            title=f"{style['emoji']} {titre_dossier} — {label}",
             colour=colour,
             thumbnail=target.display_avatar.url if hasattr(target, "display_avatar") else None,
             footer="SentriX",
@@ -248,6 +267,33 @@ class Moderation(commands.Cog):
             return None
         return row["message"]
 
+    @staticmethod
+    def _render_sanction_dm_text(
+        template: str,
+        *,
+        target: discord.abc.User,
+        guild: discord.Guild,
+        reason: str,
+        duration_seconds: int | None,
+        actor: discord.abc.User,
+        action_label: str,
+    ) -> str:
+        """Substitution pure des variables du gabarit — extrait de
+        _send_sanction_dm pour être réutilisable par services/moderation.py
+        (Core V2, Phase 2) sans dupliquer la logique de substitution."""
+        values = {
+            "membre": getattr(target, "display_name", str(target)),
+            "serveur": guild.name,
+            "raison": reason or "Aucune raison fournie",
+            "duree": helpers.format_duration(duration_seconds) if duration_seconds else "Non précisée",
+            "moderateur": getattr(actor, "display_name", str(actor)),
+            "action": action_label,
+        }
+        message = template
+        for key, value in values.items():
+            message = message.replace("{" + key + "}", str(value))
+        return message[:1900]
+
     async def _send_sanction_dm(
         self,
         ctx: commands.Context,
@@ -260,19 +306,17 @@ class Moderation(commands.Cog):
         template = await self._get_sanction_dm_template(ctx.guild.id, action)
         if template is None:
             return False
-        values = {
-            "membre": getattr(target, "display_name", str(target)),
-            "serveur": ctx.guild.name,
-            "raison": reason or "Aucune raison fournie",
-            "duree": helpers.format_duration(duration_seconds) if duration_seconds else "Non précisée",
-            "moderateur": getattr(ctx.author, "display_name", str(ctx.author)),
-            "action": self.DM_ACTION_LABELS[action],
-        }
-        message = template
-        for key, value in values.items():
-            message = message.replace("{" + key + "}", str(value))
+        message = self._render_sanction_dm_text(
+            template,
+            target=target,
+            guild=ctx.guild,
+            reason=reason,
+            duration_seconds=duration_seconds,
+            actor=ctx.author,
+            action_label=self.DM_ACTION_LABELS[action],
+        )
         try:
-            await target.send(message[:1900], allowed_mentions=discord.AllowedMentions.none())
+            await target.send(message, allowed_mentions=discord.AllowedMentions.none())
             return True
         except discord.HTTPException:
             return False
@@ -382,12 +426,36 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
     async def ban(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : première commande de sanction
+        migrée vers services/moderation.py::ban(). Ce corps ne fait plus que
+        l'adaptation Discord (parser ctx, préparer le texte du MP, rendre le
+        résultat) ; hiérarchie, exécution et persistance vivent dans le service,
+        testé sans Discord dans tests/test_services_moderation_ban.py — y compris
+        la correction d'un vrai trou trouvé pendant l'extraction : une exception de
+        persistance ne fait plus jamais passer une sanction réellement appliquée
+        pour un échec de commande."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        await self._send_sanction_dm(ctx, membre, "ban", raison)
-        await ctx.guild.ban(membre, reason=f"{ctx.author} : {raison}", delete_message_seconds=0)
-        e = await self.log_sanction(ctx, "ban", membre, raison)
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "ban")
+        dm_text = None
+        if template is not None:
+            dm_text = self._render_sanction_dm_text(
+                template,
+                target=membre,
+                guild=ctx.guild,
+                reason=raison,
+                duration_seconds=None,
+                actor=ctx.author,
+                action_label=self.DM_ACTION_LABELS["ban"],
+            )
+
+        outcome = await moderation_service.ban(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison, dm_text=dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.hierarchy_error)))
+
+        e = await self.log_sanction(ctx, "ban", membre, raison, case_number=outcome.case_number)
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
