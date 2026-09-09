@@ -3,9 +3,8 @@
 La lecture reste volontairement confiée à yt-dlp uniquement quand YouTube fournit
 réellement un flux audio lisible. Les IP de datacenter (Railway notamment) peuvent
 recevoir le challenge « Sign in to confirm you're not a bot ». Dans ce cas on ne
-contourne PAS le challenge : on récupère uniquement les métadonnées publiques via
-l'endpoint oEmbed de YouTube, puis le ProviderManager cherche une autre source de
-lecture autorisée (SoundCloud, audio direct, etc.).
+contourne PAS le challenge : on récupère uniquement les métadonnées publiques puis
+le ProviderManager cherche une autre source de lecture autorisée.
 """
 from __future__ import annotations
 
@@ -28,8 +27,6 @@ _URL_RE = re.compile(
 _PLAYLIST_HINT_RE = re.compile(r"[?&]list=", re.IGNORECASE)
 _OEMBED_ENDPOINT = "https://www.youtube.com/oembed"
 
-# Signatures connues d'un blocage anti-bot / rate-limit YouTube — PAS "cette vidéo
-# n'existe pas". C'est précisément ce qui bloque Railway (IP de datacenter connue).
 _ANTI_BOT_MARKERS = (
     "sign in to confirm",
     "confirm you're not a bot",
@@ -38,8 +35,6 @@ _ANTI_BOT_MARKERS = (
     "http error 403",
     "unable to download webpage",
 )
-# Signatures d'un vrai "ce contenu n'existe plus" — celles-là ne doivent PAS
-# déclencher de cooldown provider, juste "morceau introuvable".
 _NOT_FOUND_MARKERS = (
     "video unavailable",
     "private video",
@@ -52,7 +47,6 @@ _BASE_OPTS = {
     "format": "bestaudio/best",
     "quiet": True,
     "no_warnings": True,
-    "extract_flat": False,
     "source_address": "0.0.0.0",
     "socket_timeout": 15,
 }
@@ -64,7 +58,7 @@ def _classify_error(exc: Exception) -> str:
         return "not_found"
     if any(marker in text for marker in _ANTI_BOT_MARKERS):
         return "blocked"
-    return "blocked"  # erreur inconnue yt-dlp = indisponibilité temporaire, pas "supprimé"
+    return "blocked"
 
 
 def _entry_to_track(entry: dict, *, requested_by: int | None) -> Track:
@@ -78,6 +72,39 @@ def _entry_to_track(entry: dict, *, requested_by: int | None) -> Track:
         provider="youtube",
         playable_url=entry.get("url"),
         playback_provider="youtube",
+        is_live=bool(entry.get("is_live")),
+        requested_by=requested_by,
+    )
+
+
+def _flat_playlist_entry_to_track(entry: dict, *, requested_by: int | None) -> Track:
+    """Convertit une entrée de playlist plate en métadonnées, jamais en flux audio.
+
+    Avec ``extract_flat=in_playlist``, ``entry['url']`` peut être un identifiant de
+    vidéo ou une URL de page. Ce n'est PAS une URL audio signée et elle ne doit donc
+    jamais être mise dans ``playable_url``.
+    """
+    video_id = str(entry.get("id") or "").strip()
+    webpage_url = str(entry.get("webpage_url") or entry.get("original_url") or "").strip()
+    raw_url = str(entry.get("url") or "").strip()
+    if not webpage_url:
+        if raw_url.startswith(("http://", "https://")):
+            webpage_url = raw_url
+        elif video_id:
+            webpage_url = f"https://www.youtube.com/watch?v={video_id}"
+        elif raw_url:
+            webpage_url = f"https://www.youtube.com/watch?v={raw_url}"
+
+    return Track(
+        title=entry.get("title") or "Titre inconnu",
+        artist=entry.get("artist") or entry.get("uploader") or entry.get("channel"),
+        album=entry.get("album"),
+        duration=int(entry["duration"]) if entry.get("duration") else None,
+        thumbnail=entry.get("thumbnail"),
+        original_url=webpage_url or None,
+        provider="youtube",
+        playable_url=None,
+        playback_provider=None,
         is_live=bool(entry.get("is_live")),
         requested_by=requested_by,
     )
@@ -106,16 +133,11 @@ class YouTubeProvider(MusicProvider):
             if kind == "not_found":
                 raise TrackNotFound(self.name, query) from exc
             raise ProviderUnavailable(self.name, str(exc)[:200]) from exc
-        except Exception as exc:  # réseau, timeout, etc. -> jamais un crash de commande
+        except Exception as exc:
             raise ProviderUnavailable(self.name, f"{type(exc).__name__}: {exc}"[:200]) from exc
 
     async def _oembed_metadata(self, query: str, *, requested_by: int | None) -> Track:
-        """Récupère uniquement les métadonnées publiques d'une vidéo.
-
-        oEmbed ne fournit aucun flux audio et ne contourne donc ni challenge anti-bot,
-        ni DRM, ni publicité. Il permet seulement de connaître titre/auteur afin que
-        le moteur puisse chercher ensuite une source de lecture autorisée ailleurs.
-        """
+        """Récupère uniquement les métadonnées publiques d'une vidéo."""
         timeout = aiohttp.ClientTimeout(total=8)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -154,23 +176,39 @@ class YouTubeProvider(MusicProvider):
 
     async def resolve_metadata(self, query: str, *, requested_by: int | None = None) -> list[Track]:
         is_playlist = bool(_PLAYLIST_HINT_RE.search(query)) and "watch?v=" not in query
-        opts = {"noplaylist": not is_playlist}
+
+        if is_playlist:
+            # IMPORTANT : pour importer une playlist, on ne demande JAMAIS à yt-dlp
+            # d'ouvrir chaque vidéo ni d'en extraire l'audio. Railway peut être
+            # challenge par YouTube sur cette étape. Le mode flat récupère seulement
+            # la liste/titre/auteur des entrées publiques et évite donc le challenge
+            # vidéo individuel qui provoquait « Sign in to confirm you're not a bot ».
+            info = await self._extract(
+                query,
+                opts_override={
+                    "noplaylist": False,
+                    "extract_flat": "in_playlist",
+                    "lazy_playlist": True,
+                    "skip_download": True,
+                },
+            )
+            entries = [e for e in (info.get("entries") or []) if e]
+            if not entries:
+                raise TrackNotFound(self.name, query)
+            return [
+                _flat_playlist_entry_to_track(entry, requested_by=requested_by)
+                for entry in entries
+            ]
+
         try:
-            info = await self._extract(query, opts_override=opts)
+            info = await self._extract(query, opts_override={"noplaylist": True})
         except ProviderUnavailable as blocked:
-            # Une playlist exige plusieurs métadonnées et oEmbed n'est pas adapté.
-            # Pour une vidéo simple, en revanche, on peut continuer proprement sans
-            # tenter de contourner le challenge YouTube.
-            if is_playlist:
-                raise
             self.mark_unavailable(blocked.reason)
             try:
                 track = await self._oembed_metadata(query, requested_by=requested_by)
             except TrackNotFound:
                 raise
             except ProviderUnavailable:
-                # Conserve la cause initiale (challenge playback) si même les
-                # métadonnées publiques ne sont pas accessibles.
                 raise blocked
             logger.warning(
                 "YouTube playback blocked; metadata-only oEmbed fallback active for %s",
