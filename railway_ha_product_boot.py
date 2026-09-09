@@ -86,13 +86,23 @@ _install_v100_defer_fix()
 _install_v100_runtime_fix()
 logger.warning("V100 interactions : defer idempotent, ack unique et compatibilité Components V2 branchés.")
 
-# V101 est installé en dernier dans la pile runtime, juste avant V98. Il assainit les
+# V101 est installé en dernier dans la pile runtime de commandes. Il assainit les
 # signatures publiques à partir de la déclaration réelle du callback, restaure le Cog si
 # une copie de Command l'a perdu et donne davantage de marge aux réponses IA de code.
 from sentrix_v101_command_runtime import install as _install_v101_command_runtime  # noqa: E402
 
 _install_v101_command_runtime()
 logger.warning("V101 runtime commandes : signatures, liaison Cog et délai IA branchés.")
+
+# V102 prépare la passerelle musique avant que cogs.music soit chargé. Elle ne crée aucune
+# nouvelle commande : elle remplace uniquement la résolution de source du Cog Music afin
+# que /music play et +play acceptent un titre, YouTube/YouTube Music, Spotify et Deezer.
+# Spotify/Deezer sont résolus via leurs métadonnées publiques puis recherchés sur YouTube ;
+# aucune lecture directe de flux DRM n'est tentée.
+from sentrix_music_providers_v102 import install as _install_music_v102  # noqa: E402
+
+_install_music_v102()
+logger.warning("V102 musique : YouTube/Spotify/Deezer branchés avant le chargement des Cogs.")
 
 # V98 doit être installé dans CE véritable bootstrap produit, pas uniquement dans un wrapper
 # alternatif. Railway principal et standby utilisent historiquement ce module ; l'installation
