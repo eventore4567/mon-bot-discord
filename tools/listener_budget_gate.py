@@ -22,7 +22,6 @@ import tempfile
 os.environ.setdefault("DISCORD_TOKEN", "gate")
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-logging.disable(logging.CRITICAL)
 
 import config  # noqa: E402
 from database.db import Database  # noqa: E402
@@ -44,6 +43,11 @@ BUDGETS: dict[str, int] = {
 
 
 async def main() -> int:
+    # Déplacé hors import : au niveau module, ce désactivait TOUTE journalisation
+    # pour le reste du process — y compris pour n'importe quel test qui importe
+    # ce fichier sans passer par main() (rend assertLogs silencieusement muet ensuite).
+    logging.disable(logging.CRITICAL)
+
     config.DATABASE_PATH = str(pathlib.Path(tempfile.mkdtemp()) / "listeners.db")
     import main as bot_main
 
