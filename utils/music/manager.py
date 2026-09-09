@@ -85,8 +85,7 @@ class ProviderManager:
         # Une playlist n'a pas besoin d'extraire/résoudre l'audio de 20-100 vidéos
         # pendant l'import. C'est précisément ce qui déclenchait le challenge
         # anti-bot YouTube sur Railway. On conserve les métadonnées et la résolution
-        # de lecture se fait au moment où chaque titre démarre dans cogs/music.py.
-        # Les titres qui possèdent déjà un flux restent évidemment utilisables tels quels.
+        # de lecture se fait au moment où chaque titre démarre.
         if len(raw_tracks) > 1:
             prepared = [Track(**{**raw.__dict__, "requested_by": requested_by}) for raw in raw_tracks]
             logger.info("playlist metadata accepted -> %d piste(s), playback deferred", len(prepared))
@@ -125,12 +124,7 @@ class ProviderManager:
         return ResolvedRequest(tracks=resolved, skipped=skipped)
 
     async def ensure_playable(self, track: Track) -> Track:
-        """Résout à la demande une piste persistée qui ne possède pas encore d'audio.
-
-        Les playlists sont volontairement stockées avec des métadonnées stables et
-        jamais avec des URLs audio signées. Au démarrage d'un titre, cette méthode
-        recherche une source autorisée (YouTube si disponible, sinon SoundCloud...).
-        """
+        """Résout à la demande une piste persistée qui ne possède pas encore d'audio."""
         if track.is_playable:
             return track
 
@@ -150,6 +144,11 @@ class ProviderManager:
         return track
 
     async def refresh_playable_url(self, track: Track) -> str:
+        # Les playlists persistantes gardent des métadonnées stables, pas des URLs
+        # audio signées. Si la piste n'a encore aucune source, on la résout maintenant.
+        if not track.is_playable:
+            await self.ensure_playable(track)
+
         provider = self._provider_by_name(track.playback_provider)
         if provider is None:
             if not track.playable_url:
