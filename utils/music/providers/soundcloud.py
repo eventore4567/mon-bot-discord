@@ -4,6 +4,11 @@ Aucune protection n'est contournée. Pour une recherche texte, on récupère d'a
 une liste légère de candidats, puis on résout chaque piste séparément. Une piste DRM
 ou non diffusable est simplement ignorée et les candidats suivants sont essayés ;
 elle ne met plus tout le provider SoundCloud en cooldown.
+
+Pour la lecture Discord on préfère, lorsqu'il existe, un flux audio HTTP progressif
+plutôt qu'un manifeste HLS segmenté. Sur une VM Railway cela réduit les micro-coupures
+liées au renouvellement de petits segments réseau, tout en gardant le meilleur débit
+disponible parmi les formats progressifs. HLS reste le fallback si c'est la seule source.
 """
 from __future__ import annotations
 
@@ -27,10 +32,14 @@ _BASE_OPTS = {
     "no_warnings": True,
     "noplaylist": True,
     "socket_timeout": 15,
+    "retries": 3,
+    "extractor_retries": 3,
+    "fragment_retries": 5,
 }
 
 _NOT_FOUND_MARKERS = ("404", "not found", "unavailable", "no longer available")
 _DRM_MARKERS = ("drm protected", "drm-protected", "protected by drm")
+_HLS_PROTOCOL_MARKERS = ("m3u8", "hls")
 
 
 def _is_drm_reason(reason: str) -> bool:
@@ -48,6 +57,58 @@ def _candidate_page_url(entry: dict) -> str | None:
     return None
 
 
+def _format_bitrate(fmt: dict) -> float:
+    """Score qualité tolérant aux métadonnées yt-dlp incomplètes."""
+    for key in ("abr", "tbr"):
+        try:
+            value = float(fmt.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return value
+    return 0.0
+
+
+def _is_progressive_audio(fmt: dict) -> bool:
+    url = str(fmt.get("url") or "").casefold()
+    protocol = str(fmt.get("protocol") or "").casefold()
+    if not url.startswith(("https://", "http://")):
+        return False
+    if url.endswith(".m3u8") or ".m3u8?" in url:
+        return False
+    if any(marker in protocol for marker in _HLS_PROTOCOL_MARKERS):
+        return False
+    # Un format avec vidéo n'est pas utile au bot et consommerait inutilement bande passante/CPU.
+    vcodec = str(fmt.get("vcodec") or "none").casefold()
+    return vcodec in {"none", "", "null"}
+
+
+def _select_playable_url(entry: dict) -> str | None:
+    """Choisit le flux le plus stable pour Discord.
+
+    1. audio HTTP progressif, trié par débit ;
+    2. meilleur format audio restant (souvent HLS) ;
+    3. URL déjà choisie par yt-dlp pour compatibilité.
+    """
+    formats = [fmt for fmt in (entry.get("formats") or []) if isinstance(fmt, dict) and fmt.get("url")]
+    progressive = [fmt for fmt in formats if _is_progressive_audio(fmt)]
+    if progressive:
+        best = max(progressive, key=_format_bitrate)
+        return str(best.get("url"))
+
+    audio_formats = []
+    for fmt in formats:
+        vcodec = str(fmt.get("vcodec") or "none").casefold()
+        if vcodec in {"none", "", "null"}:
+            audio_formats.append(fmt)
+    if audio_formats:
+        best = max(audio_formats, key=_format_bitrate)
+        return str(best.get("url"))
+
+    url = entry.get("url")
+    return str(url) if isinstance(url, str) and url else None
+
+
 def _entry_to_track(entry: dict, *, requested_by: int | None) -> Track:
     return Track(
         title=entry.get("title") or "Titre inconnu",
@@ -56,7 +117,7 @@ def _entry_to_track(entry: dict, *, requested_by: int | None) -> Track:
         thumbnail=entry.get("thumbnail"),
         original_url=entry.get("webpage_url") or entry.get("original_url"),
         provider="soundcloud",
-        playable_url=entry.get("url"),
+        playable_url=_select_playable_url(entry),
         playback_provider="soundcloud",
         is_live=bool(entry.get("is_live")),
         requested_by=requested_by,
@@ -156,7 +217,13 @@ class SoundCloudProvider(MusicProvider):
         if not track.original_url:
             return await super().refresh_playable_url(track)
         info = await self._extract(track.original_url)
-        url = info.get("url")
+        entry = info
+        if "entries" in info:
+            entries = [candidate for candidate in (info.get("entries") or []) if candidate]
+            if not entries:
+                raise ProviderUnavailable(self.name, "flux audio absent de la réponse yt-dlp")
+            entry = entries[0]
+        url = _select_playable_url(entry)
         if not url:
             raise ProviderUnavailable(self.name, "flux audio absent de la réponse yt-dlp")
         return url
