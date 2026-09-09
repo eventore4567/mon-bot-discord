@@ -9,11 +9,12 @@ from pathlib import Path
 
 import discord
 
-from utils import embeds, helpers
+from utils import embeds
 from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from database.db import PRIMARY_CREATOR_DISPLAY_NAME
+from services import status as status_service
 from utils import checks, premium_style, stats_service, visual_v5
 
 
@@ -51,29 +52,24 @@ def _base(bot: commands.Bot, title: str, description: str = "", colour: int | No
 
 
 async def build_status_embed(bot: commands.Bot, guild: discord.Guild | None) -> discord.Embed:
-    latency = helpers.latence_ms(bot)
-    database_ok = False
-    try:
-        row = await bot.db.fetchone("SELECT 1 AS ok")
-        database_ok = bool(row and row["ok"] == 1)
-    except Exception:
-        pass
-    ai_ok = bot.get_cog("Ai") is not None
-    music_ok = bot.get_cog("Music") is not None
-    online = sum(1 for item in (database_ok, ai_ok, music_ok) if item)
-    colour = 0x2FBF71 if online == 3 and latency < 300 else 0xF0B232
+    """Core V2, Phase 4 (docs/core-v2-plan.md) : le calcul de santé (latence,
+    base joignable, cogs IA/Musique chargés, seuil "nominal") vit désormais
+    dans services/status.py::compute_health_snapshot(), testable sans jamais
+    instancier Discord ni la base de données réelle — voir son docstring."""
+    snapshot = await status_service.compute_health_snapshot(bot)
+    colour = 0x2FBF71 if snapshot.is_nominal else 0xF0B232
     embed = _base(
         bot,
         "Statut",
         'État en direct des services principaux. Utilisez **Actualiser** pour refaire le contrôle.',
         colour,
     )
-    embed.add_field(name="Discord", value=f"En ligne • {latency} ms", inline=True)
-    embed.add_field(name="Base", value="Opérationnelle" if database_ok else "Indisponible", inline=True)
-    embed.add_field(name="Services", value=f"{online}/3 opérationnels", inline=True)
-    embed.add_field(name="IA", value="Disponible" if ai_ok else "Indisponible", inline=True)
-    embed.add_field(name="Musique", value="Disponible" if music_ok else "Indisponible", inline=True)
-    embed.add_field(name="Commandes", value=str(len(bot.commands)), inline=True)
+    embed.add_field(name="Discord", value=f"En ligne • {snapshot.latency_ms} ms", inline=True)
+    embed.add_field(name="Base", value="Opérationnelle" if snapshot.database_ok else "Indisponible", inline=True)
+    embed.add_field(name="Services", value=f"{snapshot.healthy_count}/3 opérationnels", inline=True)
+    embed.add_field(name="IA", value="Disponible" if snapshot.ai_ok else "Indisponible", inline=True)
+    embed.add_field(name="Musique", value="Disponible" if snapshot.music_ok else "Indisponible", inline=True)
+    embed.add_field(name="Commandes", value=str(snapshot.command_count), inline=True)
     embed.set_footer(text=f"SentriX • Actualisé <t:{int(time.time())}:R>")
     return embed
 
