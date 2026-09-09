@@ -6,10 +6,11 @@ from utils.failover import SentriXFailoverCoordinator
 
 
 class FakeVoice:
-    def __init__(self, *, connected=True, playing=False, paused=False):
+    def __init__(self, *, connected=True, playing=False, paused=False, channel=True):
         self.connected = connected
         self.playing = playing
         self.paused = paused
+        self.channel = object() if channel else None
 
     def is_connected(self):
         return self.connected
@@ -57,34 +58,39 @@ def test_paused_voice_blocks_planned_handoff():
     assert drain.music_activity_blocks_handoff(bot) is True
 
 
-def test_idle_voice_does_not_block_handoff():
+def test_idle_voice_blocks_handoff_until_explicit_leave():
     bot = FakeBot([FakeVoice()])
-    assert drain.music_activity_blocks_handoff(bot) is False
+    assert drain.music_activity_blocks_handoff(bot) is True
+
+
+def test_transient_disconnected_voice_with_channel_still_blocks_handoff():
+    bot = FakeBot([FakeVoice(connected=False, channel=True)])
+    assert drain.music_activity_blocks_handoff(bot) is True
 
 
 def test_connected_music_queue_blocks_even_between_tracks():
     vc = FakeVoice()
-    queue = SimpleNamespace(voice_client=vc, current=None, tracks=[object()])
-    bot = FakeBot([vc], queues={123: queue})
+    queue = SimpleNamespace(voice_client=vc, current=None, tracks=[])
+    bot = FakeBot([], queues={123: queue})
     assert drain.music_activity_blocks_handoff(bot) is True
 
 
-def test_disconnected_stale_queue_does_not_block_handoff():
-    vc = FakeVoice(connected=False)
-    queue = SimpleNamespace(voice_client=vc, current=object(), tracks=[object()])
+def test_fully_detached_stale_queue_does_not_block_handoff():
+    vc = FakeVoice(connected=False, channel=False)
+    queue = SimpleNamespace(voice_client=vc, current=None, tracks=[])
     bot = FakeBot([], queues={123: queue})
     assert drain.music_activity_blocks_handoff(bot) is False
 
 
-def test_primary_waiting_is_deferred_while_music_active():
-    coordinator = make_coordinator(FakeBot([FakeVoice(playing=True)]), waiting=True)
+def test_primary_waiting_is_deferred_while_voice_is_idle():
+    coordinator = make_coordinator(FakeBot([FakeVoice()]), waiting=True)
     result = asyncio.run(drain._primary_waiting_drain_aware(coordinator))
     assert result is False
     assert coordinator._sentrix_music_handoff_deferred is True
 
 
-def test_primary_waiting_is_allowed_when_music_idle():
-    coordinator = make_coordinator(FakeBot([FakeVoice()]), waiting=True)
+def test_primary_waiting_is_allowed_without_voice_session():
+    coordinator = make_coordinator(FakeBot([]), waiting=True)
     coordinator._sentrix_music_handoff_deferred = True
     result = asyncio.run(drain._primary_waiting_drain_aware(coordinator))
     assert result is True
