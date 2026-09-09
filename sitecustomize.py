@@ -10,7 +10,8 @@ Objectifs :
 - empecher une boucle INFO/WARNING identique de depasser la limite de logs Railway ;
 - ignorer uniquement les faux positifs connus d'un standby HA volontairement non connecte ;
 - installer le routage dashboard leader-aware avant la construction aiohttp ;
-- installer les raffinements visuels du dashboard apres les couches principales.
+- installer les raffinements visuels du dashboard apres les couches principales ;
+- préparer la passerelle musique YouTube/Spotify/Deezer avant le chargement des Cogs.
 """
 from __future__ import annotations
 
@@ -226,8 +227,23 @@ def _install_sentrix_verification_v96() -> None:
         )
 
 
+def _install_sentrix_music_v102() -> None:
+    """Prépare le support YouTube/Spotify/Deezer avant que ``cogs.music`` soit ajouté."""
+    try:
+        from sentrix_music_providers_v102 import install
+    except (ImportError, ModuleNotFoundError):
+        return
+    try:
+        install()
+    except Exception:
+        logging.getLogger("bot.music-v102").exception(
+            "Installation précoce de la passerelle musique V102 impossible."
+        )
+
+
 _configure_railway_logging()
 _install_railway_dashboard_ha_proxy()
 _install_railway_dashboard_focus_ui()
 _install_sentrix_v95()
 _install_sentrix_verification_v96()
+_install_sentrix_music_v102()
