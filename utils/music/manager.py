@@ -31,7 +31,7 @@ logger = logging.getLogger("bot.music.manager")
 @dataclass
 class ResolvedRequest:
     tracks: list[Track] = field(default_factory=list)
-    skipped: list[str] = field(default_factory=list)  # titres de playlist non résolus, pour info
+    skipped: list[str] = field(default_factory=list)
 
     @property
     def is_playlist(self) -> bool:
@@ -41,8 +41,6 @@ class ResolvedRequest:
 class ProviderManager:
     def __init__(self, *, cache: TTLCache | None = None, providers: list[MusicProvider] | None = None):
         if providers is not None:
-            # Point d'extension pour les tests : injecter des faux providers sans
-            # jamais toucher au réseau réel.
             self.direct, self.spotify, self.deezer, self.soundcloud, self.youtube = providers[:5]
             self.playback_providers = [p for p in providers if p.can_provide_playback and p is not self.direct]
         else:
@@ -54,10 +52,6 @@ class ProviderManager:
             self.playback_providers = [self.youtube, self.soundcloud]
 
         self.search = SearchProvider(self.playback_providers)
-        # Ordre de détection : les providers à URL explicite d'abord (les plus
-        # spécifiques), le direct-audio avant Spotify/Deezer (une URL .mp3 ne doit
-        # jamais être confondue avec autre chose), SearchProvider en tout dernier
-        # (catch-all, matches() toujours vrai).
         self.platform_providers: list[MusicProvider] = [
             self.direct, self.spotify, self.deezer, self.soundcloud, self.youtube, self.search,
         ]
@@ -67,7 +61,7 @@ class ProviderManager:
         for provider in self.platform_providers:
             if provider.matches(query):
                 return provider
-        return self.search  # ne devrait jamais arriver (search.matches() est toujours vrai)
+        return self.search
 
     async def resolve(self, query: str, *, requested_by: int | None) -> ResolvedRequest:
         query = query.strip()
@@ -83,15 +77,20 @@ class ProviderManager:
             raw_tracks: list[Track] = cached
         else:
             raw_tracks = await provider.resolve_metadata(query, requested_by=requested_by)
-            # Un provider de lecture peut avoir réussi uniquement sa voie
-            # "métadonnées" tout en ayant signalé son flux audio indisponible
-            # (cas YouTube anti-bot sur Railway + oEmbed). Ne surtout pas effacer ce
-            # cooldown ici, sinon gather_candidates retente immédiatement le même
-            # provider bloqué avant d'essayer les alternatives autorisées.
             if (not provider.can_provide_playback) or any(track.is_playable for track in raw_tracks):
                 provider.mark_available()
             self.cache.set(cache_key, raw_tracks, METADATA_TTL)
         logger.info("metadata resolved -> %d piste(s) via %s", len(raw_tracks), provider.name)
+
+        # Une playlist n'a pas besoin d'extraire/résoudre l'audio de 20-100 vidéos
+        # pendant l'import. C'est précisément ce qui déclenchait le challenge
+        # anti-bot YouTube sur Railway. On conserve les métadonnées et la résolution
+        # de lecture se fait au moment où chaque titre démarre dans cogs/music.py.
+        # Les titres qui possèdent déjà un flux restent évidemment utilisables tels quels.
+        if len(raw_tracks) > 1:
+            prepared = [Track(**{**raw.__dict__, "requested_by": requested_by}) for raw in raw_tracks]
+            logger.info("playlist metadata accepted -> %d piste(s), playback deferred", len(prepared))
+            return ResolvedRequest(tracks=prepared, skipped=[])
 
         resolved: list[Track] = []
         skipped: list[str] = []
@@ -116,11 +115,6 @@ class ProviderManager:
             logger.info("playback started candidate -> %s", best.playback_provider)
             track.playable_url = best.playable_url
             track.playback_provider = best.playback_provider
-            # refresh_playable_url() doit ré-extraire la PAGE du provider qui a
-            # réellement fourni l'audio. Garder ici l'URL Spotify/Deezer/YouTube de
-            # métadonnées ferait par exemple demander au provider SoundCloud de
-            # rafraîchir une URL YouTube juste avant FFmpeg, ce qui annulerait le
-            # fallback pourtant résolu avec succès.
             track.original_url = best.original_url or track.original_url
             resolved.append(track)
 
@@ -130,10 +124,32 @@ class ProviderManager:
 
         return ResolvedRequest(tracks=resolved, skipped=skipped)
 
+    async def ensure_playable(self, track: Track) -> Track:
+        """Résout à la demande une piste persistée qui ne possède pas encore d'audio.
+
+        Les playlists sont volontairement stockées avec des métadonnées stables et
+        jamais avec des URLs audio signées. Au démarrage d'un titre, cette méthode
+        recherche une source autorisée (YouTube si disponible, sinon SoundCloud...).
+        """
+        if track.is_playable:
+            return track
+
+        query = " ".join(part for part in (track.artist, track.title) if part).strip() or track.title
+        result = await self.resolve(query, requested_by=track.requested_by)
+        if not result.tracks:
+            raise NoPlayableSource(track.title, [p.name for p in self.playback_providers])
+
+        best = result.tracks[0]
+        track.playable_url = best.playable_url
+        track.playback_provider = best.playback_provider
+        track.original_url = best.original_url or track.original_url
+        if not track.duration:
+            track.duration = best.duration
+        if not track.thumbnail:
+            track.thumbnail = best.thumbnail
+        return track
+
     async def refresh_playable_url(self, track: Track) -> str:
-        """Ré-résout une URL de flux fraîche juste avant lecture — les URLs
-        signées (YouTube, SoundCloud) expirent, on ne peut pas réutiliser
-        indéfiniment celle obtenue au moment de la recherche."""
         provider = self._provider_by_name(track.playback_provider)
         if provider is None:
             if not track.playable_url:
