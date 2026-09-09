@@ -459,21 +459,45 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
     @app_commands.describe(membre="Le membre à bannir", duree="Durée (ex: 30m, 2h, 1j)", raison="La raison")
-    @checks.has_permission_or_modrole("ban_members")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
     async def tempban(self, ctx: commands.Context, membre: discord.Member, duree: str, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : cinquième commande de
+        sanction migrée — voir services/moderation.py::tempban(). Remplace au
+        passage @checks.has_permission_or_modrole (autorisation locale,
+        redondante avec utils/access_matrix.py) par @checks.action_validation,
+        déjà en place sur ban/kick/mute/unmute — même famille de commandes,
+        même garde-fou : le bot doit réellement posséder la permission
+        Discord avant l'exécution."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        seconds = helpers.parse_duration(duree)
-        if seconds is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide. Exemples valides : `30m`, `2h`, `1j`.')))
-        await self._send_sanction_dm(ctx, membre, "tempban", raison, seconds)
-        await ctx.guild.ban(membre, reason=f"{ctx.author} (temporaire {duree}) : {raison}", delete_message_seconds=0)
-        await self.bot.db.execute(
-            "INSERT INTO tempactions (guild_id, user_id, action, expires_at) VALUES (?, ?, 'ban', ?)",
-            (ctx.guild.id, membre.id, now() + seconds),
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "tempban")
+
+        def render_dm_text(seconds: int) -> str | None:
+            if template is None:
+                return None
+            return self._render_sanction_dm_text(
+                template,
+                target=membre,
+                guild=ctx.guild,
+                reason=raison,
+                duration_seconds=seconds,
+                actor=ctx.author,
+                action_label=self.DM_ACTION_LABELS["tempban"],
+            )
+
+        outcome = await moderation_service.tempban(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison,
+            duree=duree, render_dm_text=render_dm_text,
         )
-        e = await self.log_sanction(ctx, "tempban", membre, raison, duration_seconds=seconds)
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+
+        e = await self.log_sanction(
+            ctx, "tempban", membre, raison,
+            duration_seconds=outcome.duration_seconds, case_number=outcome.case_number,
+        )
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     @commands.hybrid_command(name="unban", description="Débannir un utilisateur via son identifiant Discord.")

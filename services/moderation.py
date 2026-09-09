@@ -22,9 +22,16 @@ DM-avant-exécution n'est pas requis pour la délivrabilité, et le code existan
 ne le fait pas) : reste une fonction séparée plutôt que de forcer
 _run_sanction_pipeline à couvrir une forme qu'elle ne représente pas.
 
-tempban, unmute, warn, unban restent sur leur code existant dans
-cogs/moderation.py, inchangé — migrés un par un dans des étapes suivantes,
-chacun testé indépendamment.
++tempban a une deuxième forme bespoke : en plus du dossier de sanction
+habituel, il doit programmer sa propre levée automatique (table
+tempactions, lue par cogs/moderation.py::check_tempactions) — une DEUXIÈME
+écriture, indépendante de persist_sanction() et du bannissement Discord déjà
+appliqué, protégée séparément par persist_tempaction() pour la même raison
+(section 17 : un échec d'écriture ne doit jamais annuler une sanction Discord
+déjà exécutée).
+
+warn, unban restent sur leur code existant dans cogs/moderation.py, inchangé
+— migrés dans des étapes suivantes, chacun testé indépendamment.
 """
 from __future__ import annotations
 
@@ -36,6 +43,7 @@ from typing import Any
 
 import discord
 
+from database.db import now
 from utils import checks, helpers
 
 logger = logging.getLogger("services.moderation")
@@ -51,6 +59,7 @@ class SanctionOutcome:
     dm_sent: bool = False
     case_number: int | None = None
     persistence_error: str | None = None
+    tempaction_error: str | None = None
     duration_seconds: int | None = None
 
     @property
@@ -89,6 +98,36 @@ async def persist_sanction(
             action, guild_id, target_id,
         )
         return None, str(exc)
+
+
+async def persist_tempaction(
+    bot: Any,
+    *,
+    guild_id: int,
+    user_id: int,
+    action: str,
+    expires_at: int,
+) -> str | None:
+    """Programme la levée automatique d'une sanction temporaire sans jamais
+    faire échouer l'appelant — même rationale que persist_sanction() : au
+    moment de l'appel, le bannissement Discord est déjà appliqué. Un échec ici
+    prive seulement la sanction de sa levée automatique (elle reste levable à
+    la main) ; il ne doit jamais remettre en cause une sanction déjà
+    exécutée. Retourne None en cas de succès, ou le message d'erreur sinon.
+    """
+    try:
+        await bot.db.execute(
+            "INSERT INTO tempactions (guild_id, user_id, action, expires_at) VALUES (?, ?, ?, ?)",
+            (guild_id, user_id, action, expires_at),
+        )
+        return None
+    except Exception as exc:
+        logger.exception(
+            "Programmation de la levée automatique impossible (guild=%s cible=%s action=%s) — "
+            "la sanction Discord reste appliquée ; la levée automatique est indisponible.",
+            guild_id, user_id, action,
+        )
+        return str(exc)
 
 
 async def _run_sanction_pipeline(
@@ -302,5 +341,73 @@ async def mute(
         dm_sent=dm_sent,
         case_number=case_number,
         persistence_error=persistence_error,
+        duration_seconds=seconds,
+    )
+
+
+async def tempban(
+    bot: Any,
+    *,
+    guild: discord.Guild,
+    actor: discord.Member,
+    target: discord.Member,
+    reason: str,
+    duree: str,
+    render_dm_text: Callable[[int], str | None] | None = None,
+) -> SanctionOutcome:
+    """Pipeline complet du bannissement temporaire : hiérarchie -> durée ->
+    notification -> exécution Discord -> DEUX persistances indépendantes.
+
+    Forme bespoke (comme mute()) plutôt que _run_sanction_pipeline() : en plus
+    du dossier de sanction habituel, +tempban doit aussi programmer sa levée
+    automatique (table tempactions). Le MP part AVANT l'exécution, comme
+    ban()/kick() — un membre banni, même temporairement, n'est en général plus
+    joignable par MP une fois le bannissement appliqué — c'est l'ordre du code
+    existant, conservé à l'identique. Aucune limite haute sur la durée
+    (contrairement à mute()) : ce n'est pas un timeout natif Discord borné à
+    28 jours, juste un bannissement classique dont la levée est reprogrammée
+    par check_tempactions ; le code existant n'en imposait pas non plus.
+    """
+    hierarchy_error = checks.check_hierarchy(actor, target) or checks.check_bot_hierarchy(guild, target)
+    if hierarchy_error:
+        return SanctionOutcome(executed=False, hierarchy_error=hierarchy_error)
+
+    seconds = helpers.parse_duration(duree)
+    if seconds is None:
+        return SanctionOutcome(
+            executed=False,
+            validation_error="Durée invalide. Exemples valides : `30m`, `2h`, `1j`.",
+        )
+
+    dm_sent = False
+    dm_text = render_dm_text(seconds) if render_dm_text else None
+    if dm_text:
+        try:
+            await target.send(dm_text, allowed_mentions=discord.AllowedMentions.none())
+            dm_sent = True
+        except discord.HTTPException:
+            dm_sent = False
+
+    await guild.ban(target, reason=f"{actor} (temporaire {duree}) : {reason}", delete_message_seconds=0)
+
+    tempaction_error = await persist_tempaction(
+        bot, guild_id=guild.id, user_id=target.id, action="ban", expires_at=now() + seconds,
+    )
+    case_number, persistence_error = await persist_sanction(
+        bot,
+        guild_id=guild.id,
+        target_id=target.id,
+        actor_id=actor.id,
+        action="tempban",
+        reason=reason,
+        duration_seconds=seconds,
+    )
+
+    return SanctionOutcome(
+        executed=True,
+        dm_sent=dm_sent,
+        case_number=case_number,
+        persistence_error=persistence_error,
+        tempaction_error=tempaction_error,
         duration_seconds=seconds,
     )

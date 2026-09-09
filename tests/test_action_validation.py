@@ -24,6 +24,7 @@ from utils import checks  # noqa: E402
 # Doit rester aligné sur HIGH_RISK_LOCAL_CHECK de tools/permission_matrix_gate.py
 CRITICAL = {
     "ban": ("ban_members", "member_moderation"),
+    "tempban": ("ban_members", "member_moderation"),
     "unban": ("ban_members", "external_user"),
     "kick": ("kick_members", "member_moderation"),
     "mute": ("moderate_members", "member_moderation"),
@@ -53,6 +54,7 @@ BODY_VALIDATOR = {
         "check_targetable", "check_hierarchy",
         "moderation_service.ban", "moderation_service.kick",
         "moderation_service.mute", "moderation_service.unmute",
+        "moderation_service.tempban",
     ),
     "role_target": ("check_role_target",),
     "channel_target": ("check_channel_target", "purge"),
