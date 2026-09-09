@@ -24,9 +24,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
 
-      - name: Compile V98/V99/V101
+      - name: Compile V98/V99/V101/music
         run: |
-          python -m compileall -q sentrix_v98_slash.py sentrix_grouped_slash_fix.py sentrix_v98_boot.py sentrix_v98_ha_product_boot.py sentrix_v101_command_runtime.py web/giveaway_dashboard_v101.py cogs/dashboard_runtime_patch.py tools/v98_grouped_slash_gate.py
+          python -m compileall -q sentrix_v98_slash.py sentrix_grouped_slash_fix.py sentrix_v98_boot.py sentrix_v98_ha_product_boot.py sentrix_v101_command_runtime.py sentrix_music_providers_v102.py sentrix_music_voice_persistence.py utils/music/providers/soundcloud.py web/giveaway_dashboard_v101.py cogs/dashboard_runtime_patch.py tools/v98_grouped_slash_gate.py
 
       - name: V98 semantic slash gate
         env:
@@ -54,3 +54,10 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-v101-giveaway.db"
           PYTHONPATH: "."
         run: python -m pytest -q tests/test_giveaway_dashboard_v101.py
+
+      - name: Music audio and persistent voice regression tests
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-music-smooth.db"
+          PYTHONPATH: "."
+        run: python -m pytest -q tests/test_music_smooth_audio.py tests/test_music_voice_persistence.py

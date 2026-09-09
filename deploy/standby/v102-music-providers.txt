@@ -1,0 +1,4 @@
+SentriX standby deployment marker — Music V102
+
+Sync the standby image with the current production branch so failover keeps the same
+YouTube/YouTube Music, Spotify and Deezer input support as the primary service.

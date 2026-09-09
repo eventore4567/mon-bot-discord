@@ -152,10 +152,14 @@ class ModerationCatalogSurfaceTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, NORMAL_DIRECT_COMMANDS)
 
-    def test_normal_direct_commands_reste_exactement_a_100(self):
+    def test_normal_direct_commands_reste_exactement_a_97(self):
         """Contrat déjà imposé par tools/command_runtime_audit.py : le budget slash
-        (cogs/slash_command_budget.py) est plafonné à 100 racines globales."""
-        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 100)
+        (cogs/slash_command_budget.py) est plafonné à 100 racines globales. Passé de
+        100 à 97 depuis le regroupement volontaire de la musique sous /music (pause/
+        skip/stop/queue/nowplaying/volume/loop/shuffle/join/leave ne sont plus des
+        racines directes ; seul +play l'est encore) — ne pas relever ce nombre en
+        réintroduisant d'anciennes commandes plates pour "revenir à 100"."""
+        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 97)
 
 
 if __name__ == "__main__":

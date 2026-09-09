@@ -25,6 +25,14 @@ if any(ord(ch) < 32 or ord(ch) == 127 for ch in DISCORD_TOKEN):
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")          # /ask, /ai, /sentrix, etc.
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")         # /weather (sinon fallback wttr.in gratuit)
 
+# Moteur musique multi-provider (utils/music/) : Spotify Client Credentials Flow —
+# métadonnées UNIQUEMENT (titre/artiste/album/durée), jamais de flux audio, l'API
+# Spotify ne le permet pas pour une application tierce. Sans ces deux variables, le
+# provider retombe sur l'endpoint public oEmbed de Spotify (titre seul, sans clé) —
+# fonctionne dès l'installation, juste moins précis pour le matching.
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+
 # Modèles API OpenAI actuels. Les noms internes Luna/Terra/Sol restent gérés dans
 # utils/ai_service.py. Railway peut toujours fournir un override explicite si nécessaire.
 OPENAI_MODEL_FAST = os.getenv("OPENAI_MODEL_FAST", "gpt-5.6-luna")

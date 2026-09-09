@@ -1,0 +1,2 @@
+Sync standby after PR #331 (FFmpeg reconnect option fix).
+Production merge: 87232b38659243bb45f7e56478363d3cd17352e8

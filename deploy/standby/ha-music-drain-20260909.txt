@@ -1,0 +1,3 @@
+Trigger standby deployment after PR #332.
+Fix: defer planned standby -> primary handoff while an active music session is running.
+Emergency lease-loss fencing is unchanged.

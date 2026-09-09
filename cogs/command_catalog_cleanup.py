@@ -36,7 +36,9 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     "me", "level", "set-xp", "add-xp", "set-level-role", "remove-level-role",
     "reset-levels",
     "ticket", "giveaway", "giveaway-reroll",
-    "play", "pause", "skip", "stop",
+    # Le nouveau moteur expose pause/skip/stop sous le groupe /music. Seul +play
+    # reste volontairement une commande directe pour compatibilité rapide.
+    "play",
 }) | GAME_COMMANDS
 
 ADMIN_DIRECT_COMMANDS = frozenset({

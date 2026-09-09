@@ -26,7 +26,7 @@ jobs:
           cache: pip
 
       - name: Dependencies
-        run: pip install -r requirements.txt pytest
+        run: pip install -r requirements.txt pytest pytest-asyncio
 
       - name: Compile all Python
         run: python -m compileall -q .
@@ -54,6 +54,9 @@ jobs:
 
       - name: Permission matrix gate
         run: python tools/permission_matrix_gate.py
+
+      - name: Command permission group consistency audit
+        run: python tools/command_permission_group_consistency_audit.py
 
       - name: Natural intent fuzz gate
         run: python tools/ai_intent_fuzz_gate.py
