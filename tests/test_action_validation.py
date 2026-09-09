@@ -54,7 +54,7 @@ BODY_VALIDATOR = {
         "check_targetable", "check_hierarchy",
         "moderation_service.ban", "moderation_service.kick",
         "moderation_service.mute", "moderation_service.unmute",
-        "moderation_service.tempban",
+        "moderation_service.tempban", "moderation_service.warn",
     ),
     "role_target": ("check_role_target",),
     "channel_target": ("check_channel_target", "purge"),

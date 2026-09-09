@@ -30,8 +30,24 @@ appliqué, protégée séparément par persist_tempaction() pour la même raison
 (section 17 : un échec d'écriture ne doit jamais annuler une sanction Discord
 déjà exécutée).
 
-warn, unban restent sur leur code existant dans cogs/moderation.py, inchangé
-— migrés dans des étapes suivantes, chacun testé indépendamment.
++warn a une forme plus large que les autres : ce n'est pas UNE sanction mais
+DEUX écritures distinctes qui peuvent chacune réussir ou échouer
+indépendamment — l'avertissement lui-même (toujours) et un bannissement
+automatique quand le seuil configuré est atteint (conditionnel, acteur =
+le bot lui-même, pas ctx.author). Contrairement à ban/kick/mute/unmute/
+tempban, warn() retourne un WarnOutcome dédié plutôt que SanctionOutcome :
+les champs (comptage, rôle automatique, sous-résultat du ban automatique)
+n'ont pas de sens pour une sanction "un membre, une action". Même principe
+de fail-soft partout où une étape intervient APRÈS une écriture ou une
+action Discord déjà réussie (le comptage total, qui ne doit jamais faire
+passer un avertissement réellement enregistré pour un échec ; le dossier de
+l'avertissement ; le dossier du bannissement automatique) — mais PAS sur
+l'INSERT de l'avertissement lui-même : à ce stade rien n'a encore réussi,
+laisser l'exception remonter reste le comportement honnête (et existant).
+
+unban reste sur son code existant dans cogs/moderation.py, inchangé — sa
+cible n'est pas un membre du serveur, sa forme diverge trop des autres pour
+partager la même migration ; testé indépendamment le moment venu.
 """
 from __future__ import annotations
 
@@ -67,6 +83,31 @@ class SanctionOutcome:
         """Motif de refus, quelle que soit sa nature — hiérarchie ou validation
         métier (ex: durée invalide). None si la sanction a été exécutée."""
         return self.hierarchy_error or self.validation_error
+
+
+@dataclass
+class WarnOutcome:
+    """Résultat de warn() — dataclass dédiée plutôt que SanctionOutcome : un
+    avertissement n'est pas "un membre, une action", c'est potentiellement
+    DEUX sanctions indépendantes (l'avertissement, puis un bannissement
+    automatique conditionnel), plus des effets annexes (comptage, rôle
+    automatique) qui n'ont pas leur place dans le modèle des autres
+    commandes."""
+    executed: bool
+    hierarchy_error: str | None = None
+    dm_sent: bool = False
+    case_number: int | None = None
+    persistence_error: str | None = None
+    total_warnings: int | None = None
+    count_error: str | None = None
+    role_assigned: bool = False
+    role_error: str | None = None
+    auto_ban_triggered: bool = False
+    auto_ban_hierarchy_error: str | None = None
+    auto_ban_execution_error: str | None = None
+    auto_ban_executed: bool = False
+    auto_ban_case_number: int | None = None
+    auto_ban_persistence_error: str | None = None
 
 
 async def persist_sanction(
@@ -410,4 +451,137 @@ async def tempban(
         persistence_error=persistence_error,
         tempaction_error=tempaction_error,
         duration_seconds=seconds,
+    )
+
+
+async def _count_warnings(bot: Any, *, guild_id: int, target_id: int) -> tuple[int | None, str | None]:
+    """Best-effort : l'avertissement est déjà enregistré quand cette fonction
+    est appelée — un échec de comptage ne doit jamais le faire passer pour un
+    échec. Retourne (None, message_erreur) plutôt que de propager."""
+    try:
+        rows = await bot.db.fetchall(
+            "SELECT id FROM warnings WHERE guild_id = ? AND user_id = ?", (guild_id, target_id)
+        )
+        return len(rows), None
+    except Exception as exc:
+        logger.exception(
+            "Comptage des avertissements impossible (guild=%s cible=%s) — l'avertissement reste "
+            "enregistré ; le seuil de ban automatique ne peut pas être évalué ce tour-ci.",
+            guild_id, target_id,
+        )
+        return None, str(exc)
+
+
+async def _apply_warn_role(
+    target: discord.Member, role: discord.Role | None, *, actor: discord.Member, reason: str,
+) -> tuple[bool, str | None]:
+    """Reproduit exactement le comportement existant : rien à faire si aucun
+    rôle n'est configuré ou si le membre l'a déjà ; seule discord.HTTPException
+    est tolérée (permissions/hiérarchie), pas d'élargissement du filet."""
+    if role is None or role in target.roles:
+        return False, None
+    try:
+        await target.add_roles(role, reason=f"Avertissement par {actor} : {reason}")
+        return True, None
+    except discord.HTTPException as exc:
+        return False, str(exc)
+
+
+async def _send_dm_best_effort(target: discord.abc.User, text: str | None) -> bool:
+    if not text:
+        return False
+    try:
+        await target.send(text, allowed_mentions=discord.AllowedMentions.none())
+        return True
+    except discord.HTTPException:
+        return False
+
+
+async def warn(
+    bot: Any,
+    *,
+    guild: discord.Guild,
+    actor: discord.Member,
+    target: discord.Member,
+    reason: str,
+    dm_text: str | None = None,
+    warn_role: discord.Role | None = None,
+    ban_threshold: int = 0,
+    render_ban_dm_text: Callable[[], str | None] | None = None,
+) -> WarnOutcome:
+    """Pipeline complet de l'avertissement : hiérarchie -> INSERT -> comptage
+    -> rôle automatique -> MP -> dossier -> (si seuil atteint) bannissement
+    automatique complet, avec son propre MP et son propre dossier.
+
+    ``warn_role`` et ``ban_threshold`` sont déjà résolus par l'appelant
+    (lecture de la config de guilde, get_role) — comme ``render_dm_text`` pour
+    mute()/tempban(), cette résolution reste côté cog, propre à Discord.
+
+    Le bannissement automatique agit au nom du BOT (``bot.user``), jamais de
+    ``actor`` — comportement existant conservé à l'identique : ce n'est pas
+    le modérateur qui décide ce bannissement, c'est le seuil configuré.
+    """
+    hierarchy_error = checks.check_hierarchy(actor, target) or checks.check_bot_hierarchy(guild, target)
+    if hierarchy_error:
+        return WarnOutcome(executed=False, hierarchy_error=hierarchy_error)
+
+    await bot.db.execute(
+        "INSERT INTO warnings (guild_id, user_id, moderator_id, reason, timestamp) VALUES (?, ?, ?, ?, ?)",
+        (guild.id, target.id, actor.id, reason, now()),
+    )
+
+    total_warnings, count_error = await _count_warnings(bot, guild_id=guild.id, target_id=target.id)
+    role_assigned, role_error = await _apply_warn_role(target, warn_role, actor=actor, reason=reason)
+    dm_sent = await _send_dm_best_effort(target, dm_text)
+
+    case_number, persistence_error = await persist_sanction(
+        bot, guild_id=guild.id, target_id=target.id, actor_id=actor.id, action="warn", reason=reason,
+    )
+
+    auto_ban_triggered = bool(ban_threshold) and total_warnings is not None and total_warnings >= ban_threshold
+    auto_ban_hierarchy_error = None
+    auto_ban_execution_error = None
+    auto_ban_executed = False
+    auto_ban_case_number = None
+    auto_ban_persistence_error = None
+
+    if auto_ban_triggered:
+        auto_ban_hierarchy_error = checks.check_bot_hierarchy(guild, target)
+        if auto_ban_hierarchy_error is None:
+            ban_dm_text = render_ban_dm_text() if render_ban_dm_text else None
+            await _send_dm_best_effort(target, ban_dm_text)
+            try:
+                await guild.ban(
+                    target,
+                    reason=f"Ban automatique : {ban_threshold} avertissements atteints",
+                    delete_message_seconds=0,
+                )
+                auto_ban_executed = True
+            except discord.HTTPException as exc:
+                auto_ban_execution_error = str(exc)
+            if auto_ban_executed:
+                auto_ban_case_number, auto_ban_persistence_error = await persist_sanction(
+                    bot,
+                    guild_id=guild.id,
+                    target_id=target.id,
+                    actor_id=bot.user.id,
+                    action="ban",
+                    reason=f"Seuil de {ban_threshold} avertissements atteint",
+                )
+
+    return WarnOutcome(
+        executed=True,
+        dm_sent=dm_sent,
+        case_number=case_number,
+        persistence_error=persistence_error,
+        total_warnings=total_warnings,
+        count_error=count_error,
+        role_assigned=role_assigned,
+        role_error=role_error,
+        auto_ban_triggered=auto_ban_triggered,
+        auto_ban_hierarchy_error=auto_ban_hierarchy_error,
+        auto_ban_execution_error=auto_ban_execution_error,
+        auto_ban_executed=auto_ban_executed,
+        auto_ban_case_number=auto_ban_case_number,
+        auto_ban_persistence_error=auto_ban_persistence_error,
     )

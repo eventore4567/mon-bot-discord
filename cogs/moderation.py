@@ -645,72 +645,97 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
     async def warn(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : sixième commande de
+        sanction migrée — voir services/moderation.py::warn(). Forme la plus
+        large de toutes les commandes migrées : au-delà du dossier de
+        sanction habituel, corrige aussi le même trou de persistance sur le
+        bannissement automatique par seuil d'avertissements (une sanction
+        Discord distincte, déjà réellement exécutée avant son propre
+        record_sanction() non protégé) et sur le comptage total (une lecture
+        qui ne doit plus jamais faire passer un avertissement déjà enregistré
+        pour un échec)."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        await self.bot.db.execute(
-            "INSERT INTO warnings (guild_id, user_id, moderator_id, reason, timestamp) VALUES (?, ?, ?, ?, ?)",
-            (ctx.guild.id, membre.id, ctx.author.id, raison, now()),
-        )
-        rows = await self.bot.db.fetchall(
-            "SELECT id FROM warnings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
-        )
-        total = len(rows)
-        conf = await self.bot.db.get_guild_config(ctx.guild.id)
 
+        template = await self._get_sanction_dm_template(ctx.guild.id, "warn")
+        dm_text = None
+        if template is not None:
+            dm_text = self._render_sanction_dm_text(
+                template, target=membre, guild=ctx.guild, reason=raison,
+                duration_seconds=None, actor=ctx.author, action_label=self.DM_ACTION_LABELS["warn"],
+            )
+
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
         # Rôle automatique d'avertissement (/setwarnrole) : ajouté au membre à chaque
         # /warn, tant qu'il ne l'a pas déjà et que le bot a la permission de le faire.
-        role_note = ""
-        if conf and conf["warn_role"]:
-            role = ctx.guild.get_role(conf["warn_role"])
-            if role and role not in membre.roles:
-                try:
-                    await membre.add_roles(role, reason=f"Avertissement par {ctx.author} : {raison}")
-                    role_note = f"\nRôle {role.mention} attribué automatiquement."
-                except discord.HTTPException:
-                    role_note = f"\n⚠️ Impossible d'attribuer le rôle {role.mention} (permissions/hiérarchie)."
-
-        await self._send_sanction_dm(ctx, membre, "warn", raison)
-        extra = {"📌 Détails": f"Total d'avertissements : {total}{role_note}"}
-        e = await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra)
-        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
-
+        warn_role = ctx.guild.get_role(conf["warn_role"]) if conf and conf["warn_role"] else None
         # Bannissement automatique au bout de N avertissements (/setwarnbanthreshold,
         # 3 par défaut, 0 = désactivé). Pas de confirmation demandée : c'est le but de
         # ce seuil, agir automatiquement dès qu'il est atteint.
         threshold = conf["warn_ban_threshold"] if conf and conf["warn_ban_threshold"] else 0
-        if threshold and total >= threshold:
-            err = checks.check_bot_hierarchy(ctx.guild, membre)
-            if err:
-                await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"{membre.mention} a atteint **{total}** avertissements (seuil : {threshold}) mais n'a pas pu être banni automatiquement : {err}")))
-                return
-            await self._send_sanction_dm(
-                ctx, membre, "ban", f"Seuil de {threshold} avertissements atteint"
+
+        template_ban = await self._get_sanction_dm_template(ctx.guild.id, "ban")
+
+        def render_ban_dm_text() -> str | None:
+            if template_ban is None:
+                return None
+            return self._render_sanction_dm_text(
+                template_ban, target=membre, guild=ctx.guild,
+                reason=f"Seuil de {threshold} avertissements atteint",
+                duration_seconds=None, actor=ctx.author, action_label=self.DM_ACTION_LABELS["ban"],
             )
-            try:
-                await ctx.guild.ban(
-                    membre, reason=f"Ban automatique : {threshold} avertissements atteints", delete_message_seconds=0
-                )
-            except discord.HTTPException:
-                await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Le bannissement automatique de {membre.mention} a échoué (permissions).')))
-                return
-            case_number = await self.bot.db.record_sanction(
-                ctx.guild.id, membre.id, self.bot.user.id, "ban",
-                f"Seuil de {threshold} avertissements atteint",
-            )
-            style = design_system.CATEGORY_STYLES["moderation"]
-            ban_e = design_system.create_embed(
-                title=f"{style['emoji']} Dossier #{case_number} — 🚨 Bannissement automatique (seuil d'avertissements)",
-                colour=config.COLOR_ERROR,
-                thumbnail=membre.display_avatar.url,
-                footer="SentriX",
-            )
-            ban_e.add_field(name="👤 Membre", value=f"{membre.mention}\n`ID: {membre.id}`", inline=True)
-            ban_e.add_field(name="🛡️ Modérateur", value=f"{self.bot.user.mention} (automatique)", inline=True)
-            ban_e.add_field(name="📝 Raison", value=f"Seuil de {threshold} avertissements atteint", inline=False)
-            ban_e.add_field(name="📌 Détails", value=f"Bannissement automatique — total d'avertissements : {total}", inline=False)
-            await panels.envoyer(ctx, panels.depuis_embed(ban_e))
-            await self.log_action(ctx.guild, ban_e)
+
+        outcome = await moderation_service.warn(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison,
+            dm_text=dm_text, warn_role=warn_role, ban_threshold=threshold,
+            render_ban_dm_text=render_ban_dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.hierarchy_error)))
+
+        role_note = ""
+        if warn_role is not None:
+            if outcome.role_assigned:
+                role_note = f"\nRôle {warn_role.mention} attribué automatiquement."
+            elif outcome.role_error:
+                role_note = f"\n⚠️ Impossible d'attribuer le rôle {warn_role.mention} (permissions/hiérarchie)."
+
+        total_txt = (
+            str(outcome.total_warnings) if outcome.total_warnings is not None
+            else "inconnu (erreur de comptage)"
+        )
+        extra = {"📌 Détails": f"Total d'avertissements : {total_txt}{role_note}"}
+        e = await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra, case_number=outcome.case_number)
+        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
+
+        if not outcome.auto_ban_triggered:
+            return
+        if outcome.auto_ban_hierarchy_error:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(
+                f"{membre.mention} a atteint **{outcome.total_warnings}** avertissements (seuil : {threshold}) "
+                f"mais n'a pas pu être banni automatiquement : {outcome.auto_ban_hierarchy_error}"
+            )))
+        if not outcome.auto_ban_executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
+                f'Le bannissement automatique de {membre.mention} a échoué (permissions).'
+            )))
+
+        style = design_system.CATEGORY_STYLES["moderation"]
+        titre_dossier = (
+            f"Dossier #{outcome.auto_ban_case_number}" if outcome.auto_ban_case_number is not None
+            else "Sanction (dossier non enregistré)"
+        )
+        ban_e = design_system.create_embed(
+            title=f"{style['emoji']} {titre_dossier} — 🚨 Bannissement automatique (seuil d'avertissements)",
+            colour=config.COLOR_ERROR,
+            thumbnail=membre.display_avatar.url,
+            footer="SentriX",
+        )
+        ban_e.add_field(name="👤 Membre", value=f"{membre.mention}\n`ID: {membre.id}`", inline=True)
+        ban_e.add_field(name="🛡️ Modérateur", value=f"{self.bot.user.mention} (automatique)", inline=True)
+        ban_e.add_field(name="📝 Raison", value=f"Seuil de {threshold} avertissements atteint", inline=False)
+        ban_e.add_field(name="📌 Détails", value=f"Bannissement automatique — total d'avertissements : {outcome.total_warnings}", inline=False)
+        await panels.envoyer(ctx, panels.depuis_embed(ban_e))
+        await self.log_action(ctx.guild, ban_e)
 
     @commands.hybrid_command(name="unwarn", description="Supprimer un avertissement précis via son identifiant.", with_app_command=False)
     @app_commands.describe(warn_id="L'identifiant de l'avertissement (voir /warnings)")
