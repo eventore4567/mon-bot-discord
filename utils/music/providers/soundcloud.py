@@ -1,12 +1,14 @@
-"""SoundCloud, via l'extracteur intégré de yt-dlp (pas l'API officielle SoundCloud,
-dont l'enregistrement de nouvelles applications est fermé depuis des années). Ne
-contourne aucune protection : yt-dlp respecte le réglage "téléchargement autorisé"
-de chaque piste défini par son auteur — une piste que SoundCloud lui-même refuse de
-diffuser n'est pas non plus diffusée ici, elle est simplement marquée indisponible
-et le ProviderManager passe à la source suivante."""
+"""SoundCloud via l'extracteur intégré de yt-dlp.
+
+Aucune protection n'est contournée. Pour une recherche texte, on récupère d'abord
+une liste légère de candidats, puis on résout chaque piste séparément. Une piste DRM
+ou non diffusable est simplement ignorée et les candidats suivants sont essayés ;
+elle ne met plus tout le provider SoundCloud en cooldown.
+"""
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 
 import yt_dlp
@@ -14,6 +16,8 @@ import yt_dlp
 from ..errors import ProviderUnavailable, TrackNotFound
 from ..models import Track
 from .base import MusicProvider
+
+logger = logging.getLogger("bot.music.provider.soundcloud")
 
 _URL_RE = re.compile(r"^(https?://)?(www\.|m\.)?(soundcloud\.com|snd\.sc)/", re.IGNORECASE)
 
@@ -26,6 +30,22 @@ _BASE_OPTS = {
 }
 
 _NOT_FOUND_MARKERS = ("404", "not found", "unavailable", "no longer available")
+_DRM_MARKERS = ("drm protected", "drm-protected", "protected by drm")
+
+
+def _is_drm_reason(reason: str) -> bool:
+    text = (reason or "").casefold()
+    return any(marker in text for marker in _DRM_MARKERS)
+
+
+def _candidate_page_url(entry: dict) -> str | None:
+    """Retourne uniquement une URL de page HTTP ré-extractable, jamais un flux
+    opaque ou un identifiant interne."""
+    for key in ("webpage_url", "original_url", "url"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.startswith(("https://", "http://")):
+            return value
+    return None
 
 
 def _entry_to_track(entry: dict, *, requested_by: int | None) -> Track:
@@ -51,11 +71,12 @@ class SoundCloudProvider(MusicProvider):
     def matches(self, query: str) -> bool:
         return bool(_URL_RE.match(query.strip()))
 
-    async def _extract(self, query: str) -> dict:
-        loop = asyncio.get_event_loop()
+    async def _extract(self, query: str, *, opts_override: dict | None = None) -> dict:
+        opts = {**_BASE_OPTS, **(opts_override or {})}
+        loop = asyncio.get_running_loop()
 
         def _run():
-            with yt_dlp.YoutubeDL(_BASE_OPTS) as ydl:
+            with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(query, download=False)
 
         try:
@@ -64,6 +85,9 @@ class SoundCloudProvider(MusicProvider):
             text = str(exc).casefold()
             if any(marker in text for marker in _NOT_FOUND_MARKERS):
                 raise TrackNotFound(self.name, query) from exc
+            # La distinction DRM/provider-wide est faite par search_playable :
+            # _extract reste générique pour qu'un lien SoundCloud direct puisse
+            # remonter proprement une indisponibilité sans jamais contourner DRM.
             raise ProviderUnavailable(self.name, str(exc)[:200]) from exc
         except Exception as exc:
             raise ProviderUnavailable(self.name, f"{type(exc).__name__}: {exc}"[:200]) from exc
@@ -79,10 +103,54 @@ class SoundCloudProvider(MusicProvider):
     async def search_playable(
         self, *, title: str, artist: str | None, duration: int | None, limit: int = 5,
     ) -> list[Track]:
+        """Cherche plusieurs candidats puis résout chacun individuellement.
+
+        Avant ce correctif, yt-dlp résolvait tout ``scsearch5`` en une fois : si le
+        premier résultat était DRM, l'exception interrompait la recherche entière et
+        SoundCloud était marqué indisponible 120 s. Désormais une piste DRM est un
+        échec local au candidat ; les suivantes restent essayées.
+        """
         query_text = f"{artist} {title}" if artist else title
-        info = await self._extract(f"scsearch{limit}:{query_text}")
-        entries = [e for e in (info.get("entries") or []) if e]
-        return [_entry_to_track(entry, requested_by=None) for entry in entries]
+        try:
+            listing = await self._extract(
+                f"scsearch{limit}:{query_text}",
+                opts_override={"extract_flat": True, "noplaylist": True},
+            )
+        except ProviderUnavailable as exc:
+            if _is_drm_reason(exc.reason):
+                logger.info("SoundCloud search listing DRM ignored -> %s", query_text)
+                return []
+            raise
+
+        flat_entries = [e for e in (listing.get("entries") or []) if e]
+        results: list[Track] = []
+        for flat in flat_entries[:limit]:
+            candidate_url = _candidate_page_url(flat)
+            if not candidate_url:
+                continue
+            try:
+                info = await self._extract(
+                    candidate_url,
+                    opts_override={"extract_flat": False, "noplaylist": True},
+                )
+            except TrackNotFound:
+                continue
+            except ProviderUnavailable as exc:
+                if _is_drm_reason(exc.reason):
+                    logger.info("SoundCloud DRM candidate skipped -> %s", candidate_url)
+                    continue
+                # Erreur réseau/rate-limit/provider-wide : celle-ci doit bien mettre
+                # SoundCloud en cooldown via gather_candidates().
+                raise
+
+            entries = info.get("entries") if "entries" in info else [info]
+            for entry in (e for e in (entries or []) if e):
+                track = _entry_to_track(entry, requested_by=None)
+                if track.playable_url:
+                    results.append(track)
+                    break
+
+        return results
 
     async def refresh_playable_url(self, track: Track) -> str:
         if not track.original_url:
