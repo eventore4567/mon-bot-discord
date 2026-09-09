@@ -1,6 +1,9 @@
 import pytest
 
-from utils.music.providers.spotify import SpotifyProvider
+from utils.music.providers.spotify import SpotifyProvider, _parse_id
+
+
+ALAN_WALKER_PLAYLIST_URL = "https://open.spotify.com/playlist/37i9dQZF1DZ06evO4rvWRa"
 
 
 def _track(track_id: str, title: str) -> dict:
@@ -12,6 +15,14 @@ def _track(track_id: str, title: str) -> dict:
         "external_urls": {"spotify": f"https://open.spotify.com/track/{track_id}"},
         "album": {"name": "Test Album", "images": []},
     }
+
+
+def test_real_alan_walker_playlist_url_is_recognized():
+    assert _parse_id(ALAN_WALKER_PLAYLIST_URL) == (
+        "playlist",
+        "37i9dQZF1DZ06evO4rvWRa",
+    )
+    assert SpotifyProvider().matches(ALAN_WALKER_PLAYLIST_URL)
 
 
 @pytest.mark.asyncio
