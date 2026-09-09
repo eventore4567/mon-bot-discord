@@ -13,7 +13,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from utils import checks, embeds, log_service
+from utils import access_matrix, checks, embeds, log_service
 from utils import sentrix_panels as panels
 from . import permission_guard
 
@@ -902,13 +902,16 @@ def permission_scope_for_command(bot: commands.Bot, command_name: str) -> str:
         return "tickets"
     if name.startswith("notif"):
         return "notifications"
-    policy_module = __import__(bot.__class__.__module__, fromlist=["CATEGORY_COMMANDS"])
-    categories = getattr(policy_module, "CATEGORY_COMMANDS", {})
-    for category, names in categories.items():
+    # Core V2, Phase 3 (docs/core-v2-plan.md) : lit utils/access_matrix.py
+    # directement plutôt que la copie locale de main.py via un import dynamique
+    # sur bot.__class__.__module__ — l'audit a trouvé cette copie déjà en
+    # dérive de 34 commandes publiques (docs/core-v2-audit-technical-debt.md,
+    # §16). Ce classement n'affecte que l'affichage dans le centre Setup,
+    # jamais une décision d'accès.
+    for category, names in access_matrix.CATEGORY_COMMANDS.items():
         if name in names:
             return str(category)
-    public = set(getattr(policy_module, "PUBLIC_COMMANDS", ()))
-    if name in public:
+    if name in access_matrix.PUBLIC_COMMANDS:
         return "public"
     return "other"
 

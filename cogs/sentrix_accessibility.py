@@ -10,12 +10,12 @@ Objectifs :
 from __future__ import annotations
 
 import logging
-import sys
 import types
 
 import discord
 from discord.ext import commands
 
+from utils import access_matrix
 from utils import embeds
 from utils import sentrix_panels as panels
 from utils.accessibility import closest_commands, human_parameter, match_quick_intent, usage_line
@@ -23,10 +23,6 @@ from utils.accessibility import closest_commands, human_parameter, match_quick_i
 from . import bot_experience_v6
 
 logger = logging.getLogger("bot.accessibility-v23")
-
-
-def _runtime_main():
-    return sys.modules.get("main") or sys.modules.get("__main__")
 
 
 def _prefix(ctx: commands.Context) -> str:
@@ -43,17 +39,18 @@ def _typed_root(ctx: commands.Context) -> str:
 
 
 def _friendly_permissions(names) -> str:
-    main = _runtime_main()
-    labels = getattr(main, "PERMISSION_LABELS", {}) if main else {}
+    # Core V2, Phase 3 (docs/core-v2-plan.md) : lit utils/access_matrix.py
+    # directement — sa table de libellés est la plus complète (46 permissions
+    # de plus que la copie de main.py, docs/core-v2-audit-technical-debt.md §16).
+    labels = access_matrix.PERMISSION_LABELS
     values = [labels.get(name, str(name).replace("_", " ").capitalize()) for name in names]
     return ", ".join(values)
 
 
 def _visible_candidates(bot: commands.Bot, ctx: commands.Context) -> list[str]:
     """Ne suggère pas aveuglément des commandes staff à un membre normal."""
-    main = _runtime_main()
-    public = set(getattr(main, "PUBLIC_COMMANDS", set()) or set()) if main else set()
-    permission_commands = dict(getattr(main, "DISCORD_PERMISSION_COMMANDS", {}) or {}) if main else {}
+    public = access_matrix.PUBLIC_COMMANDS
+    permission_commands = access_matrix.DISCORD_PERMISSION_COMMANDS
 
     member = ctx.author if isinstance(ctx.author, discord.Member) else None
     perms = getattr(member, "guild_permissions", None)

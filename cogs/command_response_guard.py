@@ -1,8 +1,11 @@
 """Observabilité et garde de réponses des commandes SentriX.
 
-Cette couche ne répond jamais elle-même aux erreurs utilisateur. Le handler central
-(error_experience_v3 + main.py) est l'unique propriétaire des messages d'erreur. Cela
-évite qu'une faute comme +hlep produise deux cartes différentes.
+Cette couche ne répond jamais elle-même aux erreurs utilisateur. L'autorité finale
+des messages d'erreur est cogs/final_error_embed_v5.py (docstring corrigé — l'audit
+Core V2, docs/core-v2-audit-technical-debt.md §3/§9, a tracé la chaîne réelle
+d'exécution et trouvé que error_experience_v3 + main.py ne gagnent plus depuis
+l'installation de V5, contrairement à ce qu'affirmait cette phrase). Cela évite
+qu'une faute comme +hlep produise deux cartes différentes.
 
 Les utilitaires de suggestion restent disponibles pour les audits et la politique de
 permissions, mais ce module se limite au marquage des réponses et au diagnostic de durée.
@@ -11,20 +14,17 @@ from __future__ import annotations
 
 import difflib
 import logging
-import sys
 import time
 
 import discord
 from discord.ext import commands
 
+from utils import access_matrix
+
 logger = logging.getLogger("bot.command-response-guard")
 _INSTALLED = False
 _SLOW_COMMAND_SECONDS = 2.0
 _SLASH_STARTS: dict[int, float] = {}
-
-
-def _runtime_main():
-    return sys.modules.get("main") or sys.modules.get("__main__")
 
 
 def _command_policy_name(command: commands.Command) -> str:
@@ -33,19 +33,23 @@ def _command_policy_name(command: commands.Command) -> str:
 
 
 def _can_suggest_command(ctx: commands.Context, command: commands.Command) -> bool:
-    """Filtre les suggestions sans exposer les commandes staff/owner."""
+    """Filtre les suggestions sans exposer les commandes staff/owner.
+
+    Lit utils/access_matrix.py directement (Core V2, Phase 3 —
+    docs/core-v2-plan.md) plutôt que la copie locale de main.py : l'audit a
+    trouvé cette dernière déjà en dérive de 34 commandes publiques et 2
+    commandes owner-only (docs/core-v2-audit-technical-debt.md, §16). Comme ce
+    filtre ne fait QUE décider quoi suggérer (jamais quoi exécuter), lire la
+    source réelle élimine la dérive sans changer la moindre décision d'accès.
+    """
     if getattr(command, "hidden", False) or not getattr(command, "enabled", True):
         return False
 
-    main = _runtime_main()
-    if main is None:
-        return _command_policy_name(command) == "help"
-
     name = _command_policy_name(command)
-    public = set(getattr(main, "PUBLIC_COMMANDS", set()) or set())
-    owner_only = set(getattr(main, "OWNER_ONLY_COMMANDS", set()) or set())
-    permission_commands = dict(getattr(main, "DISCORD_PERMISSION_COMMANDS", {}) or {})
-    categories = dict(getattr(main, "CATEGORY_COMMANDS", {}) or {})
+    public = access_matrix.PUBLIC_COMMANDS
+    owner_only = access_matrix.OWNER_ONLY_COMMANDS
+    permission_commands = access_matrix.DISCORD_PERMISSION_COMMANDS
+    categories = access_matrix.CATEGORY_COMMANDS
 
     if name in owner_only:
         return False
