@@ -104,6 +104,9 @@ OWNER_ONLY_COMMANDS = frozenset({
     "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
     # Diagnostics globaux (checks.is_bot_owner dans les cogs d'origine)
     "logs-diag", "reset-logs-all",
+    # Core V2, Phase 1 (docs/core-v2-plan.md) : observabilité globale au
+    # processus, jamais scopée par serveur.
+    "corediag",
 })
 
 # ---------------------------------------------------------------- NIVEAU 4

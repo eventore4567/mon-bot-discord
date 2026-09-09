@@ -252,6 +252,8 @@ CATEGORIES: tuple[CategorySpec, ...] = (
             "bl", "blinfo", "unbl", "editbl", "sync", "syncguild",
             "setstatus", "status-rotate", "footer", "theme", "set-bot",
             "bot-servers", "bot-leave",
+            # Core V2, Phase 1 (docs/core-v2-plan.md)
+            "corediag",
         }),
         frozenset({"Owner"}),
     ),

@@ -69,6 +69,13 @@ def _dedupe_prefix_error_listeners(bot: commands.Bot) -> int:
                 module.endswith("production_phase_runtime")
                 and name == "on_command_error"
             )
+            or (
+                # Core V2, Phase 1 (docs/core-v2-plan.md) : observateur de
+                # métriques uniquement, jamais une réponse utilisateur — même
+                # nature que les deux observateurs ci-dessus.
+                module.endswith("core_command_observability")
+                and name == "on_command_error"
+            )
             or name == "prefix_failed"
             for module, name in identities
         )

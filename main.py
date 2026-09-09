@@ -61,6 +61,15 @@ EXTENSIONS = [
     "cogs.giveaway_center",
     "cogs.verification",
     "cogs.stats",
+    # Core V2, Phase 1 (docs/core-v2-plan.md) : écoute passive uniquement, aucun
+    # monkeypatch, aucune dépendance à finalize_runtime() — la position dans
+    # cette liste n'a pas d'importance particulière pour ce cog.
+    "cogs.core_command_observability",
+    # Chargé avant cogs.visual_experience_v5 pour que finalize_runtime()
+    # (cogs/__init__.py) balaie le @checks.is_bot_owner() local de /corediag,
+    # exactement comme pour toute autre commande déjà classée dans
+    # utils/access_matrix.py::OWNER_ONLY_COMMANDS.
+    "cogs.core_diagnostics",
     "cogs.owner",
     "cogs.invites",
     "cogs.design",
@@ -149,6 +158,9 @@ PUBLIC_COMMANDS = frozenset({
 OWNER_ONLY_COMMANDS = frozenset({
     "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
     "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
+    # Core V2, Phase 1 (docs/core-v2-plan.md) : panneau d'observabilité globale
+    # au processus, jamais scopé par serveur — pas adapté à un accès admin.
+    "corediag",
 })
 
 CATEGORY_COMMANDS = {
