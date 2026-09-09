@@ -33,7 +33,7 @@ from utils.music import (
 logger = logging.getLogger("bot.music")
 
 FFMPEG_OPTIONS = {
-    "before_options": "-reconnect 1 -reconnect_streamretries 5 -reconnect_delay_max 5",
+    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn",
 }
 INACTIVITY_DISCONNECT_SECONDS = 5 * 60
