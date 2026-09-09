@@ -169,10 +169,11 @@ async def _import_external(bot, music_cog, ctx: commands.Context, nom: str, url:
                 music_cog,
                 ctx,
                 "Playlist Spotify non accessible",
-                "Le lien Spotify est valide, mais Spotify limite depuis 2026 le contenu des "
-                "playlists aux playlists possedees/collaboratives du compte authentifie. "
-                "Une playlist Spotify tierce peut donc renvoyer 403. Utilisez une playlist "
-                "que vous possedez/collaborez, ou un lien YouTube, SoundCloud ou Deezer.",
+                "Le lien est valide, mais Spotify renvoie 403 pour les elements de cette playlist. "
+                "Depuis 2026, Spotify exige une autorisation utilisateur et limite les elements "
+                "aux playlists possedees ou collaboratives de ce compte. SentriX utilise ici "
+                "l'authentification d'application et ne contourne pas cette restriction. "
+                "Utilisez YouTube, SoundCloud ou Deezer pour cette playlist, ou une piste/album Spotify.",
                 kind="danger",
             )
         return await _send(
