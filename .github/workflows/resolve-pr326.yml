@@ -22,7 +22,7 @@ jobs:
           ref: audit/slash-commands-tickets-permissions
           fetch-depth: 0
 
-      - name: Merge production branch and resolve the known main.py conflict
+      - name: Merge production branch and resolve integration deltas
         shell: bash
         run: |
           set -euo pipefail
@@ -114,6 +114,24 @@ jobs:
           PY
             git add main.py
           fi
+
+          # V101 production a ajouté la racine +verification après le point de départ
+          # de Claude. PR #326 rend la matrice exhaustive : classer cette racine au même
+          # niveau que verification-review/calibration évite un fail-closed accidentel.
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("utils/access_matrix.py")
+          text = path.read_text(encoding="utf-8")
+          needle = '"server-managed", "verification-review", "verification-calibration",'
+          replacement = '"server-managed", "verification", "verification-review", "verification-calibration",'
+          if '"verification", "verification-review", "verification-calibration"' not in text:
+              if needle not in text:
+                  raise SystemExit("access_matrix marker for verification classification not found")
+              text = text.replace(needle, replacement, 1)
+              path.write_text(text, encoding="utf-8")
+          PY
+          git add utils/access_matrix.py
 
           remaining="$(git diff --name-only --diff-filter=U)"
           if [ -n "$remaining" ]; then
