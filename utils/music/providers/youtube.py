@@ -1,13 +1,19 @@
-"""YouTube + YouTube Music. music.youtube.com sert le même catalogue que
-youtube.com via la même API interne : yt-dlp les traite de façon identique, donc un
-seul provider couvre les deux plutôt que de dupliquer l'extraction (voir le
-docstring du module utils/music/providers/__init__.py)."""
+"""YouTube + YouTube Music.
+
+La lecture reste volontairement confiée à yt-dlp uniquement quand YouTube fournit
+réellement un flux audio lisible. Les IP de datacenter (Railway notamment) peuvent
+recevoir le challenge « Sign in to confirm you're not a bot ». Dans ce cas on ne
+contourne PAS le challenge : on récupère uniquement les métadonnées publiques via
+l'endpoint oEmbed de YouTube, puis le ProviderManager cherche une autre source de
+lecture autorisée (SoundCloud, audio direct, etc.).
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
 
+import aiohttp
 import yt_dlp
 
 from ..errors import ProviderUnavailable, TrackNotFound
@@ -20,10 +26,10 @@ _URL_RE = re.compile(
     r"^(https?://)?(www\.|music\.|m\.)?(youtube\.com|youtu\.be)/", re.IGNORECASE
 )
 _PLAYLIST_HINT_RE = re.compile(r"[?&]list=", re.IGNORECASE)
+_OEMBED_ENDPOINT = "https://www.youtube.com/oembed"
 
 # Signatures connues d'un blocage anti-bot / rate-limit YouTube — PAS "cette vidéo
-# n'existe pas". C'est précisément ce qui bloque Railway (IP de datacenter connue) :
-# voir la demande explicite de ne jamais laisser ça faire tomber toute la commande.
+# n'existe pas". C'est précisément ce qui bloque Railway (IP de datacenter connue).
 _ANTI_BOT_MARKERS = (
     "sign in to confirm",
     "confirm you're not a bot",
@@ -58,7 +64,7 @@ def _classify_error(exc: Exception) -> str:
         return "not_found"
     if any(marker in text for marker in _ANTI_BOT_MARKERS):
         return "blocked"
-    return "blocked"  # par prudence : une erreur inconnue de yt-dlp est traitée comme un blocage temporaire, pas comme "n'existe pas"
+    return "blocked"  # erreur inconnue yt-dlp = indisponibilité temporaire, pas "supprimé"
 
 
 def _entry_to_track(entry: dict, *, requested_by: int | None) -> Track:
@@ -87,7 +93,7 @@ class YouTubeProvider(MusicProvider):
 
     async def _extract(self, query: str, *, opts_override: dict | None = None) -> dict:
         opts = {**_BASE_OPTS, **(opts_override or {})}
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _run():
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -103,10 +109,75 @@ class YouTubeProvider(MusicProvider):
         except Exception as exc:  # réseau, timeout, etc. -> jamais un crash de commande
             raise ProviderUnavailable(self.name, f"{type(exc).__name__}: {exc}"[:200]) from exc
 
+    async def _oembed_metadata(self, query: str, *, requested_by: int | None) -> Track:
+        """Récupère uniquement les métadonnées publiques d'une vidéo.
+
+        oEmbed ne fournit aucun flux audio et ne contourne donc ni challenge anti-bot,
+        ni DRM, ni publicité. Il permet seulement de connaître titre/auteur afin que
+        le moteur puisse chercher ensuite une source de lecture autorisée ailleurs.
+        """
+        timeout = aiohttp.ClientTimeout(total=8)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    _OEMBED_ENDPOINT,
+                    params={"url": query, "format": "json"},
+                ) as response:
+                    if response.status == 404:
+                        raise TrackNotFound(self.name, query)
+                    if response.status >= 400:
+                        raise ProviderUnavailable(self.name, f"oEmbed HTTP {response.status}")
+                    payload = await response.json(content_type=None)
+        except TrackNotFound:
+            raise
+        except ProviderUnavailable:
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+            raise ProviderUnavailable(
+                self.name, f"oEmbed {type(exc).__name__}: {exc}"[:200]
+            ) from exc
+
+        title = str(payload.get("title") or "").strip()
+        if not title:
+            raise ProviderUnavailable(self.name, "oEmbed sans titre exploitable")
+
+        return Track(
+            title=title,
+            artist=(str(payload.get("author_name") or "").strip() or None),
+            thumbnail=payload.get("thumbnail_url"),
+            original_url=query,
+            provider="youtube",
+            playable_url=None,
+            playback_provider=None,
+            requested_by=requested_by,
+        )
+
     async def resolve_metadata(self, query: str, *, requested_by: int | None = None) -> list[Track]:
         is_playlist = bool(_PLAYLIST_HINT_RE.search(query)) and "watch?v=" not in query
         opts = {"noplaylist": not is_playlist}
-        info = await self._extract(query, opts_override=opts)
+        try:
+            info = await self._extract(query, opts_override=opts)
+        except ProviderUnavailable as blocked:
+            # Une playlist exige plusieurs métadonnées et oEmbed n'est pas adapté.
+            # Pour une vidéo simple, en revanche, on peut continuer proprement sans
+            # tenter de contourner le challenge YouTube.
+            if is_playlist:
+                raise
+            self.mark_unavailable(blocked.reason)
+            try:
+                track = await self._oembed_metadata(query, requested_by=requested_by)
+            except TrackNotFound:
+                raise
+            except ProviderUnavailable:
+                # Conserve la cause initiale (challenge playback) si même les
+                # métadonnées publiques ne sont pas accessibles.
+                raise blocked
+            logger.warning(
+                "YouTube playback blocked; metadata-only oEmbed fallback active for %s",
+                query,
+            )
+            return [track]
+
         entries = info.get("entries") if "entries" in info else [info]
         entries = [e for e in (entries or []) if e]
         if not entries:

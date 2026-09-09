@@ -83,7 +83,13 @@ class ProviderManager:
             raw_tracks: list[Track] = cached
         else:
             raw_tracks = await provider.resolve_metadata(query, requested_by=requested_by)
-            provider.mark_available()
+            # Un provider de lecture peut avoir réussi uniquement sa voie
+            # "métadonnées" tout en ayant signalé son flux audio indisponible
+            # (cas YouTube anti-bot sur Railway + oEmbed). Ne surtout pas effacer ce
+            # cooldown ici, sinon gather_candidates retente immédiatement le même
+            # provider bloqué avant d'essayer les alternatives autorisées.
+            if (not provider.can_provide_playback) or any(track.is_playable for track in raw_tracks):
+                provider.mark_available()
             self.cache.set(cache_key, raw_tracks, METADATA_TTL)
         logger.info("metadata resolved -> %d piste(s) via %s", len(raw_tracks), provider.name)
 
