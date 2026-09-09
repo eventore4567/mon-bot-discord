@@ -137,10 +137,12 @@ PUBLIC_COMMANDS = frozenset({
     "emoji-race", "adventure", "dungeon", "mining", "fishing", "treasure",
     "hunt", "explore", "gamehistory", "gameprofile", "gamestats", "gametop",
     "dailygames",
-    # Musique
-    "join", "leave", "play", "pause", "resume", "skip", "stop", "queue",
-    "nowplaying", "volume", "loop", "shuffle", "remove-from-queue",
-    "clear-queue", "playlist-save", "playlist-load",
+    # Musique — "music" est la racine du groupe (join/leave/play/pause/resume/
+    # skip/previous/stop/queue/nowplaying/volume/loop/shuffle/remove/clear/
+    # seek/autoplay en heritent tous comme sous-commandes publiques, exactement
+    # comme "ai" plus haut). "play" reste aussi une commande racine autonome
+    # (+play / /play), alias direct de "music play".
+    "music", "play",
 })
 
 OWNER_ONLY_COMMANDS = frozenset({
