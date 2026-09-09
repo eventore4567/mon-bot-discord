@@ -131,7 +131,8 @@ async def run() -> int:
 
         merged_visible = sorted(
             name for name in command_catalog_cleanup.MERGED_COMMANDS
-            if (command := bot.get_command(name)) is not None and not command.hidden
+            if name not in command_catalog_cleanup.HELP_VISIBLE_EXTRA_COMMANDS
+            and (command := bot.get_command(name)) is not None and not command.hidden
         )
         if merged_visible:
             errors.append("anciennes commandes fusionnées encore visibles: " + ", ".join(merged_visible))

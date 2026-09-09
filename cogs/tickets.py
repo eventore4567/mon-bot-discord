@@ -125,6 +125,34 @@ async def save_button_settings(bot, guild_id: int, settings: dict):
     )
 
 
+async def count_genuinely_open_tickets(bot, guild: discord.Guild, user_id: int, type_id: int) -> int:
+    """Compte les tickets réellement ouverts : ``status='ouvert'`` ET salon existant.
+
+    Avant ce correctif, la vérification "l'utilisateur a-t-il déjà un ticket ouvert"
+    ne regardait que la colonne ``status`` en base, jamais si le salon Discord existait
+    encore. Une suppression manuelle du salon (staff, anti-nuke, purge de catégorie...)
+    laissait donc la ligne à ``status='ouvert'`` pour toujours, bloquant indéfiniment
+    toute nouvelle ouverture du même type pour cet utilisateur — c'est le bug rapporté
+    ("impossible de rouvrir un ticket après fermeture/suppression"). Une ligne dont le
+    salon n'existe plus est donc auto-réparée ici en ``status='supprime'`` et n'est
+    jamais comptée. Utilisé par ``Tickets.start_ticket_flow`` et
+    ``ticket_claim_security.secure_create_ticket`` : les deux points où ce blocage se
+    manifestait.
+    """
+    rows = await bot.db.fetchall(
+        "SELECT id, channel_id FROM tickets WHERE guild_id = ? AND user_id = ? AND type_id = ? AND status = 'ouvert'",
+        (guild.id, user_id, type_id),
+    )
+    count = 0
+    for row in rows:
+        channel = guild.get_channel(int(row["channel_id"]))
+        if channel is None:
+            await bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (row["id"],))
+            continue
+        count += 1
+    return count
+
+
 def slugify_channel_name(text: str, fallback: str) -> str:
     text = re.sub(r"[^a-z0-9\-]+", "-", text.lower()).strip("-")
     return (text or fallback)[:90]
@@ -532,6 +560,39 @@ class TicketControlView(discord.ui.View):
                 count_in_row = 0
 
 
+class TicketRatingButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"ticket_rate:(?P<value>[1-5]):(?P<ticket_id>[0-9]+)",
+):
+    """Bouton de notation post-ticket. Son custom_id encode la note ET l'ID du ticket,
+    ce qui permet à Discord de le faire fonctionner même si le bot a redémarré depuis
+    l'envoi du message en DM — voir RatingView. Avant ce correctif, les 5 boutons
+    partageaient le custom_id fixe "rate_1".."rate_5" (jamais liés à un ticket précis)
+    et n'étaient jamais réenregistrés via bot.add_view()/add_dynamic_items() au
+    démarrage : un redémarrage dans les 24h suivant l'envoi cassait définitivement la
+    notation (voir l'audit tickets livré)."""
+
+    def __init__(self, value: int, ticket_id: int):
+        super().__init__(
+            discord.ui.Button(
+                label="⭐" * value, style=discord.ButtonStyle.secondary,
+                custom_id=f"ticket_rate:{value}:{ticket_id}",
+            )
+        )
+        self.value = value
+        self.ticket_id = ticket_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match, /):
+        return cls(int(match["value"]), int(match["ticket_id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.client.db.execute(
+            "UPDATE tickets SET rating = ? WHERE id = ?", (self.value, self.ticket_id)
+        )
+        await interaction.response.edit_message(content=f"Merci pour votre note : {'⭐' * self.value}", view=None)
+
+
 class RatingView(discord.ui.View):
     """5 étoiles envoyées après la fermeture d'un ticket pour noter le support reçu."""
 
@@ -540,20 +601,7 @@ class RatingView(discord.ui.View):
         self.cog = cog
         self.ticket_id = ticket_id
         for i in range(1, 6):
-            self.add_item(self._make_button(i))
-
-    def _make_button(self, value: int) -> discord.ui.Button:
-        btn = discord.ui.Button(label="⭐" * value, style=discord.ButtonStyle.secondary, custom_id=f"rate_{value}")
-
-        async def callback(interaction: discord.Interaction):
-            await self.cog.bot.db.execute("UPDATE tickets SET rating = ? WHERE id = ?", (value, self.ticket_id))
-            for item in self.children:
-                item.disabled = True
-            await interaction.response.edit_message(content=f"Merci pour votre note : {'⭐' * value}", view=self)
-            self.stop()
-
-        btn.callback = callback
-        return btn
+            self.add_item(TicketRatingButton(i, ticket_id))
 
 
 class PanelEditView(discord.ui.View):
@@ -800,6 +848,23 @@ class Tickets(commands.Cog):
     def cog_unload(self):
         self.check_autoclose.cancel()
 
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        """Répare immédiatement l'état DB quand un salon de ticket disparaît.
+
+        Aucune fermeture officielle (bouton, +ticket-reopen...) ne passe par ici : ce
+        listener couvre précisément les cas hors de ce chemin — suppression manuelle par
+        un staff, purge anti-nuke, suppression de la catégorie — qui laissaient sinon la
+        ligne bloquée à status='ouvert' pour toujours (aucun listener ne le faisait avant
+        ce correctif, voir count_genuinely_open_tickets pour le filet de sécurité
+        complémentaire côté ouverture d'un nouveau ticket).
+        """
+        row = await self.bot.db.fetchone(
+            "SELECT id FROM tickets WHERE channel_id = ? AND status = 'ouvert'", (channel.id,)
+        )
+        if row:
+            await self.bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (row["id"],))
+
     async def restore_panel_views(self) -> int:
         """Réenregistre une vue persistante pour chaque panel actif après un redémarrage,
         avec ses VRAIES options (types de tickets), pour que les menus/boutons déjà envoyés
@@ -934,12 +999,9 @@ class Tickets(commands.Cog):
                 return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce type de ticket n'existe plus.")), ephemere=True)
 
             limit = ticket_type["max_per_member"] or 1
-            open_count = await self.bot.db.fetchone(
-                "SELECT COUNT(*) c FROM tickets WHERE guild_id = ? AND user_id = ? AND type_id = ? AND status = 'ouvert'",
-                (interaction.guild.id, interaction.user.id, type_id),
-            )
-            if open_count["c"] >= limit:
-                return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning(f"Vous avez déjà **{open_count['c']}** ticket(s) « {ticket_type['name']} » ouvert(s) (maximum : {limit}).")), ephemere=True)
+            open_count = await count_genuinely_open_tickets(self.bot, interaction.guild, interaction.user.id, type_id)
+            if open_count >= limit:
+                return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning(f"Vous avez déjà **{open_count}** ticket(s) « {ticket_type['name']} » ouvert(s) (maximum : {limit}).")), ephemere=True)
 
             if ticket_type["use_form"]:
                 questions = await self.bot.db.fetchall(

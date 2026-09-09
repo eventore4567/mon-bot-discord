@@ -26,7 +26,7 @@ GAME_COMMANDS = frozenset({
 NORMAL_DIRECT_COMMANDS = frozenset({
     "help", "setup", "ping", "avatar", "userinfo", "afk", "setprefix", "setmodrole",
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
-    "lock", "unlock", "quarantine", "unquarantine", "nickname", "resetnick",
+    "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
     "giverole", "removerole",
     "security", "antiraid", "antinuke", "blacklist-add", "blacklist-users",
     "panic", "syncbl",
@@ -104,6 +104,38 @@ MERGED_COMMANDS = (
     | SECURITY_MERGED_COMMANDS
     | LOW_VALUE_HIDDEN_COMMANDS
 )
+
+# Commandes réelles, sans remplaçant fonctionnel, tombées dans le filet générique
+# "hidden=True" d'apply_surface() faute d'être explicitement classées quelque part —
+# confirmé par audit (2026-09-09) sur les familles tickets/logs/notifications/server/
+# économie/niveaux/emoji : ce ne sont pas des doublons "fusionnés" dans /setup (ceux-là
+# restent dans MERGED_COMMANDS), juste des commandes qu'aucune liste ne réclamait. On
+# ne les rend visibles QUE dans +help, sans toucher au budget slash : aucune n'est
+# ajoutée à NORMAL_DIRECT_COMMANDS (qui contrôle aussi l'éligibilité slash — voir
+# command_hybrid_slash_restore_v3.py).
+HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
+    # +ticketsetup ouvre le hub de config tickets (panels/types/formulaires/logs...) —
+    # /setup ne fait qu'auto-créer UN panel "Support" par défaut
+    # (setup_ticket_autoconfig_v72.py) ; un serveur voulant plusieurs types de tickets
+    # n'avait aucun chemin découvrable. Les sous-commandes du hub (ticketpanel,
+    # tickettype...) restent masquées, atteignables via ses boutons.
+    "ticketsetup",
+    # Logs/notifications/serveur : seules commandes réelles pour ces réglages,
+    # jamais fusionnées dans /setup contrairement à leurs voisines (logsetup,
+    # create-logs, automod-status...).
+    "notifs-ping", "notifs-list", "notifs-remove",
+    "logs", "logevent", "logsearch",
+    "server-audit", "server-health", "server-growth", "server-managed",
+    # Économie/niveaux : commandes membres et admin de base, masquées par accident
+    # (buy/sell/gamble sans leur propre commande "shop"/"economy" visible, weekly
+    # traité différemment de daily/work sans raison documentée).
+    "economy", "rob", "buy", "sell", "gamble", "deposit", "withdraw",
+    "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
+    "stats", "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
+    "voice-time", "level-roles",
+    # Émojis : aucun chemin de découverte sans les connaître déjà par cœur.
+    "addemoji", "deleteemoji", "emoji-list",
+})
 INTENTIONALLY_REMOVED_COMMANDS = PURE_DUPLICATE_COMMANDS
 CONFIRMED_DUPLICATE_COMMANDS = PURE_DUPLICATE_COMMANDS
 RESTORED_COMMANDS = NORMAL_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS
@@ -145,7 +177,7 @@ def _install_short_command_names() -> None:
 
 def apply_surface(bot: commands.Bot) -> None:
     """Rend visibles uniquement les commandes directes, sans casser les anciennes +."""
-    direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS
+    direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS | HELP_VISIBLE_EXTRA_COMMANDS
     for command in bot.commands:
         name = command.name.casefold()
         if name in direct:

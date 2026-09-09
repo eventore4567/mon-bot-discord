@@ -262,13 +262,11 @@ def install(bot: commands.Bot) -> None:
 
         _CREATING.add(key)
         try:
-            # Recontrôle atomique juste avant la création réelle.
+            # Recontrôle atomique juste avant la création réelle. Utilise le même
+            # comptage "auto-réparant" que start_ticket_flow (voir sa docstring) :
+            # un salon supprimé manuellement ne doit jamais bloquer indéfiniment.
             limit = int(ticket_type["max_per_member"] or 1)
-            row = await self.bot.db.fetchone(
-                "SELECT COUNT(*) c FROM tickets WHERE guild_id = ? AND user_id = ? AND type_id = ? AND status = 'ouvert'",
-                (guild.id, user.id, type_id),
-            )
-            current = int(row["c"] if row else 0)
+            current = await tickets.count_genuinely_open_tickets(self.bot, guild, user.id, type_id)
             if current >= limit:
                 return await _private_reply(
                     interaction,

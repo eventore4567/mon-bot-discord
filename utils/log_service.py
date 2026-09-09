@@ -169,15 +169,33 @@ def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> st
     return f"semantic:{guild_id}:{event_type}:{target}" if target else None
 
 
-class RevealIdButton(discord.ui.Button):
+class RevealIdButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"sxid:(?P<entity_id>[0-9]+)",
+):
+    """Bouton "Copier l'ID" des logs. Avant ce correctif, c'était un discord.ui.Button
+    ordinaire : son custom_id ("sxid:<id>") encodait déjà tout ce qu'il fallait, mais
+    aucun bot.add_view()/add_dynamic_items() ne le réenregistrait au démarrage — tout
+    log envoyé avant le redémarrage le plus récent (fréquent sur Railway) gardait ses
+    boutons visibles, mais cliquer dessus échouait silencieusement ("Cette interaction
+    a échoué"). DynamicItem reconstruit l'instance depuis le custom_id à la volée, sans
+    dépendre d'un enregistrement par message — voir main.py pour l'enregistrement une
+    seule fois au démarrage."""
+
     def __init__(self, label: str, entity_id: int, *, row: int = 0):
         self.entity_id = int(entity_id)
         super().__init__(
-            label=label[:80],
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"sxid:{self.entity_id}",
-            row=row,
+            discord.ui.Button(
+                label=label[:80],
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"sxid:{self.entity_id}",
+                row=row,
+            )
         )
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match, /):
+        return cls(item.label or "ID", int(match["entity_id"]))
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(

@@ -916,7 +916,7 @@ class Ai(commands.Cog, name="Ai"):
 
     async def _prepare_and_generate(self, *, guild_id, channel_id, user_id, author_name,
                                      question, forced_advanced: bool = False, suffix: str = "",
-                                     command: str = "ai") -> dict:
+                                     command: str = "ai", force_web_search: bool = False) -> dict:
         """Pipeline complet partagé par +ai, +chat, +improve, +correct, +ai-translate, +code et
         les boutons de régénération : réglages serveur, modération, cooldown/limites, mémoire,
         sélection du modèle, appel réel, puis mise à jour mémoire + compteurs d'usage.
@@ -962,7 +962,7 @@ class Ai(commands.Cog, name="Ai"):
             prompt, model_key=model_key, reasoning_effort=reasoning_effort,
             previous_response_id=previous_response_id, instructions=instructions,
             guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
-            web_search=ai_service.needs_web_search(question),
+            web_search=force_web_search or ai_service.needs_web_search(question),
         )
 
         if not result.ok:
@@ -977,7 +977,7 @@ class Ai(commands.Cog, name="Ai"):
 
         return {"ok": True, "text": result.text, "model_key": result.model_key or model_key}
 
-    async def _handle_ai_command(self, ctx: commands.Context, question: str, *, forced_advanced: bool = False):
+    async def _handle_ai_command(self, ctx: commands.Context, question: str, *, forced_advanced: bool = False, force_web_search: bool = False):
         guild_id = ctx.guild.id if ctx.guild else None
         channel_id = ctx.channel.id
 
@@ -1007,7 +1007,7 @@ class Ai(commands.Cog, name="Ai"):
             result = await self._prepare_and_generate(
                 guild_id=guild_id, channel_id=channel_id, user_id=ctx.author.id,
                 author_name=str(ctx.author), question=question, forced_advanced=forced_advanced,
-                command=command_name,
+                command=command_name, force_web_search=force_web_search,
             )
 
         if not result["ok"]:
@@ -1048,28 +1048,63 @@ class Ai(commands.Cog, name="Ai"):
         for extra in remaining:
             await ctx.channel.send(extra)
 
-    # ---------- +ai (+ /ai slash) — reset/memory/model/help gérés en interne (voir docstring) ----------
-
-    @commands.hybrid_command(
+    # ---------- +ai / /ai — groupe avec de vraies sous-commandes ----------
+    #
+    # Avant : +ai était une commande à plat, et "reset"/"memory"/"model"/"help"
+    # n'étaient PAS des sous-commandes Discord mais une comparaison de chaîne sur le
+    # texte tapé — "/ai enable" ou "/ai disable" envoyaient donc littéralement le mot
+    # "enable"/"disable" comme question à l'IA au lieu d'activer quoi que ce soit
+    # (aucune sous-commande de ce nom n'a jamais existé). `fallback="ask"` est le
+    # mécanisme officiel discord.py pour un groupe dont le callback reste aussi
+    # invocable directement en préfixe (+ai <question> continue de fonctionner tel
+    # quel) : côté slash, Discord affiche ce même paramètre sous /ai ask.
+    @commands.hybrid_group(
         name="ai",
         description="Poser une question à l'IA de SentriX (avec mémoire de conversation).",
+        fallback="ask",
+        invoke_without_command=True,
     )
-    @app_commands.describe(question="Votre question, ou 'reset' / 'memory' / 'model' / 'help'")
+    @app_commands.describe(question="Votre question à l'IA")
     async def ai_command(self, ctx: commands.Context, *, question: str):
-        """+ai est une commande à plat (pas un groupe) pour pouvoir exister à la fois en
-        `/ai question:<question>` ET en `+ai reset`/`+ai memory`/`+ai model`/`+ai help` —
-        Discord interdit qu'une commande slash ait À LA FOIS un paramètre direct et des
-        sous-commandes. On distingue donc "reset"/"memory"/"model"/"help" du reste ici."""
-        normalized = question.strip().lower()
-        if normalized == "reset":
-            return await self._ai_reset(ctx)
-        if normalized == "memory":
-            return await self._ai_memory(ctx)
-        if normalized == "model":
-            return await self._ai_model(ctx)
-        if normalized == "help":
-            return await self._ai_help(ctx)
         await self._handle_ai_command(ctx, question)
+
+    @ai_command.command(name="search", description="Poser une question à l'IA en forçant une vraie recherche web.")
+    @app_commands.describe(question="Votre question (recherche web toujours forcée, pas seulement si détectée)")
+    async def ai_search_command(self, ctx: commands.Context, *, question: str):
+        await self._handle_ai_command(ctx, question, force_web_search=True)
+
+    @ai_command.command(name="enable", description="Activer l'IA sur ce serveur.")
+    @checks.is_owner_or_admin_for("ai")
+    async def ai_enable_command(self, ctx: commands.Context):
+        await self._ai_toggle(ctx, True)
+
+    @ai_command.command(name="disable", description="Désactiver l'IA sur ce serveur.")
+    @checks.is_owner_or_admin_for("ai")
+    async def ai_disable_command(self, ctx: commands.Context):
+        await self._ai_toggle(ctx, False)
+
+    async def _ai_toggle(self, ctx: commands.Context, enabled: bool):
+        if not ctx.guild:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
+        await ai_service.update_setting(self.bot, ctx.guild.id, "enabled", int(enabled))
+        label = "activée" if enabled else "désactivée"
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"🤖 L'IA est maintenant **{label}** sur ce serveur.")))
+
+    @ai_command.command(name="reset", description="Réinitialiser votre conversation avec l'IA dans ce salon.")
+    async def ai_reset_command(self, ctx: commands.Context):
+        await self._ai_reset(ctx)
+
+    @ai_command.command(name="memory", description="Voir si une conversation est active dans ce salon.")
+    async def ai_memory_command(self, ctx: commands.Context):
+        await self._ai_memory(ctx)
+
+    @ai_command.command(name="model", description="Voir le modèle IA utilisé par défaut sur ce serveur.")
+    async def ai_model_command(self, ctx: commands.Context):
+        await self._ai_model(ctx)
+
+    @ai_command.command(name="help", description="Aide sur les commandes IA de SentriX.")
+    async def ai_help_command(self, ctx: commands.Context):
+        await self._ai_help(ctx)
 
     async def _ai_reset(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
@@ -1099,7 +1134,7 @@ class Ai(commands.Cog, name="Ai"):
 
     async def _ai_help(self, ctx: commands.Context):
         e = embeds.brand("🤖 Aide — Intelligence artificielle SentriX", (
-            "**+ai <question>** / **/ai question:...** — poser une question à l'IA\n**+ai reset** — réinitialiser votre conversation dans ce salon\n**+ai memory** — voir si une conversation est active\n**+ai model** — voir le modèle utilisé par défaut\n**+chat <message>** — discuter avec mémoire de conversation\n**+improve <texte>** — améliorer un texte\n**+correct <texte>** — corriger l'orthographe et la grammaire\n**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n**+code <demande>** — générer du code\n**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n**+image <description>** — générer une image 4K (3840 × 2160)\n**SentriX fais-moi une image de...** — génération 4K en langage naturel\n**SentriX ouvre-moi setup/help** — exécuter une commande en langage naturel\n**SentriX ajoute cet emoji** — importer l'emoji collé ou l'image jointe\n**SentriX donne-moi le lien de...** — rechercher un lien public avec ses sources\n**+aisetup** *(admin)* — configurer l'IA sur ce serveur"
+            "**+ai <question>** / **/ai ask <question>** — poser une question à l'IA\n**+ai search <question>** / **/ai search** — poser une question en forçant une vraie recherche web\n**+ai reset** / **/ai reset** — réinitialiser votre conversation dans ce salon\n**+ai memory** / **/ai memory** — voir si une conversation est active\n**+ai model** / **/ai model** — voir le modèle utilisé par défaut\n**+ai enable** / **/ai enable** *(admin)* — activer l'IA sur ce serveur\n**+ai disable** / **/ai disable** *(admin)* — désactiver l'IA sur ce serveur\n**+chat <message>** — discuter avec mémoire de conversation\n**+improve <texte>** — améliorer un texte\n**+correct <texte>** — corriger l'orthographe et la grammaire\n**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n**+code <demande>** — générer du code\n**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n**+image <description>** — générer une image 4K (3840 × 2160)\n**SentriX fais-moi une image de...** — génération 4K en langage naturel\n**SentriX ouvre-moi setup/help** — exécuter une commande en langage naturel\n**SentriX ajoute cet emoji** — importer l'emoji collé ou l'image jointe\n**SentriX donne-moi le lien de...** — rechercher un lien public avec ses sources\n**+aisetup** *(admin)* — configuration avancée de l'IA sur ce serveur"
         ))
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
