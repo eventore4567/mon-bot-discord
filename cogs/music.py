@@ -5,6 +5,9 @@ Cog MUSIQUE.
 """
 
 import asyncio
+import logging
+from urllib.parse import urlparse
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -12,17 +15,46 @@ from discord.ext import commands
 from utils import embeds, design_system, premium_style
 from utils import sentrix_panels as panels
 
+logger = logging.getLogger("bot.music")
+
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamretries 5 -reconnect_delay_max 5",
     "options": "-vn",
 }
 YTDL_OPTIONS = {
-    "format": "bestaudio/best",
+    "format": "bestaudio[acodec!=none]/bestaudio/best",
     "noplaylist": True,
     "quiet": True,
     "default_search": "ytsearch",
     "source_address": "0.0.0.0",
+    "socket_timeout": 20,
+    "retries": 3,
+    "extractor_retries": 3,
+    "fragment_retries": 3,
 }
+
+
+def _normalise_music_query(query: str) -> str:
+    value = (query or "").strip()
+    # Discord peut entourer un lien de <...> pour masquer l'aperçu.
+    if len(value) >= 2 and value.startswith("<") and value.endswith(">"):
+        value = value[1:-1].strip()
+    return value
+
+
+def _is_youtube_url(query: str) -> bool:
+    try:
+        parsed = urlparse(query)
+    except Exception:
+        return False
+    host = (parsed.hostname or "").lower()
+    return host in {
+        "youtu.be",
+        "youtube.com",
+        "www.youtube.com",
+        "music.youtube.com",
+        "m.youtube.com",
+    } or host.endswith(".youtube.com")
 
 
 class GuildMusicState:
@@ -59,19 +91,63 @@ class Music(commands.Cog, name="Music"):
             footer=design.get("footer"),
         )
 
+    async def _extract_info(self, query: str, options: dict) -> dict:
+        import yt_dlp
+
+        loop = asyncio.get_running_loop()
+
+        def extract():
+            with yt_dlp.YoutubeDL(options) as ydl:
+                return ydl.extract_info(query, download=False)
+
+        return await loop.run_in_executor(None, extract)
+
     async def ytdl_extract(self, query: str) -> dict:
         import yt_dlp
-        loop = asyncio.get_event_loop()
-        with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
-            info = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
+
+        query = _normalise_music_query(query)
+        if not query:
+            raise ValueError("recherche vide")
+
+        try:
+            info = await self._extract_info(query, dict(YTDL_OPTIONS))
+        except yt_dlp.utils.DownloadError as exc:
+            message = str(exc).lower()
+            # Les IP de datacenter sont parfois bloquées par YouTube. Le client
+            # web_embedded ne demande pas de PO token pour les vidéos intégrables
+            # et constitue un second chemin propre avant d'abandonner.
+            if _is_youtube_url(query) and (
+                "not a bot" in message
+                or "sign in to confirm" in message
+                or "login_required" in message
+            ):
+                fallback = dict(YTDL_OPTIONS)
+                fallback["extractor_args"] = {
+                    "youtube": {"player_client": ["web_embedded", "android_vr"]}
+                }
+                info = await self._extract_info(query, fallback)
+            else:
+                raise
+
+        if not info:
+            raise ValueError("aucun résultat")
         if "entries" in info:
-            info = info["entries"][0]
+            entries = [entry for entry in (info.get("entries") or []) if entry]
+            if not entries:
+                raise ValueError("aucun résultat exploitable")
+            info = entries[0]
+
+        stream_url = info.get("url")
+        if not stream_url:
+            raise ValueError("aucun flux audio disponible")
+
         return {
             "title": info.get("title", "Titre inconnu"),
-            "url": info["url"],
+            "url": stream_url,
             "webpage_url": info.get("webpage_url", ""),
             "thumbnail": info.get("thumbnail", ""),
             "duration": info.get("duration", 0),
+            "uploader": info.get("uploader", ""),
         }
 
     def play_next(self, guild: discord.Guild):
@@ -127,8 +203,18 @@ class Music(commands.Cog, name="Music"):
 
         try:
             track = await self.ytdl_extract(recherche)
-        except Exception:
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Lecture impossible', description='Impossible de trouver ou lire cette musique.', kind='danger')))
+        except Exception as exc:
+            message = str(exc).lower()
+            normalised = _normalise_music_query(recherche)
+            source = "recherche"
+            if "://" in normalised:
+                source = urlparse(normalised).hostname or "lien"
+            logger.warning("Extraction musique impossible source=%s erreur=%s", source, exc)
+            if "not a bot" in message or "sign in to confirm" in message or "login_required" in message:
+                description = "YouTube bloque actuellement ce lien depuis le serveur. Essaie le titre de la musique sans le lien ; SentriX tentera la recherche automatiquement."
+            else:
+                description = "Impossible de trouver ou lire cette musique. Vérifie le lien ou essaie avec le titre."
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Lecture impossible', description=description, kind='danger')))
 
         state.queue.append(track)
         if not state.voice_client.is_playing() and not state.current:
