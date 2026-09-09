@@ -16,6 +16,9 @@ flux sans désactiver le contrôle de volume PCM.
 
 V104 branche en plus la persistance vocale : une connexion créée par Music reste dans
 le salon jusqu'à ``/music leave`` et est restaurée après restart/failover.
+
+V108 ajoute enfin les playlists personnelles persistantes sous ``/music playlist`` et
+un ping au demandeur lorsque la file musicale est réellement terminée.
 """
 from __future__ import annotations
 
@@ -348,13 +351,19 @@ def install() -> None:
         result = await original(bot, cog, *args, **kwargs)
         if cog.__class__.__name__ == "Music" or getattr(cog, "qualified_name", None) == "Music":
             _patch_music_cog(bot, cog)
+            try:
+                from sentrix_music_playlists_v108 import install_on_music_cog
+
+                await install_on_music_cog(bot, cog)
+            except Exception:
+                logger.exception("Installation de la musique V108 impossible.")
         return result
 
     add_cog_with_music_v102._sentrix_music_v102_loader = True
     add_cog_with_music_v102.__wrapped__ = original
     commands.Bot.add_cog = add_cog_with_music_v102
     _INSTALLED = True
-    logger.info("Chargeur musique V102/V103/V104 préparé avant le chargement des Cogs.")
+    logger.info("Chargeur musique V102/V103/V104/V108 préparé avant le chargement des Cogs.")
 
 
 __all__ = ["install"]
