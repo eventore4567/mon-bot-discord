@@ -150,6 +150,10 @@ def score_candidate(target: Track, candidate: Track, *, requested_variants: set[
 # En dessous de ce score, on préfère dire "aucune source trouvée" plutôt que de
 # jouer un résultat qui n'a probablement rien à voir avec la demande.
 MIN_ACCEPTABLE_SCORE = 0.45
+# Les recherches +play en texte libre n'ont ni artiste structuré ni durée. Le score
+# historique leur accordait donc 0.30 point "neutre", ce qui pouvait faire passer un
+# titre sans rapport. On exige en plus une vraie proximité de titre dans ce cas.
+FREE_TEXT_MIN_TITLE_SIMILARITY = 0.55
 
 
 def pick_best(
@@ -172,5 +176,8 @@ def pick_best(
     best_score, best = scored[0]
     if best_score < MIN_ACCEPTABLE_SCORE:
         return None
+    if target.artist is None and target.duration is None:
+        if _title_similarity(target.title, best.title) < FREE_TEXT_MIN_TITLE_SIMILARITY:
+            return None
     best.match_score = best_score
     return best
