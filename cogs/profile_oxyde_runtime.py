@@ -33,6 +33,18 @@ async def _snapshot(bot: commands.Bot, guild: discord.Guild, member: discord.Mem
     return await community_v31._profile_snapshot(bot, guild, member)
 
 
+async def _niveaux_actifs(bot: commands.Bot, guild_id: int) -> bool:
+    """Réutilise l'unique source de vérité (cogs/levels.py::Levels._niveaux_actifs,
+    qui interroge les DEUX interrupteurs existants) plutôt que d'en dupliquer la
+    logique ici. Si le cog Levels n'est pas chargé, on considère les niveaux actifs
+    — comportement par défaut, cohérent avec le fail-open déjà pratiqué par
+    _niveaux_actifs lui-même quand une de ses propres vérifications échoue."""
+    levels_cog = bot.get_cog("Levels")
+    if levels_cog is None:
+        return True
+    return await levels_cog._niveaux_actifs(guild_id)
+
+
 def _base(bot: commands.Bot, member: discord.Member, title: str, subtitle: str | None = None) -> discord.Embed:
     embed = discord.Embed(
         title=title,
@@ -67,6 +79,7 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
     data = await _snapshot(bot, guild, member)
     stats = data["stats"]
     progression = data["progression"]
+    niveaux_actifs = await _niveaux_actifs(bot, guild.id)
 
     if page == "missions":
         embed = _base(bot, member, "Missions du jour", member.display_name)
@@ -138,8 +151,12 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         ranks = data["ranks"]
         embed = _base(bot, member, "Classements", member.display_name)
         embed.colour = discord.Colour(premium_style.COLORS["leaderboard"])
+        niveau_ligne = (
+            f"Niveau / XP\n**{_rank(ranks.get('xp_rank'))}**\n\n" if niveaux_actifs
+            else "Niveau / XP\n**Désactivé sur ce serveur**\n\n"
+        )
         embed.description = (
-            f"Niveau / XP\n**{_rank(ranks.get('xp_rank'))}**\n\n"
+            f"{niveau_ligne}"
             f"Messages\n**{_rank(ranks.get('message_rank'))}**\n\n"
             f"Économie\n**{_rank(ranks.get('economy_rank'))}**\n\n"
             f"Saison\n**{_rank(data['season_rank'])}**"
@@ -154,20 +171,23 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         f"Profil de {member.display_name}",
         f"{member.mention}\n\n{bio}",
     )
-    level_rank = _rank(stats.get("rank")) if stats.get("is_ranked") else "Non classé"
     wallet = int(stats.get("wallet", 0) or 0)
     bank = int(stats.get("bank", 0) or 0)
     total = wallet + bank
 
-    embed.add_field(
-        name="Progression",
-        value=(
-            f"Niveau\n**{_fmt(stats.get('current_level'))}**\n\n"
-            f"XP totale\n**{_fmt(stats.get('total_xp'))}**\n\n"
-            f"Rang du serveur\n**{level_rank}**"
-        ),
-        inline=False,
-    )
+    if niveaux_actifs:
+        level_rank = _rank(stats.get("rank")) if stats.get("is_ranked") else "Non classé"
+        embed.add_field(
+            name="Progression",
+            value=(
+                f"Niveau\n**{_fmt(stats.get('current_level'))}**\n\n"
+                f"XP totale\n**{_fmt(stats.get('total_xp'))}**\n\n"
+                f"Rang du serveur\n**{level_rank}**"
+            ),
+            inline=False,
+        )
+    else:
+        embed.add_field(name="Progression", value="Niveaux désactivés sur ce serveur.", inline=False)
     embed.add_field(
         name="Économie",
         value=(

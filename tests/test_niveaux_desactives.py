@@ -15,8 +15,8 @@ RACINE = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = (RACINE / "cogs" / "levels.py").read_text(encoding="utf-8")
 
 
-def _corps(nom: str) -> str:
-    for node in ast.walk(ast.parse(SOURCE)):
+def _corps(nom: str, source: str = SOURCE) -> str:
+    for node in ast.walk(ast.parse(source)):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name == nom:
             return ast.unparse(node)
     raise AssertionError(f"{nom} introuvable")
@@ -45,8 +45,17 @@ def test_le_panneau_de_niveau_dit_que_c_est_desactive():
 
 
 def test_profile_masque_le_niveau_et_le_rang_quand_desactive():
-    corps = _corps("profile")
-    assert "self._niveaux_actifs(ctx.guild.id)" in corps
-    # Le niveau ne doit apparaître ni dans la description ni comme champ
-    # séparé quand le système est coupé.
+    """+profile est réellement servie par cogs/profile_oxyde_runtime.py::build_page
+    — cogs/levels.py::profile existe encore comme objet Command (aliases,
+    description...) mais son corps est remplacé au démarrage, voir
+    profile_oxyde_runtime.py::install(). Ce test vérifiait auparavant, à tort,
+    le corps mort de cogs/levels.py : il passait sans jamais toucher le code
+    qui s'exécute réellement — bug réel trouvé et corrigé pendant Core V2
+    Phase 4 (le comportement live n'appliquait aucun garde-fou). Voir aussi
+    tests/test_profile_niveaux_actifs.py pour une vérification comportementale,
+    pas seulement textuelle."""
+    racine = pathlib.Path(__file__).resolve().parent.parent
+    source_reel = (racine / "cogs" / "profile_oxyde_runtime.py").read_text(encoding="utf-8")
+    corps = _corps("build_page", source=source_reel)
+    assert "niveaux_actifs" in corps
     assert 'if niveaux_actifs:' in corps
