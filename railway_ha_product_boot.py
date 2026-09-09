@@ -129,6 +129,15 @@ from sentrix_canonical_command_surface import install as _install_canonical_surf
 _install_canonical_surface()
 logger.warning("Surface slash canonique SentriX branchée sur le bootstrap HA réel.")
 
+# Contrats produit finaux : le service qui détient effectivement le lease HA garde les
+# réponses naturelles « sentrix ... » même si ce leader est le standby, et la durée de
+# /moderation ... mute est obligatoire dans l'interface slash. Les URLs restent transmises
+# telles quelles au pipeline IA, qui les détecte déjà comme déclencheurs de recherche web.
+from sentrix_product_runtime_contract import install as _install_product_runtime_contract  # noqa: E402
+
+_install_product_runtime_contract()
+logger.warning("Contrats runtime produit : IA passive HA + durée mute requise + URLs IA.")
+
 # V108 est installé par le wrapper Bot.add_cog de la passerelle musique V102. Ce second
 # wrapper s'exécute juste après V108 afin de corriger la sémantique playlist sans dupliquer
 # son stockage : create devient une vraie sauvegarde de la lecture/file et import devient

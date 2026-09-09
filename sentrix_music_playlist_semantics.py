@@ -153,7 +153,9 @@ async def _import_external(bot, music_cog, ctx: commands.Context, nom: str, url:
     try:
         resolved = await music_cog.manager.resolve(external_url, requested_by=ctx.author.id)
     except ProviderUnavailable as exc:
-        if exc.provider.casefold() == "spotify" and "SPOTIFY_CLIENT_ID" in exc.reason:
+        reason = str(exc.reason or "")
+        lowered = reason.casefold()
+        if exc.provider.casefold() == "spotify" and "spotify_client_id" in lowered:
             return await _send(
                 music_cog,
                 ctx,
@@ -162,11 +164,23 @@ async def _import_external(bot, music_cog, ctx: commands.Context, nom: str, url:
                 "dans les variables Railway. Aucun secret ne doit etre envoye dans Discord.",
                 kind="danger",
             )
+        if exc.provider.casefold() == "spotify" and "playlist-spotify-2026" in lowered:
+            return await _send(
+                music_cog,
+                ctx,
+                "Playlist Spotify non accessible",
+                "Le lien est valide, mais Spotify renvoie 403 pour les elements de cette playlist. "
+                "Depuis 2026, Spotify exige une autorisation utilisateur et limite les elements "
+                "aux playlists possedees ou collaboratives de ce compte. SentriX utilise ici "
+                "l'authentification d'application et ne contourne pas cette restriction. "
+                "Utilisez YouTube, SoundCloud ou Deezer pour cette playlist, ou une piste/album Spotify.",
+                kind="danger",
+            )
         return await _send(
             music_cog,
             ctx,
             f"{exc.provider.title()} indisponible",
-            f"Le fournisseur est temporairement indisponible : `{exc.reason[:180]}`",
+            f"Le fournisseur est temporairement indisponible : `{reason[:180]}`",
             kind="danger",
         )
     except MusicEngineError as exc:

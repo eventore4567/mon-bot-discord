@@ -23,6 +23,19 @@ def test_missing_spotify_credentials_get_a_precise_message():
     assert "Railway" in description
 
 
+def test_spotify_2026_playlist_restriction_is_not_called_temporary_outage():
+    title, description = _classify(
+        ProviderUnavailable(
+            "spotify",
+            "playlist-spotify-2026: Spotify limite le contenu des playlists aux playlists possedees ou collaboratives",
+        )
+    )
+    assert title == "Playlist Spotify non accessible"
+    assert "403" in description
+    assert "autorisation utilisateur" in description
+    assert "authentification d'application" in description
+
+
 def test_unavailable_provider_is_not_reported_as_track_missing():
     title, _ = _classify(ProviderUnavailable("youtube", "API HTTP 429"))
     assert "limité" in title

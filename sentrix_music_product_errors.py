@@ -30,6 +30,15 @@ def _classify(exc) -> tuple[str, str]:
                 "de l'application Spotify côté Railway. Une piste Spotify individuelle reste "
                 "utilisable via ses métadonnées publiques.",
             )
+        if provider.casefold() == "spotify" and "playlist-spotify-2026" in lowered:
+            return (
+                "Playlist Spotify non accessible",
+                "Le lien est valide, mais Spotify renvoie 403 pour les éléments de cette playlist. "
+                "Depuis 2026, Spotify exige une autorisation utilisateur et limite ces éléments "
+                "aux playlists possédées ou collaboratives de ce compte. SentriX utilise ici "
+                "l'authentification d'application, donc il ne contourne pas cette restriction. "
+                "Utilisez YouTube, SoundCloud ou Deezer pour cette playlist, ou une piste/album Spotify.",
+            )
         if "429" in lowered or "rate" in lowered:
             return (
                 f"{provider.title()} temporairement limité",
