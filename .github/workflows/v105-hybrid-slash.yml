@@ -1,0 +1,35 @@
+name: SentriX V105 Hybrid Slash
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  v105-hybrid-slash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Compile grouped slash runtime
+        run: python -m compileall -q sentrix_grouped_slash_fix.py
+
+      - name: Hybrid-group native binding regression
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v105.db"
+          PYTHONPATH: "."
+        run: python -m pytest -q tests/test_grouped_slash_arguments_v99.py tests/test_hybrid_group_native_v105.py

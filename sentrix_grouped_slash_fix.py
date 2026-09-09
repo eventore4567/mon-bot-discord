@@ -33,12 +33,19 @@ _INSTALLED = False
 def _supports_direct_binding(command: commands.Command, option_names: tuple[str, ...]) -> bool:
     """Vrai si Discord a déjà produit exactement les valeurs attendues par le callback.
 
-    Les commandes qui étaient réellement des sous-commandes ``commands.Group`` avant V98
-    restent sur le chemin historique : leur parent peut avoir des checks/hooks/callbacks
-    propres que ``Group.invoke`` doit continuer à exécuter.
+    Les sous-commandes d'un vrai ``commands.Group`` historique restent sur le chemin
+    legacy afin de conserver les callbacks/checks/hooks du parent prefix. En revanche,
+    une sous-commande ``HybridCommand`` sous ``HybridGroup`` est déjà une vraie route slash
+    Discord : la reparsage par ``Group.invoke`` peut perdre la liaison du Cog et appeler le
+    callback sans ``self``/``ctx``. Ces enfants hybrides utilisent donc le binding natif.
     """
-    if option_names == ("arguments",) or command.root_parent is not None:
+    if option_names == ("arguments",):
         return False
+
+    root_parent = command.root_parent
+    if root_parent is not None and not isinstance(root_parent, commands.HybridGroup):
+        return False
+
     try:
         _signature, native, generated_names = v95._build_signature(command)
     except Exception:
