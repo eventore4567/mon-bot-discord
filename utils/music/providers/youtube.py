@@ -61,6 +61,18 @@ def _classify_error(exc: Exception) -> str:
     return "blocked"
 
 
+def _safe_blocked_reason(exc: Exception) -> str:
+    """Message stable et sans détails internes à exposer au produit/Discord."""
+    text = str(exc).casefold()
+    if "sign in to confirm" in text or "confirm you're not a bot" in text:
+        return "youtube-antibot: YouTube bloque temporairement l'IP d'hebergement (challenge anti-bot)"
+    if "429" in text or "too many requests" in text:
+        return "youtube-rate-limit: YouTube limite temporairement les requetes de l'hebergement"
+    if "403" in text:
+        return "youtube-http-403: YouTube refuse temporairement cette requete depuis l'hebergement"
+    return "youtube-unavailable: extraction YouTube temporairement indisponible"
+
+
 def _entry_to_track(entry: dict, *, requested_by: int | None) -> Track:
     return Track(
         title=entry.get("title") or "Titre inconnu",
@@ -78,12 +90,7 @@ def _entry_to_track(entry: dict, *, requested_by: int | None) -> Track:
 
 
 def _flat_playlist_entry_to_track(entry: dict, *, requested_by: int | None) -> Track:
-    """Convertit une entrée de playlist plate en métadonnées, jamais en flux audio.
-
-    Avec ``extract_flat=in_playlist``, ``entry['url']`` peut être un identifiant de
-    vidéo ou une URL de page. Ce n'est PAS une URL audio signée et elle ne doit donc
-    jamais être mise dans ``playable_url``.
-    """
+    """Convertit une entrée de playlist plate en métadonnées, jamais en flux audio."""
     video_id = str(entry.get("id") or "").strip()
     webpage_url = str(entry.get("webpage_url") or entry.get("original_url") or "").strip()
     raw_url = str(entry.get("url") or "").strip()
@@ -132,12 +139,11 @@ class YouTubeProvider(MusicProvider):
             kind = _classify_error(exc)
             if kind == "not_found":
                 raise TrackNotFound(self.name, query) from exc
-            raise ProviderUnavailable(self.name, str(exc)[:200]) from exc
+            raise ProviderUnavailable(self.name, _safe_blocked_reason(exc)) from exc
         except Exception as exc:
             raise ProviderUnavailable(self.name, f"{type(exc).__name__}: {exc}"[:200]) from exc
 
     async def _oembed_metadata(self, query: str, *, requested_by: int | None) -> Track:
-        """Récupère uniquement les métadonnées publiques d'une vidéo."""
         timeout = aiohttp.ClientTimeout(total=8)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -178,11 +184,8 @@ class YouTubeProvider(MusicProvider):
         is_playlist = bool(_PLAYLIST_HINT_RE.search(query)) and "watch?v=" not in query
 
         if is_playlist:
-            # IMPORTANT : pour importer une playlist, on ne demande JAMAIS à yt-dlp
-            # d'ouvrir chaque vidéo ni d'en extraire l'audio. Railway peut être
-            # challenge par YouTube sur cette étape. Le mode flat récupère seulement
-            # la liste/titre/auteur des entrées publiques et évite donc le challenge
-            # vidéo individuel qui provoquait « Sign in to confirm you're not a bot ».
+            # On lit uniquement la table des matières de la playlist. Aucune vidéo
+            # n'est ouverte et aucun flux audio n'est demandé pendant l'import.
             info = await self._extract(
                 query,
                 opts_override={
