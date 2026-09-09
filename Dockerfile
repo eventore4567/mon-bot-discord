@@ -1,4 +1,9 @@
+FROM denoland/deno:bin-2.9.5 AS deno
 FROM python:3.11-slim
+
+# yt-dlp a désormais besoin d'un runtime JavaScript pour résoudre les challenges
+# YouTube. Deno est le runtime recommandé et est activé par défaut par yt-dlp.
+COPY --from=deno /deno /usr/local/bin/deno
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
