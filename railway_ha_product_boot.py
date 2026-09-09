@@ -42,6 +42,13 @@ _install_dashboard_before_ha()
 # bootstrap du bot. Aucune application aiohttp ne doit être construite avant la réparation.
 import railway_ha_boot as ha_boot  # noqa: E402
 
+# Une cession planifiée standby -> primary ne doit jamais couper une musique active.
+# Le lease d'urgence reste strict : perte Redis/lease = fermeture immédiate comme avant.
+from sentrix_ha_music_drain import install as _install_ha_music_drain  # noqa: E402
+
+_install_ha_music_drain()
+logger.warning("HA music drain : cession planifiée différée pendant une session musique active.")
+
 
 # V95 doit être branchée explicitement dans le véritable entrypoint Railway. Le précédent
 # branchement reposait uniquement sur l'import implicite de sitecustomize ; en production,
