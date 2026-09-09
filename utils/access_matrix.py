@@ -86,6 +86,12 @@ PUBLIC_COMMANDS = frozenset({
     # comme "ai" plus haut). "play" reste aussi une commande racine autonome
     # (+play / /play), alias direct de "music play".
     "music", "play",
+    # Core V2, Phase 3 (docs/core-v2-plan.md) : /permissions explain montre
+    # toujours SA PROPRE décision d'accès (aucune fuite d'information — c'est
+    # exactement ce qu'evaluate() calculerait pour cette personne de toute façon).
+    # Diagnostiquer un AUTRE membre est restreint aux administrateurs DANS le
+    # corps de la commande, pas ici (la cible n'est pas connue au niveau matrice).
+    "permissions",
     # Hubs et profils membre (anciennement fail-closed par oubli)
     "home", "gamehub", "economyhub", "checkin", "progress", "profilecard",
     "achievements", "challenges", "missions", "gamelobby", "matchmake",

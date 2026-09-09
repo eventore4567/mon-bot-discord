@@ -70,6 +70,9 @@ EXTENSIONS = [
     # exactement comme pour toute autre commande déjà classée dans
     # utils/access_matrix.py::OWNER_ONLY_COMMANDS.
     "cogs.core_diagnostics",
+    # Core V2, Phase 3 (docs/core-v2-plan.md) : /permissions explain, pas de check
+    # local (public, restriction "autre membre" gérée dans le corps).
+    "cogs.permissions_explain",
     "cogs.owner",
     "cogs.invites",
     "cogs.design",
@@ -153,6 +156,10 @@ PUBLIC_COMMANDS = frozenset({
     # comme "ai" plus haut). "play" reste aussi une commande racine autonome
     # (+play / /play), alias direct de "music play".
     "music", "play",
+    # Core V2, Phase 3 (docs/core-v2-plan.md) : /permissions explain montre
+    # toujours SA PROPRE décision — pas de fuite d'information. Diagnostiquer un
+    # autre membre est restreint aux administrateurs dans le corps de la commande.
+    "permissions",
 })
 
 OWNER_ONLY_COMMANDS = frozenset({
@@ -497,6 +504,35 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning(
                 "Resynchronisation callback slash/préfixe impossible :\n" + traceback.format_exc()
+            )
+
+        # Core V2, Phase 3 (docs/core-v2-plan.md) : deuxième passage du nettoyeur de
+        # décorateurs d'autorisation redondants, APRÈS que les 48 extensions (main.py
+        # + railway_boot.py) soient toutes chargées. Le premier passage
+        # (cogs/permission_guard.py::install(), déclenché par finalize_runtime() au
+        # chargement de cogs.visual_experience_v5) ne voit que les commandes déjà
+        # enregistrées à CE moment-là — toute extension ajoutée après par
+        # railway_boot.py (cogs.sentrix_plus, cogs.sentrix_ultimate, etc.) n'était
+        # donc jamais balayée. C'est la cause racine confirmée d'un vrai bug
+        # (docs/core-v2-audit-technical-debt.md §1) : un décorateur local
+        # @has_guild_permissions oublié sur /sentrixpro empêchait un rôle
+        # explicitement autorisé via Setup d'accéder à la commande, malgré la
+        # décision correcte d'utils/access_matrix.py. La fonction est idempotente
+        # (ne retire que ce qui reste réellement présent) : ce second appel ne
+        # change rien pour tout ce que le premier passage a déjà nettoyé.
+        try:
+            from cogs.permission_guard import _strip_redundant_local_checks
+
+            removed_late = _strip_redundant_local_checks(self)
+            if removed_late:
+                logger.warning(
+                    "Second balayage des décorateurs redondants (post-boot complet) : "
+                    "%s check(s) retiré(s) sur des extensions chargées tardivement.",
+                    removed_late,
+                )
+        except Exception:
+            logger.warning(
+                "Second balayage des décorateurs redondants impossible :\n" + traceback.format_exc()
             )
 
         try:

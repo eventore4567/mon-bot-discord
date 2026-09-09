@@ -241,6 +241,8 @@ CATEGORIES: tuple[CategorySpec, ...] = (
         frozenset({
             "bot-status", "server-growth", "command-stats", "changelog",
             "feedback", "botinfo", "diagnostic",
+            # Core V2, Phase 3 (docs/core-v2-plan.md)
+            "permissions",
         }),
         frozenset({"Stats"}),
     ),
