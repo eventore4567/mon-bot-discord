@@ -12,14 +12,18 @@ Discord avait déjà réellement réussi, contredisant directement la règle de 
 demande initiale (section 17) : « Si Discord exécute le ban mais que le log
 échoue, la sanction doit rester réussie. »
 
-Seul +ban / /ban est migré ici (Phase 2 : une famille à la fois). Les autres
-commandes de sanction (tempban, kick, mute, unmute, warn, unban) restent sur
-leur code existant dans cogs/moderation.py, inchangé — elles seront migrées une
-par une dans des étapes suivantes, chacune testée indépendamment.
++kick suit le même pipeline (hiérarchie -> notification -> exécution Discord ->
+persistance), seule l'action Discord change : les deux partagent maintenant
+_run_sanction_pipeline() plutôt que de dupliquer la même séquence deux fois.
+
+tempban, mute, unmute, warn, unban restent sur leur code existant dans
+cogs/moderation.py, inchangé — migrés un par un dans des étapes suivantes,
+chacun testé indépendamment.
 """
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -70,23 +74,27 @@ async def persist_sanction(
         return None, str(exc)
 
 
-async def ban(
+async def _run_sanction_pipeline(
     bot: Any,
     *,
     guild: discord.Guild,
     actor: discord.Member,
     target: discord.Member,
     reason: str,
-    dm_text: str | None = None,
+    dm_text: str | None,
+    action: str,
+    execute: Callable[[], Awaitable[None]],
 ) -> SanctionOutcome:
-    """Pipeline complet du bannissement : hiérarchie -> notification -> exécution
-    Discord -> persistance.
+    """Pipeline partagé par les sanctions "un membre, une raison" : hiérarchie
+    -> notification -> exécution Discord (fournie par l'appelant via
+    ``execute``) -> persistance. ``ban()`` et ``kick()`` ne diffèrent que par
+    cette étape d'exécution et par le nom de l'action persistée.
 
-    Le MP part AVANT le bannissement Discord — délivrabilité : un membre banni
-    n'est en général plus joignable par MP une fois l'action appliquée. C'est
-    le choix déjà fait par le code existant, conservé ici à l'identique, pas un
-    écart par rapport à « validate -> permission -> hierarchy -> execute ->
-    persist -> log -> DM » de la demande initiale.
+    Le MP part AVANT l'exécution Discord — délivrabilité : un membre banni ou
+    expulsé n'est en général plus joignable par MP une fois l'action
+    appliquée. C'est le choix déjà fait par le code existant, conservé ici à
+    l'identique, pas un écart par rapport à « validate -> permission ->
+    hierarchy -> execute -> persist -> log -> DM » de la demande initiale.
 
     L'autorisation d'accès à la commande (utils/access_matrix.py) et la
     permission Discord du bot (@checks.action_validation) sont déjà vérifiées
@@ -105,14 +113,14 @@ async def ban(
         except discord.HTTPException:
             dm_sent = False
 
-    await guild.ban(target, reason=f"{actor} : {reason}", delete_message_seconds=0)
+    await execute()
 
     case_number, persistence_error = await persist_sanction(
         bot,
         guild_id=guild.id,
         target_id=target.id,
         actor_id=actor.id,
-        action="ban",
+        action=action,
         reason=reason,
     )
 
@@ -121,4 +129,52 @@ async def ban(
         dm_sent=dm_sent,
         case_number=case_number,
         persistence_error=persistence_error,
+    )
+
+
+async def ban(
+    bot: Any,
+    *,
+    guild: discord.Guild,
+    actor: discord.Member,
+    target: discord.Member,
+    reason: str,
+    dm_text: str | None = None,
+) -> SanctionOutcome:
+    """Pipeline complet du bannissement — voir _run_sanction_pipeline()."""
+    return await _run_sanction_pipeline(
+        bot,
+        guild=guild,
+        actor=actor,
+        target=target,
+        reason=reason,
+        dm_text=dm_text,
+        action="ban",
+        execute=lambda: guild.ban(target, reason=f"{actor} : {reason}", delete_message_seconds=0),
+    )
+
+
+async def kick(
+    bot: Any,
+    *,
+    guild: discord.Guild,
+    actor: discord.Member,
+    target: discord.Member,
+    reason: str,
+    dm_text: str | None = None,
+) -> SanctionOutcome:
+    """Pipeline complet de l'expulsion — voir _run_sanction_pipeline().
+
+    Contrairement à ban(), aucun paramètre de suppression de messages : Discord
+    n'en propose pas pour un kick, ce n'est pas un oubli.
+    """
+    return await _run_sanction_pipeline(
+        bot,
+        guild=guild,
+        actor=actor,
+        target=target,
+        reason=reason,
+        dm_text=dm_text,
+        action="kick",
+        execute=lambda: guild.kick(target, reason=f"{actor} : {reason}"),
     )

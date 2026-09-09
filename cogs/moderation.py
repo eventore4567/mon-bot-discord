@@ -505,12 +505,32 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("kick_members",), target="member_moderation")
     async def kick(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : deuxième commande de
+        sanction migrée vers services/moderation.py — voir le docstring de
+        ban() ci-dessus pour le détail de la migration et du trou de
+        persistance corrigé en l'extrayant."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        await self._send_sanction_dm(ctx, membre, "kick", raison)
-        await ctx.guild.kick(membre, reason=f"{ctx.author} : {raison}")
-        e = await self.log_sanction(ctx, "kick", membre, raison)
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "kick")
+        dm_text = None
+        if template is not None:
+            dm_text = self._render_sanction_dm_text(
+                template,
+                target=membre,
+                guild=ctx.guild,
+                reason=raison,
+                duration_seconds=None,
+                actor=ctx.author,
+                action_label=self.DM_ACTION_LABELS["kick"],
+            )
+
+        outcome = await moderation_service.kick(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison, dm_text=dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.hierarchy_error)))
+
+        e = await self.log_sanction(ctx, "kick", membre, raison, case_number=outcome.case_number)
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     # ---------------------------------------------------------------- MUTE

@@ -49,7 +49,9 @@ BODY_VALIDATOR = {
     # à travers cet appel, donc le motif est ajouté explicitement ici — même
     # esprit que "purge" pour channel_target ou "fetch_user" pour external_user
     # juste en dessous : plusieurs formes valides pour une même cible.
-    "member_moderation": ("check_targetable", "check_hierarchy", "moderation_service.ban"),
+    "member_moderation": (
+        "check_targetable", "check_hierarchy", "moderation_service.ban", "moderation_service.kick",
+    ),
     "role_target": ("check_role_target",),
     "channel_target": ("check_channel_target", "purge"),
     # La cible de +unban n'est pas membre du serveur : la hiérarchie n'a pas
