@@ -82,13 +82,13 @@ class ProviderManager:
             self.cache.set(cache_key, raw_tracks, METADATA_TTL)
         logger.info("metadata resolved -> %d piste(s) via %s", len(raw_tracks), provider.name)
 
-        # Une playlist n'a pas besoin d'extraire/résoudre l'audio de 20-100 vidéos
-        # pendant l'import. C'est précisément ce qui déclenchait le challenge
-        # anti-bot YouTube sur Railway. On conserve les métadonnées et la résolution
-        # de lecture se fait au moment où chaque titre démarre.
-        if len(raw_tracks) > 1:
+        # Cas spécifique YouTube/YouTube Music : pendant l'import d'une playlist,
+        # yt-dlp fonctionne en mode flat et ne doit surtout pas ré-ouvrir chaque
+        # vidéo pour chercher son audio depuis l'IP Railway. Les autres providers
+        # gardent leur comportement historique (résolution + skipped par piste).
+        if provider.name == "youtube" and len(raw_tracks) > 1:
             prepared = [Track(**{**raw.__dict__, "requested_by": requested_by}) for raw in raw_tracks]
-            logger.info("playlist metadata accepted -> %d piste(s), playback deferred", len(prepared))
+            logger.info("youtube playlist metadata accepted -> %d piste(s), playback deferred", len(prepared))
             return ResolvedRequest(tracks=prepared, skipped=[])
 
         resolved: list[Track] = []
@@ -144,8 +144,8 @@ class ProviderManager:
         return track
 
     async def refresh_playable_url(self, track: Track) -> str:
-        # Les playlists persistantes gardent des métadonnées stables, pas des URLs
-        # audio signées. Si la piste n'a encore aucune source, on la résout maintenant.
+        # Les entrées YouTube importées en mode flat n'ont pas d'URL audio. On ne
+        # résout cette source qu'au moment où la piste doit vraiment démarrer.
         if not track.is_playable:
             await self.ensure_playable(track)
 
