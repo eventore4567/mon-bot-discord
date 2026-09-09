@@ -61,7 +61,7 @@ BODY_VALIDATOR = {
     # La cible de +unban n'est pas membre du serveur : la hiérarchie n'a pas
     # d'objet. La validation métier consiste à résoudre l'identifiant et à
     # traiter proprement le cas "pas banni / inexistant".
-    "external_user": ("fetch_user", "NotFound"),
+    "external_user": ("fetch_user", "NotFound", "moderation_service.unban"),
 }
 
 SOURCES = ("cogs/moderation.py", "cogs/verification.py")

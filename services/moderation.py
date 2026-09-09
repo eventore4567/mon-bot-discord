@@ -45,9 +45,16 @@ l'avertissement ; le dossier du bannissement automatique) — mais PAS sur
 l'INSERT de l'avertissement lui-même : à ce stade rien n'a encore réussi,
 laisser l'exception remonter reste le comportement honnête (et existant).
 
-unban reste sur son code existant dans cogs/moderation.py, inchangé — sa
-cible n'est pas un membre du serveur, sa forme diverge trop des autres pour
-partager la même migration ; testé indépendamment le moment venu.
+unban complète la liste : sa cible n'est PAS un discord.Member résolu en amont
+par Discord (donc aucune hiérarchie à vérifier — on ne "sanctionne" pas la
+hiérarchie de quelqu'un qui n'est déjà plus sur le serveur) mais un
+identifiant brut, résolu DANS le pipeline via ``fetch_user`` (injecté par
+l'appelant pour rester testable sans Discord) puis confirmé banni par
+``guild.unban`` (NotFound sinon, cas déjà géré par le code existant). Le
+utilisateur résolu n'étant connu qu'après cette étape, ``SanctionOutcome``
+gagne un champ ``resolved_target`` pour que l'appelant puisse quand même
+construire son propre dossier de sanction — seule commande de la famille à
+en avoir besoin.
 """
 from __future__ import annotations
 
@@ -77,6 +84,7 @@ class SanctionOutcome:
     persistence_error: str | None = None
     tempaction_error: str | None = None
     duration_seconds: int | None = None
+    resolved_target: discord.abc.User | None = None
 
     @property
     def rejection_reason(self) -> str | None:
@@ -584,4 +592,52 @@ async def warn(
         auto_ban_executed=auto_ban_executed,
         auto_ban_case_number=auto_ban_case_number,
         auto_ban_persistence_error=auto_ban_persistence_error,
+    )
+
+
+async def unban(
+    bot: Any,
+    *,
+    guild: discord.Guild,
+    actor: discord.Member,
+    user_id: int,
+    reason: str,
+    fetch_user: Callable[[int], Awaitable[discord.abc.User]],
+    render_dm_text: Callable[[discord.abc.User], str | None] | None = None,
+) -> SanctionOutcome:
+    """Pipeline complet du débannissement — voir le docstring du module pour
+    la forme distincte des autres sanctions (pas de discord.Member résolu en
+    amont, donc pas de hiérarchie à vérifier ; ``fetch_user`` injecté pour
+    rester testable sans Discord). ``render_dm_text`` reçoit l'utilisateur
+    résolu — le texte ne peut être construit qu'une fois cette résolution
+    faite, contrairement à ban()/kick() où la cible est déjà connue avant
+    l'appel."""
+    try:
+        user = await fetch_user(user_id)
+        await guild.unban(user, reason=f"{actor} : {reason}")
+    except discord.NotFound:
+        return SanctionOutcome(
+            executed=False,
+            validation_error="Cet utilisateur n'est pas banni ou n'existe pas.",
+        )
+
+    dm_sent = False
+    dm_text = render_dm_text(user) if render_dm_text else None
+    if dm_text:
+        try:
+            await user.send(dm_text, allowed_mentions=discord.AllowedMentions.none())
+            dm_sent = True
+        except discord.HTTPException:
+            dm_sent = False
+
+    case_number, persistence_error = await persist_sanction(
+        bot, guild_id=guild.id, target_id=user.id, actor_id=actor.id, action="unban", reason=reason,
+    )
+
+    return SanctionOutcome(
+        executed=True,
+        dm_sent=dm_sent,
+        case_number=case_number,
+        persistence_error=persistence_error,
+        resolved_target=user,
     )

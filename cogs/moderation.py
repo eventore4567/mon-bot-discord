@@ -506,18 +506,35 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("ban_members",), target="external_user")
     async def unban(self, ctx: commands.Context, user_id: str, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : septième et dernière
+        commande de sanction migrée — voir services/moderation.py::unban().
+        Corrige le même trou que les six précédentes : record_sanction()
+        n'était protégé par aucun try/except alors que le débannissement
+        Discord avait déjà réellement réussi."""
         await self._ack(ctx)
         try:
             uid = int(user_id)
         except ValueError:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Identifiant Discord invalide.')))
-        try:
-            user = await self.bot.fetch_user(uid)
-            await ctx.guild.unban(user, reason=f"{ctx.author} : {raison}")
-            await self._send_sanction_dm(ctx, user, "unban", raison)
-        except discord.NotFound:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Cet utilisateur n'est pas banni ou n'existe pas.")))
-        e = await self.log_sanction(ctx, "unban", user, raison)
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "unban")
+
+        def render_dm_text(user: discord.abc.User) -> str | None:
+            if template is None:
+                return None
+            return self._render_sanction_dm_text(
+                template, target=user, guild=ctx.guild, reason=raison,
+                duration_seconds=None, actor=ctx.author, action_label=self.DM_ACTION_LABELS["unban"],
+            )
+
+        outcome = await moderation_service.unban(
+            self.bot, guild=ctx.guild, actor=ctx.author, user_id=uid, reason=raison,
+            fetch_user=self.bot.fetch_user, render_dm_text=render_dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+
+        e = await self.log_sanction(ctx, "unban", outcome.resolved_target, raison, case_number=outcome.case_number)
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     # ---------------------------------------------------------------- KICK
