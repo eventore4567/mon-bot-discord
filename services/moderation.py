@@ -101,17 +101,23 @@ async def _run_sanction_pipeline(
     dm_text: str | None,
     action: str,
     execute: Callable[[], Awaitable[None]],
+    dm_after: bool = False,
 ) -> SanctionOutcome:
     """Pipeline partagé par les sanctions "un membre, une raison" : hiérarchie
     -> notification -> exécution Discord (fournie par l'appelant via
-    ``execute``) -> persistance. ``ban()`` et ``kick()`` ne diffèrent que par
-    cette étape d'exécution et par le nom de l'action persistée.
+    ``execute``) -> persistance. ``ban()``, ``kick()`` et ``unmute()`` ne
+    diffèrent que par cette étape d'exécution, le nom de l'action persistée,
+    et l'ordre notification/exécution.
 
-    Le MP part AVANT l'exécution Discord — délivrabilité : un membre banni ou
-    expulsé n'est en général plus joignable par MP une fois l'action
-    appliquée. C'est le choix déjà fait par le code existant, conservé ici à
-    l'identique, pas un écart par rapport à « validate -> permission ->
-    hierarchy -> execute -> persist -> log -> DM » de la demande initiale.
+    Par défaut, le MP part AVANT l'exécution Discord — délivrabilité : un
+    membre banni ou expulsé n'est en général plus joignable par MP une fois
+    l'action appliquée (ban/kick). ``dm_after=True`` inverse l'ordre pour les
+    sanctions qui laissent le membre sur le serveur (unmute) : c'est le choix
+    déjà fait par le code existant pour ce cas précis, conservé ici à
+    l'identique. Ni l'un ni l'autre n'est un écart par rapport à « validate ->
+    permission -> hierarchy -> execute -> persist -> log -> DM » de la demande
+    initiale — cette dernière ne précisait pas l'ordre relatif exécution/MP
+    pour un cas où la délivrabilité n'est pas en jeu.
 
     L'autorisation d'accès à la commande (utils/access_matrix.py) et la
     permission Discord du bot (@checks.action_validation) sont déjà vérifiées
@@ -122,15 +128,23 @@ async def _run_sanction_pipeline(
     if hierarchy_error:
         return SanctionOutcome(executed=False, hierarchy_error=hierarchy_error)
 
-    dm_sent = False
-    if dm_text:
+    async def _send_dm() -> bool:
+        if not dm_text:
+            return False
         try:
             await target.send(dm_text, allowed_mentions=discord.AllowedMentions.none())
-            dm_sent = True
+            return True
         except discord.HTTPException:
-            dm_sent = False
+            return False
+
+    dm_sent = False
+    if not dm_after:
+        dm_sent = await _send_dm()
 
     await execute()
+
+    if dm_after:
+        dm_sent = await _send_dm()
 
     case_number, persistence_error = await persist_sanction(
         bot,
@@ -194,6 +208,34 @@ async def kick(
         dm_text=dm_text,
         action="kick",
         execute=lambda: guild.kick(target, reason=f"{actor} : {reason}"),
+    )
+
+
+async def unmute(
+    bot: Any,
+    *,
+    guild: discord.Guild,
+    actor: discord.Member,
+    target: discord.Member,
+    reason: str,
+    dm_text: str | None = None,
+) -> SanctionOutcome:
+    """Pipeline complet du retrait de mute — voir _run_sanction_pipeline().
+
+    ``dm_after=True`` : contrairement à ban()/kick(), le MP part APRÈS
+    l'exécution — un membre qu'on démute reste sur le serveur, la
+    délivrabilité n'est pas en jeu, et c'est l'ordre du code existant.
+    """
+    return await _run_sanction_pipeline(
+        bot,
+        guild=guild,
+        actor=actor,
+        target=target,
+        reason=reason,
+        dm_text=dm_text,
+        action="unmute",
+        execute=lambda: target.timeout(None, reason=f"{actor} : {reason}"),
+        dm_after=True,
     )
 
 
