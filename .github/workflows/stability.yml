@@ -69,6 +69,11 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-permission-audit.db"
         run: python tools/permission_guard_audit.py
 
+      - name: Command permission group consistency audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python tools/command_permission_group_consistency_audit.py
+
       - name: Security runtime hardening audit
         env:
           DISCORD_TOKEN: "ci.fake.token"

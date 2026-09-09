@@ -56,6 +56,11 @@ jobs:
           DISCORD_TOKEN: "ci.fake.token"
         run: python tools/command_callback_integrity_audit.py
 
+      - name: Command permission group consistency audit
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python tools/command_permission_group_consistency_audit.py
+
       - name: Dashboard interaction audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
