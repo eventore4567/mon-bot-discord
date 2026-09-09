@@ -29,17 +29,26 @@ MUSIC_COMMANDS = {
     "pause",
     "resume",
     "skip",
+    "previous",
     "stop",
     "queue",
     "nowplaying",
     "volume",
     "loop",
     "shuffle",
-    "remove-from-queue",
-    "clear-queue",
-    "playlist-save",
-    "playlist-load",
+    "remove",
+    "clear",
+    "seek",
+    "autoplay",
 }
+
+# Racine du groupe /music : la plupart des commandes ci-dessus sont désormais des
+# sous-commandes ("+music pause", qualified_name "music pause"), plus jamais des
+# commandes plates ("+pause"). Sans cette racine, command_name ne récupérait que
+# le premier mot ("music") au lieu du nom réel de la sous-commande, et la
+# protection anti-faux-positif ci-dessous ne s'appliquait plus jamais à aucune
+# commande musique groupée — vérifié après la refonte du moteur musique.
+MUSIC_GROUP_ROOT = "music"
 
 SUMMARY_PATTERN = re.compile(
     r"\b(resume|resumes|resumer|resumee|resumee?s|synthese|synthetise|synthetiser)\b"
@@ -364,7 +373,12 @@ def install(bot: commands.Bot) -> None:
             return None
 
         raw = command_line[len(prefix):] if command_line.startswith(prefix) else command_line
-        command_name = raw.split(maxsplit=1)[0].casefold()
+        words = raw.split()
+        first_word = words[0].casefold() if words else ""
+        if first_word == MUSIC_GROUP_ROOT and len(words) > 1:
+            command_name = words[1].casefold()
+        else:
+            command_name = first_word
         if command_name not in MUSIC_COMMANDS:
             return command_line
 
