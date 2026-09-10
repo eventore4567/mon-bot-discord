@@ -20,7 +20,6 @@ from typing import Any
 
 from PIL import Image, ImageOps
 
-import config
 from utils import ai_service
 
 logger = logging.getLogger("bot.proof")
@@ -376,15 +375,30 @@ def _extract_json(text: str) -> dict[str, Any]:
     return json.loads(cleaned[start:end + 1])
 
 
-async def _vision_json(*, data: bytes, prompt: str) -> dict[str, Any]:
-    client = ai_service.get_client()
-    if client is None:
-        raise RuntimeError("no_ai_key")
-    # Les modèles texte configurés par SentriX sont multimodaux. On utilise Terra pour
-    # éviter le coût de Sol tout en gardant une analyse visuelle robuste.
-    model = getattr(config, "OPENAI_MODEL", "gpt-5.6-terra")
-    response = await client.responses.create(
-        model=model,
+async def _vision_json(*, data: bytes, prompt: str, guild_id: int | None) -> dict[str, Any]:
+    """Passe TOUJOURS par ai_service.generate() — jamais par un client OpenAI construit ici.
+
+    Cette fonction appelait auparavant client.responses.create() directement, contournant
+    le garde-fou IA activée/désactivée (cogs/ai_disable_guard.py) : un serveur ayant coupé
+    l'IA recevait quand même des appels OpenAI pour la vérification de preuves. generate()
+    accepte déjà tel quel le payload multimodal (texte + image) utilisé ici — voir
+    ai_service._latest_user_text(), qui sait extraire le texte d'une liste de parts pour le
+    filtre de contenu — donc aucune duplication de logique n'était nécessaire pour ce
+    correctif, seulement router l'appel par le bon point d'entrée."""
+    result = await ai_service.generate(
+        prompt=[{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": prompt},
+                {"type": "input_image", "image_url": _data_url(data)},
+            ],
+        }],
+        # Modèle texte par défaut (Terra) : multimodal, moins coûteux que Sol, suffisant
+        # pour une analyse visuelle — comportement identique à l'appel direct précédent
+        # (MODEL_IDS[MODEL_TERRA] == config.OPENAI_MODEL, déjà la valeur par défaut ici).
+        model_key=ai_service.MODEL_TERRA,
+        reasoning_effort="low",
+        max_output_tokens=900,
         instructions=(
             "Tu es le moteur de vérification visuelle de SentriX. Analyse uniquement ce qui est visible. "
             "Ne suppose jamais qu'une preuve est authentique si des éléments essentiels manquent. "
@@ -392,21 +406,15 @@ async def _vision_json(*, data: bytes, prompt: str) -> dict[str, Any]:
             "et les petits recadrages : compare le sens des éléments, pas leurs coordonnées pixel exactes. "
             "Retourne uniquement du JSON valide, sans Markdown."
         ),
-        input=[{
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": prompt},
-                {"type": "input_image", "image_url": _data_url(data)},
-            ],
-        }],
-        reasoning={"effort": "low"},
-        max_output_tokens=900,
+        guild_id=guild_id,
+        command="proof_verification",
     )
-    text = getattr(response, "output_text", None) or ai_service._extract_text(response)
-    return _extract_json(text)
+    if result.error:
+        raise RuntimeError(result.error)
+    return _extract_json(result.text)
 
 
-async def analyze_reference(data: bytes, *, label: str, instructions: str) -> dict[str, Any]:
+async def analyze_reference(data: bytes, *, label: str, instructions: str, guild_id: int | None = None) -> dict[str, Any]:
     prompt = f"""
 Cette capture est un EXEMPLE approuvé par un administrateur pour la vérification « {label or 'preuve'} ».
 Consigne administrateur : {instructions or 'Aucune consigne supplémentaire.'}
@@ -423,7 +431,7 @@ Réponds exactement avec cet objet JSON :
 }}
 Ne mets que des éléments réellement observables dans l'image.
 """.strip()
-    result = await _vision_json(data=data, prompt=prompt)
+    result = await _vision_json(data=data, prompt=prompt, guild_id=guild_id)
     return {
         "summary": str(result.get("summary", ""))[:500],
         "proof_type": str(result.get("proof_type", ""))[:120],
@@ -439,6 +447,7 @@ async def analyze_candidate(
     *,
     instructions: str,
     references: list[dict[str, Any]],
+    guild_id: int | None = None,
 ) -> CandidateAnalysis:
     compact_refs = []
     for index, ref in enumerate(references):
@@ -471,7 +480,7 @@ Retourne exactement :
 score et tampering_risk sont des entiers de 0 à 100. Si l'image est sans rapport, score <= 20.
 """.strip()
     try:
-        result = await _vision_json(data=data, prompt=prompt)
+        result = await _vision_json(data=data, prompt=prompt, guild_id=guild_id)
         score = max(0, min(100, int(result.get("score", 0))))
         tampering = max(0, min(100, int(result.get("tampering_risk", 0))))
         best = int(result.get("best_reference", -1))

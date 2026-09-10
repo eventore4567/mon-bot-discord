@@ -698,11 +698,17 @@ async def generate(
     user_id: int | None = None,
     command: str | None = None,
     web_search: bool = False,
+    max_output_tokens: int | None = None,
 ) -> AiResult:
     """Appelle la Responses API (jamais Chat Completions) via AsyncOpenAI (jamais bloquant).
 
     guild_id/channel_id/user_id/command ne servent QU'au contexte des logs serveur en cas
-    d'erreur (diagnostic) — jamais envoyés à OpenAI, jamais affichés à l'utilisateur."""
+    d'erreur (diagnostic) — jamais envoyés à OpenAI, jamais affichés à l'utilisateur.
+
+    max_output_tokens : None (par défaut) conserve le budget habituel par modèle — un appelant
+    ayant un besoin différent (ex : utils/proof_service.py, qui appelait auparavant l'API
+    directement avec son propre budget) peut le préciser sans changer le comportement de
+    tous les autres appelants."""
     filtered_text = _latest_user_text(prompt)
     if contains_sensitive_content(filtered_text):
         logger.info(
@@ -733,7 +739,10 @@ async def generate(
         "instructions": instructions,
         "input": effective_prompt,
         "reasoning": {"effort": reasoning_effort},
-        "max_output_tokens": 600 if model_key == MODEL_LUNA else (1200 if model_key == MODEL_TERRA else 2500),
+        "max_output_tokens": (
+            max_output_tokens if max_output_tokens is not None
+            else 600 if model_key == MODEL_LUNA else (1200 if model_key == MODEL_TERRA else 2500)
+        ),
     }
     if previous_response_id:
         kwargs["previous_response_id"] = previous_response_id
