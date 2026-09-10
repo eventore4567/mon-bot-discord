@@ -1011,7 +1011,6 @@ class Levels(commands.Cog, name="Levels"):
         # La barre est un repere visuel immediat, la ou un pourcentage demande un effort.
         barre = stats_service.progress_bar(
             stats["current_level_xp"], stats["required_xp"], length=18,
-            emoji_filled="█", emoji_empty="░",
         )
 
         activite = [

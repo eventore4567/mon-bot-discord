@@ -39,7 +39,7 @@ def progress_percent(current: int, needed: int) -> int:
     return max(0, min(100, round((current / needed) * 100)))
 
 
-def progress_bar(current: int, needed: int, length: int = 10, emoji_filled: str = "🟩", emoji_empty: str = "⬜") -> tuple[str, int]:
+def progress_bar(current: int, needed: int, length: int = 10, emoji_filled: str = "▰", emoji_empty: str = "▱") -> tuple[str, int]:
     pct = progress_percent(current, needed)
     filled = max(0, min(length, round(length * pct / 100)))
     return emoji_filled * filled + emoji_empty * (length - filled), pct

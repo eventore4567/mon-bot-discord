@@ -186,7 +186,7 @@ class PontDepuisEmbed(unittest.TestCase):
     def test_les_emojis_de_tete_sont_retires(self):
         """Le chevron et le filet marquent deja la section ; l'emoji fait du bruit."""
         texte = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation", compact=False))
-        self.assertIn("### ◢ MEMBRE", texte)
+        self.assertIn("### ● MEMBRE", texte)
         self.assertNotIn("👤", texte)
 
     def test_la_barre_dessinee_disparait(self):
@@ -202,11 +202,11 @@ class PontDepuisEmbed(unittest.TestCase):
     def test_compact_regroupe_les_champs_dans_une_seule_section(self):
         """Un dossier de sanction a sept champs courts : chacun avec son propre
         grand titre et son propre filet rendait la fiche disproportionnee. En
-        mode compact, un seul "### ◢ RÉSUMÉ" porte tous les champs, une ligne
+        mode compact, un seul "### ● RÉSUMÉ" porte tous les champs, une ligne
         chacun."""
         texte = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation", compact=True))
         self.assertEqual(texte.count("### "), 1)
-        self.assertIn("### ◢ RÉSUMÉ", texte)
+        self.assertIn("### ● RÉSUMÉ", texte)
         self.assertIn("**Membre** · <@1>", texte)
         self.assertIn("**Raison** · Spam massif", texte)
 
@@ -236,9 +236,9 @@ class PontDepuisEmbed(unittest.TestCase):
         embed.add_field(name="Court", value="ok", inline=True)
         embed.add_field(name="Long détail", value=long_texte, inline=False)
         texte = panels.texte_complet(panels.depuis_embed(embed, kind="moderation"))
-        self.assertIn("### ◢ RÉSUMÉ", texte)
+        self.assertIn("### ● RÉSUMÉ", texte)
         self.assertIn("**Court** · ok", texte)
-        self.assertIn("### ◢ LONG DÉTAIL", texte)
+        self.assertIn("### ● LONG DÉTAIL", texte)
         self.assertIn(long_texte, texte)
 
     def test_une_sanction_n_est_pas_peinte_en_vert(self):
@@ -319,7 +319,7 @@ class RenduUnifie(unittest.TestCase):
 
         rendu = panels.texte_complet(PremiumEmbedViewV82(self._embed(), compact=True))
         self.assertTrue(rendu.startswith("## "), rendu[:40])
-        self.assertIn("### ◢ ", rendu)
+        self.assertIn("### ● ", rendu)
 
     def test_le_mode_compact_tient_sur_moins_de_lignes(self):
         from cogs.premium_ui_v82 import PremiumEmbedViewV82

@@ -26,10 +26,10 @@ logger = logging.getLogger("bot.community-v31")
 
 def _bar(current: int, target: int, blocks: int = 12) -> str:
     if target <= 0:
-        return "█" * blocks
+        return "▰" * blocks
     ratio = max(0.0, min(1.0, float(current) / float(target)))
     filled = round(ratio * blocks)
-    return "█" * filled + "░" * (blocks - filled)
+    return "▰" * filled + "▱" * (blocks - filled)
 
 
 def achievement_catalog(stats: dict[str, Any], progression: dict[str, Any]) -> list[dict[str, Any]]:

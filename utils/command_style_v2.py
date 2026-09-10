@@ -126,12 +126,12 @@ def _useful_footer(embed: discord.Embed) -> str | None:
 
 def _latency_quality(latency_ms: int) -> tuple[str, str]:
     if latency_ms <= 80:
-        return "Excellente", "██████████"
+        return "Excellente", "▰▰▰▰▰▰▰▰▰▰"
     if latency_ms <= 140:
-        return "Très bonne", "█████████░"
+        return "Très bonne", "▰▰▰▰▰▰▰▰▰▱"
     if latency_ms <= 220:
-        return "Correcte", "███████░░░"
-    return "Dégradée", "████░░░░░░"
+        return "Correcte", "▰▰▰▰▰▰▰▱▱▱"
+    return "Dégradée", "▰▰▰▰▱▱▱▱▱▱"
 
 
 def _enrich_ping(embed: discord.Embed, command: Any) -> None:

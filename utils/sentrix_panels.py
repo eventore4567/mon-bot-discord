@@ -66,9 +66,10 @@ INTENTIONS: dict[str, tuple[int, str]] = {
 }
 
 # Marqueur de section. Discord ne sait pas tracer de filet horizontal dans un
-# TextDisplay : le Separator du conteneur s'en charge, et ce chevron donne au
-# titre de section une accroche visuelle constante.
-CHEVRON = "◢"
+# TextDisplay : le Separator du conteneur s'en charge, et cette puce donne au
+# titre de section une accroche visuelle constante (style arrondi validé par
+# Jayden — remplace l'ancien chevron anguleux "◢").
+CHEVRON = "●"
 
 _LIMITE_LIGNE = 240
 _LIMITE_BLOC = 3800
