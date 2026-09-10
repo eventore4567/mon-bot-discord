@@ -33,6 +33,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from services.tickets import count_genuinely_open_tickets
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as sx_panels
 from database.db import now
@@ -123,34 +124,6 @@ async def save_button_settings(bot, guild_id: int, settings: dict):
         "ON CONFLICT(guild_id) DO UPDATE SET config_json = excluded.config_json",
         (guild_id, json.dumps(settings)),
     )
-
-
-async def count_genuinely_open_tickets(bot, guild: discord.Guild, user_id: int, type_id: int) -> int:
-    """Compte les tickets réellement ouverts : ``status='ouvert'`` ET salon existant.
-
-    Avant ce correctif, la vérification "l'utilisateur a-t-il déjà un ticket ouvert"
-    ne regardait que la colonne ``status`` en base, jamais si le salon Discord existait
-    encore. Une suppression manuelle du salon (staff, anti-nuke, purge de catégorie...)
-    laissait donc la ligne à ``status='ouvert'`` pour toujours, bloquant indéfiniment
-    toute nouvelle ouverture du même type pour cet utilisateur — c'est le bug rapporté
-    ("impossible de rouvrir un ticket après fermeture/suppression"). Une ligne dont le
-    salon n'existe plus est donc auto-réparée ici en ``status='supprime'`` et n'est
-    jamais comptée. Utilisé par ``Tickets.start_ticket_flow`` et
-    ``ticket_claim_security.secure_create_ticket`` : les deux points où ce blocage se
-    manifestait.
-    """
-    rows = await bot.db.fetchall(
-        "SELECT id, channel_id FROM tickets WHERE guild_id = ? AND user_id = ? AND type_id = ? AND status = 'ouvert'",
-        (guild.id, user_id, type_id),
-    )
-    count = 0
-    for row in rows:
-        channel = guild.get_channel(int(row["channel_id"]))
-        if channel is None:
-            await bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (row["id"],))
-            continue
-        count += 1
-    return count
 
 
 def slugify_channel_name(text: str, fallback: str) -> str:
