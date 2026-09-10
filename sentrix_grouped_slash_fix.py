@@ -129,6 +129,35 @@ def _sanction_callback_mismatch(command: commands.Command) -> str | None:
     return None
 
 
+def _sanction_diagnostic_snapshot(command: commands.Command, option_names: tuple[str, ...], values: dict) -> str | None:
+    """Instantané complet de l'identité du callback pour les 7 commandes de sanction,
+    journalisé à CHAQUE invocation (pas seulement en cas de désaccord détecté par
+    _sanction_callback_mismatch()) — pour qu'une reproduction réelle du mélange
+    mute/unmute (jamais reproduit malgré une simulation complète du boot de
+    production) laisse une trace exploitable même si le nom déclaré concorde.
+    __code__.co_filename/co_firstlineno identifient la fonction RÉELLEMENT exécutée
+    même à travers un functools.wraps qui aurait pu tromper un simple __name__."""
+    name = str(getattr(command, "name", "") or "").casefold()
+    if name not in _SANCTION_COMMAND_NAMES:
+        return None
+    callback = getattr(command, "callback", None)
+    if callback is None:
+        return f"command={command.qualified_name} callback=None"
+    try:
+        declared = inspect.unwrap(callback)
+    except (TypeError, ValueError):
+        declared = callback
+    code = getattr(declared, "__code__", None)
+    membre = values.get("membre")
+    return (
+        f"command={command.qualified_name} outer_name={getattr(callback, '__name__', '?')} "
+        f"declared_name={getattr(declared, '__name__', '?')} "
+        f"code={getattr(code, 'co_filename', '?')}:{getattr(code, 'co_firstlineno', '?')} "
+        f"options={option_names} membre_id={getattr(membre, 'id', None)} "
+        f"a_duree={'duree' in values or 'duree' in option_names}"
+    )
+
+
 async def _make_context(bot: commands.Bot, interaction: discord.Interaction) -> commands.Context:
     ctx = await commands.Context.from_interaction(interaction)
     # SentriX ajoute des helpers à son Context. On conserve la même compatibilité que V95.
@@ -149,6 +178,9 @@ async def _invoke_native(
     values: dict,
 ) -> None:
     """Exécute une commande prefix/hybride avec le cycle de vie commands.py, sans parser."""
+    diagnostic = _sanction_diagnostic_snapshot(command, option_names, values)
+    if diagnostic:
+        logger.info("Diagnostic sanction (native) : %s", diagnostic)
     mismatch = _sanction_callback_mismatch(command)
     if mismatch:
         logger.critical(mismatch)
@@ -221,6 +253,9 @@ async def _invoke_legacy(
 ) -> None:
     """Chemin V95 conservé pour convertisseurs non natifs et groupes prefix réels."""
     root = command.root_parent or command
+    diagnostic = _sanction_diagnostic_snapshot(root, option_names, values)
+    if diagnostic:
+        logger.info("Diagnostic sanction (legacy) : %s", diagnostic)
     mismatch = _sanction_callback_mismatch(root)
     if mismatch:
         logger.critical(mismatch)

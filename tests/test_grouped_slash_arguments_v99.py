@@ -193,3 +193,81 @@ def test_invoke_native_refuse_d_executer_sur_mismatch():
         assert "unmute" in str(exc) and "mute" in str(exc)
     else:
         raise AssertionError("_invoke_native aurait dû lever CommandError")
+
+
+# Diagnostic ajouté à CHAQUE invocation d'une commande de sanction (voir
+# _sanction_diagnostic_snapshot), pas seulement quand _sanction_callback_mismatch()
+# détecte un désaccord — pour qu'une reproduction réelle du mélange mute/unmute
+# laisse une trace exploitable même si le nom déclaré concorde.
+
+def test_diagnostic_snapshot_est_produit_pour_une_commande_de_sanction():
+    async def unmute(self, ctx, membre, *, raison="..."):
+        return None
+
+    command = commands.Command(unmute, name="unmute")
+    membre = object()
+    snapshot = fix._sanction_diagnostic_snapshot(command, ("membre", "raison"), {"membre": membre, "raison": "x"})
+
+    assert snapshot is not None
+    assert "command=unmute" in snapshot
+    assert "declared_name=unmute" in snapshot
+    assert "a_duree=False" in snapshot
+
+
+def test_diagnostic_snapshot_signale_la_presence_de_duree():
+    async def mute(self, ctx, membre, duree="10m", *, raison="..."):
+        return None
+
+    command = commands.Command(mute, name="mute")
+    snapshot = fix._sanction_diagnostic_snapshot(command, ("membre", "duree", "raison"), {"duree": "1h"})
+
+    assert "a_duree=True" in snapshot
+
+
+def test_diagnostic_snapshot_absent_pour_une_commande_non_sanction():
+    async def system_status(self, ctx):
+        return None
+
+    command = commands.Command(system_status, name="bot-status")
+
+    assert fix._sanction_diagnostic_snapshot(command, (), {}) is None
+
+
+def test_diagnostic_snapshot_inclut_le_fichier_et_la_ligne_du_code_reel():
+    async def unmute(self, ctx, membre, *, raison="..."):
+        return None
+
+    command = commands.Command(unmute, name="unmute")
+    snapshot = fix._sanction_diagnostic_snapshot(command, ("membre", "raison"), {})
+
+    assert "test_grouped_slash_arguments_v99.py" in snapshot
+
+
+def test_invoke_native_journalise_le_diagnostic_meme_sans_desaccord(caplog):
+    async def unmute(cog, ctx, membre, *, raison="..."):
+        return None
+
+    command = commands.Command(unmute, name="unmute")
+
+    class FakeCtx:
+        command_failed = False
+
+    class FakeBot:
+        def dispatch(self, *args, **kwargs):
+            pass
+
+    async def fake_can_run(ctx):
+        return False  # s'arrête juste après le diagnostic, avant le vrai appel
+
+    command.can_run = fake_can_run
+
+    async def run():
+        import logging
+        caplog.set_level(logging.INFO, logger="bot.grouped-slash-fix")
+        try:
+            await fix._invoke_native(FakeBot(), command, FakeCtx(), ("membre", "raison"), {"membre": object()})
+        except commands.CheckFailure:
+            pass
+
+    asyncio.run(run())
+    assert any("Diagnostic sanction (native)" in record.message for record in caplog.records)
