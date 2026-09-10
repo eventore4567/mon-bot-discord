@@ -66,7 +66,8 @@ _LOG_CHANNEL_NAMES: dict[str, set[str]] = {
 _AUDIT_BY_TITLE = {
     "Membre banni": discord.AuditLogAction.ban,
     "Membre débanni": discord.AuditLogAction.unban,
-    "Timeout modifié": discord.AuditLogAction.member_update,
+    "Timeout appliqué": discord.AuditLogAction.member_update,
+    "Timeout retiré": discord.AuditLogAction.member_update,
     "Surnom modifié": discord.AuditLogAction.member_update,
     "Rôles d'un membre modifiés": discord.AuditLogAction.member_role_update,
     "Salon créé": discord.AuditLogAction.channel_create,
@@ -257,8 +258,8 @@ def _first_id(value: str) -> int | None:
 
 
 def _timeout_action(embed: discord.Embed) -> tuple[str, ...]:
-    state = _field_value(embed, "Nouvel état")
-    return ("unmute",) if "retir" in state.casefold() else ("mute",)
+    title = str(embed.title or "")
+    return ("unmute",) if "retir" in title.casefold() else ("mute",)
 
 
 async def _recent_sanction_exists(
@@ -395,7 +396,7 @@ def _install_generic_dedupe(bot: commands.Bot) -> None:
         if config_key == "log_moderation":
             title = str(embed.title or "")
             actions = _GENERIC_ACTIONS.get(title)
-            if title == "Timeout modifié":
+            if title in ("Timeout appliqué", "Timeout retiré"):
                 actions = _timeout_action(embed)
             target_id = _target_id(embed)
             if actions and target_id:
