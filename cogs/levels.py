@@ -964,6 +964,16 @@ class Levels(commands.Cog, name="Levels"):
     async def build_level_embed(self, guild: discord.Guild, member: discord.Member) -> discord.Embed:
         settings = await self.bot.db.get_stats_settings(guild.id)
         stats = await stats_service.get_member_statistics(self.bot, guild, member)
+        if not await self._niveaux_actifs(guild.id):
+            e = discord.Embed(
+                title=f"📈 Niveau de {member.display_name}",
+                description="Le système de niveaux est désactivé sur ce serveur.",
+                color=settings["color"],
+                timestamp=discord.utils.utcnow(),
+            )
+            e.set_thumbnail(url=member.display_avatar.url)
+            e.set_footer(text=settings.get("footer", DEFAULT_STATS_SETTINGS["footer"]))
+            return e
         remaining_xp = max(0, stats["required_xp"] - stats["current_level_xp"])
         e = discord.Embed(
             title=f"📈 Niveau de {member.display_name}",
@@ -1080,7 +1090,11 @@ class Levels(commands.Cog, name="Levels"):
         ranks = await stats_service.get_category_ranks(self.bot, guild.id, stats)
         e = discord.Embed(title=f"🏆 Classement de {member.display_name}", color=settings["color"], timestamp=discord.utils.utcnow())
         e.set_thumbnail(url=member.display_avatar.url)
-        e.add_field(name="XP / Niveau", value=(f"#{ranks['xp_rank']}" if stats["is_ranked"] else "Non classé"), inline=True)
+        if await self._niveaux_actifs(guild.id):
+            xp_rank_value = f"#{ranks['xp_rank']}" if stats["is_ranked"] else "Non classé"
+        else:
+            xp_rank_value = "Désactivé sur ce serveur"
+        e.add_field(name="XP / Niveau", value=xp_rank_value, inline=True)
         e.add_field(name="Messages", value=f"#{ranks['message_rank']}", inline=True)
         e.add_field(name="Temps vocal", value=f"#{ranks['voice_rank']}", inline=True)
         e.add_field(name="Économie", value=f"#{ranks['economy_rank']}", inline=True)
@@ -1166,6 +1180,17 @@ class Levels(commands.Cog, name="Levels"):
         """
         if ctx.interaction:
             await ctx.defer()
+        if not await self._niveaux_actifs(ctx.guild.id):
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre="SentriX — Classement des niveaux",
+                    sous_titre="Le système de niveaux est désactivé sur ce serveur.",
+                    kind="neutral",
+                    sections=[],
+                    pied="SentriX • Niveaux désactivés",
+                ),
+            )
         rows = await self.bot.db.fetchall(
             "SELECT * FROM levels WHERE guild_id = ? ORDER BY level DESC, xp DESC LIMIT 50",
             (ctx.guild.id,),
