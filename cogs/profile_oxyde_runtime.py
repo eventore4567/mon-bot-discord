@@ -10,6 +10,7 @@ import functools
 import discord
 from discord.ext import commands
 
+from services import profile as profile_service
 from utils import premium_style, stats_service, visual_v5
 from . import community_v3, community_v31
 from utils import sentrix_panels as panels
@@ -30,7 +31,10 @@ def _date(value) -> str:
 
 
 async def _snapshot(bot: commands.Bot, guild: discord.Guild, member: discord.Member):
-    return await community_v31._profile_snapshot(bot, guild, member)
+    """Core V2, Phase 4 (docs/core-v2-plan.md) : délègue désormais à
+    services/profile.py::build_snapshot(), testable sans jamais construire
+    ce cog ni Discord — voir son docstring pour le détail de l'extraction."""
+    return await profile_service.build_snapshot(bot, guild, member)
 
 
 async def _niveaux_actifs(bot: commands.Bot, guild_id: int) -> bool:
@@ -56,23 +60,6 @@ def _base(bot: commands.Bot, member: discord.Member, title: str, subtitle: str |
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text="SentriX • Profil")
     return embed
-
-
-def _badges(member: discord.Member, stats: dict, progression: dict) -> list[str]:
-    """Badges calculés uniquement à partir des vraies données du membre."""
-    badges: list[str] = []
-    if int(stats.get("message_count", 0)) >= 1000:
-        badges.append("Actif")
-    if int(stats.get("wallet", 0)) + int(stats.get("bank", 0)) >= 10_000:
-        badges.append("Économiste")
-    if int(progression.get("season_xp", 0)) > 0:
-        badges.append("Saisonnier")
-    if member.guild_permissions.manage_messages or member.guild_permissions.moderate_members:
-        badges.append("Staff")
-    account_days = max(0, (discord.utils.utcnow() - member.created_at).days)
-    if account_days >= 365:
-        badges.append("Vétéran")
-    return badges[:5]
 
 
 async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Member, author_id: int, page: str):
@@ -139,7 +126,7 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
                     text = text.replace(token, "")
                 cleaned.append(f"{index}. {text.strip().lstrip('1234567890. ')}")
             embed.add_field(name="Top 5", value="\n\n".join(cleaned), inline=False)
-        badges = _badges(member, stats, progression)
+        badges = profile_service.compute_badges(member, stats, progression)
         embed.add_field(
             name="Badges",
             value="\n".join(f"• {badge}" for badge in badges) if badges else "Aucun badge débloqué",
@@ -215,7 +202,7 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         ),
         inline=False,
     )
-    badges = _badges(member, stats, progression)
+    badges = profile_service.compute_badges(member, stats, progression)
     embed.add_field(
         name="Badges",
         value="\n".join(f"• {badge}" for badge in badges) if badges else "Aucun badge débloqué",
