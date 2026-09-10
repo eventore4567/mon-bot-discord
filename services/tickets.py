@@ -36,6 +36,15 @@ de classe, sans aucun autre appelant qui la reprendrait ensuite) et par
 ``Tickets.log_action`` (elle-même re-remplacée plus tard par
 cogs/runtime_finish_v90.py::safe_ticket_log, une garantie équivalente mais
 indépendante — hors périmètre de ce lot).
+
+claim_decision()/unclaim_decision() extraient la logique de décision pure de
+cogs/ticket_claim_security.py::secure_claim()/secure_unclaim() (les seules
+implémentations de +claim/+unclaim, `Tickets.btn_claim`/`btn_unclaim` étant
+réassignées vers elles à l'installation) : qui peut prendre en charge ou
+abandonner un ticket, séparément des effets Discord (permissions de salon,
+écriture en base, message de réponse) qui restent dans le cog. Ce sont déjà
+des fonctions pures — aucun type discord.py, seulement des identifiants et
+des booléens — jamais testées directement avant ce lot.
 """
 from __future__ import annotations
 
@@ -62,6 +71,34 @@ async def safe_ticket_log(bot, guild: discord.Guild, log_type: str, embed: disco
     except Exception:
         logger.exception("Échec du log ticket guild=%s type=%s ; action métier conservée.", guild.id, log_type)
         return False
+
+
+def claim_decision(*, current_claimant_id: int | None, member_id: int, is_admin: bool, is_owner: bool) -> str:
+    """Décide si `member_id` peut prendre en charge un ticket déjà à l'état
+    `current_claimant_id` (None si pas encore pris en charge). Retourne
+    "self_already" (déjà pris en charge par ce même membre), "taken" (pris
+    en charge par quelqu'un d'autre, et ce membre n'est ni admin ni
+    propriétaire du serveur — les deux seuls rôles pouvant reprendre la
+    charge d'un autre), ou "ok"."""
+    if current_claimant_id is not None:
+        if int(current_claimant_id) == member_id:
+            return "self_already"
+        if not is_admin and not is_owner:
+            return "taken"
+    return "ok"
+
+
+def unclaim_decision(*, current_claimant_id: int | None, member_id: int, is_admin: bool, is_owner: bool) -> str:
+    """Décide si `member_id` peut abandonner la prise en charge d'un ticket à
+    l'état `current_claimant_id`. Retourne "not_claimed" (personne ne l'a
+    pris en charge), "forbidden" (pris en charge par quelqu'un d'autre, et ce
+    membre n'est ni le titulaire, ni admin, ni propriétaire du serveur), ou
+    "ok"."""
+    if current_claimant_id is None:
+        return "not_claimed"
+    if int(current_claimant_id) != member_id and not is_admin and not is_owner:
+        return "forbidden"
+    return "ok"
 
 
 async def count_genuinely_open_tickets(bot, guild: discord.Guild, user_id: int, type_id: int) -> int:

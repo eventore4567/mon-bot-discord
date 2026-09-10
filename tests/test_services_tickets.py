@@ -9,7 +9,10 @@ extractions Core V2 (services/economy.py, services/levels.py) :
   action de ticket déjà réussie », utilisée par Tickets.close_ticket (après
   remplacement par cogs/ticket_claim_security.py::secure_close_ticket,
   seule implémentation active — confirmée par réassignation de classe sans
-  aucun appelant qui la reprendrait ensuite)."""
+  aucun appelant qui la reprendrait ensuite).
+- claim_decision()/unclaim_decision() : qui peut prendre en charge ou
+  abandonner un ticket, extrait de secure_claim()/secure_unclaim() (les
+  seules implémentations de +claim/+unclaim)."""
 from __future__ import annotations
 
 import os
@@ -126,6 +129,72 @@ class SafeTicketLogTests(unittest.IsolatedAsyncioTestCase):
                 bot, guild, "ticket_close", embed, event_key="abc", identity_name="Membre"
             )
         send_log.assert_awaited_once_with(bot, guild, "ticket_close", embed, event_key="abc", identity_name="Membre")
+
+
+class ClaimDecisionTests(unittest.TestCase):
+    def test_ticket_libre_est_toujours_reclamable(self):
+        decision = tickets_service.claim_decision(
+            current_claimant_id=None, member_id=1, is_admin=False, is_owner=False
+        )
+        self.assertEqual(decision, "ok")
+
+    def test_ne_peut_pas_reprendre_sa_propre_prise_en_charge(self):
+        """Même un admin ne peut pas « re-réclamer » un ticket qu'il a déjà pris en
+        charge — ce cas est distinct de reprendre la charge de QUELQU'UN D'AUTRE."""
+        decision = tickets_service.claim_decision(
+            current_claimant_id=1, member_id=1, is_admin=True, is_owner=False
+        )
+        self.assertEqual(decision, "self_already")
+
+    def test_membre_ordinaire_ne_peut_pas_voler_une_prise_en_charge(self):
+        decision = tickets_service.claim_decision(
+            current_claimant_id=1, member_id=2, is_admin=False, is_owner=False
+        )
+        self.assertEqual(decision, "taken")
+
+    def test_admin_peut_reprendre_la_charge_dun_autre_membre(self):
+        decision = tickets_service.claim_decision(
+            current_claimant_id=1, member_id=2, is_admin=True, is_owner=False
+        )
+        self.assertEqual(decision, "ok")
+
+    def test_proprietaire_du_serveur_peut_reprendre_la_charge_dun_autre_membre(self):
+        decision = tickets_service.claim_decision(
+            current_claimant_id=1, member_id=2, is_admin=False, is_owner=True
+        )
+        self.assertEqual(decision, "ok")
+
+
+class UnclaimDecisionTests(unittest.TestCase):
+    def test_ticket_non_pris_en_charge_ne_peut_pas_etre_abandonne(self):
+        decision = tickets_service.unclaim_decision(
+            current_claimant_id=None, member_id=1, is_admin=False, is_owner=False
+        )
+        self.assertEqual(decision, "not_claimed")
+
+    def test_le_titulaire_peut_toujours_abandonner_sa_propre_prise_en_charge(self):
+        decision = tickets_service.unclaim_decision(
+            current_claimant_id=1, member_id=1, is_admin=False, is_owner=False
+        )
+        self.assertEqual(decision, "ok")
+
+    def test_membre_ordinaire_ne_peut_pas_abandonner_la_prise_en_charge_dun_autre(self):
+        decision = tickets_service.unclaim_decision(
+            current_claimant_id=1, member_id=2, is_admin=False, is_owner=False
+        )
+        self.assertEqual(decision, "forbidden")
+
+    def test_admin_peut_forcer_labandon_de_la_prise_en_charge_dun_autre(self):
+        decision = tickets_service.unclaim_decision(
+            current_claimant_id=1, member_id=2, is_admin=True, is_owner=False
+        )
+        self.assertEqual(decision, "ok")
+
+    def test_proprietaire_du_serveur_peut_forcer_labandon_de_la_prise_en_charge_dun_autre(self):
+        decision = tickets_service.unclaim_decision(
+            current_claimant_id=1, member_id=2, is_admin=False, is_owner=True
+        )
+        self.assertEqual(decision, "ok")
 
 
 if __name__ == "__main__":
