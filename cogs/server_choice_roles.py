@@ -363,11 +363,14 @@ async def _massrole_all_members(
             batch = []
             if processed % 2000 == 0:
                 try:
-                    await progress.edit(
-                        embed=discord.Embed(
-                            title="Massrole — progression",
-                            description=f"**{processed}/{guild.member_count or '?'}** membres traités • **{added_or_removed}** modification(s) appliquée(s).",
-                        )
+                    await panels.editer(
+                        progress,
+                        panels.depuis_embed(
+                            discord.Embed(
+                                title="Massrole — progression",
+                                description=f"**{processed}/{guild.member_count or '?'}** membres traités • **{added_or_removed}** modification(s) appliquée(s).",
+                            )
+                        ),
                     )
                 except discord.HTTPException:
                     pass
