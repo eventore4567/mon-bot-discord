@@ -2,6 +2,10 @@
 
 Le catalogue public ne contient aucun rôle codé en dur : les rôles proposés viennent
 exclusivement de ``self_role_items`` et sont configurés depuis ``+setup`` > Rôles.
+
+Ce module installe aussi le contrat final de ``+massrole`` : l'action porte sur TOUS les
+membres du serveur et non plus sur une liste de mentions. ``+massrole add @Role`` ajoute
+le rôle choisi à tous les membres humains ; ``+massrole del @Role`` le retire partout.
 """
 from __future__ import annotations
 
@@ -9,7 +13,8 @@ import logging
 
 import discord
 from discord.ext import commands
-from utils import sentrix_panels as panels
+from utils import checks, sentrix_panels as panels
+from utils.owner_access import is_bot_owner_id
 
 logger = logging.getLogger("bot.server-choice-roles")
 _INSTALLED = False
@@ -249,10 +254,182 @@ async def publish_or_refresh(
     return message
 
 
+@commands.command(
+    name="massrole",
+    help="Ajouter ou retirer un rôle à tous les membres du serveur.",
+    usage="<add|del> <rôle>",
+)
+@commands.guild_only()
+@checks.is_owner_or_admin()
+async def _massrole_all_members(
+    _verification_cog,
+    ctx: commands.Context,
+    action: str,
+    role: discord.Role,
+):
+    """Implémentation finale de +massrole : le rôle choisi est appliqué au serveur entier."""
+    guild = ctx.guild
+    normalized = str(action or "").strip().casefold()
+    if normalized in {"add", "ajout", "ajouter", "ajoute"}:
+        mode = "add"
+    elif normalized in {"del", "delete", "remove", "retirer", "retire", "supprimer", "supprime"}:
+        mode = "remove"
+    else:
+        return await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                discord.Embed(
+                    title="Massrole — action invalide",
+                    description="Utilisez `+massrole add @Rôle` pour l'ajouter à tout le monde ou `+massrole del @Rôle` pour le retirer à tout le monde.",
+                )
+            ),
+        )
+
+    me = guild.me
+    if role.is_default():
+        problem = "Le rôle @everyone ne peut pas être ajouté ou retiré."
+    elif role.managed:
+        problem = "Ce rôle est géré par Discord ou une intégration et ne peut pas être modifié."
+    elif me is None:
+        problem = "SentriX n'est pas disponible dans le cache de ce serveur."
+    elif not me.guild_permissions.manage_roles:
+        problem = "SentriX a besoin de la permission **Gérer les rôles**."
+    elif role >= me.top_role:
+        problem = "Le rôle de SentriX doit être placé au-dessus du rôle à distribuer."
+    else:
+        problem = None
+
+    if problem:
+        return await panels.envoyer(
+            ctx,
+            panels.depuis_embed(discord.Embed(title="Massrole — impossible", description=problem)),
+        )
+
+    progress = await panels.envoyer(
+        ctx,
+        panels.depuis_embed(
+            discord.Embed(
+                title="Massrole — traitement en cours",
+                description=(
+                    f"{'Ajout' if mode == 'add' else 'Retrait'} de {role.mention} sur tous les membres du serveur. "
+                    "SentriX traite les membres par lots pour respecter les limites Discord."
+                ),
+            )
+        ),
+    )
+
+    added_or_removed = 0
+    failed = 0
+    skipped = 0
+    protected = 0
+    processed = 0
+    batch_size = 15
+
+    async def apply(member: discord.Member) -> None:
+        nonlocal added_or_removed, failed, skipped, protected
+        if member.bot:
+            skipped += 1
+            return
+        has_role = role in member.roles
+        if mode == "add" and has_role:
+            skipped += 1
+            return
+        if mode == "remove" and not has_role:
+            skipped += 1
+            return
+        # L'immunité propriétaire est aussi appliquée en garde bas niveau sur
+        # Member.remove_roles ; on l'évite ici explicitement pour que le compteur final
+        # ne prétende jamais qu'un derank protégé a réussi.
+        if mode == "remove" and is_bot_owner_id(member.id):
+            protected += 1
+            return
+        try:
+            if mode == "add":
+                await member.add_roles(role, reason=f"Massrole global par {ctx.author}")
+            else:
+                await member.remove_roles(role, reason=f"Massrole global par {ctx.author}")
+            added_or_removed += 1
+        except (discord.Forbidden, discord.HTTPException):
+            failed += 1
+
+    batch: list[discord.Member] = []
+    try:
+        async for member in guild.fetch_members(limit=None):
+            batch.append(member)
+            if len(batch) < batch_size:
+                continue
+            await __import__("asyncio").gather(*(apply(member) for member in batch))
+            processed += len(batch)
+            batch = []
+            if processed % 2000 == 0:
+                try:
+                    await panels.editer(
+                        progress,
+                        panels.depuis_embed(
+                            discord.Embed(
+                                title="Massrole — progression",
+                                description=f"**{processed}/{guild.member_count or '?'}** membres traités • **{added_or_removed}** modification(s) appliquée(s).",
+                            )
+                        ),
+                    )
+                except discord.HTTPException:
+                    pass
+        if batch:
+            await __import__("asyncio").gather(*(apply(member) for member in batch))
+            processed += len(batch)
+    except (discord.Forbidden, discord.HTTPException):
+        # Si Discord refuse l'énumération REST, le cache local est utilisé plutôt que
+        # d'abandonner entièrement l'opération. Le résultat indique alors ce qui a été
+        # réellement traité, sans inventer de succès.
+        remaining = [member for member in guild.members if member not in batch]
+        for offset in range(0, len(remaining), batch_size):
+            current = remaining[offset:offset + batch_size]
+            await __import__("asyncio").gather(*(apply(member) for member in current))
+            processed += len(current)
+
+    verb = "ajouté" if mode == "add" else "retiré"
+    result = discord.Embed(
+        title="Massrole terminé",
+        description=f"Rôle {role.mention} **{verb}** pour **{added_or_removed}** membre(s).",
+    )
+    result.add_field(name="Traités", value=str(processed), inline=True)
+    result.add_field(name="Ignorés", value=str(skipped), inline=True)
+    result.add_field(name="Échecs", value=str(failed), inline=True)
+    if protected:
+        result.add_field(
+            name="Protégés",
+            value=f"{protected} compte(s) propriétaire(s) SentriX conservé(s) intact(s).",
+            inline=False,
+        )
+    await panels.envoyer(ctx, panels.depuis_embed(result))
+
+
+def _install_massrole_global(bot: commands.Bot) -> None:
+    """Remplace l'ancienne variante « liste de mentions » sans laisser deux commandes."""
+    verification_cog = bot.get_cog("Verification")
+    if verification_cog is None:
+        logger.warning("+massrole global non installé : cog Verification absent.")
+        return
+
+    current = bot.get_command("massrole")
+    if current is _massrole_all_members:
+        return
+    if current is not None:
+        bot.remove_command("massrole")
+
+    # Reproduit le binding d'une commande déclarée dans le cog Verification : Discord.py
+    # lui passera le cog puis ctx, et +help continuera de la classer dans les commandes
+    # de rôles réservées au staff.
+    _massrole_all_members._cog = verification_cog
+    bot.add_command(_massrole_all_members)
+    logger.info("+massrole global installé : add/del agit sur tous les membres.")
+
+
 async def install(bot: commands.Bot) -> None:
     global _INSTALLED
     if _INSTALLED:
         return
     bot.add_view(ServerSelfRoleView())
+    _install_massrole_global(bot)
     _INSTALLED = True
     logger.info("Choix de rôles configurable et persistant SentriX activé.")
