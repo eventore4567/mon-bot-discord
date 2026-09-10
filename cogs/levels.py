@@ -17,6 +17,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from services import levels as levels_service
 from utils import embeds, checks, stats_service, design_system, visual_v5
 from utils import sentrix_panels as panels
 from database.db import now, DEFAULT_STATS_SETTINGS
@@ -646,39 +647,13 @@ class Levels(commands.Cog, name="Levels"):
         # (Database._economy_lock) et les sanctions (Database._sanctions_lock).
         self._xp_locks: dict[tuple, asyncio.Lock] = {}
 
-    def _get_xp_lock(self, guild_id: int, user_id: int) -> asyncio.Lock:
-        key = (guild_id, user_id)
-        lock = self._xp_locks.get(key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._xp_locks[key] = lock
-        return lock
-
     async def _apply_xp_delta(self, guild_id: int, user_id: int, delta: int) -> tuple[int, int, bool]:
-        """Ajoute (ou retire) `delta` XP à un membre, sous verrou, en recalculant TOUJOURS
-        le niveau correctement (jamais de xp qui dépasse le seuil du niveau courant sans
-        faire monter le niveau — c'était le cas de +add-xp avant cette correction).
+        """Ajoute (ou retire) `delta` XP à un membre — voir services/levels.py::
+        apply_xp_delta() pour le calcul (verrou par membre, recalcul du niveau).
         Retourne (nouveau_xp, nouveau_niveau, a_gagné_un_niveau)."""
-        await self.bot.db.ensure_level(guild_id, user_id)
-        lock = self._get_xp_lock(guild_id, user_id)
-        async with lock:
-            row = await self.bot.db.get_level(guild_id, user_id)
-            new_xp = max(0, row["xp"] + delta)
-            level = row["level"]
-            needed = stats_service.xp_required_for_level(level)
-            leveled_up = False
-            while new_xp >= needed:
-                new_xp -= needed
-                level += 1
-                needed = stats_service.xp_required_for_level(level)
-                leveled_up = True
-            # En cas de retrait d'XP (delta négatif), on ne fait jamais descendre le
-            # niveau automatiquement — un admin qui veut baisser un niveau doit utiliser
-            # +set-xp explicitement avec la valeur souhaitée, jamais un effet de bord.
-            await self.bot.db.execute(
-                "UPDATE levels SET xp = ?, level = ?, updated_at = ? WHERE guild_id = ? AND user_id = ?",
-                (new_xp, level, now(), guild_id, user_id),
-            )
+        new_xp, level, leveled_up = await levels_service.apply_xp_delta(
+            self.bot.db, self._xp_locks, guild_id, user_id, delta
+        )
         stats_service.invalidate_rank_cache(self.bot, guild_id, user_id)
         return new_xp, level, leveled_up
 
