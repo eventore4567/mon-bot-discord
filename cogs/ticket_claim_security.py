@@ -17,6 +17,7 @@ import unicodedata
 import discord
 from discord.ext import commands
 
+from services import tickets as tickets_service
 from utils import log_service
 from utils import sentrix_panels as panels
 
@@ -191,19 +192,12 @@ async def _private_reply(interaction: discord.Interaction, embed: discord.Embed)
 
 
 async def _safe_ticket_log(cog, guild: discord.Guild, log_type: str, embed: discord.Embed, **kwargs) -> bool:
-    """Journalise sans jamais casser l'action métier qui vient de réussir."""
-    try:
-        sent = await log_service.send_log(cog.bot, guild, log_type, embed, **kwargs)
-        if not sent:
-            logger.warning(
-                "Log ticket non envoyé guild=%s type=%s : route désactivée/invalide ou transport indisponible.",
-                guild.id,
-                log_type,
-            )
-        return bool(sent)
-    except Exception:
-        logger.exception("Échec du log ticket guild=%s type=%s ; action métier conservée.", guild.id, log_type)
-        return False
+    """Journalise sans jamais casser l'action métier qui vient de réussir.
+
+    Voir services/tickets.py::safe_ticket_log() pour le comportement — cette
+    fonction reste ici comme adaptateur mince (elle n'a que `cog.bot` à passer).
+    """
+    return await tickets_service.safe_ticket_log(cog.bot, guild, log_type, embed, **kwargs)
 
 
 def install(bot: commands.Bot) -> None:

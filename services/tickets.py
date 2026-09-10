@@ -24,10 +24,44 @@ que cogs/ticket_claim_security.py (``from . import tickets; tickets.count_
 genuinely_open_tickets(...)``) et cogs/sentrix_v22.py continuent de
 fonctionner sans aucun changement — le comportement observable est
 strictement identique à avant cette extraction.
+
+safe_ticket_log() vient de cogs/ticket_claim_security.py::_safe_ticket_log()
+(déplacée à l'identique, seul son premier paramètre passe de ``cog`` à
+``bot`` puisque c'est la seule chose qu'elle lisait dessus). C'est la garantie
+« une panne de log ne transforme jamais une action de ticket déjà réussie en
+erreur utilisateur » — partagée par ``Tickets.close_ticket`` (remplacée par
+``secure_close_ticket``, confirmée seule implémentation active :
+``tickets.Tickets.close_ticket = secure_close_ticket`` est une réassignation
+de classe, sans aucun autre appelant qui la reprendrait ensuite) et par
+``Tickets.log_action`` (elle-même re-remplacée plus tard par
+cogs/runtime_finish_v90.py::safe_ticket_log, une garantie équivalente mais
+indépendante — hors périmètre de ce lot).
 """
 from __future__ import annotations
 
+import logging
+
 import discord
+
+from utils import log_service
+
+logger = logging.getLogger("bot.tickets")
+
+
+async def safe_ticket_log(bot, guild: discord.Guild, log_type: str, embed: discord.Embed, **kwargs) -> bool:
+    """Journalise sans jamais casser l'action métier qui vient de réussir."""
+    try:
+        sent = await log_service.send_log(bot, guild, log_type, embed, **kwargs)
+        if not sent:
+            logger.warning(
+                "Log ticket non envoyé guild=%s type=%s : route désactivée/invalide ou transport indisponible.",
+                guild.id,
+                log_type,
+            )
+        return bool(sent)
+    except Exception:
+        logger.exception("Échec du log ticket guild=%s type=%s ; action métier conservée.", guild.id, log_type)
+        return False
 
 
 async def count_genuinely_open_tickets(bot, guild: discord.Guild, user_id: int, type_id: int) -> int:
