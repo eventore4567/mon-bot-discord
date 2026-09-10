@@ -490,7 +490,13 @@ class BotAllInOne(commands.Bot):
 
         self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
-        self.add_check(self.global_permission_check)
+        # cogs/permission_guard.py::install() s'enregistre désormais lui-même dès
+        # qu'il réaffecte self.global_permission_check (docs/core-v2-audit-
+        # technical-debt.md, §6) — ne l'ajouter ici qu'en repli, si cette extension
+        # n'a jamais chargé, pour ne jamais laisser aucune commande préfixée sans
+        # aucun garde de permission.
+        if not getattr(self.global_permission_check, "_sentrix_permission_guard", False):
+            self.add_check(self.global_permission_check)
 
 
         # Corrige la cause structurelle commune : quand un wrapper remplace

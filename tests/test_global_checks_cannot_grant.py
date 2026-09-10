@@ -80,17 +80,82 @@ def test_un_check_ne_peut_que_refuser(path, name, nature):
 
 
 def test_le_garde_de_permissions_est_bien_dans_la_chaine():
+    """install() s'enregistre lui-même (bot.add_check()) au lieu de compter sur
+    main.py pour ramasser l'attribut d'instance après coup — corrige
+    docs/core-v2-audit-technical-debt.md §6 (le garde ne fonctionnait qu'en
+    fonction d'un ordre d'exécution accidentel entre permission_guard.install()
+    et main.py::setup_hook()). main.py garde un repli conditionnel : il n'ajoute
+    sa propre implémentation que si permission_guard n'a jamais chargé, pour
+    qu'aucune commande préfixée ne se retrouve jamais sans aucun garde."""
     from cogs import permission_guard
 
     source = inspect.getsource(permission_guard.install)
     assert "bot.global_permission_check = prefix_permission_guard" in source
+    assert "bot.add_check(prefix_permission_guard)" in source
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")
     assert "self.add_check(self.global_permission_check)" in main_source
-    # L'ajout doit avoir lieu APRES le chargement des extensions, sinon l'attribut
-    # capture serait l'ancienne implementation et le garde serait inerte.
-    assert main_source.index("for ext in EXTENSIONS") < main_source.index(
-        "self.add_check(self.global_permission_check)"
-    )
+    assert '_sentrix_permission_guard", False)' in main_source
+
+
+def test_installer_le_garde_lenregistre_immediatement_comme_check_reel():
+    """Test comportemental (pas seulement textuel) : juste après install(), le
+    check doit déjà être dans bot._checks — sans dépendre d'un appel ultérieur
+    de main.py::setup_hook(). Aucune boucle asyncio en cours ici (test sync),
+    donc install() saute juste sa vérification fail-closed optionnelle
+    (protégée par un try/except RuntimeError autour de get_running_loop())."""
+    import discord
+    from discord.ext import commands
+
+    from cogs import permission_guard
+
+    bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
+    permission_guard.install(bot)
+
+    assert any(
+        getattr(check, "_sentrix_permission_guard", False) for check in bot._checks
+    ), "le garde de permissions doit déjà être un check réel juste après install()"
+
+
+def test_le_repli_de_main_py_ne_double_enregistre_jamais_le_garde():
+    """Reproduit exactement le repli conditionnel de main.py::setup_hook() (voir
+    test_le_garde_de_permissions_est_bien_dans_la_chaine pour la vérification que
+    ce repli existe bien dans le vrai fichier) : une fois permission_guard.install()
+    passé, le garde ne doit jamais être ajouté une seconde fois — sinon chaque
+    commande préfixée évaluerait la matrice d'accès deux fois par invocation."""
+    import discord
+    from discord.ext import commands
+
+    from cogs import permission_guard
+
+    bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
+    permission_guard.install(bot)
+
+    if not getattr(bot.global_permission_check, "_sentrix_permission_guard", False):
+        bot.add_check(bot.global_permission_check)
+
+    count = sum(1 for check in bot._checks if getattr(check, "_sentrix_permission_guard", False))
+    assert count == 1
+
+
+def test_le_repli_de_main_py_sactive_si_permission_guard_na_jamais_charge():
+    """Si l'extension cogs.permission_guard échoue à charger (jamais None,
+    jamais installée), le repli de main.py doit tout de même enregistrer UN
+    garde — sans lui, aucune commande préfixée n'aurait plus de vérification
+    de permission du tout."""
+    import discord
+    from discord.ext import commands
+
+    bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
+
+    async def fallback_check(ctx):
+        return True
+
+    bot.global_permission_check = fallback_check  # jamais réaffecté par permission_guard.install()
+
+    if not getattr(bot.global_permission_check, "_sentrix_permission_guard", False):
+        bot.add_check(bot.global_permission_check)
+
+    assert fallback_check in bot._checks
 
 
 def test_les_trois_sources_de_regles_par_role_sont_toutes_ecrites():
