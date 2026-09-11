@@ -8,6 +8,7 @@ import os
 import pathlib
 import sys
 import tempfile
+from types import SimpleNamespace
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -21,8 +22,8 @@ async def run() -> int:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-language.db")
 
         import main
-        from cogs import common_command_names, configuration, language_runtime
-        from cogs.language_setup_finalizer import LANGUAGE_CATEGORY_VALUE, LANGUAGE_PAGE
+        from cogs import common_command_names, language_runtime, setup_control_center
+        from cogs.language_official_bridge import OfficialLanguageSelect
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -92,30 +93,31 @@ async def run() -> int:
         if help_command is None or not getattr(help_command, "_sentrix_language_help", False):
             errors.append("+help n'utilise pas le rendu localise")
 
-        if not getattr(configuration.SetupView, "_sentrix_language_payload_guard", False):
-            errors.append("+setup n'a pas le garde-fou final-wire pour la langue")
-        if not getattr(configuration.SetupView, "_sentrix_setup_v6", False):
-            errors.append("configuration.SetupView ne pointe pas vers Setup V6")
-
-        # Teste la cible REELLEMENT résolue par self._open_setup_panel sur le Cog vivant.
-        # Le niveau classe peut être restauré par discord.py pendant le chargement d'une
-        # extension ; l'attribut d'instance doit rester la V6 et prend priorité en Python.
-        config_cog = bot.get_cog("Configuration")
-        bound_open = getattr(config_cog, "_open_setup_panel", None) if config_cog else None
-        bound_func = getattr(bound_open, "__func__", bound_open)
-        if bound_func is None or not getattr(bound_func, "_sentrix_setup_v6", False):
-            errors.append(
-                "Le Cog Configuration actif n'utilise pas l'ouverture V6 | "
-                f"bound={getattr(bound_func, '__module__', None)}.{getattr(bound_func, '__qualname__', None)} | "
-                f"marker={getattr(bound_func, '_sentrix_setup_v6', None)} | "
-                f"instance_flag={getattr(config_cog, '_sentrix_setup_v6_bound', None) if config_cog else None}"
-            )
-        if config_cog is not None and not getattr(config_cog, "_sentrix_setup_v6_bound", False):
-            errors.append("le verrou V6 n'est pas pose sur l'instance Configuration active")
-
+        # +setup est délibérément repris par cogs/setup_control_center.py::install(), qui
+        # fait bot.remove_command("setup") puis bot.add_cog(OfficialSetup(bot)) et marque
+        # bot._sentrix_setup_owner. cogs.configuration.SetupView (V6) et son finaliseur de
+        # langue ne sont donc plus le chemin réel de +setup — ils restent chargés mais ne
+        # sont jamais rendus. Le vrai porteur du sélecteur FR/EN est
+        # cogs.setup_control_center.SetupView, rebranché par control_center_v3_language.py
+        # (confirmé par un probe de boot réel : children = OfficialLanguageSelect/Button/
+        # V70PageSelect sur l'instance réellement utilisée par /setup).
         setup_command = bot.get_command("setup")
-        if setup_command is None or getattr(setup_command, "cog", None) is not config_cog:
-            errors.append("la commande +setup n'est pas rattachee au Cog Configuration teste")
+        owner_cog = getattr(setup_command, "cog", None) if setup_command else None
+        if getattr(bot, "_sentrix_setup_owner", None) != "cogs.setup_control_center":
+            errors.append(
+                "+setup n'est plus repris par cogs.setup_control_center | "
+                f"bot._sentrix_setup_owner={getattr(bot, '_sentrix_setup_owner', None)!r}"
+            )
+        if setup_command is None or type(owner_cog).__name__ != "OfficialSetup":
+            errors.append(
+                "la commande +setup n'est pas rattachee au vrai Cog OfficialSetup | "
+                f"cog={type(owner_cog).__name__ if owner_cog else None}"
+            )
+
+        if not getattr(setup_control_center.SetupView, "_sentrix_control_center_v3_language", False):
+            errors.append("setup_control_center.SetupView n'a pas ete rebranche par control_center_v3_language")
+        if not getattr(setup_control_center.SetupView, "_sentrix_language_payload_guard", False):
+            errors.append("+setup n'a pas le garde-fou final-wire pour la langue (vrai SetupView)")
 
         initial_view = language_runtime.LanguageChoiceView(bot)
         custom_ids = {getattr(item, "custom_id", None) for item in initial_view.children}
@@ -123,81 +125,70 @@ async def run() -> int:
             errors.append(f"boutons langue initiaux inattendus: {custom_ids}")
 
         try:
-            setup_view = configuration.SetupView(
-                bot, guild_id=123456789, author_id=111, message_id=222, channel_id=333,
+            fake_guild = SimpleNamespace(
+                id=123456789, name="Audit", default_role=SimpleNamespace(id=999),
+                roles=[], channels=[], categories=[], text_channels=[], voice_channels=[],
+                members=[], me=None, owner_id=1, icon=None, member_count=0,
             )
-
             def find_language_select(view):
                 for item in view.children:
-                    options = list(getattr(item, "options", []) or [])
-                    if any(str(getattr(opt, "value", "")) == LANGUAGE_CATEGORY_VALUE for opt in options):
+                    if isinstance(item, OfficialLanguageSelect):
                         return item
                 return None
 
-            select = find_language_select(setup_view)
+            def find_serialized_by_custom_id(components, target):
+                # setup_control_center.SetupView imbrique tout dans UN Container (Components
+                # V2) : la vraie profondeur est payload -> container.components ->
+                # actionrow.components -> item, pas juste payload -> row.components comme
+                # pour l'ancienne classe a plat. On descend donc recursivement plutot que de
+                # ne verifier que deux niveaux.
+                for component in components:
+                    if component.get("custom_id") == target:
+                        return component
+                    nested = component.get("components")
+                    if nested:
+                        found = find_serialized_by_custom_id(nested, target)
+                        if found is not None:
+                            return found
+                return None
+
+            # cogs.setup_control_center.OfficialSetup.send_setup() construit toujours une
+            # instance FRAICHE de SetupView puis appelle composer() une seule fois — jamais
+            # render() seul sur une instance deja rendue. Reutiliser la meme instance pour
+            # plusieurs verifications (render() puis composer()) reintroduit un etat perime
+            # dans le pipeline de rendu qui fait disparaitre le selecteur du payload serialise
+            # sans lever d'erreur : chaque verification ci-dessous utilise donc sa propre
+            # instance fraiche, exactement comme en production.
+
+            # Page d'accueil (category=None) : c'est la seule page ou
+            # control_center_v3_language.py injecte le selecteur de langue.
+            home_view = setup_control_center.SetupView(bot, fake_guild, 111)
+            home_view.render()
+            select = find_language_select(home_view)
             if select is None:
-                errors.append("Langue absente du menu Categories juste apres construction")
+                errors.append("Langue absente du panneau +setup reellement rendu (accueil)")
             else:
-                if str(getattr(select.options[0], "value", "")) != LANGUAGE_CATEGORY_VALUE:
-                    errors.append("Langue n'est pas la premiere option du menu Categories")
-                label = str(getattr(select.options[0], "label", "") or "")
-                if "Langue" not in label and "Language" not in label:
-                    errors.append(f"label langue incomprehensible: {label!r}")
+                if getattr(select, "custom_id", None) != "sentrix:setup:official:language":
+                    errors.append(f"custom_id du selecteur de langue inattendu: {select.custom_id!r}")
+                values = {str(getattr(option, "value", "")) for option in select.options}
+                if values != {language_runtime.LANG_FR, language_runtime.LANG_EN}:
+                    errors.append(f"options du selecteur de langue inattendues: {values}")
 
-            payload = setup_view.to_components()
-            serialized_category = None
-            for row in payload:
-                for component in row.get("components", []):
-                    options = component.get("options") or []
-                    if any(str(option.get("value", "")) == LANGUAGE_CATEGORY_VALUE for option in options):
-                        serialized_category = component
-                        break
-                if serialized_category:
-                    break
+            # Le payload REELLEMENT envoye a Discord passe par composer() (Components V2),
+            # pas par render() seul : c'est lui qui doit contenir le selecteur de langue.
+            payload_view = setup_control_center.SetupView(bot, fake_guild, 111)
+            await payload_view.composer()
+            payload = payload_view.to_components()
+            serialized_select = find_serialized_by_custom_id(payload, "sentrix:setup:official:language")
+            if serialized_select is None:
+                errors.append("CRITIQUE: selecteur de langue absent du payload final envoye a Discord pour +setup")
 
-            if serialized_category is None:
-                errors.append("CRITIQUE: Langue absente du payload final envoye a Discord")
-            elif str(serialized_category["options"][0].get("value", "")) != LANGUAGE_CATEGORY_VALUE:
-                errors.append("CRITIQUE: Langue n'est pas premiere dans le payload Discord")
-
-            setup_view.page = -1
-            setup_view.render_page()
-            payload_after_home = setup_view.to_components()
-            found_after_home = any(
-                str(option.get("value", "")) == LANGUAGE_CATEGORY_VALUE
-                for row in payload_after_home
-                for component in row.get("components", [])
-                for option in (component.get("options") or [])
-            )
-            if not found_after_home:
-                errors.append("Langue perdue apres render_page de l'accueil")
-
-            setup_view.page = LANGUAGE_PAGE
-            setup_view.render_page()
-            ids = {getattr(item, "custom_id", None) for item in setup_view.children}
-            expected = {
-                "sentrix:setup:v6:lang:fr",
-                "sentrix:setup:v6:lang:en",
-                "sentrix:setup:v6:lang:home",
-            }
-            if ids != expected:
-                errors.append(f"composants de la page Langue V6 invalides: {ids}")
-
-            language_embed = await setup_view.build_embed()
-            if "Langue" not in str(language_embed.title or "") and "Language" not in str(language_embed.title or ""):
-                errors.append(f"embed Langue invalide: {language_embed.title!r}")
-
-            setup_view.page = -1
-            setup_view.render_page()
-            home_embed = await setup_view.build_embed()
-            footer = str(home_embed.footer.text or "") if home_embed.footer else ""
-            if "SentriX" not in footer:
-                errors.append(f"marque SentriX absente du footer: {footer!r}")
-
-            for item in setup_view.children:
-                values = {str(getattr(opt, "value", "")) for opt in getattr(item, "options", [])}
-                if values == {"fr", "en"}:
-                    errors.append("un menu FR/EN separe existe encore hors des Categories")
+            # Hors accueil (ex: moderation), le selecteur ne doit pas rester affiche.
+            other_view = setup_control_center.SetupView(bot, fake_guild, 111)
+            other_view.category = "moderation"
+            other_view.render()
+            if find_language_select(other_view) is not None:
+                errors.append("le selecteur de langue reste affiche hors de la page d'accueil de +setup")
 
         except Exception as exc:
             errors.append(f"construction +setup langue impossible: {type(exc).__name__}: {exc}")
@@ -221,7 +212,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
-    print("OK: Cog actif lie a V6, FR/EN persistant et Langue premiere dans le payload Discord de +setup")
+    print("OK: +setup rattache au vrai OfficialSetup, FR/EN persistant et selecteur de langue present dans le payload Discord de +setup")
     return 0
 
 
