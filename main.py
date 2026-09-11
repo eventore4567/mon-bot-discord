@@ -168,6 +168,17 @@ OWNER_ONLY_COMMANDS = frozenset({
     # Core V2, Phase 1 (docs/core-v2-plan.md) : panneau d'observabilité globale
     # au processus, jamais scopé par serveur — pas adapté à un accès admin.
     "corediag",
+    # docs/core-v2-audit-technical-debt.md §16 : présent dans la copie canonique
+    # (utils/access_matrix.py::OWNER_ONLY_COMMANDS) depuis le début, mais absent
+    # ici — cette liste-ci n'est lue que par des outils d'audit/log (aucun
+    # gate d'exécution), donc l'ajouter ne change aucun comportement runtime,
+    # seulement l'exactitude des audits (cogs/command_hardening_v41.py, etc.).
+    # "logs-diag" (avec tiret) n'est PAS ajouté ici : ce nom ne correspond à
+    # aucune commande réelle enregistrée (la vraie commande est "logsdiag",
+    # sans tiret, cogs/generated_logs_sync.py) et se protège elle-même par un
+    # check local administrator — la reclassifier changerait un comportement
+    # aujourd'hui fonctionnel sans bug prouvé. Voir tâche de suivi créée.
+    "reset-logs-all",
 })
 
 CATEGORY_COMMANDS = {
