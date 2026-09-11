@@ -72,15 +72,25 @@ def _static_checks(errors: list[str]) -> None:
     if integrity_path.exists():
         text = integrity_path.read_text(encoding="utf-8")
         for marker in (
-            "_economy_lock",
-            "AND quantity>=1",
-            "AND cash>=?",
-            "AND bank>=?",
             "_ticket_staff_allowed",
             "_ExpiringPlayLockRegistry",
         ):
             if marker not in text:
                 errors.append(f"protection intégrité absente: {marker}")
+
+    # Core V2, Phase 4 : les garanties atomiques économie (_economy_lock, quantity/
+    # cash/bank>=?) ont été extraites de cogs/integrity_hardening.py vers
+    # services/economy.py — comportement inchangé, verrouillé par
+    # tests/test_services_economy.py. Même correctif déjà appliqué à
+    # tools/integrity_gate.py et tools/v22_quality_gate.py.
+    economy_path = ROOT / "services" / "economy.py"
+    if not economy_path.exists():
+        errors.append("fichier requis absent: services/economy.py")
+    else:
+        economy_text = economy_path.read_text(encoding="utf-8")
+        for marker in ("_economy_lock", "AND quantity>=1", "AND cash>=?", "AND bank>=?"):
+            if marker not in economy_text:
+                errors.append(f"protection intégrité absente (services/economy.py): {marker}")
 
     if ai_path.exists():
         text = ai_path.read_text(encoding="utf-8")
