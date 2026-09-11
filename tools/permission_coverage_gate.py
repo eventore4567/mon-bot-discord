@@ -10,6 +10,7 @@ peut-etre destinee aux membres. C'est exactement ce qui etait arrive a "gameseas
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import pathlib
@@ -24,6 +25,25 @@ sys.path.insert(0, str(ROOT))
 import config  # noqa: E402
 from database.db import Database  # noqa: E402
 from utils import access_matrix as matrix  # noqa: E402
+
+
+async def _close_runtime(bot) -> None:
+    """Annule les tâches de fond restées vivantes et ferme la base — sans ça,
+    le process ne se termine jamais (tâches type wait_until_ready() en boucle
+    et connexion aiosqlite jamais fermée). Même correctif déjà appliqué dans
+    tools/permission_guard_audit.py."""
+    current = asyncio.current_task()
+    pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    close_db = getattr(bot.db, "close", None)
+    if close_db:
+        result = close_db()
+        if inspect.isawaitable(result):
+            await result
 
 # Racines volontairement non classees : elles sont couvertes par un check local
 # explicite et n'ont pas vocation a passer par la matrice.
@@ -54,61 +74,69 @@ async def main() -> int:
     bot.db = Database(config.DATABASE_PATH)
     await bot.db.connect()
 
-    extensions = list(bot_main.EXTENSIONS)
-    boot = (ROOT / "railway_boot.py").read_text(encoding="utf-8")
-    for name in re.findall(r'bot_main\.EXTENSIONS\.append\("(cogs\.[a-z0-9_]+)"\)', boot):
-        if name not in extensions:
-            extensions.append(name)
+    try:
+        extensions = list(bot_main.EXTENSIONS)
+        boot = (ROOT / "railway_boot.py").read_text(encoding="utf-8")
+        for name in re.findall(r'bot_main\.EXTENSIONS\.append\("(cogs\.[a-z0-9_]+)"\)', boot):
+            if name not in extensions:
+                extensions.append(name)
 
-    failures: list[str] = []
-    for extension in extensions:
-        try:
-            await asyncio.wait_for(bot.load_extension(extension), timeout=30)
-        except Exception as exc:  # pragma: no cover - diagnostic
-            failures.append(f"{extension}: {type(exc).__name__}: {exc}")
+        failures: list[str] = []
+        for extension in extensions:
+            try:
+                await asyncio.wait_for(bot.load_extension(extension), timeout=30)
+            except Exception as exc:  # pragma: no cover - diagnostic
+                failures.append(f"{extension}: {type(exc).__name__}: {exc}")
 
-    if failures:
-        print("EXTENSIONS EN ECHEC :")
-        for line in failures:
-            print("  ", line)
-        return 1
+        if failures:
+            print("EXTENSIONS EN ECHEC :")
+            for line in failures:
+                print("  ", line)
+            return 1
 
-    covered = covered_names()
-    roots = {
-        matrix.normalise(command.name)
-        for command in bot.walk_commands()
-        if command.full_parent_name == ""
-    }
-    uncovered = sorted(roots - covered - ALLOWED_UNCOVERED)
+        covered = covered_names()
+        roots = {
+            matrix.normalise(command.name)
+            for command in bot.walk_commands()
+            if command.full_parent_name == ""
+        }
+        uncovered = sorted(roots - covered - ALLOWED_UNCOVERED)
 
-    print(f"racines chargees : {len(roots)}")
-    print(f"noms classes     : {len(covered)}")
+        print(f"racines chargees : {len(roots)}")
+        print(f"noms classes     : {len(covered)}")
 
-    if uncovered:
-        print(f"\n{len(uncovered)} COMMANDE(S) NON CLASSEE(S) — elles tomberaient en fail-closed :")
-        for name in uncovered:
-            print("  ", name)
-        print("\nClassez-les dans utils/access_matrix.py (niveau 1 a 5).")
-        return 1
+        if uncovered:
+            print(f"\n{len(uncovered)} COMMANDE(S) NON CLASSEE(S) — elles tomberaient en fail-closed :")
+            for name in uncovered:
+                print("  ", name)
+            print("\nClassez-les dans utils/access_matrix.py (niveau 1 a 5).")
+            return 1
 
-    # Les 5 niveaux doivent rester disjoints.
-    tiers = {
-        "public": set(matrix.PUBLIC_COMMANDS),
-        "guild-owner": set(matrix.GUILD_OWNER_COMMANDS),
-        "owner-sentrix": set(matrix.OWNER_ONLY_COMMANDS),
-        "discord-permission": set(matrix.DISCORD_PERMISSION_COMMANDS),
-    }
-    for left in tiers:
-        for right in tiers:
-            if left >= right:
-                continue
-            shared = tiers[left] & tiers[right]
-            if shared:
-                print(f"\nCHEVAUCHEMENT {left} / {right} : {sorted(shared)}")
-                return 1
+        # Les 5 niveaux doivent rester disjoints.
+        tiers = {
+            "public": set(matrix.PUBLIC_COMMANDS),
+            "guild-owner": set(matrix.GUILD_OWNER_COMMANDS),
+            "owner-sentrix": set(matrix.OWNER_ONLY_COMMANDS),
+            "discord-permission": set(matrix.DISCORD_PERMISSION_COMMANDS),
+        }
+        for left in tiers:
+            for right in tiers:
+                if left >= right:
+                    continue
+                shared = tiers[left] & tiers[right]
+                if shared:
+                    print(f"\nCHEVAUCHEMENT {left} / {right} : {sorted(shared)}")
+                    return 1
 
-    print("\nCouverture des permissions : OK")
-    return 0
+        print("\nCouverture des permissions : OK")
+        return 0
+    finally:
+        # Sans ceci, le process ne se termine jamais : des tâches de fond
+        # (wait_until_ready() en boucle, restauration de vues persistantes...)
+        # restent vivantes après le retour de main(), et la connexion aiosqlite
+        # n'est jamais fermée. Confirmé par exécution : ce gate se bloquait
+        # indéfiniment après avoir déjà imprimé son verdict.
+        await _close_runtime(bot)
 
 
 if __name__ == "__main__":
