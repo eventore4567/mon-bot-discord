@@ -541,6 +541,29 @@ class BotAllInOne(commands.Bot):
                 "Second balayage des décorateurs redondants impossible :\n" + traceback.format_exc()
             )
 
+        # docs/core-v2-audit-technical-debt.md §5 : le second passage ci-dessus ne
+        # couvre que permission_guard. cogs/command_hardening_v41.py::_audit_registry
+        # (détection "dangerous_public" / "unknown_policy", consommée par
+        # web/health_runtime_v45.py pour le diagnostic santé) n'a, elle, jamais reçu
+        # de second passage : elle ne tournait qu'une fois, via finalize_runtime() au
+        # chargement de cogs.visual_experience_v5, donc AVANT les 21 extensions
+        # tardives de railway_boot.py — exactement le même trou temporel qui causait
+        # le Bug #1 (§1) sur /sentrixpro. Un futur bug de même forme (une commande
+        # destructive déclarée publique) dans l'une de ces 21 extensions restait donc
+        # invisible à ce diagnostic. _audit_registry ne fait que recalculer et
+        # journaliser un rapport (aucune mutation de commande) : un second appel est
+        # sans risque et ne fait que rafraîchir bot._sentrix_command_audit avec la
+        # liste complète des 51 extensions.
+        try:
+            from cogs.command_hardening_v41 import _audit_registry as _audit_command_registry_v41
+
+            _audit_command_registry_v41(self)
+        except Exception:
+            logger.warning(
+                "Second audit du registre de commandes (V41, post-boot complet) impossible :\n"
+                + traceback.format_exc()
+            )
+
         try:
             from cogs.permission_guard import apply_slash_default_permissions
 
