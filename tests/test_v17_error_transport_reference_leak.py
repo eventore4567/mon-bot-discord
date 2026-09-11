@@ -56,7 +56,14 @@ def clean_context_send(monkeypatch):
     # main.SentriXContext.send SANS passer par monkeypatch, donc ça survit à leur test
     # pour le reste de la session pytest. On neutralise cette pollution ici, le temps du
     # test, pour un résultat indépendant de l'ordre d'exécution de la suite.
-    monkeypatch.delattr(botmain.SentriXContext, "send", raising=False)
+    # Garde explicite sur __dict__ (pas hasattr) : depuis que SentriXContext ne définit
+    # plus son propre send() (§8), l'attribut n'existe plus QUE par héritage de
+    # commands.Context — hasattr() le trouve quand même, mais delattr() sur un nom
+    # hérité (jamais présent dans __dict__ de la classe elle-même) lève toujours
+    # AttributeError, raising=False ou pas. On ne nettoie donc que si une pollution
+    # réelle (une réaffectation directe sur SentriXContext) est présente.
+    if "send" in vars(botmain.SentriXContext):
+        monkeypatch.delattr(botmain.SentriXContext, "send", raising=False)
     yield captured
 
 
