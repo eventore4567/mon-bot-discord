@@ -12,13 +12,28 @@ recopie le `__qualname__` de la couche précédente sur la nouvelle).
 ## Correction d'un audit précédent
 
 Une recherche antérieure (menée dans cette même session) avait estimé la chaîne de
-`generate()` à "6-7 couches". Un traçage direct sur un boot réel en trouve **11**, et
-révèle que `cogs/ai_api_hotfix.py` — cité par cette recherche comme une couche active —
-**n'est en réalité jamais installé** : le fichier définit un `async def setup(bot)`
-(la forme standard d'une extension discord.py) mais n'apparaît dans aucune liste
-d'extensions ni n'est importé par aucun autre module. C'est du code mort qui ressemble
-à du code vivant — le même piège que celui déjà documenté pour `docs/core-v2-audit-technical-debt.md`
-sur d'autres commandes.
+`generate()` à "6-7 couches". Un traçage direct sur un boot réel en trouve **11**.
+
+**Correction ultérieure (audit de dette technique, lot Components V2/UI+DB) :**
+une version précédente de ce document affirmait ici que `cogs/ai_api_hotfix.py`
+n'était "en réalité jamais installé" (grep n'avait trouvé aucun appelant direct
+de son `setup()`). C'était une erreur, corrigée après avoir fait tourner
+`tools/ai_api_hotfix_gate.py` (orphelin, jamais exécuté en CI jusqu'à cet
+audit) : ce gate affirme lui-même que `setup()` est bien appelé, et la lecture
+directe du code confirme la chaîne complète —
+`cogs/__init__.py:46` importe `install` de `cogs/remove_code_command/__init__.py`
+(le PAQUET vivant, pas le fichier plat mort du même nom, voir
+`docs/core-v2-audit-technical-debt.md` #11), `cogs/__init__.py:154` l'appelle
+via `_run_installer(...)` dans la chaîne de démarrage réelle, et
+`cogs/remove_code_command/__init__.py:7` fait
+`from ..ai_api_hotfix import setup as install_ai_api_hotfix` puis l'appelle à
+la ligne 39. Confirmé aussi de façon indépendante par un log de boot réel
+(`bot_mastery_audit.py`) : `[ERROR] bot.ai-api-hotfix: SentriX AI: OPENAI_API_KEY
+is missing`, émis par le logger propre de `ai_api_hotfix.py`. Ce fichier
+s'exécute donc bel et bien à chaque boot — un nom de module ("remove_code_command")
+totalement sans rapport avec ce qu'il installe réellement (l'exact piège que
+`docs/core-v2-audit-technical-debt.md` documente déjà pour d'autres chaînes de
+méta-installation). La couche 7 ci-dessous est donc active, pas morte.
 
 ## La chaîne réelle de `ai_service.generate()` (11 couches, extérieure en premier)
 
@@ -32,11 +47,9 @@ sur d'autres commandes.
 4.  cogs/ai_disable_guard.py:83        guarded_generate       (3e application)
 5.  cogs/community_v33.py:238          generate_v33           (retry sur réponse vide)
 6.  cogs/ai_disable_guard.py:83        guarded_generate       (4e application)
-7.  cogs/ai_api_hotfix.py:401          generate_compatible    ⚠️ CODE MORT — jamais installé en pratique (voir
-                                                                ci-dessus) ; présent seulement si quelque chose
-                                                                d'autre venait un jour à appeler cogs.ai_api_hotfix
-                                                                .setup() explicitement, ce qui n'arrive pas
-                                                                aujourd'hui
+7.  cogs/ai_api_hotfix.py:401          generate_compatible    active — installée via cogs/remove_code_command/
+                                                                __init__.py (voir correction ci-dessus), pas du
+                                                                code mort
 8.  cogs/bot_v12_machine.py:242        generate_v12           (compat V12)
 9.  cogs/bot_mastery_runtime.py:623    generate_safe          (coupe-circuit après erreurs répétées)
 10. cogs/natural_music_intent_guard.py:285  guarded_generate  (encore le garde IA — 3e FICHIER différent qui
@@ -133,9 +146,12 @@ corrigé indépendamment. Ce qui justifierait une consolidation future, le momen
    `bot_excellence_runtime.py`, et encore l'activation dans
    `natural_music_intent_guard.py`) — un risque de confusion pour quiconque debug cette
    chaîne sans lire le code source complet, comme cet audit a dû le faire.
-3. `cogs/ai_api_hotfix.py` (code mort confirmé) devrait être supprimé ou son
-   `setup()` réellement branché si son comportement est encore désiré — actuellement
-   c'est ni l'un ni l'autre.
+3. `cogs/ai_api_hotfix.py` est actif (voir correction en tête de document), mais
+   installé via un nom de module ("remove_code_command") sans aucun rapport avec
+   ce qu'il fait réellement — un futur mainteneur qui grep "ai_api_hotfix" pour
+   trouver son point d'installation ne trouverait rien d'évident. Le renommage ou
+   le déplacement de cet appel est hors périmètre de cet audit (refonte, pas
+   documentation).
 4. Si une consolidation dans `AIService` (Phase 4) a lieu un jour, ces 11 couches
    devraient devenir des étapes explicites d'un seul pipeline, testées individuellement
    — pas des monkeypatches empilés par des cogs qui s'ignorent mutuellement.
