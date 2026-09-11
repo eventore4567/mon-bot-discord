@@ -330,33 +330,16 @@ INTENTS.voice_states = True
 
 
 class SentriXContext(commands.Context):
-    """Context personnalisé utilisé pour TOUTES les commandes texte (préfixe +) du bot.
+    """Context utilisé pour TOUTES les commandes texte (préfixe +) du bot.
 
-    Demande explicite : quand quelqu'un tape une commande texte, la réponse du bot doit
-    être visiblement liée à son message (comme une "réponse" Discord, avec la petite
-    flèche), et pinguer la personne SANS avoir besoin d'un @mention écrit dans le texte —
-    sinon, sur un salon actif, on ne sait plus à quel message le bot répond.
-
-    Les commandes SLASH (interaction) ne sont pas concernées : Discord affiche déjà
-    nativement "SentriX a utilisé /commande" au-dessus de la réponse, donc le lien est
-    déjà visible sans rien faire de plus — voir la condition `self.interaction is None`
-    ci-dessous, qui limite ce comportement aux commandes préfixées uniquement."""
-
-    async def send(self, *args, **kwargs):
-        if self.interaction is None and self.message is not None and "reference" not in kwargs:
-            kwargs["reference"] = discord.MessageReference(
-                message_id=self.message.id,
-                channel_id=self.channel.id,
-                guild_id=self.guild.id if self.guild else None,
-                fail_if_not_exists=False,
-            )
-            kwargs.setdefault("mention_author", True)
-        try:
-            return await super().send(*args, **kwargs)
-        except discord.HTTPException:
-            kwargs.pop("reference", None)
-            kwargs.pop("mention_author", None)
-            return await super().send(*args, **kwargs)
+    Ne surcharge plus `send()` : la tentative originale (commit `ddcf278`, 2026-08-05)
+    d'ajouter une `reference`/`mention_author=True` à chaque réponse préfixée est
+    neutralisée sans exception par `cogs/reply_reference_fix.py` depuis le commit
+    `c7020f1` (2026-08-07, deux jours plus tard — pour éviter le bandeau Discord "le
+    message original a été supprimé"). `super().send()` résout `commands.Context.send`
+    dynamiquement, donc cette classe n'avait plus aucun effet propre depuis 5 semaines —
+    voir docs/core-v2-audit-technical-debt.md §8. Elle reste comme classe (utilisée par
+    `get_context` ci-dessous et comme marqueur de type par d'autres modules)."""
 
 
 async def get_prefix(bot: "BotAllInOne", message: discord.Message):
