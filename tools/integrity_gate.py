@@ -13,6 +13,13 @@ def main() -> int:
     errors: list[str] = []
     integrity_path = ROOT / "cogs" / "integrity_hardening.py"
     stats_path = ROOT / "cogs" / "stats.py"
+    # Core V2, Phase 4 : les trois garanties atomiques économie (dépôt/retrait,
+    # vente) ont été extraites de integrity_hardening.py vers services/economy.py
+    # (comportement inchangé, vérifié par tests/test_services_economy.py) — ce
+    # gate cherchait encore ces marqueurs dans l'ancien fichier et échouait donc
+    # à tort depuis cette extraction, sans que personne ne le remarque puisqu'il
+    # n'était jamais exécuté en CI.
+    economy_path = ROOT / "services" / "economy.py"
 
     if not integrity_path.exists():
         errors.append("cogs/integrity_hardening.py absent")
@@ -31,9 +38,6 @@ def main() -> int:
 
         required_markers = (
             "root_name.casefold() != str(requested_name).casefold()",
-            "AND quantity>=1",
-            "AND cash>=?",
-            "AND bank>=?",
             "_sentrix_integrity_tempaction_task",
             "Cette action est réservée au staff du ticket.",
             "status='supprime' WHERE id=? AND status='ferme'",
@@ -43,6 +47,14 @@ def main() -> int:
         for marker in required_markers:
             if marker not in text:
                 errors.append(f"garantie d'intégrité absente: {marker}")
+
+        if not economy_path.exists():
+            errors.append("services/economy.py absent")
+        else:
+            economy_text = economy_path.read_text(encoding="utf-8")
+            for marker in ("AND quantity>=1", "AND cash>=?", "AND bank>=?"):
+                if marker not in economy_text:
+                    errors.append(f"garantie d'intégrité économie absente (services/economy.py): {marker}")
 
         if tree is not None:
             public_decorators = 0
