@@ -6,6 +6,10 @@ ont un propriétaire unique :
 - setup : cogs.setup_control_center ;
 - help : cogs.help ;
 - logs : cogs.logs -> utils.log_service.
+
+Avant même le premier chargement d'extension listé ici, ``sitecustomize.py`` (racine du
+dépôt) s'est déjà exécuté via l'auto-import implicite de Python — voir
+docs/core-v2-audit-technical-debt.md §12 et le docstring de ce module pour le détail.
 """
 from __future__ import annotations
 

@@ -6,6 +6,12 @@ par défaut, configurable par serveur via /setprefix).
 
 Pour lancer le bot : python3 main.py
 Le token doit être défini dans le fichier .env (variable DISCORD_TOKEN).
+
+docs/core-v2-audit-technical-debt.md §12 : avant même que ce fichier (ou tout autre
+script de démarrage réel — voir §4 pour les multiples déclarations concurrentes) ne
+s'exécute, Python a déjà auto-importé ``sitecustomize.py`` à la racine du dépôt (sauf
+lancement avec ``-S``). Ce module installe, entre autres, les patchs SentriX V95/V96/
+V102 avant tout code applicatif — voir son propre docstring pour le détail exact.
 """
 
 import asyncio
