@@ -312,6 +312,22 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
             sections=[panels.Section("Raison", [panels.Ligne("Motif enregistré", raison)])],
         )
 
+    if cls == "RuntimeRateLimitError":
+        # docs/core-v2-audit-technical-debt.md §3 : ce message vivait dans
+        # cogs/bot_excellence_runtime.py::improved_error_handler, un patch de
+        # classe (cls.on_command_error) définitivement masqué par le
+        # remplacement d'instance ci-dessous (bot.on_command_error =
+        # MethodType(prefix_error, bot)) — RuntimeRateLimitError (une
+        # CheckFailure sans .message) retombait donc dans le cas générique
+        # juste après et affichait à tort "Vous n'êtes pas autorisé à utiliser
+        # cette commande" pour un simple ralentissement anti-abus.
+        secondes = max(1, round(float(getattr(base, "retry_after", 1.0) or 1.0)))
+        return _panneau(
+            "Fonction temporairement limitée",
+            f"Cette fonction est temporairement limitée pour protéger SentriX. Réessayez dans environ {secondes} seconde(s).",
+            kind="warning",
+        )
+
     if cls == "BotPermissionError" or isinstance(base, commands.CheckFailure):
         message = str(getattr(base, "message", "") or "Vous n'êtes pas autorisé à utiliser cette commande.")
         return _panneau(
@@ -629,6 +645,26 @@ async def _raw_slash_send(interaction: discord.Interaction, panneau: panels.Pann
 
 def install(bot: commands.Bot) -> None:
     async def prefix_error(self: commands.Bot, ctx: commands.Context, error: commands.CommandError):
+        base = getattr(error, "original", error)
+        if (
+            isinstance(base, commands.MissingRequiredArgument)
+            and ctx.command is not None
+            and ctx.command.qualified_name == "tictactoe"
+            and getattr(base.param, "name", "") == "adversaire"
+        ):
+            # docs/core-v2-audit-technical-debt.md §3 : ce matchmaking vivait dans
+            # cogs/bot_excellence_runtime.py::improved_error_handler, un patch de
+            # classe (cls.on_command_error) définitivement masqué par le
+            # remplacement d'instance ci-dessous (bot.on_command_error =
+            # MethodType(prefix_error, bot)) — +tictactoe sans argument affichait
+            # donc "Argument manquant" au lieu de chercher un adversaire.
+            try:
+                from .bot_excellence_runtime import _matchmake_tictactoe
+
+                return await _matchmake_tictactoe(ctx)
+            except Exception:
+                logger.exception("V5 : matchmaking +tictactoe indisponible, repli sur le panneau d'erreur standard.")
+
         panel = _prefix_error_panel(ctx, error)
         try:
             if getattr(ctx, "_sentrix_response_sent", False):
