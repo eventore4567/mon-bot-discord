@@ -6,7 +6,7 @@ etc.) ne peuvent jamais etre publies comme options slash.
 
 Les commandes racine directes, volontairement exclues du regroupement V95, sont
 reconstruites comme vraies commandes ``app_commands`` a partir de leur commande texte.
-``/setup`` conserve son pont specialise V103 vers le centre de configuration existant.
+``/setup`` conserve son controleur natif specialise V103.
 """
 from __future__ import annotations
 
@@ -35,6 +35,22 @@ def _iter_leaf_commands(
             yield from _iter_leaf_commands(node.commands)
         elif isinstance(node, app_commands.Command):
             yield node
+
+
+def _top_level_commands(tree: app_commands.CommandTree) -> tuple[app_commands.Command | app_commands.Group, ...]:
+    """Retourne les racines globales et guild-scoped sans doublons d'objet."""
+    output: list[app_commands.Command | app_commands.Group] = list(tree.get_commands())
+    seen = {id(command) for command in output}
+    guild_maps = getattr(tree, "_guild_commands", {})
+    if isinstance(guild_maps, dict):
+        for mapping in guild_maps.values():
+            values = mapping.values() if isinstance(mapping, dict) else ()
+            for command in values:
+                if id(command) in seen:
+                    continue
+                seen.add(id(command))
+                output.append(command)
+    return tuple(output)
 
 
 def _parameter_names(command: app_commands.Command) -> set[str]:
@@ -74,13 +90,10 @@ def _ensure_direct_roots(bot: commands.Bot) -> None:
             logger.exception("Impossible de reconstruire /%s en commande slash native.", name)
             raise
 
-    # /setup utilise le pont dedie V103, qui n'expose que ``interaction`` a Discord.
-    try:
-        legacy_setup = v103._find_legacy_setup(bot)
-    except Exception:
-        legacy_setup = None
-    if legacy_setup is not None:
-        v103.install(bot)
+    # V103 utilise directement SentriXSetup.send_setup et publie zero option utilisateur.
+    # On le reaffirme ici pour qu'aucune couche chargee tardivement ne puisse le repolluer.
+    if not v103._replace_setup_slash(bot):
+        raise RuntimeError("SentriX V105: impossible de garantir la route native /setup")
 
 
 def audit_tree(tree: app_commands.CommandTree) -> tuple[str, ...]:
@@ -88,7 +101,7 @@ def audit_tree(tree: app_commands.CommandTree) -> tuple[str, ...]:
     violations: list[str] = []
     audited: list[str] = []
 
-    for command in _iter_leaf_commands(tree.get_commands()):
+    for command in _iter_leaf_commands(_top_level_commands(tree)):
         qualified_name = str(getattr(command, "qualified_name", None) or command.name)
         audited.append(qualified_name)
         names = _parameter_names(command)
