@@ -935,6 +935,15 @@ CREATE INDEX IF NOT EXISTS idx_setup_history_guild_time ON setup_history (guild_
 CREATE INDEX IF NOT EXISTS idx_bot_manager_permissions_guild_user ON bot_manager_permissions (guild_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_voice_sessions_guild ON voice_sessions (guild_id);
 CREATE INDEX IF NOT EXISTS idx_economy_transactions_guild ON economy_transactions (guild_id, created_at);
+-- Milestone 5 (Scale) : ces deux index vivaient uniquement dans cogs/sentrix_v22.py::
+-- cog_load (créés en dehors du schéma canonique) alors que economy_transactions est
+-- filtrée par sender_id/receiver_id dans plusieurs endroits (database/db.py,
+-- cogs/platform_v4.py). Déplacés ici pour qu'une base neuve ou restaurée les ait
+-- garantis, sans dépendre du chargement réussi de ce cog précis. CREATE INDEX IF NOT
+-- EXISTS : aucun risque si sentrix_v22.py les recrée aussi, la seconde tentative ne
+-- fait rien.
+CREATE INDEX IF NOT EXISTS idx_economy_tx_sender_time ON economy_transactions (guild_id, sender_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_economy_tx_receiver_time ON economy_transactions (guild_id, receiver_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_reputation_history_guild ON reputation_history (guild_id, receiver_id);
 CREATE INDEX IF NOT EXISTS idx_embed_templates_guild ON embed_templates (guild_id);
 CREATE INDEX IF NOT EXISTS idx_embed_allowed_roles_guild ON embed_allowed_roles (guild_id);

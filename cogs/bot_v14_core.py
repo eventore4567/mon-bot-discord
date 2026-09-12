@@ -27,6 +27,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from utils import stats_service
+
 logger = logging.getLogger("bot.v14-core")
 
 CREATOR_CACHE_TTL = 60.0
@@ -505,6 +507,13 @@ def _install_command_experience(bot: commands.Bot) -> None:
             cache = state[cache_name]
             for key in [key for key in cache if isinstance(key, tuple) and key and int(key[0]) == gid]:
                 cache.pop(key, None)
+        # Milestone 5 (Scale) : ces deux caches n'étaient jamais purgés au départ
+        # d'un serveur (Database._guild_config_cache, bot._rank_cache) — sans
+        # gravité sur peu de serveurs, mais un dict qui ne fait que grossir. Les
+        # deux ont déjà leur propre méthode d'invalidation publique ; on les
+        # appelle ici plutôt que d'accéder aux dicts internes directement.
+        bot.db.invalidate_guild_config(gid)
+        stats_service.invalidate_rank_cache(bot, gid)
 
     bot.add_listener(command_start, "on_command")
     bot.add_listener(command_end, "on_command_completion")
