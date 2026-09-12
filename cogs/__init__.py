@@ -19,6 +19,8 @@ import logging
 import discord
 from discord.ext import commands
 
+from core.modules.definitions import install as install_modules_registry
+
 from .afk_nickname import install as install_afk_nickname
 from .afk_signature_fix import install as install_afk_signature_fix
 from .ai_reliability import install as install_ai_reliability
@@ -133,6 +135,11 @@ async def _install_configuration_critical_patches(bot: commands.Bot) -> None:
 
 
 async def _install_common_runtime(bot: commands.Bot) -> None:
+    # Milestone 2 (Configuration Platform) : registre central des modules — voir
+    # core/modules/registry.py. Pure et synchrone (peuple un dict en mémoire),
+    # aucune dépendance à bot ; enregistré ici pour qu'il soit prêt avant que
+    # /setup ou le dashboard ne puissent jamais l'interroger.
+    await _run_installer("registre des modules", install_modules_registry)
     await _run_installer("aliases techniques", install_common_command_names, bot)
     await _run_installer("réponses sans référence fragile", install_reply_reference_fix)
     await _run_installer("suivi bot", install_bot_tracker, bot)
