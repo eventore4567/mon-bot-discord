@@ -214,15 +214,21 @@ def _install_sentrix_v95() -> None:
 
 
 def _install_sentrix_verification_v96() -> None:
-    """Branche l'assistant de vérification après V95, sans casser les audits sans discord.py."""
+    """Branche l'assistant de vérification et sécurise la publication après restauration DB."""
     try:
-        from sentrix_verification_v96 import VerificationConfigV96, install
+        import discord
+        from sentrix_verification_v96 import (
+            VerificationConfigV96,
+            VerificationSetupView,
+            _clone_overwrite,
+            _sensitive_surface,
+            install,
+        )
     except (ImportError, ModuleNotFoundError):
         return
 
-    # Compatibilité des bases créées avant l'ajout de l'option d'accès automatique.
-    # La commande V96 écrit cette clé via set_guild_config(); sans migration, SQLite
-    # levait "no such column: verification_auto_access" au clic sur Publier.
+    # Les snapshots PostgreSQL peuvent restaurer une ancienne SQLite après le pre-deploy.
+    # On garantit donc la colonne au moment réel où V96 prépare une publication.
     if not getattr(VerificationConfigV96, "_sentrix_auto_access_schema_fix", False):
         original_ensure_table = VerificationConfigV96._ensure_table
 
@@ -238,9 +244,137 @@ def _install_sentrix_verification_v96() -> None:
                     "ALTER TABLE guild_config ADD COLUMN verification_auto_access INTEGER NOT NULL DEFAULT 0"
                 )
                 self.bot.db._guild_config_cache.clear()
+                logging.getLogger("bot.verification-v96").warning(
+                    "Migration runtime appliquée : guild_config.verification_auto_access ajouté."
+                )
 
         VerificationConfigV96._ensure_table = ensure_table_with_auto_access
         VerificationConfigV96._sentrix_auto_access_schema_fix = True
+
+    # Interface plus propre : on n'affiche pas une étape Image vide. L'accès salons devient
+    # l'étape 4 lorsqu'aucune image n'est configurée, et l'étape 5 uniquement si une image existe.
+    if not getattr(VerificationSetupView, "_sentrix_clean_steps_fix", False):
+        def clean_configuration_embed(self):
+            guild = self._guild()
+            channel = guild.get_channel(self.channel_id) if guild and self.channel_id else None
+            role = guild.get_role(self.role_id) if guild and self.role_id else None
+            embed = discord.Embed(
+                title="SentriX — Configuration de la vérification",
+                description=(
+                    "Configurez le panneau puis cliquez sur **Publier**.\n\n"
+                    "Le membre accepte le règlement, réussit le CAPTCHA, puis reçoit le rôle choisi."
+                ),
+                colour=discord.Colour.blurple(),
+            )
+            embed.add_field(
+                name="1 • Salon",
+                value=channel.mention if isinstance(channel, discord.TextChannel) else "Non choisi",
+                inline=False,
+            )
+            embed.add_field(
+                name="2 • Rôle après vérification",
+                value=role.mention if isinstance(role, discord.Role) else "Non choisi",
+                inline=False,
+            )
+            embed.add_field(
+                name="3 • Règlement",
+                value=self.rules_text[:700] + ("…" if len(self.rules_text) > 700 else ""),
+                inline=False,
+            )
+            access_step = 4
+            if self.image_url:
+                embed.add_field(name="4 • Image", value=self.image_url, inline=False)
+                access_step = 5
+            embed.add_field(
+                name=f"{access_step} • Accès automatiques aux salons",
+                value=(
+                    "**ACTIVÉ** — tous les salons publics seront cachés à `@everyone` et visibles par le rôle vérifié. "
+                    "Le salon de vérification restera visible. Les espaces privés et les salons staff/admin/modération/logs/audits restent intacts."
+                    if self.auto_access
+                    else "**DÉSACTIVÉ** — les permissions des salons ne seront pas modifiées."
+                ),
+                inline=False,
+            )
+            for item in self.children:
+                if isinstance(item, discord.ui.Button) and item.label and "Accès salons" in item.label:
+                    item.label = f"{access_step}. Accès salons : {'OUI' if self.auto_access else 'NON'}"
+            embed.set_footer(text="SentriX • Vérification • CAPTCHA activé")
+            return embed
+
+        VerificationSetupView.configuration_embed = clean_configuration_embed
+        VerificationSetupView._sentrix_clean_steps_fix = True
+
+    # Accès automatiques : chaque salon public est traité individuellement. On ne touche pas
+    # aux espaces sensibles ni aux salons déjà privés, afin d'éviter d'ouvrir tickets/staff.
+    if not getattr(VerificationConfigV96, "_sentrix_per_channel_access_fix", False):
+        async def apply_per_channel_access(
+            self,
+            guild,
+            *,
+            verification_channel,
+            verified_role,
+            actor,
+        ):
+            everyone = guild.default_role
+            operations = []
+            protected_ids = set()
+            seen = set()
+
+            def plan(surface, target, *, view_channel: bool):
+                key = (surface.id, target.id)
+                if key in seen:
+                    return
+                seen.add(key)
+                old = surface.overwrites_for(target)
+                new = _clone_overwrite(old)
+                new.view_channel = view_channel
+                had_overwrite = target in surface.overwrites
+                operations.append((surface, target, had_overwrite, old, new))
+
+            for surface in guild.channels:
+                if isinstance(surface, discord.CategoryChannel):
+                    continue
+                if surface.id == verification_channel.id:
+                    plan(surface, everyone, view_channel=True)
+                    plan(surface, verified_role, view_channel=True)
+                    continue
+                if _sensitive_surface(surface):
+                    protected_ids.add(surface.id)
+                    continue
+                if not surface.permissions_for(everyone).view_channel:
+                    protected_ids.add(surface.id)
+                    continue
+                plan(surface, everyone, view_channel=False)
+                plan(surface, verified_role, view_channel=True)
+
+            changed = []
+            reason = f"SentriX vérification : accès salons configurés par {actor} ({actor.id})"
+            try:
+                for surface, target, had_overwrite, old, new in operations:
+                    await surface.set_permissions(target, overwrite=new, reason=reason)
+                    changed.append((surface, target, had_overwrite, old, new))
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                rollback_reason = "SentriX vérification : rollback après échec permissions"
+                for surface, target, had_overwrite, old, _new in reversed(changed):
+                    try:
+                        await surface.set_permissions(
+                            target,
+                            overwrite=old if had_overwrite else None,
+                            reason=rollback_reason,
+                        )
+                    except (discord.Forbidden, discord.HTTPException):
+                        logging.getLogger("bot.verification-v96").exception(
+                            "Rollback impossible sur salon=%s rôle=%s",
+                            getattr(surface, "id", "?"),
+                            getattr(target, "id", "?"),
+                        )
+                raise RuntimeError(f"Discord a refusé une permission sur {surface!s}") from exc
+
+            changed_surfaces = {surface.id for surface, *_rest in changed}
+            return len(changed_surfaces), len(protected_ids)
+
+        VerificationConfigV96._apply_auto_access = apply_per_channel_access
+        VerificationConfigV96._sentrix_per_channel_access_fix = True
 
     try:
         install()
