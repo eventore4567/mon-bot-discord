@@ -150,13 +150,13 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         )
         return embed
 
-    # Vue principale volontairement aérée : aucune grille de petits champs collés.
+    # Vue principale compacte : les métriques restent lisibles sans étirer l'embed.
     bio = str(data.get("bio") or "Aucune bio définie pour le moment.").strip()
     embed = _base(
         bot,
         member,
         f"Profil de {member.display_name}",
-        f"{member.mention}\n\n{bio}",
+        f"{member.mention}\n{bio}",
     )
     wallet = int(stats.get("wallet", 0) or 0)
     bank = int(stats.get("bank", 0) or 0)
@@ -167,46 +167,51 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         embed.add_field(
             name="Progression",
             value=(
-                f"Niveau\n**{_fmt(stats.get('current_level'))}**\n\n"
-                f"XP totale\n**{_fmt(stats.get('total_xp'))}**\n\n"
-                f"Rang du serveur\n**{level_rank}**"
+                f"Niveau **{_fmt(stats.get('current_level'))}**\n"
+                f"XP **{_fmt(stats.get('total_xp'))}**\n"
+                f"Rang **{level_rank}**"
             ),
-            inline=False,
+            inline=True,
         )
     else:
-        embed.add_field(name="Progression", value="Niveaux désactivés sur ce serveur.", inline=False)
+        embed.add_field(
+            name="Progression",
+            value="Niveaux désactivés sur ce serveur.",
+            inline=True,
+        )
+
     embed.add_field(
         name="Économie",
         value=(
-            f"Portefeuille\n**{_fmt(wallet)}**\n\n"
-            f"Banque\n**{_fmt(bank)}**\n\n"
-            f"Total\n**{_fmt(total)}**"
+            f"Portefeuille **{_fmt(wallet)}**\n"
+            f"Banque **{_fmt(bank)}**\n"
+            f"Total **{_fmt(total)}**"
         ),
-        inline=False,
+        inline=True,
     )
     embed.add_field(
         name="Activité",
         value=(
-            f"Messages\n**{_fmt(stats.get('message_count'))}**\n\n"
-            f"Temps vocal\n**{stats_service.format_duration(int(stats.get('voice_time', 0) or 0))}**\n\n"
-            f"Série d’activité\n**{_fmt(progression.get('daily_streak'))} jours**"
+            f"Messages **{_fmt(stats.get('message_count'))}**\n"
+            f"Vocal **{stats_service.format_duration(int(stats.get('voice_time', 0) or 0))}**\n"
+            f"Série **{_fmt(progression.get('daily_streak'))} j**"
         ),
-        inline=False,
+        inline=True,
     )
     embed.add_field(
         name="Compte",
         value=(
-            f"Compte créé\n**{_date(member.created_at)}**\n\n"
-            f"Arrivé sur le serveur\n**{_date(member.joined_at)}**\n\n"
-            f"Réputation\n**{_fmt(stats.get('reputation'))}**"
+            f"Créé {_date(member.created_at)}\n"
+            f"Arrivé {_date(member.joined_at)}\n"
+            f"Réputation **{_fmt(stats.get('reputation'))}**"
         ),
-        inline=False,
+        inline=True,
     )
     badges = profile_service.compute_badges(member, stats, progression)
     embed.add_field(
         name="Badges",
-        value="\n".join(f"• {badge}" for badge in badges) if badges else "Aucun badge débloqué",
-        inline=False,
+        value=" · ".join(badges) if badges else "Aucun badge",
+        inline=True,
     )
     return embed
 
