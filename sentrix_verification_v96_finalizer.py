@@ -27,6 +27,60 @@ _NAMES = (
 )
 
 
+def _install_verification_transport_bypass() -> None:
+    """Laisse V96 contrôler son propre rendu sans le formatter global.
+
+    ``final_interaction_policy`` reformate normalement toutes les réponses de commandes.
+    C'est utile pour les anciennes commandes texte, mais V96 possède déjà son embed et ses
+    composants. Le reformatage transformait donc le panneau de configuration en fausse
+    carte « Erreur » et les follow-ups des boutons en panneau « Information » avec une
+    bannière jointe. Les interactions de composants n'ont pas de ``interaction.command`` :
+    on les rattache à V96 grâce au message qui porte le panneau.
+    """
+    try:
+        from cogs import final_interaction_policy as policy
+    except Exception:
+        logger.exception("Impossible d'installer le transport direct de la vérification V96.")
+        return
+
+    current_plain = policy._plain_root
+    if not getattr(current_plain, "_sentrix_verification_v96", False):
+        def plain_root_with_verification(root: str) -> bool:
+            return str(root or "").casefold() == "verification" or current_plain(root)
+
+        plain_root_with_verification._sentrix_verification_v96 = True
+        plain_root_with_verification._sentrix_original = current_plain
+        policy._plain_root = plain_root_with_verification
+
+    current_root = policy._root_from_interaction
+    if not getattr(current_root, "_sentrix_verification_v96", False):
+        def root_from_interaction_with_verification(interaction):
+            root = current_root(interaction)
+            if root:
+                return root
+
+            message = getattr(interaction, "message", None)
+            for embed in list(getattr(message, "embeds", ()) or ()):
+                title = str(getattr(embed, "title", "") or "").casefold()
+                footer = str(getattr(getattr(embed, "footer", None), "text", "") or "").casefold()
+                if (
+                    "configuration de la vérification" in title
+                    or "configuration de la verification" in title
+                    or "vérification • captcha" in footer
+                    or "verification • captcha" in footer
+                ):
+                    return "verification"
+            return root
+
+        root_from_interaction_with_verification._sentrix_verification_v96 = True
+        root_from_interaction_with_verification._sentrix_original = current_root
+        policy._root_from_interaction = root_from_interaction_with_verification
+
+    logger.info(
+        "V96 transport direct actif : panneau, composants et follow-ups exclus du formatter global."
+    )
+
+
 def _repair_permission_policy() -> None:
     try:
         import main
@@ -77,6 +131,7 @@ async def reassert(bot: commands.Bot) -> commands.Command:
 
 def install() -> None:
     """Entoure V95 puis arme les gardes finaux V103 et V105 de la surface slash."""
+    _install_verification_transport_bypass()
     v96._install_v95_route()
     current = v95.prepare_bot
 
