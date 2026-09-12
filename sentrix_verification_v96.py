@@ -107,6 +107,7 @@ class VerificationRulesModal(discord.ui.Modal, title="Configurer le règlement")
         self.setup_view.panel_title = str(self.panel_title.value).strip()[:100] or _DEFAULT_TITLE
         self.setup_view.rules_text = str(self.rules.value).strip()[:4000] or _DEFAULT_RULES
         self.setup_view.image_url = image or None
+        self.setup_view._sync_access_button()
         await interaction.response.edit_message(
             embed=self.setup_view.configuration_embed(),
             view=self.setup_view,
@@ -168,6 +169,7 @@ class VerificationSetupView(discord.ui.View):
 
         self.add_item(VerificationChannelSelect(self))
         self.add_item(VerificationRoleSelect(self))
+        self._sync_access_button()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -180,6 +182,15 @@ class VerificationSetupView(discord.ui.View):
 
     def _guild(self) -> discord.Guild | None:
         return self.bot.get_guild(self.guild_id)
+
+    def _sync_access_button(self) -> None:
+        button = getattr(self, "toggle_auto_access", None)
+        if button is None:
+            return
+        button.label = "4. Accès salons : OUI" if self.auto_access else "4. Accès salons : NON"
+        button.style = (
+            discord.ButtonStyle.success if self.auto_access else discord.ButtonStyle.secondary
+        )
 
     def configuration_embed(self) -> discord.Embed:
         guild = self._guild()
@@ -209,13 +220,14 @@ class VerificationSetupView(discord.ui.View):
             value=(self.rules_text[:700] + ("…" if len(self.rules_text) > 700 else "")),
             inline=False,
         )
+        if self.image_url:
+            embed.add_field(
+                name="Image",
+                value=self.image_url,
+                inline=False,
+            )
         embed.add_field(
-            name="4 • Image",
-            value=self.image_url or "Aucune image — facultatif",
-            inline=False,
-        )
-        embed.add_field(
-            name="5 • Accès automatiques aux salons",
+            name="4 • Accès automatiques aux salons",
             value=(
                 "**ACTIVÉ** — SentriX cachera les espaces publics aux membres non vérifiés, "
                 "les ouvrira au rôle choisi et laissera le salon de vérification visible. "
@@ -298,8 +310,8 @@ class VerificationSetupView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         await self.cog._ensure_table()
+        await self.cog._ensure_auto_access_column()
 
-        # Les clés historiques sont maintenues pour toutes les couches Setup existantes.
         await self.bot.db.set_guild_config(guild.id, "verify_role", role.id)
         await self.bot.db.set_guild_config(guild.id, "verification_role", role.id)
         await self.bot.db.set_guild_config(guild.id, "verification_channel", channel.id)
@@ -376,15 +388,12 @@ class VerificationSetupView(discord.ui.View):
             ephemeral=True,
         )
 
-    @discord.ui.button(label="5. Accès salons : NON", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="4. Accès salons : NON", style=discord.ButtonStyle.secondary, row=3)
     async def toggle_auto_access(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         self.auto_access = not self.auto_access
-        button.label = "5. Accès salons : OUI" if self.auto_access else "5. Accès salons : NON"
-        button.style = (
-            discord.ButtonStyle.success if self.auto_access else discord.ButtonStyle.secondary
-        )
+        self._sync_access_button()
         await interaction.response.edit_message(
             embed=self.configuration_embed(),
             view=self,
@@ -403,6 +412,24 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             self.bot.add_view(VerifyView())
             self.bot._sentrix_verify_view_registered_v96 = True
 
+    async def _ensure_auto_access_column(self) -> None:
+        """Répare le schéma guild_config après restauration d'un ancien snapshot HA."""
+        columns = await self.bot.db.fetchall("PRAGMA table_info(guild_config)")
+        if any(str(row[1]) == "verification_auto_access" for row in columns):
+            return
+        try:
+            await self.bot.db.execute(
+                "ALTER TABLE guild_config ADD COLUMN verification_auto_access INTEGER NOT NULL DEFAULT 0"
+            )
+        except Exception:
+            columns = await self.bot.db.fetchall("PRAGMA table_info(guild_config)")
+            if not any(str(row[1]) == "verification_auto_access" for row in columns):
+                raise
+        cache = getattr(self.bot.db, "_guild_config_cache", None)
+        if isinstance(cache, dict):
+            cache.clear()
+        logger.info("Schéma vérification confirmé : verification_auto_access disponible.")
+
     async def _ensure_table(self) -> None:
         await self.bot.db.execute(
             """
@@ -418,6 +445,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             )
             """
         )
+        await self._ensure_auto_access_column()
 
     async def _apply_auto_access(
         self,
@@ -427,10 +455,11 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         verified_role: discord.Role,
         actor: discord.abc.User,
     ) -> tuple[int, int]:
-        """Ferme uniquement les espaces actuellement publics et protège les espaces privés.
+        """Ferme les espaces publics à @everyone et les ouvre au rôle vérifié.
 
-        La modification est transactionnelle au mieux : si Discord refuse une écriture,
-        toutes les permissions déjà modifiées pendant cette passe sont restaurées.
+        Les espaces déjà privés et les surfaces sensibles (staff/admin/modération/logs/audits)
+        ne sont jamais modifiés. Le salon de vérification reste visible avant le CAPTCHA.
+        Si Discord refuse une écriture, les changements déjà effectués sont restaurés.
         """
         everyone = guild.default_role
         channels = list(guild.channels)
@@ -438,9 +467,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             item.id: bool(item.permissions_for(everyone).view_channel)
             for item in channels
         }
-        sensitive_ids = {
-            item.id for item in channels if _sensitive_surface(item)
-        }
+        sensitive_ids = {item.id for item in channels if _sensitive_surface(item)}
 
         category_targets: set[int] = set()
         protected_ids: set[int] = set()
@@ -448,10 +475,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             children = list(category.channels)
             risky_child = any(
                 child.id != verification_channel.id
-                and (
-                    child.id in sensitive_ids
-                    or not public_before.get(child.id, False)
-                )
+                and (child.id in sensitive_ids or not public_before.get(child.id, False))
                 for child in children
             )
             if (
@@ -464,9 +488,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             category_targets.add(category.id)
 
         surfaces: list[discord.abc.GuildChannel] = []
-        surfaces.extend(
-            category for category in guild.categories if category.id in category_targets
-        )
+        surfaces.extend(category for category in guild.categories if category.id in category_targets)
 
         for item in channels:
             if isinstance(item, discord.CategoryChannel):
@@ -485,8 +507,6 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             if not covered_by_category:
                 surfaces.append(item)
 
-        # Le salon de vérification doit toujours rester visible avant le CAPTCHA, même si
-        # sa catégorie vient d'être fermée à @everyone.
         surfaces.append(verification_channel)
 
         operations: list[
@@ -567,8 +587,6 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
     )
     @commands.guild_only()
     async def verification_setup(self, ctx: commands.Context) -> None:
-        # Check explicite ici pour que la commande reste protégée même si une ancienne
-        # couche de permissions est rechargée dans un ordre différent.
         from utils import checks
 
         predicate = checks.is_owner_or_admin().predicate
@@ -582,8 +600,6 @@ async def _attach(bot: commands.Bot) -> None:
     if bot.get_cog("VerificationConfigV96") is not None:
         return
 
-    # Les anciennes commandes existaient séparément. On les remplace par l'assistant
-    # unique tout en gardant leurs noms comme alias préfixés.
     for legacy in ("verify-panel", "verify-setup"):
         command = bot.get_command(legacy)
         if command is not None:
@@ -591,7 +607,6 @@ async def _attach(bot: commands.Bot) -> None:
 
     await bot.add_cog(VerificationConfigV96(bot))
 
-    # Politique centrale : une seule commande configuration, admin uniquement.
     try:
         import main
 
