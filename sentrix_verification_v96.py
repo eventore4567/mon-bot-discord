@@ -3,7 +3,7 @@
 Ce module complète le cog historique ``cogs.verification`` sans recopier son moteur
 CAPTCHA. Il remplace les anciennes entrées +verify-panel / +verify-setup par un seul
 assistant de configuration : salon, rôle, texte du règlement, image facultative,
-apercu, permissions automatiques facultatives puis publication.
+aperçu, diagnostic, permissions automatiques facultatives puis publication.
 """
 from __future__ import annotations
 
@@ -69,6 +69,19 @@ def _clone_overwrite(overwrite: discord.PermissionOverwrite) -> discord.Permissi
     return discord.PermissionOverwrite.from_pair(allow, deny)
 
 
+def _row_value(row, key: str, default=None):
+    if row is None:
+        return default
+    try:
+        keys = row.keys()
+    except Exception:
+        keys = ()
+    try:
+        return row[key] if key in keys else default
+    except Exception:
+        return default
+
+
 class VerificationRulesModal(discord.ui.Modal, title="Configurer le règlement"):
     panel_title = discord.ui.TextInput(
         label="Titre de l'embed",
@@ -104,10 +117,11 @@ class VerificationRulesModal(discord.ui.Modal, title="Configurer le règlement")
                 "L'image doit être une URL `http://` ou `https://` valide, ou être laissée vide.",
                 ephemeral=True,
             )
+
         self.setup_view.panel_title = str(self.panel_title.value).strip()[:100] or _DEFAULT_TITLE
         self.setup_view.rules_text = str(self.rules.value).strip()[:4000] or _DEFAULT_RULES
         self.setup_view.image_url = image or None
-        self.setup_view._sync_access_button()
+        self.setup_view._sync_controls()
         await interaction.response.edit_message(
             embed=self.setup_view.configuration_embed(),
             view=self.setup_view,
@@ -128,6 +142,7 @@ class VerificationChannelSelect(discord.ui.ChannelSelect):
     async def callback(self, interaction: discord.Interaction) -> None:
         channel = self.values[0]
         self.setup_view.channel_id = int(channel.id)
+        self.setup_view._sync_controls()
         await interaction.response.edit_message(
             embed=self.setup_view.configuration_embed(),
             view=self.setup_view,
@@ -147,6 +162,7 @@ class VerificationRoleSelect(discord.ui.RoleSelect):
     async def callback(self, interaction: discord.Interaction) -> None:
         role = self.values[0]
         self.setup_view.role_id = int(role.id)
+        self.setup_view._sync_controls()
         await interaction.response.edit_message(
             embed=self.setup_view.configuration_embed(),
             view=self.setup_view,
@@ -154,22 +170,37 @@ class VerificationRoleSelect(discord.ui.RoleSelect):
 
 
 class VerificationSetupView(discord.ui.View):
-    def __init__(self, cog: "VerificationConfigV96", guild_id: int, author_id: int) -> None:
+    def __init__(
+        self,
+        cog: "VerificationConfigV96",
+        guild_id: int,
+        author_id: int,
+        *,
+        channel_id: int | None = None,
+        role_id: int | None = None,
+        panel_title: str = _DEFAULT_TITLE,
+        rules_text: str = _DEFAULT_RULES,
+        image_url: str | None = None,
+        auto_access: bool = False,
+        has_existing_panel: bool = False,
+    ) -> None:
         super().__init__(timeout=_SETUP_TIMEOUT)
         self.cog = cog
         self.bot = cog.bot
         self.guild_id = int(guild_id)
         self.author_id = int(author_id)
-        self.channel_id: int | None = None
-        self.role_id: int | None = None
-        self.panel_title = _DEFAULT_TITLE
-        self.rules_text = _DEFAULT_RULES
-        self.image_url: str | None = None
-        self.auto_access = False
+        self.channel_id = int(channel_id) if channel_id else None
+        self.role_id = int(role_id) if role_id else None
+        self.panel_title = str(panel_title or _DEFAULT_TITLE)[:100]
+        self.rules_text = str(rules_text or _DEFAULT_RULES)[:4000]
+        self.image_url = str(image_url).strip() if image_url else None
+        self.auto_access = bool(auto_access)
+        self.has_existing_panel = bool(has_existing_panel)
+        self._publishing = False
 
         self.add_item(VerificationChannelSelect(self))
         self.add_item(VerificationRoleSelect(self))
-        self._sync_access_button()
+        self._sync_controls()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -183,19 +214,42 @@ class VerificationSetupView(discord.ui.View):
     def _guild(self) -> discord.Guild | None:
         return self.bot.get_guild(self.guild_id)
 
-    def _sync_access_button(self) -> None:
-        button = getattr(self, "toggle_auto_access", None)
-        if button is None:
-            return
-        button.label = "4. Accès salons : OUI" if self.auto_access else "4. Accès salons : NON"
-        button.style = (
-            discord.ButtonStyle.success if self.auto_access else discord.ButtonStyle.secondary
-        )
-
-    def configuration_embed(self) -> discord.Embed:
+    def _resolved(self) -> tuple[discord.Guild | None, discord.TextChannel | None, discord.Role | None]:
         guild = self._guild()
         channel = guild.get_channel(self.channel_id) if guild and self.channel_id else None
         role = guild.get_role(self.role_id) if guild and self.role_id else None
+        return (
+            guild,
+            channel if isinstance(channel, discord.TextChannel) else None,
+            role if isinstance(role, discord.Role) else None,
+        )
+
+    def _ready(self) -> bool:
+        _guild, channel, role = self._resolved()
+        return channel is not None and role is not None and bool(self.rules_text.strip())
+
+    def _sync_controls(self) -> None:
+        access = getattr(self, "toggle_auto_access", None)
+        if access is not None:
+            access.label = "4. Accès salons : OUI" if self.auto_access else "4. Accès salons : NON"
+            access.style = (
+                discord.ButtonStyle.success if self.auto_access else discord.ButtonStyle.secondary
+            )
+
+        publish = getattr(self, "publish", None)
+        if publish is not None:
+            publish.disabled = (not self._ready()) or self._publishing
+            if self._publishing:
+                publish.label = "Publication..."
+            elif self.has_existing_panel:
+                publish.label = "Mettre à jour"
+            else:
+                publish.label = "Publier"
+
+    def configuration_embed(self) -> discord.Embed:
+        _guild, channel, role = self._resolved()
+        ready = channel is not None and role is not None and bool(self.rules_text.strip())
+
         embed = discord.Embed(
             title="SentriX — Configuration de la vérification",
             description=(
@@ -207,12 +261,12 @@ class VerificationSetupView(discord.ui.View):
         )
         embed.add_field(
             name="1 • Salon",
-            value=channel.mention if isinstance(channel, discord.TextChannel) else "Non choisi",
+            value=channel.mention if channel else "Non choisi",
             inline=False,
         )
         embed.add_field(
             name="2 • Rôle après vérification",
-            value=role.mention if isinstance(role, discord.Role) else "Non choisi",
+            value=role.mention if role else "Non choisi",
             inline=False,
         )
         embed.add_field(
@@ -222,7 +276,7 @@ class VerificationSetupView(discord.ui.View):
         )
         if self.image_url:
             embed.add_field(
-                name="Image",
+                name="Image facultative",
                 value=self.image_url,
                 inline=False,
             )
@@ -233,7 +287,19 @@ class VerificationSetupView(discord.ui.View):
                 "les ouvrira au rôle choisi et laissera le salon de vérification visible. "
                 "Les espaces déjà privés et les salons/catégories staff, admin, modération, logs et audits restent intacts."
                 if self.auto_access
-                else "**DÉSACTIVÉ** — les permissions des salons ne seront pas modifiées."
+                else (
+                    "**DÉSACTIVÉ** — aucune nouvelle permission ne sera modifiée. "
+                    "Les permissions configurées lors d'une ancienne publication ne sont pas restaurées automatiquement."
+                )
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="État",
+            value=(
+                "**PRÊT À PUBLIER** — le diagnostic complet sera refait juste avant la publication."
+                if ready
+                else "**À COMPLÉTER** — choisissez au minimum le salon et le rôle."
             ),
             inline=False,
         )
@@ -253,6 +319,10 @@ class VerificationSetupView(discord.ui.View):
 
     @discord.ui.button(label="3. Modifier le règlement", style=discord.ButtonStyle.secondary, row=2)
     async def edit_rules(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        if self._publishing:
+            return await interaction.response.send_message(
+                "Une publication est déjà en cours.", ephemeral=True
+            )
         await interaction.response.send_modal(VerificationRulesModal(self))
 
     @discord.ui.button(label="Aperçu", style=discord.ButtonStyle.primary, row=2)
@@ -266,134 +336,229 @@ class VerificationSetupView(discord.ui.View):
             ephemeral=True,
         )
 
+    @discord.ui.button(label="Diagnostic", style=discord.ButtonStyle.secondary, row=2)
+    async def diagnostic(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        guild, channel, role = self._resolved()
+        issues: list[str] = []
+        if guild is None:
+            issues.append("Serveur introuvable.")
+        if channel is None:
+            issues.append("Salon du règlement non choisi ou supprimé.")
+        if role is None:
+            issues.append("Rôle de vérification non choisi ou supprimé.")
+        if guild is not None and channel is not None and role is not None:
+            issues.extend(
+                await self.cog._preflight(
+                    guild,
+                    channel=channel,
+                    role=role,
+                    auto_access=self.auto_access,
+                )
+            )
+
+        embed = discord.Embed(
+            title="Diagnostic de la vérification",
+            colour=discord.Colour.green() if not issues else discord.Colour.orange(),
+        )
+        if issues:
+            embed.description = "La configuration n'est pas encore prête."
+            embed.add_field(
+                name="À corriger",
+                value="\n".join(f"• {item}" for item in issues)[:1024],
+                inline=False,
+            )
+        else:
+            embed.description = "La configuration est prête à être publiée."
+            embed.add_field(name="Salon", value=channel.mention, inline=True)
+            embed.add_field(name="Rôle", value=role.mention, inline=True)
+            embed.add_field(name="CAPTCHA", value="Activé", inline=True)
+            embed.add_field(
+                name="Accès salons",
+                value="Automatiques" if self.auto_access else "Inchangés",
+                inline=True,
+            )
+        embed.set_footer(text="SentriX • Diagnostic vérification")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @discord.ui.button(label="Publier", style=discord.ButtonStyle.success, row=2)
     async def publish(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
-        guild = self._guild()
+        if self._publishing:
+            return await interaction.response.send_message(
+                "Une publication est déjà en cours. Patientez quelques secondes.",
+                ephemeral=True,
+            )
+
+        guild, channel, role = self._resolved()
         if guild is None:
             return await interaction.response.send_message("Serveur introuvable.", ephemeral=True)
-        channel = guild.get_channel(self.channel_id) if self.channel_id else None
-        role = guild.get_role(self.role_id) if self.role_id else None
-        if not isinstance(channel, discord.TextChannel):
+        if channel is None:
             return await interaction.response.send_message(
                 "Choisissez d'abord le salon où publier le règlement.", ephemeral=True
             )
-        if not isinstance(role, discord.Role):
+        if role is None:
             return await interaction.response.send_message(
                 "Choisissez d'abord le rôle à donner après la vérification.", ephemeral=True
             )
 
-        from cogs.verification import VerifyView, role_grant_problem
-
-        problem = role_grant_problem(guild, role)
-        if problem:
-            return await interaction.response.send_message(
-                f"Impossible d'utiliser ce rôle : {problem}", ephemeral=True
+        issues = await self.cog._preflight(
+            guild,
+            channel=channel,
+            role=role,
+            auto_access=self.auto_access,
+        )
+        if issues:
+            embed = discord.Embed(
+                title="Publication impossible",
+                description="Corrigez ces points puis réessayez.",
+                colour=discord.Colour.orange(),
             )
-        permissions = channel.permissions_for(guild.me) if guild.me else None
-        if permissions is None or not permissions.send_messages or not permissions.embed_links:
-            return await interaction.response.send_message(
-                "SentriX doit pouvoir **Voir le salon**, **Envoyer des messages** et **Intégrer des liens** dans ce salon.",
-                ephemeral=True,
+            embed.add_field(
+                name="Diagnostic",
+                value="\n".join(f"• {item}" for item in issues)[:1024],
+                inline=False,
             )
-        if self.auto_access:
-            bot_permissions = guild.me.guild_permissions if guild.me else None
-            if (
-                bot_permissions is None
-                or not bot_permissions.manage_channels
-                or not bot_permissions.manage_roles
-            ):
-                return await interaction.response.send_message(
-                    "Pour configurer automatiquement les accès, SentriX doit avoir **Gérer les salons** "
-                    "et **Gérer les rôles**. Désactivez l'option d'accès automatique ou donnez ces permissions au bot.",
-                    ephemeral=True,
-                )
+            embed.set_footer(text="SentriX • Vérification")
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
 
+        self._publishing = True
+        self._sync_controls()
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await self.cog._ensure_table()
-        await self.cog._ensure_auto_access_column()
 
-        await self.bot.db.set_guild_config(guild.id, "verify_role", role.id)
-        await self.bot.db.set_guild_config(guild.id, "verification_role", role.id)
-        await self.bot.db.set_guild_config(guild.id, "verification_channel", channel.id)
-        await self.bot.db.set_guild_config(guild.id, "verify_captcha_enabled", 1)
-        await self.bot.db.set_guild_config(
-            guild.id, "verification_auto_access", int(self.auto_access)
-        )
+        from cogs.verification import VerifyView
 
-        existing = await self.bot.db.fetchone(
-            "SELECT channel_id, message_id FROM verification_panels_v96 WHERE guild_id = ?",
-            (guild.id,),
-        )
-        sent: discord.Message | None = None
-        if existing:
-            old_channel = guild.get_channel(int(existing["channel_id"]))
-            if isinstance(old_channel, discord.TextChannel):
-                try:
-                    old_message = await old_channel.fetch_message(int(existing["message_id"]))
-                    if old_channel.id == channel.id:
-                        await old_message.edit(embed=self.final_embed(), view=VerifyView())
-                        sent = old_message
-                    else:
-                        await old_message.delete()
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    pass
+        old_message_to_delete: discord.Message | None = None
+        try:
+            await self.cog._ensure_table()
+            await self.cog._ensure_auto_access_column()
 
-        if sent is None:
-            sent = await channel.send(embed=self.final_embed(), view=VerifyView())
+            await self.bot.db.set_guild_config(guild.id, "verify_role", role.id)
+            await self.bot.db.set_guild_config(guild.id, "verification_role", role.id)
+            await self.bot.db.set_guild_config(guild.id, "verification_channel", channel.id)
+            await self.bot.db.set_guild_config(guild.id, "verify_captcha_enabled", 1)
+            await self.bot.db.set_guild_config(
+                guild.id, "verification_auto_access", int(self.auto_access)
+            )
 
-        await self.bot.db.execute(
-            "INSERT INTO verification_panels_v96(guild_id,channel_id,message_id,role_id,title,rules_text,image_url,updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(guild_id) DO UPDATE SET channel_id=excluded.channel_id, message_id=excluded.message_id, "
-            "role_id=excluded.role_id, title=excluded.title, rules_text=excluded.rules_text, "
-            "image_url=excluded.image_url, updated_at=excluded.updated_at",
-            (
-                guild.id,
-                channel.id,
-                sent.id,
-                role.id,
-                self.panel_title,
-                self.rules_text,
-                self.image_url,
-                int(time.time()),
-            ),
-        )
+            existing = await self.bot.db.fetchone(
+                "SELECT channel_id, message_id FROM verification_panels_v96 WHERE guild_id = ?",
+                (guild.id,),
+            )
+            sent: discord.Message | None = None
+            if existing:
+                old_channel = guild.get_channel(int(existing["channel_id"]))
+                if isinstance(old_channel, discord.TextChannel):
+                    try:
+                        old_message = await old_channel.fetch_message(int(existing["message_id"]))
+                        if old_channel.id == channel.id:
+                            await old_message.edit(embed=self.final_embed(), view=VerifyView())
+                            sent = old_message
+                        else:
+                            old_message_to_delete = old_message
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        pass
 
-        access_message = "Accès automatiques désactivés : permissions Discord inchangées."
-        if self.auto_access:
-            try:
+            if sent is None:
+                sent = await channel.send(embed=self.final_embed(), view=VerifyView())
+
+            await self.bot.db.execute(
+                "INSERT INTO verification_panels_v96(guild_id,channel_id,message_id,role_id,title,rules_text,image_url,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(guild_id) DO UPDATE SET channel_id=excluded.channel_id, message_id=excluded.message_id, "
+                "role_id=excluded.role_id, title=excluded.title, rules_text=excluded.rules_text, "
+                "image_url=excluded.image_url, updated_at=excluded.updated_at",
+                (
+                    guild.id,
+                    channel.id,
+                    sent.id,
+                    role.id,
+                    self.panel_title,
+                    self.rules_text,
+                    self.image_url,
+                    int(time.time()),
+                ),
+            )
+
+            access_text = "Désactivés — permissions Discord inchangées."
+            changed = 0
+            protected = 0
+            if self.auto_access:
                 changed, protected = await self.cog._apply_auto_access(
                     guild,
                     verification_channel=channel,
                     verified_role=role,
                     actor=interaction.user,
                 )
-            except Exception as exc:
-                logger.exception("Échec de la configuration automatique des accès de vérification.")
-                return await interaction.followup.send(
-                    "Le panneau de vérification a bien été publié, mais **les accès automatiques n'ont pas été appliqués**. "
-                    "SentriX a annulé les modifications de permissions déjà commencées afin d'éviter un serveur partiellement configuré.\n"
-                    f"Détail : `{type(exc).__name__}: {str(exc)[:500]}`",
-                    ephemeral=True,
+                access_text = (
+                    f"Activés — {changed} espace(s) public(s) configuré(s), "
+                    f"{protected} espace(s) privé(s)/sensible(s) conservé(s)."
                 )
-            access_message = (
-                f"Accès automatiques appliqués sur **{changed}** catégorie(s)/salon(s) public(s). "
-                f"**{protected}** espace(s) privé(s) ou sensible(s) ont été laissés intacts."
-            )
 
-        await interaction.followup.send(
-            f"Vérification configurée et publiée dans {channel.mention}.\n"
-            f"Après le règlement + CAPTCHA, le membre recevra {role.mention}.\n"
-            f"{access_message}",
-            ephemeral=True,
-        )
+            if old_message_to_delete is not None:
+                try:
+                    await old_message_to_delete.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    logger.warning(
+                        "Ancien panneau de vérification impossible à supprimer guild=%s message=%s",
+                        guild.id,
+                        getattr(old_message_to_delete, "id", None),
+                    )
+
+            self.has_existing_panel = True
+
+            success = discord.Embed(
+                title="Vérification publiée",
+                description="Le système de vérification est actif et prêt à être utilisé.",
+                colour=discord.Colour.green(),
+            )
+            success.add_field(name="Salon", value=channel.mention, inline=True)
+            success.add_field(name="Rôle attribué", value=role.mention, inline=True)
+            success.add_field(name="CAPTCHA", value="Activé", inline=True)
+            success.add_field(name="Accès salons", value=access_text, inline=False)
+            success.add_field(
+                name="Panneau",
+                value=f"[Ouvrir le panneau]({sent.jump_url})",
+                inline=False,
+            )
+            success.set_footer(text="SentriX • Vérification sécurisée")
+            await interaction.followup.send(embed=success, ephemeral=True)
+
+        except Exception as exc:
+            logger.exception(
+                "Publication vérification échouée guild=%s channel=%s role=%s auto_access=%s",
+                guild.id,
+                channel.id,
+                role.id,
+                self.auto_access,
+            )
+            failure = discord.Embed(
+                title="Publication interrompue",
+                description=(
+                    "SentriX n'a pas pu terminer la publication. "
+                    "La cause a été enregistrée dans les logs pour éviter un échec silencieux."
+                ),
+                colour=discord.Colour.red(),
+            )
+            failure.add_field(
+                name="Détail technique",
+                value=f"`{type(exc).__name__}: {str(exc)[:700]}`",
+                inline=False,
+            )
+            failure.set_footer(text="SentriX • Vérification")
+            await interaction.followup.send(embed=failure, ephemeral=True)
+        finally:
+            self._publishing = False
+            self._sync_controls()
 
     @discord.ui.button(label="4. Accès salons : NON", style=discord.ButtonStyle.secondary, row=3)
     async def toggle_auto_access(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, _button: discord.ui.Button
     ) -> None:
+        if self._publishing:
+            return await interaction.response.send_message(
+                "Une publication est déjà en cours.", ephemeral=True
+            )
         self.auto_access = not self.auto_access
-        self._sync_access_button()
+        self._sync_controls()
         await interaction.response.edit_message(
             embed=self.configuration_embed(),
             view=self,
@@ -446,6 +611,90 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             """
         )
         await self._ensure_auto_access_column()
+
+    async def _preflight(
+        self,
+        guild: discord.Guild,
+        *,
+        channel: discord.TextChannel,
+        role: discord.Role,
+        auto_access: bool,
+    ) -> list[str]:
+        """Valide toute la chaîne avant une publication pour éviter les états partiels."""
+        from cogs.verification import role_grant_problem
+
+        issues: list[str] = []
+        problem = role_grant_problem(guild, role)
+        if problem:
+            issues.append(problem)
+
+        me = guild.me
+        if me is None:
+            issues.append("SentriX n'est pas disponible dans le cache de ce serveur.")
+            return issues
+
+        channel_permissions = channel.permissions_for(me)
+        required_channel_permissions = (
+            ("view_channel", "Voir le salon"),
+            ("send_messages", "Envoyer des messages"),
+            ("embed_links", "Intégrer des liens"),
+        )
+        missing = [
+            label
+            for attr, label in required_channel_permissions
+            if not bool(getattr(channel_permissions, attr, False))
+        ]
+        if missing:
+            issues.append(
+                "Permissions manquantes dans le salon : " + ", ".join(f"**{item}**" for item in missing) + "."
+            )
+
+        if auto_access:
+            guild_permissions = me.guild_permissions
+            missing_auto = []
+            if not guild_permissions.manage_channels:
+                missing_auto.append("Gérer les salons")
+            if not guild_permissions.manage_roles:
+                missing_auto.append("Gérer les rôles")
+            if missing_auto:
+                issues.append(
+                    "Accès automatiques impossibles sans "
+                    + " et ".join(f"**{item}**" for item in missing_auto)
+                    + "."
+                )
+
+        return issues
+
+    async def _load_setup_state(self, guild: discord.Guild) -> dict:
+        """Recharge la configuration existante afin que +verification serve aussi d'éditeur."""
+        await self._ensure_table()
+        conf = await self.bot.db.get_guild_config(guild.id)
+        panel = await self.bot.db.fetchone(
+            "SELECT * FROM verification_panels_v96 WHERE guild_id = ?",
+            (guild.id,),
+        )
+
+        channel_id = _row_value(conf, "verification_channel") or _row_value(panel, "channel_id")
+        role_id = (
+            _row_value(conf, "verify_role")
+            or _row_value(conf, "verification_role")
+            or _row_value(panel, "role_id")
+        )
+        auto_raw = _row_value(conf, "verification_auto_access", 0)
+        try:
+            auto_access = bool(int(auto_raw or 0))
+        except (TypeError, ValueError):
+            auto_access = bool(auto_raw)
+
+        return {
+            "channel_id": int(channel_id) if channel_id else None,
+            "role_id": int(role_id) if role_id else None,
+            "panel_title": _row_value(panel, "title", _DEFAULT_TITLE) or _DEFAULT_TITLE,
+            "rules_text": _row_value(panel, "rules_text", _DEFAULT_RULES) or _DEFAULT_RULES,
+            "image_url": _row_value(panel, "image_url"),
+            "auto_access": auto_access,
+            "has_existing_panel": panel is not None,
+        }
 
     async def _apply_auto_access(
         self,
@@ -592,7 +841,14 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         predicate = checks.is_owner_or_admin().predicate
         if not await predicate(ctx):
             return
-        view = VerificationSetupView(self, ctx.guild.id, ctx.author.id)
+
+        state = await self._load_setup_state(ctx.guild)
+        view = VerificationSetupView(
+            self,
+            ctx.guild.id,
+            ctx.author.id,
+            **state,
+        )
         await ctx.send(embed=view.configuration_embed(), view=view)
 
 
