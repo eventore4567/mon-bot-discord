@@ -1,0 +1,1 @@
+SentriX verification V109 deploy trigger — schema-after-restore + clean setup UI + per-channel verified access.
