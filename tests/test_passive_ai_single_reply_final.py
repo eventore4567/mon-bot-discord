@@ -66,6 +66,16 @@ def test_primary_coordinates_only_explicit_guild_trigger():
     assert guard._should_coordinate(bot, "primary", _message("sentrix yo", guild=False)) is False
 
 
+def test_wake_word_alone_and_wake_word_with_url_are_explicit_triggers():
+    bot = _bot()
+    assert guard._should_coordinate(bot, "primary", _message("sentrix", guild=True)) is True
+    assert guard._should_coordinate(
+        bot,
+        "primary",
+        _message("sentrix https://example.com/page?q=test", guild=True),
+    ) is True
+
+
 def test_fallbacks_coordinate_explicit_trigger_in_dm_too():
     bot = _bot()
     dm = _message("sentrix yo", guild=False)

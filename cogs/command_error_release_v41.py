@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 
 from .command_hardening_v41 import release_slash
+from .global_command_error_guard import install as install_global_command_error_guard
 from .runtime_consistency_v57 import install as install_runtime_consistency_v57
 from .setup_v2_runtime import install as install_setup_v2_runtime
 
@@ -104,6 +105,9 @@ def install(bot: commands.Bot) -> None:
 
     current = bot.tree.on_error
     if getattr(current, "_sentrix_v41_release", False):
+        # Même si V41 a déjà été installé, la garde utilisateur doit exister. Son install
+        # est idempotent et ne double jamais les wrappers.
+        install_global_command_error_guard(bot)
         logger.info("Renderer V6 final réappliqué ; erreurs préfixées dédupliquées.")
         return
 
@@ -120,4 +124,9 @@ def install(bot: commands.Bot) -> None:
     error_with_release._sentrix_v41_release = True
     error_with_release._sentrix_previous = current
     bot.tree.on_error = error_with_release
+
+    # IMPORTANT : cette garde vient après V41 et enveloppe donc le chemin d'erreur final,
+    # pas une ancienne version qui pourrait ensuite être remplacée. Elle corrige d'un seul
+    # endroit toutes les commandes + et / qui fuitaient ctx/args/kwargs dans leurs embeds.
+    install_global_command_error_guard(bot)
     logger.info("V41 : renderer V6 final, erreur préfixée unique et verrou slash libéré.")

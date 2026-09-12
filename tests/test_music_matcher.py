@@ -85,6 +85,25 @@ class PickBestTests(unittest.TestCase):
         best = matcher.pick_best(target, [candidate], original_query="africa toto")
         self.assertIs(best, candidate)
 
+    def test_recherche_texte_libre_rejette_un_titre_sans_rapport(self):
+        query = "Farex Pull My Pearl - DrDonutClips (Official Music Video)"
+        target = Track(title=query, artist=None, duration=None)
+        unrelated = Track(
+            title="Audio Library — Sugar Zone – Silent Partner (No Copyright Music)",
+            artist=None,
+            duration=None,
+            playable_url="a",
+        )
+        best = matcher.pick_best(target, [unrelated], original_query=query)
+        self.assertIsNone(best)
+
+    def test_recherche_texte_libre_accepte_un_titre_proche(self):
+        query = "Farex Pull My Pearl - DrDonutClips (Official Music Video)"
+        target = Track(title=query, artist=None, duration=None)
+        candidate = Track(title="Farex - Pull My Pearl", artist="DrDonutClips", duration=None, playable_url="a")
+        best = matcher.pick_best(target, [candidate], original_query=query)
+        self.assertIs(best, candidate)
+
 
 if __name__ == "__main__":
     unittest.main()

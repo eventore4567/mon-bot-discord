@@ -1,0 +1,4 @@
+SentriX V107 music audio stability
+Merge: d67fe8fb3bc3e8c5c312ccfe2aee6a92f1b303ea
+PCM read-ahead: 4s startup target, 12s bounded reserve.
+Purpose: force standby deployment after PR #337.
