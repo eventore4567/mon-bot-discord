@@ -1279,6 +1279,14 @@ class Database:
         await self._conn.execute("PRAGMA journal_mode=WAL;")
         await self._conn.execute("PRAGMA synchronous=NORMAL;")
         await self._conn.execute("PRAGMA foreign_keys=ON;")
+        # Milestone 1 (SentriX Core Reliability) : sans busy_timeout, une seconde
+        # connexion sur ce même fichier (inspection manuelle, checkpoint WAL
+        # concurrent, transition HA) obtient immédiatement "database is locked"
+        # au lieu d'attendre que le verrou se libère. Même valeur que les autres
+        # connexions du dépôt qui l'avaient déjà (utils/wide_logs.py,
+        # cogs/sentrix_v22.py) — cette connexion principale, la plus sollicitée
+        # du bot, en était la seule dépourvue.
+        await self._conn.execute("PRAGMA busy_timeout=5000;")
         await self._conn.executescript(SCHEMA)
         await self._conn.executescript(INDEXES)
         # Nouvelles tables additives (jeux + logs indépendants) : CREATE TABLE IF NOT
