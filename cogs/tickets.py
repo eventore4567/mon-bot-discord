@@ -52,6 +52,15 @@ BUTTON_STYLES = {
     "rouge": discord.ButtonStyle.danger,
 }
 BUTTON_STYLE_NAMES = list(BUTTON_STYLES.keys())
+
+# Milestone 3 (Modules avancés) : voir +ticket-priority ci-dessous. 'normale' reste la
+# valeur par défaut à la création (database/db.py::INSERT INTO tickets), inchangée.
+TICKET_PRIORITY_LABELS = {
+    "basse": "🟢 Basse",
+    "normale": "🔵 Normale",
+    "haute": "🟠 Haute",
+    "urgente": "🔴 Urgente",
+}
 DEFAULT_BUTTON_STYLE = "bleu"
 
 # Les 9 boutons staff configurables : clé interne -> (libellé par défaut, emoji par défaut).
@@ -1414,6 +1423,40 @@ class Tickets(commands.Cog):
             overwrite.send_messages = True
             await ctx.channel.set_permissions(owner, overwrite=overwrite)
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success('🔓 Le ticket a été rouvert.')))
+
+    # Milestone 3 (Modules avancés) : "priority" existe dans le schéma tickets depuis
+    # le début (database/db.py) et est déjà lu par le dashboard (web/ticket_center_v35.py),
+    # mais rien ne l'écrivait jamais après la création du ticket (toujours 'normale',
+    # database/db.py::INSERT INTO tickets, cogs/tickets.py) — un champ mort en pratique.
+    # Cette commande est la première à réellement le modifier.
+    @commands.hybrid_command(
+        name="ticket-priority",
+        description="Définir la priorité de ce ticket (basse, normale, haute, urgente).",
+        with_app_command=False,
+    )
+    @checks.has_permission_or_modrole("manage_channels")
+    async def ticket_priority(self, ctx: commands.Context, niveau: str):
+        ticket = await self.get_ticket_by_channel(ctx.channel.id)
+        if not ticket:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
+        niveau_normalise = str(niveau or "").strip().casefold()
+        if niveau_normalise not in TICKET_PRIORITY_LABELS:
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.depuis_embed(embeds.error(
+                    f"Priorité invalide. Valeurs possibles : {', '.join(TICKET_PRIORITY_LABELS)}."
+                )),
+            )
+        await self.bot.db.execute(
+            "UPDATE tickets SET priority = ?, last_activity_at = ? WHERE id = ?",
+            (niveau_normalise, now(), ticket["id"]),
+        )
+        await sx_panels.envoyer(
+            ctx,
+            sx_panels.depuis_embed(embeds.success(
+                f"Priorité mise à jour : {TICKET_PRIORITY_LABELS[niveau_normalise]}."
+            )),
+        )
 
     # ---------------------------------------------------------------- COMMANDES : OUVERTURE (MEMBRES)
 

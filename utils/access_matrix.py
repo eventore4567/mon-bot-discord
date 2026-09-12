@@ -219,6 +219,7 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     "show": "manage_channels",
     "smartlockdown": "manage_channels",
     "ticket-reopen": "manage_channels",
+    "ticket-priority": "manage_channels",
     "reopenticket": "manage_channels",
     "tickettranscript": "manage_channels",
     "ticketstats": "manage_channels",
@@ -430,8 +431,8 @@ _MODULE_BY_PERMISSION_COMMAND = {
         "nickname", "nick", "resetnick", "move", "disconnect",
     },
     "tickets": {
-        "ticket-reopen", "reopenticket", "tickettranscript", "ticketstats",
-        "ticketstaffstats",
+        "ticket-reopen", "ticket-priority", "reopenticket", "tickettranscript",
+        "ticketstats", "ticketstaffstats",
     },
     "roles": {
         "role-snapshot", "role-restore", "giverole", "removerole",
