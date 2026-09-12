@@ -268,7 +268,13 @@ CREATE TABLE IF NOT EXISTS tickets (
     rating INTEGER,
     type_id INTEGER,
     locked INTEGER DEFAULT 0,
-    last_activity_at INTEGER
+    last_activity_at INTEGER,
+    -- Milestone 3 (Modules avancés) : liste de tags libres (JSON), même esprit que
+    -- priority — ajoutée sur une base déjà en production. Aucune migration numérotée
+    -- écrite à la main : database/migrations.py (Milestone 1) réconcilie automatiquement
+    -- cette colonne sur toute base existante au prochain Database.connect(), exactement
+    -- le scénario que ce système a été construit pour couvrir.
+    tags TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS ticket_notes (

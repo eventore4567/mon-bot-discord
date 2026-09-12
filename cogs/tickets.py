@@ -61,6 +61,10 @@ TICKET_PRIORITY_LABELS = {
     "haute": "🟠 Haute",
     "urgente": "🔴 Urgente",
 }
+
+# Milestone 3 (Modules avancés) : voir +ticket-tags ci-dessous.
+TICKET_TAG_MAX_LENGTH = 30
+TICKET_TAG_MAX_COUNT = 10
 DEFAULT_BUTTON_STYLE = "bleu"
 
 # Les 9 boutons staff configurables : clé interne -> (libellé par défaut, emoji par défaut).
@@ -1457,6 +1461,55 @@ class Tickets(commands.Cog):
                 f"Priorité mise à jour : {TICKET_PRIORITY_LABELS[niveau_normalise]}."
             )),
         )
+
+    # Milestone 3 (Modules avancés) : "tags" n'existait pas du tout avant cette
+    # session (colonne ajoutée dans database/db.py::SCHEMA, réconciliée automatiquement
+    # par database/migrations.py). Remplace la liste entière plutôt que
+    # d'ajouter/retirer un tag à la fois : plus simple, et suffisant pour un premier
+    # usage (catégorisation manuelle par le staff dans le salon du ticket).
+    @commands.hybrid_command(
+        name="ticket-tags",
+        description="Définir les tags de ce ticket (séparés par des virgules, vide pour les retirer tous).",
+        with_app_command=False,
+    )
+    @checks.has_permission_or_modrole("manage_channels")
+    async def ticket_tags(self, ctx: commands.Context, *, tags: str = ""):
+        ticket = await self.get_ticket_by_channel(ctx.channel.id)
+        if not ticket:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
+
+        parsed: list[str] = []
+        seen: set[str] = set()
+        for brut in tags.split(","):
+            tag = brut.strip()
+            if not tag:
+                continue
+            if len(tag) > TICKET_TAG_MAX_LENGTH:
+                return await sx_panels.envoyer(
+                    ctx,
+                    sx_panels.depuis_embed(embeds.error(
+                        f"Le tag « {tag} » dépasse {TICKET_TAG_MAX_LENGTH} caractères."
+                    )),
+                )
+            cle = tag.casefold()
+            if cle in seen:
+                continue
+            seen.add(cle)
+            parsed.append(tag)
+        if len(parsed) > TICKET_TAG_MAX_COUNT:
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.depuis_embed(embeds.error(f"Maximum {TICKET_TAG_MAX_COUNT} tags par ticket.")),
+            )
+
+        await self.bot.db.execute(
+            "UPDATE tickets SET tags = ?, last_activity_at = ? WHERE id = ?",
+            (json.dumps(parsed, ensure_ascii=False), now(), ticket["id"]),
+        )
+        message = (
+            f"Tags mis à jour : {', '.join(parsed)}." if parsed else "Tous les tags ont été retirés."
+        )
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(message)))
 
     # ---------------------------------------------------------------- COMMANDES : OUVERTURE (MEMBRES)
 
