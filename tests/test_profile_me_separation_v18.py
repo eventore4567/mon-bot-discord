@@ -44,23 +44,30 @@ def test_profile_and_profil_keep_community_profile_surface():
     assert 'build_page(bot, ctx.guild, member, ctx.author.id, "overview")' in source
 
 
-def test_profile_overview_is_spacious_and_not_inline_grid():
+def test_profile_overview_is_compact_inline_grid():
     source = _profile_source()
-    overview_start = source.index("# Vue principale volontairement aérée")
+    overview_start = source.index("# Vue principale compacte")
     overview_end = source.index("class CleanProfileView", overview_start)
     overview = source[overview_start:overview_end]
 
     for section in ("Progression", "Économie", "Activité", "Compte", "Badges"):
         assert f'name="{section}"' in overview
-    assert "\\n\\n" in overview
-    assert "inline=False" in overview
-    assert "Portefeuille\\n" in overview
-    assert "Banque\\n" in overview
-    assert "Total\\n" in overview
-    assert "Messages\\n" in overview
-    assert "Temps vocal\\n" in overview
-    assert "Compte créé\\n" in overview
-    assert "Arrivé sur le serveur\\n" in overview
+
+    # La vue principale doit tenir en quelques lignes/colonnes au lieu d'empiler
+    # chaque métrique sur deux lignes et chaque section en pleine largeur.
+    assert "inline=True" in overview
+    assert "inline=False" not in overview
+    assert 'f"Niveau **' in overview
+    assert 'f"XP **' in overview
+    assert 'f"Rang **' in overview
+    assert 'f"Portefeuille **' in overview
+    assert 'f"Banque **' in overview
+    assert 'f"Total **' in overview
+    assert 'f"Messages **' in overview
+    assert 'f"Vocal **' in overview
+    assert 'f"Créé ' in overview
+    assert 'f"Arrivé ' in overview
+    assert 'value=" · ".join(badges)' in overview
 
 
 def test_profile_secondary_pages_are_spaced_too():
