@@ -1,0 +1,3 @@
+SentriX compact profile UI production deployment trigger
+source_merge=d77d9ff909c882c4263c418950b443e89c32e8f7
+reason=compact-profile-overview
