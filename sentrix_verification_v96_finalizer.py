@@ -13,6 +13,7 @@ from discord.ext import commands
 
 import sentrix_v95_runtime as v95
 import sentrix_verification_v96 as v96
+from sentrix_v103_setup_fix import install as install_setup_v103
 
 logger = logging.getLogger("bot.verification-v96-final")
 
@@ -74,42 +75,46 @@ async def reassert(bot: commands.Bot) -> commands.Command:
 
 
 def install() -> None:
-    """Entoure la préparation V95 afin de réaffirmer V96 au dernier moment utile."""
+    """Entoure la préparation V95 et arme ensuite le garde final V103 de /setup."""
     v96._install_v95_route()
     current = v95.prepare_bot
-    if getattr(current, "_sentrix_verification_v96_final", False):
-        return
 
-    async def prepare_with_verification(bot: commands.Bot):
-        command = await reassert(bot)
-        result = await current(bot)
+    if not getattr(current, "_sentrix_verification_v96_final", False):
+        async def prepare_with_verification(bot: commands.Bot):
+            command = await reassert(bot)
+            result = await current(bot)
 
-        verification_paths = [
-            path
-            for path, info in result.items()
-            if str(info.get("original")) == str(command.qualified_name)
-        ]
-        if len(verification_paths) != 1:
-            raise RuntimeError(
-                "V96: la commande de vérification doit avoir exactement un chemin slash, "
-                f"obtenu={verification_paths!r}"
+            verification_paths = [
+                path
+                for path, info in result.items()
+                if str(info.get("original")) == str(command.qualified_name)
+            ]
+            if len(verification_paths) != 1:
+                raise RuntimeError(
+                    "V96: la commande de vérification doit avoir exactement un chemin slash, "
+                    f"obtenu={verification_paths!r}"
+                )
+            if not verification_paths[0].startswith("/roles "):
+                raise RuntimeError(
+                    f"V96: chemin slash inattendu pour la vérification: {verification_paths[0]}"
+                )
+
+            bot._sentrix_verification_v96_path = verification_paths[0]
+            logger.warning(
+                "V96 final : +verification/+verify-panel/+verify-setup actifs ; slash=%s.",
+                verification_paths[0],
             )
-        if not verification_paths[0].startswith("/roles "):
-            raise RuntimeError(
-                f"V96: chemin slash inattendu pour la vérification: {verification_paths[0]}"
-            )
+            return result
 
-        bot._sentrix_verification_v96_path = verification_paths[0]
-        logger.warning(
-            "V96 final : +verification/+verify-panel/+verify-setup actifs ; slash=%s.",
-            verification_paths[0],
-        )
-        return result
+        prepare_with_verification._sentrix_verification_v96_final = True
+        prepare_with_verification._sentrix_original = current
+        v95.prepare_bot = prepare_with_verification
+        logger.info("V96 finalizer branché juste avant la préparation slash V95.")
 
-    prepare_with_verification._sentrix_verification_v96_final = True
-    prepare_with_verification._sentrix_original = current
-    v95.prepare_bot = prepare_with_verification
-    logger.info("V96 finalizer branché juste avant la préparation slash V95.")
+    # Ce module est installé à la fin du vrai bootstrap HA Railway. V103 doit donc
+    # s'armer ici, après V95/V97/V98/V99/V100/V101/V102 et après le finalizer V96,
+    # afin que /setup soit la toute dernière réécriture de la surface slash.
+    install_setup_v103()
 
 
 __all__ = ["install", "reassert"]
