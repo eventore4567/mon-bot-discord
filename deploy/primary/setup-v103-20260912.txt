@@ -1,3 +1,4 @@
 SentriX /setup V103 production deployment trigger
 source_fix=a053ffbcc2a30c058752f499836d66844f47d7f9
 reason=slash-setup-direct-controller
+final_trigger_after_standby=25cab74f864aef2d9d39a0040dd80b75344bae64
