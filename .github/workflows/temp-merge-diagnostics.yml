@@ -1,4 +1,4 @@
-name: Temporary Core V2 merge diagnostics
+name: Temporary Core V2 integration validation
 
 on:
   push:
@@ -6,42 +6,107 @@ on:
       - integration/sentrix-core-v2-main-sync
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  detect-conflicts:
+  integrate-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DISCORD_TOKEN: ci.fake.token
     steps:
-      - name: Checkout integration branch
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Detect merge conflicts with main
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Build clean integration candidate
         shell: bash
         run: |
-          set -u
-          git config user.name "SentriX Merge Diagnostics"
-          git config user.email "merge-diagnostics@users.noreply.github.com"
-          git fetch origin main
+          set -euo pipefail
+          git config user.name "SentriX Integration Validator"
+          git config user.email "integration-validator@users.noreply.github.com"
+          git fetch origin main architecture/sentrix-core-v2
+          git checkout -B integration/sentrix-core-v2-merged origin/architecture/sentrix-core-v2
+
           set +e
           git merge --no-commit --no-ff origin/main
           merge_status=$?
           set -e
 
-          echo "MERGE_STATUS=${merge_status}"
-          echo "CONFLICT_FILES_BEGIN"
-          git diff --name-only --diff-filter=U || true
-          echo "CONFLICT_FILES_END"
+          if [ "$merge_status" -ne 0 ]; then
+            echo "Resolving the 11 conflicts identified by the diagnostics run..."
 
-          if [ "${merge_status}" -eq 0 ]; then
-            echo "No merge conflicts detected."
-            git merge --abort || true
-            exit 0
+            # Core V2-specific policy additions live only on the architecture branch;
+            # main's overlapping edits in these files are already contained there.
+            git checkout --ours -- main.py utils/access_matrix.py
+
+            # main contains the later production music/HA fixes (V103-V108, jitter,
+            # persistence, playlist semantics) on top of the same V102 refactor.
+            git checkout --theirs -- \
+              cogs/music.py \
+              railway_ha_product_boot.py \
+              sentrix_music_providers_v102.py \
+              tests/test_music_matcher.py \
+              utils/music/manager.py \
+              utils/music/matcher.py \
+              utils/music/providers/soundcloud.py \
+              utils/music/providers/spotify.py \
+              utils/music/providers/youtube.py
+
+            git add -A
           fi
 
-          count=$(git diff --name-only --diff-filter=U | sed '/^$/d' | wc -l | tr -d ' ')
-          echo "CONFLICT_COUNT=${count}"
+          unresolved=$(git diff --name-only --diff-filter=U | sed '/^$/d' | wc -l | tr -d ' ')
+          echo "UNRESOLVED_CONFLICTS=$unresolved"
+          if [ "$unresolved" -ne 0 ]; then
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
+
+          git diff --check
           git status --short
-          git merge --abort || true
-          exit 0
+
+      - name: Dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio
+
+      - name: Compile all Python
+        run: python -m compileall -q .
+
+      - name: Full unit suite
+        run: python -m pytest tests -q
+
+      - name: Production ops tests
+        run: python -m unittest tests.test_production_ops -v
+
+      - name: Command contracts
+        run: python tools/command_runtime_audit.py
+
+      - name: Command callback integrity
+        run: python tools/command_callback_integrity_audit.py
+
+      - name: Command error ownership
+        run: python tools/command_error_ownership_gate.py
+
+      - name: Permission matrix
+        run: python tools/permission_matrix_gate.py
+
+      - name: Permission group consistency
+        run: python tools/command_permission_group_consistency_audit.py
+
+      - name: Runtime debt
+        run: python tools/runtime_debt_gate.py
+
+      - name: Commit and push validated candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git commit -m "merge: reconcile main into SentriX Core V2"
+          git push --force-with-lease origin HEAD:refs/heads/integration/sentrix-core-v2-merged
+          echo "VALIDATED_INTEGRATION_SHA=$(git rev-parse HEAD)"
