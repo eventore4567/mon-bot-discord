@@ -27,7 +27,9 @@ DIRECT_BRIDGED_ROOTS = ("help", "ping", "sentrix")
 _INSTALL_MARKER = "_sentrix_v105_slash_schema_guard_installed"
 
 
-def _iter_leaf_commands(nodes: Iterable[app_commands.Command | app_commands.Group]) -> Iterator[app_commands.Command]:
+def _iter_leaf_commands(
+    nodes: Iterable[app_commands.Command | app_commands.Group],
+) -> Iterator[app_commands.Command]:
     for node in nodes:
         if isinstance(node, app_commands.Group):
             yield from _iter_leaf_commands(node.commands)
@@ -111,9 +113,9 @@ def audit_tree(tree: app_commands.CommandTree) -> tuple[str, ...]:
     return tuple(audited)
 
 
-def prepare_bot(bot: commands.Bot) -> tuple[str, ...]:
+async def prepare_bot(bot: commands.Bot) -> tuple[str, ...]:
     """Point d'entree testable: applique V95, les racines natives, puis audite."""
-    v95.prepare_bot(bot)
+    await v95.prepare_bot(bot)
     _ensure_direct_roots(bot)
     return audit_tree(bot.tree)
 
@@ -125,13 +127,24 @@ def install() -> None:
 
     original_prepare = v95.prepare_bot
 
-    def guarded_prepare(bot: commands.Bot) -> None:
-        original_prepare(bot)
+    async def guarded_prepare(bot: commands.Bot):
+        result = await original_prepare(bot)
         _ensure_direct_roots(bot)
         audit_tree(bot.tree)
+        return result
 
     guarded_prepare.__name__ = "prepare_bot_v105_guarded"
     guarded_prepare.__qualname__ = guarded_prepare.__name__
+    guarded_prepare._sentrix_original = original_prepare
     v95.prepare_bot = guarded_prepare
     setattr(v95, _INSTALL_MARKER, True)
     logger.info("SentriX V105 slash schema guard installe.")
+
+
+__all__ = [
+    "DIRECT_BRIDGED_ROOTS",
+    "FORBIDDEN_PUBLIC_PARAMETERS",
+    "audit_tree",
+    "install",
+    "prepare_bot",
+]
