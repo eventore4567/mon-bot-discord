@@ -6,6 +6,12 @@ par défaut, configurable par serveur via /setprefix).
 
 Pour lancer le bot : python3 main.py
 Le token doit être défini dans le fichier .env (variable DISCORD_TOKEN).
+
+docs/core-v2-audit-technical-debt.md §12 : avant même que ce fichier (ou tout autre
+script de démarrage réel — voir §4 pour les multiples déclarations concurrentes) ne
+s'exécute, Python a déjà auto-importé ``sitecustomize.py`` à la racine du dépôt (sauf
+lancement avec ``-S``). Ce module installe, entre autres, les patchs SentriX V95/V96/
+V102 avant tout code applicatif — voir son propre docstring pour le détail exact.
 """
 
 import asyncio
@@ -61,6 +67,18 @@ EXTENSIONS = [
     "cogs.giveaway_center",
     "cogs.verification",
     "cogs.stats",
+    # Core V2, Phase 1 (docs/core-v2-plan.md) : écoute passive uniquement, aucun
+    # monkeypatch, aucune dépendance à finalize_runtime() — la position dans
+    # cette liste n'a pas d'importance particulière pour ce cog.
+    "cogs.core_command_observability",
+    # Chargé avant cogs.visual_experience_v5 pour que finalize_runtime()
+    # (cogs/__init__.py) balaie le @checks.is_bot_owner() local de /corediag,
+    # exactement comme pour toute autre commande déjà classée dans
+    # utils/access_matrix.py::OWNER_ONLY_COMMANDS.
+    "cogs.core_diagnostics",
+    # Core V2, Phase 3 (docs/core-v2-plan.md) : /permissions explain, pas de check
+    # local (public, restriction "autre membre" gérée dans le corps).
+    "cogs.permissions_explain",
     "cogs.owner",
     "cogs.invites",
     "cogs.design",
@@ -144,11 +162,29 @@ PUBLIC_COMMANDS = frozenset({
     # comme "ai" plus haut). "play" reste aussi une commande racine autonome
     # (+play / /play), alias direct de "music play".
     "music", "play",
+    # Core V2, Phase 3 (docs/core-v2-plan.md) : /permissions explain montre
+    # toujours SA PROPRE décision — pas de fuite d'information. Diagnostiquer un
+    # autre membre est restreint aux administrateurs dans le corps de la commande.
+    "permissions",
 })
 
 OWNER_ONLY_COMMANDS = frozenset({
     "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
     "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
+    # Core V2, Phase 1 (docs/core-v2-plan.md) : panneau d'observabilité globale
+    # au processus, jamais scopé par serveur — pas adapté à un accès admin.
+    "corediag",
+    # docs/core-v2-audit-technical-debt.md §16 : présent dans la copie canonique
+    # (utils/access_matrix.py::OWNER_ONLY_COMMANDS) depuis le début, mais absent
+    # ici — cette liste-ci n'est lue que par des outils d'audit/log (aucun
+    # gate d'exécution), donc l'ajouter ne change aucun comportement runtime,
+    # seulement l'exactitude des audits (cogs/command_hardening_v41.py, etc.).
+    # "logs-diag" (avec tiret) n'est PAS ajouté ici : ce nom ne correspond à
+    # aucune commande réelle enregistrée (la vraie commande est "logsdiag",
+    # sans tiret, cogs/generated_logs_sync.py) et se protège elle-même par un
+    # check local administrator — la reclassifier changerait un comportement
+    # aujourd'hui fonctionnel sans bug prouvé. Voir tâche de suivi créée.
+    "reset-logs-all",
 })
 
 CATEGORY_COMMANDS = {
@@ -294,33 +330,16 @@ INTENTS.voice_states = True
 
 
 class SentriXContext(commands.Context):
-    """Context personnalisé utilisé pour TOUTES les commandes texte (préfixe +) du bot.
+    """Context utilisé pour TOUTES les commandes texte (préfixe +) du bot.
 
-    Demande explicite : quand quelqu'un tape une commande texte, la réponse du bot doit
-    être visiblement liée à son message (comme une "réponse" Discord, avec la petite
-    flèche), et pinguer la personne SANS avoir besoin d'un @mention écrit dans le texte —
-    sinon, sur un salon actif, on ne sait plus à quel message le bot répond.
-
-    Les commandes SLASH (interaction) ne sont pas concernées : Discord affiche déjà
-    nativement "SentriX a utilisé /commande" au-dessus de la réponse, donc le lien est
-    déjà visible sans rien faire de plus — voir la condition `self.interaction is None`
-    ci-dessous, qui limite ce comportement aux commandes préfixées uniquement."""
-
-    async def send(self, *args, **kwargs):
-        if self.interaction is None and self.message is not None and "reference" not in kwargs:
-            kwargs["reference"] = discord.MessageReference(
-                message_id=self.message.id,
-                channel_id=self.channel.id,
-                guild_id=self.guild.id if self.guild else None,
-                fail_if_not_exists=False,
-            )
-            kwargs.setdefault("mention_author", True)
-        try:
-            return await super().send(*args, **kwargs)
-        except discord.HTTPException:
-            kwargs.pop("reference", None)
-            kwargs.pop("mention_author", None)
-            return await super().send(*args, **kwargs)
+    Ne surcharge plus `send()` : la tentative originale (commit `ddcf278`, 2026-08-05)
+    d'ajouter une `reference`/`mention_author=True` à chaque réponse préfixée est
+    neutralisée sans exception par `cogs/reply_reference_fix.py` depuis le commit
+    `c7020f1` (2026-08-07, deux jours plus tard — pour éviter le bandeau Discord "le
+    message original a été supprimé"). `super().send()` résout `commands.Context.send`
+    dynamiquement, donc cette classe n'avait plus aucun effet propre depuis 5 semaines —
+    voir docs/core-v2-audit-technical-debt.md §8. Elle reste comme classe (utilisée par
+    `get_context` ci-dessous et comme marqueur de type par d'autres modules)."""
 
 
 async def get_prefix(bot: "BotAllInOne", message: discord.Message):
@@ -471,7 +490,13 @@ class BotAllInOne(commands.Bot):
 
         self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
-        self.add_check(self.global_permission_check)
+        # cogs/permission_guard.py::install() s'enregistre désormais lui-même dès
+        # qu'il réaffecte self.global_permission_check (docs/core-v2-audit-
+        # technical-debt.md, §6) — ne l'ajouter ici qu'en repli, si cette extension
+        # n'a jamais chargé, pour ne jamais laisser aucune commande préfixée sans
+        # aucun garde de permission.
+        if not getattr(self.global_permission_check, "_sentrix_permission_guard", False):
+            self.add_check(self.global_permission_check)
 
 
         # Corrige la cause structurelle commune : quand un wrapper remplace
@@ -485,6 +510,58 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning(
                 "Resynchronisation callback slash/préfixe impossible :\n" + traceback.format_exc()
+            )
+
+        # Core V2, Phase 3 (docs/core-v2-plan.md) : deuxième passage du nettoyeur de
+        # décorateurs d'autorisation redondants, APRÈS que les 48 extensions (main.py
+        # + railway_boot.py) soient toutes chargées. Le premier passage
+        # (cogs/permission_guard.py::install(), déclenché par finalize_runtime() au
+        # chargement de cogs.visual_experience_v5) ne voit que les commandes déjà
+        # enregistrées à CE moment-là — toute extension ajoutée après par
+        # railway_boot.py (cogs.sentrix_plus, cogs.sentrix_ultimate, etc.) n'était
+        # donc jamais balayée. C'est la cause racine confirmée d'un vrai bug
+        # (docs/core-v2-audit-technical-debt.md §1) : un décorateur local
+        # @has_guild_permissions oublié sur /sentrixpro empêchait un rôle
+        # explicitement autorisé via Setup d'accéder à la commande, malgré la
+        # décision correcte d'utils/access_matrix.py. La fonction est idempotente
+        # (ne retire que ce qui reste réellement présent) : ce second appel ne
+        # change rien pour tout ce que le premier passage a déjà nettoyé.
+        try:
+            from cogs.permission_guard import _strip_redundant_local_checks
+
+            removed_late = _strip_redundant_local_checks(self)
+            if removed_late:
+                logger.warning(
+                    "Second balayage des décorateurs redondants (post-boot complet) : "
+                    "%s check(s) retiré(s) sur des extensions chargées tardivement.",
+                    removed_late,
+                )
+        except Exception:
+            logger.warning(
+                "Second balayage des décorateurs redondants impossible :\n" + traceback.format_exc()
+            )
+
+        # docs/core-v2-audit-technical-debt.md §5 : le second passage ci-dessus ne
+        # couvre que permission_guard. cogs/command_hardening_v41.py::_audit_registry
+        # (détection "dangerous_public" / "unknown_policy", consommée par
+        # web/health_runtime_v45.py pour le diagnostic santé) n'a, elle, jamais reçu
+        # de second passage : elle ne tournait qu'une fois, via finalize_runtime() au
+        # chargement de cogs.visual_experience_v5, donc AVANT les 21 extensions
+        # tardives de railway_boot.py — exactement le même trou temporel qui causait
+        # le Bug #1 (§1) sur /sentrixpro. Un futur bug de même forme (une commande
+        # destructive déclarée publique) dans l'une de ces 21 extensions restait donc
+        # invisible à ce diagnostic. _audit_registry ne fait que recalculer et
+        # journaliser un rapport (aucune mutation de commande) : un second appel est
+        # sans risque et ne fait que rafraîchir bot._sentrix_command_audit avec la
+        # liste complète des 51 extensions.
+        try:
+            from cogs.command_hardening_v41 import _audit_registry as _audit_command_registry_v41
+
+            _audit_command_registry_v41(self)
+        except Exception:
+            logger.warning(
+                "Second audit du registre de commandes (V41, post-boot complet) impossible :\n"
+                + traceback.format_exc()
             )
 
         try:

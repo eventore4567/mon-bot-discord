@@ -36,7 +36,7 @@ def main() -> int:
         if re.search(r"(?m)^\s*@commands\.(?:command|hybrid_command|group)\b", text):
             errors.append("V2.2 déclare une nouvelle commande alors que cette phase doit uniquement améliorer l'existant")
         markers = (
-            "last_rob", "_economy_lock", "cash>=?", "status='ouvert' AND claimed_by IS NULL",
+            "status='ouvert' AND claimed_by IS NULL",
             "check_targetable", "asyncio.wait_for", "AI_SETTINGS_TTL", "GAME_SETTINGS_TTL",
             "TICKET_BUTTON_SETTINGS_TTL", "PRAGMA busy_timeout=5000", '"new_commands": 0',
             "_ticket_create_locks", "await conn.commit()",
@@ -44,6 +44,19 @@ def main() -> int:
         for marker in markers:
             if marker not in text:
                 errors.append(f"invariant V2.2 absent: {marker}")
+
+    # Core V2, Phase 4 : atomic_rob() (la garantie last_rob/_economy_lock/cash>=?)
+    # a été extraite de cogs/sentrix_v22.py vers services/economy.py — comportement
+    # inchangé, verrouillé par tests/test_services_economy.py — donc ces trois
+    # marqueurs vivent désormais là, pas dans sentrix_v22.py.
+    economy = ROOT / "services/economy.py"
+    if not economy.exists():
+        errors.append("fichier absent: services/economy.py")
+    else:
+        economy_text = economy.read_text(encoding="utf-8")
+        for marker in ("last_rob", "_economy_lock", "cash>=?"):
+            if marker not in economy_text:
+                errors.append(f"invariant V2.2 absent (services/economy.py): {marker}")
 
     stats = ROOT / "utils/stats_service.py"
     if stats.exists():

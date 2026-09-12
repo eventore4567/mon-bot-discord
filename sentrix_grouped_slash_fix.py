@@ -104,6 +104,67 @@ async def _bind_native_arguments(
     return args, kwargs
 
 
+# Filet de sécurité pour la famille de commandes de sanction : un rapport utilisateur a
+# montré un +unmute dont le dossier journalisé correspondait à +mute (mauvaise action
+# potentiellement appliquée à un membre réel). Le nom de fonction Python de CES commandes
+# précises est toujours identique à leur nom de commande (contrairement à des commandes
+# comme bot-status/system_status, qu'on ne peut donc pas vérifier de la même façon sans
+# faux positifs) — assez fiable pour détecter, ici, un command.callback qui pointerait
+# vers une autre fonction que celle attendue, quelle qu'en soit la cause exacte. Échoue
+# fermé (refuse d'exécuter) plutôt que de risquer la mauvaise sanction.
+_SANCTION_COMMAND_NAMES = frozenset({"ban", "tempban", "unban", "kick", "mute", "unmute", "warn"})
+
+
+def _sanction_callback_mismatch(command: commands.Command) -> str | None:
+    name = str(getattr(command, "name", "") or "").casefold()
+    if name not in _SANCTION_COMMAND_NAMES:
+        return None
+    callback = getattr(command, "callback", None)
+    if callback is None:
+        return None
+    try:
+        declared = inspect.unwrap(callback)
+    except (TypeError, ValueError):
+        declared = callback
+    declared_name = str(getattr(declared, "__name__", "") or "").casefold()
+    if declared_name and declared_name != name:
+        return (
+            f"Sécurité : '{command.qualified_name}' devait exécuter la fonction '{name}' "
+            f"mais son callback pointe vers '{declared_name}'. Commande bloquée plutôt que "
+            f"de risquer d'appliquer la mauvaise sanction."
+        )
+    return None
+
+
+def _sanction_diagnostic_snapshot(command: commands.Command, option_names: tuple[str, ...], values: dict) -> str | None:
+    """Instantané complet de l'identité du callback pour les 7 commandes de sanction,
+    journalisé à CHAQUE invocation (pas seulement en cas de désaccord détecté par
+    _sanction_callback_mismatch()) — pour qu'une reproduction réelle du mélange
+    mute/unmute (jamais reproduit malgré une simulation complète du boot de
+    production) laisse une trace exploitable même si le nom déclaré concorde.
+    __code__.co_filename/co_firstlineno identifient la fonction RÉELLEMENT exécutée
+    même à travers un functools.wraps qui aurait pu tromper un simple __name__."""
+    name = str(getattr(command, "name", "") or "").casefold()
+    if name not in _SANCTION_COMMAND_NAMES:
+        return None
+    callback = getattr(command, "callback", None)
+    if callback is None:
+        return f"command={command.qualified_name} callback=None"
+    try:
+        declared = inspect.unwrap(callback)
+    except (TypeError, ValueError):
+        declared = callback
+    code = getattr(declared, "__code__", None)
+    membre = values.get("membre")
+    return (
+        f"command={command.qualified_name} outer_name={getattr(callback, '__name__', '?')} "
+        f"declared_name={getattr(declared, '__name__', '?')} "
+        f"code={getattr(code, 'co_filename', '?')}:{getattr(code, 'co_firstlineno', '?')} "
+        f"options={option_names} membre_id={getattr(membre, 'id', None)} "
+        f"a_duree={'duree' in values or 'duree' in option_names}"
+    )
+
+
 async def _make_context(bot: commands.Bot, interaction: discord.Interaction) -> commands.Context:
     ctx = await commands.Context.from_interaction(interaction)
     # SentriX ajoute des helpers à son Context. On conserve la même compatibilité que V95.
@@ -124,6 +185,14 @@ async def _invoke_native(
     values: dict,
 ) -> None:
     """Exécute une commande prefix/hybride avec le cycle de vie commands.py, sans parser."""
+    diagnostic = _sanction_diagnostic_snapshot(command, option_names, values)
+    if diagnostic:
+        logger.info("Diagnostic sanction (native) : %s", diagnostic)
+    mismatch = _sanction_callback_mismatch(command)
+    if mismatch:
+        logger.critical(mismatch)
+        raise commands.CommandError(mismatch)
+
     ctx.command = command
     ctx.invoked_with = command.name
     ctx.invoked_parents = []
@@ -191,6 +260,14 @@ async def _invoke_legacy(
 ) -> None:
     """Chemin V95 conservé pour convertisseurs non natifs et groupes prefix réels."""
     root = command.root_parent or command
+    diagnostic = _sanction_diagnostic_snapshot(root, option_names, values)
+    if diagnostic:
+        logger.info("Diagnostic sanction (legacy) : %s", diagnostic)
+    mismatch = _sanction_callback_mismatch(root)
+    if mismatch:
+        logger.critical(mismatch)
+        raise commands.CommandError(mismatch)
+
     path = str(command.qualified_name).split()[1:] if command.root_parent is not None else []
     arguments = v95._argument_text(command, option_names, values)
     source = " ".join([*path, arguments]).strip()

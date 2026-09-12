@@ -317,12 +317,12 @@ _CANONICAL_ADD_FIELDS = add_fields
 
 def _latency_quality(latency_ms: int) -> tuple[str, str]:
     if latency_ms <= 80:
-        return "Excellente", "██████████"
+        return "Excellente", "▰▰▰▰▰▰▰▰▰▰"
     if latency_ms <= 140:
-        return "Très bonne", "█████████░"
+        return "Très bonne", "▰▰▰▰▰▰▰▰▰▱"
     if latency_ms <= 220:
-        return "Correcte", "███████░░░"
-    return "Dégradée", "████░░░░░░"
+        return "Correcte", "▰▰▰▰▰▰▰▱▱▱"
+    return "Dégradée", "▰▰▰▰▱▱▱▱▱▱"
 
 
 def enrich_ping(embed: discord.Embed, bot: Any) -> discord.Embed:
@@ -504,7 +504,7 @@ def log_entry(title: str, color: int | None = None, *, cible=None, cible_label: 
     return canonical_log_embed(title, fields=fields)
 
 
-def bar(value: float, maximum: float, length: int = 10, filled_char: str = "█", empty_char: str = "░") -> str:
+def bar(value: float, maximum: float, length: int = 10, filled_char: str = "▰", empty_char: str = "▱") -> str:
     try:
         ratio = float(value) / float(maximum) if maximum else 0.0
     except (TypeError, ValueError, ZeroDivisionError):

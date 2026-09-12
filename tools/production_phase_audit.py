@@ -135,6 +135,14 @@ async def runtime_audit(path: str) -> None:
     os.environ["DATABASE_PATH"] = path
     import main
 
+    # config.DATABASE_PATH est fige au premier import du module (ligne 25 de ce fichier,
+    # "from cogs import production_phase_runtime as phase", tire deja utils.embeds -> config
+    # avant que cette fonction ne tourne). Positionner la variable d'environnement ici arrive
+    # donc trop tard : sans cette ligne, BotAllInOne() relit la constante deja figee sur
+    # "database/bot.db" et cet audit ecrit boots/metriques/SLO dans la vraie base locale au
+    # lieu du dossier temporaire, avec un UPSERT additif qui s'accumule a chaque execution.
+    main.config.DATABASE_PATH = path
+
     bot = main.BotAllInOne()
     await bot.db.connect()
     try:

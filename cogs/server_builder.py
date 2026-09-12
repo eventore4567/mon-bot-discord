@@ -1139,23 +1139,26 @@ class ServerBuilderView(discord.ui.View):
             )
         except discord.Forbidden:
             logger.exception("Permission Discord refusée pendant create-server")
+            step = cog._build_steps.get(interaction.guild.id, "initialisation")
             summary = embeds.error(
-                f"Discord a refusé l'étape **{cog._build_step}**. "
+                f"Discord a refusé l'étape **{step}**. "
                 "Placez le rôle SentriX au-dessus des rôles "
                 "qu'il doit gérer et accordez-lui Administrateur, puis relancez +create-server."
             )
         except discord.HTTPException as exc:
             logger.exception("Erreur HTTP Discord pendant create-server")
+            step = cog._build_steps.get(interaction.guild.id, "initialisation")
             summary = embeds.error(
-                f"Discord a interrompu l'étape **{cog._build_step}** ({exc}). "
+                f"Discord a interrompu l'étape **{step}** ({exc}). "
                 "Les éléments déjà créés sont "
                 "conservés : relancez +create-server pour reprendre sans doublons."
             )
         except Exception as exc:
             logger.exception("Erreur inattendue pendant create-server")
+            step = cog._build_steps.get(interaction.guild.id, "initialisation")
             detail = (str(exc) or exc.__class__.__name__).replace("`", "'")[:300]
             summary = embeds.error(
-                f"L'installation s'est arrêtée pendant **{cog._build_step}**. "
+                f"L'installation s'est arrêtée pendant **{step}**. "
                 f"Détail : `{exc.__class__.__name__}: {detail}`\n\n"
                 "Les éléments déjà créés sont conservés. Relancez la commande après correction : "
                 "elle reprend sans doublons."
@@ -1167,7 +1170,11 @@ class ServerBuilderView(discord.ui.View):
 class ServerBuilder(commands.Cog, name="ServerBuilder"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self._build_step = "initialisation"
+        # Par guild_id : ServerBuilder est un cog unique partagé par tous les serveurs,
+        # donc un seul attribut _build_step aurait mélangé l'étape de deux /create-server
+        # lancés en même temps sur deux serveurs différents (ou deux fois sur le même) —
+        # le message d'erreur affiché à l'un aurait pu décrire l'étape de l'autre.
+        self._build_steps: dict[int, str] = {}
 
     @staticmethod
     def _desired_category_overwrites(
@@ -1808,13 +1815,13 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         author: discord.Member,
     ) -> discord.Embed:
         data = SERVER_TEMPLATES[template_key]
-        self._build_step = "vérification des limites Discord"
+        self._build_steps[guild.id] = "vérification des limites Discord"
         capacity_error = self._capacity_error(guild, data)
         if capacity_error:
             return embeds.error(capacity_error)
 
         reason = f"Configuration complète {data['label']} demandée par {author}"
-        self._build_step = "création et mise à jour des rôles"
+        self._build_steps[guild.id] = "création et mise à jour des rôles"
         role_map, roles_created, roles_updated = await self._ensure_roles(
             guild,
             data,
@@ -1822,7 +1829,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         )
         staff_role = role_map[data["staff_role_name"]]
         member_role = role_map[data["member_role_name"]]
-        self._build_step = "création et configuration des catégories et salons"
+        self._build_steps[guild.id] = "création et configuration des catégories et salons"
         (
             category_map,
             channel_map,
@@ -1837,7 +1844,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             reason,
         )
 
-        self._build_step = "liaison des salons avec les fonctions SentriX"
+        self._build_steps[guild.id] = "liaison des salons avec les fonctions SentriX"
         settings_configured = await self._configure_bot_channels(
             guild,
             role_map,
@@ -1846,13 +1853,13 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             data["staff_role_name"],
         )
 
-        self._build_step = "publication du règlement et des guides"
+        self._build_steps[guild.id] = "publication du règlement et des guides"
         messages_published = await self._publish_welcome_content(
             guild,
             channel_map,
             template_key,
         )
-        self._build_step = "configuration du panneau de tickets"
+        self._build_steps[guild.id] = "configuration du panneau de tickets"
         try:
             ticket_status = await self._configure_tickets(
                 guild,
@@ -1866,7 +1873,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             logger.exception("Échec de la configuration automatique des tickets")
             ticket_status = "erreur pendant la configuration ; utilisez +ticketsetup"
 
-        self._build_step = "finalisation"
+        self._build_steps[guild.id] = "finalisation"
         total_channels = sum(len(category["channels"]) for category in data["categories"])
         result = embeds.success(
             f"Le serveur **{guild.name}** est configuré avec le modèle **{data['label']}**.\n\n"

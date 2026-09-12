@@ -241,6 +241,8 @@ CATEGORIES: tuple[CategorySpec, ...] = (
         frozenset({
             "bot-status", "server-growth", "command-stats", "changelog",
             "feedback", "botinfo", "diagnostic",
+            # Core V2, Phase 3 (docs/core-v2-plan.md)
+            "permissions",
         }),
         frozenset({"Stats"}),
     ),
@@ -252,6 +254,8 @@ CATEGORIES: tuple[CategorySpec, ...] = (
             "bl", "blinfo", "unbl", "editbl", "sync", "syncguild",
             "setstatus", "status-rotate", "footer", "theme", "set-bot",
             "bot-servers", "bot-leave",
+            # Core V2, Phase 1 (docs/core-v2-plan.md)
+            "corediag",
         }),
         frozenset({"Owner"}),
     ),

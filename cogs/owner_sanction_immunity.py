@@ -3,8 +3,9 @@
 Le compte propriétaire de SentriX ne peut pas être ciblé par les sanctions exécutées par
 SentriX. La protection existe à deux niveaux :
 - commandes/runtimes (modération, AutoMod, anti-nuke) ;
-- garde bas niveau discord.py pour ban, kick et timeout, même si un autre module appelle
-  directement les méthodes Discord au lieu de passer par les commandes de modération.
+- garde bas niveau discord.py pour ban, kick, timeout et retrait de rôles, même si un autre
+  module appelle directement les méthodes Discord au lieu de passer par les commandes de
+  modération.
 
 Cette protection ne change pas les permissions natives Discord et ne peut pas empêcher un
 autre bot ou un humain distinct de sanctionner ce compte.
@@ -102,6 +103,22 @@ def _install_discord_api_guard() -> None:
             member_kick_protected._sentrix_original = original_member_kick
             discord.Member.kick = member_kick_protected
 
+    if hasattr(discord.Member, "remove_roles"):
+        original_remove_roles = discord.Member.remove_roles
+        if not getattr(original_remove_roles, "_sentrix_owner_hard_guard", False):
+            async def remove_roles_protected(self, *roles, **kwargs):
+                if _is_protected(self):
+                    logger.warning(
+                        "RETRAIT DE RÔLES BLOQUÉ : SentriX a refusé de derank son propriétaire vérifié sur guild=%s.",
+                        self.guild.id,
+                    )
+                    return None
+                return await original_remove_roles(self, *roles, **kwargs)
+
+            remove_roles_protected._sentrix_owner_hard_guard = True
+            remove_roles_protected._sentrix_original = original_remove_roles
+            discord.Member.remove_roles = remove_roles_protected
+
     if hasattr(discord.Member, "timeout"):
         original_timeout = discord.Member.timeout
         if not getattr(original_timeout, "_sentrix_owner_hard_guard", False):
@@ -121,14 +138,24 @@ def _install_discord_api_guard() -> None:
     original_member_edit = discord.Member.edit
     if not getattr(original_member_edit, "_sentrix_owner_hard_guard", False):
         async def member_edit_protected(self, *args, **kwargs):
-            if _is_protected(self) and kwargs.get("timed_out_until") is not None:
-                logger.warning(
-                    "TIMEOUT VIA EDIT BLOQUÉ : cible propriétaire SentriX guild=%s.",
-                    self.guild.id,
-                )
+            if _is_protected(self):
+                blocked = False
                 kwargs = dict(kwargs)
-                kwargs.pop("timed_out_until", None)
-                if not kwargs:
+                if kwargs.get("timed_out_until") is not None:
+                    logger.warning(
+                        "TIMEOUT VIA EDIT BLOQUÉ : cible propriétaire SentriX guild=%s.",
+                        self.guild.id,
+                    )
+                    kwargs.pop("timed_out_until", None)
+                    blocked = True
+                if "roles" in kwargs:
+                    logger.warning(
+                        "MODIFICATION DE RÔLES VIA EDIT BLOQUÉE : SentriX a refusé de derank son propriétaire vérifié sur guild=%s.",
+                        self.guild.id,
+                    )
+                    kwargs.pop("roles", None)
+                    blocked = True
+                if blocked and not kwargs:
                     return self
             return await original_member_edit(self, *args, **kwargs)
 
@@ -137,7 +164,7 @@ def _install_discord_api_guard() -> None:
         discord.Member.edit = member_edit_protected
 
     _HARD_GUARD_INSTALLED = True
-    logger.info("Verrou bas niveau ban/kick/timeout du propriétaire SentriX activé.")
+    logger.info("Verrou bas niveau ban/kick/timeout/retrait de rôles du propriétaire SentriX activé.")
 
 
 def install(bot: commands.Bot) -> None:
@@ -202,6 +229,30 @@ def install(bot: commands.Bot) -> None:
             if is_bot_owner_id(actor_id):
                 logger.warning("Anti-nuke ignoré pour le propriétaire vérifié de SentriX sur %s.", guild.id)
                 return None
+
+            # Défense en profondeur : revalide l'exemption juste avant toute sanction.
+            # Ainsi, une entrée /antinuke-whitelist-* (ou le propriétaire du serveur / bot)
+            # reste protégée même si un autre runtime appelle punish_nuker() directement et
+            # contourne accidentellement les listeners qui font normalement ce contrôle.
+            actor = guild.get_member(int(actor_id)) or discord.Object(id=int(actor_id))
+            try:
+                if await self.is_antinuke_exempt(guild, actor):
+                    logger.warning(
+                        "Anti-nuke ignoré pour un utilisateur exempté/whitelisté sur guild=%s actor=%s.",
+                        guild.id,
+                        actor_id,
+                    )
+                    return None
+            except Exception:
+                # Fail-safe : une panne de lecture de la whitelist ne doit jamais provoquer
+                # un ban/derank potentiellement irréversible d'un compte protégé.
+                logger.exception(
+                    "Vérification whitelist anti-nuke impossible sur guild=%s actor=%s ; sanction bloquée par sécurité.",
+                    guild.id,
+                    actor_id,
+                )
+                return None
+
             return await original_punish_nuker(self, guild, actor_id, reason)
 
         patches = (

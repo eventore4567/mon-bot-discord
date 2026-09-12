@@ -298,6 +298,14 @@ def install(bot: commands.Bot) -> None:
 
     prefix_permission_guard._sentrix_permission_guard = True
     bot.global_permission_check = prefix_permission_guard
+    # S'enregistre lui-même plutôt que de compter sur main.py pour ramasser cet
+    # attribut d'instance après coup (docs/core-v2-audit-technical-debt.md, §6) :
+    # avant ce correctif, self.add_check(self.global_permission_check) dans
+    # main.py::setup_hook() ne fonctionnait QUE parce qu'il s'exécute après la
+    # boucle de chargement des extensions — un accident d'ordre, pas une garantie.
+    # Un futur refactor du boot qui inverserait cet ordre aurait rendu ce garde
+    # inerte (fail-open) sans qu'aucune erreur ne le signale.
+    bot.add_check(prefix_permission_guard)
 
     # Affichage seulement : Discord masque aux membres les commandes qu'ils ne peuvent
     # pas utiliser. La decision reste prise au runtime a chaque invocation.

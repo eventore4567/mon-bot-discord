@@ -10,6 +10,7 @@ import functools
 import discord
 from discord.ext import commands
 
+from services import profile as profile_service
 from utils import premium_style, stats_service, visual_v5
 from . import community_v3, community_v31
 from utils import sentrix_panels as panels
@@ -30,7 +31,22 @@ def _date(value) -> str:
 
 
 async def _snapshot(bot: commands.Bot, guild: discord.Guild, member: discord.Member):
-    return await community_v31._profile_snapshot(bot, guild, member)
+    """Core V2, Phase 4 (docs/core-v2-plan.md) : délègue désormais à
+    services/profile.py::build_snapshot(), testable sans jamais construire
+    ce cog ni Discord — voir son docstring pour le détail de l'extraction."""
+    return await profile_service.build_snapshot(bot, guild, member)
+
+
+async def _niveaux_actifs(bot: commands.Bot, guild_id: int) -> bool:
+    """Réutilise l'unique source de vérité (cogs/levels.py::Levels._niveaux_actifs,
+    qui interroge les DEUX interrupteurs existants) plutôt que d'en dupliquer la
+    logique ici. Si le cog Levels n'est pas chargé, on considère les niveaux actifs
+    — comportement par défaut, cohérent avec le fail-open déjà pratiqué par
+    _niveaux_actifs lui-même quand une de ses propres vérifications échoue."""
+    levels_cog = bot.get_cog("Levels")
+    if levels_cog is None:
+        return True
+    return await levels_cog._niveaux_actifs(guild_id)
 
 
 def _base(bot: commands.Bot, member: discord.Member, title: str, subtitle: str | None = None) -> discord.Embed:
@@ -46,27 +62,11 @@ def _base(bot: commands.Bot, member: discord.Member, title: str, subtitle: str |
     return embed
 
 
-def _badges(member: discord.Member, stats: dict, progression: dict) -> list[str]:
-    """Badges calculés uniquement à partir des vraies données du membre."""
-    badges: list[str] = []
-    if int(stats.get("message_count", 0)) >= 1000:
-        badges.append("Actif")
-    if int(stats.get("wallet", 0)) + int(stats.get("bank", 0)) >= 10_000:
-        badges.append("Économiste")
-    if int(progression.get("season_xp", 0)) > 0:
-        badges.append("Saisonnier")
-    if member.guild_permissions.manage_messages or member.guild_permissions.moderate_members:
-        badges.append("Staff")
-    account_days = max(0, (discord.utils.utcnow() - member.created_at).days)
-    if account_days >= 365:
-        badges.append("Vétéran")
-    return badges[:5]
-
-
 async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Member, author_id: int, page: str):
     data = await _snapshot(bot, guild, member)
     stats = data["stats"]
     progression = data["progression"]
+    niveaux_actifs = await _niveaux_actifs(bot, guild.id)
 
     if page == "missions":
         embed = _base(bot, member, "Missions du jour", member.display_name)
@@ -126,7 +126,7 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
                     text = text.replace(token, "")
                 cleaned.append(f"{index}. {text.strip().lstrip('1234567890. ')}")
             embed.add_field(name="Top 5", value="\n\n".join(cleaned), inline=False)
-        badges = _badges(member, stats, progression)
+        badges = profile_service.compute_badges(member, stats, progression)
         embed.add_field(
             name="Badges",
             value="\n".join(f"• {badge}" for badge in badges) if badges else "Aucun badge débloqué",
@@ -138,8 +138,12 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         ranks = data["ranks"]
         embed = _base(bot, member, "Classements", member.display_name)
         embed.colour = discord.Colour(premium_style.COLORS["leaderboard"])
+        niveau_ligne = (
+            f"Niveau / XP\n**{_rank(ranks.get('xp_rank'))}**\n\n" if niveaux_actifs
+            else "Niveau / XP\n**Désactivé sur ce serveur**\n\n"
+        )
         embed.description = (
-            f"Niveau / XP\n**{_rank(ranks.get('xp_rank'))}**\n\n"
+            f"{niveau_ligne}"
             f"Messages\n**{_rank(ranks.get('message_rank'))}**\n\n"
             f"Économie\n**{_rank(ranks.get('economy_rank'))}**\n\n"
             f"Saison\n**{_rank(data['season_rank'])}**"
@@ -154,20 +158,23 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         f"Profil de {member.display_name}",
         f"{member.mention}\n\n{bio}",
     )
-    level_rank = _rank(stats.get("rank")) if stats.get("is_ranked") else "Non classé"
     wallet = int(stats.get("wallet", 0) or 0)
     bank = int(stats.get("bank", 0) or 0)
     total = wallet + bank
 
-    embed.add_field(
-        name="Progression",
-        value=(
-            f"Niveau\n**{_fmt(stats.get('current_level'))}**\n\n"
-            f"XP totale\n**{_fmt(stats.get('total_xp'))}**\n\n"
-            f"Rang du serveur\n**{level_rank}**"
-        ),
-        inline=False,
-    )
+    if niveaux_actifs:
+        level_rank = _rank(stats.get("rank")) if stats.get("is_ranked") else "Non classé"
+        embed.add_field(
+            name="Progression",
+            value=(
+                f"Niveau\n**{_fmt(stats.get('current_level'))}**\n\n"
+                f"XP totale\n**{_fmt(stats.get('total_xp'))}**\n\n"
+                f"Rang du serveur\n**{level_rank}**"
+            ),
+            inline=False,
+        )
+    else:
+        embed.add_field(name="Progression", value="Niveaux désactivés sur ce serveur.", inline=False)
     embed.add_field(
         name="Économie",
         value=(
@@ -195,7 +202,7 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         ),
         inline=False,
     )
-    badges = _badges(member, stats, progression)
+    badges = profile_service.compute_badges(member, stats, progression)
     embed.add_field(
         name="Badges",
         value="\n".join(f"• {badge}" for badge in badges) if badges else "Aucun badge débloqué",

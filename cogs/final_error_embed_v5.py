@@ -16,6 +16,7 @@ from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from . import final_interaction_policy as policy
+from core.errors import pipeline as error_pipeline
 
 logger = logging.getLogger("bot.final-error-embed-v5")
 
@@ -311,6 +312,22 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
             sections=[panels.Section("Raison", [panels.Ligne("Motif enregistré", raison)])],
         )
 
+    if cls == "RuntimeRateLimitError":
+        # docs/core-v2-audit-technical-debt.md §3 : ce message vivait dans
+        # cogs/bot_excellence_runtime.py::improved_error_handler, un patch de
+        # classe (cls.on_command_error) définitivement masqué par le
+        # remplacement d'instance ci-dessous (bot.on_command_error =
+        # MethodType(prefix_error, bot)) — RuntimeRateLimitError (une
+        # CheckFailure sans .message) retombait donc dans le cas générique
+        # juste après et affichait à tort "Vous n'êtes pas autorisé à utiliser
+        # cette commande" pour un simple ralentissement anti-abus.
+        secondes = max(1, round(float(getattr(base, "retry_after", 1.0) or 1.0)))
+        return _panneau(
+            "Fonction temporairement limitée",
+            f"Cette fonction est temporairement limitée pour protéger SentriX. Réessayez dans environ {secondes} seconde(s).",
+            kind="warning",
+        )
+
     if cls == "BotPermissionError" or isinstance(base, commands.CheckFailure):
         message = str(getattr(base, "message", "") or "Vous n'êtes pas autorisé à utiliser cette commande.")
         return _panneau(
@@ -343,6 +360,17 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
             ],
         )
 
+    # Seul cas qui journalisait auparavant zero trace exploitable côté serveur —
+    # voir docs/core-v2-audit-technical-debt.md §2. core.errors.pipeline.report()
+    # écrit la trace complète dans les logs et retourne une référence courte,
+    # affichée ici, à recouper avec les logs si le problème persiste.
+    entree = error_pipeline.report(
+        base,
+        command=commande or "inconnue",
+        transport="prefix",
+        guild_id=ctx.guild.id if getattr(ctx, "guild", None) else None,
+        user_id=getattr(getattr(ctx, "author", None), "id", None),
+    )
     return _panneau(
         "Erreur de commande",
         "Une erreur technique a interrompu la commande.",
@@ -351,7 +379,11 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
                 "Ce qui s'est passé",
                 [
                     panels.Ligne("Effet sur le serveur", "**Aucun** — rien n'a été modifié"),
-                    panels.Ligne("Signalement", "L'erreur a été enregistrée automatiquement"),
+                    panels.Ligne(
+                        "Référence",
+                        entree.code,
+                        indice="Enregistrée automatiquement — donnez cette référence au support si besoin.",
+                    ),
                 ],
             ),
             panels.Section("Ce que vous pouvez faire", [panels.Ligne("Vérifiez la syntaxe", f"`{_usage(ctx)}`")]),
@@ -360,9 +392,19 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
     )
 
 
-def _slash_error_panel(error: discord.app_commands.AppCommandError) -> panels.Panneau:
+def _slash_error_panel(
+    error: discord.app_commands.AppCommandError,
+    *,
+    command: str | None = None,
+    guild_id: int | None = None,
+    user_id: int | None = None,
+) -> panels.Panneau:
     """Meme composition que les erreurs prefixees : une commande slash qui echoue
-    ne doit pas ressembler a autre chose qu'une commande prefixee qui echoue."""
+    ne doit pas ressembler a autre chose qu'une commande prefixee qui echoue.
+
+    ``command``/``guild_id``/``user_id`` sont optionnels (rétrocompatibles avec
+    tout appelant existant qui ne passe que ``error``) — utilisés uniquement pour
+    enrichir la référence d'erreur du repli générique ci-dessous."""
     original = getattr(error, "original", error)
 
     if isinstance(error, discord.app_commands.CommandOnCooldown):
@@ -434,6 +476,13 @@ def _slash_error_panel(error: discord.app_commands.AppCommandError) -> panels.Pa
         message = str(getattr(original, "message", "") or "Vous n'êtes pas autorisé à utiliser cette commande.")
         return _panneau("Accès refusé", message)
 
+    entree = error_pipeline.report(
+        original,
+        command=command or "inconnue",
+        transport="slash",
+        guild_id=guild_id,
+        user_id=user_id,
+    )
     return _panneau(
         "Erreur de commande",
         "Une erreur technique inattendue a interrompu la commande.",
@@ -442,7 +491,11 @@ def _slash_error_panel(error: discord.app_commands.AppCommandError) -> panels.Pa
                 "Ce qui s'est passé",
                 [
                     panels.Ligne("Effet sur le serveur", "**Aucun** — rien n'a été modifié"),
-                    panels.Ligne("Signalement", "L'erreur a été enregistrée automatiquement"),
+                    panels.Ligne(
+                        "Référence",
+                        entree.code,
+                        indice="Enregistrée automatiquement — donnez cette référence au support si besoin.",
+                    ),
                 ],
             ),
             panels.Section(
@@ -592,6 +645,26 @@ async def _raw_slash_send(interaction: discord.Interaction, panneau: panels.Pann
 
 def install(bot: commands.Bot) -> None:
     async def prefix_error(self: commands.Bot, ctx: commands.Context, error: commands.CommandError):
+        base = getattr(error, "original", error)
+        if (
+            isinstance(base, commands.MissingRequiredArgument)
+            and ctx.command is not None
+            and ctx.command.qualified_name == "tictactoe"
+            and getattr(base.param, "name", "") == "adversaire"
+        ):
+            # docs/core-v2-audit-technical-debt.md §3 : ce matchmaking vivait dans
+            # cogs/bot_excellence_runtime.py::improved_error_handler, un patch de
+            # classe (cls.on_command_error) définitivement masqué par le
+            # remplacement d'instance ci-dessous (bot.on_command_error =
+            # MethodType(prefix_error, bot)) — +tictactoe sans argument affichait
+            # donc "Argument manquant" au lieu de chercher un adversaire.
+            try:
+                from .bot_excellence_runtime import _matchmake_tictactoe
+
+                return await _matchmake_tictactoe(ctx)
+            except Exception:
+                logger.exception("V5 : matchmaking +tictactoe indisponible, repli sur le panneau d'erreur standard.")
+
         panel = _prefix_error_panel(ctx, error)
         try:
             if getattr(ctx, "_sentrix_response_sent", False):
@@ -610,7 +683,13 @@ def install(bot: commands.Bot) -> None:
     bot.on_command_error = MethodType(prefix_error, bot)
 
     async def slash_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-        panel = _slash_error_panel(error)
+        command = getattr(interaction, "command", None)
+        panel = _slash_error_panel(
+            error,
+            command=getattr(command, "qualified_name", None),
+            guild_id=interaction.guild_id,
+            user_id=getattr(interaction.user, "id", None),
+        )
         try:
             await _raw_slash_send(interaction, panel)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException):

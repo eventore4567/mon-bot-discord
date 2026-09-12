@@ -28,9 +28,10 @@ import discord
 from discord.ext import commands
 
 from database.db import now
+from services import economy as economy_service
 from utils import embeds, stats_service
 from utils import sentrix_panels as panels
-from utils.v22_rules import clean_reason, parse_friendly_amount, parse_friendly_duration
+from utils.v22_rules import clean_reason, parse_friendly_duration
 
 logger = logging.getLogger("bot.integrity-hardening")
 
@@ -96,164 +97,6 @@ def _install_safe_pruning(bot: commands.Bot) -> bool:
     return True
 
 
-async def _fetchone_conn(conn, query: str, params: tuple = ()):
-    cur = await conn.execute(query, params)
-    try:
-        return await cur.fetchone()
-    finally:
-        await cur.close()
-
-
-async def _atomic_bank_transfer(db, guild_id: int, user_id: int, raw_amount: str, *, deposit: bool):
-    conn = getattr(db, "_conn", None)
-    if conn is None:
-        return "unavailable", 0
-    async with db._economy_lock:
-        try:
-            await conn.execute(
-                "INSERT OR IGNORE INTO economy (guild_id,user_id) VALUES (?,?)",
-                (guild_id, user_id),
-            )
-            row = await _fetchone_conn(
-                conn,
-                "SELECT cash,bank FROM economy WHERE guild_id=? AND user_id=?",
-                (guild_id, user_id),
-            )
-            source = int(row["cash"] if deposit else row["bank"]) if row else 0
-            amount = parse_friendly_amount(str(raw_amount), source)
-            if amount is None or int(amount) <= 0 or int(amount) > source:
-                await conn.commit()
-                return "invalid", 0
-            amount = int(amount)
-            if deposit:
-                cur = await conn.execute(
-                    "UPDATE economy SET cash=cash-?, bank=bank+? "
-                    "WHERE guild_id=? AND user_id=? AND cash>=?",
-                    (amount, amount, guild_id, user_id, amount),
-                )
-                transaction_type = "deposit"
-                reason = "Dépôt bancaire"
-            else:
-                cur = await conn.execute(
-                    "UPDATE economy SET cash=cash+?, bank=bank-? "
-                    "WHERE guild_id=? AND user_id=? AND bank>=?",
-                    (amount, amount, guild_id, user_id, amount),
-                )
-                transaction_type = "withdraw"
-                reason = "Retrait bancaire"
-            if cur.rowcount < 1:
-                await conn.rollback()
-                return "changed", 0
-            await conn.execute(
-                "INSERT INTO economy_transactions "
-                "(guild_id,sender_id,receiver_id,transaction_type,amount,created_at,reason) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (guild_id, user_id, user_id, transaction_type, amount, now(), reason),
-            )
-            await conn.commit()
-            return "ok", amount
-        except Exception:
-            await conn.rollback()
-            logger.exception("Transaction banque annulée (deposit=%s).", deposit)
-            return "error", 0
-
-
-async def _atomic_sell(db, guild_id: int, user_id: int, item_name: str):
-    conn = getattr(db, "_conn", None)
-    if conn is None:
-        return "unavailable", 0
-    async with db._economy_lock:
-        try:
-            row = await _fetchone_conn(
-                conn,
-                "SELECT quantity FROM inventory WHERE guild_id=? AND user_id=? AND item_name=?",
-                (guild_id, user_id, item_name),
-            )
-            if not row or int(row["quantity"] or 0) < 1:
-                return "missing", 0
-            item = await _fetchone_conn(
-                conn,
-                "SELECT price FROM shop_items WHERE guild_id=? AND name=?",
-                (guild_id, item_name),
-            )
-            price = max(0, int(int(item["price"]) * 0.5)) if item else 10
-            cur = await conn.execute(
-                "UPDATE inventory SET quantity=quantity-1 "
-                "WHERE guild_id=? AND user_id=? AND item_name=? AND quantity>=1",
-                (guild_id, user_id, item_name),
-            )
-            if cur.rowcount < 1:
-                await conn.rollback()
-                return "changed", 0
-            await conn.execute(
-                "DELETE FROM inventory WHERE guild_id=? AND user_id=? AND item_name=? AND quantity<=0",
-                (guild_id, user_id, item_name),
-            )
-            await conn.execute(
-                "INSERT OR IGNORE INTO economy (guild_id,user_id) VALUES (?,?)",
-                (guild_id, user_id),
-            )
-            await conn.execute(
-                "UPDATE economy SET cash=cash+? WHERE guild_id=? AND user_id=?",
-                (price, guild_id, user_id),
-            )
-            await conn.execute(
-                "INSERT INTO economy_transactions "
-                "(guild_id,sender_id,receiver_id,transaction_type,amount,created_at,reason) "
-                "VALUES (?,NULL,?,'sell',?,?,?)",
-                (guild_id, user_id, price, now(), f"Vente : {item_name}"),
-            )
-            await conn.commit()
-            return "ok", price
-        except Exception:
-            await conn.rollback()
-            logger.exception("Vente atomique annulée.")
-            return "error", 0
-
-
-async def _atomic_gamble(db, guild_id: int, user_id: int, amount: int, *, win: bool):
-    if amount <= 0:
-        return "invalid"
-    conn = getattr(db, "_conn", None)
-    if conn is None:
-        return "unavailable"
-    async with db._economy_lock:
-        try:
-            await conn.execute(
-                "INSERT OR IGNORE INTO economy (guild_id,user_id) VALUES (?,?)",
-                (guild_id, user_id),
-            )
-            delta = amount if win else -amount
-            cur = await conn.execute(
-                "UPDATE economy SET cash=cash+? "
-                "WHERE guild_id=? AND user_id=? AND cash>=?",
-                (delta, guild_id, user_id, amount),
-            )
-            if cur.rowcount < 1:
-                await conn.rollback()
-                return "insufficient"
-            await conn.execute(
-                "INSERT INTO economy_transactions "
-                "(guild_id,sender_id,receiver_id,transaction_type,amount,created_at,reason) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (
-                    guild_id,
-                    None if win else user_id,
-                    user_id if win else None,
-                    "gamble_win" if win else "gamble_loss",
-                    amount,
-                    now(),
-                    "Casino",
-                ),
-            )
-            await conn.commit()
-            return "ok"
-        except Exception:
-            await conn.rollback()
-            logger.exception("Mise casino annulée.")
-            return "error"
-
-
 def _install_economy(bot: commands.Bot) -> bool:
     economy = bot.get_cog("Economy")
     if economy is None:
@@ -262,7 +105,7 @@ def _install_economy(bot: commands.Bot) -> bool:
     async def safe_deposit(this, ctx: commands.Context, montant: str):
         if ctx.guild is None:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-        status, amount = await _atomic_bank_transfer(
+        status, amount = await economy_service.atomic_bank_transfer(
             bot.db, ctx.guild.id, ctx.author.id, montant, deposit=True
         )
         if status == "ok":
@@ -279,7 +122,7 @@ def _install_economy(bot: commands.Bot) -> bool:
         async def safe_withdraw(cog, ctx: commands.Context, montant: str):
             if ctx.guild is None:
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-            status, amount = await _atomic_bank_transfer(
+            status, amount = await economy_service.atomic_bank_transfer(
                 bot.db, ctx.guild.id, ctx.author.id, montant, deposit=False
             )
             if status == "ok":
@@ -297,7 +140,7 @@ def _install_economy(bot: commands.Bot) -> bool:
             item_name = str(objet or "").strip()
             if not item_name:
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Indiquez l'objet à vendre.")))
-            status, price = await _atomic_sell(bot.db, ctx.guild.id, ctx.author.id, item_name)
+            status, price = await economy_service.atomic_sell(bot.db, ctx.guild.id, ctx.author.id, item_name)
             if status == "ok":
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{item_name}** vendu pour **{stats_service.format_number(price)}** 🪙.')))
             if status in {"missing", "changed"}:
@@ -313,7 +156,7 @@ def _install_economy(bot: commands.Bot) -> bool:
             if int(montant) <= 0:
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant doit être positif.')))
             win = secrets.randbelow(2) == 0
-            status = await _atomic_gamble(bot.db, ctx.guild.id, ctx.author.id, int(montant), win=win)
+            status = await economy_service.atomic_gamble(bot.db, ctx.guild.id, ctx.author.id, int(montant), win=win)
             if status == "insufficient":
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Solde insuffisant.')))
             if status != "ok":

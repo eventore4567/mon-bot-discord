@@ -32,7 +32,6 @@ import traceback
 os.environ.setdefault("DISCORD_TOKEN", "x")
 RACINE = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE))
-logging.disable(logging.CRITICAL)
 
 import discord  # noqa: E402
 
@@ -397,6 +396,12 @@ def _arguments(rappel, ctx) -> tuple[dict, str]:
 
 
 async def main(fichiers: list[str]) -> int:
+    # Déplacé hors import : au niveau module, ce désactivait TOUTE journalisation
+    # pour le reste du process — y compris pour tests/test_rendu_execution.py, qui
+    # importe ce fichier sans jamais appeler main() (rendait assertLogs
+    # silencieusement muet pour n'importe quel autre test exécuté ensuite).
+    logging.disable(logging.CRITICAL)
+
     import config
     from database.db import Database
 

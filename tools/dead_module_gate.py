@@ -15,6 +15,7 @@ rendre bloquante en CI une fois le depot assaini.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import pathlib
@@ -25,10 +26,27 @@ import tempfile
 os.environ.setdefault("DISCORD_TOKEN", "gate")
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-logging.disable(logging.CRITICAL)
 
 import config  # noqa: E402
 from database.db import Database  # noqa: E402
+
+
+async def _close_runtime(bot) -> None:
+    """Annule les tâches de fond restées vivantes et ferme la base — sans ça,
+    le process ne se termine jamais. Même correctif que
+    tools/permission_coverage_gate.py (voir son historique de commit)."""
+    current = asyncio.current_task()
+    pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    close_db = getattr(bot.db, "close", None)
+    if close_db:
+        result = close_db()
+        if inspect.isawaitable(result):
+            await result
 
 # Modules non importes au boot mais dont une dependance vivante a ete VERIFIEE.
 # Chacun est retenu par un appel reel, pas par une reference defensive.
@@ -43,6 +61,11 @@ RETENUS: dict[str, str] = {
 
 
 async def main() -> int:
+    # Déplacé hors import : au niveau module, ce désactivait TOUTE journalisation
+    # pour le reste du process — y compris pour n'importe quel test import ce
+    # fichier sans passer par main() (rend assertLogs silencieusement muet ensuite).
+    logging.disable(logging.CRITICAL)
+
     strict = "--strict" in sys.argv
     config.DATABASE_PATH = str(pathlib.Path(tempfile.mkdtemp()) / "dead.db")
     import main as bot_main
@@ -51,67 +74,78 @@ async def main() -> int:
     bot.db = Database(config.DATABASE_PATH)
     await bot.db.connect()
 
-    extensions = list(bot_main.EXTENSIONS)
-    boot = (ROOT / "railway_boot.py").read_text(encoding="utf-8")
-    for name in re.findall(r'bot_main\.EXTENSIONS\.append\("(cogs\.[a-z0-9_]+)"\)', boot):
-        if name not in extensions:
-            extensions.append(name)
-    for extension in extensions:
-        try:
-            await asyncio.wait_for(bot.load_extension(extension), timeout=30)
-        except Exception:  # pragma: no cover - diagnostic
-            pass
+    try:
+        extensions = list(bot_main.EXTENSIONS)
+        boot = (ROOT / "railway_boot.py").read_text(encoding="utf-8")
+        for name in re.findall(r'bot_main\.EXTENSIONS\.append\("(cogs\.[a-z0-9_]+)"\)', boot):
+            if name not in extensions:
+                extensions.append(name)
+        for extension in extensions:
+            try:
+                await asyncio.wait_for(bot.load_extension(extension), timeout=30)
+            except Exception:  # pragma: no cover - diagnostic
+                pass
 
-    importes = {n.split(".", 1)[1] for n in sys.modules if n.startswith("cogs.")}
-    tous = {p.stem for p in (ROOT / "cogs").glob("*.py") if p.stem != "__init__"}
-    jamais = tous - importes
+        importes = {n.split(".", 1)[1] for n in sys.modules if n.startswith("cogs.")}
+        tous = {p.stem for p in (ROOT / "cogs").glob("*.py") if p.stem != "__init__"}
+        jamais = tous - importes
 
-    # Une reference TEXTUELLE depuis un module vivant suffit a retenir un fichier :
-    # elle attrape aussi les imports differes dans une fonction rarement appelee.
-    # web/ compte comme du code VIVANT : le dashboard importe des cogs
-    # (web/platform_v4.py fait « from cogs import platform_v4 »), et ce chemin n'est
-    # jamais exerce par un harnais qui ne charge que le bot. L'oublier ferait passer
-    # pour mort un module bien utilise en production.
-    vivants = [
-        p for p in list((ROOT / "cogs").glob("*.py")) + list((ROOT / "utils").glob("*.py"))
-        + list((ROOT / "web").glob("*.py"))
-        + [ROOT / "main.py", ROOT / "railway_boot.py"]
-        if p.parent.name != "cogs" or p.stem not in jamais
-    ]
-    retenus_par: dict[str, list[str]] = {}
-    for fichier in vivants:
-        texte = fichier.read_text(encoding="utf-8", errors="ignore")
-        for module in jamais:
-            if re.search(rf"\b{re.escape(module)}\b", texte):
-                retenus_par.setdefault(module, []).append(fichier.name)
+        # Une reference TEXTUELLE depuis un module vivant suffit a retenir un fichier :
+        # elle attrape aussi les imports differes dans une fonction rarement appelee.
+        # web/ compte comme du code VIVANT : le dashboard importe des cogs
+        # (web/platform_v4.py fait « from cogs import platform_v4 »), et ce chemin n'est
+        # jamais exerce par un harnais qui ne charge que le bot. L'oublier ferait passer
+        # pour mort un module bien utilise en production.
+        # Un module de RETENUS (vivant confirmé manuellement malgré l'absence de
+        # sys.modules) doit aussi compter comme texte vivant pour ses PROPRES imports
+        # différés : sinon final_runtime_polish (retenu car help_v8_final_guard
+        # appelle son install()) filtrait ses propres "from .sentrix_v22 import ..."
+        # hors du balayage, et sentrix_v2/v21/v22/sentrix_intelligent_ux ressortaient
+        # comme orphelins alors qu'ils sont bien atteints en production via lui.
+        vivants = [
+            p for p in list((ROOT / "cogs").glob("*.py")) + list((ROOT / "utils").glob("*.py"))
+            + list((ROOT / "web").glob("*.py"))
+            + [ROOT / "main.py", ROOT / "railway_boot.py"]
+            if p.parent.name != "cogs" or p.stem not in jamais or p.stem in RETENUS
+        ]
+        retenus_par: dict[str, list[str]] = {}
+        for fichier in vivants:
+            texte = fichier.read_text(encoding="utf-8", errors="ignore")
+            for module in jamais:
+                if re.search(rf"\b{re.escape(module)}\b", texte):
+                    retenus_par.setdefault(module, []).append(fichier.name)
 
-    orphelins = sorted(m for m in jamais if m not in retenus_par and m not in RETENUS)
-    lignes = sum(
-        len((ROOT / "cogs" / f"{m}.py").read_text(encoding="utf-8", errors="ignore").splitlines())
-        for m in orphelins
-    )
+        orphelins = sorted(m for m in jamais if m not in retenus_par and m not in RETENUS)
+        lignes = sum(
+            len((ROOT / "cogs" / f"{m}.py").read_text(encoding="utf-8", errors="ignore").splitlines())
+            for m in orphelins
+        )
 
-    print(f"fichiers cogs/*.py       : {len(tous)}")
-    print(f"importes au boot         : {len(tous & importes)}")
-    print(f"jamais importes          : {len(jamais)}")
-    print(f"  retenus par un vivant  : {len(retenus_par)}")
-    print(f"  dependance verifiee    : {len(RETENUS)}")
-    print(f"  ORPHELINS              : {len(orphelins)} ({lignes} lignes)")
-    print()
-    print("Rappel : « orphelin » signifie qu'aucun texte du code vivant ne les nomme.")
-    print("Cela ne prouve pas qu'ils sont morts — verifiez les appelants reels avant")
-    print("toute suppression, comme pour railway_boot et le dashboard web.")
+        print(f"fichiers cogs/*.py       : {len(tous)}")
+        print(f"importes au boot         : {len(tous & importes)}")
+        print(f"jamais importes          : {len(jamais)}")
+        print(f"  retenus par un vivant  : {len(retenus_par)}")
+        print(f"  dependance verifiee    : {len(RETENUS)}")
+        print(f"  ORPHELINS              : {len(orphelins)} ({lignes} lignes)")
+        print()
+        print("Rappel : « orphelin » signifie qu'aucun texte du code vivant ne les nomme.")
+        print("Cela ne prouve pas qu'ils sont morts — verifiez les appelants reels avant")
+        print("toute suppression, comme pour railway_boot et le dashboard web.")
 
-    if orphelins:
-        print("\nModules que plus rien n'atteint :")
-        for module in orphelins:
-            print("   ", module)
-        print("\nVerifiez avant de supprimer : un chemin d'import non couvert par le")
-        print("harnais (comme railway_boot) peut encore les atteindre en production.")
-        if strict:
-            return 1
+        if orphelins:
+            print("\nModules que plus rien n'atteint :")
+            for module in orphelins:
+                print("   ", module)
+            print("\nVerifiez avant de supprimer : un chemin d'import non couvert par le")
+            print("harnais (comme railway_boot) peut encore les atteindre en production.")
+            if strict:
+                return 1
 
-    return 0
+        return 0
+    finally:
+        # Même bug que tools/permission_coverage_gate.py avait : sans cleanup, le
+        # process ne se termine jamais après avoir imprimé son verdict.
+        await _close_runtime(bot)
 
 
 if __name__ == "__main__":

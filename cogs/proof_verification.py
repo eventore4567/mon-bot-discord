@@ -484,6 +484,7 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
                     data,
                     label=nom,
                     instructions=str(_get(settings, "instructions", "")),
+                    guild_id=ctx.guild.id,
                 )
             reference_id = await proof_service.add_reference(
                 self.bot, ctx.guild.id, ctx.author.id, label=nom, data=data, profile=profile
@@ -556,11 +557,13 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
                     pass
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vérification de {membre.mention} réinitialisée.')))
 
-    async def _analyze_attachment(self, attachment: discord.Attachment, references, instructions: str):
+    async def _analyze_attachment(self, attachment: discord.Attachment, references, instructions: str, guild_id: int):
         data = await attachment.read()
         fingerprint = proof_service.fingerprint_image(data)
         async with self.analysis_semaphore:
-            analysis = await proof_service.analyze_candidate(data, instructions=instructions, references=references)
+            analysis = await proof_service.analyze_candidate(
+                data, instructions=instructions, references=references, guild_id=guild_id,
+            )
         return data, fingerprint, analysis
 
     async def _queue_manual(
@@ -660,7 +663,7 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
         duplicate = False
         try:
             results = await asyncio.gather(*(
-                self._analyze_attachment(attachment, references, str(_get(settings, "instructions", "")))
+                self._analyze_attachment(attachment, references, str(_get(settings, "instructions", "")), message.guild.id)
                 for attachment in chosen
             ))
             fingerprints = []

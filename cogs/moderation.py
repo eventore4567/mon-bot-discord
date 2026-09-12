@@ -17,7 +17,6 @@ confondus, pas seulement les avertissements comme avec /warnings).
 """
 
 import logging
-from datetime import timedelta
 
 import discord
 from discord import app_commands
@@ -27,8 +26,14 @@ import config
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as panels
 from database.db import now
+from services import moderation as moderation_service
 
 logger = logging.getLogger("bot.moderation")
+
+# Sentinelle distincte de None : None est une valeur légitime pour case_number
+# quand la persistance a déjà été tentée par le service et a ÉCHOUÉ (Core V2,
+# Phase 2) — log_sanction ne doit alors PAS retenter un appel non protégé.
+_CASE_NUMBER_UNSET = object()
 
 
 class Moderation(commands.Cog):
@@ -186,19 +191,32 @@ class Moderation(commands.Cog):
     async def log_sanction(
         self, ctx: commands.Context, action: str, target: discord.abc.User, reason: str,
         duration_seconds: int | None = None, extra_fields: dict | None = None,
+        case_number: int | None = _CASE_NUMBER_UNSET,
     ) -> discord.Embed:
         """Point de passage UNIQUE pour toute sanction réelle : enregistre le dossier en
         base (numéro de dossier séquentiel réel), construit la fiche visuelle, l'envoie
-        dans le salon de logs, et retourne l'embed pour l'affichage dans le salon courant."""
-        case_number = await self.bot.db.record_sanction(
-            ctx.guild.id, target.id, ctx.author.id, action, reason, duration_seconds
-        )
+        dans le salon de logs, et retourne l'embed pour l'affichage dans le salon courant.
+
+        ``case_number`` : optionnel, rétrocompatible. Si fourni — y compris explicitement
+        None (Core V2, Phase 2 — services/moderation.py::persist_sanction() déjà tenté par
+        l'appelant, et échoué) — la persistance n'est PAS retentée ici : un None explicite
+        veut dire « déjà essayé, ne recommence pas sans protection ». Seule l'ABSENCE
+        d'argument (comportement historique, inchangé pour tempban/kick/mute/unmute/warn/
+        unban tant qu'ils ne sont pas migrés) déclenche encore la persistance directe,
+        non protégée, ici."""
+        if case_number is _CASE_NUMBER_UNSET:
+            case_number = await self.bot.db.record_sanction(
+                ctx.guild.id, target.id, ctx.author.id, action, reason, duration_seconds
+            )
         kind = self.SANCTION_KIND.get(action, "danger")
         colour = {"success": config.COLOR_SUCCESS, "warning": config.COLOR_WARNING, "danger": config.COLOR_ERROR}[kind]
         label = self.SANCTION_LABELS.get(action, action)
         style = design_system.CATEGORY_STYLES["moderation"]
+        # La sanction Discord a réussi même quand case_number est None (échec de
+        # persistance, Core V2 Phase 2) — jamais "Dossier #None", un texte honnête.
+        titre_dossier = f"Dossier #{case_number}" if case_number is not None else "Sanction (dossier non enregistré)"
         e = design_system.create_embed(
-            title=f"{style['emoji']} Dossier #{case_number} — {label}",
+            title=f"{style['emoji']} {titre_dossier} — {label}",
             colour=colour,
             thumbnail=target.display_avatar.url if hasattr(target, "display_avatar") else None,
             footer="SentriX",
@@ -248,6 +266,33 @@ class Moderation(commands.Cog):
             return None
         return row["message"]
 
+    @staticmethod
+    def _render_sanction_dm_text(
+        template: str,
+        *,
+        target: discord.abc.User,
+        guild: discord.Guild,
+        reason: str,
+        duration_seconds: int | None,
+        actor: discord.abc.User,
+        action_label: str,
+    ) -> str:
+        """Substitution pure des variables du gabarit — extrait de
+        _send_sanction_dm pour être réutilisable par services/moderation.py
+        (Core V2, Phase 2) sans dupliquer la logique de substitution."""
+        values = {
+            "membre": getattr(target, "display_name", str(target)),
+            "serveur": guild.name,
+            "raison": reason or "Aucune raison fournie",
+            "duree": helpers.format_duration(duration_seconds) if duration_seconds else "Non précisée",
+            "moderateur": getattr(actor, "display_name", str(actor)),
+            "action": action_label,
+        }
+        message = template
+        for key, value in values.items():
+            message = message.replace("{" + key + "}", str(value))
+        return message[:1900]
+
     async def _send_sanction_dm(
         self,
         ctx: commands.Context,
@@ -260,19 +305,17 @@ class Moderation(commands.Cog):
         template = await self._get_sanction_dm_template(ctx.guild.id, action)
         if template is None:
             return False
-        values = {
-            "membre": getattr(target, "display_name", str(target)),
-            "serveur": ctx.guild.name,
-            "raison": reason or "Aucune raison fournie",
-            "duree": helpers.format_duration(duration_seconds) if duration_seconds else "Non précisée",
-            "moderateur": getattr(ctx.author, "display_name", str(ctx.author)),
-            "action": self.DM_ACTION_LABELS[action],
-        }
-        message = template
-        for key, value in values.items():
-            message = message.replace("{" + key + "}", str(value))
+        message = self._render_sanction_dm_text(
+            template,
+            target=target,
+            guild=ctx.guild,
+            reason=reason,
+            duration_seconds=duration_seconds,
+            actor=ctx.author,
+            action_label=self.DM_ACTION_LABELS[action],
+        )
         try:
-            await target.send(message[:1900], allowed_mentions=discord.AllowedMentions.none())
+            await target.send(message, allowed_mentions=discord.AllowedMentions.none())
             return True
         except discord.HTTPException:
             return False
@@ -382,31 +425,79 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
     async def ban(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : première commande de sanction
+        migrée vers services/moderation.py::ban(). Ce corps ne fait plus que
+        l'adaptation Discord (parser ctx, préparer le texte du MP, rendre le
+        résultat) ; hiérarchie, exécution et persistance vivent dans le service,
+        testé sans Discord dans tests/test_services_moderation_ban.py — y compris
+        la correction d'un vrai trou trouvé pendant l'extraction : une exception de
+        persistance ne fait plus jamais passer une sanction réellement appliquée
+        pour un échec de commande."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        await self._send_sanction_dm(ctx, membre, "ban", raison)
-        await ctx.guild.ban(membre, reason=f"{ctx.author} : {raison}", delete_message_seconds=0)
-        e = await self.log_sanction(ctx, "ban", membre, raison)
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "ban")
+        dm_text = None
+        if template is not None:
+            dm_text = self._render_sanction_dm_text(
+                template,
+                target=membre,
+                guild=ctx.guild,
+                reason=raison,
+                duration_seconds=None,
+                actor=ctx.author,
+                action_label=self.DM_ACTION_LABELS["ban"],
+            )
+
+        outcome = await moderation_service.ban(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison, dm_text=dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.hierarchy_error)))
+
+        e = await self.log_sanction(ctx, "ban", membre, raison, case_number=outcome.case_number)
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
     @app_commands.describe(membre="Le membre à bannir", duree="Durée (ex: 30m, 2h, 1j)", raison="La raison")
-    @checks.has_permission_or_modrole("ban_members")
+    # AUTORISATION -> utils/access_matrix.py (matrice unique).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
     async def tempban(self, ctx: commands.Context, membre: discord.Member, duree: str, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : cinquième commande de
+        sanction migrée — voir services/moderation.py::tempban(). Remplace au
+        passage @checks.has_permission_or_modrole (autorisation locale,
+        redondante avec utils/access_matrix.py) par @checks.action_validation,
+        déjà en place sur ban/kick/mute/unmute — même famille de commandes,
+        même garde-fou : le bot doit réellement posséder la permission
+        Discord avant l'exécution."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        seconds = helpers.parse_duration(duree)
-        if seconds is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide. Exemples valides : `30m`, `2h`, `1j`.')))
-        await self._send_sanction_dm(ctx, membre, "tempban", raison, seconds)
-        await ctx.guild.ban(membre, reason=f"{ctx.author} (temporaire {duree}) : {raison}", delete_message_seconds=0)
-        await self.bot.db.execute(
-            "INSERT INTO tempactions (guild_id, user_id, action, expires_at) VALUES (?, ?, 'ban', ?)",
-            (ctx.guild.id, membre.id, now() + seconds),
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "tempban")
+
+        def render_dm_text(seconds: int) -> str | None:
+            if template is None:
+                return None
+            return self._render_sanction_dm_text(
+                template,
+                target=membre,
+                guild=ctx.guild,
+                reason=raison,
+                duration_seconds=seconds,
+                actor=ctx.author,
+                action_label=self.DM_ACTION_LABELS["tempban"],
+            )
+
+        outcome = await moderation_service.tempban(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison,
+            duree=duree, render_dm_text=render_dm_text,
         )
-        e = await self.log_sanction(ctx, "tempban", membre, raison, duration_seconds=seconds)
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+
+        e = await self.log_sanction(
+            ctx, "tempban", membre, raison,
+            duration_seconds=outcome.duration_seconds, case_number=outcome.case_number,
+        )
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     @commands.hybrid_command(name="unban", description="Débannir un utilisateur via son identifiant Discord.")
@@ -415,18 +506,35 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("ban_members",), target="external_user")
     async def unban(self, ctx: commands.Context, user_id: str, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : septième et dernière
+        commande de sanction migrée — voir services/moderation.py::unban().
+        Corrige le même trou que les six précédentes : record_sanction()
+        n'était protégé par aucun try/except alors que le débannissement
+        Discord avait déjà réellement réussi."""
         await self._ack(ctx)
         try:
             uid = int(user_id)
         except ValueError:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Identifiant Discord invalide.')))
-        try:
-            user = await self.bot.fetch_user(uid)
-            await ctx.guild.unban(user, reason=f"{ctx.author} : {raison}")
-            await self._send_sanction_dm(ctx, user, "unban", raison)
-        except discord.NotFound:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Cet utilisateur n'est pas banni ou n'existe pas.")))
-        e = await self.log_sanction(ctx, "unban", user, raison)
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "unban")
+
+        def render_dm_text(user: discord.abc.User) -> str | None:
+            if template is None:
+                return None
+            return self._render_sanction_dm_text(
+                template, target=user, guild=ctx.guild, reason=raison,
+                duration_seconds=None, actor=ctx.author, action_label=self.DM_ACTION_LABELS["unban"],
+            )
+
+        outcome = await moderation_service.unban(
+            self.bot, guild=ctx.guild, actor=ctx.author, user_id=uid, reason=raison,
+            fetch_user=self.bot.fetch_user, render_dm_text=render_dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+
+        e = await self.log_sanction(ctx, "unban", outcome.resolved_target, raison, case_number=outcome.case_number)
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     # ---------------------------------------------------------------- KICK
@@ -437,12 +545,32 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("kick_members",), target="member_moderation")
     async def kick(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : deuxième commande de
+        sanction migrée vers services/moderation.py — voir le docstring de
+        ban() ci-dessus pour le détail de la migration et du trou de
+        persistance corrigé en l'extrayant."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        await self._send_sanction_dm(ctx, membre, "kick", raison)
-        await ctx.guild.kick(membre, reason=f"{ctx.author} : {raison}")
-        e = await self.log_sanction(ctx, "kick", membre, raison)
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "kick")
+        dm_text = None
+        if template is not None:
+            dm_text = self._render_sanction_dm_text(
+                template,
+                target=membre,
+                guild=ctx.guild,
+                reason=raison,
+                duration_seconds=None,
+                actor=ctx.author,
+                action_label=self.DM_ACTION_LABELS["kick"],
+            )
+
+        outcome = await moderation_service.kick(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison, dm_text=dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.hierarchy_error)))
+
+        e = await self.log_sanction(ctx, "kick", membre, raison, case_number=outcome.case_number)
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     # ---------------------------------------------------------------- MUTE
@@ -461,16 +589,37 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
     async def mute(self, ctx: commands.Context, membre: discord.Member, duree: str = "10m", *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : troisième commande de
+        sanction migrée. Forme différente de ban()/kick() (durée à valider, MP
+        après l'exécution) — voir services/moderation.py::mute()."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        seconds = helpers.parse_duration(duree)
-        if seconds is None or seconds > 2419200:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide (maximum 28 jours). Exemple : `10m`, `1h`, `1j`.')))
-        until = discord.utils.utcnow() + timedelta(seconds=seconds)
-        await membre.timeout(until, reason=f"{ctx.author} : {raison}")
-        await self._send_sanction_dm(ctx, membre, "mute", raison, seconds)
-        e = await self.log_sanction(ctx, "mute", membre, raison, duration_seconds=seconds)
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "mute")
+
+        def render_dm_text(seconds: int) -> str | None:
+            if template is None:
+                return None
+            return self._render_sanction_dm_text(
+                template,
+                target=membre,
+                guild=ctx.guild,
+                reason=raison,
+                duration_seconds=seconds,
+                actor=ctx.author,
+                action_label=self.DM_ACTION_LABELS["mute"],
+            )
+
+        outcome = await moderation_service.mute(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison,
+            duree=duree, render_dm_text=render_dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+
+        e = await self.log_sanction(
+            ctx, "mute", membre, raison,
+            duration_seconds=outcome.duration_seconds, case_number=outcome.case_number,
+        )
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     @commands.hybrid_command(name="unmute", description="Retirer le mute (timeout) d'un membre.", with_app_command=False)
@@ -479,12 +628,30 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
     async def unmute(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : quatrième commande de
+        sanction migrée — voir services/moderation.py::unmute()."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        await membre.timeout(None, reason=f"{ctx.author} : {raison}")
-        await self._send_sanction_dm(ctx, membre, "unmute", raison)
-        e = await self.log_sanction(ctx, "unmute", membre, raison)
+
+        template = await self._get_sanction_dm_template(ctx.guild.id, "unmute")
+        dm_text = None
+        if template is not None:
+            dm_text = self._render_sanction_dm_text(
+                template,
+                target=membre,
+                guild=ctx.guild,
+                reason=raison,
+                duration_seconds=None,
+                actor=ctx.author,
+                action_label=self.DM_ACTION_LABELS["unmute"],
+            )
+
+        outcome = await moderation_service.unmute(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison, dm_text=dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+
+        e = await self.log_sanction(ctx, "unmute", membre, raison, case_number=outcome.case_number)
         await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
 
     # ---------------------------------------------------------------- WARN
@@ -495,72 +662,97 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
     async def warn(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
+        """Core V2, Phase 2 (docs/core-v2-plan.md) : sixième commande de
+        sanction migrée — voir services/moderation.py::warn(). Forme la plus
+        large de toutes les commandes migrées : au-delà du dossier de
+        sanction habituel, corrige aussi le même trou de persistance sur le
+        bannissement automatique par seuil d'avertissements (une sanction
+        Discord distincte, déjà réellement exécutée avant son propre
+        record_sanction() non protégé) et sur le comptage total (une lecture
+        qui ne doit plus jamais faire passer un avertissement déjà enregistré
+        pour un échec)."""
         await self._ack(ctx)
-        if not await self.check_targetable(ctx, membre):
-            return
-        await self.bot.db.execute(
-            "INSERT INTO warnings (guild_id, user_id, moderator_id, reason, timestamp) VALUES (?, ?, ?, ?, ?)",
-            (ctx.guild.id, membre.id, ctx.author.id, raison, now()),
-        )
-        rows = await self.bot.db.fetchall(
-            "SELECT id FROM warnings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
-        )
-        total = len(rows)
-        conf = await self.bot.db.get_guild_config(ctx.guild.id)
 
+        template = await self._get_sanction_dm_template(ctx.guild.id, "warn")
+        dm_text = None
+        if template is not None:
+            dm_text = self._render_sanction_dm_text(
+                template, target=membre, guild=ctx.guild, reason=raison,
+                duration_seconds=None, actor=ctx.author, action_label=self.DM_ACTION_LABELS["warn"],
+            )
+
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
         # Rôle automatique d'avertissement (/setwarnrole) : ajouté au membre à chaque
         # /warn, tant qu'il ne l'a pas déjà et que le bot a la permission de le faire.
-        role_note = ""
-        if conf and conf["warn_role"]:
-            role = ctx.guild.get_role(conf["warn_role"])
-            if role and role not in membre.roles:
-                try:
-                    await membre.add_roles(role, reason=f"Avertissement par {ctx.author} : {raison}")
-                    role_note = f"\nRôle {role.mention} attribué automatiquement."
-                except discord.HTTPException:
-                    role_note = f"\n⚠️ Impossible d'attribuer le rôle {role.mention} (permissions/hiérarchie)."
-
-        await self._send_sanction_dm(ctx, membre, "warn", raison)
-        extra = {"📌 Détails": f"Total d'avertissements : {total}{role_note}"}
-        e = await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra)
-        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
-
+        warn_role = ctx.guild.get_role(conf["warn_role"]) if conf and conf["warn_role"] else None
         # Bannissement automatique au bout de N avertissements (/setwarnbanthreshold,
         # 3 par défaut, 0 = désactivé). Pas de confirmation demandée : c'est le but de
         # ce seuil, agir automatiquement dès qu'il est atteint.
         threshold = conf["warn_ban_threshold"] if conf and conf["warn_ban_threshold"] else 0
-        if threshold and total >= threshold:
-            err = checks.check_bot_hierarchy(ctx.guild, membre)
-            if err:
-                await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"{membre.mention} a atteint **{total}** avertissements (seuil : {threshold}) mais n'a pas pu être banni automatiquement : {err}")))
-                return
-            await self._send_sanction_dm(
-                ctx, membre, "ban", f"Seuil de {threshold} avertissements atteint"
+
+        template_ban = await self._get_sanction_dm_template(ctx.guild.id, "ban")
+
+        def render_ban_dm_text() -> str | None:
+            if template_ban is None:
+                return None
+            return self._render_sanction_dm_text(
+                template_ban, target=membre, guild=ctx.guild,
+                reason=f"Seuil de {threshold} avertissements atteint",
+                duration_seconds=None, actor=ctx.author, action_label=self.DM_ACTION_LABELS["ban"],
             )
-            try:
-                await ctx.guild.ban(
-                    membre, reason=f"Ban automatique : {threshold} avertissements atteints", delete_message_seconds=0
-                )
-            except discord.HTTPException:
-                await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Le bannissement automatique de {membre.mention} a échoué (permissions).')))
-                return
-            case_number = await self.bot.db.record_sanction(
-                ctx.guild.id, membre.id, self.bot.user.id, "ban",
-                f"Seuil de {threshold} avertissements atteint",
-            )
-            style = design_system.CATEGORY_STYLES["moderation"]
-            ban_e = design_system.create_embed(
-                title=f"{style['emoji']} Dossier #{case_number} — 🚨 Bannissement automatique (seuil d'avertissements)",
-                colour=config.COLOR_ERROR,
-                thumbnail=membre.display_avatar.url,
-                footer="SentriX",
-            )
-            ban_e.add_field(name="👤 Membre", value=f"{membre.mention}\n`ID: {membre.id}`", inline=True)
-            ban_e.add_field(name="🛡️ Modérateur", value=f"{self.bot.user.mention} (automatique)", inline=True)
-            ban_e.add_field(name="📝 Raison", value=f"Seuil de {threshold} avertissements atteint", inline=False)
-            ban_e.add_field(name="📌 Détails", value=f"Bannissement automatique — total d'avertissements : {total}", inline=False)
-            await panels.envoyer(ctx, panels.depuis_embed(ban_e))
-            await self.log_action(ctx.guild, ban_e)
+
+        outcome = await moderation_service.warn(
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison,
+            dm_text=dm_text, warn_role=warn_role, ban_threshold=threshold,
+            render_ban_dm_text=render_ban_dm_text,
+        )
+        if not outcome.executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.hierarchy_error)))
+
+        role_note = ""
+        if warn_role is not None:
+            if outcome.role_assigned:
+                role_note = f"\nRôle {warn_role.mention} attribué automatiquement."
+            elif outcome.role_error:
+                role_note = f"\n⚠️ Impossible d'attribuer le rôle {warn_role.mention} (permissions/hiérarchie)."
+
+        total_txt = (
+            str(outcome.total_warnings) if outcome.total_warnings is not None
+            else "inconnu (erreur de comptage)"
+        )
+        extra = {"📌 Détails": f"Total d'avertissements : {total_txt}{role_note}"}
+        e = await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra, case_number=outcome.case_number)
+        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
+
+        if not outcome.auto_ban_triggered:
+            return
+        if outcome.auto_ban_hierarchy_error:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(
+                f"{membre.mention} a atteint **{outcome.total_warnings}** avertissements (seuil : {threshold}) "
+                f"mais n'a pas pu être banni automatiquement : {outcome.auto_ban_hierarchy_error}"
+            )))
+        if not outcome.auto_ban_executed:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
+                f'Le bannissement automatique de {membre.mention} a échoué (permissions).'
+            )))
+
+        style = design_system.CATEGORY_STYLES["moderation"]
+        titre_dossier = (
+            f"Dossier #{outcome.auto_ban_case_number}" if outcome.auto_ban_case_number is not None
+            else "Sanction (dossier non enregistré)"
+        )
+        ban_e = design_system.create_embed(
+            title=f"{style['emoji']} {titre_dossier} — 🚨 Bannissement automatique (seuil d'avertissements)",
+            colour=config.COLOR_ERROR,
+            thumbnail=membre.display_avatar.url,
+            footer="SentriX",
+        )
+        ban_e.add_field(name="👤 Membre", value=f"{membre.mention}\n`ID: {membre.id}`", inline=True)
+        ban_e.add_field(name="🛡️ Modérateur", value=f"{self.bot.user.mention} (automatique)", inline=True)
+        ban_e.add_field(name="📝 Raison", value=f"Seuil de {threshold} avertissements atteint", inline=False)
+        ban_e.add_field(name="📌 Détails", value=f"Bannissement automatique — total d'avertissements : {outcome.total_warnings}", inline=False)
+        await panels.envoyer(ctx, panels.depuis_embed(ban_e))
+        await self.log_action(ctx.guild, ban_e)
 
     @commands.hybrid_command(name="unwarn", description="Supprimer un avertissement précis via son identifiant.", with_app_command=False)
     @app_commands.describe(warn_id="L'identifiant de l'avertissement (voir /warnings)")

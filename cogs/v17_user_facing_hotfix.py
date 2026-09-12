@@ -63,9 +63,12 @@ def _apply_error_context_transport() -> None:
         kwargs.setdefault("delete_after", PREFIX_ERROR_LIFETIME)
         kwargs.setdefault("allowed_mentions", discord.AllowedMentions.none())
         message = getattr(self, "message", None)
-        if message is not None:
-            kwargs.setdefault("reference", message)
-            kwargs.setdefault("mention_author", False)
+        # Pas de reference= ici : current_send a été capturé AVANT l'installation de
+        # cogs/reply_reference_fix.py, donc un reference= posé à ce niveau contournait
+        # entièrement son filtrage et atteignait l'envoi Discord réel — réintroduisant
+        # le bandeau "le message original a été supprimé" que reply_reference_fix.py
+        # existe pour éliminer, mais seulement sur les erreurs de commandes préfixées.
+        # Voir docs/core-v2-audit-technical-debt.md §8.
 
         try:
             result = await current_send(self, *args, **kwargs)

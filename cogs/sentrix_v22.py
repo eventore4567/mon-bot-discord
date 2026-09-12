@@ -11,7 +11,6 @@ import asyncio
 import copy
 import functools
 import logging
-import secrets
 import time
 import types
 from collections import defaultdict
@@ -19,19 +18,18 @@ from collections import defaultdict
 import discord
 from discord.ext import commands
 
+from services import economy as economy_service
 from utils import embeds, stats_service
 from utils import sentrix_panels as panels
 from utils.v22_rules import (
     clean_reason,
     parse_friendly_amount,
     parse_friendly_duration,
-    safe_penalty,
     ttl_is_fresh,
 )
 
 logger = logging.getLogger("bot.sentrix-v22")
 
-ROB_COOLDOWN_SECONDS = 3600
 AI_SETTINGS_TTL = 20.0
 GAME_SETTINGS_TTL = 20.0
 TICKET_BUTTON_SETTINGS_TTL = 15.0
@@ -147,93 +145,7 @@ class SentriXV22(commands.Cog):
             if membre.bot:
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
 
-            db = self.bot.db
-            conn = getattr(db, "_conn", None)
-            if conn is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'économie est temporairement indisponible.")))
-
-            result = ("error", 0)
-            async with db._economy_lock:
-                try:
-                    await conn.execute(
-                        "INSERT OR IGNORE INTO economy (guild_id,user_id) VALUES (?,?)",
-                        (ctx.guild.id, ctx.author.id),
-                    )
-                    await conn.execute(
-                        "INSERT OR IGNORE INTO economy (guild_id,user_id) VALUES (?,?)",
-                        (ctx.guild.id, membre.id),
-                    )
-                    actor = await db.fetchone(
-                        "SELECT cash,last_rob FROM economy WHERE guild_id=? AND user_id=?",
-                        (ctx.guild.id, ctx.author.id),
-                    )
-                    target = await db.fetchone(
-                        "SELECT cash FROM economy WHERE guild_id=? AND user_id=?",
-                        (ctx.guild.id, membre.id),
-                    )
-                    actor_cash = int(actor["cash"] if actor else 0)
-                    target_cash = int(target["cash"] if target else 0)
-                    last_rob = int(actor["last_rob"] if actor else 0)
-                    now_ts = int(time.time())
-                    remaining = ROB_COOLDOWN_SECONDS - (now_ts - last_rob) if last_rob else 0
-                    if remaining > 0:
-                        # Les INSERT OR IGNORE ci-dessus peuvent avoir ouvert une transaction
-                        # sur un compte neuf. On la ferme explicitement même sans vol.
-                        await conn.commit()
-                        result = ("cooldown", remaining)
-                    elif target_cash < 50:
-                        await conn.commit()
-                        result = ("poor", 0)
-                    else:
-                        await conn.execute(
-                            "UPDATE economy SET last_rob=? WHERE guild_id=? AND user_id=?",
-                            (now_ts, ctx.guild.id, ctx.author.id),
-                        )
-                        if secrets.randbelow(100) < 40:
-                            ceiling = min(target_cash, 300)
-                            amount = 1 + secrets.randbelow(ceiling)
-                            debit = await conn.execute(
-                                "UPDATE economy SET cash=cash-? WHERE guild_id=? AND user_id=? AND cash>=?",
-                                (amount, ctx.guild.id, membre.id, amount),
-                            )
-                            if debit.rowcount < 1:
-                                await conn.rollback()
-                                result = ("retry", 0)
-                            else:
-                                await conn.execute(
-                                    "UPDATE economy SET cash=cash+? WHERE guild_id=? AND user_id=?",
-                                    (amount, ctx.guild.id, ctx.author.id),
-                                )
-                                await conn.execute(
-                                    "INSERT INTO economy_transactions "
-                                    "(guild_id,sender_id,receiver_id,transaction_type,amount,created_at,reason) "
-                                    "VALUES (?,?,?,?,?,?,?)",
-                                    (ctx.guild.id, membre.id, ctx.author.id, "rob", amount, now_ts, "Vol réussi V2.2"),
-                                )
-                                await conn.commit()
-                                result = ("success", amount)
-                        else:
-                            requested = 20 + secrets.randbelow(81)
-                            penalty = safe_penalty(actor_cash, requested)
-                            if penalty:
-                                await conn.execute(
-                                    "UPDATE economy SET cash=cash-? WHERE guild_id=? AND user_id=? AND cash>=?",
-                                    (penalty, ctx.guild.id, ctx.author.id, penalty),
-                                )
-                                await conn.execute(
-                                    "INSERT INTO economy_transactions "
-                                    "(guild_id,sender_id,receiver_id,transaction_type,amount,created_at,reason) "
-                                    "VALUES (?,?,NULL,?,?,?,?)",
-                                    (ctx.guild.id, ctx.author.id, "rob_fail", penalty, now_ts, "Vol raté, amende V2.2"),
-                                )
-                            await conn.commit()
-                            result = ("failed", penalty)
-                except Exception:
-                    await conn.rollback()
-                    logger.exception("V2.2 : transaction +rob annulée.")
-                    result = ("error", 0)
-
-            kind, value = result
+            kind, value = await economy_service.atomic_rob(self.bot.db, ctx.guild.id, ctx.author.id, membre.id)
             if kind == "cooldown":
                 minutes = max(1, (int(value) + 59) // 60)
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Vous devez attendre encore **{minutes} min** avant de retenter un vol.')))

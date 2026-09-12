@@ -17,6 +17,7 @@ import unicodedata
 import discord
 from discord.ext import commands
 
+from services import tickets as tickets_service
 from utils import log_service
 from utils import sentrix_panels as panels
 
@@ -191,19 +192,12 @@ async def _private_reply(interaction: discord.Interaction, embed: discord.Embed)
 
 
 async def _safe_ticket_log(cog, guild: discord.Guild, log_type: str, embed: discord.Embed, **kwargs) -> bool:
-    """Journalise sans jamais casser l'action métier qui vient de réussir."""
-    try:
-        sent = await log_service.send_log(cog.bot, guild, log_type, embed, **kwargs)
-        if not sent:
-            logger.warning(
-                "Log ticket non envoyé guild=%s type=%s : route désactivée/invalide ou transport indisponible.",
-                guild.id,
-                log_type,
-            )
-        return bool(sent)
-    except Exception:
-        logger.exception("Échec du log ticket guild=%s type=%s ; action métier conservée.", guild.id, log_type)
-        return False
+    """Journalise sans jamais casser l'action métier qui vient de réussir.
+
+    Voir services/tickets.py::safe_ticket_log() pour le comportement — cette
+    fonction reste ici comme adaptateur mince (elle n'a que `cog.bot` à passer).
+    """
+    return await tickets_service.safe_ticket_log(cog.bot, guild, log_type, embed, **kwargs)
 
 
 def install(bot: commands.Bot) -> None:
@@ -405,12 +399,17 @@ def install(bot: commands.Bot) -> None:
             return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.error('Impossible de prendre en charge ce ticket.')), ephemere=True)
 
         current_id = ticket["claimed_by"]
-        if current_id:
-            if int(current_id) == member.id:
-                return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.warning('Vous avez déjà pris en charge ce ticket.')), ephemere=True)
-            if not member.guild_permissions.administrator and member.id != guild.owner_id:
-                current = guild.get_member(int(current_id))
-                return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.warning(f"Ce ticket est déjà pris en charge par {(current.mention if current else 'un autre membre du staff')}.")), ephemere=True)
+        decision = tickets_service.claim_decision(
+            current_claimant_id=int(current_id) if current_id else None,
+            member_id=member.id,
+            is_admin=member.guild_permissions.administrator,
+            is_owner=member.id == guild.owner_id,
+        )
+        if decision == "self_already":
+            return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.warning('Vous avez déjà pris en charge ce ticket.')), ephemere=True)
+        if decision == "taken":
+            current = guild.get_member(int(current_id))
+            return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.warning(f"Ce ticket est déjà pris en charge par {(current.mention if current else 'un autre membre du staff')}.")), ephemere=True)
 
         await interaction.response.defer()
 
@@ -438,9 +437,15 @@ def install(bot: commands.Bot) -> None:
             return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.error('Action impossible.')), ephemere=True)
 
         current_id = ticket["claimed_by"]
-        if not current_id:
+        decision = tickets_service.unclaim_decision(
+            current_claimant_id=int(current_id) if current_id else None,
+            member_id=member.id,
+            is_admin=member.guild_permissions.administrator,
+            is_owner=member.id == guild.owner_id,
+        )
+        if decision == "not_claimed":
             return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.warning("Ce ticket n'est pas actuellement pris en charge.")), ephemere=True)
-        if int(current_id) != member.id and not member.guild_permissions.administrator and member.id != guild.owner_id:
+        if decision == "forbidden":
             return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.error('Seul le membre en charge ou un Administrateur peut abandonner ce ticket.')), ephemere=True)
 
         await interaction.response.defer()

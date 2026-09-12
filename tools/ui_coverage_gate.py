@@ -40,7 +40,6 @@ import tempfile
 os.environ.setdefault("DISCORD_TOKEN", "x")
 RACINE = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE))
-logging.disable(logging.CRITICAL)
 
 DETTE = pathlib.Path(__file__).parent / "ui_coverage_debt.json"
 
@@ -348,6 +347,15 @@ async def analyser() -> list[dict]:
 
 
 def main() -> int:
+    # Déplacé ici (hors import) : au niveau module, ce désactivait TOUTE
+    # journalisation pour le reste du process — y compris dans des tests qui se
+    # contentent d'importer ce fichier (tests/test_porte_couverture_ui.py),
+    # rendant `assertLogs` silencieusement muet pour n'importe quel autre test
+    # exécuté dans la même suite après celui-là. L'exécution en script autonome
+    # (`python3 tools/ui_coverage_gate.py`) garde exactement le même silence
+    # pendant le chargement bruyant du bot.
+    logging.disable(logging.CRITICAL)
+
     parseur = argparse.ArgumentParser(description=__doc__)
     parseur.add_argument("--init", action="store_true", help="regenere la dette de reference")
     parseur.add_argument("--liste", action="store_true", help="affiche la dette restante")

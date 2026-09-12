@@ -1108,7 +1108,7 @@ def _embed_de_sections(titre: str, resume: str, sections) -> discord.Embed:
     panneau = embeds.brand(titre, resume)
     for section in sections:
         rendu = section.rendu()
-        # On retire l'en-tete « ### ◢ TITRE » : il redevient le nom du champ.
+        # On retire l'en-tete « ### ● TITRE » : il redevient le nom du champ.
         corps = rendu.split("\n", 1)[1] if "\n" in rendu else ""
         if corps.strip():
             panneau.add_field(name=section.titre[:256], value=corps[:1024], inline=False)

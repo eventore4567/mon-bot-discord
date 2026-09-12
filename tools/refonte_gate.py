@@ -35,7 +35,6 @@ os.environ.setdefault("DISCORD_TOKEN", "x")
 RACINE = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE))
 sys.path.insert(0, str(RACINE / "tools"))
-logging.disable(logging.CRITICAL)
 
 from ui_coverage_gate import suivre_delegation  # noqa: E402
 
@@ -279,6 +278,11 @@ async def analyser() -> list[dict]:
 
 
 def main() -> int:
+    # Déplacé hors import : au niveau module, ce désactivait TOUTE journalisation
+    # pour le reste du process — y compris pour n'importe quel test qui importe
+    # ce fichier sans passer par main() (rend assertLogs silencieusement muet ensuite).
+    logging.disable(logging.CRITICAL)
+
     parseur = argparse.ArgumentParser(description=__doc__)
     parseur.add_argument("--liste", action="store_true")
     parseur.add_argument("--familles", action="store_true",

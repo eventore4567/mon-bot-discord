@@ -169,10 +169,10 @@ def _season_tier(xp: int) -> str:
 
 def _progress_bar(current: int, target: int, blocks: int = 10) -> str:
     if target <= 0:
-        return "█" * blocks
+        return "▰" * blocks
     ratio = max(0.0, min(1.0, current / target))
     filled = round(ratio * blocks)
-    return "█" * filled + "░" * (blocks - filled)
+    return "▰" * filled + "▱" * (blocks - filled)
 
 
 async def _engagement_row(bot: commands.Bot, guild_id: int, user_id: int):

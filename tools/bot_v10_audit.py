@@ -25,6 +25,7 @@ def main() -> None:
     web = text("web/platform_v10.py")
     boot = text("railway_boot.py")
     community = text("web/community_card_polish.py")
+    reliability = text("cogs/slash_reliability_v7.py")
 
     compile(bot, "cogs/bot_v10.py", "exec")
     compile(web, "web/platform_v10.py", "exec")
@@ -54,7 +55,14 @@ def main() -> None:
     ):
         assert marker in web, f"Dashboard V10 incomplet: {marker}"
 
-    assert '"cogs.bot_v10"' in boot
+    # bot_v10 n'est plus déclaré directement dans railway_boot.py : il est chargé
+    # indirectement par cogs/slash_reliability_v7.py::_install_bot_v10(), lui-même
+    # appelé depuis son setup() — confirmé en lisant le code réel. slash_reliability_v7
+    # doit donc être l'extension réellement déclarée dans le boot.
+    assert '"cogs.slash_reliability_v7"' in boot
+    assert "from . import bot_v10" in reliability
+    assert "await bot_v10.setup(bot)" in reliability
+    assert "await _install_bot_v10(bot)" in reliability
     assert "platform_v10.install(dashboard)" in community
 
     for path in (

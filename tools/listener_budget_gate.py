@@ -12,6 +12,7 @@ budget dans BUDGETS en connaissance de cause.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import pathlib
@@ -22,10 +23,27 @@ import tempfile
 os.environ.setdefault("DISCORD_TOKEN", "gate")
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-logging.disable(logging.CRITICAL)
 
 import config  # noqa: E402
 from database.db import Database  # noqa: E402
+
+
+async def _close_runtime(bot) -> None:
+    """Annule les tâches de fond restées vivantes et ferme la base — sans ça,
+    le process ne se termine jamais. Même correctif que
+    tools/permission_coverage_gate.py et tools/dead_module_gate.py."""
+    current = asyncio.current_task()
+    pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    close_db = getattr(bot.db, "close", None)
+    if close_db:
+        result = close_db()
+        if inspect.isawaitable(result):
+            await result
 
 # Budgets constates le 2026-09-01. Un depassement doit etre un choix, pas une derive.
 BUDGETS: dict[str, int] = {
@@ -44,6 +62,11 @@ BUDGETS: dict[str, int] = {
 
 
 async def main() -> int:
+    # Déplacé hors import : au niveau module, ce désactivait TOUTE journalisation
+    # pour le reste du process — y compris pour n'importe quel test qui importe
+    # ce fichier sans passer par main() (rend assertLogs silencieusement muet ensuite).
+    logging.disable(logging.CRITICAL)
+
     config.DATABASE_PATH = str(pathlib.Path(tempfile.mkdtemp()) / "listeners.db")
     import main as bot_main
 
@@ -51,51 +74,56 @@ async def main() -> int:
     bot.db = Database(config.DATABASE_PATH)
     await bot.db.connect()
 
-    extensions = list(bot_main.EXTENSIONS)
-    boot = (ROOT / "railway_boot.py").read_text(encoding="utf-8")
-    for name in re.findall(r'bot_main\.EXTENSIONS\.append\("(cogs\.[a-z0-9_]+)"\)', boot):
-        if name not in extensions:
-            extensions.append(name)
-    for extension in extensions:
-        try:
-            await asyncio.wait_for(bot.load_extension(extension), timeout=30)
-        except Exception:  # pragma: no cover - diagnostic
-            pass
+    try:
+        extensions = list(bot_main.EXTENSIONS)
+        boot = (ROOT / "railway_boot.py").read_text(encoding="utf-8")
+        for name in re.findall(r'bot_main\.EXTENSIONS\.append\("(cogs\.[a-z0-9_]+)"\)', boot):
+            if name not in extensions:
+                extensions.append(name)
+        for extension in extensions:
+            try:
+                await asyncio.wait_for(bot.load_extension(extension), timeout=30)
+            except Exception:  # pragma: no cover - diagnostic
+                pass
 
-    # bot.extra_events contient DEJA les listeners de cogs : ne pas reparcourir les
-    # cogs, cela compterait chaque handler deux fois.
-    compte = {name: len(callbacks) for name, callbacks in bot.extra_events.items()}
+        # bot.extra_events contient DEJA les listeners de cogs : ne pas reparcourir les
+        # cogs, cela compterait chaque handler deux fois.
+        compte = {name: len(callbacks) for name, callbacks in bot.extra_events.items()}
 
-    depassements: list[str] = []
-    for evenement, budget in sorted(BUDGETS.items()):
-        actuel = compte.get(evenement, 0)
-        marque = "  " if actuel <= budget else "!!"
-        print(f"{marque} {evenement:<32} {actuel:>3} / {budget}")
-        if actuel > budget:
-            depassements.append(f"{evenement} : {actuel} handlers pour un budget de {budget}")
+        depassements: list[str] = []
+        for evenement, budget in sorted(BUDGETS.items()):
+            actuel = compte.get(evenement, 0)
+            marque = "  " if actuel <= budget else "!!"
+            print(f"{marque} {evenement:<32} {actuel:>3} / {budget}")
+            if actuel > budget:
+                depassements.append(f"{evenement} : {actuel} handlers pour un budget de {budget}")
 
-    inconnus = {
-        nom: n for nom, n in compte.items()
-        if n >= 10 and nom not in BUDGETS
-    }
-    if inconnus:
-        print("\nEvenements a fort trafic hors budget :")
-        for nom, n in sorted(inconnus.items(), key=lambda x: -x[1]):
-            print(f"   {nom:<32} {n}")
+        inconnus = {
+            nom: n for nom, n in compte.items()
+            if n >= 10 and nom not in BUDGETS
+        }
+        if inconnus:
+            print("\nEvenements a fort trafic hors budget :")
+            for nom, n in sorted(inconnus.items(), key=lambda x: -x[1]):
+                print(f"   {nom:<32} {n}")
 
-    total = sum(compte.values())
-    print(f"\nlisteners totaux : {total}")
+        total = sum(compte.values())
+        print(f"\nlisteners totaux : {total}")
 
-    if depassements:
-        print("\nBUDGET DEPASSE :")
-        for ligne in depassements:
-            print("  ", ligne)
-        print("\nSi l'ajout est voulu, relevez le budget dans tools/listener_budget_gate.py")
-        print("en sachant ce que cela coute sur l'evenement concerne.")
-        return 1
+        if depassements:
+            print("\nBUDGET DEPASSE :")
+            for ligne in depassements:
+                print("  ", ligne)
+            print("\nSi l'ajout est voulu, relevez le budget dans tools/listener_budget_gate.py")
+            print("en sachant ce que cela coute sur l'evenement concerne.")
+            return 1
 
-    print("\nBudget des listeners : OK")
-    return 0
+        print("\nBudget des listeners : OK")
+        return 0
+    finally:
+        # Même bug que tools/permission_coverage_gate.py avait : sans cleanup, le
+        # process ne se termine jamais après avoir imprimé son verdict.
+        await _close_runtime(bot)
 
 
 if __name__ == "__main__":
