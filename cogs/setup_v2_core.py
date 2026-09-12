@@ -83,6 +83,30 @@ async def ensure_schema(bot: commands.Bot) -> None:
             )
             """,
             """
+            -- Milestone 2 (Configuration Platform), Permission Center : exceptions
+            -- salon/catégorie par commande, même forme et même précédence
+            -- ("un refus explicite l'emporte") que command_role_permissions
+            -- ci-dessus. channel_id peut être un salon OU une catégorie — les deux
+            -- partagent le même espace d'identifiants Discord, donc une seule
+            -- table couvre les deux portées. Lecture/écriture : voir
+            -- get_channel_command_decision / set_channel_command_decision.
+            --
+            -- Cette table n'est PAS ENCORE consultée par utils/access_matrix.py::
+            -- evaluate() (la décision de sécurité centrale) : le point d'intégration
+            -- exact dans sa chaîne (priorité par rapport au bypass Administrateur/
+            -- propriétaire, notamment) est une décision produit délibérément
+            -- laissée à Jayden plutôt que tranchée ici — voir tâche de suivi créée.
+            CREATE TABLE IF NOT EXISTS command_channel_permissions (
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                command_name TEXT NOT NULL,
+                decision TEXT NOT NULL CHECK(decision IN ('allow','deny')),
+                updated_by INTEGER,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, channel_id, command_name)
+            )
+            """,
+            """
             CREATE TABLE IF NOT EXISTS trusted_members (
                 guild_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
@@ -311,6 +335,69 @@ async def set_role_command_decision(
         "ON CONFLICT(guild_id,role_id,command_name) DO UPDATE SET decision=excluded.decision,"
         "updated_by=excluded.updated_by,updated_at=excluded.updated_at",
         (int(guild_id), int(role_id), command_name, decision, actor_id, int(time.time())),
+    )
+
+
+async def get_channel_command_decision(
+    bot: commands.Bot,
+    guild: discord.Guild | None,
+    channel: Any,
+    command_name: str,
+) -> str | None:
+    """Même précédence que get_role_command_decision : un refus explicite sur
+    le salon OU sa catégorie l'emporte sur une autorisation explicite."""
+    if guild is None or channel is None:
+        return None
+    await ensure_schema(bot)
+    scope_ids = {int(getattr(channel, "id", 0) or 0)}
+    category_id = getattr(channel, "category_id", None)
+    if category_id:
+        scope_ids.add(int(category_id))
+    scope_ids.discard(0)
+    if not scope_ids:
+        return None
+    placeholders = ",".join("?" for _ in scope_ids)
+    rows = await bot.db.fetchall(
+        f"SELECT decision FROM command_channel_permissions WHERE guild_id=? AND command_name=? "
+        f"AND channel_id IN ({placeholders})",
+        (guild.id, command_name.casefold(), *scope_ids),
+    )
+    decisions = {str(row["decision"]).casefold() for row in rows}
+    if "deny" in decisions:
+        return "deny"
+    if "allow" in decisions:
+        return "allow"
+    return None
+
+
+async def set_channel_command_decision(
+    bot: commands.Bot,
+    guild_id: int,
+    channel_id: int,
+    command_name: str,
+    decision: str | None,
+    *,
+    actor_id: int | None = None,
+) -> None:
+    await ensure_schema(bot)
+    command_name = str(command_name or "").casefold().strip()
+    if not command_name:
+        raise ValueError("command_name vide")
+    if decision is None or decision == "default":
+        await bot.db.execute(
+            "DELETE FROM command_channel_permissions WHERE guild_id=? AND channel_id=? AND command_name=?",
+            (int(guild_id), int(channel_id), command_name),
+        )
+        return
+    decision = decision.casefold()
+    if decision not in {"allow", "deny"}:
+        raise ValueError("decision invalide")
+    await bot.db.execute(
+        "INSERT INTO command_channel_permissions "
+        "(guild_id,channel_id,command_name,decision,updated_by,updated_at) VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT(guild_id,channel_id,command_name) DO UPDATE SET decision=excluded.decision,"
+        "updated_by=excluded.updated_by,updated_at=excluded.updated_at",
+        (int(guild_id), int(channel_id), command_name, decision, actor_id, int(time.time())),
     )
 
 

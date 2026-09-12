@@ -733,6 +733,29 @@ class Backend:
             return True, source
         return None, ""
 
+    async def channel_rule(self, guild_id: int, guild: Any, channel: Any, name: str):
+        """Milestone 2 (Configuration Platform), Permission Center : exceptions
+        salon/catégorie par commande (command_channel_permissions, voir
+        cogs/setup_v2_core.py). Même contrat que explicit_rule() ci-dessus
+        (True/False/None) mais PAS ENCORE appelé par evaluate() — le point
+        d'intégration exact dans la chaîne de décision (avant ou après le
+        bypass Administrateur/propriétaire, notamment) est une décision produit
+        délibérément laissée à Jayden. Prêt à être branché une fois tranché."""
+        try:
+            from cogs.setup_v2_core import get_channel_command_decision
+        except Exception:
+            return None
+        try:
+            decision = await get_channel_command_decision(self.bot, guild, channel, name)
+        except Exception:
+            logger.exception("Lecture des exceptions salon impossible guild=%s", guild_id)
+            return None
+        if decision == "deny":
+            return False
+        if decision == "allow":
+            return True
+        return None
+
     async def has_staff_role(self, guild_id: int, author: Any) -> bool:
         try:
             conf = await self.bot.db.get_guild_config(int(guild_id))
