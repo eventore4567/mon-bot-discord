@@ -216,9 +216,32 @@ def _install_sentrix_v95() -> None:
 def _install_sentrix_verification_v96() -> None:
     """Branche l'assistant de vérification après V95, sans casser les audits sans discord.py."""
     try:
-        from sentrix_verification_v96 import install
+        from sentrix_verification_v96 import VerificationConfigV96, install
     except (ImportError, ModuleNotFoundError):
         return
+
+    # Compatibilité des bases créées avant l'ajout de l'option d'accès automatique.
+    # La commande V96 écrit cette clé via set_guild_config(); sans migration, SQLite
+    # levait "no such column: verification_auto_access" au clic sur Publier.
+    if not getattr(VerificationConfigV96, "_sentrix_auto_access_schema_fix", False):
+        original_ensure_table = VerificationConfigV96._ensure_table
+
+        async def ensure_table_with_auto_access(self) -> None:
+            await original_ensure_table(self)
+            columns = await self.bot.db.fetchall("PRAGMA table_info(guild_config)")
+            names = {
+                str(row["name"] if hasattr(row, "keys") and "name" in row.keys() else row[1])
+                for row in columns
+            }
+            if "verification_auto_access" not in names:
+                await self.bot.db.execute(
+                    "ALTER TABLE guild_config ADD COLUMN verification_auto_access INTEGER NOT NULL DEFAULT 0"
+                )
+                self.bot.db._guild_config_cache.clear()
+
+        VerificationConfigV96._ensure_table = ensure_table_with_auto_access
+        VerificationConfigV96._sentrix_auto_access_schema_fix = True
+
     try:
         install()
     except Exception:
