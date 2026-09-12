@@ -84,6 +84,9 @@ def test_snapshot_includes_migration_fields_and_never_raises(tmp_path):
             assert "migration_version" in data
             assert "migrations_available" in data
             assert data["migration_version"] == 0
+            assert "ha_enabled" in data
+            assert "ha_role" in data
+            assert "ha_state" in data
         finally:
             await db.close()
 

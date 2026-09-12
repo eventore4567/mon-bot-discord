@@ -12,6 +12,7 @@ Le launcher garde `railway_boot.py` intact et ajoute quatre garanties :
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -69,7 +70,25 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 def _install_ha_healthcheck() -> None:
-    """Expose clairement leader/standby tout en gardant le healthcheck non-HA historique."""
+    """Expose clairement leader/standby tout en gardant le healthcheck non-HA historique.
+
+    Milestone 4 (Observabilité) : ceci remplaçait purement et simplement
+    dashboard.handle_health (web/health_runtime_v45.py::enhanced_health, qui
+    porte le diagnostic riche — DB, extensions, migrations, politique de
+    commandes) par un payload beaucoup plus pauvre, sans jamais l'appeler.
+    Résultat : dès que le failover HA est actif (le cas réel sur Railway),
+    tout ce diagnostic devenait invisible, alors même que health_runtime_v45.py
+    a pu s'installer AVANT ou APRÈS selon l'ordre de boot — exactement le motif
+    "remplacement dur au lieu de chaînage" déjà trouvé et corrigé ailleurs
+    cette session (docs/core-v2-audit-technical-debt.md §3/§9). Corrigé en
+    appelant le handler précédent et en fusionnant son diagnostic, plutôt que
+    de le remplacer : `failover` reste la source de vérité sur le rôle HA,
+    mais `ok` exige désormais AUSSI le diagnostic riche pour une instance
+    réellement connectée à Discord (ready=True) — un leader avec une base de
+    données cassée n'est plus rapporté sain juste parce que Discord répond.
+    Le cas standby légitimement déconnecté (ready=False) garde EXACTEMENT la
+    même tolérance qu'avant : jamais gêné par le diagnostic riche.
+    """
     current = dashboard_web.handle_health
     if getattr(current, "_sentrix_ha_health", False):
         return
@@ -79,14 +98,26 @@ def _install_ha_healthcheck() -> None:
         ready = bool(bot.is_ready() and not bot.is_closed())
         ha = coordinator.health()
 
+        try:
+            previous_response = await current(request)
+            previous_payload = json.loads(previous_response.body)
+        except Exception:
+            logger.exception("Diagnostic santé précédent indisponible ; repli minimal.")
+            previous_payload = {}
+
         if not coordinator.enabled:
-            ok = ready
+            ok = bool(previous_payload.get("ok", ready))
         else:
             # Un standby doit rester vivant sur Railway. "blocked" est accepté car une
             # panne Redis transitoire peut se réparer sans redémarrer le conteneur.
-            ok = ready or ha["state"] in {"starting", "standby", "blocked", "leader"}
+            ha_liveness_ok = ready or ha["state"] in {"starting", "standby", "blocked", "leader"}
+            if ready:
+                ok = bool(previous_payload.get("ok", True)) and ha_liveness_ok
+            else:
+                ok = ha_liveness_ok
 
-        payload = {
+        payload = dict(previous_payload)
+        payload.update({
             "ok": bool(ok),
             "discord_ready": ready,
             "latency_ms": round(bot.latency * 1000) if ready else None,
@@ -99,7 +130,7 @@ def _install_ha_healthcheck() -> None:
                 "leader_for_seconds": ha["leader_for_seconds"],
                 "error": ha["error"],
             },
-        }
+        })
         return aiohttp_web.json_response(payload, status=200 if ok else 503)
 
     ha_health._sentrix_ha_health = True

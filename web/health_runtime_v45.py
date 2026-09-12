@@ -110,6 +110,7 @@ async def _migration_state(bot) -> tuple[int, int] | None:
 async def _snapshot(bot, dashboard) -> dict:
     database_ok, database_latency_ms = await _database_probe(bot)
     migration_state = await _migration_state(bot)
+    ha_enabled, ha_leader, ha_role, ha_state = _ha_runtime_state(bot)
     loaded_extensions, expected_extensions, extensions_ok = _extension_state(bot)
     command_policy_ok, unknown_commands, dangerous_public_commands = _command_policy_state(bot)
     discord_ready = bool(bot.is_ready())
@@ -156,6 +157,15 @@ async def _snapshot(bot, dashboard) -> dict:
         "release": _release_id(),
         "migration_version": migration_state[0] if migration_state else None,
         "migrations_available": migration_state[1] if migration_state else None,
+        # Repli léger : si railway_ha_boot.py::_install_ha_healthcheck est installé,
+        # son "failover" (plus riche : ttl, owner, leader_for_seconds) prend le relais
+        # en se fusionnant à cette même réponse plutôt que de la remplacer — voir son
+        # docstring. Ces trois champs restent utiles quand ce n'est PAS le cas (dev
+        # local, tests, déploiement non-HA), où sinon aucune info HA n'existerait.
+        "ha_enabled": ha_enabled,
+        "ha_role": ha_role,
+        "ha_leader": ha_leader,
+        "ha_state": ha_state,
     }
 
 
