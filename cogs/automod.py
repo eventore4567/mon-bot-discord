@@ -31,6 +31,7 @@ privé de ses rôles dangereux et expulsé, et le propriétaire du serveur est a
 """
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -97,6 +98,79 @@ ESCALATION_RULES = [  # (seuil d'infractions atteint, action) — évalué du pl
 MUTE_ESCALATION_SECONDS = 600  # 10 minutes
 DATASET_TIMEOUT_SECONDS = 600  # sanction directe du filtre multilingue
 ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "ban": "🔨 Bannissement"}
+
+# ---------------------------------------------------------- MOTEUR DE RÈGLES (fondation)
+# Milestone 3 (Modules avancés) : configuration fine par filtre, en plus de l'interrupteur
+# global ci-dessus. Lecture/écriture seulement pour l'instant — voir le commentaire sur
+# CREATE TABLE automod_rules (database/db.py) pour pourquoi _maybe_escalate ne les
+# consulte pas encore (trois cogs se disputent déjà cette fonction à l'exécution).
+_AUTOMOD_ACTIONS = frozenset({"mute", "kick", "ban", "warn", "delete_only"})
+
+
+async def get_automod_rule(bot, guild_id: int, filter_name: str) -> dict | None:
+    """None = aucune règle fine configurée pour ce filtre : l'appelant doit alors
+    se rabattre sur le comportement actuel (ESCALATION_RULES/ESCALATION_WINDOW),
+    jamais lever d'erreur ni bloquer le filtre."""
+    if filter_name not in TOGGLE_FIELDS:
+        raise ValueError(f"filtre AutoMod inconnu : {filter_name!r}")
+    row = await bot.db.fetchone(
+        "SELECT * FROM automod_rules WHERE guild_id = ? AND filter_name = ?",
+        (int(guild_id), filter_name),
+    )
+    if row is None:
+        return None
+    return {
+        "threshold": row["threshold"],
+        "window_seconds": row["window_seconds"],
+        "action": row["action"],
+        "excluded_role_ids": json.loads(row["excluded_role_ids"] or "[]"),
+        "excluded_channel_ids": json.loads(row["excluded_channel_ids"] or "[]"),
+        "message": row["message"],
+    }
+
+
+async def set_automod_rule(
+    bot,
+    guild_id: int,
+    filter_name: str,
+    *,
+    threshold: int | None = None,
+    window_seconds: int | None = None,
+    action: str | None = None,
+    excluded_role_ids: list[int] = (),
+    excluded_channel_ids: list[int] = (),
+    message: str | None = None,
+    actor_id: int | None = None,
+) -> None:
+    if filter_name not in TOGGLE_FIELDS:
+        raise ValueError(f"filtre AutoMod inconnu : {filter_name!r}")
+    if action is not None and action not in _AUTOMOD_ACTIONS:
+        raise ValueError(f"action AutoMod invalide : {action!r}")
+    await bot.db.execute(
+        "INSERT INTO automod_rules "
+        "(guild_id, filter_name, threshold, window_seconds, action, "
+        "excluded_role_ids, excluded_channel_ids, message, updated_by, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(guild_id, filter_name) DO UPDATE SET "
+        "threshold=excluded.threshold, window_seconds=excluded.window_seconds, "
+        "action=excluded.action, excluded_role_ids=excluded.excluded_role_ids, "
+        "excluded_channel_ids=excluded.excluded_channel_ids, message=excluded.message, "
+        "updated_by=excluded.updated_by, updated_at=excluded.updated_at",
+        (
+            int(guild_id), filter_name, threshold, window_seconds, action,
+            json.dumps(list(excluded_role_ids)), json.dumps(list(excluded_channel_ids)),
+            message, actor_id, int(time.time()),
+        ),
+    )
+
+
+async def delete_automod_rule(bot, guild_id: int, filter_name: str) -> None:
+    """Revient au comportement par défaut pour ce filtre (redevient identique à
+    l'absence de ligne, donc à get_automod_rule() qui renvoie None)."""
+    await bot.db.execute(
+        "DELETE FROM automod_rules WHERE guild_id = ? AND filter_name = ?",
+        (int(guild_id), filter_name),
+    )
 
 
 def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:

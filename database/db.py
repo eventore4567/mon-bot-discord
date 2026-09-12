@@ -189,6 +189,37 @@ CREATE TABLE IF NOT EXISTS automod_settings (
     escalation INTEGER DEFAULT 1
 );
 
+-- Milestone 3 (Modules avancés), moteur de règles AutoMod : fondation seulement.
+-- automod_settings ci-dessus reste l'interrupteur maître par filtre (11 booléens) —
+-- inchangé, toujours lu/écrit tel quel par tous ses appelants existants (~17 fichiers,
+-- vérifiés avant d'ajouter cette table). Cette table ajoute une configuration FINE
+-- optionnelle par filtre (seuil, fenêtre, action, exclusions, message), avec repli
+-- implicite sur le comportement actuel (ESCALATION_RULES/ESCALATION_WINDOW dans
+-- cogs/automod.py) quand aucune ligne n'existe pour un filtre donné.
+--
+-- PAS ENCORE consultée par cogs/automod.py::_maybe_escalate (voir get_automod_rule/
+-- set_automod_rule dans ce même fichier) : cette fonction est remplacée à l'exécution
+-- par TROIS cogs différents (cogs/owner_sanction_immunity.py, en chaîne correcte ;
+-- cogs/content_filter_policy.py, qui la désactive entièrement pour les filtres de
+-- contenu ; cogs/bot_excellence_runtime.py, qui la remplace par un système
+-- d'escalade concurrent, à score, avec ses propres tables automod_risk_events/
+-- automod_risk_state). Câbler cette table dans _maybe_escalate sans résoudre ce
+-- conflit à trois pourrait n'avoir aucun effet en production, ou entrer en
+-- contradiction avec le système déjà actif. Décision et arbitrage pour Jayden.
+CREATE TABLE IF NOT EXISTS automod_rules (
+    guild_id INTEGER NOT NULL,
+    filter_name TEXT NOT NULL,
+    threshold INTEGER,
+    window_seconds INTEGER,
+    action TEXT CHECK(action IS NULL OR action IN ('mute','kick','ban','warn','delete_only')),
+    excluded_role_ids TEXT NOT NULL DEFAULT '[]',
+    excluded_channel_ids TEXT NOT NULL DEFAULT '[]',
+    message TEXT,
+    updated_by INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, filter_name)
+);
+
 CREATE TABLE IF NOT EXISTS automod_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER,
