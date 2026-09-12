@@ -93,8 +93,23 @@ def _backup_state(bot) -> bool | None:
     return bool(value) if value is not None else None
 
 
+async def _migration_state(bot) -> tuple[int, int] | None:
+    """Milestone 1 (Core Reliability) : expose l'état réel du système de
+    migrations (database/migrations.py) plutôt que de supposer qu'il a
+    tourné. Retourne (version_courante, nombre_de_migrations_numérotées
+    disponibles) ou None si la table n'existe pas encore (DB pas encore
+    connectée) — jamais une exception qui casserait /health."""
+    try:
+        from database import migrations as db_migrations
+        version = await db_migrations.current_version(bot.db._conn)
+        return version, len(db_migrations.MIGRATIONS)
+    except Exception:
+        return None
+
+
 async def _snapshot(bot, dashboard) -> dict:
     database_ok, database_latency_ms = await _database_probe(bot)
+    migration_state = await _migration_state(bot)
     loaded_extensions, expected_extensions, extensions_ok = _extension_state(bot)
     command_policy_ok, unknown_commands, dangerous_public_commands = _command_policy_state(bot)
     discord_ready = bool(bot.is_ready())
@@ -139,6 +154,8 @@ async def _snapshot(bot, dashboard) -> dict:
         "uptime_seconds": max(0, int(time.time() - start_time)),
         "backup_ok": _backup_state(bot),
         "release": _release_id(),
+        "migration_version": migration_state[0] if migration_state else None,
+        "migrations_available": migration_state[1] if migration_state else None,
     }
 
 
