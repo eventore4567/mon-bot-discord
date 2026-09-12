@@ -13,6 +13,8 @@ import random
 import sqlite3
 import time
 
+from . import migrations as db_migrations
+
 logger = logging.getLogger("bot.database")
 
 
@@ -1283,6 +1285,16 @@ class Database:
         # EXISTS, ne touche à aucune table/donnée déjà existante.
         await self._conn.executescript(GAME_TRANSACTIONS_SCHEMA)
         await self._conn.executescript(LOG_CONFIG_SCHEMA)
+        # Milestone 1 (SentriX Core Reliability) : réconciliation additive sur les
+        # ~79 tables (voir database/migrations.py) + migrations numérotées futures.
+        # Tourne à CHAQUE connect() — boot normal ET reprise HA après restauration
+        # d'un snapshot PostgreSQL plus ancien que le code qui tourne (voir
+        # railway_ha_boot.py::_restore_for_takeover, qui rappelle explicitement
+        # cette méthode). L'ancien _migrate() ci-dessous reste en place pour
+        # l'instant : il ne fait plus rien d'utile une fois les colonnes déjà
+        # réconciliées (son propre PRAGMA table_info le voit et saute chaque
+        # colonne), donc le garder est sans risque pendant la transition.
+        await db_migrations.run(self._conn, [SCHEMA, GAME_TRANSACTIONS_SCHEMA, LOG_CONFIG_SCHEMA])
         await self._migrate()
         await self._conn.execute(
             "INSERT INTO bot_creators (user_id, display_name, username, is_primary, added_at) "
