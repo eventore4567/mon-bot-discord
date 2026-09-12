@@ -1,0 +1,45 @@
+name: Temporary Core V2 merge diagnostics
+
+on:
+  push:
+    branches:
+      - integration/sentrix-core-v2-main-sync
+
+permissions:
+  contents: read
+
+jobs:
+  detect-conflicts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect merge conflicts with main
+        shell: bash
+        run: |
+          set -u
+          git fetch origin main
+          set +e
+          git merge --no-commit --no-ff origin/main
+          merge_status=$?
+          set -e
+
+          echo "MERGE_STATUS=${merge_status}"
+          echo "CONFLICT_FILES_BEGIN"
+          git diff --name-only --diff-filter=U || true
+          echo "CONFLICT_FILES_END"
+
+          if [ "${merge_status}" -eq 0 ]; then
+            echo "No merge conflicts detected."
+            git merge --abort || true
+            exit 0
+          fi
+
+          count=$(git diff --name-only --diff-filter=U | sed '/^$/d' | wc -l | tr -d ' ')
+          echo "CONFLICT_COUNT=${count}"
+          git status --short
+          git merge --abort || true
+          exit 0
