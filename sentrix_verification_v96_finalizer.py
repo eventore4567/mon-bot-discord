@@ -14,6 +14,7 @@ from discord.ext import commands
 import sentrix_v95_runtime as v95
 import sentrix_verification_v96 as v96
 from sentrix_v103_setup_fix import install as install_setup_v103
+from sentrix_v105_slash_schema_guard import install as install_slash_guard_v105
 
 logger = logging.getLogger("bot.verification-v96-final")
 
@@ -75,7 +76,7 @@ async def reassert(bot: commands.Bot) -> commands.Command:
 
 
 def install() -> None:
-    """Entoure la préparation V95 et arme ensuite le garde final V103 de /setup."""
+    """Entoure V95 puis arme les gardes finaux V103 et V105 de la surface slash."""
     v96._install_v95_route()
     current = v95.prepare_bot
 
@@ -111,10 +112,11 @@ def install() -> None:
         v95.prepare_bot = prepare_with_verification
         logger.info("V96 finalizer branché juste avant la préparation slash V95.")
 
-    # Ce module est installé à la fin du vrai bootstrap HA Railway. V103 doit donc
-    # s'armer ici, après V95/V97/V98/V99/V100/V101/V102 et après le finalizer V96,
-    # afin que /setup soit la toute dernière réécriture de la surface slash.
+    # Le bootstrap HA charge ce finalizer après les anciennes couches. V103 réinstalle
+    # /setup, puis V105 devient l'ultime garde avant chaque CommandTree.sync : il normalise
+    # aussi /help, /ping et /sentrix, puis refuse toute fuite ctx/args/kwargs restante.
     install_setup_v103()
+    install_slash_guard_v105()
 
 
 __all__ = ["install", "reassert"]
