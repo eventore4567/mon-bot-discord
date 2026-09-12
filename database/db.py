@@ -874,6 +874,23 @@ CREATE TABLE IF NOT EXISTS ai_usage (
     tokens_estimate INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (guild_id, user_id, day)
 );
+
+-- Piste d'audit du dashboard : qui a changé quoi, quand (Milestone 2, Configuration
+-- Platform). Même schéma que cogs/operations_center.py, déplacé ici (SCHEMA, la
+-- source unique déjà réconciliée par database/migrations.py à chaque connect())
+-- pour que web/dashboard.py::handle_update_guild puisse y écrire sans dépendre de
+-- l'ordre de chargement du cog operations_center. CREATE TABLE IF NOT EXISTS reste
+-- inoffensif si les deux tournent : la seconde exécution ne fait rien.
+CREATE TABLE IF NOT EXISTS dashboard_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    target TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dashboard_audit_log_guild_time ON dashboard_audit_log (guild_id, created_at DESC);
 """
 
 # Index sur les colonnes les plus interrogées : indispensable pour qu'un serveur de

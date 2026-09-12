@@ -146,6 +146,27 @@ def _json_error(message: str, status: int) -> web.Response:
     return web.json_response({"ok": False, "error": message}, status=status)
 
 
+def _diff_changed_fields(old_row, new_values: dict) -> dict[str, dict[str, object]]:
+    """Compare les valeurs envoyées à l'instantané "avant" et ne garde que ce qui
+    a réellement changé — un audit trail qui journalise aussi les champs
+    renvoyés sans changement serait bruyant et rendrait l'historique inutile.
+
+    Le résultat est déposé sur `request["dashboard_audit_changes"]` par
+    handle_update_guild plutôt qu'écrit directement ici : web/operations_center.
+    py::_wrap_existing_writes enveloppe déjà handle_update_guild pour journaliser
+    CHAQUE écriture du dashboard dans dashboard_audit_log (action="settings_
+    update") — mais jusqu'ici sans aucun détail (ni champ, ni ancienne/nouvelle
+    valeur). Un second appel d'audit séparé ici doublonnerait la ligne ; on
+    enrichit donc le mécanisme existant au lieu d'en ajouter un deuxième."""
+    changes: dict[str, dict[str, object]] = {}
+    keys = old_row.keys() if old_row is not None else ()
+    for field, value in new_values.items():
+        old_value = old_row[field] if field in keys else None
+        if old_value != value:
+            changes[field] = {"old": old_value, "new": value}
+    return changes
+
+
 def _session(request: web.Request) -> dict | None:
     session_id = request.cookies.get(SESSION_COOKIE)
     if not session_id:
@@ -1027,6 +1048,17 @@ async def handle_update_guild(request: web.Request):
         return _json_error(validation_error, 400)
 
     db = request.app["bot"].db
+    # Instantané "avant" pour l'audit trail (Milestone 2) : uniquement les champs
+    # réellement envoyés, pas toute la configuration du serveur.
+    old_config = await db.get_guild_config(guild_id)
+    old_automod = await db.get_automod(guild_id)
+    old_ai = await db.fetchone("SELECT * FROM ai_settings WHERE guild_id = ?", (guild_id,))
+
+    changes: dict[str, dict[str, object]] = {}
+    changes.update(_diff_changed_fields(old_config, clean_settings))
+    changes.update(_diff_changed_fields(old_automod, clean_automod))
+    changes.update(_diff_changed_fields(old_ai, clean_ai))
+
     for field, value in clean_settings.items():
         await db.set_guild_config(guild_id, field, value)
     for field, value in clean_automod.items():
@@ -1041,6 +1073,11 @@ async def handle_update_guild(request: web.Request):
                 f"UPDATE ai_settings SET {field} = ?, updated_at = ? WHERE guild_id = ?",
                 (value, now(), guild_id),
             )
+
+    # Lu par web/operations_center.py::_wrap_existing_writes, qui enveloppe déjà
+    # cette fonction pour écrire une ligne dashboard_audit_log après un succès —
+    # voir le docstring de _diff_changed_fields ci-dessus.
+    request["dashboard_audit_changes"] = changes
     request.app["write_limits"][rate_key] = time.time()
     logger.info(
         "Dashboard : %s (%s) a modifié %s réglage(s) du serveur %s (%s).",

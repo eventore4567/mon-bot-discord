@@ -588,9 +588,16 @@ def _wrap_existing_writes(dashboard):
                 try:
                     guild_id = int(request.match_info.get("guild_id", "0"))
                     if guild_id:
+                        # Milestone 2 (Configuration Platform) : handle_update_guild
+                        # dépose le détail champ par champ (ancienne/nouvelle valeur)
+                        # sur la requête — sans ça, cette ligne d'audit ne disait
+                        # jamais QUOI avait changé, seulement QUE quelque chose
+                        # avait changé.
+                        changes = request.get("dashboard_audit_changes") or None
                         await _audit(
                             request, guild_id, int(session["user"]["id"]),
                             _action, request.path,
+                            {"changes": changes} if changes else None,
                         )
                 except Exception:
                     pass
