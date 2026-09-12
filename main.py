@@ -79,6 +79,11 @@ EXTENSIONS = [
     # Core V2, Phase 3 (docs/core-v2-plan.md) : /permissions explain, pas de check
     # local (public, restriction "autre membre" gérée dans le corps).
     "cogs.permissions_explain",
+    # Milestone 2 (Configuration Platform) : /setupdiag, cog autonome qui rend
+    # visible core/modules/registry.py sans toucher au rendu de /setup lui-même
+    # (voir cogs/setup_diagnostics.py). Même garde que /setup (_can_setup),
+    # importé et jamais réimplémenté.
+    "cogs.setup_diagnostics",
     "cogs.owner",
     "cogs.invites",
     "cogs.design",
@@ -195,7 +200,7 @@ CATEGORY_COMMANDS = {
         "setautorole", "createrole", "setwarnrole", "setwarnbanthreshold",
         "disablecommand", "enablecommand", "ignorechannel", "unignorechannel",
         "setlevelchannel", "setsuggestchannel", "setannouncechannel",
-        "setgiveawaychannel", "config-view", "config-reset", "setup",
+        "setgiveawaychannel", "config-view", "config-reset", "setup", "setupdiag",
         "create-server", "delete-channel", "verify-setup", "verify-panel",
         "rolepanel", "rolepanel-refresh", "reactionrole-add",
         "reactionrole-remove", "reactionrole-list", "set-level-role",

@@ -254,7 +254,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "setautorole", "createrole", "setwarnrole", "setwarnbanthreshold",
         "disablecommand", "enablecommand", "ignorechannel", "unignorechannel",
         "setlevelchannel", "setsuggestchannel", "setannouncechannel",
-        "setgiveawaychannel", "config-view", "config-reset", "setup",
+        "setgiveawaychannel", "config-view", "config-reset", "setup", "setupdiag",
         "create-server", "delete-channel", "verify-setup", "verify-panel",
         "rolepanel", "rolepanel-refresh", "reactionrole-add",
         "reactionrole-remove", "reactionrole-list", "set-level-role",
