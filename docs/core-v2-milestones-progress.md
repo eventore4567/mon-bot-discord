@@ -52,6 +52,13 @@ pas une intention.
 - **`+ticket-priority`** (`5850eb4`) : la colonne `tickets.priority` existait
   depuis toujours mais aucune commande ne l'avait jamais modifiée après
   création (toujours `'normale'`) — premier réel usage de ce champ.
+- **`+ticket-tags`** (`dfe9d8f`) : nouvelle colonne `tickets.tags` (JSON,
+  défaut `'[]'`) ajoutée directement dans `database/db.py::SCHEMA` et
+  réconciliée automatiquement sur les bases existantes par le système de
+  migrations du Milestone 1 — aucune migration numérotée écrite à la main,
+  deuxième cas réel après la mise en place de ce système. Validation :
+  30 caractères max par tag, 10 tags max, dédoublonnage insensible à la
+  casse.
 - **Correction d'un audit précédent** : `cogs/automatic_verification_v4.py`
   et `_v5.py` avaient été classés à tort comme "morts" dans une session
   antérieure. Une recherche dédiée (boot réel + `tools/dead_module_gate.py`
