@@ -1,0 +1,1 @@
+Deploy SentriX verification V109 final — runtime schema guard, clean setup UI, per-channel verification permissions.
