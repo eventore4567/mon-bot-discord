@@ -18,6 +18,7 @@ from discord.ext import commands
 
 import main
 from cogs import command_hardening_v41
+from utils import access_matrix
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -43,43 +44,41 @@ def test_main_py_fait_un_second_passage_de_laudit_v41_apres_boot_complet():
 
 
 def test_le_second_audit_detecte_une_commande_destructive_rendue_publique_tardivement():
-    """dangerous_public = _DESTRUCTIVE_ROOTS & main.PUBLIC_COMMANDS : une simple
-    intersection de listes de politique, independante de bot.walk_commands().
-    Le risque reel (railway_boot.py et ~6 autres fichiers mutent
-    main.PUBLIC_COMMANDS/OWNER_ONLY_COMMANDS en place, voir §16) est donc qu'une
-    extension tardive elargisse PUBLIC_COMMANDS APRES le premier passage -- pas
-    qu'elle enregistre une commande sur le bot."""
+    """dangerous_public doit suivre utils.access_matrix.PUBLIC_COMMANDS, qui est la
+    source de vérité runtime depuis l'unification des permissions. Les constantes
+    historiques de main.py ne sont plus un gate d'accès et ne doivent donc pas piloter
+    cet audit de sécurité."""
     bot = _make_fake_bot()
     destructive_root = next(iter(command_hardening_v41._DESTRUCTIVE_ROOTS))
-    original_public = main.PUBLIC_COMMANDS
+    original_public = access_matrix.PUBLIC_COMMANDS
     try:
         assert destructive_root not in original_public
 
-        # Premier passage (simule finalize_runtime(), avant les extensions
-        # tardives de railway_boot.py) : la politique n'est pas encore alteree.
+        # Premier passage (simule finalize_runtime(), avant une éventuelle mutation
+        # tardive de la politique autoritative).
         command_hardening_v41._audit_registry(bot)
         assert destructive_root not in bot._sentrix_command_audit["dangerous_public"]
 
-        # Une extension tardive mute main.PUBLIC_COMMANDS en place (motif reel
-        # trouve dans cogs/sentrix_v2.py, cogs/v17_shared.py, etc.).
-        main.PUBLIC_COMMANDS = original_public | {destructive_root}
+        # Simule une extension tardive qui élargirait par erreur la vraie matrice
+        # d'accès après le premier audit.
+        access_matrix.PUBLIC_COMMANDS = original_public | {destructive_root}
 
-        # Second passage (main.py::setup_hook, apres les 51 extensions) : doit
-        # desormais la detecter.
+        # Second passage (main.py::setup_hook, après les 51 extensions) : doit la
+        # détecter immédiatement comme destructive et publique.
         command_hardening_v41._audit_registry(bot)
         assert destructive_root in bot._sentrix_command_audit["dangerous_public"]
     finally:
-        main.PUBLIC_COMMANDS = original_public
+        access_matrix.PUBLIC_COMMANDS = original_public
 
 
 def test_le_second_audit_detecte_une_commande_enregistree_tardivement_et_non_classee():
     """unknown_policy depend, lui, reellement de bot.walk_commands() : une
     commande ajoutee par une extension tardive de railway_boot.py et absente de
-    main.KNOWN_PERMISSION_COMMANDS n'etait detectee par aucun passage avant ce
-    correctif, puisque le seul appel existant tournait avant son chargement."""
+    la matrice d'accès n'etait detectee par aucun passage avant ce correctif,
+    puisque le seul appel existant tournait avant son chargement."""
     bot = _make_fake_bot()
     late_root = "sentrix-audit-test-commande-inconnue"
-    assert late_root not in main.KNOWN_PERMISSION_COMMANDS
+    assert late_root not in access_matrix.KNOWN_COMMANDS
 
     # Premier passage : la commande n'est pas encore enregistree sur le bot.
     command_hardening_v41._audit_registry(bot)
