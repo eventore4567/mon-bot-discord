@@ -17,8 +17,8 @@ _REQUIRED_MARKERS = (
     'async function loadSession()',
     'async function loadGuilds()',
     'async function selectGuild(value)',
-    '"/api/me"',
-    '"/api/guilds"',
+    "api('/api/me')",
+    "api('/api/guilds')",
 )
 _UNIFIED_MARKER = 'id="sentrix-dashboard-unified-v2"'
 _PRODUCT_RECOVERY_MARKER = 'id="sentrix-product-dashboard-recovery"'
@@ -51,21 +51,18 @@ def _is_unified_document(dashboard, html: str) -> bool:
 
 
 def _finalize_unified_html(html: str) -> str:
-    """Applique les deux contrats de compatibilité nécessaires au document unique.
-
-    - Le backend sanctions attend ``clear-warnings`` ; l'ancien frontend utilisait encore
-      ``clearwarnings`` dans un embranchement JavaScript.
-    - ``sentrix_product_update`` ajoute son ancien recovery-loop s'il ne trouve pas son
-      marqueur. Le frontend unifié possède déjà ses propres états/retry : on expose donc le
-      marqueur attendu avec un script inerte pour empêcher la réinjection legacy.
-    """
+    """Applique les contrats nécessaires au document unique avant de le figer."""
     if _UNIFIED_MARKER not in html:
         return html
 
+    # Le backend sanctions expose explicitement ``clear-warnings``.
     html = html.replace(
         "action==='warn'?'clearwarnings':",
         "action==='warn'?'clear-warnings':",
     )
+
+    # Le recovery legacy de sentrix_product_update ne doit pas se réinjecter par-dessus
+    # unified-v2. Le nouveau frontend possède déjà ses états erreur/retry.
     if _PRODUCT_RECOVERY_MARKER not in html and "</body>" in html:
         html = html.replace(
             "</body>",
@@ -102,7 +99,6 @@ def install(dashboard) -> bool:
             logger.error("Dashboard unifié non figé : ancienne UI encore présente=%s.", present)
             return False
     else:
-        # Fallback de compatibilité si un environnement ancien appelle directement install().
         version = str(getattr(dashboard, "_sentrix_dashboard_version", "") or "")
         if version.startswith("v64") and 'id="sentrix-v64-final"' not in snapshot:
             logger.error("Dashboard V64 non figé : verrou de navigation absent.")
@@ -133,11 +129,10 @@ def install(dashboard) -> bool:
 
 
 def _install_backend_compatibility(dashboard) -> None:
-    """Conserve uniquement les extensions qui apportent des APIs réellement utilisées.
+    """Branche uniquement les APIs historiques encore utilisées par unified-v2.
 
-    Les modules ci-dessous peuvent encore injecter du HTML, mais cette sortie est remplacée
-    ensuite par ``dashboard_unified_v2``. Leurs routes restent donc disponibles sans empiler
-    leurs anciennes interfaces dans le document servi au navigateur.
+    Les installateurs V62 historiques dépendaient de marqueurs HTML V61. Le nouveau frontend
+    n'en dépend plus : on installe directement le backend V62 idempotent et ses routes.
     """
     try:
         from .dashboard_v60_diagnostics import install as install_diagnostics
@@ -146,16 +141,29 @@ def _install_backend_compatibility(dashboard) -> None:
         logger.exception("Dashboard unifié : API diagnostics impossible à installer.")
 
     try:
-        from .dashboard_v62_compat import install as install_v62_compat
-        install_v62_compat(dashboard)
-    except Exception:
-        logger.exception("Dashboard unifié : compatibilité V62 impossible à installer.")
-
-    try:
-        from .dashboard_v62_dense import install as install_v62
-        install_v62(dashboard)
+        from . import dashboard_v62_dense
+        dashboard_v62_dense._install_backend(dashboard)
     except Exception:
         logger.exception("Dashboard unifié : API Tickets/Vérification V62 impossible à installer.")
+
+
+def _install_unified_document(dashboard) -> bool:
+    """Pose le document unifié sans dépendre des validateurs HTML des anciennes versions."""
+    try:
+        from .dashboard_unified_v2 import INDEX_HTML
+    except Exception:
+        logger.exception("Dashboard unifié V2 : source frontend impossible à importer.")
+        return False
+
+    html = _finalize_unified_html(str(INDEX_HTML or ""))
+    usable, missing = _snapshot_is_usable(html)
+    if _UNIFIED_MARKER not in html or not usable:
+        logger.error("Dashboard unifié V2 incomplet : marqueurs absents=%s.", missing)
+        return False
+
+    dashboard.INDEX_HTML = html
+    dashboard._sentrix_dashboard_version = "unified-v2"
+    return True
 
 
 def install_product_prestart_hook() -> bool:
@@ -174,18 +182,10 @@ def install_product_prestart_hook() -> bool:
         current(dashboard)
         _install_backend_compatibility(dashboard)
 
-        try:
-            from .dashboard_unified_v2 import install as install_unified
-            unified_ok = bool(install_unified(dashboard))
-        except Exception:
-            unified_ok = False
-            logger.exception("Dashboard unifié V2 : installation impossible.")
-
-        if not unified_ok:
+        if not _install_unified_document(dashboard):
             logger.error("Dashboard unifié V2 absent : le gel final est refusé.")
             return
 
-        dashboard.INDEX_HTML = _finalize_unified_html(str(dashboard.INDEX_HTML or ""))
         if not install(dashboard):
             logger.error("Dashboard frontend : gel final échoué.")
 
@@ -203,4 +203,5 @@ __all__ = [
     "_ensure_v60_features_final",
     "_theme_secondary_pages_final",
     "_finalize_unified_html",
+    "_install_unified_document",
 ]
