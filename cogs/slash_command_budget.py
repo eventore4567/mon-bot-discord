@@ -18,6 +18,32 @@ GLOBAL_CHAT_INPUT_BUDGET = 100
 PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofexample", "proofstatus"})
 
 
+def _v110_public_root_names() -> set[str]:
+    """Retourne les racines publiques explicitement choisies par la surface V110.
+
+    Le catalogue préfixé peut volontairement masquer une ancienne commande comme
+    ``queue`` ou ``profile`` sans que cela signifie que la nouvelle racine slash du même
+    nom doit être supprimée. Le budget raisonne donc sur la surface slash V110, et non
+    seulement sur les anciennes catégories +.
+    """
+    try:
+        import sentrix_command_surface_v110 as surface
+    except (ImportError, ModuleNotFoundError):
+        return set()
+
+    roots = {
+        str(public_name).casefold().strip()
+        for public_name in getattr(surface, "STANDARD_DIRECT_SLASH", {}).values()
+        if str(public_name).strip()
+    }
+    roots.update(
+        str(root_name).casefold().strip()
+        for root_name, _leaf_name in getattr(surface, "STANDARD_GROUPED_SLASH", {}).values()
+        if str(root_name).strip()
+    )
+    return roots
+
+
 def _preferred_names() -> set[str]:
     from .command_catalog_cleanup import NORMAL_DIRECT_COMMANDS
 
@@ -26,12 +52,22 @@ def _preferred_names() -> set[str]:
     # prioritaire contenait donc un nom inexistant, et la vraie commande
     # `nickname` n'etait jamais protegee : des que le budget de 100 racines etait
     # atteint, elle etait la premiere evincee.
-    return set(NORMAL_DIRECT_COMMANDS) | set(PROOF_SLASH_PREFERRED)
+    return (
+        set(NORMAL_DIRECT_COMMANDS)
+        | set(PROOF_SLASH_PREFERRED)
+        | _v110_public_root_names()
+    )
 
 
 def _excluded_names() -> set[str]:
     from .command_catalog_cleanup import ADMIN_DIRECT_COMMANDS, MERGED_COMMANDS
-    return set(ADMIN_DIRECT_COMMANDS) | set(MERGED_COMMANDS)
+
+    # MERGED_COMMANDS décrit la visibilité historique des commandes préfixées. V110 peut
+    # réutiliser l'un de ces noms comme racine slash standard (ex. /queue, /resume,
+    # /profile, /shop, /weekly). Ces racines sont intentionnelles et ne doivent donc pas
+    # être bloquées par le filtre legacy du budget.
+    legacy_excluded = set(ADMIN_DIRECT_COMMANDS) | set(MERGED_COMMANDS)
+    return legacy_excluded - _v110_public_root_names()
 
 
 def _global_roots(tree) -> list:
@@ -168,7 +204,8 @@ def install(bot: commands.Bot) -> None:
     tree.add_command = MethodType(budgeted_add, tree)
     finalize(bot)
     logger.info(
-        "Budget slash SentriX actif : maximum %s racines, proof essentiel réservé=%s.",
+        "Budget slash SentriX actif : maximum %s racines, proof essentiel réservé=%s, V110 protégée=%s racines.",
         GLOBAL_CHAT_INPUT_BUDGET,
         ",".join(sorted(PROOF_SLASH_PREFERRED)),
+        len(_v110_public_root_names()),
     )
