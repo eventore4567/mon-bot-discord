@@ -24,6 +24,7 @@ async def run() -> int:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-ci.db")
 
         import main
+        import sentrix_command_surface_v110 as surface_v110
         from cogs import (
             command_catalog_cleanup,
             command_response_guard,
@@ -48,13 +49,18 @@ async def run() -> int:
         if not command_catalog_cleanup._INSTALLED:
             errors.append("politique canonique du catalogue non installée")
 
-        # 97 depuis le passage volontaire de la musique en groupe /music (pause/skip/
-        # stop/queue/nowplaying/volume/loop/shuffle/join/leave ne sont plus des racines
-        # directes) : seul +play reste une racine directe autonome. Ne pas relever ce
-        # nombre en réintroduisant d'anciennes commandes plates pour "revenir à 100".
-        if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != 97:
+        # La surface historique comptait 97 commandes directes après le passage de la
+        # musique en groupe /music. Une suppression produit explicitement documentée doit
+        # réduire ce nombre, sans obliger à réintroduire une commande juste pour satisfaire
+        # un compteur de CI. Au 13/09/2026, blacklist-add et blacklist-users sont retirées.
+        explicit_removed = set(
+            getattr(command_catalog_cleanup, "EXPLICITLY_REMOVED_COMMANDS", frozenset())
+        )
+        expected_normal_direct = 97 - len(explicit_removed)
+        if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != expected_normal_direct:
             errors.append(
-                "la surface normale doit contenir exactement 97 commandes directes, "
+                "la surface normale doit contenir exactement "
+                f"{expected_normal_direct} commandes directes après retraits produit, "
                 f"obtenu: {len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)}"
             )
         if len(command_catalog_cleanup.GAME_COMMANDS) != 43:
@@ -62,10 +68,10 @@ async def run() -> int:
                 f"les 43 jeux doivent rester directs, obtenu: {len(command_catalog_cleanup.GAME_COMMANDS)}"
             )
 
-        expected_pruned = command_catalog_cleanup.PURE_DUPLICATE_COMMANDS
+        expected_pruned = command_catalog_cleanup.PURE_DUPLICATE_COMMANDS | frozenset(explicit_removed)
         if main.PRUNED_COMMANDS != expected_pruned:
             errors.append(
-                "seuls les vrais doublons doivent être prunés: "
+                "les commandes prunées doivent être les vrais doublons ou des retraits produit explicites: "
                 + ", ".join(sorted(main.PRUNED_COMMANDS ^ expected_pruned))
             )
 
@@ -127,11 +133,14 @@ async def run() -> int:
             errors.append("commandes proof masquées dans +help: " + ", ".join(hidden_proof))
 
         removed_still_present = sorted(
-            name for name in command_catalog_cleanup.PURE_DUPLICATE_COMMANDS
+            name for name in expected_pruned
             if bot.get_command(name) is not None
         )
         if removed_still_present:
-            errors.append("vrais doublons encore enregistrés: " + ", ".join(removed_still_present))
+            errors.append(
+                "doublons/retraits produit encore enregistrés: "
+                + ", ".join(removed_still_present)
+            )
 
         merged_visible = sorted(
             name for name in command_catalog_cleanup.MERGED_COMMANDS
@@ -167,12 +176,22 @@ async def run() -> int:
         if not owner_expected <= set(main.OWNER_ONLY_COMMANDS):
             errors.append("certaines commandes propriétaire ne sont plus owner-only")
 
-        security_sensitive = {"blacklist-add", "blacklist-users", "panic", "syncbl"}
-        public_security = sorted(security_sensitive & set(main.PUBLIC_COMMANDS))
+        # Les commandes supprimées par choix produit ne sont plus tenues d'appartenir à
+        # une catégorie d'exécution. On vérifie séparément qu'elles ont réellement disparu.
+        protected_security = {"panic", "syncbl"}
+        public_security = sorted(protected_security & set(main.PUBLIC_COMMANDS))
         if public_security:
             errors.append("commandes sécurité sensibles classées publiques: " + ", ".join(public_security))
-        if not security_sensitive <= set(main.CATEGORY_COMMANDS.get("securite", ())):
+        if not protected_security <= set(main.CATEGORY_COMMANDS.get("securite", ())):
             errors.append("commandes sécurité directes absentes de la catégorie protégée securite")
+        removed_security_present = sorted(
+            name for name in explicit_removed if bot.get_command(name) is not None
+        )
+        if removed_security_present:
+            errors.append(
+                "commandes sécurité retirées encore enregistrées: "
+                + ", ".join(removed_security_present)
+            )
         for name in ("quarantine", "unquarantine"):
             if main.DISCORD_PERMISSION_COMMANDS.get(name) != "moderate_members":
                 errors.append(f"{name} doit exiger moderate_members")
@@ -186,18 +205,37 @@ async def run() -> int:
         if not getattr(bot, "_sentrix_permission_guard_installed", False):
             errors.append("le verrou global de permissions slash n'est pas installé")
 
+        # L'audit doit regarder le même arbre final que celui synchronisé chez Discord.
+        # Les couches historiques chargées avant la sync peuvent reconstruire/transitoirement
+        # évincer des racines ; V110 est réaffirmée juste avant la publication réelle.
+        try:
+            surface_v110.reassert_standard_slash_surface(bot)
+            slash_command_budget.finalize(bot)
+        except Exception as exc:
+            errors.append(f"réaffirmation V110 impossible: {type(exc).__name__}: {exc}")
+
         app_roots = list(bot.tree.get_commands())
         app_root_names = {str(command.name).casefold() for command in app_roots}
-        # Le renommage nickname -> nick n'etait code QUE dans cet audit : ni le
-        # catalogue (SHORT_COMMAND_NAMES), ni le runtime ne le realisent. L'audit
-        # exigeait donc une racine /nick que rien ne cree. La verification de fond
-        # reste identique : toute commande directe normale doit avoir sa slash.
-        expected_slash = set(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)
-        missing_slash_direct = sorted(expected_slash - app_root_names)
+
+        # V110 est l'autorité sur les racines slash publiques. L'ancien audit comparait
+        # toutes les commandes + directes au tree slash, ce qui signalait à tort les jeux
+        # ou centres volontairement groupés, tout en rejetant /profile, /shop et /weekly
+        # alors que V110 les expose explicitement. On vérifie désormais la surface choisie
+        # réellement pour Discord, y compris la racine groupée /role.
+        v110_public_roots = {
+            str(public_name).casefold()
+            for public_name in surface_v110.STANDARD_DIRECT_SLASH.values()
+        }
+        v110_public_roots.update(
+            str(root_name).casefold()
+            for root_name, _leaf_name in surface_v110.STANDARD_GROUPED_SLASH.values()
+        )
+        missing_v110_roots = sorted(v110_public_roots - app_root_names)
+        if missing_v110_roots:
+            errors.append("slash V110 standards absents: " + ", ".join(missing_v110_roots))
+
         if len(app_roots) > slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET:
             errors.append(f"trop de racines slash: {len(app_roots)}/100")
-        if "nickname" not in app_root_names:
-            errors.append("/nickname est absent")
 
         missing_proof_slash = sorted(set(slash_command_budget.PROOF_SLASH_PREFERRED) - app_root_names)
         if missing_proof_slash:
@@ -207,7 +245,11 @@ async def run() -> int:
         if admin_slash:
             errors.append("commandes admin historiques présentes en slash: " + ", ".join(admin_slash))
 
-        merged_slash = sorted(app_root_names & set(command_catalog_cleanup.MERGED_COMMANDS))
+        # MERGED_COMMANDS reste la politique historique des commandes préfixées. Une
+        # racine réutilisée volontairement par V110 n'est donc pas un ancien doublon slash.
+        # Le filtre ci-dessous continue de rejeter toutes les autres racines legacy.
+        legacy_merged_roots = set(command_catalog_cleanup.MERGED_COMMANDS) - v110_public_roots
+        merged_slash = sorted(app_root_names & legacy_merged_roots)
         if merged_slash:
             errors.append("anciennes commandes fusionnées encore en slash: " + ", ".join(merged_slash))
 
@@ -248,8 +290,12 @@ async def run() -> int:
         print(f"SentriX audit: {len(command_catalog_cleanup.ADMIN_DIRECT_COMMANDS)} commandes admin directes + uniquement")
         print(f"SentriX audit: {len(command_catalog_cleanup.PROOF_VISIBLE_COMMANDS)} commandes proof visibles")
         print(f"SentriX audit: {len(command_catalog_cleanup.GAME_COMMANDS)} jeux directs")
-        if missing_slash_direct:
-            print("Slash directs absents: " + ", ".join(missing_slash_direct))
+        print(
+            "Slash V110 standards: "
+            + ", ".join(sorted(v110_public_roots & app_root_names))
+        )
+        if missing_v110_roots:
+            print("Slash V110 absents: " + ", ".join(missing_v110_roots))
         print("Slash proof essentiels: " + ", ".join(sorted(set(slash_command_budget.PROOF_SLASH_PREFERRED) & app_root_names)))
         print(f"Extensions: {len(loaded)}/{len(main.EXTENSIONS)} chargées")
         print("Catégories visibles +help:")
@@ -257,6 +303,8 @@ async def run() -> int:
             count = category_counts.get(category.key, 0)
             if count:
                 print(f"  {category.key}: {count}")
+        if explicit_removed:
+            print("Retraits produit confirmés: " + ", ".join(sorted(explicit_removed)))
         if len(app_roots) < 100:
             warnings.append(f"catalogue slash sous le plafond: {len(app_roots)}/100")
         for warning in warnings:
@@ -280,7 +328,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} problème(s) détecté(s)")
         return 1
-    print("OK: catalogue, +help, proof et permissions préfixe/slash conformes")
+    print("OK: catalogue, retraits produit, +help, V110, proof et permissions préfixe/slash conformes")
     return 0
 
 

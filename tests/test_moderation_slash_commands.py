@@ -152,14 +152,12 @@ class ModerationCatalogSurfaceTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, NORMAL_DIRECT_COMMANDS)
 
-    def test_normal_direct_commands_reste_exactement_a_97(self):
-        """Contrat déjà imposé par tools/command_runtime_audit.py : le budget slash
-        (cogs/slash_command_budget.py) est plafonné à 100 racines globales. Passé de
-        100 à 97 depuis le regroupement volontaire de la musique sous /music (pause/
-        skip/stop/queue/nowplaying/volume/loop/shuffle/join/leave ne sont plus des
-        racines directes ; seul +play l'est encore) — ne pas relever ce nombre en
-        réintroduisant d'anciennes commandes plates pour "revenir à 100"."""
-        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 97)
+    def test_normal_direct_commands_reste_exactement_a_95(self):
+        """Contrat imposé par tools/command_runtime_audit.py : la surface directe
+        reste volontairement à 95. Elle était à 97 avant le retrait produit explicite
+        de `blacklist-add` et `blacklist-users`; ces deux anciennes commandes ne doivent
+        pas être réintroduites juste pour faire remonter un compteur."""
+        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 95)
 
 
 if __name__ == "__main__":

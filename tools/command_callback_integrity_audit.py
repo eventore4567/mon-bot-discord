@@ -60,8 +60,7 @@ def _app_callback_object(hybrid_command):
 
 
 async def _walk_all_hybrid(bot):
-    """Toutes les HybridCommand/HybridGroup, y compris les sous-commandes de groupe,
-    en excluant les groupes eux-mêmes qui n'ont pas de callback propre invocable."""
+    """Toutes les HybridCommand/HybridGroup, y compris les sous-commandes de groupe."""
     from discord.ext import commands as dpy_commands
 
     for command in bot.walk_commands():
@@ -78,6 +77,7 @@ async def run() -> int:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-ci.db")
 
         import main
+        import sentrix_command_surface_v110 as surface_v110
         before = list(main.EXTENSIONS)
 
         # Réplique EXACTEMENT ce que fait railway_boot.py sur main.EXTENSIONS (les ~21
@@ -113,10 +113,10 @@ async def run() -> int:
         print(f"Extensions chargées: {len(loaded)}/{len(main.EXTENSIONS)}")
 
         # Reconstitue la surface finale exactement comme au vrai démarrage (voir
-        # tools/command_runtime_audit.py) : c'est APRÈS ces étapes que
-        # command_hybrid_slash_restore_v3 et slash_command_budget ont fini de jouer,
-        # donc que la divergence éventuelle callback vs app_command._callback est figée
-        # dans son état final de production.
+        # tools/command_runtime_audit.py). Les callbacks hybrides sont resynchronisés
+        # d'abord ; V110 est ensuite réaffirmée comme elle l'est juste avant la sync
+        # Discord afin que l'audit observe réellement l'arbre publié, pas un état
+        # transitoire produit par une ancienne couche de runtime.
         from cogs import command_catalog_cleanup, slash_command_budget
         from cogs.hybrid_callback_resync import resync as resync_hybrid_callbacks
         bot._prune_redundant_commands()
@@ -185,29 +185,48 @@ async def run() -> int:
         if prefix_dupes:
             errors.append("Doublons dans le registre préfixe/hybride: " + ", ".join(sorted(prefix_dupes)))
 
+        # V110 est l'autorité finale de publication. La réaffirmation doit se faire avant
+        # l'audit du CommandTree, sinon les anciennes couches chargées par railway_boot
+        # peuvent faire croire que des racines standards ont disparu alors qu'elles sont
+        # restaurées juste avant bot.tree.sync() en production.
+        try:
+            surface_v110.reassert_standard_slash_surface(bot)
+            slash_command_budget.finalize(bot)
+        except Exception as exc:
+            errors.append(f"réaffirmation V110 impossible: {type(exc).__name__}: {exc}")
+
         app_names = [c.qualified_name.casefold() for c in bot.tree.walk_commands()]
         app_dupes = [name for name, count in Counter(app_names).items() if count > 1]
         if app_dupes:
             errors.append("Doublons dans le CommandTree slash: " + ", ".join(sorted(app_dupes)))
 
         # ------------------------------------------------------------------
-        # 4. Commande présente en + mais absente du CommandTree alors que
-        #    with_app_command=True (devrait être slash mais ne l'est pas)
+        # 4. Commandes slash obligatoires réellement absentes.
         # ------------------------------------------------------------------
-        from discord.ext import commands as dpy_commands
-        missing_slash_should_exist: list[str] = []
-        async for command in _walk_all_hybrid(bot):
-            if command.parent is not None:
-                continue  # sous-commande : vérifiée via le groupe parent
-            wants_slash = getattr(command, "with_app_command", True)
-            if wants_slash and command.app_command is None:
-                missing_slash_should_exist.append(command.qualified_name)
-        if missing_slash_should_exist:
-            warnings.append(
-                "Commande(s) hybride(s) déclarées with_app_command=True mais sans "
-                "app_command construit (probablement évincée par le budget slash, "
-                "cogs/slash_command_budget.py — vérifier si c'est voulu) : "
-                + ", ".join(sorted(missing_slash_should_exist))
+        # V110 est la source de vérité du tree réellement publié. Les anciennes racines
+        # catégorielles du budget (config/economy/games/...) ne doivent pas être exigées
+        # si V110 les a remplacées par des commandes directes ou des groupes canoniques.
+        required_slash_roots = {
+            str(public_name).casefold()
+            for public_name in surface_v110.STANDARD_DIRECT_SLASH.values()
+        }
+        required_slash_roots.update(
+            str(root_name).casefold()
+            for root_name, _leaf_name in surface_v110.STANDARD_GROUPED_SLASH.values()
+        )
+        required_slash_roots.update(
+            str(name).casefold()
+            for name in slash_command_budget.PROOF_SLASH_PREFERRED
+        )
+        app_root_names = {
+            str(command.name).casefold()
+            for command in bot.tree.get_commands()
+        }
+        missing_required_slash = sorted(required_slash_roots - app_root_names)
+        if missing_required_slash:
+            errors.append(
+                "Racines slash canoniques obligatoires absentes : "
+                + ", ".join(missing_required_slash)
             )
 
         # ------------------------------------------------------------------
@@ -225,7 +244,8 @@ async def run() -> int:
                 + ", ".join(sorted(leaked_params))
             )
 
-        print(f"Commandes hybrides restées + uniquement (with_app_command=False, jamais restaurées): {len(no_app_command)}")
+        print(f"Commandes hybrides restées + uniquement / hors surface slash canonique : {len(no_app_command)}")
+        print(f"Racines slash V110 vérifiées : {len(required_slash_roots)}")
 
         for warning in warnings:
             print(f"[WARN] {warning}")
@@ -247,7 +267,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s) structurel(s) detecte(s)")
         return 1
-    print("OK: aucune divergence callback slash/prefixe detectee sur les commandes hybrides.")
+    print("OK: aucune divergence callback slash/prefixe et aucune racine slash canonique manquante.")
     return 0
 
 

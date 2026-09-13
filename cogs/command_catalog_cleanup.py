@@ -28,8 +28,7 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
     "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
     "giverole", "removerole",
-    "security", "antiraid", "antinuke", "blacklist-add", "blacklist-users",
-    "panic", "syncbl",
+    "security", "antiraid", "antinuke", "panic", "syncbl",
     "sentrix", "image", "ai-translate", "chat-reset",
     "balance", "daily", "work", "pay", "inventory", "banque",
     "economyleaderboard", "leaderboard-money",
@@ -41,10 +40,22 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     "play",
 }) | GAME_COMMANDS
 
+# Commandes admin encore découvrables. Les commandes owner privées (blacklist globale,
+# sync global et wipe serveur) restent chargées/permissionnées mais ne sont plus montrées
+# dans +help : elles ne doivent pas apparaître dans la surface administrative publique.
 ADMIN_DIRECT_COMMANDS = frozenset({
-    "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
-    "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
-    "wipe-server", "roleall", "massrole",
+    "setstatus", "status-rotate", "footer", "theme", "set-bot",
+    "bot-servers", "bot-leave", "roleall", "massrole",
+})
+
+PRIVATE_OWNER_COMMANDS = frozenset({
+    "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "wipe-server",
+})
+
+# Commandes explicitement retirées du bot à la demande du produit. Elles ne doivent
+# rester ni en préfixe, ni en slash, ni être réinjectées par les couches de restauration.
+EXPLICITLY_REMOVED_COMMANDS = frozenset({
+    "blacklist-add", "blacklist-users",
 })
 
 # Nouveau système transverse : visible dans +help sans le classer dans les anciennes
@@ -138,7 +149,7 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # Émojis : aucun chemin de découverte sans les connaître déjà par cœur.
     "addemoji", "deleteemoji", "emoji-list",
 })
-INTENTIONALLY_REMOVED_COMMANDS = PURE_DUPLICATE_COMMANDS
+INTENTIONALLY_REMOVED_COMMANDS = PURE_DUPLICATE_COMMANDS | EXPLICITLY_REMOVED_COMMANDS
 CONFIRMED_DUPLICATE_COMMANDS = PURE_DUPLICATE_COMMANDS
 RESTORED_COMMANDS = NORMAL_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS
 LOW_VALUE_REMOVED_COMMANDS = LOW_VALUE_HIDDEN_COMMANDS
@@ -182,7 +193,11 @@ def apply_surface(bot: commands.Bot) -> None:
     direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS | HELP_VISIBLE_EXTRA_COMMANDS
     for command in bot.commands:
         name = command.name.casefold()
-        if name in direct:
+        if name in EXPLICITLY_REMOVED_COMMANDS:
+            command.hidden = True
+        elif name in PRIVATE_OWNER_COMMANDS:
+            command.hidden = True
+        elif name in direct:
             command.hidden = False
         elif name in PURE_DUPLICATE_COMMANDS:
             continue
@@ -209,7 +224,7 @@ def install(bot: commands.Bot) -> None:
     if not _INSTALLED:
         main.COMMANDS_REPLACED_BY_SETUP = frozenset()
         main.EXACT_DUPLICATE_COMMANDS = PURE_DUPLICATE_COMMANDS
-        main.PRUNED_COMMANDS = PURE_DUPLICATE_COMMANDS
+        main.PRUNED_COMMANDS = PURE_DUPLICATE_COMMANDS | EXPLICITLY_REMOVED_COMMANDS
         main.PUBLIC_COMMANDS = main.PUBLIC_COMMANDS | {"help", "ticket", "giveaway"}
         main.KNOWN_PERMISSION_COMMANDS = (
             main.PUBLIC_COMMANDS
@@ -224,7 +239,8 @@ def install(bot: commands.Bot) -> None:
 
     apply_surface(bot)
     logger.info(
-        "Surface SentriX : %s commandes directes normales, %s admin, %s proof, %s jeux; "
+        "Surface SentriX : %s commandes directes normales, %s admin visibles, %s owner privées, %s proof, %s jeux; "
         "anciennes commandes fusionnées conservées en + mais masquées.",
-        len(NORMAL_DIRECT_COMMANDS), len(ADMIN_DIRECT_COMMANDS), len(PROOF_VISIBLE_COMMANDS), len(GAME_COMMANDS),
+        len(NORMAL_DIRECT_COMMANDS), len(ADMIN_DIRECT_COMMANDS), len(PRIVATE_OWNER_COMMANDS),
+        len(PROOF_VISIBLE_COMMANDS), len(GAME_COMMANDS),
     )
