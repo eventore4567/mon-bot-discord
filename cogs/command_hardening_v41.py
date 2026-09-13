@@ -240,12 +240,15 @@ def _cooldown_error(retry_after: float) -> commands.CommandOnCooldown:
 
 
 def _audit_registry(bot: commands.Bot) -> None:
-    main = _runtime_main(bot)
-    if main is None:
-        return
+    # La matrice d'accès est la source de vérité runtime. L'ancien audit V41 lisait les
+    # constantes historiques de main.py, qui ne voient pas les classifications ajoutées
+    # dynamiquement par les cogs (par exemple +infinit) ni le niveau guild-owner de +dm
+    # et +dmall. Résultat : faux avertissements « fail-closed » alors que le garde réel
+    # avait déjà une politique explicite pour ces commandes.
+    from utils import access_matrix
 
-    public = set(getattr(main, "PUBLIC_COMMANDS", ()) or ())
-    known = set(getattr(main, "KNOWN_PERMISSION_COMMANDS", ()) or ())
+    public = set(access_matrix.PUBLIC_COMMANDS)
+    known = set(access_matrix.KNOWN_COMMANDS)
     roots: set[str] = set()
     aliases: dict[str, set[str]] = defaultdict(set)
     missing_docs: list[str] = []
