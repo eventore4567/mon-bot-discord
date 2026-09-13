@@ -167,7 +167,9 @@ async def run() -> int:
             "Publier",
             "verify_captcha_enabled",
             "VerifyView",
-            "5. Accès salons : NON",
+            # Le numéro d'étape de l'UI peut changer quand le setup est réordonné ;
+            # le gate doit vérifier la présence du contrôle, pas son numéro cosmétique.
+            "Accès salons : NON",
             "_apply_auto_access",
             "verification_auto_access",
             "manage_channels",
