@@ -77,6 +77,7 @@ async def run() -> int:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-ci.db")
 
         import main
+        import sentrix_command_surface_v110 as surface_v110
         before = list(main.EXTENSIONS)
 
         # Réplique EXACTEMENT ce que fait railway_boot.py sur main.EXTENSIONS (les ~21
@@ -112,10 +113,10 @@ async def run() -> int:
         print(f"Extensions chargées: {len(loaded)}/{len(main.EXTENSIONS)}")
 
         # Reconstitue la surface finale exactement comme au vrai démarrage (voir
-        # tools/command_runtime_audit.py) : c'est APRÈS ces étapes que
-        # command_hybrid_slash_restore_v3 et slash_command_budget ont fini de jouer,
-        # donc que la divergence éventuelle callback vs app_command._callback est figée
-        # dans son état final de production.
+        # tools/command_runtime_audit.py). Les callbacks hybrides sont resynchronisés
+        # d'abord ; V110 est ensuite réaffirmée comme elle l'est juste avant la sync
+        # Discord afin que l'audit observe réellement l'arbre publié, pas un état
+        # transitoire produit par une ancienne couche de runtime.
         from cogs import command_catalog_cleanup, slash_command_budget
         from cogs.hybrid_callback_resync import resync as resync_hybrid_callbacks
         bot._prune_redundant_commands()
@@ -184,6 +185,16 @@ async def run() -> int:
         if prefix_dupes:
             errors.append("Doublons dans le registre préfixe/hybride: " + ", ".join(sorted(prefix_dupes)))
 
+        # V110 est l'autorité finale de publication. La réaffirmation doit se faire avant
+        # l'audit du CommandTree, sinon les anciennes couches chargées par railway_boot
+        # peuvent faire croire que des racines standards ont disparu alors qu'elles sont
+        # restaurées juste avant bot.tree.sync() en production.
+        try:
+            surface_v110.reassert_standard_slash_surface(bot)
+            slash_command_budget.finalize(bot)
+        except Exception as exc:
+            errors.append(f"réaffirmation V110 impossible: {type(exc).__name__}: {exc}")
+
         app_names = [c.qualified_name.casefold() for c in bot.tree.walk_commands()]
         app_dupes = [name for name, count in Counter(app_names).items() if count > 1]
         if app_dupes:
@@ -192,13 +203,9 @@ async def run() -> int:
         # ------------------------------------------------------------------
         # 4. Commandes slash obligatoires réellement absentes.
         # ------------------------------------------------------------------
-        # `HybridCommand` n'expose pas de contrat public fiable permettant de relire
-        # `with_app_command=False` après construction. L'ancien audit faisait donc
-        # `getattr(command, "with_app_command", True)` et accusait à tort +image d'avoir
-        # perdu son slash, alors que cogs/ai.py la déclare explicitement + uniquement.
-        # La source de vérité est désormais la même que le budget : les racines V110,
-        # groupes canoniques et proof de tier 1 doivent exister ; les autres peuvent être
-        # volontairement + only pour respecter la limite Discord de 100 racines.
+        # La source de vérité est la même que le budget ET le point de sync final : les
+        # racines V110, groupes canoniques et proof de tier 1 doivent exister ; les autres
+        # peuvent être volontairement + only pour respecter la limite Discord de 100.
         required_slash_roots = set(slash_command_budget._required_names())
         app_root_names = {
             str(command.name).casefold()
