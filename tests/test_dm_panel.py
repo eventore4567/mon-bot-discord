@@ -159,7 +159,6 @@ def test_le_proprietaire_de_sentrix_est_autorise():
 
 
 def test_un_administrateur_ordinaire_est_refuse():
-    """C'est tout l'enjeu : un admin du serveur ne doit PAS pouvoir écrire à tous."""
     assert asyncio.run(_autorise(session_user_id=99, proprietaire=1, est_owner_bot=False)) is False
 
 
@@ -174,7 +173,6 @@ def test_un_job_en_cours_est_visible_et_bloquant():
     app = {}
     magasin = dm_panel._jobs(app)
     magasin[4242] = {"termine": False, "fin": 0.0}
-    # Un second clic doit retrouver le job en cours, donc pouvoir être refusé.
     assert dm_panel._jobs(app)[4242]["termine"] is False
 
 
@@ -187,8 +185,8 @@ def test_les_jobs_termines_finissent_par_etre_purges():
         3: {"termine": False, "fin": 0.0},
     }
     dm_panel._purger(magasin)
-    assert 1 not in magasin, "un vieux bilan doit être libéré"
-    assert 2 in magasin and 3 in magasin, "un bilan récent ou actif reste consultable"
+    assert 1 not in magasin
+    assert 2 in magasin and 3 in magasin
 
 
 def test_les_routes_dm_sont_toutes_declarees():
@@ -204,36 +202,34 @@ def test_les_routes_dm_sont_toutes_declarees():
 
 
 def test_le_panneau_dm_ne_reimplemente_pas_le_moteur():
-    """Garde-fou : deux moteurs concurrents finiraient par diverger."""
     import pathlib
 
     source = pathlib.Path("web/dm_panel.py").read_text(encoding="utf-8")
     assert "moteur.diffuser(" in source
-    assert "panels.envoyer(" not in source, "le panneau ne doit jamais envoyer lui-même"
+    assert "panels.envoyer(" not in source
 
 
-# ---------------------------------------------------------------- interface
+# ---------------------------------------------------------------- interface unifiée
 def _html() -> str:
-    import web  # déclenche l'assemblage complet de la page
+    import sentrix_product_update
     from web import dashboard
 
+    sentrix_product_update.install_dashboard_prestart(dashboard)
     return dashboard.INDEX_HTML
 
 
-def test_l_onglet_dm_est_reellement_servi():
-    """L'injection doit survivre à la restauration de INDEX_HTML par web/__init__ :
-    posée trop tôt, elle était effacée comme les anciennes couches visuelles."""
+def test_l_onglet_dm_est_reellement_servi_dans_unified_v2():
     html = _html()
-    assert 'data-tab="dm"' in html, "l'onglet n'apparaît pas dans la navigation"
+    assert '["dm","Messages privés","DM"]' in html
+    assert 'dm:["Messages privés"' in html
     assert 'id="sentrix-dm-panel"' in html
     assert 'id="sentrix-dm-style"' in html
 
 
-def test_le_rendu_de_l_onglet_est_branche():
+def test_le_rendu_de_l_onglet_est_branche_sur_le_routeur_unifie():
     html = _html()
-    assert "if(tab.dm){window.sentrixRenderDM" in html, "l'onglet ne rendrait rien"
-    # Rien à « enregistrer » ici : la barre de sauvegarde doit disparaître.
-    assert 'Boolean(tab.sanctions||tab.dm)' in html
+    assert "case'dm':await window.sentrixRenderDM();break;" in html
+    assert "window.sentrixRenderDM=async function renderDM" in html
 
 
 def test_l_interface_couvre_les_elements_demandes():
@@ -250,34 +246,31 @@ def test_l_interface_couvre_les_elements_demandes():
 def test_l_interface_utilise_les_routes_existantes_et_aucun_moteur_bis():
     html = _html()
     assert "/dm/apercu" in html and "/dm/all" in html and "/dm/job" in html and "/dm/user" in html
-    # Le navigateur ne doit jamais parler directement à Discord.
-    assert "discord.com/api" not in html.split('id="sentrix-dm-panel"')[1]
+    assert "discord.com/api" not in html
 
 
 def test_l_envoi_est_neutralise_avant_le_premier_aller_retour():
-    """Anti double-clic : le bouton est désactivé AVANT l'appel réseau, pas après."""
     html = _html()
     bloc = html.split("async function envoyerTous")[1].split("async function envoyerUn")[0]
-    i_desactive = bloc.index("bouton.disabled = true")
-    i_appel = bloc.index("await appel(")
+    i_desactive = bloc.index("bouton.disabled=true")
+    i_appel = bloc.index("await dmCall(")
     assert i_desactive < i_appel
 
 
 def test_le_conflit_409_est_traite_comme_une_diffusion_en_cours():
     html = _html()
-    assert "r.status === 409" in html, "un double envoi doit être signalé, pas ignoré"
+    assert "r.status===409" in html
+    assert "Une diffusion est déjà en cours" in html
 
 
 def test_l_interface_est_responsive():
     html = _html()
-    assert "@media(max-width:620px)" in html, "l'interface doit tenir sur mobile"
+    assert "@media(max-width:620px)" in html
 
 
 def test_le_formulaire_n_est_montre_qu_apres_accord_du_serveur():
-    """La visibilité suit la réponse du serveur : aucun formulaire pour un non-autorisé."""
     html = _html()
-    # sentrixRenderDM apparait deux fois (aiguillage puis definition) : on vise la definition.
-    bloc = html.split("window.sentrixRenderDM = async function renderDM")[1]
+    bloc = html.split("window.sentrixRenderDM=async function renderDM")[1]
     i_verif = bloc.index("/dm/apercu")
     i_formulaire = bloc.index("dmAllMessage")
     assert i_verif < i_formulaire
