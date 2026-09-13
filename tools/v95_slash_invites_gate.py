@@ -96,7 +96,7 @@ async def run() -> int:
             errors.append("racines slash dupliquées")
         if len(roots) > 100:
             errors.append(f"budget slash dépassé: {len(roots)}/100")
-        for required in ("help", "setup", "ping", "sentrix", "moderation", "security", "ticket", "giveaway", "invites", "games", "roles"):
+        for required in ("help", "setup", "ping", "sentrix", "mod", "security", "ticket", "giveaway", "invites", "games", "roles"):
             if required not in root_names:
                 errors.append(f"racine slash essentielle absente: /{required}")
 
@@ -123,7 +123,7 @@ async def run() -> int:
 
         ban_app = app_for_original("ban")
         if ban_app is None:
-            errors.append("/moderation ... ban absent")
+            errors.append("/mod ... ban absent")
         else:
             params = list(getattr(ban_app, "parameters", ()) or ())
             if not any(str(getattr(param, "type", "")).casefold().endswith("user") for param in params):
