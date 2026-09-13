@@ -21,6 +21,114 @@ _REQUIRED_MARKERS = (
 _REQUIRED_ENDPOINTS = ("/api/me", "/api/guilds")
 _UNIFIED_MARKER = 'id="sentrix-dashboard-unified-v2"'
 _PRODUCT_RECOVERY_MARKER = 'id="sentrix-product-dashboard-recovery"'
+_UNIFIED_PRODUCT_UX_MARKER = 'id="sentrix-unified-product-ux-v3"'
+
+_UNIFIED_PRODUCT_UX = r'''
+<script id="sentrix-unified-product-ux-v3">
+(() => {
+  "use strict";
+  if (window.__sentrixUnifiedProductUxV3) return;
+  window.__sentrixUnifiedProductUxV3 = true;
+
+  const byId = id => document.getElementById(id);
+  const activeInput = () => ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName || "");
+  const hasUnsavedChanges = () => {
+    const save = byId("saveButton");
+    return Boolean(save && !save.classList.contains("hidden"));
+  };
+  const confirmNavigation = action => !hasUnsavedChanges() || window.confirm(
+    `Tu as des modifications non enregistrées. ${action} les annulera. Continuer ?`
+  );
+
+  // Changer de serveur ou actualiser recharge les données et peut effacer le brouillon local.
+  // On bloque donc l'action AVANT les handlers du dashboard tant que l'utilisateur n'a pas confirmé.
+  document.addEventListener("click", event => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const guild = target.closest("[data-guild]");
+    if (guild && !confirmNavigation("Changer de serveur")) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+    const refresh = target.closest("#refreshButton");
+    if (refresh && !confirmNavigation("Actualiser les données")) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+
+  // Les boutons de navigation exposent toujours la page active aux lecteurs d'écran,
+  // même si renderNav() reconstruit complètement la sidebar.
+  const syncNavigationA11y = () => {
+    document.querySelectorAll("#navigation [data-tab]").forEach(button => {
+      if (button.classList.contains("active")) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+      if (!button.title) button.title = button.textContent?.trim() || "Ouvrir";
+    });
+  };
+  const navigation = byId("navigation");
+  if (navigation) {
+    new MutationObserver(syncNavigationA11y).observe(navigation, {childList:true, subtree:true});
+    syncNavigationA11y();
+  }
+
+  // Palette : flèches pour naviguer, Entrée pour ouvrir, sans sortir du champ de recherche.
+  const paletteInput = byId("paletteInput");
+  const paletteResults = byId("paletteResults");
+  const paletteItems = () => [...document.querySelectorAll("#paletteResults [data-palette-tab]")];
+  const selectPaletteItem = index => {
+    const items = paletteItems();
+    if (!items.length) return;
+    const normalized = ((index % items.length) + items.length) % items.length;
+    items.forEach((item, i) => item.classList.toggle("active", i === normalized));
+    items[normalized].scrollIntoView?.({block:"nearest"});
+  };
+  if (paletteInput && paletteResults) {
+    paletteInput.addEventListener("keydown", event => {
+      const items = paletteItems();
+      if (!items.length) return;
+      const current = items.findIndex(item => item.classList.contains("active"));
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        selectPaletteItem(current < 0 ? 0 : current + 1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        selectPaletteItem(current < 0 ? items.length - 1 : current - 1);
+      } else if (event.key === "Enter" && current >= 0) {
+        event.preventDefault();
+        items[current].click();
+      }
+    });
+    new MutationObserver(() => {
+      const items = paletteItems();
+      if (items.length && !items.some(item => item.classList.contains("active"))) selectPaletteItem(0);
+    }).observe(paletteResults, {childList:true, subtree:true});
+  }
+
+  // Raccourci rapide : / ouvre directement la recherche globale quand on n'écrit pas déjà.
+  document.addEventListener("keydown", event => {
+    if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || activeInput()) return;
+    const search = byId("globalSearch");
+    if (!search) return;
+    event.preventDefault();
+    search.focus();
+    search.select?.();
+  });
+
+  // État réseau visible immédiatement. Le dashboard garde la main sur le vrai statut Discord.
+  window.addEventListener("offline", () => {
+    byId("runtimeDot")?.classList.add("off");
+    const text = byId("runtimeText");
+    if (text) text.textContent = "Hors ligne";
+  });
+  window.addEventListener("online", () => {
+    const text = byId("runtimeText");
+    if (text) text.textContent = "Reconnexion…";
+  });
+})();
+</script>
+'''
 
 
 def _snapshot_is_usable(html: str) -> tuple[bool, list[str]]:
@@ -71,6 +179,16 @@ def _finalize_unified_html(html: str) -> str:
             1,
         )
     return html
+
+
+def _enhance_unified_product_ux(html: str) -> str:
+    """Ajoute une couche UX finale, idempotente et indépendante des APIs produit."""
+    html = str(html or "")
+    if _UNIFIED_MARKER not in html or _UNIFIED_PRODUCT_UX_MARKER in html:
+        return html
+    if "</body>" in html:
+        return html.replace("</body>", _UNIFIED_PRODUCT_UX + "\n</body>", 1)
+    return html + _UNIFIED_PRODUCT_UX
 
 
 def install(dashboard) -> bool:
@@ -162,6 +280,7 @@ def _install_unified_document(dashboard) -> bool:
         return False
 
     html = enhance_html(_finalize_unified_html(str(INDEX_HTML or "")))
+    html = _enhance_unified_product_ux(html)
     usable, missing = _snapshot_is_usable(html)
     if _UNIFIED_MARKER not in html or not usable:
         logger.error("Dashboard unifié V2 incomplet : marqueurs absents=%s.", missing)
@@ -216,5 +335,6 @@ __all__ = [
     "_ensure_v60_features_final",
     "_theme_secondary_pages_final",
     "_finalize_unified_html",
+    "_enhance_unified_product_ux",
     "_install_unified_document",
 ]
