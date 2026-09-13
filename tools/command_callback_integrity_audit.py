@@ -60,8 +60,7 @@ def _app_callback_object(hybrid_command):
 
 
 async def _walk_all_hybrid(bot):
-    """Toutes les HybridCommand/HybridGroup, y compris les sous-commandes de groupe,
-    en excluant les groupes eux-mêmes qui n'ont pas de callback propre invocable."""
+    """Toutes les HybridCommand/HybridGroup, y compris les sous-commandes de groupe."""
     from discord.ext import commands as dpy_commands
 
     for command in bot.walk_commands():
@@ -191,23 +190,25 @@ async def run() -> int:
             errors.append("Doublons dans le CommandTree slash: " + ", ".join(sorted(app_dupes)))
 
         # ------------------------------------------------------------------
-        # 4. Commande présente en + mais absente du CommandTree alors que
-        #    with_app_command=True (devrait être slash mais ne l'est pas)
+        # 4. Commandes slash obligatoires réellement absentes.
         # ------------------------------------------------------------------
-        from discord.ext import commands as dpy_commands
-        missing_slash_should_exist: list[str] = []
-        async for command in _walk_all_hybrid(bot):
-            if command.parent is not None:
-                continue  # sous-commande : vérifiée via le groupe parent
-            wants_slash = getattr(command, "with_app_command", True)
-            if wants_slash and command.app_command is None:
-                missing_slash_should_exist.append(command.qualified_name)
-        if missing_slash_should_exist:
-            warnings.append(
-                "Commande(s) hybride(s) déclarées with_app_command=True mais sans "
-                "app_command construit (probablement évincée par le budget slash, "
-                "cogs/slash_command_budget.py — vérifier si c'est voulu) : "
-                + ", ".join(sorted(missing_slash_should_exist))
+        # `HybridCommand` n'expose pas de contrat public fiable permettant de relire
+        # `with_app_command=False` après construction. L'ancien audit faisait donc
+        # `getattr(command, "with_app_command", True)` et accusait à tort +image d'avoir
+        # perdu son slash, alors que cogs/ai.py la déclare explicitement + uniquement.
+        # La source de vérité est désormais la même que le budget : les racines V110,
+        # groupes canoniques et proof de tier 1 doivent exister ; les autres peuvent être
+        # volontairement + only pour respecter la limite Discord de 100 racines.
+        required_slash_roots = set(slash_command_budget._required_names())
+        app_root_names = {
+            str(command.name).casefold()
+            for command in bot.tree.get_commands()
+        }
+        missing_required_slash = sorted(required_slash_roots - app_root_names)
+        if missing_required_slash:
+            errors.append(
+                "Racines slash canoniques obligatoires absentes : "
+                + ", ".join(missing_required_slash)
             )
 
         # ------------------------------------------------------------------
@@ -225,7 +226,8 @@ async def run() -> int:
                 + ", ".join(sorted(leaked_params))
             )
 
-        print(f"Commandes hybrides restées + uniquement (with_app_command=False, jamais restaurées): {len(no_app_command)}")
+        print(f"Commandes hybrides restées + uniquement / hors surface slash canonique : {len(no_app_command)}")
+        print(f"Racines slash tier 1 vérifiées : {len(required_slash_roots)}")
 
         for warning in warnings:
             print(f"[WARN] {warning}")
@@ -247,7 +249,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} probleme(s) structurel(s) detecte(s)")
         return 1
-    print("OK: aucune divergence callback slash/prefixe detectee sur les commandes hybrides.")
+    print("OK: aucune divergence callback slash/prefixe et aucune racine slash canonique manquante.")
     return 0
 
 
