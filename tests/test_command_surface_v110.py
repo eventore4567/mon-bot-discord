@@ -13,17 +13,16 @@ def test_common_slash_roots_are_compact() -> None:
     assert surface.COMPACT_ROOT_NAMES["notifications"] == "notify"
 
 
-def test_long_legacy_names_are_normalised_without_hashes() -> None:
+def test_long_legacy_names_are_normalised_readably() -> None:
     samples = {
-        "very-long-configuration-command": "very-long-config-com",
+        "very-long-configuration-command": "very-long-config",
         "permission-management-system": "perms-management",
-        "notification-notification-history": "notif-notif-history",
+        "notification-notification-history": "notif-history",
     }
     for source, expected in samples.items():
         compact = surface._normalise_public_leaf(source)
         assert compact == expected
         assert len(compact) <= 20
-        assert not any(char in compact for char in "abcdef0123456789" if False)
 
 
 def test_collision_suffix_is_readable() -> None:
