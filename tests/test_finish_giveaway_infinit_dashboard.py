@@ -48,9 +48,10 @@ def test_weighted_draw_is_unique_even_with_multiple_winners():
 def test_dashboard_uses_single_canonical_switch_loader():
     """Une ancienne réponse serveur ne doit jamais écraser le serveur courant.
 
-    V60 possède un loader canonique basé sur AbortController : chaque nouveau changement
-    annule la requête précédente et vérifie encore l'identité du contrôleur après l'attente
-    réseau. Le runtime tardif ne doit ajouter aucun second système de token/loader.
+    Le frontend unifié possède un loader canonique basé sur AbortController : chaque nouveau
+    changement annule la requête précédente, passe le signal au fetch et vérifie encore
+    l'identité du contrôleur après l'attente réseau. Le runtime tardif ne doit ajouter aucun
+    second système de token/loader.
     """
     html = dashboard.INDEX_HTML
     runtime_source = (ROOT / "cogs/dashboard_runtime_patch.py").read_text(encoding="utf-8")
@@ -59,7 +60,7 @@ def test_dashboard_uses_single_canonical_switch_loader():
     assert "state.guildAbort" in html
     assert "if(state.guildAbort)state.guildAbort.abort();" in html
     assert "controller!==state.guildAbort" in html
-    assert "controller.signal.aborted" in html
+    assert "{signal:controller.signal}" in html
     assert "guildLoadToken" not in runtime_source
     assert "Les données précédentes ont été retirées" not in runtime_source
     assert "dashboard.INDEX_HTML =" not in runtime_source
