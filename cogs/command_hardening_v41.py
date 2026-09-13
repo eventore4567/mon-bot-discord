@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import inspect
 import logging
-import sys
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -74,10 +73,6 @@ def _state(bot: commands.Bot) -> _GuardState:
     value = _GuardState()
     bot._sentrix_command_hardening_state = value
     return value
-
-
-def _runtime_main(bot: commands.Bot):
-    return sys.modules.get(bot.__class__.__module__) or sys.modules.get("main") or sys.modules.get("__main__")
 
 
 def _root_name(command: Any) -> str:
@@ -260,8 +255,15 @@ def _audit_registry(bot: commands.Bot) -> None:
         canonical = str(getattr(command, "qualified_name", "") or "").strip()
         if canonical and not (getattr(command, "help", None) or getattr(command, "description", None)):
             missing_docs.append(canonical)
+        parent = getattr(command, "parent", None)
+        parent_scope = str(getattr(parent, "qualified_name", "") or "").strip().casefold()
         for alias in getattr(command, "aliases", ()) or ():
-            aliases[str(alias).casefold()].add(canonical or root)
+            alias_name = str(alias).casefold().strip()
+            # Les alias de sous-commandes sont locaux à leur groupe. « list » peut donc
+            # exister sous /logs ET /giveaway sans collision réelle. Seuls les alias de
+            # même portée doivent être comparés entre eux.
+            alias_key = f"{parent_scope} {alias_name}".strip() if parent_scope else alias_name
+            aliases[alias_key].add(canonical or root)
 
     try:
         for command in bot.tree.get_commands():
