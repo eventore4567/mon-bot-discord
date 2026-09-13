@@ -96,7 +96,18 @@ async def run() -> int:
             errors.append("racines slash dupliquées")
         if len(roots) > 100:
             errors.append(f"budget slash dépassé: {len(roots)}/100")
-        for required in ("help", "setup", "ping", "sentrix", "mod", "security", "ticket", "giveaway", "invites", "games", "roles"):
+
+        # V110 : les commandes les plus familières doivent être directes, comme sur les
+        # principaux bots Discord. On garde les groupes pour les fonctions avancées.
+        required_roots = (
+            "help", "setup", "ping", "sentrix",
+            "moderation", "security", "ticket", "giveaway", "invites", "games", "roles",
+            "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
+            "clearwarnings", "clear", "lock", "unlock", "slowmode",
+            "userinfo", "serverinfo", "avatar", "level", "leaderboard",
+            "balance", "play", "pause", "queue", "role",
+        )
+        for required in required_roots:
             if required not in root_names:
                 errors.append(f"racine slash essentielle absente: /{required}")
 
@@ -123,7 +134,7 @@ async def run() -> int:
 
         ban_app = app_for_original("ban")
         if ban_app is None:
-            errors.append("/mod ... ban absent")
+            errors.append("/ban absent")
         else:
             params = list(getattr(ban_app, "parameters", ()) or ())
             if not any(str(getattr(param, "type", "")).casefold().endswith("user") for param in params):
@@ -131,7 +142,7 @@ async def run() -> int:
 
         giverole_app = app_for_original("giverole")
         if giverole_app is None:
-            errors.append("slash giverole absent")
+            errors.append("/role give absent")
         else:
             params = list(getattr(giverole_app, "parameters", ()) or ())
             if not any(str(getattr(param, "type", "")).casefold().endswith("role") for param in params):
@@ -205,9 +216,14 @@ async def run() -> int:
         if not key1 or key1 != key2 or "abc123" not in key1:
             errors.append(f"dédup sémantique invitation invalide: {key1!r} / {key2!r}")
 
+        direct_mapping = getattr(bot, "_sentrix_v110_direct_mapping", {})
         print(
             f"V95: extensions={len(loaded)}/{len(bot_main.EXTENSIONS)} "
             f"commandes_groupées={len(mapping)} racines_slash={len(roots)}"
+        )
+        print(
+            f"V110: slash_familiers={len(direct_mapping)} "
+            f"exemples=/ban,/userinfo,/leaderboard,/play,/role give"
         )
         print(f"V95: inventaire_attendu={len(expected)} manquantes={len(missing)} extras={len(extra)}")
         print(
