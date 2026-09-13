@@ -61,8 +61,8 @@ def test_loading_experience_does_not_use_fake_percentages():
 def test_loader_tracks_dashboard_api_calls_and_timeouts():
     html = _enhance_unified_product_ux(_document())
     assert 'window.fetch = async function sentrixLoadingFetch' in html
-    assert 'url.includes("/api/me")' in html
-    assert 'url.includes("/api/guilds")' in html
+    assert 'path==="/api/me"' in html
+    assert 'path==="/api/guilds"' in html
     assert 'LONG_WAIT_MS' in html
     assert 'RETRY_WAIT_MS' in html
     assert 'AbortError' in html
