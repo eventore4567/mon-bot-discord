@@ -41,10 +41,16 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     "play",
 }) | GAME_COMMANDS
 
+# Commandes admin encore découvrables. Les commandes owner privées (blacklist globale,
+# sync global et wipe serveur) restent chargées/permissionnées mais ne sont plus montrées
+# dans +help : elles ne doivent pas apparaître dans la surface administrative publique.
 ADMIN_DIRECT_COMMANDS = frozenset({
-    "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
-    "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
-    "wipe-server", "roleall", "massrole",
+    "setstatus", "status-rotate", "footer", "theme", "set-bot",
+    "bot-servers", "bot-leave", "roleall", "massrole",
+})
+
+PRIVATE_OWNER_COMMANDS = frozenset({
+    "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "wipe-server",
 })
 
 # Nouveau système transverse : visible dans +help sans le classer dans les anciennes
@@ -182,7 +188,9 @@ def apply_surface(bot: commands.Bot) -> None:
     direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS | HELP_VISIBLE_EXTRA_COMMANDS
     for command in bot.commands:
         name = command.name.casefold()
-        if name in direct:
+        if name in PRIVATE_OWNER_COMMANDS:
+            command.hidden = True
+        elif name in direct:
             command.hidden = False
         elif name in PURE_DUPLICATE_COMMANDS:
             continue
@@ -224,7 +232,8 @@ def install(bot: commands.Bot) -> None:
 
     apply_surface(bot)
     logger.info(
-        "Surface SentriX : %s commandes directes normales, %s admin, %s proof, %s jeux; "
+        "Surface SentriX : %s commandes directes normales, %s admin visibles, %s owner privées, %s proof, %s jeux; "
         "anciennes commandes fusionnées conservées en + mais masquées.",
-        len(NORMAL_DIRECT_COMMANDS), len(ADMIN_DIRECT_COMMANDS), len(PROOF_VISIBLE_COMMANDS), len(GAME_COMMANDS),
+        len(NORMAL_DIRECT_COMMANDS), len(ADMIN_DIRECT_COMMANDS), len(PRIVATE_OWNER_COMMANDS),
+        len(PROOF_VISIBLE_COMMANDS), len(GAME_COMMANDS),
     )
