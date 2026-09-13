@@ -11,7 +11,6 @@ reconstruites comme vraies commandes ``app_commands`` a partir de leur commande 
 from __future__ import annotations
 
 import logging
-import sys
 from collections.abc import Iterable, Iterator
 
 from discord import app_commands
@@ -58,7 +57,6 @@ def _parameter_names(command: app_commands.Command) -> set[str]:
     try:
         return {str(parameter.name).strip().casefold() for parameter in command.parameters}
     except Exception:
-        # Une commande impossible a introspecter ne doit pas etre consideree comme saine.
         return {"<introspection-error>"}
 
 
@@ -82,20 +80,37 @@ def _replace_direct_root(bot: commands.Bot, name: str) -> bool:
 
 
 def _reassert_v110_surface(bot: commands.Bot) -> None:
-    """Réaffirme les slash standards V110 après les correctifs de schéma tardifs.
+    """Réaffirme les slash standards V110 après les correctifs de schéma tardifs."""
+    try:
+        from sentrix_command_surface_v110 import reassert_standard_slash_surface
+    except (ImportError, AttributeError):
+        return
 
-    V110 est optionnelle : les branches plus anciennes qui n'ont pas ce module gardent le
-    comportement V105 historique. Quand V110 est chargée, elle reste l'autorité finale sur
-    les noms publics (/ban, /userinfo, /play, /queue, /role give, etc.).
-    """
-    surface = sys.modules.get("sentrix_command_surface_v110")
-    if surface is None:
-        return
-    reassert = getattr(surface, "reassert_standard_slash_surface", None)
-    if not callable(reassert):
-        return
-    installed, missing = reassert(bot)
-    logger.debug("V110 réaffirmée après V105 : %s route(s), absentes=%s", installed, len(missing))
+    installed, missing = reassert_standard_slash_surface(bot)
+    logger.info(
+        "V110 réaffirmée après V105 : %s route(s), sources absentes=%s.",
+        installed,
+        len(missing),
+    )
+
+    # Ce contrôle est volontairement placé ici, juste avant l'audit final : une route
+    # déclarée par V110 ne doit jamais pouvoir disparaître silencieusement du tree.
+    try:
+        from sentrix_command_surface_v110 import STANDARD_DIRECT_SLASH
+
+        expected_roots = set(STANDARD_DIRECT_SLASH.values())
+        actual_roots = {
+            str(getattr(command, "name", "") or "").casefold()
+            for command in bot.tree.get_commands()
+        }
+        absent = sorted(expected_roots - actual_roots)
+        if absent:
+            raise RuntimeError(
+                "SentriX V110: routes slash standard absentes après réaffirmation: "
+                + ", ".join(f"/{name}" for name in absent)
+            )
+    except ImportError:
+        pass
 
 
 def _ensure_direct_roots(bot: commands.Bot) -> None:
@@ -108,13 +123,9 @@ def _ensure_direct_roots(bot: commands.Bot) -> None:
             logger.exception("Impossible de reconstruire /%s en commande slash native.", name)
             raise
 
-    # V103 utilise directement SentriXSetup.send_setup et publie zero option utilisateur.
-    # On le reaffirme ici pour qu'aucune couche chargee tardivement ne puisse le repolluer.
     if not v103._replace_setup_slash(bot):
         raise RuntimeError("SentriX V105: impossible de garantir la route native /setup")
 
-    # V105 peut être installé après V110. Réaffirmer V110 ici évite qu'une reconstruction
-    # tardive du tree fasse disparaître une route standard comme /queue avant la sync.
     _reassert_v110_surface(bot)
 
 
