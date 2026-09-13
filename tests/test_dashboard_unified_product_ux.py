@@ -47,7 +47,8 @@ def test_navigation_exposes_current_page_and_slash_search_shortcut():
 
 def test_browser_network_state_is_visible_without_replacing_discord_health():
     html = _enhanced()
+    compact = html.replace(' = ', '=')
     assert 'window.addEventListener("offline"' in html
-    assert 'text.textContent = "Hors ligne"' in html
+    assert 'text.textContent="Hors ligne"' in compact
     assert 'window.addEventListener("online"' in html
-    assert 'text.textContent = "Reconnexion…"' in html
+    assert 'text.textContent="Reconnexion…"' in compact
