@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import sqlite3
 import tempfile
@@ -9,7 +10,17 @@ from collections import deque
 from pathlib import Path
 from unittest import mock
 
-from cogs import production_ops
+
+# Charge uniquement le module testé. ``from cogs import production_ops`` exécute
+# cogs/__init__.py, puis utils/config.py, ce qui exige DISCORD_TOKEN avant même la
+# collecte des tests. Le job de fiabilité doit pouvoir tester les opérations locales
+# (backup/alertes) sans secret Discord ni démarrage du runtime complet.
+_MODULE_PATH = Path(__file__).resolve().parents[1] / "cogs" / "production_ops.py"
+_SPEC = importlib.util.spec_from_file_location("sentrix_test_production_ops", _MODULE_PATH)
+if _SPEC is None or _SPEC.loader is None:
+    raise RuntimeError(f"Impossible de charger {_MODULE_PATH}")
+production_ops = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(production_ops)
 
 
 class _DB:
