@@ -58,8 +58,6 @@ TICKET_PING_JS = r"""
       return;
     }
 
-    // L'utilisateur peut changer de serveur pendant la requête : ne jamais injecter les
-    // données du serveur précédent dans l'interface du nouveau.
     if (state.tab !== "tickets" || String(state.guildId) !== guildId || !state.guildData) return;
 
     const wrapper = document.createElement("div");
@@ -95,8 +93,6 @@ TICKET_PING_JS = r"""
         select.value = savedValue;
         if (typeof toast === "function") toast(result.message);
       } catch (error) {
-        // Avant ce correctif, un PUT refusé laissait visuellement le mauvais rôle sélectionné
-        // jusqu'au rechargement de la page. On restaure maintenant la dernière valeur sauvée.
         select.value = savedValue;
         if (typeof toast === "function") toast(error.message, true);
       } finally {
@@ -112,8 +108,6 @@ TICKET_PING_JS = r"""
     return result;
   };
 
-  // Certaines versions du dashboard peuvent charger cette couche avant selectGuild : le
-  // réglage doit rester optionnel au lieu de casser tout le script avec une ReferenceError.
   if (typeof selectGuild === "function") {
     const originalSelectGuild = selectGuild;
     selectGuild = async function sentrixTicketPingSelectGuild(...args) {
@@ -212,5 +206,14 @@ def install(dashboard) -> None:
     dashboard.build_app = build_app
     if 'id="sentrix-ticket-ping-dashboard"' not in dashboard.INDEX_HTML:
         dashboard.INDEX_HTML = dashboard.INDEX_HTML.replace("</body>", TICKET_PING_JS + "\n</body>", 1)
+
+    # La V65 est volontairement chargée APRÈS V35, V53 et ce réglage historique. Elle
+    # masque seulement leur ancienne présentation dans l'onglet Tickets et réutilise leurs
+    # API : aucune donnée ni compatibilité n'est supprimée.
+    try:
+        from . import ticket_dashboard_simple_v65
+        ticket_dashboard_simple_v65.install(dashboard)
+    except Exception:
+        logger.exception("Impossible d'installer l'interface Tickets simplifiée V65.")
 
     logger.info("Réglage du rôle ping tickets ajouté au dashboard.")
