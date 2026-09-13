@@ -24,6 +24,7 @@ async def run() -> int:
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-ci.db")
 
         import main
+        import sentrix_command_surface_v110 as surface_v110
         from cogs import (
             command_catalog_cleanup,
             command_response_guard,
@@ -188,16 +189,26 @@ async def run() -> int:
 
         app_roots = list(bot.tree.get_commands())
         app_root_names = {str(command.name).casefold() for command in app_roots}
-        # Le renommage nickname -> nick n'etait code QUE dans cet audit : ni le
-        # catalogue (SHORT_COMMAND_NAMES), ni le runtime ne le realisent. L'audit
-        # exigeait donc une racine /nick que rien ne cree. La verification de fond
-        # reste identique : toute commande directe normale doit avoir sa slash.
-        expected_slash = set(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)
-        missing_slash_direct = sorted(expected_slash - app_root_names)
+
+        # V110 est l'autorité sur les racines slash publiques. L'ancien audit comparait
+        # toutes les commandes + directes au tree slash, ce qui signalait à tort les jeux
+        # ou centres volontairement groupés, tout en rejetant /profile, /shop et /weekly
+        # alors que V110 les expose explicitement. On vérifie désormais la surface choisie
+        # réellement pour Discord, y compris la racine groupée /role.
+        v110_public_roots = {
+            str(public_name).casefold()
+            for public_name in surface_v110.STANDARD_DIRECT_SLASH.values()
+        }
+        v110_public_roots.update(
+            str(root_name).casefold()
+            for root_name, _leaf_name in surface_v110.STANDARD_GROUPED_SLASH.values()
+        )
+        missing_v110_roots = sorted(v110_public_roots - app_root_names)
+        if missing_v110_roots:
+            errors.append("slash V110 standards absents: " + ", ".join(missing_v110_roots))
+
         if len(app_roots) > slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET:
             errors.append(f"trop de racines slash: {len(app_roots)}/100")
-        if "nickname" not in app_root_names:
-            errors.append("/nickname est absent")
 
         missing_proof_slash = sorted(set(slash_command_budget.PROOF_SLASH_PREFERRED) - app_root_names)
         if missing_proof_slash:
@@ -207,7 +218,11 @@ async def run() -> int:
         if admin_slash:
             errors.append("commandes admin historiques présentes en slash: " + ", ".join(admin_slash))
 
-        merged_slash = sorted(app_root_names & set(command_catalog_cleanup.MERGED_COMMANDS))
+        # MERGED_COMMANDS reste la politique historique des commandes préfixées. Une
+        # racine réutilisée volontairement par V110 n'est donc pas un ancien doublon slash.
+        # Le filtre ci-dessous continue de rejeter toutes les autres racines legacy.
+        legacy_merged_roots = set(command_catalog_cleanup.MERGED_COMMANDS) - v110_public_roots
+        merged_slash = sorted(app_root_names & legacy_merged_roots)
         if merged_slash:
             errors.append("anciennes commandes fusionnées encore en slash: " + ", ".join(merged_slash))
 
@@ -248,8 +263,12 @@ async def run() -> int:
         print(f"SentriX audit: {len(command_catalog_cleanup.ADMIN_DIRECT_COMMANDS)} commandes admin directes + uniquement")
         print(f"SentriX audit: {len(command_catalog_cleanup.PROOF_VISIBLE_COMMANDS)} commandes proof visibles")
         print(f"SentriX audit: {len(command_catalog_cleanup.GAME_COMMANDS)} jeux directs")
-        if missing_slash_direct:
-            print("Slash directs absents: " + ", ".join(missing_slash_direct))
+        print(
+            "Slash V110 standards: "
+            + ", ".join(sorted(v110_public_roots & app_root_names))
+        )
+        if missing_v110_roots:
+            print("Slash V110 absents: " + ", ".join(missing_v110_roots))
         print("Slash proof essentiels: " + ", ".join(sorted(set(slash_command_budget.PROOF_SLASH_PREFERRED) & app_root_names)))
         print(f"Extensions: {len(loaded)}/{len(main.EXTENSIONS)} chargées")
         print("Catégories visibles +help:")
@@ -280,7 +299,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC: {len(errors)} problème(s) détecté(s)")
         return 1
-    print("OK: catalogue, +help, proof et permissions préfixe/slash conformes")
+    print("OK: catalogue, +help, V110, proof et permissions préfixe/slash conformes")
     return 0
 
 
