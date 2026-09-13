@@ -1,9 +1,8 @@
-"""Audit du boot unique du dashboard SentriX V60.
+"""Audit du boot unique du dashboard SentriX unifié.
 
-Les invariants restent les mêmes que lors des corrections historiques : aucune landing ne
-flashe pendant /api/me, une ancienne requête serveur ne peut pas gagner après la nouvelle,
-les codes HTTP restent disponibles et un onglet invalide retombe sur Général. Les tests
-visent désormais le frontend V60 final au lieu des noms d'objets des anciennes générations.
+Les invariants historiques restent obligatoires : aucune landing ne flashe pendant /api/me,
+une ancienne requête serveur ne peut pas gagner après la nouvelle, les codes HTTP restent
+disponibles et un onglet invalide retombe sur la vue d'ensemble.
 """
 from __future__ import annotations
 
@@ -16,7 +15,8 @@ from web import dashboard_oxyde_hotfix  # noqa: E402
 
 
 def test_landing_est_masquee_par_defaut():
-    assert '<section id="landing" class="landing hidden">' in dashboard.INDEX_HTML, (
+    html = dashboard.INDEX_HTML
+    assert 'class="landing hidden" id="landing"' in html, (
         "#landing doit être masquée dans le HTML reçu ; elle n'est révélée qu'après un 401"
     )
 
@@ -27,6 +27,7 @@ def test_selectGuild_annule_la_requete_obsolete():
     assert "new AbortController()" in html
     assert "if(state.guildAbort)state.guildAbort.abort();" in html
     assert "controller!==state.guildAbort" in html
+    assert "requested!==state.guildId" in html
 
 
 def test_selectGuild_distingue_les_etats_d_erreur():
@@ -37,18 +38,19 @@ def test_selectGuild_distingue_les_etats_d_erreur():
     assert "Votre session Discord a expiré" in html
 
 
-def test_renderTab_ne_reste_jamais_sur_un_onglet_invalide():
+def test_navigation_invalide_retombe_sur_overview():
     html = dashboard.INDEX_HTML
-    assert 'if(!special.has(state.tab)&&!tabMeta[state.tab])state.tab="general";' in html, (
-        "un onglet V60 inconnu doit retomber sur Général au lieu de laisser le centre vide"
+    assert "if(!META[state.tab])state.tab='overview';" in html, (
+        "un onglet inconnu doit retomber sur la vue d'ensemble"
     )
+    assert "function go(tab){if(!META[tab])tab='overview';" in html
 
 
-def test_json_conserve_le_code_http_de_l_erreur():
+def test_api_conserve_le_code_http_et_le_payload_de_l_erreur():
     html = dashboard.INDEX_HTML
-    # api() attache le status HTTP à l'Error utilisée ensuite par le bootguard 401/503.
     assert "status:r.status" in html
     assert "Object.assign(new Error" in html
+    assert "data});return data" in html
 
 
 def test_oxyde_hotfix_n_a_plus_de_boucle_de_recuperation_concurrente():
