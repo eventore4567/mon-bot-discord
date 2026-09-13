@@ -260,6 +260,16 @@ def _wrap_prepare_bot() -> None:
     v95.prepare_bot = prepare_bot_fixed
 
 
+def _install_compact_command_surface() -> None:
+    """Branche V110 après les correctifs V95 pour garder un seul routage slash autoritaire."""
+    try:
+        from sentrix_command_surface_v110 import install as install_surface
+
+        install_surface()
+    except Exception:
+        logger.exception("Installation de la surface de commandes compacte V110 impossible.")
+
+
 def install() -> None:
     v95._unwrap_optional = _unwrap_optional_safe
     v95._native_annotation = _native_annotation_safe
@@ -269,6 +279,7 @@ def install() -> None:
     _wrap_prepare_bot()
     _repair_invite_registry()
     v95.install_global()
+    _install_compact_command_surface()
     logger.info("V95 bootstrap actif.")
 
 
