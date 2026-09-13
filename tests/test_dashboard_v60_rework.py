@@ -9,102 +9,107 @@ def _prestart_html() -> str:
     return str(dashboard.INDEX_HTML)
 
 
-def test_v64_is_the_final_prestart_frontend():
+def test_unified_v2_is_the_final_prestart_frontend():
     document = _prestart_html()
     module = __import__("web.dashboard", fromlist=["dashboard"])
-    assert getattr(module, "_sentrix_dashboard_version", None) == "v64-final"
-    assert "SENTR<em>IX</em>" in document
-    assert "--accent:#d66f55" in document
-    assert "--sx-blue:#4da3ff" in document
-    assert "--sx-blue2:#78bdff" in document
-    assert "--sx-blue:var(--accent,#d66f55)" not in document
+
+    assert getattr(module, "_sentrix_dashboard_version", None) == "unified-v2"
+    assert 'id="sentrix-dashboard-unified-v2"' in document
+    assert 'id="sentrix-unified-runtime-v2"' in document
+    assert "--blue:#4da3ff" in document
     assert 'class="server-rail"' in document
     assert 'class="sidebar"' in document
-    assert 'id="sentrix-v60-max"' in document
-    assert 'id="sentrix-v60-suite"' in document
-    assert 'id="sentrix-v60-dm-adapter"' in document
-    assert 'id="sentrix-v60-bootguard"' in document
-    assert 'id="sentrix-v61-unified"' in document
-    assert 'id="sentrix-v62-compat"' in document
-    assert 'id="sentrix-v62-dense"' in document
-    assert 'id="sentrix-v63-polish"' in document
-    assert 'id="sentrix-v64-final"' in document
+    assert 'id="sentrix-product-dashboard-recovery"' in document
+
+    # Les couches UI historiques ne doivent plus composer le document servi.
+    for legacy in (
+        'id="sentrix-v60-max"',
+        'id="sentrix-v60-suite"',
+        'id="sentrix-v61-unified"',
+        'id="sentrix-v62-dense"',
+        'id="sentrix-v63-polish"',
+        'id="sentrix-v64-final"',
+        'id="sentrix-v60-features-inline"',
+        'id="sxFeaturesFrame"',
+    ):
+        assert legacy not in document
+
     for tab in (
-        "overview", "welcome", "roles", "verification", "security", "sanctions", "logs",
-        "tickets", "notifications", "economy", "ai", "embeds", "games", "design", "setup",
-        "access", "dm", "status",
+        "overview", "welcome", "levels", "security", "moderation", "logs",
+        "verification", "roles", "economy", "notifications", "tickets", "ai",
+        "embeds", "config", "access", "dm", "diagnostic",
     ):
         assert f'["{tab}",' in document or f"['{tab}'," in document or f'data-tab="{tab}"' in document, tab
 
 
-def test_v64_removes_the_broken_generic_feature_suite():
-    document = _prestart_html()
-    from web.dashboard_v61_postfix import _legacy_feature_ui_present
-
-    assert not _legacy_feature_ui_present(document)
-    assert 'id="sentrix-v60-features-inline"' not in document
-    assert 'id="sxFeaturesFrame"' not in document
-    assert 'class="sx-features-shell"' not in document
-    final_groups = document[document.index("const FINAL_GROUPS"):document.index("let lastSearch", document.index("const FINAL_GROUPS"))]
-    assert "Fonctions avancées" not in final_groups
-    assert "Messages récurrents" not in final_groups
-
-
-def test_v64_keeps_real_api_wiring_inside_one_app():
+def test_unified_v2_keeps_real_api_wiring_inside_one_app():
     document = _prestart_html()
     required = (
         'async function loadSession()',
         'async function loadGuilds()',
         'async function selectGuild(value)',
-        '"/api/me"',
-        '"/api/guilds"',
-        '/settings`,{method:"PUT"',
-        '/notifications`,{method:"POST"',
-        '/embeds`,{method:"POST"',
+        "api('/api/public')",
+        "api('/api/me')",
+        "api('/api/guilds')",
+        '/settings`,{method:',
+        '/notifications`,{method:',
+        '/embeds`,{method:',
+        '/sanctions`',
         '/diagnostics`',
         '/setup-tools`',
-        '/systems`',
-        '/games`',
-        '/design`',
         '/v62`',
         '/dm/apercu',
         '/dm/all',
         '/dm/job',
         '/dm/user',
-        'Promise.all([loadPublic(),loadSession()])',
+        "action==='warn'?'clear-warnings':",
     )
     for marker in required:
         assert marker in document, marker
 
 
-def test_v64_uses_one_draftbot_like_shell_with_sentrix_details():
+def test_unified_v2_has_complete_primary_navigation():
     document = _prestart_html()
     for marker in (
-        "Membres & rôles",
-        "Modération",
+        "Général",
+        "Sécurité & modération",
         "Communauté",
         "Outils",
-        "Configuration serveur",
-        "Vérification & règlement",
-        "Mini-jeux",
-        "Design",
-        "Statut SentriX",
-        "const FINAL_GROUPS",
-        "sx-v63-discord",
-        "sx-v62-grid",
+        "Administration",
+        "Vue d’ensemble",
+        "Arrivées & départs",
+        "Sécurité",
+        "Modération",
+        "Tickets",
+        "Logs",
+        "Vérification",
+        "Rôles",
+        "Niveaux",
+        "Économie",
+        "Intelligence artificielle",
+        "Notifications",
+        "Embeds & design",
+        "Configuration",
+        "Accès & commandes",
+        "Messages privés",
+        "Diagnostic",
     ):
         assert marker in document, marker
 
 
-def test_v64_has_mobile_and_tablet_breakpoints_without_secondary_pages():
+def test_unified_v2_has_mobile_tablet_and_accessibility_contracts():
     document = _prestart_html()
     for marker in (
         "@media(max-width:1180px)",
-        "@media(max-width:820px)",
-        "@media(max-width:540px)",
-        "width:min(86vw,300px)!important",
-        "overflow-x:hidden!important",
-        "if(innerWidth<821)$('sidebar')?.classList.remove('open')",
+        "@media(max-width:840px)",
+        "@media(max-width:620px)",
+        "@media(max-width:560px)",
+        "prefers-reduced-motion:reduce",
+        'class="skip" href="#main"',
+        'aria-live="polite"',
+        'aria-modal="true"',
+        "openSidebar()",
+        "closeSidebar()",
     ):
         assert marker in document, marker
 
@@ -118,11 +123,20 @@ def test_v60_diagnostics_defines_all_requested_runtime_states():
     assert diagnostics._status("error", "x")["status"] == "ERREUR DE CONFIGURATION"
 
 
-def test_v62_routes_wrap_the_diagnostics_build_before_aiohttp_build():
+def test_v62_routes_remain_in_the_build_wrapper_chain_before_aiohttp_build():
     from web import dashboard
     import sentrix_product_update
 
     sentrix_product_update.install_dashboard_prestart(dashboard)
     function = getattr(dashboard.build_app, "__func__", dashboard.build_app)
-    assert getattr(function, "_sentrix_v62_routes", False)
-    assert dashboard.build_app.__module__ == "web.dashboard_v62_dense"
+    seen = set()
+    found_v62 = False
+    found_dm = False
+    while function is not None and id(function) not in seen:
+        seen.add(id(function))
+        found_v62 = found_v62 or bool(getattr(function, "_sentrix_v62_routes", False))
+        found_dm = found_dm or bool(getattr(function, "_sentrix_dm_panel", False))
+        function = getattr(function, "_sentrix_original", None)
+
+    assert found_v62, "les routes Tickets/Vérification V62 doivent rester branchées"
+    assert found_dm, "les routes DM doivent partager le build final sans masquer V62"

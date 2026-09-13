@@ -11,56 +11,38 @@ def _run_prestart():
     return dashboard
 
 
-def test_v61_redirects_legacy_admin_pages_into_app():
-    _run_prestart()
-
-    from web import setup_center
-    from web import feature_suite_dashboard_v37
-    from web import operations_center
-    from web import community_growth
-
-    assert getattr(setup_center.handle_setup_center, "_sentrix_v61_redirect", False)
-    assert getattr(feature_suite_dashboard_v37.handle_page, "_sentrix_v61_redirect", False)
-    assert getattr(operations_center.handle_operations_page, "_sentrix_v61_redirect", False)
-    assert getattr(community_growth.handle_page, "_sentrix_v61_redirect", False)
-
-
-def test_v61_main_document_contains_no_published_feature_tab_or_iframe():
+def test_unified_main_document_publishes_no_legacy_secondary_ui():
     dashboard = _run_prestart()
     html = dashboard.INDEX_HTML
 
-    assert 'id="sentrix-v61-unified"' in html
+    assert 'id="sentrix-dashboard-unified-v2"' in html
+    assert 'id="sentrix-unified-runtime-v2"' in html
     assert 'id="sentrix-v60-secondary-theme"' not in html
     assert 'id="sentrix-v60-features-inline"' not in html
+    assert 'id="sxFeaturesFrame"' not in html
     assert "sx-features-frame" not in html
     assert "<iframe" not in html.lower()
-
-    # V61 contient volontairement un sélecteur JS qui SUPPRIME les anciens boutons
-    # data-tab="features". Ce texte source ne signifie donc pas qu'un bouton est publié.
     assert not re.search(r'<button[^>]+data-tab=["\']features["\']', html, flags=re.I)
-    assert "querySelectorAll('[data-tab=\"features\"]')" in html
 
 
-def test_v61_navigation_is_grouped_like_one_product_not_separate_sites():
+def test_unified_navigation_is_grouped_like_one_product_not_separate_sites():
     dashboard = _run_prestart()
     html = dashboard.INDEX_HTML
 
-    for group in ("Général", "Membres & rôles", "Modération", "Outils", "Configuration"):
+    for group in ("Général", "Sécurité & modération", "Communauté", "Outils", "Administration"):
         assert group in html
 
-    # La navigation V61 est construite côté JS, puis vérifiée dans le smoke JSDOM.
-    # Ici on vérifie le contrat source au lieu d'exiger des boutons statiques inexistants.
-    for tab in ("setup", "games", "design", "status", "access", "dm"):
+    for tab in ("security", "moderation", "tickets", "config", "access", "dm", "diagnostic"):
         assert re.search(rf'["\']{re.escape(tab)}["\']', html), tab
 
-    assert "oldMap" in html
-    assert "'/setup-center':'setup'" in html
-    assert "'/operations':'status'" in html
-    assert "'/feature-suite':'setup'" in html
+    # Les anciens centres peuvent rester importables pour compatibilité backend, mais le
+    # frontend publié ne doit plus envoyer l'utilisateur vers un deuxième site d'admin.
+    for legacy_path in ("/setup-center", "/operations", "/feature-suite", "/community"):
+        assert f'href="{legacy_path}"' not in html
 
 
-def test_old_secondary_theme_helper_is_inert_for_v61_runtime():
-    """Le helper historique peut rester importable, mais V61 ne l'installe plus."""
+def test_old_secondary_theme_helper_is_inert_for_unified_runtime():
+    """Le helper historique reste importable, mais unified-v2 ne l'installe plus."""
     from web.dashboard_v60_secondary_theme import apply_secondary_theme
 
     source = "<!doctype html><html><head></head><body>x</body></html>"

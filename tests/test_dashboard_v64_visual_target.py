@@ -9,73 +9,72 @@ def _final_document() -> str:
     return str(dashboard.INDEX_HTML)
 
 
-def test_v64_matches_requested_sentrix_shell_with_blue_details():
+def test_unified_matches_requested_sentrix_shell_with_blue_details():
     document = _final_document()
 
-    # Identité SentriX : le dashboard s'inspire du shell fourni sans reprendre son branding.
     assert "<title>SentriX — Dashboard</title>" in document
-    assert "SENTR<em>IX</em>" in document
+    assert "SentriX<small>Control Center</small>" in document
 
-    # Palette finale : charbon/corail pour le shell et vraies touches bleues SentriX.
-    assert "--accent:#d66f55" in document
-    assert "--accent2:#ef8568" in document
-    assert "--sx-blue:#4da3ff" in document
-    assert "--sx-blue2:#78bdff" in document
-    assert "--sx-blue:var(--accent,#d66f55)" not in document
-    assert ".btn.blue{background:var(--sx-blue,#4da3ff)!important" in document
-    assert ".navigation .sx-nav-search:focus{border-color:var(--sx-blue,#4da3ff)" in document
+    # Palette propre à SentriX : charbon + bleu, sans reprendre le branding d'un tiers.
+    assert "--bg:#0b0d10" in document
+    assert "--panel:#15191f" in document
+    assert "--blue:#4da3ff" in document
+    assert "--blue2:#77bcff" in document
+    assert "--accent:#d66f55" not in document
 
-    # Le shell final doit rester monolithique : rail serveurs + sidebar + zone centrale.
+    # Un seul shell : rail serveurs + sidebar + zone centrale.
     assert 'class="server-rail"' in document
     assert 'class="sidebar"' in document
     assert 'class="workspace"' in document
-    assert "const FINAL_GROUPS" in document
+    assert "const NAV=[" in document
+    assert 'id="sentrix-dashboard-unified-v2"' in document
 
 
-def test_v64_mobile_and_tablet_layout_is_explicitly_hardened():
+def test_unified_mobile_and_tablet_layout_is_explicitly_hardened():
     document = _final_document()
 
     for marker in (
         "@media(max-width:1180px)",
-        "@media(max-width:820px)",
-        "@media(max-width:540px)",
-        "width:min(86vw,300px)!important",
-        "overflow-x:hidden!important",
-        ".grid2,.embed-builder,.fields-grid,.action-grid,.sx-v62-grid,.sx-v63-modules,.sx-v63-palette,.sx-v63-economy{grid-template-columns:1fr!important}",
-        ".metrics{grid-template-columns:1fr!important}",
-        "if(innerWidth<821)$('sidebar')?.classList.remove('open')",
+        "@media(max-width:840px)",
+        "@media(max-width:620px)",
+        "@media(max-width:560px)",
+        ".sidebar.open{transform:none}",
+        ".grid{grid-template-columns:1fr}",
+        ".metrics{grid-template-columns:1fr}",
+        "if(innerWidth<841)closeSidebar()",
+        "prefers-reduced-motion:reduce",
     ):
         assert marker in document, marker
 
 
-def test_v64_keeps_requested_pages_inside_the_same_app():
+def test_unified_keeps_requested_pages_inside_the_same_app():
     document = _final_document()
-    final = document[document.index("const FINAL_GROUPS"):document.index("let lastSearch", document.index("const FINAL_GROUPS"))]
 
     for label in (
         "Vue d’ensemble",
-        "Arrivées et départs",
-        "Rôles automatiques",
-        "Rôles sécurisés",
-        "Rôles-réactions",
-        "Vérification & règlement",
+        "Arrivées & départs",
+        "Niveaux",
+        "Sécurité",
         "Modération",
-        "Auto-Modération",
-        "Signalements",
         "Logs",
+        "Vérification",
+        "Rôles",
         "Économie",
-        "Notifications sociales",
+        "Notifications",
         "Tickets",
         "Intelligence artificielle",
-        "Embeds",
-        "Mini-jeux",
-        "Design",
-        "Configuration serveur",
+        "Embeds & design",
+        "Configuration",
         "Accès & commandes",
         "Messages privés",
-        "Statut SentriX",
+        "Diagnostic",
     ):
-        assert label in final, label
+        assert label in document, label
 
-    for legacy in ("Fonctions avancées", "Messages récurrents", "/feature-suite", "/setup-center"):
-        assert legacy not in final
+    for legacy in (
+        "Fonctions avancées",
+        "Messages récurrents",
+        'id="sentrix-v64-final"',
+        'id="sxFeaturesFrame"',
+    ):
+        assert legacy not in document

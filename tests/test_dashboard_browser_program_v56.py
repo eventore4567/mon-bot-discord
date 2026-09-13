@@ -30,11 +30,16 @@ def _prestart_html() -> str:
 
 def test_prestart_dashboard_contains_the_authenticated_boot_chain():
     document = _prestart_html()
+    assert 'id="sentrix-dashboard-unified-v2"' in document
     assert 'async function loadSession()' in document
     assert 'async function loadGuilds()' in document
-    assert '"/api/me"' in document
-    assert '"/api/guilds"' in document
-    assert 'Promise.all([loadPublic(),loadSession()])' in document
+    assert 'async function selectGuild(value)' in document
+    assert "api('/api/public')" in document
+    assert "api('/api/me')" in document
+    assert "api('/api/guilds')" in document
+    assert 'async function boot()' in document
+    assert 'await loadSession()' in document
+    assert 'id="sentrix-product-dashboard-recovery"' in document
 
 
 def test_prestart_dashboard_javascript_parses_in_node(tmp_path: Path):
