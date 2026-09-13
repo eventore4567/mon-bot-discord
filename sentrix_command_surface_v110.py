@@ -38,7 +38,7 @@ COMPACT_COMMAND_NAMES: dict[str, str] = {
 # faisait auparavant des chemins comme /moderation ban ou /info userinfo : V110 les
 # republie en /ban, /userinfo, etc. Les anciennes commandes + ne sont pas renommées ici.
 STANDARD_DIRECT_SLASH: dict[str, str] = {
-    # Modération — conventions communes Dyno/MEE6/ProBot/Arcane/YAGPDB.
+    # Modération — conventions communes des grands bots généralistes.
     "ban": "ban",
     "tempban": "tempban",
     "unban": "unban",
@@ -55,15 +55,14 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "nickname": "setnick",
     "case": "case",
 
-    # Informations — userinfo/serverinfo sont déjà de très bons noms et restent ainsi.
+    # Informations — userinfo/serverinfo sont déjà des noms très répandus.
     "avatar": "avatar",
     "userinfo": "userinfo",
     "serverinfo": "serverinfo",
-    "roleinfo": "roleinfo",
     "channelinfo": "channelinfo",
     "membercount": "membercount",
 
-    # Niveaux / profil — /level et /leaderboard sont des conventions très répandues.
+    # Niveaux / profil — /level et /leaderboard sont des conventions répandues.
     "level": "level",
     "profile": "profile",
     "leaderboard-levels": "leaderboard",
@@ -83,7 +82,7 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "deposit": "deposit",
     "withdraw": "withdraw",
 
-    # Musique — surface utilisée par les bots musique majeurs.
+    # Musique — vocabulaire commun aux bots musique majeurs.
     # +play reste la commande préfixée historique ; les autres restent aussi accessibles
     # via +music <action> côté préfixe.
     "play": "play",
@@ -100,8 +99,7 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "music seek": "seek",
 }
 
-# Les rôles sont plus lisibles sous un petit groupe /role, comme chez plusieurs bots
-# majeurs, plutôt que sous des noms concaténés du type /roles giverole.
+# Les rôles sont plus lisibles sous un petit groupe /role que sous des chemins profonds.
 STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "giverole": ("role", "give"),
     "removerole": ("role", "remove"),
@@ -292,6 +290,16 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
     return installed, missing
 
 
+def reassert_standard_slash_surface(bot) -> tuple[int, list[str]]:
+    """Réinstalle idempotemment la surface standard juste avant l'audit/sync final.
+
+    Certaines couches historiques de SentriX reconstruisent encore une partie du tree
+    après V95. Cette passe garantit que les noms publics choisis par V110 sont ceux qui
+    arrivent réellement chez Discord, sans dupliquer la logique métier.
+    """
+    return _install_standard_slash_surface(bot)
+
+
 def _wrap_prepare_bot() -> None:
     current = v95.prepare_bot
     if getattr(current, "_sentrix_compact_surface_v110", False):
@@ -299,7 +307,7 @@ def _wrap_prepare_bot() -> None:
 
     async def prepare_bot_standard(bot):
         grouped = await current(bot)
-        installed, missing = _install_standard_slash_surface(bot)
+        installed, missing = reassert_standard_slash_surface(bot)
         if missing:
             logger.warning("V110 : commandes sources absentes pour la surface standard : %s", ", ".join(sorted(missing)))
         logger.info(
@@ -334,5 +342,6 @@ __all__ = [
     "COMPACT_ROOT_NAMES",
     "STANDARD_DIRECT_SLASH",
     "STANDARD_GROUPED_SLASH",
+    "reassert_standard_slash_surface",
     "install",
 ]
