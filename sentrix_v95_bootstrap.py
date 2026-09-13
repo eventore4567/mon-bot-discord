@@ -270,6 +270,17 @@ def _install_compact_command_surface() -> None:
         logger.exception("Installation de la surface de commandes compacte V110 impossible.")
 
 
+def _install_ops_foundation() -> None:
+    """Branche V111 après V110 : ses commandes admin restent préfixe-only et ne
+    consomment donc aucune des 100 racines slash déjà utilisées."""
+    try:
+        from sentrix_ops_v111 import install as install_ops
+
+        install_ops()
+    except Exception:
+        logger.exception("Installation du centre d'opérations V111 impossible.")
+
+
 def install() -> None:
     v95._unwrap_optional = _unwrap_optional_safe
     v95._native_annotation = _native_annotation_safe
@@ -280,6 +291,7 @@ def install() -> None:
     _repair_invite_registry()
     v95.install_global()
     _install_compact_command_surface()
+    _install_ops_foundation()
     logger.info("V95 bootstrap actif.")
 
 
