@@ -187,6 +187,15 @@ async def run() -> int:
         if not getattr(bot, "_sentrix_permission_guard_installed", False):
             errors.append("le verrou global de permissions slash n'est pas installé")
 
+        # L'audit doit regarder le même arbre final que celui synchronisé chez Discord.
+        # Les couches historiques chargées avant la sync peuvent reconstruire/transitoirement
+        # évincer des racines ; V110 est réaffirmée juste avant la publication réelle.
+        try:
+            surface_v110.reassert_standard_slash_surface(bot)
+            slash_command_budget.finalize(bot)
+        except Exception as exc:
+            errors.append(f"réaffirmation V110 impossible: {type(exc).__name__}: {exc}")
+
         app_roots = list(bot.tree.get_commands())
         app_root_names = {str(command.name).casefold() for command in app_roots}
 
