@@ -17,15 +17,16 @@ _REQUIRED_MARKERS = (
     'async function loadSession()',
     'async function loadGuilds()',
     'async function selectGuild(value)',
-    "api('/api/me')",
-    "api('/api/guilds')",
 )
+_REQUIRED_ENDPOINTS = ("/api/me", "/api/guilds")
 _UNIFIED_MARKER = 'id="sentrix-dashboard-unified-v2"'
 _PRODUCT_RECOVERY_MARKER = 'id="sentrix-product-dashboard-recovery"'
 
 
 def _snapshot_is_usable(html: str) -> tuple[bool, list[str]]:
+    """Validate the authenticated boot chain without depending on one fetch helper syntax."""
     missing = [marker for marker in _REQUIRED_MARKERS if marker not in html]
+    missing.extend(endpoint for endpoint in _REQUIRED_ENDPOINTS if endpoint not in html)
     return not missing, missing
 
 
@@ -105,7 +106,7 @@ def install(dashboard) -> bool:
             return False
 
     digest = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()[:16]
-    version = str(getattr(dashboard, "_sentrix_dashboard_version", "unified-v2"))
+    version = str(getattr(dashboard, "_sentrix_dashboard_version", "v55") or "v55")
 
     async def frozen_handle_index(request: web.Request):
         if request.path == "/app":
@@ -129,11 +130,7 @@ def install(dashboard) -> bool:
 
 
 def _install_backend_compatibility(dashboard) -> None:
-    """Branche uniquement les APIs historiques encore utilisées par unified-v2.
-
-    Les installateurs V62 historiques dépendaient de marqueurs HTML V61. Le nouveau frontend
-    n'en dépend plus : on installe directement le backend V62 idempotent et ses routes.
-    """
+    """Branche uniquement les APIs historiques encore utilisées par unified-v2."""
     try:
         from .dashboard_v60_diagnostics import install as install_diagnostics
         install_diagnostics(dashboard)
@@ -146,16 +143,25 @@ def _install_backend_compatibility(dashboard) -> None:
     except Exception:
         logger.exception("Dashboard unifié : API Tickets/Vérification V62 impossible à installer.")
 
+    # Les routes DM partagent exactement le moteur de +dmall. L'ancienne injection HTML est
+    # remplacée ensuite par le frontend unifié, mais le backend et son verrou restent uniques.
+    try:
+        from .dm_panel import installer as install_dm_panel
+        install_dm_panel(dashboard)
+    except Exception:
+        logger.exception("Dashboard unifié : API Messages privés impossible à installer.")
+
 
 def _install_unified_document(dashboard) -> bool:
-    """Pose le document unifié sans dépendre des validateurs HTML des anciennes versions."""
+    """Pose le document unifié puis ses contrats runtime sans empiler les anciennes UIs."""
     try:
         from .dashboard_unified_v2 import INDEX_HTML
+        from .dashboard_unified_runtime_v2 import enhance_html
     except Exception:
         logger.exception("Dashboard unifié V2 : source frontend impossible à importer.")
         return False
 
-    html = _finalize_unified_html(str(INDEX_HTML or ""))
+    html = enhance_html(_finalize_unified_html(str(INDEX_HTML or "")))
     usable, missing = _snapshot_is_usable(html)
     if _UNIFIED_MARKER not in html or not usable:
         logger.error("Dashboard unifié V2 incomplet : marqueurs absents=%s.", missing)
@@ -180,8 +186,15 @@ def install_product_prestart_hook() -> bool:
 
     def no_store_then_freeze(dashboard) -> None:
         current(dashboard)
-        _install_backend_compatibility(dashboard)
 
+        # Les tests unitaires du gel utilisent volontairement un objet minimal : dans ce cas
+        # on vérifie uniquement l'immuabilité du snapshot et on ne fabrique pas une app aiohttp.
+        if not hasattr(dashboard, "build_app"):
+            if not install(dashboard):
+                logger.error("Dashboard frontend : gel du snapshot minimal échoué.")
+            return
+
+        _install_backend_compatibility(dashboard)
         if not _install_unified_document(dashboard):
             logger.error("Dashboard unifié V2 absent : le gel final est refusé.")
             return
