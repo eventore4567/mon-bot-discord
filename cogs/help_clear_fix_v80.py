@@ -26,6 +26,9 @@ from . import premium_ui_v82 as premium_v82
 logger = logging.getLogger("bot.help-clear-fix-v80")
 RUNTIME_MARKER = "Help/Clear Fix V80"
 _SUPPRESSION_TTL = 15.0
+_PRIVATE_HELP_ROOTS = frozenset({
+    "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "wipe-server",
+})
 
 
 def _neutralize_mentions(value: object) -> str:
@@ -35,6 +38,19 @@ def _neutralize_mentions(value: object) -> str:
 
 
 def _install_help_safety() -> None:
+    current_catalog = help_v79._catalog
+    if not getattr(current_catalog, "_sentrix_v80_private_owner_filter", False):
+        def safe_catalog(bot):
+            rows = current_catalog(bot)
+            return [
+                entry for entry in rows
+                if help_v79._normalise(entry.key).split(" ", 1)[0] not in _PRIVATE_HELP_ROOTS
+            ]
+
+        safe_catalog._sentrix_v80_private_owner_filter = True
+        safe_catalog._sentrix_previous = current_catalog
+        help_v79._catalog = safe_catalog
+
     current_description = help_v79._description
     if not getattr(current_description, "_sentrix_v80_safe_mentions", False):
         def safe_description(entry):
@@ -338,7 +354,7 @@ def install(bot: commands.Bot) -> None:
     premium_v82.install(bot)
     bot._sentrix_help_clear_fix_v80 = True
     logger.info(
-        "%s installé : mentions du Help neutralisées, clear complet et Premium UI V82 chargée.",
+        "%s installé : mentions du Help neutralisées, commandes owner privées masquées, clear complet et Premium UI V82 chargée.",
         RUNTIME_MARKER,
     )
 
