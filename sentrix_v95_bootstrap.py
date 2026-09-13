@@ -281,6 +281,16 @@ def _install_ops_foundation() -> None:
         logger.exception("Installation du centre d'opérations V111 impossible.")
 
 
+def _install_ops_features() -> None:
+    """Branche V112 après V111 : previews, AutoMod contextuel et watchdog runtime."""
+    try:
+        from sentrix_ops_features_v112 import install as install_features
+
+        install_features()
+    except Exception:
+        logger.exception("Installation des intégrations V112 impossible.")
+
+
 def install() -> None:
     v95._unwrap_optional = _unwrap_optional_safe
     v95._native_annotation = _native_annotation_safe
@@ -292,6 +302,7 @@ def install() -> None:
     v95.install_global()
     _install_compact_command_surface()
     _install_ops_foundation()
+    _install_ops_features()
     logger.info("V95 bootstrap actif.")
 
 
