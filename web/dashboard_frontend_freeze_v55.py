@@ -21,6 +21,7 @@ _REQUIRED_MARKERS = (
     '"/api/guilds"',
 )
 _UNIFIED_MARKER = 'id="sentrix-dashboard-unified-v2"'
+_PRODUCT_RECOVERY_MARKER = 'id="sentrix-product-dashboard-recovery"'
 
 
 def _snapshot_is_usable(html: str) -> tuple[bool, list[str]]:
@@ -49,6 +50,31 @@ def _is_unified_document(dashboard, html: str) -> bool:
     return version.startswith("unified-v2") or _UNIFIED_MARKER in html
 
 
+def _finalize_unified_html(html: str) -> str:
+    """Applique les deux contrats de compatibilité nécessaires au document unique.
+
+    - Le backend sanctions attend ``clear-warnings`` ; l'ancien frontend utilisait encore
+      ``clearwarnings`` dans un embranchement JavaScript.
+    - ``sentrix_product_update`` ajoute son ancien recovery-loop s'il ne trouve pas son
+      marqueur. Le frontend unifié possède déjà ses propres états/retry : on expose donc le
+      marqueur attendu avec un script inerte pour empêcher la réinjection legacy.
+    """
+    if _UNIFIED_MARKER not in html:
+        return html
+
+    html = html.replace(
+        "action==='warn'?'clearwarnings':",
+        "action==='warn'?'clear-warnings':",
+    )
+    if _PRODUCT_RECOVERY_MARKER not in html and "</body>" in html:
+        html = html.replace(
+            "</body>",
+            '<script id="sentrix-product-dashboard-recovery">/* unified-v2 owns recovery */</script>\n</body>',
+            1,
+        )
+    return html
+
+
 def install(dashboard) -> bool:
     current = dashboard.handle_index
     if getattr(current, "_sentrix_frontend_freeze_v55", False):
@@ -63,6 +89,9 @@ def install(dashboard) -> bool:
     if _is_unified_document(dashboard, snapshot):
         if _UNIFIED_MARKER not in snapshot:
             logger.error("Dashboard unifié non figé : marqueur principal absent.")
+            return False
+        if _PRODUCT_RECOVERY_MARKER not in snapshot:
+            logger.error("Dashboard unifié non figé : contrat recovery produit absent.")
             return False
         forbidden = (
             'id="sentrix-v60-features-inline"',
@@ -156,6 +185,7 @@ def install_product_prestart_hook() -> bool:
             logger.error("Dashboard unifié V2 absent : le gel final est refusé.")
             return
 
+        dashboard.INDEX_HTML = _finalize_unified_html(str(dashboard.INDEX_HTML or ""))
         if not install(dashboard):
             logger.error("Dashboard frontend : gel final échoué.")
 
@@ -172,4 +202,5 @@ __all__ = [
     "_snapshot_is_usable",
     "_ensure_v60_features_final",
     "_theme_secondary_pages_final",
+    "_finalize_unified_html",
 ]
