@@ -203,10 +203,21 @@ async def run() -> int:
         # ------------------------------------------------------------------
         # 4. Commandes slash obligatoires réellement absentes.
         # ------------------------------------------------------------------
-        # La source de vérité est la même que le budget ET le point de sync final : les
-        # racines V110, groupes canoniques et proof de tier 1 doivent exister ; les autres
-        # peuvent être volontairement + only pour respecter la limite Discord de 100.
-        required_slash_roots = set(slash_command_budget._required_names())
+        # V110 est la source de vérité du tree réellement publié. Les anciennes racines
+        # catégorielles du budget (config/economy/games/...) ne doivent pas être exigées
+        # si V110 les a remplacées par des commandes directes ou des groupes canoniques.
+        required_slash_roots = {
+            str(public_name).casefold()
+            for public_name in surface_v110.STANDARD_DIRECT_SLASH.values()
+        }
+        required_slash_roots.update(
+            str(root_name).casefold()
+            for root_name, _leaf_name in surface_v110.STANDARD_GROUPED_SLASH.values()
+        )
+        required_slash_roots.update(
+            str(name).casefold()
+            for name in slash_command_budget.PROOF_SLASH_PREFERRED
+        )
         app_root_names = {
             str(command.name).casefold()
             for command in bot.tree.get_commands()
@@ -234,7 +245,7 @@ async def run() -> int:
             )
 
         print(f"Commandes hybrides restées + uniquement / hors surface slash canonique : {len(no_app_command)}")
-        print(f"Racines slash tier 1 vérifiées : {len(required_slash_roots)}")
+        print(f"Racines slash V110 vérifiées : {len(required_slash_roots)}")
 
         for warning in warnings:
             print(f"[WARN] {warning}")
