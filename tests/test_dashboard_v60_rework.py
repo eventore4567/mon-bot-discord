@@ -15,6 +15,7 @@ def test_unified_v2_is_the_final_prestart_frontend():
 
     assert getattr(module, "_sentrix_dashboard_version", None) == "unified-v2"
     assert 'id="sentrix-dashboard-unified-v2"' in document
+    assert 'id="sentrix-unified-runtime-v2"' in document
     assert "--blue:#4da3ff" in document
     assert 'class="server-rail"' in document
     assert 'class="sidebar"' in document
@@ -36,7 +37,7 @@ def test_unified_v2_is_the_final_prestart_frontend():
     for tab in (
         "overview", "welcome", "levels", "security", "moderation", "logs",
         "verification", "roles", "economy", "notifications", "tickets", "ai",
-        "embeds", "config", "access", "diagnostic",
+        "embeds", "config", "access", "dm", "diagnostic",
     ):
         assert f'["{tab}",' in document or f"['{tab}'," in document or f'data-tab="{tab}"' in document, tab
 
@@ -57,6 +58,10 @@ def test_unified_v2_keeps_real_api_wiring_inside_one_app():
         '/diagnostics`',
         '/setup-tools`',
         '/v62`',
+        '/dm/apercu',
+        '/dm/all',
+        '/dm/job',
+        '/dm/user',
         "action==='warn'?'clear-warnings':",
     )
     for marker in required:
@@ -86,6 +91,7 @@ def test_unified_v2_has_complete_primary_navigation():
         "Embeds & design",
         "Configuration",
         "Accès & commandes",
+        "Messages privés",
         "Diagnostic",
     ):
         assert marker in document, marker
@@ -96,6 +102,7 @@ def test_unified_v2_has_mobile_tablet_and_accessibility_contracts():
     for marker in (
         "@media(max-width:1180px)",
         "@media(max-width:840px)",
+        "@media(max-width:620px)",
         "@media(max-width:560px)",
         "prefers-reduced-motion:reduce",
         'class="skip" href="#main"',
@@ -116,11 +123,20 @@ def test_v60_diagnostics_defines_all_requested_runtime_states():
     assert diagnostics._status("error", "x")["status"] == "ERREUR DE CONFIGURATION"
 
 
-def test_v62_routes_still_wrap_the_diagnostics_build_before_aiohttp_build():
+def test_v62_routes_remain_in_the_build_wrapper_chain_before_aiohttp_build():
     from web import dashboard
     import sentrix_product_update
 
     sentrix_product_update.install_dashboard_prestart(dashboard)
     function = getattr(dashboard.build_app, "__func__", dashboard.build_app)
-    assert getattr(function, "_sentrix_v62_routes", False)
-    assert dashboard.build_app.__module__ == "web.dashboard_v62_dense"
+    seen = set()
+    found_v62 = False
+    found_dm = False
+    while function is not None and id(function) not in seen:
+        seen.add(id(function))
+        found_v62 = found_v62 or bool(getattr(function, "_sentrix_v62_routes", False))
+        found_dm = found_dm or bool(getattr(function, "_sentrix_dm_panel", False))
+        function = getattr(function, "_sentrix_original", None)
+
+    assert found_v62, "les routes Tickets/Vérification V62 doivent rester branchées"
+    assert found_dm, "les routes DM doivent partager le build final sans masquer V62"
