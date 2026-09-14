@@ -88,7 +88,7 @@ def install() -> bool:
         raise RuntimeError("Growth Control V12 assets are present but browser syntax guard is missing")
     if not visibility_v13:
         raise RuntimeError("Visibility V13 assets or Growth V12 renderer bridge are missing")
-    if not native_v14:
+    if unified_v2 and not native_v14:
         raise RuntimeError("Native Bundle V14 is missing from the canonical V2 browser program")
 
     logger.warning(
