@@ -25,9 +25,19 @@ def test_bridge_is_idempotent():
     assert dashboard.INDEX_HTML == once
 
 
-def test_finalizer_requires_runtime_bridge_before_v9():
+def test_bridge_is_safe_noop_for_non_unified_ci_boots():
+    html = "<html><head></head><body>legacy dashboard fixture</body></html>"
+    dashboard = SimpleNamespace(INDEX_HTML=html)
+    assert bridge.install(dashboard) is True
+    assert dashboard.INDEX_HTML == html
+    assert "__sentrixUnifiedRuntimeV10" not in dashboard.INDEX_HTML
+
+
+def test_finalizer_requires_runtime_bridge_before_v9_when_unified_present():
     source = open("sentrix_dashboard_finalizer_v7.py", encoding="utf-8").read()
     assert "dashboard_unified_runtime_bridge_v10.install(dashboard)" in source
     assert "dashboard_unified_adapter_v9.install(dashboard)" in source
     assert source.index("dashboard_unified_runtime_bridge_v10.install(dashboard)") < source.index("dashboard_unified_adapter_v9.install(dashboard)")
+    assert 'unified_v2 = \'id="sentrix-dashboard-unified-v2"\' in final_html' in source
+    assert 'if unified_v2 and not runtime_bridge:' in source
     assert "__sentrixUnifiedRuntimeV10" in source
