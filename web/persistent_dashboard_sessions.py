@@ -23,10 +23,12 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import ClientSession, ClientTimeout, DummyCookieJar, web
 from redis.asyncio import Redis
 
 import config
+
+from .http_surfaces import sign_proxy_headers
 
 logger = logging.getLogger("bot.dashboard.browser-session")
 
@@ -107,8 +109,9 @@ async def _proxy_to_active_peer(request: web.Request, peer_url: str) -> web.Resp
             headers[name] = value
 
     body = await request.read() if request.can_read_body else None
+    headers = sign_proxy_headers(request, headers, body)
     timeout = ClientTimeout(total=_PROXY_TIMEOUT_SECONDS)
-    async with ClientSession(timeout=timeout) as client:
+    async with ClientSession(timeout=timeout, cookie_jar=DummyCookieJar()) as client:
         async with client.request(
             request.method,
             target,
@@ -380,6 +383,8 @@ def install(dashboard) -> None:
         if session_id and session_id in sessions:
             await _store_session(request.app, session_id, sessions[session_id])
         return response
+
+    ha_session_hydrator._sentrix_session_hydrator = True
 
     @web.middleware
     async def ha_active_api_proxy(request: web.Request, handler):

@@ -99,6 +99,20 @@ def _relay_payload(bot: commands.Bot) -> dict:
 
 
 async def _publish_runtime_relay(bot: commands.Bot) -> None:
+    if os.getenv("API_PUBLIC_URL", "").strip():
+        # The active HA process already owns the dashboard runtime cache. Keep its
+        # telemetry locally instead of POSTing to a now-private bot route.
+        try:
+            from web.dashboard_instance_runtime import record_runtime_payload
+            runner = getattr(bot, "_sentrix_dashboard_runner_v54", None)
+            if runner is None:
+                raise RuntimeError("Dashboard runtime not started")
+            record_runtime_payload(runner.app, _relay_payload(bot))
+            _mark_state(bot, last_publish_at=int(time.time()), last_publish_error=None)
+        except Exception as exc:
+            _mark_state(bot, last_publish_error=type(exc).__name__)
+            logger.debug("Enregistrement du runtime slash local impossible.", exc_info=True)
+        return
     if not _RUNTIME_RELAY_URL:
         return
     try:

@@ -194,6 +194,8 @@ def _build_app_with_final_dashboard(bot):
     if not _install_v97_dashboard(dashboard_web):
         raise RuntimeError("Dashboard Tickets V97 absent avant build_app.")
     app = _original_build_app(bot)
+    from web.http_surfaces import apply as apply_http_surfaces
+    apply_http_surfaces(app, dashboard_web)
     logger.info("Dashboard HA final confirmé au build_app aiohttp (Embeds + Tickets V97 + Ops Suite).")
     return app
 

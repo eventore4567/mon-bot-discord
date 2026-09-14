@@ -274,6 +274,11 @@ def install(dashboard) -> None:
                     )
                     app = _build_core_app(dashboard, bot)
 
+                # Apply after the final builder AND the recovery path. A plugin failure
+                # must never reopen the API or bypass the public hostname boundary.
+                from .http_surfaces import apply as apply_http_surfaces
+                apply_http_surfaces(app, dashboard)
+
                 runner = web.AppRunner(app)
                 await runner.setup()
                 site = web.TCPSite(runner, "0.0.0.0", config.DASHBOARD_PORT)

@@ -123,6 +123,9 @@ La redirection OAuth configurée dans Discord doit correspondre exactement à :
 https://votre-domaine.up.railway.app/oauth/callback
 ```
 
+La séparation dashboard/API sur les deux domaines Railway, le maintien des sessions
+et la procédure HA sont décrits dans [Surfaces HTTPS](docs/https-surfaces.md).
+
 ## Données et persistance
 
 SentriX utilise SQLite avec WAL. Les niveaux, nombres de messages, économie, banques, achats et historiques sont stockés par serveur/membre et ne doivent pas être supprimés simplement parce qu’un module est désactivé ou qu’un membre est sanctionné/banni.

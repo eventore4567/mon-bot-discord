@@ -82,12 +82,22 @@ async def _handle_runtime_slash_heartbeat(request: web.Request) -> web.Response:
     if clean is None:
         return web.json_response({"ok": False, "error": "invalid_payload"}, status=400)
 
+    record_runtime_payload(request.app, clean)
+    return web.json_response({"ok": True})
+
+
+def record_runtime_payload(app, payload: dict) -> None:
+    """Record trusted in-process telemetry without opening a public bot endpoint."""
+    clean = _sanitize_runtime_payload(payload)
+    if clean is None:
+        raise ValueError("Invalid runtime telemetry")
+
     now = int(time.time())
     clean["received_at"] = now
-    relays = request.app.get("slash_runtime_relays")
+    relays = app.get("slash_runtime_relays")
     if not isinstance(relays, dict):
         relays = {}
-        request.app["slash_runtime_relays"] = relays
+        app["slash_runtime_relays"] = relays
 
     key = f"{clean.get('service_id') or clean.get('service')}:{clean.get('bot_user_id') or 'unknown'}"
     relays[key] = clean
@@ -108,8 +118,6 @@ async def _handle_runtime_slash_heartbeat(request: web.Request) -> web.Response:
         )
         for relay_key in oldest[: len(relays) - _RUNTIME_RELAY_MAX_ITEMS]:
             relays.pop(relay_key, None)
-
-    return web.json_response({"ok": True})
 
 
 def _install_runtime_relay_route(dashboard) -> None:

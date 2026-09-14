@@ -13,8 +13,10 @@ import logging
 import os
 from typing import Any
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import ClientSession, ClientTimeout, DummyCookieJar, web
 from multidict import CIMultiDict
+
+from .http_surfaces import sign_proxy_headers
 
 logger = logging.getLogger("bot.dashboard-ha-proxy")
 
@@ -148,10 +150,11 @@ def install(dashboard_module: Any, coordinator: Any | None = None) -> None:
             target = f"{peer_base}{request.rel_url}"
             try:
                 body = await request.read()
+                headers = sign_proxy_headers(request, _forward_headers(request), body)
                 async with session.request(
                     request.method,
                     target,
-                    headers=_forward_headers(request),
+                    headers=headers,
                     data=body if body else None,
                     allow_redirects=False,
                 ) as upstream:
@@ -186,6 +189,7 @@ def install(dashboard_module: Any, coordinator: Any | None = None) -> None:
             _app[_SESSION_KEY] = ClientSession(
                 timeout=ClientTimeout(total=20, connect=5),
                 auto_decompress=False,
+                cookie_jar=DummyCookieJar(),
             )
 
         async def stop_proxy_session(_app):
