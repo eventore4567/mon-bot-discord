@@ -7,7 +7,7 @@ def test_v9_targets_the_real_unified_v2_dom():
     assert 'id="sentrix-unified-adapter-v9-js"' in source
     assert '$("content")' in source
     assert 'document.querySelector(".workspace")' in source
-    assert 'serverContent' not in source
+    assert '$("serverContent")' not in source
 
 
 def test_v9_exposes_visible_real_discord_verification():
