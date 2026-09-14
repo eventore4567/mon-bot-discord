@@ -60,7 +60,7 @@ def install(dashboard, ops) -> bool:
     if all(hasattr(dashboard,n) for n in contract):
         try:
             from web import dashboard_ops_suite_plus
-            if not dashboard_ops_suite_plus.install(dashboard,ops):raise RuntimeError("Ops Suite Plus returned false")
+            if not dashboard_ops_suite_plus.install(dashboard, ops):raise RuntimeError("Ops Suite Plus returned false")
             from web import dashboard_control_center_v3
             if not dashboard_control_center_v3.install(dashboard):raise RuntimeError("Control Center V3 returned false")
             from web import dashboard_premium_ui_v4
