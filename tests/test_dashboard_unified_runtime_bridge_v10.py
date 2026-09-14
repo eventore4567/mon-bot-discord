@@ -16,6 +16,15 @@ def test_bridge_exposes_unified_v2_lexical_runtime():
     assert "window.toast=toast" in out
 
 
+def test_bridge_accepts_production_state_extensions():
+    html = '''<script id="sentrix-dashboard-unified-v2">\n(() => {\n"use strict";\nconst state={user:null,tab:"logs",sanctionsPage:0,lateRuntime:{enabled:true},extraFlag:false};\nfunction go(){}\nfunction refreshAll(){}\nfunction v62Action(){}\nfunction toast(){}\n})();\n</script>'''
+    dashboard = SimpleNamespace(INDEX_HTML=html)
+    assert bridge.install(dashboard) is True
+    out = dashboard.INDEX_HTML
+    assert "lateRuntime:{enabled:true},extraFlag:false};window.__sentrixUnifiedRuntimeV10" in out
+    assert "window.state=state" in out
+
+
 def test_bridge_is_idempotent():
     html = '''<script id="sentrix-dashboard-unified-v2">const state={sanctionsPage:0};</script>'''
     dashboard = SimpleNamespace(INDEX_HTML=html)
