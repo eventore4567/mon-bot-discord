@@ -6,6 +6,7 @@ from pathlib import Path
 from web import dashboard_ops_suite as ops
 from web import dashboard_ops_suite_fix as ops_fix
 from web import dashboard_control_center_v3 as v3
+from web import dashboard_premium_ui_v4 as premium
 
 
 def test_ops_suite_exposes_expected_ui_contract():
@@ -60,6 +61,25 @@ def test_control_center_v3_command_module_mapping_is_conservative():
     assert v3._command_module("setup") is None
 
 
+def test_premium_ui_v4_applies_one_visual_language_to_all_sections():
+    assert 'id="sentrix-premium-ui-v4-css"' in premium.PREMIUM_CSS
+    assert 'id="sentrix-premium-ui-v4-js"' in premium.PREMIUM_JS
+    for label in (
+        "Centre de contrôle",
+        "Sécurité",
+        "Logs",
+        "Tickets",
+        "Intelligence artificielle",
+        "Notifications",
+        "Rôles & salons",
+        "Diagnostic",
+    ):
+        assert label in premium.PREMIUM_JS
+    assert "sentrix-premium-kpis" in premium.PREMIUM_CSS
+    assert "sentrix-premium-hero" in premium.PREMIUM_CSS
+    assert "/ops/export" in premium.PREMIUM_JS
+
+
 def test_ha_bootstrap_installs_ops_before_aiohttp():
     source = Path("railway_ha_product_boot.py").read_text(encoding="utf-8")
     ops_pos = source.index("dashboard_ops_suite as _dashboard_ops_suite")
@@ -102,7 +122,6 @@ class _FakeDashboard:
 
 
 def test_clean_snapshot_filters_internal_database_columns():
-    # install() replaces ops._snapshot with the clean compatibility implementation.
     dashboard = _FakeDashboard()
     dashboard.INDEX_HTML = "<html><head></head><body></body></html>"
     dashboard.build_app = lambda bot: None
