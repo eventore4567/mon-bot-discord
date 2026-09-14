@@ -5,10 +5,8 @@ schemas continue to expose internal columns such as guild_id/updated_at.
 """
 from __future__ import annotations
 
-import json
 import logging
 import time
-from types import MethodType
 
 from aiohttp import web
 
@@ -174,6 +172,16 @@ def install(dashboard, ops) -> bool:
 
         build_app_with_safe_clone._sentrix_ops_fix_routes = True
         dashboard.build_app = build_app_with_safe_clone
+
+    # Complete the requested dashboard feature set after compatibility hardening.  This
+    # layer adds access tiers, searchable logs, dry-run previews and deeper health status.
+    try:
+        from web import dashboard_ops_suite_plus
+        if not dashboard_ops_suite_plus.install(dashboard, ops):
+            raise RuntimeError("Ops Suite Plus returned false")
+    except Exception:
+        logger.exception("Ops Suite Plus installation failed.")
+        return False
 
     _INSTALLED = True
     logger.info("SentriX dashboard ops-suite compatibility fixes installed.")
