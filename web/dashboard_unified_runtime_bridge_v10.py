@@ -22,8 +22,13 @@ _BRIDGE_JS = (
 
 def install(dashboard) -> bool:
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
-    if not html or 'id="sentrix-dashboard-unified-v2"' not in html:
+    if not html:
         return False
+    # Some registry/command CI boots run the dashboard finalizer against a legacy test HTML.
+    # In that context there is no unified V2 lexical runtime to bridge, so this layer is a no-op.
+    if 'id="sentrix-dashboard-unified-v2"' not in html:
+        logger.info("Dashboard unified runtime bridge V10 skipped: unified V2 frontend not present.")
+        return True
     if BRIDGE_MARKER in html:
         return True
     if _STATE_TAIL not in html:
