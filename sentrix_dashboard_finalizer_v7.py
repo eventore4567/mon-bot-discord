@@ -23,6 +23,8 @@ REQUIRED_MARKERS = (
     'id="sentrix-dashboard-verification-v6-js"',
     'id="sentrix-unified-adapter-v9-css"',
     'id="sentrix-unified-adapter-v9-js"',
+    'id="sentrix-growth-v12-css"',
+    'id="sentrix-growth-v12-js"',
 )
 
 
@@ -35,6 +37,8 @@ def install() -> bool:
     from web import dashboard_verification_v6
     from web import dashboard_unified_runtime_bridge_v10
     from web import dashboard_unified_adapter_v9
+    from web import dashboard_growth_control_v12
+    from web import dashboard_growth_control_v12_fix
 
     # dashboard_control_center historically keeps a module-global install flag. If a later
     # compatibility layer replaced INDEX_HTML, that flag no longer proves its assets exist.
@@ -58,6 +62,10 @@ def install() -> bool:
         raise RuntimeError("Unified V2 Runtime Bridge V10 could not be finalized")
     if not dashboard_unified_adapter_v9.install(dashboard):
         raise RuntimeError("Unified V2 Adapter V9 could not be finalized")
+    if not dashboard_growth_control_v12.install(dashboard):
+        raise RuntimeError("Growth Control V12 could not be finalized")
+    if not dashboard_growth_control_v12_fix.install(dashboard):
+        raise RuntimeError("Growth Control V12 browser syntax guard failed")
 
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
@@ -65,17 +73,21 @@ def install() -> bool:
         raise RuntimeError("Final dashboard markers missing: " + ", ".join(missing))
     unified_v2 = 'id="sentrix-dashboard-unified-v2"' in final_html
     runtime_bridge = "__sentrixUnifiedRuntimeV10" in final_html
+    growth_v12 = "__sentrixGrowthV12SyntaxGuard" in final_html
     if unified_v2 and not runtime_bridge:
         raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
+    if not growth_v12:
+        raise RuntimeError("Growth Control V12 assets are present but browser syntax guard is missing")
 
     logger.warning(
         "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, "
-        "control center, Discord verification, unified runtime bridge V10 and unified V2 adapter V9 confirmed "
-        "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s).",
+        "control center, Discord verification, unified runtime bridge V10, unified V2 adapter V9 "
+        "and Growth Control V12 confirmed (html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s).",
         len(final_html.encode("utf-8")),
         "Vérification Discord réelle" in final_html and "CAPTCHA V96 RÉEL" in final_html,
         unified_v2,
         runtime_bridge,
+        growth_v12,
     )
     return True
 
