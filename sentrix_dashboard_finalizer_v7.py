@@ -25,6 +25,8 @@ REQUIRED_MARKERS = (
     'id="sentrix-unified-adapter-v9-js"',
     'id="sentrix-growth-v12-css"',
     'id="sentrix-growth-v12-js"',
+    'id="sentrix-dashboard-visibility-v13-css"',
+    'id="sentrix-dashboard-visibility-v13-js"',
 )
 
 
@@ -39,9 +41,8 @@ def install() -> bool:
     from web import dashboard_unified_adapter_v9
     from web import dashboard_growth_control_v12
     from web import dashboard_growth_control_v12_fix
+    from web import dashboard_visibility_guard_v13
 
-    # dashboard_control_center historically keeps a module-global install flag. If a later
-    # compatibility layer replaced INDEX_HTML, that flag no longer proves its assets exist.
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if (
         'id="sentrix-control-center-css"' not in html
@@ -66,6 +67,8 @@ def install() -> bool:
         raise RuntimeError("Growth Control V12 could not be finalized")
     if not dashboard_growth_control_v12_fix.install(dashboard):
         raise RuntimeError("Growth Control V12 browser syntax guard failed")
+    if not dashboard_visibility_guard_v13.install(dashboard):
+        raise RuntimeError("Dashboard Visibility V13 could not be finalized")
 
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
@@ -74,20 +77,25 @@ def install() -> bool:
     unified_v2 = 'id="sentrix-dashboard-unified-v2"' in final_html
     runtime_bridge = "__sentrixUnifiedRuntimeV10" in final_html
     growth_v12 = "__sentrixGrowthV12SyntaxGuard" in final_html
+    visibility_v13 = "__sentrixDashboardVisibilityV13" in final_html and "__sentrixGrowthV12Api" in final_html
     if unified_v2 and not runtime_bridge:
         raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
     if not growth_v12:
         raise RuntimeError("Growth Control V12 assets are present but browser syntax guard is missing")
+    if not visibility_v13:
+        raise RuntimeError("Visibility V13 assets or Growth V12 renderer bridge are missing")
 
     logger.warning(
         "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, "
-        "control center, Discord verification, unified runtime bridge V10, unified V2 adapter V9 "
-        "and Growth Control V12 confirmed (html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s).",
+        "control center, Discord verification, unified runtime bridge V10, unified V2 adapter V9, "
+        "Growth Control V12 and Visibility V13 confirmed "
+        "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, visibility_v13=%s).",
         len(final_html.encode("utf-8")),
         "Vérification Discord réelle" in final_html and "CAPTCHA V96 RÉEL" in final_html,
         unified_v2,
         runtime_bridge,
         growth_v12,
+        visibility_v13,
     )
     return True
 
