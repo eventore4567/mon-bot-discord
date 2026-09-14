@@ -63,5 +63,7 @@ def install(dashboard, ops) -> bool:
             if not dashboard_ops_suite_plus.install(dashboard,ops):raise RuntimeError("Ops Suite Plus returned false")
             from web import dashboard_control_center_v3
             if not dashboard_control_center_v3.install(dashboard):raise RuntimeError("Control Center V3 returned false")
+            from web import dashboard_premium_ui_v4
+            if not dashboard_premium_ui_v4.install(dashboard):raise RuntimeError("Premium UI V4 returned false")
         except Exception:logger.exception("Advanced dashboard installation failed.");return False
     _INSTALLED=True;logger.info("SentriX dashboard ops-suite compatibility fixes installed.");return True
