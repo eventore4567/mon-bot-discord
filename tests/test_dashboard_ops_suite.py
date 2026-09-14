@@ -7,6 +7,7 @@ from web import dashboard_ops_suite as ops
 from web import dashboard_ops_suite_fix as ops_fix
 from web import dashboard_control_center_v3 as v3
 from web import dashboard_premium_ui_v4 as premium
+from web import dashboard_section_variants_v5 as variants
 
 
 def test_ops_suite_exposes_expected_ui_contract():
@@ -78,6 +79,15 @@ def test_premium_ui_v4_applies_one_visual_language_to_all_sections():
     assert "sentrix-premium-kpis" in premium.PREMIUM_CSS
     assert "sentrix-premium-hero" in premium.PREMIUM_CSS
     assert "/ops/export" in premium.PREMIUM_JS
+
+
+def test_section_variants_v5_are_distinct_per_major_tab():
+    assert 'id="sentrix-section-variants-v5-css"' in variants.VARIANT_CSS
+    assert 'id="sentrix-section-variants-v5-js"' in variants.VARIANT_JS
+    for tab in ("logs", "security", "tickets", "ai", "notifications", "welcome", "levels", "roles", "verification", "community", "sanctions", "ops"):
+        assert f'data-sx-tab="{tab}"' in variants.VARIANT_CSS
+    for label in ("Journalisation détaillée", "Protection active", "Support structuré", "Moteur IA", "Santé & exploitation"):
+        assert label in variants.VARIANT_JS
 
 
 def test_ha_bootstrap_installs_ops_before_aiohttp():
