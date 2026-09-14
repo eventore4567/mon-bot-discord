@@ -33,6 +33,7 @@ def install() -> bool:
     from web import dashboard_premium_ui_v4
     from web import dashboard_section_variants_v5
     from web import dashboard_verification_v6
+    from web import dashboard_unified_runtime_bridge_v10
     from web import dashboard_unified_adapter_v9
 
     # dashboard_control_center historically keeps a module-global install flag. If a later
@@ -53,6 +54,8 @@ def install() -> bool:
         raise RuntimeError("Section Variants V5 could not be finalized")
     if not dashboard_verification_v6.install(dashboard):
         raise RuntimeError("Discord Verification V6 could not be finalized")
+    if not dashboard_unified_runtime_bridge_v10.install(dashboard):
+        raise RuntimeError("Unified V2 Runtime Bridge V10 could not be finalized")
     if not dashboard_unified_adapter_v9.install(dashboard):
         raise RuntimeError("Unified V2 Adapter V9 could not be finalized")
 
@@ -60,13 +63,19 @@ def install() -> bool:
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
     if missing:
         raise RuntimeError("Final dashboard markers missing: " + ", ".join(missing))
+    unified_v2 = 'id="sentrix-dashboard-unified-v2"' in final_html
+    runtime_bridge = "__sentrixUnifiedRuntimeV10" in final_html
+    if unified_v2 and not runtime_bridge:
+        raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
 
     logger.warning(
         "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, "
-        "control center, Discord verification and unified V2 adapter V9 confirmed "
-        "(html_bytes=%s, real_verify=%s).",
+        "control center, Discord verification, unified runtime bridge V10 and unified V2 adapter V9 confirmed "
+        "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s).",
         len(final_html.encode("utf-8")),
         "Vérification Discord réelle" in final_html and "CAPTCHA V96 RÉEL" in final_html,
+        unified_v2,
+        runtime_bridge,
     )
     return True
 
