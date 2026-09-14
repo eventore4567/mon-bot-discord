@@ -38,6 +38,15 @@ def _install_dashboard_before_ha() -> None:
 
 _install_dashboard_before_ha()
 
+# Suite opérationnelle du dashboard : historique/rollback, diagnostics, sauvegarde,
+# duplication, maintenance et politiques de commandes. Elle doit être installée avant
+# la construction de l'application aiohttp pour pouvoir ajouter ses routes et son UI.
+from web import dashboard_ops_suite as _dashboard_ops_suite  # noqa: E402
+
+if not _dashboard_ops_suite.install(dashboard_web):
+    raise RuntimeError("Suite opérations dashboard SentriX absente avant build_app.")
+logger.info("Suite opérations dashboard SentriX installée avant aiohttp.")
+
 # Import volontairement tardif : railway_ha_boot importe railway_boot, qui construit le
 # bootstrap du bot. Aucune application aiohttp ne doit être construite avant la réparation.
 import railway_ha_boot as ha_boot  # noqa: E402
@@ -177,7 +186,7 @@ def _build_app_with_final_dashboard(bot):
     if not _install_v97_dashboard(dashboard_web):
         raise RuntimeError("Dashboard Tickets V97 absent avant build_app.")
     app = _original_build_app(bot)
-    logger.info("Dashboard HA final confirmé au build_app aiohttp (Embeds + Tickets V97).")
+    logger.info("Dashboard HA final confirmé au build_app aiohttp (Embeds + Tickets V97 + Ops Suite).")
     return app
 
 
