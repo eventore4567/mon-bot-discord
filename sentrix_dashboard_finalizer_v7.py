@@ -21,6 +21,8 @@ REQUIRED_MARKERS = (
     'id="sentrix-section-variants-v5-js"',
     'id="sentrix-dashboard-verification-v6-css"',
     'id="sentrix-dashboard-verification-v6-js"',
+    'id="sentrix-unified-adapter-v9-css"',
+    'id="sentrix-unified-adapter-v9-js"',
 )
 
 
@@ -31,6 +33,7 @@ def install() -> bool:
     from web import dashboard_premium_ui_v4
     from web import dashboard_section_variants_v5
     from web import dashboard_verification_v6
+    from web import dashboard_unified_adapter_v9
 
     # dashboard_control_center historically keeps a module-global install flag. If a later
     # compatibility layer replaced INDEX_HTML, that flag no longer proves its assets exist.
@@ -50,6 +53,8 @@ def install() -> bool:
         raise RuntimeError("Section Variants V5 could not be finalized")
     if not dashboard_verification_v6.install(dashboard):
         raise RuntimeError("Discord Verification V6 could not be finalized")
+    if not dashboard_unified_adapter_v9.install(dashboard):
+        raise RuntimeError("Unified V2 Adapter V9 could not be finalized")
 
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
@@ -57,7 +62,11 @@ def install() -> bool:
         raise RuntimeError("Final dashboard markers missing: " + ", ".join(missing))
 
     logger.warning(
-        "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, control center and Discord verification confirmed."
+        "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, "
+        "control center, Discord verification and unified V2 adapter V9 confirmed "
+        "(html_bytes=%s, real_verify=%s).",
+        len(final_html.encode("utf-8")),
+        "Vérification Discord réelle" in final_html and "CAPTCHA V96 RÉEL" in final_html,
     )
     return True
 
