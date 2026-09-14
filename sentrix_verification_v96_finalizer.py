@@ -15,6 +15,7 @@ import sentrix_v95_runtime as v95
 import sentrix_verification_v96 as v96
 from sentrix_v103_setup_fix import install as install_setup_v103
 from sentrix_v105_slash_schema_guard import install as install_slash_guard_v105
+from sentrix_dashboard_finalizer_v7 import install as install_dashboard_v7
 
 logger = logging.getLogger("bot.verification-v96-final")
 
@@ -130,7 +131,7 @@ async def reassert(bot: commands.Bot) -> commands.Command:
 
 
 def install() -> None:
-    """Entoure V95 puis arme les gardes finaux V103 et V105 de la surface slash."""
+    """Entoure V95 puis arme les gardes finaux V103/V105 et l'UI dashboard finale."""
     _install_verification_transport_bypass()
     v96._install_v95_route()
     current = v95.prepare_bot
@@ -172,6 +173,12 @@ def install() -> None:
     # aussi /help, /ping et /sentrix, puis refuse toute fuite ctx/args/kwargs restante.
     install_setup_v103()
     install_slash_guard_v105()
+
+    # Autorité dashboard finale : les anciens modules ont déjà eu l'occasion de remplacer
+    # INDEX_HTML. On réapplique donc ici les couches V3/V4/V5 ainsi que la vraie publication
+    # de vérification Discord avant que railway_ha_product_boot capture build_app.
+    if not install_dashboard_v7():
+        raise RuntimeError("Dashboard V7 finalizer absent après les couches Railway historiques")
 
 
 __all__ = ["install", "reassert"]
