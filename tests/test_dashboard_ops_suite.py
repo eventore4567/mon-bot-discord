@@ -5,6 +5,9 @@ from pathlib import Path
 
 from web import dashboard_ops_suite as ops
 from web import dashboard_ops_suite_fix as ops_fix
+from web import dashboard_control_center_v3 as v3
+from web import dashboard_premium_ui_v4 as premium
+from web import dashboard_section_variants_v5 as variants
 
 
 def test_ops_suite_exposes_expected_ui_contract():
@@ -30,6 +33,61 @@ def test_ops_suite_exposes_expected_ui_contract():
 def test_safe_clone_patch_is_present():
     assert 'id="sentrix-ops-suite-fix-js"' in ops_fix.PATCH_JS
     assert "/ops/clone-safe/" in ops_fix.PATCH_JS
+
+
+def test_control_center_v3_exposes_real_operational_controls():
+    assert 'id="sentrix-control-center-v3-js"' in v3.V3_JS
+    for label in (
+        "Centre de contrôle avancé",
+        "Maintenance par module",
+        "Simulateur de permissions",
+        "Comparer deux serveurs",
+        "Incidents regroupés",
+        "File d'actions",
+    ):
+        assert label in v3.V3_JS
+    assert "/ops/maintenance/modules" in v3.V3_JS
+    assert "/ops/permissions/simulate" in v3.V3_JS
+    assert "/ops/compare/" in v3.V3_JS
+
+
+def test_control_center_v3_command_module_mapping_is_conservative():
+    assert v3._command_module("ticket close") == "tickets"
+    assert v3._command_module("automod-status") == "automod"
+    assert v3._command_module("daily") == "economy"
+    assert v3._command_module("guessnumber") == "games"
+    assert v3._command_module("youtube") == "notifications"
+    assert v3._command_module("image") == "ai"
+    assert v3._command_module("ban") is None
+    assert v3._command_module("setup") is None
+
+
+def test_premium_ui_v4_applies_one_visual_language_to_all_sections():
+    assert 'id="sentrix-premium-ui-v4-css"' in premium.PREMIUM_CSS
+    assert 'id="sentrix-premium-ui-v4-js"' in premium.PREMIUM_JS
+    for label in (
+        "Centre de contrôle",
+        "Sécurité",
+        "Logs",
+        "Tickets",
+        "Intelligence artificielle",
+        "Notifications",
+        "Rôles & salons",
+        "Diagnostic",
+    ):
+        assert label in premium.PREMIUM_JS
+    assert "sentrix-premium-kpis" in premium.PREMIUM_CSS
+    assert "sentrix-premium-hero" in premium.PREMIUM_CSS
+    assert "/ops/export" in premium.PREMIUM_JS
+
+
+def test_section_variants_v5_are_distinct_per_major_tab():
+    assert 'id="sentrix-section-variants-v5-css"' in variants.VARIANT_CSS
+    assert 'id="sentrix-section-variants-v5-js"' in variants.VARIANT_JS
+    for tab in ("logs", "security", "tickets", "ai", "notifications", "welcome", "levels", "roles", "verification", "community", "sanctions", "ops"):
+        assert f'data-sx-tab="{tab}"' in variants.VARIANT_CSS
+    for label in ("Journalisation détaillée", "Protection active", "Support structuré", "Moteur IA", "Santé & exploitation"):
+        assert label in variants.VARIANT_JS
 
 
 def test_ha_bootstrap_installs_ops_before_aiohttp():
@@ -74,7 +132,6 @@ class _FakeDashboard:
 
 
 def test_clean_snapshot_filters_internal_database_columns():
-    # install() replaces ops._snapshot with the clean compatibility implementation.
     dashboard = _FakeDashboard()
     dashboard.INDEX_HTML = "<html><head></head><body></body></html>"
     dashboard.build_app = lambda bot: None
