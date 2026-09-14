@@ -47,6 +47,14 @@ if not _dashboard_ops_suite.install(dashboard_web):
     raise RuntimeError("Suite opérations dashboard SentriX absente avant build_app.")
 logger.info("Suite opérations dashboard SentriX installée avant aiohttp.")
 
+# Correctifs de compatibilité pour les anciens schémas dashboard : filtre les colonnes
+# internes lors des snapshots et sécurise la duplication inter-serveurs.
+from web import dashboard_ops_suite_fix as _dashboard_ops_suite_fix  # noqa: E402
+
+if not _dashboard_ops_suite_fix.install(dashboard_web, _dashboard_ops_suite):
+    raise RuntimeError("Correctifs Ops Suite absents avant build_app.")
+logger.info("Correctifs Ops Suite installés avant aiohttp.")
+
 # Import volontairement tardif : railway_ha_boot importe railway_boot, qui construit le
 # bootstrap du bot. Aucune application aiohttp ne doit être construite avant la réparation.
 import railway_ha_boot as ha_boot  # noqa: E402
