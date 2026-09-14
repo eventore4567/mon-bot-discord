@@ -21,7 +21,6 @@ REQUIRED_MARKERS = (
     'id="sentrix-section-variants-v5-js"',
     'id="sentrix-dashboard-verification-v6-css"',
     'id="sentrix-dashboard-verification-v6-js"',
-    '__sentrixUnifiedRuntimeV10',
     'id="sentrix-unified-adapter-v9-css"',
     'id="sentrix-unified-adapter-v9-js"',
 )
@@ -64,14 +63,19 @@ def install() -> bool:
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
     if missing:
         raise RuntimeError("Final dashboard markers missing: " + ", ".join(missing))
+    unified_v2 = 'id="sentrix-dashboard-unified-v2"' in final_html
+    runtime_bridge = "__sentrixUnifiedRuntimeV10" in final_html
+    if unified_v2 and not runtime_bridge:
+        raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
 
     logger.warning(
         "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, "
         "control center, Discord verification, unified runtime bridge V10 and unified V2 adapter V9 confirmed "
-        "(html_bytes=%s, real_verify=%s, runtime_bridge=%s).",
+        "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s).",
         len(final_html.encode("utf-8")),
         "Vérification Discord réelle" in final_html and "CAPTCHA V96 RÉEL" in final_html,
-        "__sentrixUnifiedRuntimeV10" in final_html,
+        unified_v2,
+        runtime_bridge,
     )
     return True
 
