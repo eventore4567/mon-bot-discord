@@ -46,7 +46,8 @@ def test_growth_v12_syntax_guard_removes_known_bad_badge_literals():
     for bad in growth_fix._REPLACEMENTS:
         assert bad not in html
     assert '`${fmt(d.items.length)} liens`,"blue"' in html
-    assert '`${fmt(d.items.length)} règle(s)`,"blue"' in html
+    # V22 deliberately surfaces the count of enabled rules instead of the less useful total.
+    assert '`${fmt(d.items.filter(x=>x.enabled).length)} active(s)`,"blue"' in html
 
 
 def test_auto_reaction_emoji_validation_accepts_unicode_and_discord_custom():
