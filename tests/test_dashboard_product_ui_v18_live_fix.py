@@ -36,6 +36,13 @@ def test_v18_live_fix_patches_real_v15_v16_shape():
     assert "sx19-command-overlay" not in patched
     assert "sx19-command-hint" not in patched
 
+    # Live KPIs use one authenticated same-origin EventSource and update existing DOM.
+    assert "new EventSource(`/api/guilds/${encodeURIComponent(guildId)}/live/stream`" in patched
+    assert 'source.addEventListener("metrics"' in patched
+    assert 'source.addEventListener("access"' in patched
+    assert 'setText("metricTickets"' in patched
+    assert 'setText("metricWarnings"' in patched
+
 
 def test_v18_live_fix_is_idempotent_on_live_shape():
     patched = dashboard_product_ui_v18_live_fix.patch_html(_live_v16_html())
