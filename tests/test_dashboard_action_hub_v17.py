@@ -39,11 +39,14 @@ def test_v17_only_exposes_controls_backed_by_existing_routes_or_pages():
     assert '/ops/maintenance' in patched
     assert '/ops/policies' in patched
     assert '/ops/history/' in patched
-    assert "data-v17-go=\"autoreact\"" in patched
-    assert "data-v17-go=\"embeds\"" in patched
-    assert "data-v17-go=\"tickets\"" in patched
-    assert "data-v17-go=\"economy\"" in patched
-    assert "data-v17-go=\"notifications\"" in patched
+
+    # Shortcuts are generated at runtime by v17Shortcut(), so assert the actual renderer
+    # calls rather than looking for already-expanded HTML attributes in the source script.
+    for tab in ('autoreact', 'embeds', 'tickets', 'economy', 'notifications', 'welcome'):
+        assert f"v17Shortcut('{tab}'" in patched
+    assert 'data-v17-go=' in patched
+    assert "go(b.dataset.v17Go)" in patched
+
     assert "Giveaway" not in patched
     assert "Quiz" not in patched
 
