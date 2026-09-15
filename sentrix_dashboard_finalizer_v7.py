@@ -47,6 +47,8 @@ def install() -> bool:
     from web import dashboard_live_response_v15
     from web import dashboard_ui_hotfix_v16
     from web import dashboard_action_hub_v17
+    from web import dashboard_product_v18
+    from web import dashboard_product_ui_v18
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if (
@@ -77,8 +79,6 @@ def install() -> bool:
     if not dashboard_native_bundle_v14.install(dashboard):
         raise RuntimeError("Dashboard Native Bundle V14 could not be finalized")
 
-    # Some registry/command CI boots intentionally exercise the legacy dashboard without
-    # unified V2. V15+ only have a native V2 program to patch when that frontend is present.
     v15_ok = dashboard_live_response_v15.install(dashboard)
     has_unified_v2_now = 'id="sentrix-dashboard-unified-v2"' in str(
         getattr(dashboard, "INDEX_HTML", "") or ""
@@ -86,18 +86,34 @@ def install() -> bool:
     if has_unified_v2_now and not v15_ok:
         raise RuntimeError("Dashboard Live Response V15 could not be finalized")
 
-    # V16 is part of the stable production surface and remains fail-closed.
     v16_ok = dashboard_ui_hotfix_v16.install(dashboard)
     if has_unified_v2_now and not v16_ok:
         raise RuntimeError("Dashboard UI Hotfix V16 could not be finalized")
 
-    # V17 is additive UI only. A missed HTML anchor must never take the whole bot/dashboard
-    # offline. Keep V16 serving and log the miss so V17 can be repaired independently.
-    v17_ok = dashboard_action_hub_v17.install(dashboard)
-    if has_unified_v2_now and not v17_ok:
-        logger.error(
-            "Dashboard Action Hub V17 did not patch the startup snapshot; continuing with stable V16."
-        )
+    # V18 replaces the experimental V17 action hub when it can install. This keeps one
+    # coherent advanced control center in the request-time chain instead of stacking both.
+    try:
+        product_v18_ok = bool(dashboard_product_v18.install(dashboard))
+    except Exception:
+        product_v18_ok = False
+        logger.exception("Dashboard Product V18 backend installation failed; stable dashboard remains active.")
+    try:
+        product_ui_v18_ok = bool(dashboard_product_ui_v18.install(dashboard))
+    except Exception:
+        product_ui_v18_ok = False
+        logger.exception("Dashboard Product UI V18 installation failed; stable dashboard remains active.")
+
+    # V17 is fallback only. It is never added to the response-time patch chain when V18 UI
+    # is healthy, which avoids the live HTML anchor conflict that caused the previous outage.
+    v17_ok = False
+    if not product_ui_v18_ok:
+        try:
+            v17_ok = bool(dashboard_action_hub_v17.install(dashboard))
+        except Exception:
+            v17_ok = False
+            logger.exception("Fallback Action Hub V17 also failed; stable V16 remains authoritative.")
+        if has_unified_v2_now and not v17_ok:
+            logger.error("Neither V18 nor V17 advanced UI installed; continuing with stable V16.")
 
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
@@ -115,6 +131,11 @@ def install() -> bool:
         and "sentrix-dashboard-action-hub-v17" in final_html
         and '["actions","Actions utiles","UT"]' in final_html
     )
+    product_ui_v18 = (
+        "__sentrixProductUiV18" in final_html
+        and "sentrix-dashboard-product-ui-v18" in final_html
+        and '["product","Centre avancé","PX"]' in final_html
+    )
     if unified_v2 and not runtime_bridge:
         raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
     if not growth_v12:
@@ -127,17 +148,13 @@ def install() -> bool:
         raise RuntimeError("Live Response V15 is missing from the native V2 response program")
     if unified_v2 and not ui_v16:
         raise RuntimeError("UI Hotfix V16 is missing from the browser-visible dashboard")
-    if unified_v2 and not actions_v17:
-        logger.error(
-            "Action Hub V17 is not present in the startup snapshot; stable V16 remains authoritative."
-        )
+    if unified_v2 and not product_ui_v18 and not actions_v17:
+        logger.error("No advanced UI is present in the startup snapshot; stable V16 remains authoritative.")
 
     logger.warning(
-        "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, "
-        "control center, Discord verification, unified runtime bridge V10, unified V2 adapter V9, "
-        "Growth Control V12, Visibility V13, Native Bundle V14, Live Response V15 and UI Hotfix V16 confirmed "
+        "Dashboard V7 final authority active after legacy freeze: stable V16 + advanced product layer "
         "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, "
-        "visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s, actions_v17=%s).",
+        "visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s, product_v18=%s, product_ui_v18=%s, v17_fallback=%s).",
         len(final_html.encode("utf-8")),
         "CAPTCHA V96 RÉEL" in final_html,
         unified_v2,
@@ -147,7 +164,9 @@ def install() -> bool:
         native_v14,
         live_v15,
         ui_v16,
-        actions_v17,
+        product_v18_ok,
+        product_ui_v18_ok and product_ui_v18,
+        v17_ok and actions_v17,
     )
     return True
 
