@@ -27,6 +27,7 @@ REQUIRED_MARKERS = (
     'id="sentrix-growth-v12-js"',
     'id="sentrix-dashboard-visibility-v13-css"',
     'id="sentrix-dashboard-visibility-v13-js"',
+    'id="sentrix-dashboard-ui-hotfix-v16"',
 )
 
 
@@ -44,6 +45,7 @@ def install() -> bool:
     from web import dashboard_visibility_guard_v13
     from web import dashboard_native_bundle_v14
     from web import dashboard_live_response_v15
+    from web import dashboard_ui_hotfix_v16
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if (
@@ -84,6 +86,13 @@ def install() -> bool:
     if has_unified_v2_now and not v15_ok:
         raise RuntimeError("Dashboard Live Response V15 could not be finalized")
 
+    # V16 must run after V15 because it wraps V15's request-time patch function. This
+    # guarantees that the compact switch CSS and Verification Discord nav reach the exact
+    # bytes returned by /app instead of only mutating a stale startup snapshot.
+    v16_ok = dashboard_ui_hotfix_v16.install(dashboard)
+    if has_unified_v2_now and not v16_ok:
+        raise RuntimeError("Dashboard UI Hotfix V16 could not be finalized")
+
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
     if missing:
@@ -94,6 +103,7 @@ def install() -> bool:
     visibility_v13 = "__sentrixDashboardVisibilityV13" in final_html and "__sentrixGrowthV12Api" in final_html
     native_v14 = "__sentrixNativeBundleV14" in final_html
     live_v15 = "__sentrixLiveResponseV15" in final_html
+    ui_v16 = "sentrix-dashboard-ui-hotfix-v16" in final_html and "Vérification Discord" in final_html
     if unified_v2 and not runtime_bridge:
         raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
     if not growth_v12:
@@ -104,12 +114,14 @@ def install() -> bool:
         raise RuntimeError("Native Bundle V14 is missing from the canonical V2 browser program")
     if unified_v2 and not live_v15:
         raise RuntimeError("Live Response V15 is missing from the native V2 response program")
+    if unified_v2 and not ui_v16:
+        raise RuntimeError("UI Hotfix V16 is missing from the browser-visible dashboard")
 
     logger.warning(
         "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, "
         "control center, Discord verification, unified runtime bridge V10, unified V2 adapter V9, "
-        "Growth Control V12, Visibility V13, Native Bundle V14 and Live Response V15 confirmed "
-        "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, visibility_v13=%s, native_v14=%s, live_v15=%s).",
+        "Growth Control V12, Visibility V13, Native Bundle V14, Live Response V15 and UI Hotfix V16 confirmed "
+        "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s).",
         len(final_html.encode("utf-8")),
         "CAPTCHA V96 RÉEL" in final_html,
         unified_v2,
@@ -118,6 +130,7 @@ def install() -> bool:
         visibility_v13,
         native_v14,
         live_v15,
+        ui_v16,
     )
     return True
 
