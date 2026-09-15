@@ -4,6 +4,10 @@ Plusieurs runtimes historiques réécrivent ``verify-setup`` très tard pendant 
 Cette couche s'exécute juste avant la préparation slash V95, donc après le chargement de
 toutes les extensions Railway. Elle garantit que la configuration guidée règlement +
 CAPTCHA reste l'unique commande de vérification publique, en ``+`` comme en ``/``.
+
+Le dashboard n'est volontairement plus finalisé ici : l'autorité UI finale appartient au
+bootstrap V8, au vrai ``build_app`` après le freeze V55. Cela évite une première exécution
+V7 immédiatement écrasée par les couches dashboard chargées ensuite.
 """
 from __future__ import annotations
 
@@ -15,7 +19,6 @@ import sentrix_v95_runtime as v95
 import sentrix_verification_v96 as v96
 from sentrix_v103_setup_fix import install as install_setup_v103
 from sentrix_v105_slash_schema_guard import install as install_slash_guard_v105
-from sentrix_dashboard_finalizer_v7 import install as install_dashboard_v7
 
 logger = logging.getLogger("bot.verification-v96-final")
 
@@ -131,7 +134,7 @@ async def reassert(bot: commands.Bot) -> commands.Command:
 
 
 def install() -> None:
-    """Entoure V95 puis arme les gardes finaux V103/V105 et l'UI dashboard finale."""
+    """Entoure V95 puis arme uniquement les gardes finaux V103/V105."""
     _install_verification_transport_bypass()
     v96._install_v95_route()
     current = v95.prepare_bot
@@ -168,17 +171,11 @@ def install() -> None:
         v95.prepare_bot = prepare_with_verification
         logger.info("V96 finalizer branché juste avant la préparation slash V95.")
 
-    # Le bootstrap HA charge ce finalizer après les anciennes couches. V103 réinstalle
-    # /setup, puis V105 devient l'ultime garde avant chaque CommandTree.sync : il normalise
-    # aussi /help, /ping et /sentrix, puis refuse toute fuite ctx/args/kwargs restante.
+    # V103 réinstalle /setup, puis V105 devient l'ultime garde avant chaque
+    # CommandTree.sync : il normalise aussi /help, /ping et /sentrix, puis refuse toute
+    # fuite ctx/args/kwargs restante. L'UI dashboard finale est appliquée plus tard par V8.
     install_setup_v103()
     install_slash_guard_v105()
-
-    # Autorité dashboard finale : les anciens modules ont déjà eu l'occasion de remplacer
-    # INDEX_HTML. On réapplique donc ici les couches V3/V4/V5 ainsi que la vraie publication
-    # de vérification Discord avant que railway_ha_product_boot capture build_app.
-    if not install_dashboard_v7():
-        raise RuntimeError("Dashboard V7 finalizer absent après les couches Railway historiques")
 
 
 __all__ = ["install", "reassert"]
