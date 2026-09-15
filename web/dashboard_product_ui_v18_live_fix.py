@@ -64,30 +64,34 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
   let decorating = false;
   const addExternalPaletteItems = () => {
     if (!paletteResults || !paletteInput || decorating) return;
+    const query = paletteInput.value.trim().toLocaleLowerCase("fr");
+    const visible = extras.filter(([, label, detail]) => !query || `${label} ${detail}`.toLocaleLowerCase("fr").includes(query));
+    const signature = `${query}::${visible.map(([href]) => href).join("|")}`;
+    const existing = paletteResults.querySelectorAll("[data-sx19-external]");
+    if (paletteResults.dataset.sx19Extras === signature && existing.length === visible.length) return;
+
     decorating = true;
     try {
-      const query = paletteInput.value.trim().toLocaleLowerCase("fr");
-      paletteResults.querySelectorAll("[data-sx19-external]").forEach(node => node.remove());
-      extras
-        .filter(([, label, detail]) => !query || `${label} ${detail}`.toLocaleLowerCase("fr").includes(query))
-        .forEach(([href, label, detail]) => {
-          const link = document.createElement("a");
-          link.className = "palette-item";
-          link.href = href;
-          link.dataset.sx19External = "1";
-          const title = document.createElement("span");
-          title.textContent = label;
-          const meta = document.createElement("small");
-          meta.textContent = detail;
-          link.append(title, meta);
-          paletteResults.appendChild(link);
-        });
+      paletteResults.dataset.sx19Extras = signature;
+      existing.forEach(node => node.remove());
+      visible.forEach(([href, label, detail]) => {
+        const link = document.createElement("a");
+        link.className = "palette-item";
+        link.href = href;
+        link.dataset.sx19External = "1";
+        const title = document.createElement("span");
+        title.textContent = label;
+        const meta = document.createElement("small");
+        meta.textContent = detail;
+        link.append(title, meta);
+        paletteResults.appendChild(link);
+      });
     } finally {
       decorating = false;
     }
   };
   if (paletteResults && paletteInput) {
-    new MutationObserver(addExternalPaletteItems).observe(paletteResults, {childList:true});
+    new MutationObserver(() => queueMicrotask(addExternalPaletteItems)).observe(paletteResults, {childList:true});
     paletteInput.addEventListener("input", () => queueMicrotask(addExternalPaletteItems));
     document.getElementById("globalSearch")?.addEventListener("focus", () => queueMicrotask(addExternalPaletteItems));
     queueMicrotask(addExternalPaletteItems);
