@@ -86,6 +86,33 @@ def test_v21_v8_is_the_only_boot_level_dashboard_finalizer():
     assert "after legacy V55 freeze" in standby_v8
 
 
+def test_v21_growth_routes_exist_before_product_boot_captures_build_app():
+    primary_v8 = Path("railway_ha_product_boot_v8.py").read_text(encoding="utf-8")
+    standby_v8 = Path("sentrix_v98_ha_product_boot_v8.py").read_text(encoding="utf-8")
+    growth = Path("web/dashboard_growth_control_v12.py").read_text(encoding="utf-8")
+
+    # Both production entrypoints must install the route-bearing V12 wrapper before importing
+    # the shared product bootstrap, which freezes its current dashboard.build_app reference.
+    assert primary_v8.index("_growth_v12.install(_dashboard_preboot)") < primary_v8.index(
+        "import railway_ha_product_boot as product_boot"
+    )
+    assert standby_v8.index("_growth_v12.install(_dashboard_preboot)") < standby_v8.index(
+        "import sentrix_v98_ha_product_boot as v98_boot"
+    )
+    assert "product_boot.dashboard_web.build_app._sentrix_growth_v12_routes = True" in primary_v8
+    assert "product_boot.dashboard_web.build_app._sentrix_growth_v12_routes = True" in standby_v8
+
+    # These are the real endpoints consumed by the five affected tabs. Automations reuses
+    # the reactions endpoint alongside the already-present Ops overview.
+    for route in (
+        '/api/guilds/{guild_id}/growth/stats',
+        '/api/guilds/{guild_id}/growth/invitations',
+        '/api/guilds/{guild_id}/growth/webhooks',
+        '/api/guilds/{guild_id}/automation/reactions',
+    ):
+        assert route in growth
+
+
 def test_v21_final_polish_covers_keyboard_mobile_and_accessible_live_state():
     style = dashboard_product_ui_v18_live_fix._POLISH_STYLE
     script = dashboard_product_ui_v18_live_fix._POLISH_JS
