@@ -73,7 +73,15 @@ def install() -> bool:
         raise RuntimeError("Dashboard Visibility V13 could not be finalized")
     if not dashboard_native_bundle_v14.install(dashboard):
         raise RuntimeError("Dashboard Native Bundle V14 could not be finalized")
-    if not dashboard_live_response_v15.install(dashboard):
+
+    # Some registry/command CI boots intentionally exercise the legacy dashboard without
+    # unified V2. V15 only has a native V2 program to patch when that frontend is present.
+    # In production unified V2 is present, so V15 remains fail-closed there.
+    v15_ok = dashboard_live_response_v15.install(dashboard)
+    has_unified_v2_now = 'id="sentrix-dashboard-unified-v2"' in str(
+        getattr(dashboard, "INDEX_HTML", "") or ""
+    )
+    if has_unified_v2_now and not v15_ok:
         raise RuntimeError("Dashboard Live Response V15 could not be finalized")
 
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
