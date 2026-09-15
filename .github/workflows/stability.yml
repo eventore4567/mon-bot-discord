@@ -31,15 +31,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Dashboard V19 regression tests
+      - name: Dashboard V20 regression tests
         env:
           DISCORD_TOKEN: "ci.fake.token"
-          DATABASE_PATH: "/tmp/sentrix-dashboard-v19-tests.db"
+          DATABASE_PATH: "/tmp/sentrix-dashboard-v20-tests.db"
         run: |
           pip install pytest
           python -m pytest -q \
             tests/test_dashboard_product_ui_v18_live_fix.py \
-            tests/test_dashboard_recovery_v54_performance.py
+            tests/test_dashboard_recovery_v54_performance.py \
+            tests/test_dashboard_simple_mode_v20.py
 
       # Les deux audits visuels sont placés avant les anciens gates du registre. Le dépôt
       # historique possède encore des contrôles indépendants sur le nombre de commandes ;
