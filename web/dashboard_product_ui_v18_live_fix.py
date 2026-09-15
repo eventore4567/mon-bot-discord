@@ -35,25 +35,16 @@ _POLISH_STYLE = f'''<style id="{POLISH_MARKER}">
 .btn{{transition:transform var(--sx19-fast) ease,border-color var(--sx19-fast) ease,background var(--sx19-fast) ease,opacity var(--sx19-fast) ease}}
 .btn:not(:disabled):active{{transform:translateY(1px) scale(.99)}}
 .badge{{letter-spacing:.025em}}.row:hover{{border-color:#384451;background:#141a21}}.row-actions{{align-items:center}}
-.sx19-command-hint{{position:fixed;right:18px;bottom:18px;z-index:82;min-height:34px;padding:0 11px;border:1px solid #354250;border-radius:9px;background:rgba(17,22,28,.92);backdrop-filter:blur(12px);color:#aeb9c6;font-size:10px;font-weight:850;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.24)}}
-.sx19-command-hint:hover{{border-color:#4b6f90;color:#eef5fb}}
-.sx19-command-overlay{{position:fixed;inset:0;z-index:140;background:rgba(3,6,9,.68);backdrop-filter:blur(5px);display:grid;place-items:start center;padding:clamp(76px,12vh,132px) 16px 24px}}
-.sx19-command-overlay[hidden]{{display:none}}
-.sx19-command{{width:min(680px,100%);border:1px solid #394757;border-radius:15px;background:#11161c;box-shadow:0 30px 90px rgba(0,0,0,.52);overflow:hidden}}
-.sx19-command-head{{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid var(--line)}}
-.sx19-command-head input{{flex:1;height:42px;border:0;background:transparent;color:var(--text);outline:0;font-size:14px}}
-.sx19-command-head kbd{{border:1px solid var(--line2);border-radius:6px;padding:3px 7px;color:var(--muted);font-size:9px;background:#191f26}}
-.sx19-command-list{{max-height:min(52vh,430px);overflow:auto;padding:7px}}
-.sx19-command-item{{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--text);padding:10px 11px;text-align:left;cursor:pointer}}
-.sx19-command-item:hover,.sx19-command-item.active{{background:#17222d;border-color:#2f5778}}
-.sx19-command-item b{{display:block;font-size:12px}}.sx19-command-item span{{display:block;color:var(--muted);font-size:10px;margin-top:2px}}
-.sx19-command-item small{{color:#718092;font-size:9px}}
-.sx19-loading-bar{{position:fixed;left:0;top:0;height:2px;width:100%;z-index:200;pointer-events:none;overflow:hidden;opacity:0;transition:opacity .12s}}
+.palette{{width:min(680px,100%);border-radius:15px;background:#11161c;box-shadow:0 30px 90px rgba(0,0,0,.52)}}
+.palette input{{height:56px;font-size:14px}}.palette-results{{padding:7px;max-height:min(52vh,440px)}}
+.palette-item{{border:1px solid transparent;padding:10px 11px;transition:background var(--sx19-fast),border-color var(--sx19-fast),color var(--sx19-fast)}}
+.palette-item:hover,.palette-item.active{{background:#17222d;border-color:#2f5778}}.palette-item[data-sx19-external] small{{color:#8ba3b9}}
+.sx19-loading-bar{{position:fixed;left:0;top:0;height:2px;width:100%;z-index:240;pointer-events:none;overflow:hidden;opacity:0;transition:opacity .12s}}
 .sx19-loading-bar.active{{opacity:1}}.sx19-loading-bar:before{{content:"";display:block;width:34%;height:100%;background:var(--blue);animation:sx19-load .75s ease-in-out infinite}}
 @keyframes sx19-load{{from{{transform:translateX(-110%)}}to{{transform:translateX(330%)}}}}
-@media(max-width:900px){{.workspace{{padding-left:18px;padding-right:18px}}.sx19-command-hint{{right:12px;bottom:12px}}}}
-@media(max-width:620px){{.workspace{{padding:20px 13px 72px}}.card,.p18-card{{padding:14px}}.p18-tabs{{top:4px;overflow-x:auto;flex-wrap:nowrap}}.p18-tab{{white-space:nowrap}}.sx19-command-hint{{display:none}}}}
-@media(prefers-reduced-motion:reduce){{#content,.card,.p18-card,.metric,.row,.btn,.p18-tab{{animation:none!important;transition:none!important}}}}
+@media(max-width:900px){{.workspace{{padding-left:18px;padding-right:18px}}}}
+@media(max-width:620px){{.workspace{{padding:20px 13px 72px}}.card,.p18-card{{padding:14px}}.p18-tabs{{top:4px;overflow-x:auto;flex-wrap:nowrap}}.p18-tab{{white-space:nowrap}}.palette-backdrop{{padding:7vh 8px}}}}
+@media(prefers-reduced-motion:reduce){{#content,.card,.p18-card,.metric,.row,.btn,.p18-tab,.palette-item{{animation:none!important;transition:none!important}}}}
 </style>'''
 
 _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
@@ -62,117 +53,57 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
   if (window.__sentrixDashboardV19Polish) return;
   window.__sentrixDashboardV19Polish = true;
 
-  const COMMANDS = [
-    ["overview","Vue d’ensemble","État du serveur, métriques et raccourcis"],
-    ["moderation","Modération","Sanctions et outils staff"],
-    ["tickets","Tickets","Support, panneaux et configuration"],
-    ["logs","Logs","Journalisation du serveur"],
-    ["security","Sécurité","Anti-spam, anti-raid et protections"],
-    ["verification","Vérification Discord","Règlement, rôle et CAPTCHA"],
-    ["config","Rôles & configuration","Rôles, salons et réglages généraux"],
-    ["community","Niveaux & économie","XP, progression, monnaie et boutique"],
-    ["notifications","Notifications","Réseaux et notifications serveur"],
-    ["autoreact","Réactions automatiques","Réactions configurables"],
-    ["/giveaways","Giveaway","Création et gestion des giveaways"],
-    ["/embed-builder","Embeds & design","Créateur d’embeds et aperçu Discord"],
-    ["ai","Intelligence artificielle","Réglages IA SentriX"],
-    ["commands","Commandes","Contrôle et disponibilité des commandes"],
-    ["diagnostic","Diagnostic","Permissions et ressources cassées"],
-    ["product","Centre avancé","Membres, automations, audit, templates et accès"]
+  // Unified V2 already owns the global Cmd/Ctrl+K palette. V19 extends that single
+  // source of truth instead of creating a second command system beside it.
+  const extras = [
+    ["/giveaways", "Giveaways", "Outil complet · création et gestion"],
+    ["/embed-builder", "Créateur d’embeds", "Outil complet · aperçu Discord et brouillons"]
   ];
-
-  let overlay = null, input = null, list = null, current = [], selected = 0;
-  const escHtml = value => String(value ?? "").replace(/[&<>\"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
-
-  function navigate(id) {
-    closePalette();
-    if (String(id || "").startsWith("/")) {
-      location.assign(id);
-      return;
-    }
+  const paletteResults = document.getElementById("paletteResults");
+  const paletteInput = document.getElementById("paletteInput");
+  let decorating = false;
+  const addExternalPaletteItems = () => {
+    if (!paletteResults || !paletteInput || decorating) return;
+    decorating = true;
     try {
-      if (typeof window.go === "function") return window.go(id);
-      if (typeof go === "function") return go(id);
-    } catch (_) {}
-    const button = document.querySelector(`[data-page="${CSS.escape(id)}"],[data-nav="${CSS.escape(id)}"],[data-v17-go="${CSS.escape(id)}"]`);
-    if (button) button.click();
-  }
-
-  function ensurePalette() {
-    if (overlay) return;
-    overlay = document.createElement("div");
-    overlay.className = "sx19-command-overlay";
-    overlay.hidden = true;
-    overlay.innerHTML = `<div class="sx19-command" role="dialog" aria-modal="true" aria-label="Recherche rapide SentriX"><div class="sx19-command-head"><input aria-label="Rechercher une page" placeholder="Rechercher une fonction…" autocomplete="off"><kbd>ESC</kbd></div><div class="sx19-command-list" role="listbox"></div></div>`;
-    document.body.appendChild(overlay);
-    input = overlay.querySelector("input");
-    list = overlay.querySelector(".sx19-command-list");
-    input.addEventListener("input", () => { selected = 0; renderPalette(); });
-    input.addEventListener("keydown", event => {
-      if (event.key === "ArrowDown") { event.preventDefault(); selected = Math.min(selected + 1, Math.max(0, current.length - 1)); renderPalette(); }
-      else if (event.key === "ArrowUp") { event.preventDefault(); selected = Math.max(0, selected - 1); renderPalette(); }
-      else if (event.key === "Enter" && current[selected]) { event.preventDefault(); navigate(current[selected][0]); }
-      else if (event.key === "Escape") { event.preventDefault(); closePalette(); }
-    });
-    overlay.addEventListener("mousedown", event => { if (event.target === overlay) closePalette(); });
-  }
-
-  function renderPalette() {
-    if (!list) return;
-    const query = (input?.value || "").trim().toLocaleLowerCase("fr");
-    current = COMMANDS.filter(item => !query || `${item[1]} ${item[2]}`.toLocaleLowerCase("fr").includes(query)).slice(0, 12);
-    if (!current.length) {
-      list.innerHTML = '<div class="empty" style="margin:8px">Aucune fonction trouvée.</div>';
-      return;
+      const query = paletteInput.value.trim().toLocaleLowerCase("fr");
+      paletteResults.querySelectorAll("[data-sx19-external]").forEach(node => node.remove());
+      extras
+        .filter(([, label, detail]) => !query || `${label} ${detail}`.toLocaleLowerCase("fr").includes(query))
+        .forEach(([href, label, detail]) => {
+          const link = document.createElement("a");
+          link.className = "palette-item";
+          link.href = href;
+          link.dataset.sx19External = "1";
+          const title = document.createElement("span");
+          title.textContent = label;
+          const meta = document.createElement("small");
+          meta.textContent = detail;
+          link.append(title, meta);
+          paletteResults.appendChild(link);
+        });
+    } finally {
+      decorating = false;
     }
-    if (selected >= current.length) selected = current.length - 1;
-    list.innerHTML = current.map((item, index) => `<button type="button" class="sx19-command-item ${index === selected ? "active" : ""}" data-sx19-command="${escHtml(item[0])}" role="option" aria-selected="${index === selected}"><span><b>${escHtml(item[1])}</b><span>${escHtml(item[2])}</span></span><small>Ouvrir</small></button>`).join("");
-    list.querySelectorAll("[data-sx19-command]").forEach(button => button.addEventListener("click", () => navigate(button.dataset.sx19Command)));
-    list.querySelector(".active")?.scrollIntoView({block:"nearest"});
+  };
+  if (paletteResults && paletteInput) {
+    new MutationObserver(addExternalPaletteItems).observe(paletteResults, {childList:true});
+    paletteInput.addEventListener("input", () => queueMicrotask(addExternalPaletteItems));
+    document.getElementById("globalSearch")?.addEventListener("focus", () => queueMicrotask(addExternalPaletteItems));
+    queueMicrotask(addExternalPaletteItems);
   }
-
-  function openPalette() {
-    ensurePalette();
-    overlay.hidden = false;
-    input.value = "";
-    selected = 0;
-    renderPalette();
-    requestAnimationFrame(() => input.focus());
-  }
-
-  function closePalette() {
-    if (!overlay) return;
-    overlay.hidden = true;
-  }
-
-  const hint = document.createElement("button");
-  hint.type = "button";
-  hint.className = "sx19-command-hint";
-  hint.textContent = navigator.platform?.toLowerCase().includes("mac") ? "⌘ K  Recherche" : "Ctrl K  Recherche";
-  hint.setAttribute("aria-label", "Ouvrir la recherche rapide SentriX");
-  hint.addEventListener("click", openPalette);
-  document.body.appendChild(hint);
 
   const loadBar = document.createElement("div");
   loadBar.className = "sx19-loading-bar";
   document.body.appendChild(loadBar);
   let loadTimer = null;
   document.addEventListener("click", event => {
-    const target = event.target.closest(".nav button,[data-p18-tab],[data-p18-go],[data-page]");
+    const target = event.target.closest(".nav button,[data-p18-tab],[data-p18-go],[data-page],.palette-item");
     if (!target) return;
     loadBar.classList.add("active");
     clearTimeout(loadTimer);
     loadTimer = setTimeout(() => loadBar.classList.remove("active"), 900);
   }, true);
-
-  document.addEventListener("keydown", event => {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-      event.preventDefault();
-      openPalette();
-    } else if (event.key === "Escape" && overlay && !overlay.hidden) {
-      closePalette();
-    }
-  });
 })();
 </script>'''
 
