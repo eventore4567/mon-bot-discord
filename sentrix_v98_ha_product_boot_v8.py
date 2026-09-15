@@ -1,14 +1,30 @@
-"""Standby Railway V98 entrypoint with dashboard V8 build-time finalization."""
+"""Standby Railway V98 entrypoint with dashboard V8 build-time finalization.
+
+Growth Control V12 is installed before importing the shared V98/product bootstrap so its
+route-bearing build_app wrapper is part of the function chain captured for the live aiohttp
+application. The late V7 pass remains responsible for refreshing the final UI after V55.
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
 
-import sentrix_v98_ha_product_boot as v98_boot
-from sentrix_dashboard_finalizer_v7 import install as install_dashboard_v7
+from web import dashboard as _dashboard_preboot
+from web import dashboard_growth_control_v12 as _growth_v12
+
+if not _growth_v12.install(_dashboard_preboot):
+    raise RuntimeError("Dashboard Growth Control V12 absent before standby build_app capture.")
+
+import sentrix_v98_ha_product_boot as v98_boot  # noqa: E402
+from sentrix_dashboard_finalizer_v7 import install as install_dashboard_v7  # noqa: E402
 
 logger = logging.getLogger("bot.dashboard-final-order-v8-standby")
 product_boot = v98_boot.product_boot
+
+# The shared guard contains the V12 route wrapper captured above. Keep the V12 marker on the
+# exposed guard so the final UI pass cannot add a duplicate copy of the same aiohttp routes.
+product_boot.dashboard_web.build_app._sentrix_growth_v12_routes = True
+
 _original_finish = product_boot._install_embed_dashboard_finish
 
 
