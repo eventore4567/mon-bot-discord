@@ -1,8 +1,7 @@
-"""Mode simple V20 du dashboard SentriX, compatible avec le gel frontend V55.
+"""Mode simple V20 du dashboard SentriX, composé dans l'autorité frontend V55.
 
-Le module reste purement frontend : aucune API, permission ou fonction métier n'est
-modifiée. ``enhance_html`` est idempotent et peut être utilisé aussi bien sur le document
-courant que par le runtime unified-v2 avant que V55 ne fige définitivement ``/app``.
+Aucune API ou permission n'est modifiée ici. Le module enrichit uniquement le document
+unified-v2 avant que V55 ne le fige et garantit que V18/V19/V20 survivent au rebuild final.
 """
 from __future__ import annotations
 
@@ -39,7 +38,6 @@ function build(){const dashboard=byId("dashboard"),workspace=dashboard&&dashboar
 
 
 def enhance_html(html: str) -> str:
-    """Injecte V20 exactement une fois dans un document HTML dashboard."""
     html = str(html or "")
     if "</body>" not in html:
         return html
@@ -50,14 +48,21 @@ def enhance_html(html: str) -> str:
     return html
 
 
+def _guard_optional_browser_apis(html: str) -> str:
+    """Ne laisse pas une API navigateur optionnelle casser tout le dashboard."""
+    anchor = '  const connectLive = () => {\n    const guildId = currentGuild();'
+    replacement = '  const connectLive = () => {\n    if (typeof EventSource === "undefined") return;\n    const guildId = currentGuild();'
+    if anchor in html and replacement not in html:
+        html = html.replace(anchor, replacement, 1)
+    return html
+
+
 def _install_unified_runtime_hook() -> bool:
-    """Compose V18/V19 puis V20 dans unified-v2, avant le gel immuable V55."""
     try:
         from . import dashboard_unified_runtime_v2 as runtime
     except Exception:
         logger.exception("Mode simple : runtime unified-v2 indisponible.")
         return False
-
     current = runtime.enhance_html
     if getattr(current, _RUNTIME_HOOK_MARKER, False):
         return True
@@ -69,6 +74,7 @@ def _install_unified_runtime_hook() -> bool:
             rendered = patch_product_html(rendered)
         except Exception:
             logger.exception("Composition V18/V19 impossible avant le gel V55.")
+        rendered = _guard_optional_browser_apis(rendered)
         return enhance_html(rendered)
 
     setattr(runtime_then_product_then_simple, _RUNTIME_HOOK_MARKER, True)
@@ -78,7 +84,6 @@ def _install_unified_runtime_hook() -> bool:
 
 
 def install(dashboard) -> None:
-    """Installe V20 sur le document courant et arme sa composition dans le gel V55."""
     global _INSTALLED
     _install_unified_runtime_hook()
     html = getattr(dashboard, "INDEX_HTML", "")
