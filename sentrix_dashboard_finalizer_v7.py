@@ -49,6 +49,7 @@ def install() -> bool:
     from web import dashboard_action_hub_v17
     from web import dashboard_product_v18
     from web import dashboard_product_ui_v18
+    from web import dashboard_product_ui_v18_live_fix
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if (
@@ -90,8 +91,6 @@ def install() -> bool:
     if has_unified_v2_now and not v16_ok:
         raise RuntimeError("Dashboard UI Hotfix V16 could not be finalized")
 
-    # V18 replaces the experimental V17 action hub when it can install. This keeps one
-    # coherent advanced control center in the request-time chain instead of stacking both.
     try:
         product_v18_ok = bool(dashboard_product_v18.install(dashboard))
     except Exception:
@@ -101,10 +100,18 @@ def install() -> bool:
         product_ui_v18_ok = bool(dashboard_product_ui_v18.install(dashboard))
     except Exception:
         product_ui_v18_ok = False
-        logger.exception("Dashboard Product UI V18 installation failed; stable dashboard remains active.")
+        logger.exception("Dashboard Product UI V18 installation failed; trying live-anchor repair.")
 
-    # V17 is fallback only. It is never added to the response-time patch chain when V18 UI
-    # is healthy, which avoids the live HTML anchor conflict that caused the previous outage.
+    # The live V15 bundle contains extra navigation/render cases. If the native V18 anchors
+    # miss that expanded shape, repair only those anchors while reusing the exact same V18 UI.
+    if not product_ui_v18_ok:
+        try:
+            product_ui_v18_ok = bool(dashboard_product_ui_v18_live_fix.install(dashboard))
+        except Exception:
+            product_ui_v18_ok = False
+            logger.exception("Dashboard Product UI V18 live-anchor repair failed; stable dashboard remains active.")
+
+    # V17 stays fallback-only and is never stacked over a healthy V18 response program.
     v17_ok = False
     if not product_ui_v18_ok:
         try:
@@ -135,6 +142,7 @@ def install() -> bool:
         "__sentrixProductUiV18" in final_html
         and "sentrix-dashboard-product-ui-v18" in final_html
         and '["product","Centre avancé","PX"]' in final_html
+        and "case'product':await renderProductV18();break;" in final_html
     )
     if unified_v2 and not runtime_bridge:
         raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
