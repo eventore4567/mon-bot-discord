@@ -17,10 +17,12 @@ POLISH_JS_MARKER = "__sentrixDashboardV19Polish"
 
 _POLISH_STYLE = f'''<style id="{POLISH_MARKER}">
 :root{{--sx19-fast:160ms;--sx19-soft:220ms;--sx19-radius:14px;--sx19-elev:0 12px 32px rgba(0,0,0,.16)}}
-.workspace{{padding-top:28px}}#content{{animation:sx19-enter var(--sx19-fast) ease both}}
+html{{color-scheme:dark}}
+.workspace{{padding-top:28px;min-width:0}}#content{{animation:sx19-enter var(--sx19-fast) ease both;min-width:0}}
 @keyframes sx19-enter{{from{{opacity:.55;transform:translateY(3px)}}to{{opacity:1;transform:none}}}}
 .card,.p18-card,.metric,.row{{transition:border-color var(--sx19-fast) ease,background var(--sx19-fast) ease,box-shadow var(--sx19-fast) ease,transform var(--sx19-fast) ease}}
-.card,.p18-card{{border-radius:var(--sx19-radius);background:linear-gradient(180deg,rgba(25,30,37,.96),rgba(19,23,29,.98));box-shadow:0 1px 0 rgba(255,255,255,.018)}}
+.card,.p18-card{{border-radius:var(--sx19-radius);background:linear-gradient(180deg,rgba(25,30,37,.96),rgba(19,23,29,.98));box-shadow:0 1px 0 rgba(255,255,255,.018);min-width:0}}
+.p18-card{{overflow-x:auto;overscroll-behavior-inline:contain}}
 .card:hover,.p18-card:hover{{border-color:#394552;box-shadow:var(--sx19-elev)}}
 .card h2,.card h3,.p18-card h3{{letter-spacing:-.025em}}.card h3,.p18-card h3{{font-size:15px}}
 .card>p,.card-copy,.p18-card>p{{font-size:11px;line-height:1.6;color:#98a4b3}}
@@ -29,22 +31,27 @@ _POLISH_STYLE = f'''<style id="{POLISH_MARKER}">
 .p18-tabs{{position:sticky;top:8px;z-index:34;padding:6px;border-radius:12px;background:rgba(15,19,24,.88);backdrop-filter:blur(16px);box-shadow:0 8px 26px rgba(0,0,0,.18)}}
 .p18-tab{{min-height:34px;padding:8px 12px;transition:background var(--sx19-fast),color var(--sx19-fast),box-shadow var(--sx19-fast)}}
 .p18-tab.active{{background:#1b344b;box-shadow:inset 0 0 0 1px #3e75a5,0 4px 12px rgba(0,0,0,.16)}}
-.p18-table{{border-spacing:0}}.p18-table th{{position:sticky;top:0;background:#151a20;z-index:1;letter-spacing:.04em}}
+.p18-table{{border-spacing:0;width:100%;min-width:640px}}.p18-table th{{position:sticky;top:0;background:#151a20;z-index:1;letter-spacing:.04em}}
 .p18-table tbody tr:hover td{{background:#171d24}}.p18-table td{{font-size:11px}}
 .p18-search input,.field input,.field select,.field textarea{{transition:border-color var(--sx19-fast),box-shadow var(--sx19-fast),background var(--sx19-fast)}}
 .btn{{transition:transform var(--sx19-fast) ease,border-color var(--sx19-fast) ease,background var(--sx19-fast) ease,opacity var(--sx19-fast) ease}}
 .btn:not(:disabled):active{{transform:translateY(1px) scale(.99)}}
+.btn:disabled{{opacity:.5;cursor:not-allowed;transform:none!important}}
+.btn:focus-visible,.p18-tab:focus-visible,.palette-item:focus-visible,.field input:focus-visible,.field select:focus-visible,.field textarea:focus-visible,.p18-search input:focus-visible{{outline:2px solid #68a9e0;outline-offset:2px;box-shadow:0 0 0 4px rgba(76,143,199,.18)}}
 .badge{{letter-spacing:.025em}}.row:hover{{border-color:#384451;background:#141a21}}.row-actions{{align-items:center}}
 .palette{{width:min(680px,100%);border-radius:15px;background:#11161c;box-shadow:0 30px 90px rgba(0,0,0,.52)}}
 .palette input{{height:56px;font-size:14px}}.palette-results{{padding:7px;max-height:min(52vh,440px)}}
 .palette-item{{border:1px solid transparent;padding:10px 11px;transition:background var(--sx19-fast),border-color var(--sx19-fast),color var(--sx19-fast)}}
 .palette-item:hover,.palette-item.active{{background:#17222d;border-color:#2f5778}}.palette-item[data-sx19-external] small{{color:#8ba3b9}}
+.sx-empty-premium{{min-height:180px;display:grid;place-items:center;padding:20px}}.sx-load-card{{width:min(520px,100%);padding:20px;border:1px solid #2c3845;border-radius:14px;background:#121820;box-shadow:0 14px 40px rgba(0,0,0,.2)}}
+.sx-load-card h3{{margin:0 0 7px}}.sx-load-card p{{margin:0 0 14px;color:#9ca8b5;line-height:1.55}}
 .sx19-loading-bar{{position:fixed;left:0;top:0;height:2px;width:100%;z-index:240;pointer-events:none;overflow:hidden;opacity:0;transition:opacity .12s}}
 .sx19-loading-bar.active{{opacity:1}}.sx19-loading-bar:before{{content:"";display:block;width:34%;height:100%;background:var(--blue);animation:sx19-load .75s ease-in-out infinite}}
 @keyframes sx19-load{{from{{transform:translateX(-110%)}}to{{transform:translateX(330%)}}}}
 @media(max-width:900px){{.workspace{{padding-left:18px;padding-right:18px}}}}
-@media(max-width:620px){{.workspace{{padding:20px 13px 72px}}.card,.p18-card{{padding:14px}}.p18-tabs{{top:4px;overflow-x:auto;flex-wrap:nowrap}}.p18-tab{{white-space:nowrap}}.palette-backdrop{{padding:7vh 8px}}}}
-@media(prefers-reduced-motion:reduce){{#content,.card,.p18-card,.metric,.row,.btn,.p18-tab,.palette-item{{animation:none!important;transition:none!important}}}}
+@media(max-width:620px){{.workspace{{padding:20px 13px 72px}}.card,.p18-card{{padding:14px}}.p18-tabs{{top:4px;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:thin}}.p18-tab{{white-space:nowrap}}.p18-table{{min-width:560px}}.palette-backdrop{{padding:7vh 8px}}}}
+@media(prefers-reduced-motion:reduce){{#content,.card,.p18-card,.metric,.row,.btn,.p18-tab,.palette-item{{animation:none!important;transition:none!important}}.sx19-loading-bar:before{{animation:none!important;width:100%}}}}
+@media(forced-colors:active){{.btn:focus-visible,.p18-tab:focus-visible,.palette-item:focus-visible,.field input:focus-visible,.field select:focus-visible,.field textarea:focus-visible{{outline:2px solid Highlight;box-shadow:none}}.card,.p18-card,.metric,.p18-kpi{{border:1px solid CanvasText}}}}
 </style>'''
 
 _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
@@ -91,6 +98,8 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
     }
   };
   if (paletteResults && paletteInput) {
+    paletteResults.setAttribute("aria-live", "polite");
+    paletteInput.setAttribute("aria-controls", "paletteResults");
     new MutationObserver(() => queueMicrotask(addExternalPaletteItems)).observe(paletteResults, {childList:true});
     paletteInput.addEventListener("input", () => queueMicrotask(addExternalPaletteItems));
     document.getElementById("globalSearch")?.addEventListener("focus", () => queueMicrotask(addExternalPaletteItems));
@@ -116,7 +125,10 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
     const runtimeDot = document.getElementById("runtimeDot");
     const runtimeText = document.getElementById("runtimeText");
     if (runtimeDot) runtimeDot.classList.toggle("off", !data.online);
-    if (runtimeText) runtimeText.textContent = data.online ? `En ligne · ${data.latency_ms ?? "—"} ms` : "Hors ligne";
+    if (runtimeText) {
+      runtimeText.setAttribute("aria-live", "polite");
+      runtimeText.textContent = data.online ? `En ligne · ${data.latency_ms ?? "—"} ms` : "Hors ligne";
+    }
 
     const kpiValues = {
       "Membres": data.members,
@@ -157,7 +169,10 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
     source.addEventListener("access", () => {
       closeLive();
       const runtimeText = document.getElementById("runtimeText");
-      if (runtimeText) runtimeText.textContent = "Accès serveur retiré";
+      if (runtimeText) {
+        runtimeText.setAttribute("aria-live", "assertive");
+        runtimeText.textContent = "Accès serveur retiré";
+      }
     });
     source.onerror = () => {
       if (source !== liveSource || document.hidden) return;
@@ -186,6 +201,7 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
 
   const loadBar = document.createElement("div");
   loadBar.className = "sx19-loading-bar";
+  loadBar.setAttribute("aria-hidden", "true");
   document.body.appendChild(loadBar);
   let loadTimer = null;
   document.addEventListener("click", event => {
