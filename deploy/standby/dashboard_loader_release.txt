@@ -1,2 +1,2 @@
-release=df384b7841d648bab87fb24a72b0c36af4ac19e2
-reason=deploy premium dashboard loading experience
+release=b44fc6186694e1f89100657b4ba36174df5a0a62
+reason=deploy dashboard V17 fail-open uptime hotfix
