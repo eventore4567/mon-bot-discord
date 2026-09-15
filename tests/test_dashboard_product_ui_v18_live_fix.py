@@ -27,16 +27,14 @@ def test_v18_live_fix_patches_real_v15_v16_shape():
     assert "case'product':await renderProductV18();break;" in patched
     assert 'name="sentrix-dashboard-product-ui-v18-live-fix"' in patched
 
-    # V19 polish rides on the active V18 live-fix instead of adding another wrapper layer.
+    # V19 reuses the Unified V2 palette rather than shipping a competing Cmd/Ctrl+K UI.
     assert dashboard_product_ui_v18_live_fix.POLISH_MARKER in patched
     assert dashboard_product_ui_v18_live_fix.POLISH_JS_MARKER in patched
-    assert '"/giveaways","Giveaway"' in patched
-    assert '"/embed-builder","Embeds & design"' in patched
-    assert '["config","Rôles & configuration"' in patched
-    assert '["community","Niveaux & économie"' in patched
-    assert '["configuration"' not in patched
-    assert '["roles"' not in patched
-    assert '["levels"' not in patched
+    assert 'id="paletteBackdrop"' in patched
+    assert '"/giveaways", "Giveaways"' in patched
+    assert '"/embed-builder", "Créateur d’embeds"' in patched
+    assert "sx19-command-overlay" not in patched
+    assert "sx19-command-hint" not in patched
 
 
 def test_v18_live_fix_is_idempotent_on_live_shape():
