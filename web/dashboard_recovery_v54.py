@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from urllib.parse import urlparse
 
 from aiohttp import web
@@ -116,6 +117,11 @@ def _install_guild_loading_recovery(dashboard) -> None:
     Discord. Dans cet intervalle ``bot.get_guild`` est vide : l'ancien code transformait alors
     chaque serveur OAuth en faux « SentriX non installé ». On expose maintenant explicitement
     l'état indéterminé et le navigateur réessaie jusqu'à ce que la gateway soit prête.
+
+    V54 optimise aussi deux chemins très chauds du dashboard : les permissions de tous les
+    serveurs installés sont vérifiées en parallèle avec une concurrence bornée, et les cinq
+    compteurs SQL de la fiche serveur sont regroupés dans une seule requête. Les contrôles de
+    sécurité restent identiques : aucun serveur n'est retourné avant validation des droits.
     """
     if getattr(dashboard, "_sentrix_guild_loading_recovery_v54", False):
         return
@@ -132,6 +138,7 @@ def _install_guild_loading_recovery(dashboard) -> None:
         return
 
     original_manageable = dashboard._manageable_guild
+    original_guild_metrics = getattr(dashboard, "_guild_metrics", None)
 
     async def manageable_guild_ha_safe(request: web.Request, guild_id: int):
         bot = request.app["bot"]
@@ -149,7 +156,44 @@ def _install_guild_loading_recovery(dashboard) -> None:
             )
         return await original_manageable(request, guild_id)
 
+    async def guild_metrics_fast(db, guild_id: int) -> dict:
+        if original_guild_metrics is None:
+            return {}
+        try:
+            row = await db.fetchone(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM warnings WHERE guild_id = ?) AS warnings,
+                    (SELECT COUNT(*) FROM tickets WHERE guild_id = ? AND status = 'ouvert') AS open_tickets,
+                    (SELECT COUNT(*) FROM levels WHERE guild_id = ?) AS profiles,
+                    (SELECT COUNT(*) FROM economy WHERE guild_id = ?) AS economy_accounts,
+                    (SELECT COUNT(*) FROM command_logs WHERE guild_id = ? AND timestamp >= ?) AS commands_24h
+                """,
+                (
+                    guild_id,
+                    guild_id,
+                    guild_id,
+                    guild_id,
+                    guild_id,
+                    dashboard.now() - 86400,
+                ),
+            )
+            if row is None:
+                raise RuntimeError("metric query returned no row")
+            return {
+                "warnings": int(row["warnings"] or 0),
+                "open_tickets": int(row["open_tickets"] or 0),
+                "profiles": int(row["profiles"] or 0),
+                "economy_accounts": int(row["economy_accounts"] or 0),
+                "commands_24h": int(row["commands_24h"] or 0),
+            }
+        except Exception:
+            # Une installation plus ancienne peut ne pas encore posséder une des tables.
+            # On conserve alors exactement le comportement tolérant du cœur historique.
+            return await original_guild_metrics(db, guild_id)
+
     async def handle_guilds_ha_safe(request: web.Request):
+        started = time.perf_counter()
         session, error = dashboard._require_session(request)
         if error:
             return error
@@ -157,41 +201,72 @@ def _install_guild_loading_recovery(dashboard) -> None:
         bot = request.app["bot"]
         ready = bool(bot.is_ready())
         user_id = int(session["user"]["id"])
-        guilds = []
+        session_guilds = list(session.get("guilds", []))
 
-        for item in session.get("guilds", []):
-            guild_id = int(item["id"])
-            if not ready:
-                guilds.append({
+        if not ready:
+            guilds = [
+                {
                     **item,
                     "installed": None,
                     "invite_url": None,
-                })
-                continue
-
-            installed_guild = bot.get_guild(guild_id)
-            installed = installed_guild is not None
-            if installed and await dashboard._administrator_member(installed_guild, user_id) is None:
-                continue
-            guilds.append({
-                **item,
-                "installed": installed,
-                "invite_url": None if installed else dashboard._invite_url(bot, guild_id),
-            })
-
-        if ready:
-            guilds.sort(key=lambda item: (not bool(item["installed"]), item["name"].casefold()))
-        else:
+                }
+                for item in session_guilds
+            ]
             guilds.sort(key=lambda item: item["name"].casefold())
+        else:
+            permission_gate = asyncio.Semaphore(6)
 
-        return web.json_response({
+            async def validated_item(item: dict):
+                guild_id = int(item["id"])
+                installed_guild = bot.get_guild(guild_id)
+                installed = installed_guild is not None
+                if installed:
+                    async with permission_gate:
+                        member = await dashboard._administrator_member(installed_guild, user_id)
+                    if member is None:
+                        return None
+                return {
+                    **item,
+                    "installed": installed,
+                    "invite_url": None if installed else dashboard._invite_url(bot, guild_id),
+                }
+
+            results = await asyncio.gather(
+                *(validated_item(item) for item in session_guilds),
+                return_exceptions=True,
+            )
+            guilds = []
+            for item, result in zip(session_guilds, results):
+                if isinstance(result, Exception):
+                    logger.warning(
+                        "Dashboard : vérification du serveur %s impossible (%s).",
+                        item.get("id"),
+                        type(result).__name__,
+                    )
+                    continue
+                if result is not None:
+                    guilds.append(result)
+            guilds.sort(key=lambda item: (not bool(item["installed"]), item["name"].casefold()))
+
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        if elapsed_ms >= 1000:
+            logger.warning(
+                "Dashboard lent : GET /api/guilds %.0f ms pour %s serveur(s) OAuth.",
+                elapsed_ms,
+                len(session_guilds),
+            )
+        response = web.json_response({
             "guilds": guilds,
             "discord_ready": ready,
             "retry_after_ms": 2000 if not ready else None,
         })
+        response.headers["Server-Timing"] = f"guilds;dur={elapsed_ms:.1f}"
+        return response
 
     dashboard._manageable_guild = manageable_guild_ha_safe
     dashboard.handle_guilds = handle_guilds_ha_safe
+    if original_guild_metrics is not None:
+        dashboard._guild_metrics = guild_metrics_fast
 
     html = str(getattr(dashboard, "INDEX_HTML", ""))
     if _GUILD_LOADER_OLD in html:
