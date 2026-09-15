@@ -43,6 +43,7 @@ def install() -> bool:
     from web import dashboard_growth_control_v12_fix
     from web import dashboard_visibility_guard_v13
     from web import dashboard_native_bundle_v14
+    from web import dashboard_live_response_v15
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if (
@@ -72,6 +73,8 @@ def install() -> bool:
         raise RuntimeError("Dashboard Visibility V13 could not be finalized")
     if not dashboard_native_bundle_v14.install(dashboard):
         raise RuntimeError("Dashboard Native Bundle V14 could not be finalized")
+    if not dashboard_live_response_v15.install(dashboard):
+        raise RuntimeError("Dashboard Live Response V15 could not be finalized")
 
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
@@ -82,6 +85,7 @@ def install() -> bool:
     growth_v12 = "__sentrixGrowthV12SyntaxGuard" in final_html
     visibility_v13 = "__sentrixDashboardVisibilityV13" in final_html and "__sentrixGrowthV12Api" in final_html
     native_v14 = "__sentrixNativeBundleV14" in final_html
+    live_v15 = "__sentrixLiveResponseV15" in final_html
     if unified_v2 and not runtime_bridge:
         raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
     if not growth_v12:
@@ -90,19 +94,22 @@ def install() -> bool:
         raise RuntimeError("Visibility V13 assets or Growth V12 renderer bridge are missing")
     if unified_v2 and not native_v14:
         raise RuntimeError("Native Bundle V14 is missing from the canonical V2 browser program")
+    if unified_v2 and not live_v15:
+        raise RuntimeError("Live Response V15 is missing from the native V2 response program")
 
     logger.warning(
         "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, "
         "control center, Discord verification, unified runtime bridge V10, unified V2 adapter V9, "
-        "Growth Control V12, Visibility V13 and Native Bundle V14 confirmed "
-        "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, visibility_v13=%s, native_v14=%s).",
+        "Growth Control V12, Visibility V13, Native Bundle V14 and Live Response V15 confirmed "
+        "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, visibility_v13=%s, native_v14=%s, live_v15=%s).",
         len(final_html.encode("utf-8")),
-        "Vérification Discord réelle" in final_html and "CAPTCHA V96 RÉEL" in final_html,
+        "CAPTCHA V96 RÉEL" in final_html,
         unified_v2,
         runtime_bridge,
         growth_v12,
         visibility_v13,
         native_v14,
+        live_v15,
     )
     return True
 
