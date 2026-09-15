@@ -14,6 +14,7 @@ MARKER = "__sentrixGrowthV12SyntaxGuard"
 _REPLACEMENTS = {
     '`${fmt(d.items.length)} liens","blue"': '`${fmt(d.items.length)} liens`,"blue"',
     '`${fmt(d.items.length)} règle(s)","blue"': '`${fmt(d.items.length)} règle(s)`,"blue"',
+    '`${fmt(d.items.filter(x=>x.enabled).length)} active(s)","blue"': '`${fmt(d.items.filter(x=>x.enabled).length)} active(s)`,"blue"',
     '`${fmt(r.items.filter(x=>x.enabled).length)} réactions actives","blue"': '`${fmt(r.items.filter(x=>x.enabled).length)} réactions actives`,"blue"',
     '`${fmt(policies.length)} politique(s)",""': '`${fmt(policies.length)} politique(s)`,""',
     '`${fmt(total)} actions","blue"': '`${fmt(total)} actions`,"blue"',
