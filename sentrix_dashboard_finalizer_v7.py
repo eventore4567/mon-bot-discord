@@ -32,6 +32,7 @@ REQUIRED_MARKERS = (
     'id="sentrix-dashboard-button-system-v24"',
     'id="sentrix-dashboard-motion-system-v25"',
     'id="sentrix-dashboard-visible-motion-v26"',
+    'id="sentrix-dashboard-motion-audio-v27"',
 )
 
 
@@ -57,6 +58,7 @@ def install() -> bool:
     from web import dashboard_button_system_v24
     from web import dashboard_motion_system_v25
     from web import dashboard_visible_motion_v26
+    from web import dashboard_motion_audio_v27
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if (
@@ -126,11 +128,13 @@ def install() -> bool:
         raise RuntimeError("Dashboard Button System V24 could not be finalized")
     if not dashboard_motion_system_v25.install(dashboard):
         raise RuntimeError("Dashboard Motion System V25 could not be finalized")
-
-    # V26 intentionally runs last. V25 was technically active but too subtle in the real UI;
-    # V26 makes navigation/loading/surface motion visibly perceptible without touching behavior.
     if not dashboard_visible_motion_v26.install(dashboard):
         raise RuntimeError("Dashboard Visible Motion V26 could not be finalized")
+
+    # V27 targets the actual native/V15 renderer returned to the browser and uses the Web
+    # Animations + Web Audio APIs directly so the user sees and hears navigation feedback.
+    if not dashboard_motion_audio_v27.install(dashboard):
+        raise RuntimeError("Dashboard Motion + Audio V27 could not be finalized")
 
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
@@ -158,6 +162,7 @@ def install() -> bool:
     buttons_v24 = 'id="sentrix-dashboard-button-system-v24"' in final_html and "__sentrixDashboardButtonSystemV24" in final_html
     motion_v25 = 'id="sentrix-dashboard-motion-system-v25"' in final_html and "__sentrixDashboardMotionSystemV25" in final_html
     visible_motion_v26 = 'id="sentrix-dashboard-visible-motion-v26"' in final_html and "__sentrixDashboardVisibleMotionV26" in final_html
+    motion_audio_v27 = 'id="sentrix-dashboard-motion-audio-v27"' in final_html and "__sentrixDashboardMotionAudioV27" in final_html
 
     if unified_v2 and not runtime_bridge:
         raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
@@ -181,12 +186,14 @@ def install() -> bool:
         raise RuntimeError("Motion System V25 markers are missing from the final dashboard response")
     if not visible_motion_v26:
         raise RuntimeError("Visible Motion V26 markers are missing from the final dashboard response")
+    if not motion_audio_v27:
+        raise RuntimeError("Motion + Audio V27 markers are missing from the final dashboard response")
 
     logger.warning(
-        "Dashboard V7 final authority active after legacy freeze: stable V16 + advanced product layer + V23 visual finish + V24 buttons + V25 motion + V26 visible motion "
+        "Dashboard V7 final authority active after legacy freeze: stable V16 + advanced product layer + V23 visual finish + V24 buttons + V25 motion + V26 visible motion + V27 real motion/audio "
         "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, "
         "visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s, product_v18=%s, product_ui_v18=%s, "
-        "v17_fallback=%s, visual_v23=%s, buttons_v24=%s, motion_v25=%s, visible_motion_v26=%s).",
+        "v17_fallback=%s, visual_v23=%s, buttons_v24=%s, motion_v25=%s, visible_motion_v26=%s, motion_audio_v27=%s).",
         len(final_html.encode("utf-8")),
         "CAPTCHA V96 RÉEL" in final_html,
         unified_v2,
@@ -203,6 +210,7 @@ def install() -> bool:
         buttons_v24,
         motion_v25,
         visible_motion_v26,
+        motion_audio_v27,
     )
     return True
 
