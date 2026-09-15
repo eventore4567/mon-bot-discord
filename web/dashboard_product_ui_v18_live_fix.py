@@ -69,17 +69,16 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
     ["logs","Logs","Journalisation du serveur"],
     ["security","Sécurité","Anti-spam, anti-raid et protections"],
     ["verification","Vérification Discord","Règlement, rôle et CAPTCHA"],
-    ["roles","Rôles","Attribution et gestion des rôles"],
-    ["economy","Économie","Monnaie, banque et boutique"],
-    ["levels","Niveaux","XP, progression et récompenses"],
+    ["config","Rôles & configuration","Rôles, salons et réglages généraux"],
+    ["community","Niveaux & économie","XP, progression, monnaie et boutique"],
     ["notifications","Notifications","Réseaux et notifications serveur"],
     ["autoreact","Réactions automatiques","Réactions configurables"],
-    ["giveaway","Giveaway","Création et gestion des giveaways"],
-    ["embeds","Embeds & design","Créateur d’embeds"],
+    ["/giveaways","Giveaway","Création et gestion des giveaways"],
+    ["/embed-builder","Embeds & design","Créateur d’embeds et aperçu Discord"],
     ["ai","Intelligence artificielle","Réglages IA SentriX"],
+    ["commands","Commandes","Contrôle et disponibilité des commandes"],
     ["diagnostic","Diagnostic","Permissions et ressources cassées"],
-    ["product","Centre avancé","Membres, automations, audit, templates et accès"],
-    ["configuration","Configuration","Réglages généraux du serveur"]
+    ["product","Centre avancé","Membres, automations, audit, templates et accès"]
   ];
 
   let overlay = null, input = null, list = null, current = [], selected = 0;
@@ -87,6 +86,10 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
 
   function navigate(id) {
     closePalette();
+    if (String(id || "").startsWith("/")) {
+      location.assign(id);
+      return;
+    }
     try {
       if (typeof window.go === "function") return window.go(id);
       if (typeof go === "function") return go(id);
@@ -187,7 +190,6 @@ def patch_html(html: str) -> str:
     from web import dashboard_product_ui_v18 as v18
 
     source = str(html or "")
-    # Let the original implementation handle native/pre-V15 HTML when it can.
     patched = v18._ORIGINAL_PATCH_HTML_V18(source) if hasattr(v18, "_ORIGINAL_PATCH_HTML_V18") else source
     if v18.JS_MARKER in patched and v18.MARKER in patched and '["product","Centre avancé","PX"]' in patched:
         return _inject_polish(patched)
@@ -203,8 +205,6 @@ def patch_html(html: str) -> str:
         return _inject_polish(source)
     body = source[body_start:end]
 
-    # V15 keeps the Diagnostic token but appends several technical entries after it.
-    # Insert Product beside Diagnostic without assuming what comes after it.
     product_nav = '["product","Centre avancé","PX"]'
     diagnostic_nav = '["diagnostic","Diagnostic","DG"]'
     if product_nav not in body:
@@ -229,7 +229,6 @@ def patch_html(html: str) -> str:
             1,
         )
 
-    # V15 inserts its own cases between Diagnostic and default. Anchor on default itself.
     product_case = "case'product':await renderProductV18();break;"
     default_case = "default:await renderOverview()"
     if product_case not in body:
@@ -258,8 +257,6 @@ def install(dashboard) -> bool:
         v18._ORIGINAL_PATCH_HTML_V18 = v18.patch_html
     v18.patch_html = patch_html
 
-    # V18's request-time wrapper resolves its module-global patch_html at call time, so
-    # replacing that function repairs both the current startup snapshot and future /app bytes.
     dashboard.INDEX_HTML = patch_html(str(getattr(dashboard, "INDEX_HTML", "") or ""))
     ok = (
         v18.JS_MARKER in dashboard.INDEX_HTML
