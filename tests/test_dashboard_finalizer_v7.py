@@ -1,10 +1,22 @@
 from pathlib import Path
 
 
-def test_dashboard_finalizer_runs_after_legacy_boot_via_v96_finalizer():
-    source = Path("sentrix_verification_v96_finalizer.py").read_text(encoding="utf-8")
-    assert "from sentrix_dashboard_finalizer_v7 import install as install_dashboard_v7" in source
-    assert "install_dashboard_v7()" in source
+def test_dashboard_finalizer_runs_only_at_v8_build_boundary():
+    verification_source = Path("sentrix_verification_v96_finalizer.py").read_text(encoding="utf-8")
+    primary_source = Path("railway_ha_product_boot_v8.py").read_text(encoding="utf-8")
+    standby_source = Path("sentrix_v98_ha_product_boot_v8.py").read_text(encoding="utf-8")
+
+    # V96 owns verification/slash only. It must not pre-apply the dashboard authority
+    # before the legacy V55 freeze, otherwise V7/V18 executes twice during production boot.
+    assert "from sentrix_dashboard_finalizer_v7 import install as install_dashboard_v7" not in verification_source
+    assert "install_dashboard_v7()" not in verification_source
+
+    # Primary and standby V8 wrappers are the only boot-level owners of V7 and invoke it
+    # at the actual build_app boundary, after legacy dashboard layers have finished.
+    for source in (primary_source, standby_source):
+        assert "from sentrix_dashboard_finalizer_v7 import install as install_dashboard_v7" in source
+        assert "dashboard_ok = bool(install_dashboard_v7())" in source
+        assert "_install_embed_dashboard_finish" in source
 
 
 def test_dashboard_finalizer_requires_all_production_ui_markers():
