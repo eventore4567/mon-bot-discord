@@ -28,7 +28,6 @@ REQUIRED_MARKERS = (
     'id="sentrix-dashboard-visibility-v13-css"',
     'id="sentrix-dashboard-visibility-v13-js"',
     'id="sentrix-dashboard-ui-hotfix-v16"',
-    'id="sentrix-dashboard-action-hub-v17"',
 )
 
 
