@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from sentrix_product_update import _DASHBOARD_RECOVERY_JS
+from web import dashboard_growth_control_v12
 from web import dashboard_live_response_v15
 from web import dashboard_product_ui_v18
 from web import dashboard_product_ui_v18_live_fix
@@ -111,6 +112,40 @@ def test_v21_growth_routes_exist_before_product_boot_captures_build_app():
         '/api/guilds/{guild_id}/automation/reactions',
     ):
         assert route in growth
+
+
+def test_v22_growth_visuals_are_page_specific_real_and_event_driven():
+    style = dashboard_growth_control_v12.CSS
+    script = dashboard_growth_control_v12.JS
+
+    # Premium depth inspired by modern dark admin/Discord dashboards, while each major V12
+    # surface gets its own composition rather than repeating one generic table/card layout.
+    for selector in (
+        ".sx12-invite-grid",
+        ".sx12-flow-grid",
+        ".sx12-webhook-grid",
+        ".sx12-bars",
+        ".sx12-preview",
+        ".sx12-skeleton",
+    ):
+        assert selector in style
+
+    assert "discord.gg/${esc(i.code)}" in script
+    assert "Déclencheur" in script and "Condition" in script and "Action" in script
+    assert "APERÇU DISCORD" in style
+    assert "prefers-reduced-motion:reduce" in style
+    assert 'role="alert"' in script
+
+    # V12 now reacts to actual navigation/session events instead of waking the browser every
+    # second. All charts/progress bars are derived from real API payloads, not fabricated data.
+    assert "setInterval(" not in script
+    assert "MutationObserver" in script
+    assert 'addEventListener("pageshow"' in script
+    assert 'addEventListener("sentrix:live"' in script
+    assert "/growth/stats" in script
+    assert "/growth/invitations" in script
+    assert "/growth/webhooks" in script
+    assert "/automation/reactions" in script
 
 
 def test_v21_final_polish_covers_keyboard_mobile_and_accessible_live_state():
