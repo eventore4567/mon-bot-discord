@@ -44,7 +44,7 @@ _DASHBOARD_RECOVERY_JS = r'''
   window.__sentrixProductDashboardRecovery = true;
 
   let running = false;
-  let lastError = "";
+  let recoveryTimer = null;
   const S = () => { try { return typeof state !== "undefined" ? state : null; } catch (_) { return null; } };
   const byId = id => document.getElementById(id);
   const selected = () => {
@@ -153,29 +153,50 @@ _DASHBOARD_RECOVERY_JS = r'''
       const data = await request(`/api/guilds/${encodeURIComponent(id)}`);
       if (!applyGuild(id, data)) throw new Error("Les données du serveur ont été reçues mais l'affichage n'a pas pu être initialisé.");
       try { localStorage.setItem("sentrix:main:guild", id); } catch (_) {}
-      lastError = "";
     } catch (error) {
-      lastError = String(error?.message || "Chargement impossible.");
       console.warn("SentriX dashboard recovery", error);
-      showError(lastError);
+      showError(String(error?.message || "Chargement impossible."));
     } finally {
       running = false;
     }
   }
 
+  function needsRecovery(){
+    if (!visibleDashboard()) return false;
+    const s = S();
+    const id = selected();
+    const loader = byId("emptyState");
+    if (!id) return !s?.guildData;
+    return !s?.guildData || String(s.guildId || "") !== id || Boolean(loader && !loader.classList.contains("hidden"));
+  }
+
+  function scheduleRecovery(force=false, delay=100){
+    clearTimeout(recoveryTimer);
+    recoveryTimer = setTimeout(() => {
+      recoveryTimer = null;
+      if (force || needsRecovery()) bootstrap(force);
+    }, delay);
+  }
+
   document.addEventListener("change", event => {
     if (event.target?.id !== "serverSelect") return;
-    setTimeout(() => bootstrap(true), 120);
+    scheduleRecovery(true, 120);
   }, true);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) scheduleRecovery(false, 120);
+  });
+  document.addEventListener("sentrix:recovery-needed", () => scheduleRecovery(true, 0));
+  window.addEventListener("online", () => scheduleRecovery(false, 80));
+  window.addEventListener("pageshow", () => scheduleRecovery(false, 120));
 
   const start = () => {
+    // Bounded startup retries cover slow DOM/session initialization. Afterwards recovery is
+    // fully event-driven: no permanent timer wakes the browser or rechecks healthy state.
     [250, 900, 2000, 4500].forEach(delay => setTimeout(() => bootstrap(false), delay));
-    setInterval(() => {
-      if (!visibleDashboard()) return;
-      const s = S(), id = selected();
-      const loader = byId("emptyState");
-      if (id && (!s?.guildData || String(s.guildId || "") !== id || (loader && !loader.classList.contains("hidden")))) bootstrap(false);
-    }, 7000);
+    const empty = byId("emptyState");
+    if (empty) new MutationObserver(() => scheduleRecovery(false, 100)).observe(empty, {attributes:true, attributeFilter:["class"]});
+    const select = byId("serverSelect");
+    if (select) new MutationObserver(() => scheduleRecovery(false, 100)).observe(select, {childList:true});
   };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, {once:true});
   else start();
