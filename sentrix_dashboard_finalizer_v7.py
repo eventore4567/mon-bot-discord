@@ -28,6 +28,7 @@ REQUIRED_MARKERS = (
     'id="sentrix-dashboard-visibility-v13-css"',
     'id="sentrix-dashboard-visibility-v13-js"',
     'id="sentrix-dashboard-ui-hotfix-v16"',
+    'id="sentrix-dashboard-action-hub-v17"',
 )
 
 
@@ -46,6 +47,7 @@ def install() -> bool:
     from web import dashboard_native_bundle_v14
     from web import dashboard_live_response_v15
     from web import dashboard_ui_hotfix_v16
+    from web import dashboard_action_hub_v17
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if (
@@ -77,8 +79,8 @@ def install() -> bool:
         raise RuntimeError("Dashboard Native Bundle V14 could not be finalized")
 
     # Some registry/command CI boots intentionally exercise the legacy dashboard without
-    # unified V2. V15 only has a native V2 program to patch when that frontend is present.
-    # In production unified V2 is present, so V15 remains fail-closed there.
+    # unified V2. V15+ only have a native V2 program to patch when that frontend is present.
+    # In production unified V2 is present, so these layers remain fail-closed there.
     v15_ok = dashboard_live_response_v15.install(dashboard)
     has_unified_v2_now = 'id="sentrix-dashboard-unified-v2"' in str(
         getattr(dashboard, "INDEX_HTML", "") or ""
@@ -93,6 +95,13 @@ def install() -> bool:
     if has_unified_v2_now and not v16_ok:
         raise RuntimeError("Dashboard UI Hotfix V16 could not be finalized")
 
+    # V17 wraps the complete V15 -> V16 live-response chain. It consolidates the separate
+    # technical admin tabs into one action-oriented page while preserving their backend
+    # routes and old deep-link renderers for compatibility.
+    v17_ok = dashboard_action_hub_v17.install(dashboard)
+    if has_unified_v2_now and not v17_ok:
+        raise RuntimeError("Dashboard Action Hub V17 could not be finalized")
+
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
     if missing:
@@ -104,6 +113,11 @@ def install() -> bool:
     native_v14 = "__sentrixNativeBundleV14" in final_html
     live_v15 = "__sentrixLiveResponseV15" in final_html
     ui_v16 = "sentrix-dashboard-ui-hotfix-v16" in final_html and "Vérification Discord" in final_html
+    actions_v17 = (
+        "__sentrixActionHubV17" in final_html
+        and "sentrix-dashboard-action-hub-v17" in final_html
+        and '["actions","Actions utiles","UT"]' in final_html
+    )
     if unified_v2 and not runtime_bridge:
         raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
     if not growth_v12:
@@ -116,12 +130,16 @@ def install() -> bool:
         raise RuntimeError("Live Response V15 is missing from the native V2 response program")
     if unified_v2 and not ui_v16:
         raise RuntimeError("UI Hotfix V16 is missing from the browser-visible dashboard")
+    if unified_v2 and not actions_v17:
+        raise RuntimeError("Action Hub V17 is missing from the browser-visible dashboard")
 
     logger.warning(
         "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, "
         "control center, Discord verification, unified runtime bridge V10, unified V2 adapter V9, "
-        "Growth Control V12, Visibility V13, Native Bundle V14, Live Response V15 and UI Hotfix V16 confirmed "
-        "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s).",
+        "Growth Control V12, Visibility V13, Native Bundle V14, Live Response V15, UI Hotfix V16 "
+        "and Action Hub V17 confirmed "
+        "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, "
+        "visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s, actions_v17=%s).",
         len(final_html.encode("utf-8")),
         "CAPTCHA V96 RÉEL" in final_html,
         unified_v2,
@@ -131,6 +149,7 @@ def install() -> bool:
         native_v14,
         live_v15,
         ui_v16,
+        actions_v17,
     )
     return True
 
