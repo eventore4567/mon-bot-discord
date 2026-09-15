@@ -79,7 +79,6 @@ def install() -> bool:
 
     # Some registry/command CI boots intentionally exercise the legacy dashboard without
     # unified V2. V15+ only have a native V2 program to patch when that frontend is present.
-    # In production unified V2 is present, so these layers remain fail-closed there.
     v15_ok = dashboard_live_response_v15.install(dashboard)
     has_unified_v2_now = 'id="sentrix-dashboard-unified-v2"' in str(
         getattr(dashboard, "INDEX_HTML", "") or ""
@@ -87,19 +86,18 @@ def install() -> bool:
     if has_unified_v2_now and not v15_ok:
         raise RuntimeError("Dashboard Live Response V15 could not be finalized")
 
-    # V16 must run after V15 because it wraps V15's request-time patch function. This
-    # guarantees that the compact switch CSS and Verification Discord nav reach the exact
-    # bytes returned by /app instead of only mutating a stale startup snapshot.
+    # V16 is part of the stable production surface and remains fail-closed.
     v16_ok = dashboard_ui_hotfix_v16.install(dashboard)
     if has_unified_v2_now and not v16_ok:
         raise RuntimeError("Dashboard UI Hotfix V16 could not be finalized")
 
-    # V17 wraps the complete V15 -> V16 live-response chain. It consolidates the separate
-    # technical admin tabs into one action-oriented page while preserving their backend
-    # routes and old deep-link renderers for compatibility.
+    # V17 is additive UI only. A missed HTML anchor must never take the whole bot/dashboard
+    # offline. Keep V16 serving and log the miss so V17 can be repaired independently.
     v17_ok = dashboard_action_hub_v17.install(dashboard)
     if has_unified_v2_now and not v17_ok:
-        raise RuntimeError("Dashboard Action Hub V17 could not be finalized")
+        logger.error(
+            "Dashboard Action Hub V17 did not patch the startup snapshot; continuing with stable V16."
+        )
 
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
@@ -130,13 +128,14 @@ def install() -> bool:
     if unified_v2 and not ui_v16:
         raise RuntimeError("UI Hotfix V16 is missing from the browser-visible dashboard")
     if unified_v2 and not actions_v17:
-        raise RuntimeError("Action Hub V17 is missing from the browser-visible dashboard")
+        logger.error(
+            "Action Hub V17 is not present in the startup snapshot; stable V16 remains authoritative."
+        )
 
     logger.warning(
         "Dashboard V7 final authority active after legacy freeze: premium UI, section variants, "
         "control center, Discord verification, unified runtime bridge V10, unified V2 adapter V9, "
-        "Growth Control V12, Visibility V13, Native Bundle V14, Live Response V15, UI Hotfix V16 "
-        "and Action Hub V17 confirmed "
+        "Growth Control V12, Visibility V13, Native Bundle V14, Live Response V15 and UI Hotfix V16 confirmed "
         "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, "
         "visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s, actions_v17=%s).",
         len(final_html.encode("utf-8")),
