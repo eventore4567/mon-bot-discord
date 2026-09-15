@@ -48,7 +48,6 @@ def install() -> bool:
     from web import dashboard_ui_hotfix_v16
     from web import dashboard_action_hub_v17
     from web import dashboard_product_v18
-    from web import dashboard_product_ui_v18
     from web import dashboard_product_ui_v18_live_fix
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
@@ -96,20 +95,16 @@ def install() -> bool:
     except Exception:
         product_v18_ok = False
         logger.exception("Dashboard Product V18 backend installation failed; stable dashboard remains active.")
+
+    # V18 live-fix is the single canonical advanced UI finalizer. It internally reuses the
+    # original V18 patch once and repairs the expanded V15/V16 anchors in the same pass.
+    # Calling the historical V18 installer first only produced a predictable failed attempt
+    # on the live bundle before doing the exact same work again.
     try:
-        product_ui_v18_ok = bool(dashboard_product_ui_v18.install(dashboard))
+        product_ui_v18_ok = bool(dashboard_product_ui_v18_live_fix.install(dashboard))
     except Exception:
         product_ui_v18_ok = False
-        logger.exception("Dashboard Product UI V18 installation failed; trying live-anchor repair.")
-
-    # The live V15 bundle contains extra navigation/render cases. If the native V18 anchors
-    # miss that expanded shape, repair only those anchors while reusing the exact same V18 UI.
-    if not product_ui_v18_ok:
-        try:
-            product_ui_v18_ok = bool(dashboard_product_ui_v18_live_fix.install(dashboard))
-        except Exception:
-            product_ui_v18_ok = False
-            logger.exception("Dashboard Product UI V18 live-anchor repair failed; stable dashboard remains active.")
+        logger.exception("Dashboard Product UI V18 canonical live finalizer failed; stable dashboard remains active.")
 
     # V17 stays fallback-only and is never stacked over a healthy V18 response program.
     v17_ok = False
