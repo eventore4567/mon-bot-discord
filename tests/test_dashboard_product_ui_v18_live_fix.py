@@ -27,7 +27,20 @@ def test_v18_live_fix_patches_real_v15_v16_shape():
     assert "case'product':await renderProductV18();break;" in patched
     assert 'name="sentrix-dashboard-product-ui-v18-live-fix"' in patched
 
+    # V19 polish rides on the active V18 live-fix instead of adding another wrapper layer.
+    assert dashboard_product_ui_v18_live_fix.POLISH_MARKER in patched
+    assert dashboard_product_ui_v18_live_fix.POLISH_JS_MARKER in patched
+    assert '"/giveaways","Giveaway"' in patched
+    assert '"/embed-builder","Embeds & design"' in patched
+    assert '["config","Rôles & configuration"' in patched
+    assert '["community","Niveaux & économie"' in patched
+    assert '["configuration"' not in patched
+    assert '["roles"' not in patched
+    assert '["levels"' not in patched
+
 
 def test_v18_live_fix_is_idempotent_on_live_shape():
     patched = dashboard_product_ui_v18_live_fix.patch_html(_live_v16_html())
     assert dashboard_product_ui_v18_live_fix.patch_html(patched) == patched
+    assert patched.count(f'id="{dashboard_product_ui_v18_live_fix.POLISH_MARKER}"') == 1
+    assert patched.count('id="sentrix-dashboard-v19-polish-js"') == 1
