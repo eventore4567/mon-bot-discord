@@ -97,6 +97,93 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
     queueMicrotask(addExternalPaletteItems);
   }
 
+  // Live V19: the server keeps authorization and database reads authoritative. The browser
+  // only reflects the authenticated SSE payload into the existing KPI/runtime elements.
+  let liveSource = null;
+  let liveGuild = "";
+  let liveReconnect = null;
+  const fmt = value => Number(value || 0).toLocaleString("fr-FR");
+  const currentGuild = () => document.querySelector('.guild-btn.active[data-guild]')?.dataset.guild || "";
+  const setText = (id, value) => {
+    const node = document.getElementById(id);
+    if (node) node.textContent = value;
+  };
+  const applyLiveMetrics = data => {
+    setText("metricMembers", fmt(data.members));
+    setText("metricCommands", fmt(data.commands_24h));
+    setText("metricTickets", fmt(data.open_tickets));
+    setText("metricWarnings", fmt(data.warnings));
+    const runtimeDot = document.getElementById("runtimeDot");
+    const runtimeText = document.getElementById("runtimeText");
+    if (runtimeDot) runtimeDot.classList.toggle("off", !data.online);
+    if (runtimeText) runtimeText.textContent = data.online ? `En ligne · ${data.latency_ms ?? "—"} ms` : "Hors ligne";
+
+    const kpiValues = {
+      "Membres": data.members,
+      "Commandes 24 h": data.commands_24h,
+      "Tickets ouverts": data.open_tickets,
+      "Avertissements": data.warnings
+    };
+    document.querySelectorAll("#sxUnifiedKpisV9 .sxv9-kpi").forEach(card => {
+      const label = card.querySelector("span")?.textContent?.trim();
+      if (!(label in kpiValues)) return;
+      const target = card.querySelector("strong");
+      if (target) target.textContent = fmt(kpiValues[label]);
+    });
+    document.body.dataset.sxSanctionsRevision = String(data.sanctions_revision || 0);
+    document.dispatchEvent(new CustomEvent("sentrix:live", {detail:data}));
+  };
+  const closeLive = () => {
+    clearTimeout(liveReconnect);
+    liveReconnect = null;
+    if (liveSource) liveSource.close();
+    liveSource = null;
+  };
+  const connectLive = () => {
+    const guildId = currentGuild();
+    if (document.hidden || !guildId) {
+      closeLive();
+      liveGuild = guildId;
+      return;
+    }
+    if (liveSource && liveGuild === guildId && liveSource.readyState !== EventSource.CLOSED) return;
+    closeLive();
+    liveGuild = guildId;
+    const source = new EventSource(`/api/guilds/${encodeURIComponent(guildId)}/live/stream`, {withCredentials:true});
+    liveSource = source;
+    source.addEventListener("metrics", event => {
+      try { applyLiveMetrics(JSON.parse(event.data || "{}")); } catch (_) {}
+    });
+    source.addEventListener("access", () => {
+      closeLive();
+      const runtimeText = document.getElementById("runtimeText");
+      if (runtimeText) runtimeText.textContent = "Accès serveur retiré";
+    });
+    source.onerror = () => {
+      if (source !== liveSource || document.hidden) return;
+      if (source.readyState === EventSource.CLOSED) {
+        closeLive();
+        liveReconnect = setTimeout(connectLive, 2200);
+      }
+    };
+  };
+  const serverRail = document.getElementById("serverRail");
+  if (serverRail) new MutationObserver(() => {
+    clearTimeout(liveReconnect);
+    liveReconnect = setTimeout(connectLive, 120);
+  }).observe(serverRail, {childList:true, subtree:true, attributes:true, attributeFilter:["class"]});
+  document.addEventListener("click", event => {
+    if (!event.target.closest("[data-guild]")) return;
+    clearTimeout(liveReconnect);
+    liveReconnect = setTimeout(connectLive, 180);
+  }, true);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) closeLive();
+    else liveReconnect = setTimeout(connectLive, 120);
+  });
+  window.addEventListener("beforeunload", closeLive);
+  liveReconnect = setTimeout(connectLive, 800);
+
   const loadBar = document.createElement("div");
   loadBar.className = "sx19-loading-bar";
   document.body.appendChild(loadBar);
