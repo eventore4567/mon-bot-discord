@@ -47,6 +47,7 @@ def install() -> bool:
     from web import dashboard_live_response_v15
     from web import dashboard_ui_hotfix_v16
     from web import dashboard_action_hub_v17
+    from web import dashboard_product_v18
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if (
@@ -99,6 +100,14 @@ def install() -> bool:
             "Dashboard Action Hub V17 did not patch the startup snapshot; continuing with stable V16."
         )
 
+    # V18 is a backend-first product foundation. It is deliberately fail-open while it is
+    # introduced: route/RBAC installation must never make /health or the existing V16 UI fail.
+    try:
+        product_v18_ok = bool(dashboard_product_v18.install(dashboard))
+    except Exception:
+        product_v18_ok = False
+        logger.exception("Dashboard Product V18 backend installation failed; stable dashboard remains active.")
+
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
     if missing:
@@ -137,7 +146,7 @@ def install() -> bool:
         "control center, Discord verification, unified runtime bridge V10, unified V2 adapter V9, "
         "Growth Control V12, Visibility V13, Native Bundle V14, Live Response V15 and UI Hotfix V16 confirmed "
         "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, "
-        "visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s, actions_v17=%s).",
+        "visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s, actions_v17=%s, product_v18=%s).",
         len(final_html.encode("utf-8")),
         "CAPTCHA V96 RÉEL" in final_html,
         unified_v2,
@@ -148,6 +157,7 @@ def install() -> bool:
         live_v15,
         ui_v16,
         actions_v17,
+        product_v18_ok,
     )
     return True
 
