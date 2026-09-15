@@ -50,6 +50,8 @@ def install() -> bool:
     from web import dashboard_product_v18
     from web import dashboard_product_ui_v18
     from web import dashboard_product_ui_v18_live_fix
+    from web import dashboard_product_v19
+    from web import dashboard_product_ui_v19
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if (
@@ -102,14 +104,24 @@ def install() -> bool:
         product_ui_v18_ok = False
         logger.exception("Dashboard Product UI V18 installation failed; trying live-anchor repair.")
 
-    # The live V15 bundle contains extra navigation/render cases. If the native V18 anchors
-    # miss that expanded shape, repair only those anchors while reusing the exact same V18 UI.
     if not product_ui_v18_ok:
         try:
             product_ui_v18_ok = bool(dashboard_product_ui_v18_live_fix.install(dashboard))
         except Exception:
             product_ui_v18_ok = False
             logger.exception("Dashboard Product UI V18 live-anchor repair failed; stable dashboard remains active.")
+
+    # V19 is an enhancement only. A V19 regression must never take down V18/V16.
+    product_v19_ok = False
+    product_ui_v19_ok = False
+    if product_v18_ok and product_ui_v18_ok:
+        try:
+            product_v19_ok = bool(dashboard_product_v19.install(dashboard))
+            product_ui_v19_ok = bool(dashboard_product_ui_v19.install(dashboard))
+        except Exception:
+            product_v19_ok = False
+            product_ui_v19_ok = False
+            logger.exception("Dashboard Product V19 failed open; stable V18 remains authoritative.")
 
     # V17 stays fallback-only and is never stacked over a healthy V18 response program.
     v17_ok = False
@@ -144,6 +156,12 @@ def install() -> bool:
         and '["product","Centre avancé","PX"]' in final_html
         and "case'product':await renderProductV18();break;" in final_html
     )
+    product_ui_v19 = (
+        "__sentrixProductUiV19" in final_html
+        and "sentrix-dashboard-product-ui-v19" in final_html
+        and "Actions groupées" in final_html
+        and "Onboarding" in final_html
+    )
     if unified_v2 and not runtime_bridge:
         raise RuntimeError("Unified V2 frontend is present but Runtime Bridge V10 is missing")
     if not growth_v12:
@@ -158,11 +176,14 @@ def install() -> bool:
         raise RuntimeError("UI Hotfix V16 is missing from the browser-visible dashboard")
     if unified_v2 and not product_ui_v18 and not actions_v17:
         logger.error("No advanced UI is present in the startup snapshot; stable V16 remains authoritative.")
+    if product_ui_v18 and not product_ui_v19:
+        logger.warning("V19 polish is unavailable; V18 remains fully usable.")
 
     logger.warning(
-        "Dashboard V7 final authority active after legacy freeze: stable V16 + advanced product layer "
+        "Dashboard V7 final authority active after legacy freeze: stable V16 + product center "
         "(html_bytes=%s, real_verify=%s, unified_v2=%s, runtime_bridge=%s, growth_v12=%s, "
-        "visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s, product_v18=%s, product_ui_v18=%s, v17_fallback=%s).",
+        "visibility_v13=%s, native_v14=%s, live_v15=%s, ui_v16=%s, product_v18=%s, "
+        "product_ui_v18=%s, product_v19=%s, product_ui_v19=%s, v17_fallback=%s).",
         len(final_html.encode("utf-8")),
         "CAPTCHA V96 RÉEL" in final_html,
         unified_v2,
@@ -174,6 +195,8 @@ def install() -> bool:
         ui_v16,
         product_v18_ok,
         product_ui_v18_ok and product_ui_v18,
+        product_v19_ok,
+        product_ui_v19_ok and product_ui_v19,
         v17_ok and actions_v17,
     )
     return True
