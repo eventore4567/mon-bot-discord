@@ -1,3 +1,6 @@
+from pathlib import Path
+
+from sentrix_product_update import _DASHBOARD_RECOVERY_JS
 from web import dashboard_live_response_v15
 from web import dashboard_product_ui_v18
 from web import dashboard_product_ui_v18_live_fix
@@ -49,3 +52,37 @@ def test_v18_live_fix_is_idempotent_on_live_shape():
     assert dashboard_product_ui_v18_live_fix.patch_html(patched) == patched
     assert patched.count(f'id="{dashboard_product_ui_v18_live_fix.POLISH_MARKER}"') == 1
     assert patched.count('id="sentrix-dashboard-v19-polish-js"') == 1
+
+
+def test_v21_recovery_has_no_permanent_browser_polling():
+    # Startup retries are finite; healthy pages must not wake up every N seconds forever.
+    assert "setInterval(" not in _DASHBOARD_RECOVERY_JS
+    assert "MutationObserver" in _DASHBOARD_RECOVERY_JS
+    assert 'addEventListener("visibilitychange"' in _DASHBOARD_RECOVERY_JS
+    assert 'addEventListener("online"' in _DASHBOARD_RECOVERY_JS
+    assert 'addEventListener("pageshow"' in _DASHBOARD_RECOVERY_JS
+    assert "sentrix:recovery-needed" in _DASHBOARD_RECOVERY_JS
+    assert "[250, 900, 2000, 4500]" in _DASHBOARD_RECOVERY_JS
+
+
+def test_v21_uses_one_canonical_v18_finalizer():
+    source = Path("sentrix_dashboard_finalizer_v7.py").read_text(encoding="utf-8")
+    assert "dashboard_product_ui_v18.install(dashboard)" not in source
+    assert source.count("dashboard_product_ui_v18_live_fix.install(dashboard)") == 1
+    assert "dashboard_action_hub_v17.install(dashboard)" in source
+    assert "if not product_ui_v18_ok:" in source
+
+
+def test_v21_final_polish_covers_keyboard_mobile_and_accessible_live_state():
+    style = dashboard_product_ui_v18_live_fix._POLISH_STYLE
+    script = dashboard_product_ui_v18_live_fix._POLISH_JS
+
+    assert ":focus-visible" in style
+    assert ".btn:disabled" in style
+    assert "min-width:560px" in style
+    assert "forced-colors:active" in style
+    assert "prefers-reduced-motion:reduce" in style
+    assert 'runtimeText.setAttribute("aria-live", "polite")' in script
+    assert 'runtimeText.setAttribute("aria-live", "assertive")' in script
+    assert 'loadBar.setAttribute("aria-hidden", "true")' in script
+    assert 'paletteResults.setAttribute("aria-live", "polite")' in script
