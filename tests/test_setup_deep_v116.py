@@ -1,10 +1,12 @@
 from sentrix_setup_deep_v116 import (
     AUTOMOD_FIELDS,
+    BRIDGE_TARGETS,
     CONFIG_TARGETS,
     MODULES,
     MODULE_BY_KEY,
     PAGE_V116_DETAIL,
     PAGE_V116_MODULES,
+    _persisted_page,
 )
 
 
@@ -68,8 +70,17 @@ def test_config_targets_are_known_setup_fields_only():
     assert {"mod_role", "welcome_channel", "autorole", "verify_role", "log_channel"} <= referenced
 
 
+def test_bridge_targets_reference_only_known_existing_panels():
+    for module in MODULES:
+        for detail in module.details:
+            if not detail.target.startswith("bridge:"):
+                continue
+            bridge = detail.target.split(":", 2)[1]
+            assert bridge in BRIDGE_TARGETS
+
+
 def test_v116_target_protocol_is_explicit_and_non_destructive():
-    allowed = ("automod:", "config:", "page:", "action:", "hint:")
+    allowed = ("automod:", "config:", "page:", "action:", "hint:", "bridge:", "native:")
     for module in MODULES:
         for detail in module.details:
             assert detail.target.startswith(allowed), detail.target
@@ -79,10 +90,15 @@ def test_v116_target_protocol_is_explicit_and_non_destructive():
             assert "remove" not in lowered
 
 
-def test_pages_do_not_overlap_legacy_setup_pages():
-    assert PAGE_V116_MODULES >= 100
+def test_v116_uses_legacy_modules_page_as_restart_safe_entrypoint():
+    # Le centre V116 remplace la page Modules existante plutôt que d'inventer une page
+    # persistée hors de la plage connue par cogs.configuration.
+    assert PAGE_V116_MODULES >= 0
     assert PAGE_V116_DETAIL >= 100
     assert PAGE_V116_MODULES != PAGE_V116_DETAIL
+    assert _persisted_page(PAGE_V116_DETAIL) == PAGE_V116_MODULES
+    assert _persisted_page(PAGE_V116_MODULES) == PAGE_V116_MODULES
+    assert _persisted_page(-1) == -1
 
 
 def test_labels_stay_compact_for_discord_components():
@@ -98,3 +114,20 @@ def test_hierarchy_is_deep_without_becoming_a_flat_button_wall():
     assert len(MODULES) <= 25
     assert max(len(module.details) for module in MODULES) <= 25
     assert sum(len(module.details) for module in MODULES) >= 60
+
+
+def test_core_modules_open_real_existing_configuration_panels():
+    levels = {item.target for item in MODULE_BY_KEY["levels"].details}
+    tickets = {item.target for item in MODULE_BY_KEY["tickets"].details}
+    ai = {item.target for item in MODULE_BY_KEY["ai"].details}
+
+    assert any(target.startswith("bridge:levels:") for target in levels)
+    assert tickets == {"bridge:tickets"}
+    assert ai == {"bridge:ai"}
+
+
+def test_welcome_and_xp_multiplier_have_native_setup_editors():
+    members = {item.target for item in MODULE_BY_KEY["members"].details}
+    levels = {item.target for item in MODULE_BY_KEY["levels"].details}
+    assert "native:welcome_message" in members
+    assert "native:xp_multiplier" in levels
