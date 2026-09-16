@@ -9,6 +9,7 @@ Garanties ajoutées :
 - aucun Smart Setup automatique ne démarre sans snapshot valide ;
 - création de rôles/salons idempotente avec comparaison de nom normalisée ;
 - corrections de sécurité groupées bloquées si le snapshot préalable échoue ;
+- le plan sécurité vérifie les filtres requis du modèle, pas un simple pourcentage ;
 - rendu plus compact et cohérent, sans surcharge d'emojis.
 """
 from __future__ import annotations
@@ -23,6 +24,7 @@ from utils import embeds, helpers
 
 logger = logging.getLogger("bot.setup-v114")
 _INSTALLED = False
+_ORIGINAL_BUILD_SMART_PLAN = None
 
 
 def _progress_bar(score: int, width: int = 10) -> str:
@@ -62,6 +64,54 @@ def _normalised_exact(items, name: str, *, attr: str = "name"):
         if v4._clean_name(getattr(item, attr, "")) == wanted:
             return item
     return None
+
+
+def _effective_scopes(view) -> set[str]:
+    mode = getattr(view, "_v4_mode", "complete")
+    if mode == "custom":
+        return set(getattr(view, "_v4_scopes", set(v4.AUTO_SCOPES)))
+    if mode == "essential":
+        return {"security", "logs", "roles"}
+    return set(v4.AUTO_SCOPES)
+
+
+async def _build_smart_plan(view) -> list[dict[str, Any]]:
+    """Corrige le calcul sécurité V4 sans recopier les autres règles du plan.
+
+    V4 utilisait un ratio global (ex. 5 filtres actifs sur 11) pour décider si un preset
+    était satisfait. Or le preset Moyen active 5 filtres sur 11 : 5/11 reste inférieur à
+    50 %, ce qui reproposait le même preset indéfiniment. Ici on vérifie directement les
+    filtres ON exigés par le modèle et on ne propose que ceux qui manquent.
+    """
+    base = await _ORIGINAL_BUILD_SMART_PLAN(view)
+    plan = [item for item in base if item.get("kind") != "security_preset"]
+    if "security" not in _effective_scopes(view):
+        return plan
+
+    template = v4.SMART_TEMPLATES.get(view._v4_template) or v4.SMART_TEMPLATES["balanced"]
+    preset = template["security"]
+    current_row = await view.bot.db.get_automod(view.guild_id)
+    current = dict(current_row) if current_row else {}
+    target = v4._CONFIG_MODULE.SECURITY_PRESETS.get(preset, {})
+    missing = _upgrade_only_values(current, target)
+    if not missing:
+        return plan
+
+    item = {
+        "kind": "security_preset",
+        "scope": "security",
+        "automatic": True,
+        "preset": preset,
+        "label": f"Renforcer la sécurité {preset} ({len(missing)} protection(s) à activer)",
+    }
+    insert_at = 0
+    while insert_at < len(plan):
+        candidate = plan[insert_at]
+        if candidate.get("scope") != "security" or candidate.get("automatic"):
+            break
+        insert_at += 1
+    plan.insert(insert_at, item)
+    return plan
 
 
 def _decorate(view, embed: discord.Embed, *, section: str) -> discord.Embed:
@@ -556,7 +606,7 @@ async def _module_hint(view, interaction: discord.Interaction, title: str, comma
 
 
 def install_for_bot(bot) -> None:
-    global _INSTALLED
+    global _INSTALLED, _ORIGINAL_BUILD_SMART_PLAN
     if _INSTALLED:
         return
 
@@ -566,11 +616,15 @@ def install_for_bot(bot) -> None:
         logger.warning("V114 non installé : Setup V4 indisponible.")
         return
 
+    if _ORIGINAL_BUILD_SMART_PLAN is None:
+        _ORIGINAL_BUILD_SMART_PLAN = v4._build_smart_plan
+
     v4._decorate_embed = _decorate
     v4._home_embed = _home_embed
     v4._configuration_embed = _configuration_embed
     v4._security_embed = _security_embed
     v4._modules_embed = _modules_embed
+    v4._build_smart_plan = _build_smart_plan
     v4._auto_embed = _auto_embed
     v4._summary_embed = _summary_embed
     v4._render_home = _render_home
