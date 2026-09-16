@@ -172,6 +172,7 @@ def _patch_contextual_automod(bot, ops) -> None:
                 )
             return await _original(message, reason, detection_kind=detection_kind)
         delete_timeout_v112._sentrix_v112 = True
+        dataset.match = getattr(dataset, "match", dataset)
         automod._delete_and_timeout = delete_timeout_v112
 
 
@@ -272,6 +273,11 @@ async def _install_features(bot) -> None:
         install_for_bot(bot)
     except Exception:
         logger.exception("Installation du Setup compact V113 impossible.")
+    try:
+        from sentrix_setup_polish_v114 import install_for_bot as install_setup_polish
+        install_setup_polish(bot)
+    except Exception:
+        logger.exception("Installation du polish Setup V114 impossible.")
     task = getattr(bot, "_sentrix_ops_watchdog", None)
     if task is None or task.done():
         bot._sentrix_ops_watchdog = asyncio.create_task(_watchdog(bot, ops), name="sentrix-ops-watchdog")
