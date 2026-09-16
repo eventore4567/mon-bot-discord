@@ -74,7 +74,9 @@ def inject_late_motion_into_native_v2(html: str) -> str:
 
 def _install_late_motion_response_bridge(dashboard) -> None:
     """Patch /app at request time, after V27 has been installed by the finalizer."""
-    previous = dashboard.handle_index
+    previous = getattr(dashboard, "handle_index", None)
+    if previous is None:
+        return
     if getattr(previous, "_sentrix_native_motion_v28", False):
         return
 
@@ -94,9 +96,10 @@ def _install_late_motion_response_bridge(dashboard) -> None:
         for key in ("Content-Type", "Content-Length"):
             headers.pop(key, None)
         headers["X-SentriX-Motion-Native"] = "1"
+        native_body = _script_body(html, "sentrix-dashboard-unified-v2") or ""
         logger.warning(
             "Dashboard V28 native motion bridge applied on /app: v27_inside_canonical=%s bytes=%s.",
-            LATE_MOTION_JS_MARKER in _script_body(html, "sentrix-dashboard-unified-v2") if _script_body(html, "sentrix-dashboard-unified-v2") else False,
+            LATE_MOTION_JS_MARKER in native_body,
             len(html.encode("utf-8")),
         )
         return web.Response(
