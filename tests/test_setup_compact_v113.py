@@ -7,6 +7,11 @@ from sentrix_setup_compact_v113 import (
     _score_colour,
     _template_targets,
 )
+from sentrix_setup_polish_v114 import (
+    _progress_bar,
+    _status_label,
+    _upgrade_only_values,
+)
 
 
 def test_clean_name_is_accent_and_case_insensitive():
@@ -56,3 +61,47 @@ def test_plan_signature_changes_when_preview_relevant_data_changes():
 def test_smart_setup_scopes_are_explicit_and_non_destructive():
     assert set(AUTO_SCOPES) == {"security", "logs", "roles", "channels", "community"}
     assert all("delete" not in key and "remove" not in key for key in AUTO_SCOPES)
+
+
+def test_progress_bar_is_bounded_and_fixed_width():
+    assert _progress_bar(-20, 10) == "░" * 10
+    assert _progress_bar(100, 10) == "█" * 10
+    assert len(_progress_bar(55, 10)) == 10
+    assert len(_progress_bar(50, 2)) == 4
+    assert len(_progress_bar(50, 99)) == 20
+
+
+def test_status_label_has_clear_product_states():
+    assert _status_label(0) == "PRIORITAIRE"
+    assert _status_label(50) == "À RENFORCER"
+    assert _status_label(75) == "BON"
+    assert _status_label(90) == "EXCELLENT"
+
+
+def test_smart_setup_security_upgrade_never_disables_existing_protection():
+    current = {
+        "antispam": 1,
+        "antilink": 1,
+        "antiinvite": 0,
+        "antiraid": 0,
+        "antiscam": 1,
+        "antinuke": 1,
+    }
+    medium = {
+        "antispam": 1,
+        "antilink": 0,
+        "antiinvite": 1,
+        "antiraid": 1,
+        "antiscam": 1,
+        "antinuke": 1,
+    }
+    upgrades = _upgrade_only_values(current, medium)
+    assert upgrades == {"antiinvite": 1, "antiraid": 1}
+    assert "antilink" not in upgrades
+    assert all(value == 1 for value in upgrades.values())
+
+
+def test_security_upgrade_is_idempotent_when_target_is_already_satisfied():
+    current = {"antispam": 1, "antiraid": 1, "antiscam": 1}
+    target = {"antispam": 1, "antiraid": 1, "antiscam": 1}
+    assert _upgrade_only_values(current, target) == {}
