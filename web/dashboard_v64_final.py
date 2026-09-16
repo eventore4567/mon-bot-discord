@@ -98,8 +98,6 @@ CSS = r'''
    dashboard_oxyde_theme.py...) est écrasé au boot par le remplacement brutal de
    dashboard_rework_v60.py avant que cette couche ne s'applique. Voir mémoire
    "SentriX : dashboard_rework_v60.py écrase tout". */
-:focus-visible{outline:2px solid var(--sx-blue,#4da3ff);outline-offset:2px}
-.rail-guild:focus-visible,.switch:focus-visible,.sx-big-switch:focus-visible{outline-offset:3px}
 .btn,.navigation button,.rail-guild,.switch,.sx-big-switch,.action-card{transition:transform .12s ease,border-color .15s ease,background .15s ease,color .15s ease}
 .btn:active{transform:scale(.96)}
 .action-card:hover,.metric:hover{transform:translateY(-2px);border-color:#5f656c}
@@ -118,6 +116,45 @@ html.sx-motion-off .toast{transition:none}
 .sx-interface-btn:hover{border-color:var(--sx-blue,#4da3ff);color:var(--sx-blue,#4da3ff)}
 .sx-interface-popover{position:fixed;z-index:120;width:280px;background:#2b2f34;border:1px solid #454a50;border-radius:10px;box-shadow:0 16px 40px #0008;padding:14px 16px}
 .sx-interface-popover .sx-interface-title{font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:#d2d3d4;margin-bottom:2px}
+
+/* Accessibilité (portée depuis dashboard_accessibility.py, qui n'atteint jamais /app pour
+   la même raison que le reste : voir la mémoire citée plus haut). Non destructif : aucune
+   route ni permission n'est modifiée, uniquement des aides clavier/lecteur d'écran, contraste,
+   cibles tactiles et réduction des animations. */
+.sx-skip-link{position:fixed;left:12px;top:10px;z-index:100000;transform:translateY(-150%);padding:10px 14px;border-radius:8px;background:#fff;color:#000;font-weight:800;box-shadow:0 4px 18px rgba(0,0,0,.35);transition:transform .15s ease}
+.sx-skip-link:focus{transform:translateY(0)}
+.sx-sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+:where(button,a,input,select,textarea,[role="button"]):focus-visible{outline:3px solid #fff!important;outline-offset:3px!important;box-shadow:0 0 0 5px var(--sx-blue,#4da3ff)!important}
+:where(button,select,input[type="button"],input[type="submit"],[role="button"]){min-height:44px}
+:where(input,select,textarea){font-size:max(16px,1em)}
+[aria-disabled="true"],button:disabled{cursor:not-allowed;opacity:.62}
+[aria-hidden="true"]{pointer-events:none}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}
+@media(prefers-contrast:more){:root{--muted:#d1d5db!important;--line:#8b95aa!important}:where(button,a,input,select,textarea){text-decoration-thickness:2px}}
+@media(forced-colors:active){*{forced-color-adjust:auto}:where(button,a,input,select,textarea,[role="button"]):focus-visible{outline:3px solid Highlight!important;box-shadow:none!important}}
+@media(max-width:560px){:where(button,[role="button"],select){min-height:48px}:where(button,[role="button"]){line-height:1.25}}
+
+/* Confirmation avant action critique (modal stylée, portée depuis
+   dashboard_confirm_modal_v47.py — même raison, jamais servie jusqu'ici). Les deux
+   confirm() natifs qui gardaient réellement une suppression (panel/type de ticket dans
+   dashboard_v62_dense.py) appellent désormais window.sentrixConfirm défini plus bas. Les
+   deux confirm() qui bloquent une navigation avec modifications non enregistrées
+   (dashboard_v60_max.py) restent natifs : ils doivent rester synchrones pour pouvoir
+   annuler la navigation en cours, ce qu'une modale asynchrone ne peut pas faire. */
+.sentrix-confirm-backdrop{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(3,5,10,.76);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+.sentrix-confirm-backdrop.hidden{display:none!important}
+.sentrix-confirm-card{width:min(440px,100%);background:linear-gradient(180deg,#171b29,#10131e);border:1px solid #303750;border-radius:20px;box-shadow:0 30px 100px rgba(0,0,0,.62);overflow:hidden}
+@media(prefers-reduced-motion:no-preference){.sentrix-confirm-card{animation:sentrixConfirmIn .16s ease-out}}
+@keyframes sentrixConfirmIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+.sentrix-confirm-body{padding:25px 25px 20px}
+.sentrix-confirm-title{font-size:20px;font-weight:850;letter-spacing:-.02em;margin:0 0 9px;color:#f2f4ff}
+.sentrix-confirm-text{margin:0;color:#a3abc0;line-height:1.6;font-size:14px}
+.sentrix-confirm-actions{display:flex;justify-content:flex-end;gap:10px;padding:17px 20px;border-top:1px solid #262d43;background:#0d1019}
+.sentrix-confirm-btn{border:1px solid #303850;border-radius:11px;padding:10px 16px;font:inherit;font-weight:750;cursor:pointer;color:#eef1ff;background:#171c2c;transition:transform .12s ease,border-color .15s ease}
+.sentrix-confirm-btn:hover{transform:translateY(-1px);border-color:#505a7a}
+.sentrix-confirm-btn.primary{border-color:transparent;background:linear-gradient(135deg,var(--sx-blue,#4da3ff),var(--sx-blue2,#78bdff));color:#08131f}
+.sentrix-confirm-btn.danger{border-color:#713044;background:#3a1520;color:#ff9aaa}
+.sentrix-confirm-btn:focus-visible{outline:2px solid var(--sx-blue,#4da3ff)!important;outline-offset:2px!important;box-shadow:none!important}
 '''
 
 JS = r'''
@@ -282,6 +319,178 @@ JS = r'''
   buildInterfacePopover();
 })();
 </script>
+
+<div id="sentrixConfirmBackdrop" class="sentrix-confirm-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="sentrixConfirmTitle" aria-describedby="sentrixConfirmText">
+  <div class="sentrix-confirm-card">
+    <div class="sentrix-confirm-body">
+      <h2 id="sentrixConfirmTitle" class="sentrix-confirm-title">Confirmation</h2>
+      <p id="sentrixConfirmText" class="sentrix-confirm-text">Confirmer cette action ?</p>
+    </div>
+    <div class="sentrix-confirm-actions">
+      <button id="sentrixConfirmCancel" class="sentrix-confirm-btn" type="button">Annuler</button>
+      <button id="sentrixConfirmOk" class="sentrix-confirm-btn primary" type="button">Confirmer</button>
+    </div>
+  </div>
+</div>
+<script id="sentrix-confirm-modal-js-v47">
+(() => {
+  "use strict";
+  if(window.__sentrixConfirmModal)return;window.__sentrixConfirmModal=true;
+  let pendingResolve = null;
+
+  function closeSentrixConfirm(result) {
+    const backdrop = document.getElementById("sentrixConfirmBackdrop");
+    if (backdrop) backdrop.classList.add("hidden");
+    const resolve = pendingResolve;
+    pendingResolve = null;
+    if (resolve) resolve(Boolean(result));
+  }
+
+  window.sentrixConfirm = function(message, options = {}) {
+    const backdrop = document.getElementById("sentrixConfirmBackdrop");
+    const title = document.getElementById("sentrixConfirmTitle");
+    const text = document.getElementById("sentrixConfirmText");
+    const ok = document.getElementById("sentrixConfirmOk");
+    const cancel = document.getElementById("sentrixConfirmCancel");
+    if (!backdrop || !title || !text || !ok || !cancel) return Promise.resolve(false);
+
+    if (pendingResolve) {
+      pendingResolve(false);
+      pendingResolve = null;
+    }
+
+    title.textContent = options.title || "Confirmer l’action";
+    text.textContent = String(message || "Confirmer cette action ?");
+    ok.textContent = options.confirmText || "Confirmer";
+    cancel.textContent = options.cancelText || "Annuler";
+    ok.classList.toggle("danger", Boolean(options.danger));
+    ok.classList.toggle("primary", !options.danger);
+    backdrop.classList.remove("hidden");
+
+    return new Promise(resolve => {
+      pendingResolve = resolve;
+      setTimeout(() => ok.focus(), 0);
+    });
+  };
+
+  const backdrop = document.getElementById("sentrixConfirmBackdrop");
+  const ok = document.getElementById("sentrixConfirmOk");
+  const cancel = document.getElementById("sentrixConfirmCancel");
+  if (backdrop && ok && cancel) {
+    ok.addEventListener("click", () => closeSentrixConfirm(true));
+    cancel.addEventListener("click", () => closeSentrixConfirm(false));
+    backdrop.addEventListener("click", event => {
+      if (event.target === backdrop) closeSentrixConfirm(false);
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && !backdrop.classList.contains("hidden")) closeSentrixConfirm(false);
+    });
+  }
+})();
+</script>
+
+<script id="sentrix-a11y-js">
+(() => {
+  "use strict";
+  if (window.__sentrixAccessibility) return;
+  window.__sentrixAccessibility = true;
+
+  const clean = value => String(value || "").replace(/\s+/g," ").trim();
+  let scheduled = false;
+
+  function ensureMain(){
+    let main = document.querySelector("main");
+    if (!main) {
+      main = document.getElementById("sxSimpleHome") || document.querySelector(".main-content,.content,[data-main]");
+      if (main && !main.hasAttribute("role")) main.setAttribute("role","main");
+    }
+    if (main && !main.id) main.id = "sentrix-main";
+    return main;
+  }
+
+  function ensureSkipLink(){
+    if (document.getElementById("sxSkipLink")) return;
+    const main = ensureMain();
+    if (!main) return;
+    const link = document.createElement("a");
+    link.id = "sxSkipLink";
+    link.className = "sx-skip-link";
+    link.href = "#" + main.id;
+    link.textContent = "Aller au contenu principal";
+    document.body.prepend(link);
+  }
+
+  function labelControls(root=document){
+    root.querySelectorAll("button,[role='button']").forEach(el => {
+      if (el.hasAttribute("aria-label")) return;
+      const text = clean(el.innerText || el.textContent);
+      const fallback = clean(el.getAttribute("title") || el.dataset.label || el.dataset.action || el.dataset.sxV2Go);
+      if (text || fallback) el.setAttribute("aria-label", text || fallback);
+    });
+
+    root.querySelectorAll("input,select,textarea").forEach(el => {
+      if (el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby")) return;
+      const id = el.id;
+      let explicit = null;
+      if (id) {
+        try {
+          const escaped = (window.CSS && CSS.escape) ? CSS.escape(id) : id.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+          explicit = document.querySelector(`label[for="${escaped}"]`);
+        } catch (_) {}
+      }
+      if (explicit) return;
+      const placeholder = clean(el.getAttribute("placeholder"));
+      const name = clean(el.getAttribute("name"));
+      if (placeholder || name) el.setAttribute("aria-label", placeholder || name);
+    });
+
+    root.querySelectorAll("img:not([alt])").forEach(img => {
+      const title = clean(img.getAttribute("title"));
+      const cls = String(img.className || "").toLowerCase();
+      if (title) img.alt = title;
+      else if (cls.includes("avatar")) img.alt = "Avatar";
+      else img.alt = "";
+    });
+  }
+
+  function markCurrentNavigation(){
+    document.querySelectorAll("a[href]").forEach(link => {
+      try {
+        const url = new URL(link.href, location.href);
+        if (url.pathname === location.pathname) link.setAttribute("aria-current","page");
+        else if (link.getAttribute("aria-current") === "page") link.removeAttribute("aria-current");
+      } catch (_) {}
+    });
+  }
+
+  function enhance(){
+    scheduled = false;
+    try {
+      if (!document.documentElement.lang) document.documentElement.lang = "fr";
+      ensureSkipLink();
+      labelControls();
+      markCurrentNavigation();
+    } catch (_) {}
+  }
+
+  function schedule(){
+    if (scheduled) return;
+    scheduled = true;
+    setTimeout(enhance, 0);
+  }
+
+  /* Pas de MutationObserver ni de requestAnimationFrame ici : renderTab() (déjà chaîné par
+     le bloc motion ci-dessus) est le seul point précis où le contenu change réellement dans
+     cette page mono-document, donc on s'y accroche au lieu d'observer tout le sous-arbre. */
+  if (typeof renderTab === "function") {
+    const beforeA11y = renderTab;
+    renderTab = function(){ const result = beforeA11y(); schedule(); return result; };
+  }
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden)schedule();});
+  window.addEventListener("popstate",schedule);
+  schedule();
+})();
+</script>
 '''
 
 
@@ -296,7 +505,7 @@ def install(dashboard) -> bool:
         return False
     dashboard.INDEX_HTML = html.replace("</style>", CSS + "\n</style>", 1).replace("</body>", JS + "\n</body>", 1)
     dashboard._sentrix_dashboard_version = "v64-final"
-    logger.info("Dashboard V64 final installé : navigation stable, détails bleus SentriX, responsive mobile/tablette verrouillé, motion+son réels et préférences Interface.")
+    logger.info("Dashboard V64 final installé : navigation stable, détails bleus SentriX, responsive mobile/tablette verrouillé, motion+son réels, préférences Interface, accessibilité et confirmation d'action critique.")
     return True
 
 
