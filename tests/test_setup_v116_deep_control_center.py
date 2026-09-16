@@ -62,7 +62,8 @@ def test_v103_installs_v116_after_existing_prepare_chain():
     source = Path("sentrix_v103_setup_fix.py").read_text(encoding="utf-8")
     assert "result = await current_prepare(bot)" in source
     assert "from sentrix_setup_v116 import install_for_bot as install_setup_v116" in source
-    assert source.index("result = await current_prepare(bot)") < source.index("install_setup_v116(bot)")
-    assert source.index("install_setup_v116(bot)") < source.index("_replace_setup_slash(bot)")
+    prepare = source[source.index("async def prepare_bot_v103"):]
+    assert prepare.index("result = await current_prepare(bot)") < prepare.index("install_setup_v116(bot)")
+    assert prepare.index("install_setup_v116(bot)") < prepare.index("_replace_setup_slash(bot)")
     # Le contrat d'autorité V105/V114 reste stable pour ne pas casser le slash guard.
     assert '_sentrix_setup_authority = "configuration-v114"' in source
