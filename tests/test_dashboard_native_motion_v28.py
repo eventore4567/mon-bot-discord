@@ -36,7 +36,11 @@ def test_v28_native_injection_is_idempotent():
     end = second.index('</script>', start)
     canonical = second[start:end]
     assert canonical.count(v14.LATE_MOTION_BRIDGE_MARKER) == 1
-    assert canonical.count(v27.JS_MARKER) == 1
+    # The V27 source legitimately references its guard marker twice: once in the
+    # early-return check and once in the assignment. Two occurrences therefore
+    # mean one injected V27 controller, not two injected controllers.
+    assert canonical.count(v27.JS_MARKER) == 2
+    assert canonical.count('SentriX V28: execute final V27 motion/audio') == 1
 
 
 def test_v28_does_not_modify_pages_without_late_v27_source():
