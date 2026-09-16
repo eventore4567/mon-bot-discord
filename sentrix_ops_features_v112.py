@@ -172,7 +172,6 @@ def _patch_contextual_automod(bot, ops) -> None:
                 )
             return await _original(message, reason, detection_kind=detection_kind)
         delete_timeout_v112._sentrix_v112 = True
-        dataset.match = getattr(dataset, "match", dataset)
         automod._delete_and_timeout = delete_timeout_v112
 
 
