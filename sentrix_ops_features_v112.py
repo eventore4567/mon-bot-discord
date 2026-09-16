@@ -267,6 +267,11 @@ async def _install_features(bot) -> None:
     _patch_contextual_automod(bot, ops)
     _instrument_log_changes(bot, ops)
     _add_manage_commands(bot, ops)
+    try:
+        from sentrix_setup_compact_v113 import install_for_bot
+        install_for_bot(bot)
+    except Exception:
+        logger.exception("Installation du Setup compact V113 impossible.")
     task = getattr(bot, "_sentrix_ops_watchdog", None)
     if task is None or task.done():
         bot._sentrix_ops_watchdog = asyncio.create_task(_watchdog(bot, ops), name="sentrix-ops-watchdog")
