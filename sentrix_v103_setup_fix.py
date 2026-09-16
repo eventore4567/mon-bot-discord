@@ -6,6 +6,9 @@ obsolète : le setup officiel vit dans ``cogs.configuration.SetupView`` et V113/
 patchent précisément cette vue pour fournir l'accueil compact, Smart Setup, snapshots,
 rollback et diagnostic.
 
+V116 s'installe au même point d'autorité, après les couches V113/V114 : il ajoute le
+centre hiérarchique Accueil -> Module -> Réglage sans créer une seconde commande /setup.
+
 Cette couche reste utile pour garantir une signature slash sans argument utilisateur après
 les transformations V95+, mais elle ne possède plus d'interface concurrente. Elle ouvre
 explicitement le panneau du cog Configuration, donc un redémarrage ou une resynchronisation
@@ -44,17 +47,16 @@ async def _is_setup_authorized(bot, interaction: discord.Interaction) -> bool:
         if await bot.is_owner(user):
             return True
     except Exception:
-        # OWNER_IDS reste l'autorité de repli si Discord n'a pas encore résolu le owner.
         pass
     return isinstance(user, discord.Member) and user.guild_permissions.administrator
 
 
 async def _send_setup_v114(bot, interaction: discord.Interaction) -> None:
-    """Ouvre l'unique setup officiel : Configuration.SetupView patché par V113/V114."""
+    """Ouvre l'unique setup officiel : Configuration.SetupView patché par V113/V114/V116."""
     configuration = bot.get_cog("Configuration")
     opener = getattr(configuration, "_open_setup_panel", None) if configuration is not None else None
     if not callable(opener):
-        raise RuntimeError("Le module Configuration / Smart Setup V114 n'est pas chargé.")
+        raise RuntimeError("Le module Configuration / Smart Setup n'est pas chargé.")
 
     if interaction.guild is None:
         return await interaction.response.send_message(
@@ -66,9 +68,6 @@ async def _send_setup_v114(bot, interaction: discord.Interaction) -> None:
             ephemeral=True,
         )
 
-    # Préserve le verrou historique : deux administrateurs ne doivent pas modifier la
-    # configuration du même serveur en parallèle. Le panneau de reprise reste celui du
-    # cog Configuration ; il ne réintroduit pas l'ancien setup_control_center.
     existing = getattr(configuration, "active_by_guild", {}).get(interaction.guild.id)
     if existing and existing[1] != interaction.user.id:
         locked_message_id, locked_author_id, locked_author_name = existing
@@ -100,12 +99,7 @@ async def _send_setup_v114(bot, interaction: discord.Interaction) -> None:
 
 
 def _replace_setup_slash(bot) -> bool:
-    """Réinstalle /setup avec une signature native, dirigée vers Smart Setup V114.
-
-    Important : cette fonction ne doit JAMAIS importer ni appeler SentriXSetup. L'ancien
-    ``cogs.setup_control_center`` peut rester présent pour compatibilité interne, mais il
-    n'est plus propriétaire de la commande publique /setup.
-    """
+    """Réinstalle /setup avec une signature native, dirigée vers Configuration.SetupView."""
     configuration = bot.get_cog("Configuration")
     if configuration is None or not callable(getattr(configuration, "_open_setup_panel", None)):
         logger.error("V103 : cog Configuration/Smart Setup introuvable ; /setup non remplacé.")
@@ -135,6 +129,7 @@ def _replace_setup_slash(bot) -> bool:
     }
     setup_callback._sentrix_original_command = "setup"
     setup_callback._sentrix_native_options = True
+    # Conservé pour les contrats V105/V114 déjà déployés. V116 patche cette même vue.
     setup_callback._sentrix_setup_authority = "configuration-v114"
 
     tree.add_command(
@@ -145,7 +140,7 @@ def _replace_setup_slash(bot) -> bool:
         ),
         override=True,
     )
-    logger.info("V103 : /setup V114 installé — Configuration est l'unique autorité.")
+    logger.info("V103 : /setup V116 installé — Configuration reste l'unique autorité.")
     return True
 
 
@@ -162,6 +157,13 @@ def install() -> None:
 
     async def prepare_bot_v103(bot):
         result = await current_prepare(bot)
+        # V116 doit passer APRES V113/V114, qui sont installés par les intégrations V112.
+        # Il ne remplace aucun moteur métier : il ne fait que réorganiser leur navigation.
+        try:
+            from sentrix_setup_v116 import install_for_bot as install_setup_v116
+            install_setup_v116(bot)
+        except Exception:
+            logger.exception("Installation du centre Setup V116 impossible.")
         _replace_setup_slash(bot)
         return result
 
@@ -169,7 +171,7 @@ def install() -> None:
     prepare_bot_v103._sentrix_original = current_prepare
     v95.prepare_bot = prepare_bot_v103
     _INSTALLED = True
-    logger.info("V103 setup authority guard armé pour Smart Setup V114.")
+    logger.info("V103 setup authority guard armé pour Smart Setup V114/V116.")
 
 
 __all__ = ["install", "_replace_setup_slash", "_send_setup_v114", "_is_setup_authorized"]
