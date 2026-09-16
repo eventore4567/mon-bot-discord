@@ -12,6 +12,14 @@ def test_v117_keeps_all_v116_modules_available():
     assert "tickets" in v116.MODULE_BY_KEY
 
 
+def test_v117_home_hides_redundant_top_level_modules():
+    assert "roles" not in v117.HOME_MODULE_KEYS
+    assert "verification" not in v117.HOME_MODULE_KEYS
+    assert "profile" not in v117.HOME_MODULE_KEYS
+    for key in ("security", "moderation", "members", "logs", "levels", "economy", "tickets", "notifications", "ai"):
+        assert key in v117.HOME_MODULE_KEYS
+
+
 def test_v117_removes_intermediate_section_picker_language():
     source = Path("sentrix_setup_guided_v117.py").read_text(encoding="utf-8")
     assert "Ouvrir ce réglage" not in source
@@ -21,6 +29,8 @@ def test_v117_removes_intermediate_section_picker_language():
     assert 'label="Précédent"' in source
     assert 'label="Suivant"' in source
     assert 'label="Accueil"' in source
+    assert 'label="Terminer"' in source
+    assert "**Résumé**" in source
 
 
 def test_v117_uses_clear_action_labels():
@@ -35,6 +45,21 @@ def test_v117_uses_clear_action_labels():
     security = v116.MODULE_BY_KEY["security"]
     protections = next(section for section in security.sections if section.key == "automod")
     assert v117._action_label(protections) == "Configurer la protection"
+
+
+def test_v117_uses_native_discord_pickers_for_simple_fields():
+    source = Path("sentrix_setup_guided_v117.py").read_text(encoding="utf-8")
+    assert "discord.ui.RoleSelect" in source
+    assert "discord.ui.ChannelSelect" in source
+    assert "set_guild_config" in source
+    assert "Une sélection valide fait naturellement avancer l'assistant" in source
+
+
+def test_v117_guides_every_visible_home_module():
+    for key in v117.HOME_MODULE_KEYS:
+        module = v116.MODULE_BY_KEY[key]
+        assert module.sections
+        assert len(module.sections) <= 25
 
 
 def test_v117_is_installed_after_v116_before_setup_authority():
