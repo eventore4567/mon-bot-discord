@@ -1,9 +1,17 @@
-"""SentriX V64 — verrou de navigation du dashboard final.
+"""SentriX V64 — verrou de navigation du dashboard final et système motion+son réel.
 
 V61 garde encore un renderer de compatibilité qui reconstruit son ancienne sidebar lorsqu'une
 page historique (Accueil, Logs, IA, etc.) est affichée. V62 reconstruit la bonne sidebar avant
-cet appel. V64 est la dernière couche : elle restaure la navigation finale seulement si une
-couche héritée l'a réellement remplacée, puis ne fait plus que synchroniser l'état actif.
+cet appel. V64 est la dernière couche avant le gel (dashboard_frontend_freeze_v55) : elle
+restaure la navigation finale seulement si une couche héritée l'a réellement remplacée, puis ne
+fait plus que synchroniser l'état actif.
+
+C'est aussi, depuis cette révision, le seul endroit du code où ajouter une animation, un son ou
+une préférence d'interface a un effet réel sur ``/app`` : ``dashboard_rework_v60.py`` écrase au
+boot le document produit par ``web/__init__.py`` (donc dashboard_polish.py,
+dashboard_accessibility.py, dashboard_oxyde_theme.py, dashboard_button_feedback.py etc. ne
+survivent jamais jusqu'ici), et le gel V55 fige ensuite tout ce qui reste. Voir la mémoire
+« SentriX : dashboard_rework_v60.py écrase tout » pour la chaîne complète.
 """
 from __future__ import annotations
 
@@ -84,6 +92,32 @@ CSS = r'''
   .sx-v63-palette,.sx-v63-modules{grid-template-columns:1fr!important}
   #fields button,#fields .btn{max-width:100%!important}
 }
+
+/* V64 motion+sound : ce bloc est le premier système d'animation à réellement atteindre
+   /app — tout ce qui existait avant (dashboard_polish.py, dashboard_accessibility.py,
+   dashboard_oxyde_theme.py...) est écrasé au boot par le remplacement brutal de
+   dashboard_rework_v60.py avant que cette couche ne s'applique. Voir mémoire
+   "SentriX : dashboard_rework_v60.py écrase tout". */
+:focus-visible{outline:2px solid var(--sx-blue,#4da3ff);outline-offset:2px}
+.rail-guild:focus-visible,.switch:focus-visible,.sx-big-switch:focus-visible{outline-offset:3px}
+.btn,.navigation button,.rail-guild,.switch,.sx-big-switch,.action-card{transition:transform .12s ease,border-color .15s ease,background .15s ease,color .15s ease}
+.btn:active{transform:scale(.96)}
+.action-card:hover,.metric:hover{transform:translateY(-2px);border-color:#5f656c}
+.toast{transition:opacity .18s ease,transform .18s ease;opacity:0;transform:translateY(10px) scale(.97)}
+.toast.sx-toast-in{opacity:1;transform:translateY(0) scale(1)}
+@media(prefers-reduced-motion:no-preference){
+  html:not(.sx-motion-off) #serverContent.sx-tab-enter{animation:sx-tab-in .22s cubic-bezier(.16,1,.3,1)}
+  html:not(.sx-motion-off) #fields.sx-tab-enter .panel-section,
+  html:not(.sx-motion-off) #fields.sx-tab-enter .action-card,
+  html:not(.sx-motion-off) #fields.sx-tab-enter .list-row{animation:sx-card-in .26s cubic-bezier(.16,1,.3,1) both;animation-delay:var(--sx-stagger,0ms)}
+  @keyframes sx-tab-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes sx-card-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+}
+html.sx-motion-off .toast{transition:none}
+.sx-interface-btn{width:38px;height:38px;border-radius:50%;border:1px solid #ffffff20;background:#2c3035;color:#eef0f2;font-size:16px;cursor:pointer;display:grid;place-items:center;flex:0 0 auto}
+.sx-interface-btn:hover{border-color:var(--sx-blue,#4da3ff);color:var(--sx-blue,#4da3ff)}
+.sx-interface-popover{position:fixed;z-index:120;width:280px;background:#2b2f34;border:1px solid #454a50;border-radius:10px;box-shadow:0 16px 40px #0008;padding:14px 16px}
+.sx-interface-popover .sx-interface-title{font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:#d2d3d4;margin-bottom:2px}
 '''
 
 JS = r'''
@@ -133,6 +167,119 @@ JS = r'''
   const beforeV64=renderTab;
   renderTab=function(){const result=beforeV64();lockNavigation();stripExternalCards();return result};
   lockNavigation();stripExternalCards();
+
+  /* --- Préférences Interface (Animations / Sons), persistées localement --- */
+  function prefersReducedMotionOS(){try{return matchMedia('(prefers-reduced-motion: reduce)').matches}catch(_){return false}}
+  function readPref(key,fallback){try{const v=localStorage.getItem(key);return v===null?fallback:v==='1'}catch(_){return fallback}}
+  function writePref(key,value){try{localStorage.setItem(key,value?'1':'0')}catch(_){}}
+  let motionEnabled=readPref('sentrix:pref:motion',!prefersReducedMotionOS());
+  let soundEnabled=readPref('sentrix:pref:sound',true);
+  function applyMotionPref(){document.documentElement.classList.toggle('sx-motion-off',!motionEnabled)}
+  applyMotionPref();
+
+  /* --- Petits sons UI : contrairement à dashboard_button_feedback.py (jamais servi, et
+     dont le seul déclencheur était "pointerover", mort sur écran tactile et découplé du
+     geste qui débloque l'AudioContext), ici chaque son est déclenché par le même geste
+     réel (clic/clavier) qui débloque l'AudioContext. */
+  let audioCtx=null;
+  function getAudioCtx(){
+    if(audioCtx)return audioCtx;
+    try{const Ctor=window.AudioContext||window.webkitAudioContext;if(!Ctor)return null;audioCtx=new Ctor()}catch(_){return null}
+    return audioCtx;
+  }
+  function unlockAudio(){const ctx=getAudioCtx();if(!ctx)return;if(ctx.state==='suspended'){ctx.resume().catch(()=>{})}}
+  function playTone(freq,duration,gainPeak){
+    if(!soundEnabled)return;
+    const ctx=getAudioCtx();if(!ctx)return;
+    try{
+      if(ctx.state==='suspended')ctx.resume().catch(()=>{});
+      const osc=ctx.createOscillator(),gain=ctx.createGain();
+      osc.type='sine';osc.frequency.value=freq;
+      const now=ctx.currentTime;
+      gain.gain.setValueAtTime(0,now);
+      gain.gain.linearRampToValueAtTime(gainPeak,now+.008);
+      gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now);osc.stop(now+duration+.02);
+    }catch(_){}
+  }
+  function tickSound(){playTone(720,.07,.05)}
+  function successSound(){playTone(880,.09,.055);setTimeout(()=>playTone(1180,.1,.045),70)}
+  function errorSound(){playTone(300,.14,.06)}
+  function toggleSound(){playTone(560,.05,.04)}
+  document.addEventListener('pointerdown',unlockAudio,{passive:true});
+  document.addEventListener('keydown',unlockAudio,{passive:true});
+  document.addEventListener('change',event=>{if(event.target.closest?.('.switch,.sx-big-switch'))toggleSound()});
+
+  /* --- Transition d'apparition au changement d'onglet (contenu déjà remplacé
+     instantanément par renderTab ; on rejoue seulement l'entrée visuelle) --- */
+  function replayEnter(el){if(!el)return;el.classList.remove('sx-tab-enter');void el.offsetWidth;el.classList.add('sx-tab-enter')}
+  function staggerChildren(container){
+    if(!container)return;
+    container.querySelectorAll('.panel-section,.action-card,.list-row').forEach((node,i)=>{node.style.setProperty('--sx-stagger',Math.min(i,8)*35+'ms')});
+  }
+  /* Le clic de navigation est intercepté en phase de capture par V64 lui-même
+     (bindNavigation ci-dessus fait stopImmediatePropagation), donc un écouteur
+     séparé sur #navigation ne recevrait jamais l'événement : le son de changement
+     d'onglet est déclenché depuis renderTab (toujours appelé par un vrai clic ou un
+     vrai changement de serveur), pas depuis un écouteur concurrent. */
+  let lastAnimatedTab=null;
+  const beforeMotionTab=renderTab;
+  renderTab=function(){
+    const result=beforeMotionTab();
+    const fields=$('fields');
+    staggerChildren(fields);
+    replayEnter($('serverContent'));
+    replayEnter(fields);
+    if(lastAnimatedTab!==null&&lastAnimatedTab!==state.tab)tickSound();
+    lastAnimatedTab=state.tab;
+    return result;
+  };
+
+  /* --- Toast : glissement + fondu, plus un son distinct succès/erreur --- */
+  if(typeof toast==='function'){
+    const beforeToast=toast;
+    let toastFadeTimer;
+    toast=function(message,bad=false){
+      beforeToast(message,bad);
+      const el=$('toast');
+      if(bad)errorSound();else successSound();
+      if(!el)return;
+      clearTimeout(toastFadeTimer);
+      el.classList.remove('sx-toast-in');
+      void el.offsetWidth;
+      el.classList.add('sx-toast-in');
+      toastFadeTimer=setTimeout(()=>el.classList.remove('sx-toast-in'),3900);
+    };
+  }
+
+  /* --- Réglages "Interface" : un bouton dans la topbar, pas un onglet.
+     V61/V62/V63 possèdent leur propre routage pour tous les onglets de FINAL_TABS
+     (aucun ne retombe plus sur renderGeneral, vérifié en navigateur réel : l'onglet
+     "general" du V60 de base n'a même plus de bouton dans la sidebar reconstruite par
+     V64). Un onglet ne serait donc pas fiable ; un contrôle toujours visible l'est. */
+  function buildInterfacePopover(){
+    const topRight=document.querySelector('.top-right');
+    if(!topRight||$('sxInterfaceBtn'))return;
+    const btn=document.createElement('button');
+    btn.type='button';btn.id='sxInterfaceBtn';btn.className='sx-interface-btn';
+    btn.title='Interface';btn.setAttribute('aria-label','Réglages d’interface');btn.textContent='⚙';
+    const pop=document.createElement('div');
+    pop.id='sxInterfacePopover';pop.className='sx-interface-popover hidden';
+    pop.innerHTML='<div class="sx-interface-title">Interface</div>'
+      +'<div class="switch-line"><div class="switch-copy"><b>Animations</b><span>Transitions et apparitions dans le tableau de bord.</span></div><input id="sxPrefMotion" class="switch" type="checkbox" '+(motionEnabled?'checked':'')+'></div>'
+      +'<div class="switch-line"><div class="switch-copy"><b>Sons de l’interface</b><span>Petits retours sonores lors des actions.</span></div><input id="sxPrefSound" class="switch" type="checkbox" '+(soundEnabled?'checked':'')+'></div>';
+    topRight.insertBefore(btn,topRight.firstChild);
+    document.body.appendChild(pop);
+    function position(){const r=btn.getBoundingClientRect();pop.style.top=(r.bottom+8)+'px';pop.style.right=(innerWidth-r.right)+'px'}
+    btn.addEventListener('click',event=>{event.stopPropagation();position();pop.classList.toggle('hidden')});
+    document.addEventListener('click',event=>{if(!pop.contains(event.target)&&event.target!==btn)pop.classList.add('hidden')});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape')pop.classList.add('hidden')});
+    addEventListener('resize',()=>{if(!pop.classList.contains('hidden'))position()});
+    pop.querySelector('#sxPrefMotion').addEventListener('change',event=>{motionEnabled=event.target.checked;writePref('sentrix:pref:motion',motionEnabled);applyMotionPref()});
+    pop.querySelector('#sxPrefSound').addEventListener('change',event=>{soundEnabled=event.target.checked;writePref('sentrix:pref:sound',soundEnabled)});
+  }
+  buildInterfacePopover();
 })();
 </script>
 '''
@@ -149,7 +296,7 @@ def install(dashboard) -> bool:
         return False
     dashboard.INDEX_HTML = html.replace("</style>", CSS + "\n</style>", 1).replace("</body>", JS + "\n</body>", 1)
     dashboard._sentrix_dashboard_version = "v64-final"
-    logger.info("Dashboard V64 final installé : navigation stable, détails bleus SentriX et responsive mobile/tablette verrouillé.")
+    logger.info("Dashboard V64 final installé : navigation stable, détails bleus SentriX, responsive mobile/tablette verrouillé, motion+son réels et préférences Interface.")
     return True
 
 
