@@ -18,6 +18,7 @@ from discord import app_commands
 from web import dashboard as dashboard_web
 from sentrix_product_update import install_dashboard_prestart
 from sentrix_final_product_finish import _install_embed_dashboard_finish
+from sentrix_dashboard_finalizer_v7 import install as install_dashboard_v7
 
 logger = logging.getLogger("bot.ha-product-boot")
 
@@ -193,10 +194,12 @@ def _build_app_with_final_dashboard(bot):
     from sentrix_v97_reliability import install_dashboard as _install_v97_dashboard
     if not _install_v97_dashboard(dashboard_web):
         raise RuntimeError("Dashboard Tickets V97 absent avant build_app.")
+    if not install_dashboard_v7():
+        raise RuntimeError("Dashboard V7/V18/V25-V28 absent avant build_app.")
     app = _original_build_app(bot)
     from web.http_surfaces import apply as apply_http_surfaces
     apply_http_surfaces(app, dashboard_web)
-    logger.info("Dashboard HA final confirmé au build_app aiohttp (Embeds + Tickets V97 + Ops Suite).")
+    logger.info("Dashboard HA final confirmé au build_app aiohttp (Embeds + Tickets V97 + Ops Suite + V25-V28).")
     return app
 
 
