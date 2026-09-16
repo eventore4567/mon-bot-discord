@@ -49,13 +49,14 @@ def _interaction():
     )
 
 
-def test_v103_no_longer_routes_setup_to_legacy_control_center():
+def test_v103_no_longer_executes_legacy_setup_route():
     source = inspect.getsource(v103._replace_setup_slash) + inspect.getsource(v103._send_setup_v114)
-    assert "SentriXSetup" not in source
-    assert "send_setup" not in source
-    assert "setup_control_center" not in source
-    assert "Configuration" in source
-    assert "_open_setup_panel" in source
+    # Vérifie le code exécutable historique, sans faire échouer le test si un docstring
+    # explique simplement pourquoi l'ancien routeur ne doit plus être utilisé.
+    assert "from cogs.setup_control_center import" not in source
+    assert ".send_setup(" not in source
+    assert 'bot.get_cog("Configuration")' in source
+    assert '"_open_setup_panel"' in source
 
 
 def test_v103_registers_native_zero_option_v114_setup():
