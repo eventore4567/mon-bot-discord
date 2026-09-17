@@ -12,6 +12,7 @@ Le launcher garde `railway_boot.py` intact et ajoute quatre garanties :
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -79,14 +80,38 @@ def _install_ha_healthcheck() -> None:
         ready = bool(bot.is_ready() and not bot.is_closed())
         ha = coordinator.health()
 
+        # Le diagnostic riche (base de données, extensions, migrations, politique de
+        # commandes) est produit par dashboard_web.handle_health. Cette enveloppe HA le
+        # remplaçait purement et simplement : dès que le failover est actif — le cas réel
+        # sur Railway — plus rien de ce diagnostic n'était visible, et une instance
+        # connectée à Discord mais avec une base cassée était rapportée saine. On chaîne
+        # donc au lieu de remplacer, en repli silencieux si l'appel échoue.
+        previous_payload: dict = {}
+        try:
+            previous_response = await current(request)
+            body = getattr(previous_response, "body", None)
+            if body:
+                parsed = json.loads(body.decode("utf-8") if isinstance(body, bytes) else str(body))
+                if isinstance(parsed, dict):
+                    previous_payload = parsed
+        except Exception:
+            logger.warning("Healthcheck HA : diagnostic complet indisponible.", exc_info=True)
+
         if not coordinator.enabled:
-            ok = ready
+            ok = bool(previous_payload.get("ok", ready))
         else:
             # Un standby doit rester vivant sur Railway. "blocked" est accepté car une
             # panne Redis transitoire peut se réparer sans redémarrer le conteneur.
-            ok = ready or ha["state"] in {"starting", "standby", "blocked", "leader"}
+            ha_liveness_ok = ready or ha["state"] in {"starting", "standby", "blocked", "leader"}
+            if ready:
+                # Instance réellement connectée à Discord : le diagnostic riche fait foi
+                # en plus de la vivacité HA (une base cassée ne doit plus passer pour saine).
+                ok = bool(previous_payload.get("ok", True)) and ha_liveness_ok
+            else:
+                ok = ha_liveness_ok
 
-        payload = {
+        payload = dict(previous_payload)
+        payload.update({
             "ok": bool(ok),
             "discord_ready": ready,
             "latency_ms": round(bot.latency * 1000) if ready else None,
@@ -99,7 +124,7 @@ def _install_ha_healthcheck() -> None:
                 "leader_for_seconds": ha["leader_for_seconds"],
                 "error": ha["error"],
             },
-        }
+        })
         return aiohttp_web.json_response(payload, status=200 if ok else 503)
 
     ha_health._sentrix_ha_health = True

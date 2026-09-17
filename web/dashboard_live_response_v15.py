@@ -80,6 +80,48 @@ def patch_html(html: str) -> str:
     return _patch_native(str(html or ""))
 
 
+# Marqueurs produits par le finaliseur V7 (sentrix_dashboard_finalizer_v7.py), qui
+# reconstruit dashboard.INDEX_HTML APRÈS le gel V55. Voir _live_source().
+_FINAL_BUILD_MARKERS = (
+    'id="sentrix-dashboard-motion-audio-v27"',
+    'id="sentrix-dashboard-visible-motion-v26"',
+    'id="sentrix-dashboard-motion-system-v25"',
+    'id="sentrix-dashboard-button-system-v24"',
+    'id="sentrix-dashboard-visual-finish-v23"',
+    "sentrix-dashboard-product-ui-v18",
+)
+
+
+def _live_source(response: web.Response, dashboard) -> str:
+    """Choisit le document à servir pour /app.
+
+    Le gel V55 (web/dashboard_frontend_freeze_v55.py) renvoie un instantané capturé
+    AVANT que le finaliseur V7/V8 ne reconstruise ``dashboard.INDEX_HTML``. Repartir du
+    corps de cette réponse — ce que faisait V15 — voulait dire que tout ce que V18 à V27
+    ajoutent (UI produit, finition visuelle, boutons, motion, motion+audio) était
+    construit, validé par les marqueurs de V7, journalisé ``installed=True``... puis
+    jamais servi : le navigateur recevait l'instantané gelé. Mesuré sur le commit de
+    production : INDEX_HTML = 389 617 octets (30 @keyframes, AudioContext présent) alors
+    que la réponse réelle repartait de 93 539 octets (4 @keyframes, aucun AudioContext).
+
+    On ne repart du document courant que s'il porte des marqueurs finaux que la réponse
+    gelée n'a pas : sinon le comportement précédent est conservé à l'identique.
+    """
+    frozen = response.text if isinstance(response.text, str) else ""
+    current = str(getattr(dashboard, "INDEX_HTML", "") or "")
+    if not current:
+        return frozen
+    missing = [marker for marker in _FINAL_BUILD_MARKERS if marker in current and marker not in frozen]
+    if not missing:
+        return frozen or current
+    logger.warning(
+        "V15 : /app repart du document final (%s octets) au lieu de l'instantané gelé (%s octets) — "
+        "marqueurs absents du gel : %s",
+        len(current.encode("utf-8")), len(frozen.encode("utf-8")), ", ".join(missing),
+    )
+    return current
+
+
 def install(dashboard) -> bool:
     previous = dashboard.handle_index
     if getattr(previous, "_sentrix_live_response_v15", False):
@@ -89,7 +131,7 @@ def install(dashboard) -> bool:
         response = await previous(request)
         if request.path != "/app" or not isinstance(response, web.Response) or response.status >= 300:
             return response
-        source = response.text if isinstance(response.text, str) else str(getattr(dashboard, "INDEX_HTML", "") or "")
+        source = _live_source(response, dashboard)
         html = patch_html(source)
         has_nav = all(x in html for x in ("Réactions automatiques", "Statistiques", "Webhooks & intégrations"))
         has_captcha = "CAPTCHA V96 RÉEL" in html

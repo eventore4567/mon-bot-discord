@@ -9,3 +9,10 @@ asyncpg>=0.30.0
 redis>=5.2.0
 boto3>=1.35.0
 yt-dlp[default]>=2026.8.19
+# Tests : une partie de la suite utilise @pytest.mark.asyncio. Sans ce plugin, pytest
+# collecte ces tests puis les marque en échec ("async def functions are not natively
+# supported") — 9 tests rouges sur une machine propre alors que le code est correct.
+# Seuls 4 workflows l'installaient à la volée ; les 9 autres qui lancent pytest ne
+# l'avaient pas. Le déclarer ici le rend disponible partout où requirements.txt est
+# installé, sans modifier chaque workflow un par un.
+pytest-asyncio>=0.23

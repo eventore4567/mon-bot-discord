@@ -13,6 +13,7 @@ jobs:
       - name: Wait for Railway and verify SentriX runtime
         env:
           HEALTH_URL: https://mon-bot-discord-production-8944.up.railway.app/health
+          STANDBY_HEALTH_URL: https://sentrix-standby-production.up.railway.app/health
           PUBLIC_URL: https://mon-bot-discord-production-8944.up.railway.app/api/public
         run: |
           python - <<'PY'
@@ -22,9 +23,18 @@ jobs:
           import urllib.error
           import urllib.request
 
+          # SentriX tourne en HA avec un verrou de leader à TTL : après un déploiement, le
+          # leader est simplement l'instance qui reprend le verrou en premier, et c'est
+          # légitimement le standby la plupart du temps. Exiger discord_ready=True sur le
+          # SEUL service "primary" faisait donc échouer ce diagnostic à chaque déploiement
+          # alors que le bot était bien en ligne (porté par le standby) — un rouge permanent
+          # qui masquerait une vraie panne. On vérifie maintenant le contrat HA réel : les
+          # deux instances vivantes, et AU MOINS UNE connectée à Discord.
           health_url = os.environ["HEALTH_URL"]
+          standby_health_url = os.environ["STANDBY_HEALTH_URL"]
           public_url = os.environ["PUBLIC_URL"]
           last_health = None
+          last_standby = None
           last_public = None
           last_error = None
 
@@ -40,17 +50,30 @@ jobs:
               try:
                   health_status, health = fetch_json(health_url)
                   last_health = health
+                  try:
+                      standby_status, standby = fetch_json(standby_health_url)
+                  except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as exc:
+                      standby_status, standby = None, {"error": f"{type(exc).__name__}: {exc}"}
+                  last_standby = standby
+
+                  def alive(status, payload):
+                      return bool(status == 200 and isinstance(payload, dict) and payload.get("ok") is True)
+
+                  def connected(payload):
+                      return bool(isinstance(payload, dict) and payload.get("discord_ready") is True)
+
                   ready = bool(
-                      health_status == 200
-                      and isinstance(health, dict)
-                      and health.get("ok") is True
-                      and health.get("discord_ready") is True
+                      alive(health_status, health)
+                      and alive(standby_status, standby)
+                      and (connected(health) or connected(standby))
                   )
                   print(
-                      f"Attempt {attempt}: health_status={health_status} "
+                      f"Attempt {attempt}: primary_status={health_status} "
                       f"ok={health.get('ok') if isinstance(health, dict) else None} "
-                      f"discord_ready={health.get('discord_ready') if isinstance(health, dict) else None} "
-                      f"latency_ms={health.get('latency_ms') if isinstance(health, dict) else None}"
+                      f"discord_ready={connected(health)} "
+                      f"| standby_status={standby_status} "
+                      f"ok={standby.get('ok') if isinstance(standby, dict) else None} "
+                      f"discord_ready={connected(standby)}"
                   )
                   if not ready:
                       time.sleep(10)
@@ -70,7 +93,7 @@ jobs:
                       f"guilds={public.get('guilds') if isinstance(public, dict) else None}"
                   )
                   if online:
-                      print(json.dumps({"health": health, "public": public}, indent=2, sort_keys=True))
+                      print(json.dumps({"health": health, "standby": standby, "public": public}, indent=2, sort_keys=True))
                       print("SENTRIX_PRODUCTION_RUNTIME_OK")
                       raise SystemExit(0)
               except SystemExit:
@@ -84,6 +107,7 @@ jobs:
               time.sleep(10)
 
           print("Last health:", json.dumps(last_health, indent=2, sort_keys=True) if last_health is not None else None)
+          print("Last standby:", json.dumps(last_standby, indent=2, sort_keys=True) if last_standby is not None else None)
           print("Last public:", json.dumps(last_public, indent=2, sort_keys=True) if last_public is not None else None)
           raise SystemExit(f"SENTRIX_PRODUCTION_RUNTIME_TIMEOUT: {last_error or 'runtime never became ready'}")
           PY

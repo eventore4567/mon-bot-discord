@@ -504,9 +504,19 @@ class BotAllInOne(commands.Bot):
         # une ancienne référence dans app_command._callback. On réaligne tout juste
         # avant le sync global afin que / et + exécutent exactement le même callback.
         try:
-            from cogs.hybrid_callback_resync import resync as _resync_hybrid_callbacks
+            from cogs.hybrid_callback_resync import (
+                install_guard as _install_sanction_identity_guard,
+                resync as _resync_hybrid_callbacks,
+            )
 
             _resync_hybrid_callbacks(self)
+            # Le resync ci-dessus ne passe qu'une fois. Tout module qui refait
+            # `command.callback = wrapper` APRÈS réintroduit la divergence pour le chemin
+            # slash, sans erreur ni log. Ce garde vérifie l'identité réelle du code des 7
+            # commandes de sanction avant chaque exécution, sur + comme sur /, et réaligne
+            # au passage un app_command divergent : appliquer la mauvaise sanction à un
+            # membre est irréversible.
+            _install_sanction_identity_guard(self)
         except Exception:
             logger.warning(
                 "Resynchronisation callback slash/préfixe impossible :\n" + traceback.format_exc()
