@@ -114,38 +114,28 @@ def test_v21_growth_routes_exist_before_product_boot_captures_build_app():
         assert route in growth
 
 
-def test_v22_growth_visuals_are_page_specific_real_and_event_driven():
-    style = dashboard_growth_control_v12.CSS
+def test_growth_pages_are_owned_by_v15_not_by_a_v12_client_router():
+    """Historique : V12 rendait lui-même Statistiques/Invitations/Réactions/Automatisations
+    via un routeur client (observer sur tout le document, timers). Depuis V15 ces pages sont
+    natives ; deux routeurs coexistaient et se marchaient dessus (double « Statistiques »,
+    rendu V15 écrasé par un skeleton V12, requêtes dupliquées, skeleton permanent). V12 ne
+    conserve que ses routes API et les marqueurs de boot."""
     script = dashboard_growth_control_v12.JS
+    style = dashboard_growth_control_v12.CSS
+    assert 'id="sentrix-growth-v12-css"' in style
+    assert 'id="sentrix-growth-v12-js"' in script
+    assert "__sentrixGrowthV12Api" in script
+    for retired in ("setInterval(", "MutationObserver", "ensureNav", "/growth/stats", "data-sx12-tab", "sx12-skeleton"):
+        assert retired not in script, retired
+    assert ".sx12-page" not in style
 
-    # Premium depth inspired by modern dark admin/Discord dashboards, while each major V12
-    # surface gets its own composition rather than repeating one generic table/card layout.
-    for selector in (
-        ".sx12-invite-grid",
-        ".sx12-flow-grid",
-        ".sx12-webhook-grid",
-        ".sx12-bars",
-        ".sx12-preview",
-        ".sx12-skeleton",
-    ):
-        assert selector in style
-
-    assert "discord.gg/${esc(i.code)}" in script
-    assert "Déclencheur" in script and "Condition" in script and "Action" in script
-    assert "APERÇU DISCORD" in style
-    assert "prefers-reduced-motion:reduce" in style
-    assert 'role="alert"' in script
-
-    # V12 now reacts to actual navigation/session events instead of waking the browser every
-    # second. All charts/progress bars are derived from real API payloads, not fabricated data.
-    assert "setInterval(" not in script
-    assert "MutationObserver" in script
-    assert 'addEventListener("pageshow"' in script
-    assert 'addEventListener("sentrix:live"' in script
-    assert "/growth/stats" in script
-    assert "/growth/invitations" in script
-    assert "/growth/webhooks" in script
-    assert "/automation/reactions" in script
+    native = dashboard_live_response_v15._NATIVE_JS
+    for endpoint in ("/growth/stats", "/growth/invitations", "/growth/webhooks", "/automation/reactions", "/ops/overview"):
+        assert endpoint in native, endpoint
+    # Etats propres : vide explicite, jamais un skeleton laissé en place.
+    assert "function v15Empty(" in native
+    assert "Aucune donnée disponible." in native
+    assert "esc(i.code)" in native
 
 
 def test_v21_final_polish_covers_keyboard_mobile_and_accessible_live_state():

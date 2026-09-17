@@ -1,10 +1,14 @@
-"""Browser-visible guard for the unified SentriX dashboard.
+"""Browser-visible CAPTCHA guard for the unified SentriX dashboard.
 
-The canonical V55/V2 frontend rebuilds ``#navigation`` from its private NAV array. Growth V12
-is intentionally additive, so its injected buttons can be removed by a later native render.
-This layer runs after V12 and makes the additive pages persistent in the actual browser DOM.
-It also exposes V12's existing renderer through a tiny public bridge and makes the real V96
-CAPTCHA control unmistakably visible on the Verification page.
+Historique : V13 rendait persistants les boutons de navigation injectés par Growth V12 et
+relançait le renderer de V12 (``ensureCurrent``) dès que ``#content`` ne contenait pas de
+``.sx12-page`` — sur chaque mutation du DOM et toutes les 650 ms. Depuis V15
+(``dashboard_live_response_v15``), ces 9 pages sont rendues nativement par le routeur V2 :
+le rendu V15 ne contient jamais ``.sx12-page``, donc V13 l'écrasait par un skeleton V12,
+relançait deux fetch par cycle et, si une requête V12 était lente, laissait le skeleton
+affiché indéfiniment. Mesuré en navigateur réel : un seul clic sur « Statistiques »
+produisait 6 écritures dans ``#content`` et 5 fetch. Ce mécanisme est retiré ; il ne reste
+que la mise en évidence du vrai contrôle CAPTCHA V96 sur la page Vérification, sans rapport.
 """
 from __future__ import annotations
 
@@ -36,37 +40,7 @@ JS = r'''
 if(window.__sentrixDashboardVisibilityV13)return;
 window.__sentrixDashboardVisibilityV13=true;
 const $=id=>document.getElementById(id);
-const TABS={
-  stats:["Général","Statistiques","ST"],
-  invites:["Communauté","Invitations","IN"],
-  autoreact:["Communauté","Réactions automatiques","RA"],
-  automations:["Outils","Automatisations","AU"],
-  staffactivity:["Administration","Activité staff","AS"],
-  audit:["Administration","Historique & audit","HA"],
-  backups:["Administration","Sauvegardes","SV"],
-  maintenance:["Administration","Maintenance","MT"],
-  integrations:["Administration","Webhooks & intégrations","WI"]
-};
 const state=()=>window.state||window.__sentrixUnifiedRuntimeV10?.state||null;
-const api=()=>window.__sentrixGrowthV12Api||null;
-let repairing=false;
-function group(name){return [...document.querySelectorAll("#navigation .nav-group")].find(x=>x.textContent.trim().toLocaleLowerCase("fr")===name.toLocaleLowerCase("fr"))}
-function ensureNav(){
-  const nav=$("navigation");if(!nav||repairing)return;
-  repairing=true;
-  try{
-    for(const [key,[groupName,label,icon]] of Object.entries(TABS)){
-      if(nav.querySelector(`[data-tab="${key}"],[data-sx12-tab="${key}"],[data-sx13-tab="${key}"]`))continue;
-      const g=group(groupName);if(!g)continue;
-      const b=document.createElement("button");b.type="button";b.className="sx13-nav";b.dataset.sx13Tab=key;b.innerHTML=`<span class="nav-icon">${icon}</span><span>${label}</span>`;
-      let last=g,c=g.nextElementSibling;while(c&&!c.classList.contains("nav-group")){last=c;c=c.nextElementSibling}last.after(b);
-    }
-    sync();
-  } finally {repairing=false}
-}
-function sync(){const cur=state()?.tab||new URL(location.href).searchParams.get("tab")||"";document.querySelectorAll("[data-sx13-tab],[data-sx12-tab]").forEach(b=>b.classList.toggle("active",(b.dataset.sx13Tab||b.dataset.sx12Tab)===cur))}
-function openGrowth(tab){const a=api();if(a?.setTab){a.setTab(tab);sync();return}const u=new URL(location.href);u.searchParams.set("tab",tab);history.replaceState({},"",u);const c=$("content");if(c)c.innerHTML='<div class="error-state"><h2>Module dashboard en cours de chargement</h2><p>Le moteur Growth Control n’est pas encore disponible dans cette session.</p></div>';window.toast?.("Growth Control V12 n’est pas chargé dans le navigateur.",true)}
-function ensureCurrent(){const s=state(),a=api();if(!s||!TABS[s.tab]||!a?.render)return;if(!$("content")?.querySelector(".sx12-page"))a.render(s.tab);sync()}
 function ensureCaptcha(){
   const s=state();if(s?.tab!=="verification"){$("sxCaptchaV13")?.remove();return}
   if($("sxVerifyV9")){ $("sxCaptchaV13")?.remove(); return }
@@ -76,17 +50,14 @@ function ensureCaptcha(){
   $("sx13CaptchaFocus")?.addEventListener("click",()=>{control.scrollIntoView({behavior:"smooth",block:"center"});control.focus()});
   $("sx13CaptchaPublish")?.addEventListener("click",()=>$("verifyPublish")?.click());
 }
-function repair(){ensureNav();ensureCurrent();ensureCaptcha()}
-document.addEventListener("click",e=>{const b=e.target.closest?.("[data-sx13-tab]");if(!b)return;e.preventDefault();e.stopPropagation();openGrowth(b.dataset.sx13Tab)},true);
-const nav=$("navigation");if(nav)new MutationObserver(()=>queueMicrotask(repair)).observe(nav,{childList:true});
-const content=$("content");if(content)new MutationObserver(()=>queueMicrotask(repair)).observe(content,{childList:true,subtree:true});
-repair();setInterval(repair,650);
+// Seul déclencheur : le contenu change (changement d'onglet). ensureCaptcha est idempotent,
+// ne déclenche aucun fetch et n'écrit rien en dehors de son propre encart.
+const content=$("content");if(content)new MutationObserver(()=>queueMicrotask(ensureCaptcha)).observe(content,{childList:true});
+ensureCaptcha();
 })();
 </script>
 '''
 
-_RENDER_NEEDLE = 'function render(tab=st()?.tab){if(!R[tab])return;syncActive();R[tab]()}'
-_RENDER_BRIDGE = _RENDER_NEEDLE + '\nwindow.__sentrixGrowthV12Api={render,setTab,ensureNav,TABS};'
 
 
 def install(dashboard) -> bool:
@@ -97,17 +68,15 @@ def install(dashboard) -> bool:
         logger.error("Visibility V13 requires Growth Control V12 in the final HTML.")
         return False
     if API_MARKER not in html:
-        if _RENDER_NEEDLE not in html:
-            logger.error("Visibility V13 could not expose the V12 renderer.")
-            return False
-        html = html.replace(_RENDER_NEEDLE, _RENDER_BRIDGE, 1)
+        logger.error("Visibility V13 requires the Growth Control V12 API marker in the final HTML.")
+        return False
     if f'id="{CSS_MARKER}"' not in html:
         html = html.replace("</head>", CSS + "\n</head>", 1)
     if f'id="{JS_MARKER}"' not in html:
         html = html.replace("</body>", JS + "\n</body>", 1)
     dashboard.INDEX_HTML = html
-    ok = all(x in html for x in (API_MARKER, CSS_MARKER, JS_MARKER, "CAPTCHA V96 RÉEL", "data-sx13-tab"))
-    logger.warning("Dashboard Visibility V13 installed=%s: persistent Growth navigation + visible CAPTCHA guard.", ok)
+    ok = all(x in html for x in (API_MARKER, CSS_MARKER, JS_MARKER, "CAPTCHA V96 RÉEL", "sxCaptchaV13"))
+    logger.warning("Dashboard Visibility V13 installed=%s: visible CAPTCHA guard (Growth navigation/re-render bridge retired, V15 renders natively).", ok)
     return ok
 
 
