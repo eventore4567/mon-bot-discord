@@ -2,36 +2,49 @@ from types import SimpleNamespace
 
 from web import dashboard_visibility_guard_v13 as v13
 
+_V12_SCRIPT = (
+    '<script id="sentrix-growth-v12-js">'
+    'window.__sentrixGrowthV12Api={retired:true,renderer:"v15-native"};'
+    '</script>'
+)
 
-def test_visibility_v13_exposes_growth_renderer_and_browser_guards():
-    needle = 'function render(tab=st()?.tab){if(!R[tab])return;syncActive();R[tab]()}'
-    fake = SimpleNamespace(
+
+def _fake(with_api_marker: bool = True):
+    return SimpleNamespace(
         INDEX_HTML=(
             '<html><head></head><body>'
             '<nav id="navigation" class="nav"></nav><section id="content"></section>'
-            '<script id="sentrix-growth-v12-js">'
-            + needle
-            + '</script></body></html>'
+            + (_V12_SCRIPT if with_api_marker else '<script id="sentrix-growth-v12-js"></script>')
+            + '</body></html>'
         )
     )
 
+
+def test_visibility_v13_keeps_only_the_captcha_guard():
+    """V13 relançait le renderer V12 (ensureCurrent) sur chaque mutation de #content et
+    toutes les 650 ms, écrasant le rendu natif V15 par un skeleton et dupliquant les
+    requêtes. Il ne reste que la mise en évidence du contrôle CAPTCHA V96."""
+    fake = _fake()
     assert v13.install(fake) is True
     html = fake.INDEX_HTML
     assert 'id="sentrix-dashboard-visibility-v13-css"' in html
     assert 'id="sentrix-dashboard-visibility-v13-js"' in html
-    assert 'window.__sentrixGrowthV12Api={render,setTab,ensureNav,TABS};' in html
-    assert 'data-sx13-tab' in html
-    assert 'CAPTCHA V96 RÉEL' in html
-    assert 'verifyPublish' in html
+    assert "__sentrixDashboardVisibilityV13" in html
+    assert "sxCaptchaV13" in html
+    assert "CAPTCHA V96 RÉEL" in html
+    assert "verifyPublish" in html
+    for retired in ("ensureCurrent", "ensureNav", "setInterval", "data-sx13-tab", "openGrowth", "a.render("):
+        assert retired not in html, retired
+
+
+def test_visibility_v13_requires_the_v12_api_marker_instead_of_creating_it():
+    fake = _fake(with_api_marker=False)
+    assert v13.install(fake) is False
+    assert "__sentrixGrowthV12Api" not in fake.INDEX_HTML
 
 
 def test_visibility_v13_is_idempotent():
-    needle = 'function render(tab=st()?.tab){if(!R[tab])return;syncActive();R[tab]()}'
-    fake = SimpleNamespace(
-        INDEX_HTML='<html><head></head><body><script id="sentrix-growth-v12-js">'
-        + needle
-        + '</script></body></html>'
-    )
+    fake = _fake()
     assert v13.install(fake) is True
     once = fake.INDEX_HTML
     assert v13.install(fake) is True

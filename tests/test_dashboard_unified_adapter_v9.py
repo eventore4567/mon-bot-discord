@@ -10,6 +10,19 @@ def test_v9_targets_the_real_unified_v2_dom():
     assert '$("serverContent")' not in source
 
 
+def test_v9_does_not_duplicate_the_native_kpi_grid():
+    """Le template V2 possède déjà #metrics (Membres, Commandes 24 h, Tickets ouverts,
+    Avertissements), rafraîchi par selectGuild. V9 en rendait une seconde copie
+    (#sxUnifiedKpisV9) juste en dessous : deux rangées identiques en production."""
+    source = Path("web/dashboard_unified_adapter_v9.py").read_text(encoding="utf-8")
+    assert 'kpis.innerHTML' not in source
+    assert 'class="sxv9-kpi"' not in source
+    assert "function metrics()" not in source
+    # Le hero V9 (Actualiser / Diagnostic) reste, lui, en place.
+    assert 'id="sxV9Refresh"' in source
+    assert 'id="sxV9Diagnostic"' in source
+
+
 def test_v9_exposes_visible_real_discord_verification():
     source = Path("web/dashboard_unified_adapter_v9.py").read_text(encoding="utf-8")
     assert "Vérification Discord réelle" in source
