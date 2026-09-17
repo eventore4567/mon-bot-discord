@@ -89,11 +89,13 @@ def test_v117_notifications_are_configured_without_notifs_command_redirect():
     assert "+notifs-ping" not in source
 
 
-def test_v117_is_installed_after_v116_before_setup_authority():
+def test_v117_is_kept_in_repo_but_not_installed_as_public_setup():
     source = Path("sentrix_v103_setup_fix.py").read_text(encoding="utf-8")
     prepare = source[source.index("async def prepare_bot_v103"):]
-    assert prepare.index("install_setup_v116(bot)") < prepare.index("install_setup_v117(bot)")
-    assert prepare.index("install_setup_v117(bot)") < prepare.index("_replace_setup_slash(bot)")
+    assert "install_setup_v116(bot)" in prepare
+    assert "install_setup_v117" not in prepare
+    assert "configuration-v116" in source
+    assert "/setup V116 restauré" in source
 
 
 def test_v117_does_not_reintroduce_visual_bars_or_technical_status_blocks():
