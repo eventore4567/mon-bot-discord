@@ -798,10 +798,40 @@ def install(dashboard) -> bool:
                     return dashboard._json_error("Action membre non supportée.", 400)
                 return web.json_response({"ok": True, "message": "Action appliquée au membre."})
 
+            async def live_metrics(request):
+                guild_id, session, guild, member, error = await _require_access(dashboard, request, "view")
+                if error:
+                    return error
+                await _ensure_tables(bot.db)
+                data = await _analytics(bot.db, guild_id)
+                revision = int(data.get("warnings_total") or 0)
+                try:
+                    row = await bot.db.fetchone(
+                        "SELECT COALESCE(MAX(id), 0) AS n FROM warnings WHERE guild_id = ?",
+                        (guild_id,),
+                    )
+                    item = _row_dict(row)
+                    revision = max(revision, int(item.get("n") or 0))
+                except Exception:
+                    pass
+                return web.json_response(
+                    {
+                        "ok": True,
+                        "members": int(guild.member_count or 0),
+                        "commands_24h": int(data.get("commands_24h") or 0),
+                        "open_tickets": int(data.get("open_tickets") or 0),
+                        "warnings": int(data.get("warnings_total") or 0),
+                        "online": bool(bot.is_ready()),
+                        "latency_ms": round(bot.latency * 1000) if bot.is_ready() else None,
+                        "sanctions_revision": revision,
+                    }
+                )
+
             app.router.add_get("/api/guilds/{guild_id}/product/access", access_list)
             app.router.add_post("/api/guilds/{guild_id}/product/access", access_save)
             app.router.add_delete("/api/guilds/{guild_id}/product/access/{principal_type}/{principal_id}", access_delete)
             app.router.add_get("/api/guilds/{guild_id}/product/search", search)
+            app.router.add_get("/api/guilds/{guild_id}/live/metrics", live_metrics)
             app.router.add_get("/api/guilds/{guild_id}/product/analytics", analytics)
             app.router.add_get("/api/guilds/{guild_id}/product/audit/{history_id}/diff", audit_diff)
             app.router.add_get("/api/guilds/{guild_id}/product/templates", templates_list)
