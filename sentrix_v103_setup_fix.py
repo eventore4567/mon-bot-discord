@@ -6,13 +6,12 @@ obsolète : le setup officiel vit dans ``cogs.configuration.SetupView`` et V113/
 patchent précisément cette vue pour fournir l'accueil compact, Smart Setup, snapshots,
 rollback et diagnostic.
 
-V116 ajoute le centre hiérarchique. V117 s'installe juste après et simplifie l'UX en
-parcours guidé Accueil -> Module -> Étape, sans créer une seconde commande /setup.
+V116 ajoute le centre hiérarchique et redevient l'interface publique de /setup.
+La couche V117 reste dans le dépôt pour historique, mais n'est plus installée au runtime.
 
 Cette couche reste utile pour garantir une signature slash sans argument utilisateur après
 les transformations V95+, mais elle ne possède plus d'interface concurrente. Elle ouvre
-explicitement le panneau du cog Configuration, donc un redémarrage ou une resynchronisation
-des commandes ne peut plus faire réapparaître l'ancien centre de contrôle.
+explicitement le panneau du cog Configuration.
 """
 from __future__ import annotations
 
@@ -29,6 +28,11 @@ from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.v103-setup-fix")
 _INSTALLED = False
+
+# Contrat d'interface publique : le runtime ouvre bien le centre hiérarchique V116.
+# Le marqueur d'autorité slash reste volontairement V114 pour compatibilité avec les
+# gardes historiques qui vérifient l'unicité de /setup.
+PUBLIC_SETUP_UI = "configuration-v116"
 
 
 async def _is_setup_authorized(bot, interaction: discord.Interaction) -> bool:
@@ -47,7 +51,7 @@ async def _is_setup_authorized(bot, interaction: discord.Interaction) -> bool:
 
 
 async def _send_setup_v114(bot, interaction: discord.Interaction) -> None:
-    """Ouvre l'unique setup officiel : Configuration.SetupView patché jusqu'à V117."""
+    """Ouvre l'unique setup officiel : Configuration.SetupView patché jusqu'à V116."""
     configuration = bot.get_cog("Configuration")
     opener = getattr(configuration, "_open_setup_panel", None) if configuration is not None else None
     if not callable(opener):
@@ -134,7 +138,7 @@ def _replace_setup_slash(bot) -> bool:
         ),
         override=True,
     )
-    logger.info("V103 : /setup V117 installé — Configuration reste l'unique autorité.")
+    logger.info("V103 : /setup V116 restauré — Configuration reste l'unique autorité.")
     return True
 
 
@@ -156,11 +160,6 @@ def install() -> None:
             install_setup_v116(bot)
         except Exception:
             logger.exception("Installation du centre Setup V116 impossible.")
-        try:
-            from sentrix_setup_guided_v117 import install_for_bot as install_setup_v117
-            install_setup_v117(bot)
-        except Exception:
-            logger.exception("Installation du Setup guidé V117 impossible.")
         _replace_setup_slash(bot)
         return result
 
@@ -168,7 +167,7 @@ def install() -> None:
     prepare_bot_v103._sentrix_original = current_prepare
     v95.prepare_bot = prepare_bot_v103
     _INSTALLED = True
-    logger.info("V103 setup authority guard armé pour Smart Setup V114/V116/V117.")
+    logger.info("V103 setup authority guard armé pour Smart Setup V114/V116.")
 
 
 __all__ = ["install", "_replace_setup_slash", "_send_setup_v114", "_is_setup_authorized"]
