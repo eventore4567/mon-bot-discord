@@ -123,7 +123,7 @@ def _replace_setup_slash(bot) -> bool:
     }
     setup_callback._sentrix_original_command = "setup"
     setup_callback._sentrix_native_options = True
-    setup_callback._sentrix_setup_authority = "configuration-v116"
+    setup_callback._sentrix_setup_authority = "configuration-v114"
 
     tree.add_command(
         app_commands.Command(
