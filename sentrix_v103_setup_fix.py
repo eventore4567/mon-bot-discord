@@ -29,6 +29,11 @@ from utils import sentrix_panels as panels
 logger = logging.getLogger("bot.v103-setup-fix")
 _INSTALLED = False
 
+# Contrat d'interface publique : le runtime ouvre bien le centre hiérarchique V116.
+# Le marqueur d'autorité slash reste volontairement V114 pour compatibilité avec les
+# gardes historiques qui vérifient l'unicité de /setup.
+PUBLIC_SETUP_UI = "configuration-v116"
+
 
 async def _is_setup_authorized(bot, interaction: discord.Interaction) -> bool:
     """Même barrière que la commande Configuration.setup_wizard."""
