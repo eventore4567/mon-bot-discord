@@ -74,34 +74,29 @@ def test_v21_uses_one_canonical_v18_finalizer():
     assert "if not product_ui_v18_ok:" in source
 
 
-def test_v21_v8_is_the_only_boot_level_dashboard_finalizer():
+def test_v21_v8_has_one_canonical_boot_level_dashboard_finalizer():
     verification = Path("sentrix_verification_v96_finalizer.py").read_text(encoding="utf-8")
-    primary_v8 = Path("railway_ha_product_boot_v8.py").read_text(encoding="utf-8")
-    standby_v8 = Path("sentrix_v98_ha_product_boot_v8.py").read_text(encoding="utf-8")
+    canonical_v8 = Path("railway_ha_product_boot_v8.py").read_text(encoding="utf-8")
+    procfile = Path("Procfile").read_text(encoding="utf-8")
 
     assert "sentrix_dashboard_finalizer_v7" not in verification
     assert "install_dashboard_v7()" not in verification
-    assert primary_v8.count("install_dashboard_v7()") == 1
-    assert standby_v8.count("install_dashboard_v7()") == 1
-    assert "after legacy V55 freeze" in primary_v8
-    assert "after legacy V55 freeze" in standby_v8
+    assert canonical_v8.count("install_dashboard_v7()") == 1
+    assert "after legacy V55 freeze" in canonical_v8
+    assert procfile.strip() == "web: python3 railway_ha_product_boot_v8.py"
+    assert not Path("sentrix_v98_ha_product_boot_v8.py").exists()
 
 
 def test_v21_growth_routes_exist_before_product_boot_captures_build_app():
-    primary_v8 = Path("railway_ha_product_boot_v8.py").read_text(encoding="utf-8")
-    standby_v8 = Path("sentrix_v98_ha_product_boot_v8.py").read_text(encoding="utf-8")
+    canonical_v8 = Path("railway_ha_product_boot_v8.py").read_text(encoding="utf-8")
     growth = Path("web/dashboard_growth_control_v12.py").read_text(encoding="utf-8")
 
-    # Both production entrypoints must install the route-bearing V12 wrapper before importing
-    # the shared product bootstrap, which freezes its current dashboard.build_app reference.
-    assert primary_v8.index("_growth_v12.install(_dashboard_preboot)") < primary_v8.index(
+    # The canonical production entrypoint installs the route-bearing V12 wrapper before
+    # importing the shared product bootstrap, which freezes dashboard.build_app.
+    assert canonical_v8.index("_growth_v12.install(_dashboard_preboot)") < canonical_v8.index(
         "import railway_ha_product_boot as product_boot"
     )
-    assert standby_v8.index("_growth_v12.install(_dashboard_preboot)") < standby_v8.index(
-        "import sentrix_v98_ha_product_boot as v98_boot"
-    )
-    assert "product_boot.dashboard_web.build_app._sentrix_growth_v12_routes = True" in primary_v8
-    assert "product_boot.dashboard_web.build_app._sentrix_growth_v12_routes = True" in standby_v8
+    assert "product_boot.dashboard_web.build_app._sentrix_growth_v12_routes = True" in canonical_v8
 
     # These are the real endpoints consumed by the five affected tabs. Automations reuses
     # the reactions endpoint alongside the already-present Ops overview.

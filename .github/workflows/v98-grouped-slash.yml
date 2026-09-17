@@ -24,9 +24,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
 
-      - name: Compile V98/V99/V101/music
+      - name: Compile active V98/V99/V101/music runtime
         run: |
-          python -m compileall -q sentrix_v98_slash.py sentrix_grouped_slash_fix.py sentrix_v98_boot.py sentrix_v98_ha_product_boot.py sentrix_v101_command_runtime.py sentrix_music_providers_v102.py sentrix_music_voice_persistence.py utils/music/providers/soundcloud.py web/giveaway_dashboard_v101.py cogs/dashboard_runtime_patch.py tools/v98_grouped_slash_gate.py
+          python -m compileall -q railway_ha_product_boot.py railway_ha_product_boot_v8.py sentrix_v98_slash.py sentrix_grouped_slash_fix.py sentrix_v101_command_runtime.py sentrix_music_providers_v102.py sentrix_music_voice_persistence.py utils/music/providers/soundcloud.py web/giveaway_dashboard_v101.py cogs/dashboard_runtime_patch.py tools/v98_grouped_slash_gate.py
 
       - name: V98 semantic slash gate
         env:
