@@ -23,6 +23,7 @@ if not _growth_v12.install(_dashboard_preboot):
 
 import railway_ha_product_boot as product_boot  # noqa: E402
 from sentrix_dashboard_finalizer_v7 import install as install_dashboard_v7  # noqa: E402
+from web.dashboard_loader_hard_stop_v4 import install as install_loader_hard_stop_v4  # noqa: E402
 
 logger = logging.getLogger("bot.dashboard-final-order-v8")
 
@@ -36,12 +37,15 @@ _original_finish = product_boot._install_embed_dashboard_finish
 def _finish_with_dashboard_v8() -> bool:
     embeds_ok = bool(_original_finish())
     dashboard_ok = bool(install_dashboard_v7())
-    if not embeds_ok or not dashboard_ok:
+    loader_ok = bool(install_loader_hard_stop_v4(product_boot.dashboard_web))
+    if not embeds_ok or not dashboard_ok or not loader_ok:
         raise RuntimeError(
-            f"Dashboard V8 finalization failed: embeds={embeds_ok} dashboard={dashboard_ok}"
+            "Dashboard V8 finalization failed: "
+            f"embeds={embeds_ok} dashboard={dashboard_ok} loader_hard_stop={loader_ok}"
         )
     logger.warning(
-        "Dashboard V8 final authority applied at actual build_app boundary after legacy V55 freeze."
+        "Dashboard V8 final authority applied at actual build_app boundary after legacy V55 freeze; "
+        "blocking loaders disabled by V4."
     )
     return True
 
