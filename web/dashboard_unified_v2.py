@@ -25,7 +25,7 @@ INDEX_HTML = r'''<!doctype html>
   --red:#ff7081;--red-bg:#35191f;--shadow:0 20px 55px rgba(0,0,0,.34);
   --rail:68px;--sidebar:262px;--top:64px;--radius:12px;
 }
-*{box-sizing:border-box}html{color-scheme:dark;scroll-behavior:smooth}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}button,input,select,textarea{font:inherit}button{color:inherit}a{color:inherit;text-decoration:none}.hidden{display:none!important}
+*{box-sizing:border-box}html{color-scheme:dark;scroll-behavior:smooth;background:#0b0d10;overscroll-behavior-y:none}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}button,input,select,textarea{font:inherit}button{color:inherit}a{color:inherit;text-decoration:none}.hidden{display:none!important}
 :focus-visible{outline:2px solid var(--blue2);outline-offset:2px}.skip{position:fixed;left:12px;top:-60px;background:var(--blue);color:#08111a;padding:9px 12px;border-radius:8px;z-index:1000;font-weight:800}.skip:focus{top:12px}
 .skeleton{background:linear-gradient(90deg,#1c222b 20%,#252d38 40%,#1c222b 60%);background-size:300% 100%;animation:sk 1.35s linear infinite}@keyframes sk{to{background-position:-150% 0}}
 .topbar{height:var(--top);position:fixed;inset:0 0 auto 0;z-index:70;display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--line);background:rgba(11,13,16,.94);backdrop-filter:blur(14px)}

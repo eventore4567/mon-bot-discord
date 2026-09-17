@@ -45,12 +45,10 @@ html{{color-scheme:dark}}
 .palette-item:hover,.palette-item.active{{background:#17222d;border-color:#2f5778}}.palette-item[data-sx19-external] small{{color:#8ba3b9}}
 .sx-empty-premium{{min-height:180px;display:grid;place-items:center;padding:20px}}.sx-load-card{{width:min(520px,100%);padding:20px;border:1px solid #2c3845;border-radius:14px;background:#121820;box-shadow:0 14px 40px rgba(0,0,0,.2)}}
 .sx-load-card h3{{margin:0 0 7px}}.sx-load-card p{{margin:0 0 14px;color:#9ca8b5;line-height:1.55}}
-.sx19-loading-bar{{position:fixed;left:0;top:0;height:2px;width:100%;z-index:240;pointer-events:none;overflow:hidden;opacity:0;transition:opacity .12s}}
-.sx19-loading-bar.active{{opacity:1}}.sx19-loading-bar:before{{content:"";display:block;width:34%;height:100%;background:var(--blue);animation:sx19-load .75s ease-in-out infinite}}
 @keyframes sx19-load{{from{{transform:translateX(-110%)}}to{{transform:translateX(330%)}}}}
 @media(max-width:900px){{.workspace{{padding-left:18px;padding-right:18px}}}}
 @media(max-width:620px){{.workspace{{padding:20px 13px 72px}}.card,.p18-card{{padding:14px}}.p18-tabs{{top:4px;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:thin}}.p18-tab{{white-space:nowrap}}.p18-table{{min-width:560px}}.palette-backdrop{{padding:7vh 8px}}}}
-@media(prefers-reduced-motion:reduce){{#content,.card,.p18-card,.metric,.row,.btn,.p18-tab,.palette-item{{animation:none!important;transition:none!important}}.sx19-loading-bar:before{{animation:none!important;width:100%}}}}
+@media(prefers-reduced-motion:reduce){{#content,.card,.p18-card,.metric,.row,.btn,.p18-tab,.palette-item{{animation:none!important;transition:none!important}}}}
 @media(forced-colors:active){{.btn:focus-visible,.p18-tab:focus-visible,.palette-item:focus-visible,.field input:focus-visible,.field select:focus-visible,.field textarea:focus-visible{{outline:2px solid Highlight;box-shadow:none}}.card,.p18-card,.metric,.p18-kpi{{border:1px solid CanvasText}}}}
 </style>'''
 
@@ -184,18 +182,6 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
   window.addEventListener("beforeunload", stopLive);
   setTimeout(startLive, 800);
 
-  const loadBar = document.createElement("div");
-  loadBar.className = "sx19-loading-bar";
-  loadBar.setAttribute("aria-hidden", "true");
-  document.body.appendChild(loadBar);
-  let loadTimer = null;
-  document.addEventListener("click", event => {
-    const target = event.target.closest(".nav button,[data-p18-tab],[data-p18-go],[data-page],.palette-item");
-    if (!target) return;
-    loadBar.classList.add("active");
-    clearTimeout(loadTimer);
-    loadTimer = setTimeout(() => loadBar.classList.remove("active"), 900);
-  }, true);
 })();
 </script>'''
 
