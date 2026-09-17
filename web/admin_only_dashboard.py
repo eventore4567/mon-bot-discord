@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
+import discord
 from aiohttp import web
 
 from utils.owner_access import is_bot_owner_id
@@ -42,7 +43,7 @@ ACCESS_DENIED_HTML = """<!doctype html>
 
 
 def _installed_item(guild, user_id: int, previous: dict | None = None) -> dict:
-    """Construit l'entrée affichée sans dépendre de l'ancien snapshot OAuth."""
+    """Construit l'entrée affichée sans dépendre d'un objet membre mis en cache."""
     icon_url = str(guild.icon.url) if getattr(guild, "icon", None) else None
     return {
         "id": str(guild.id),
@@ -53,26 +54,82 @@ def _installed_item(guild, user_id: int, previous: dict | None = None) -> dict:
     }
 
 
-# Fenêtre pendant laquelle une vérification réussie reste valable pour la même session.
-# 30 s = la cadence de re-vérification déjà retenue par le flux live du dashboard
-# (dashboard_v60_diagnostics.handle_live_stream) : une révocation d'Administrateur est
-# donc détectée dans le même délai qu'avant, sans refaire le tour des serveurs à chaque
-# requête.
+# Une permission validée peut être réutilisée pendant la même fenêtre que le contrôle live.
+# Cela évite que /api/guilds/<id> réussisse puis que /sanctions, /logs, etc. échoue juste
+# après à cause d'un second fetch Discord ou d'un cache membres incomplet sur l'instance HA.
 ADMIN_REFRESH_TTL_SECONDS = 30.0
+ADMIN_MEMBER_NEGATIVE_TTL_SECONDS = 5.0
 _REFRESH_STAMP_KEY = "_admin_guilds_verified_at"
+_OAUTH_GUILDS_KEY = "_oauth_admin_guilds"
+_ADMIN_MEMBER_CACHE: dict[tuple[int, int], tuple[float, discord.Member | None]] = {}
+
+
+def _oauth_admin_candidates(session: dict) -> list[dict]:
+    """Conserve la liste OAuth d'origine séparément de la liste live vérifiée.
+
+    ``session['guilds']`` est rafraîchie régulièrement. Sans copie immuable, un faux négatif
+    temporaire supprimait définitivement le serveur de la session et les requêtes suivantes
+    n'avaient plus aucun candidat à revérifier.
+    """
+    saved = session.get(_OAUTH_GUILDS_KEY)
+    if not isinstance(saved, list):
+        saved = [dict(item) for item in session.get("guilds", []) if isinstance(item, dict)]
+        session[_OAUTH_GUILDS_KEY] = saved
+    return [dict(item) for item in saved if isinstance(item, dict)]
+
+
+async def _administrator_member_cached(guild: discord.Guild, user_id: int) -> discord.Member | None:
+    """Vérifie Administrateur sans faux 404 entre deux appels du même dashboard.
+
+    Le cache gateway est préféré. S'il ne contient pas le membre, même sur un guild marqué
+    ``chunked``, on autorise UN fetch ciblé pour un serveur candidat OAuth. Un résultat
+    positif est ensuite réutilisé 30 s par toutes les routes de la page. Les absences sont
+    gardées seulement 5 s afin de ne pas bloquer longtemps une permission fraîchement ajoutée.
+    """
+    key = (int(guild.id), int(user_id))
+    now_mono = time.monotonic()
+
+    member = guild.get_member(user_id)
+    if member is not None:
+        result = member if member.guild_permissions.administrator else None
+        ttl = ADMIN_REFRESH_TTL_SECONDS if result is not None else ADMIN_MEMBER_NEGATIVE_TTL_SECONDS
+        _ADMIN_MEMBER_CACHE[key] = (now_mono + ttl, result)
+        return result
+
+    cached = _ADMIN_MEMBER_CACHE.get(key)
+    if cached and cached[0] > now_mono:
+        return cached[1]
+    if cached:
+        _ADMIN_MEMBER_CACHE.pop(key, None)
+
+    try:
+        member = await guild.fetch_member(user_id)
+    except discord.NotFound:
+        _ADMIN_MEMBER_CACHE[key] = (now_mono + ADMIN_MEMBER_NEGATIVE_TTL_SECONDS, None)
+        return None
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        # Ne jamais transformer une panne/rate-limit Discord en refus persistant.
+        logger.warning(
+            "Vérification Administrateur temporairement impossible guild=%s user=%s (%s).",
+            getattr(guild, "id", "?"),
+            user_id,
+            type(exc).__name__,
+        )
+        return None
+
+    result = member if member.guild_permissions.administrator else None
+    ttl = ADMIN_REFRESH_TTL_SECONDS if result is not None else ADMIN_MEMBER_NEGATIVE_TTL_SECONDS
+    _ADMIN_MEMBER_CACHE[key] = (now_mono + ttl, result)
+    return result
 
 
 async def _refresh_admin_guilds(request: web.Request, dashboard, session: dict) -> bool:
-    """Reconstruit les accès depuis Discord au lieu de garder le snapshot OAuth du login.
+    """Rafraîchit uniquement les serveurs plausibles, pas tous les serveurs du bot.
 
-    Ce contrôle s'exécute sur chaque requête ``/api/*``. Avant : il parcourait TOUS les
-    serveurs du bot et appelait ``_administrator_member`` pour chacun — donc un
-    ``guild.fetch_member`` REST Discord pour chaque serveur où l'utilisateur n'est PAS
-    membre, à chaque requête. Mesuré en production (20 serveurs) : 2 à 3,6 s par appel
-    d'API, 8,2 s pour ``/api/guilds``, et des 404 « accès refusé » sporadiques quand le
-    rate-limit Discord faisait échouer le ``fetch_member`` du serveur réellement demandé.
-    Deux corrections : un résultat récent (30 s) est réutilisé, et l'énumération ne fait
-    plus d'appel REST pour un serveur dont le cache membres est complet (``guild.chunked``).
+    La liste OAuth d'origine indique les serveurs où le compte était Administrateur au login.
+    On y ajoute seulement les serveurs où le membre est déjà présent dans le cache gateway,
+    ce qui permet de détecter une permission ajoutée sans lancer de scan REST global. Chaque
+    candidat installé passe ensuite par le cache de vérification ciblé ci-dessus.
     """
     bot = request.app["bot"]
     try:
@@ -84,38 +141,40 @@ async def _refresh_admin_guilds(request: web.Request, dashboard, session: dict) 
     if isinstance(verified_at, (int, float)) and 0 <= time.time() - float(verified_at) < ADMIN_REFRESH_TTL_SECONDS:
         return bool(session.get("guilds"))
 
+    oauth_candidates = _oauth_admin_candidates(session)
     previous_by_id: dict[int, dict] = {}
-    oauth_only: list[dict] = []
-    for item in list(session.get("guilds", [])):
+    ordered_ids: list[int] = []
+    for item in [*oauth_candidates, *list(session.get("guilds", []))]:
         try:
             guild_id = int(item["id"])
         except (KeyError, TypeError, ValueError):
             continue
-        previous_by_id[guild_id] = item
-        if bot.get_guild(guild_id) is None:
-            oauth_only.append(item)
+        previous_by_id.setdefault(guild_id, item)
+        if guild_id not in ordered_ids:
+            ordered_ids.append(guild_id)
+
+    # Une permission admin accordée depuis le login doit aussi pouvoir apparaître. On ne
+    # sonde aucun serveur arbitraire : seuls les membres déjà présents en cache sont ajoutés.
+    for guild in list(bot.guilds):
+        member = guild.get_member(user_id)
+        if member is not None and member.guild_permissions.administrator:
+            previous_by_id.setdefault(guild.id, _installed_item(guild, user_id))
+            if guild.id not in ordered_ids:
+                ordered_ids.append(guild.id)
 
     verified: list[dict] = []
-    seen: set[int] = set()
-    for guild in list(bot.guilds):
-        # Cache membres complet (intent members + chunking au démarrage) : une absence du
-        # cache signifie « pas membre », inutile d'interroger Discord. Un serveur pas encore
-        # chunké garde l'ancien chemin (fetch_member) pour ne rien refuser à tort.
-        if guild.get_member(user_id) is None and getattr(guild, "chunked", False):
+    for guild_id in ordered_ids:
+        previous = previous_by_id[guild_id]
+        guild = bot.get_guild(guild_id)
+        if guild is None:
+            # SentriX n'est pas installé sur ce serveur OAuth : on le garde pour le bouton
+            # d'invitation, exactement comme le dashboard historique.
+            if any(str(item.get("id")) == str(guild_id) for item in oauth_candidates):
+                verified.append(previous)
             continue
         if await dashboard._administrator_member(guild, user_id) is None:
             continue
-        verified.append(_installed_item(guild, user_id, previous_by_id.get(guild.id)))
-        seen.add(guild.id)
-
-    for item in oauth_only:
-        try:
-            guild_id = int(item["id"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if guild_id not in seen:
-            verified.append(item)
-            seen.add(guild_id)
+        verified.append(_installed_item(guild, user_id, previous))
 
     session["guilds"] = verified
     session[_REFRESH_STAMP_KEY] = time.time()
@@ -148,6 +207,11 @@ def install(dashboard) -> None:
     if _INSTALLED:
         return
     _INSTALLED = True
+
+    # Toutes les routes canoniques (_manageable_guild, /api/guilds, sanctions, logs, etc.)
+    # utilisent le même verdict pendant 30 s. On évite ainsi le cas observé où la fiche du
+    # serveur charge, puis la page Modération reçoit immédiatement un deuxième faux 404.
+    dashboard._administrator_member = _administrator_member_cached
 
     original_build_app = dashboard.build_app
 
@@ -228,4 +292,4 @@ def install(dashboard) -> None:
         return app
 
     dashboard.build_app = build_app
-    logger.info("Dashboard verrouillé : Administrateur requis, avec zone propriétaire séparée.")
+    logger.info("Dashboard verrouillé : Administrateur requis, vérification ciblée et cache cohérent 30 s.")
