@@ -78,17 +78,21 @@ def test_v21_uses_one_canonical_v18_finalizer():
     assert "if not product_ui_v18_ok:" in source
 
 
-def test_v21_v8_is_the_only_boot_level_dashboard_finalizer():
+def test_v21_has_one_boot_level_dashboard_finalizer_in_shared_bootstrap():
     verification = Path("sentrix_verification_v96_finalizer.py").read_text(encoding="utf-8")
+    shared = Path("railway_ha_product_boot.py").read_text(encoding="utf-8")
     primary_v8 = Path("railway_ha_product_boot_v8.py").read_text(encoding="utf-8")
     standby_v8 = Path("sentrix_v98_ha_product_boot_v8.py").read_text(encoding="utf-8")
 
     assert "sentrix_dashboard_finalizer_v7" not in verification
     assert "install_dashboard_v7()" not in verification
-    assert primary_v8.count("install_dashboard_v7()") == 1
-    assert standby_v8.count("install_dashboard_v7()") == 1
-    assert "after legacy V55 freeze" in primary_v8
-    assert "after legacy V55 freeze" in standby_v8
+    assert shared.count("install_dashboard_v7()") == 1
+    assert "_install_v97_dashboard(dashboard_web)" in shared
+    assert shared.index("_install_v97_dashboard(dashboard_web)") < shared.index("install_dashboard_v7()")
+    assert "install_dashboard_v7" not in primary_v8
+    assert "install_dashboard_v7" not in standby_v8
+    assert "_finish_with_dashboard_v8" not in primary_v8
+    assert "_finish_with_dashboard_v8" not in standby_v8
 
 
 def test_v21_growth_routes_exist_before_product_boot_captures_build_app():
