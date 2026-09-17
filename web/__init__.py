@@ -135,9 +135,8 @@ _CORE_RECOVERY_JS = r"""
   // en parallèle du propre mécanisme de nouvelle tentative de loadGuilds() (voir
   // dashboard_recovery_v54.py, qui se replanifie lui-même quand discord_ready=false),
   // sans coordination entre les deux. Deux déclencheurs indépendants pour le même appel
-  // /api/guilds pouvaient se chevaucher — exactement le genre d'appel en double observé
-  // dans les journaux Railway. Ce script se limite maintenant au statut/bouton visibles
-  // ici, qui ne dépendent d'aucune autre couche.
+  // /api/guilds pouvaient se chevaucher. Ce script ne vérifie que le statut global et doit
+  // s'arrêter dès que le runtime ET OAuth sont prêts.
   let attempts = 0;
   let delai = 2000;
   let timer = null;
@@ -161,23 +160,22 @@ _CORE_RECOVERY_JS = r"""
         login.title = data.oauth_ready ? "Se connecter avec Discord" : "SentriX termine son démarrage — réessayez dans quelques secondes";
       }
 
-      if (data.online && data.oauth_ready && attempts >= 6) arreter();
+      if (data.online && data.oauth_ready) { arreter(); return; }
     } catch (_) {
       // Le script principal affiche déjà les erreurs réseau. Ce polling reste silencieux.
     }
     if (attempts >= 90) arreter();
   };
 
-  // Ce sondage attend que le bot passe « online ». Quand il ne l'est pas — ce qui
-  // arrive pendant un redéploiement — la condition d'arrêt n'est jamais atteinte et
-  // l'ancienne cadence fixe de 2 s tapait /api/public 90 fois par chargement de page,
-  // sur chaque onglet ouvert. On espace progressivement et on ne sonde pas un onglet
-  // que personne ne regarde.
+  // Ce sondage n'existe que pour la courte phase de redéploiement/reconnexion. Il utilise
+  // un backoff, ignore les onglets cachés et ne programme jamais un nouveau tour une fois
+  // que SentriX est sain. Ainsi un dashboard déjà opérationnel ne charge plus « en boucle ».
   const planifier = () => {
     if (arrete) return;
     timer = setTimeout(async () => {
       if (document.hidden) { planifier(); return; }
       await refreshRuntime();
+      if (arrete) return;
       delai = Math.min(delai * 1.6, 30000);
       planifier();
     }, delai);
