@@ -2,15 +2,13 @@ from __future__ import annotations
 
 from web.dashboard_frontend_freeze_v55 import (
     _enhance_unified_product_ux,
-    _LOADING_UX_CSS_MARKER,
-    _LOADING_UX_HTML_MARKER,
     _UNIFIED_PRODUCT_UX_MARKER,
 )
 
 
 def _document() -> str:
     return '''<!doctype html><html><head></head><body>
-<div id="sentrix-dashboard-unified-v2"></div>
+<script id="sentrix-dashboard-unified-v2"></script>
 <div id="content"></div>
 <div id="runtimeDot"></div><span id="runtimeText"></span>
 <div id="navigation"></div><input id="paletteInput"><div id="paletteResults"></div>
@@ -26,43 +24,35 @@ fetch('/api/me');fetch('/api/guilds');
 </body></html>'''
 
 
-def test_loading_experience_is_injected_once():
+def test_product_ux_is_injected_once_without_loading_overlay():
     html = _enhance_unified_product_ux(_document())
-    assert html.count(_LOADING_UX_CSS_MARKER) == 1
-    assert html.count(_LOADING_UX_HTML_MARKER) == 1
     assert html.count(_UNIFIED_PRODUCT_UX_MARKER) == 1
+    for forbidden in (
+        'sxLoadingExperience',
+        'sentrix-loading-experience-css',
+        'sentrixLoadingFetch',
+        'LONG_WAIT_MS',
+        'RETRY_WAIT_MS',
+    ):
+        assert forbidden not in html
 
     html2 = _enhance_unified_product_ux(html)
     assert html2 == html
 
 
-def test_loading_experience_has_real_stages_and_retry():
+def test_product_ux_keeps_navigation_safety_and_accessibility():
     html = _enhance_unified_product_ux(_document())
-    for label in (
-        'Vérification de ta session',
-        'Synchronisation avec Discord',
-        'Chargement de tes serveurs',
-        'Préparation du serveur',
-        'Ça prend plus longtemps que prévu',
-        'Réessayer',
-        'Hors ligne',
-    ):
-        assert label in html
-    assert 'aria-live="polite"' in html
-    assert 'prefers-reduced-motion:reduce' in html
+    assert 'confirmNavigation' in html
+    assert 'syncNavigationA11y' in html
+    assert 'aria-current' in html
+    assert 'paletteInput' in html
+    assert 'globalSearch' in html
 
 
-def test_loading_experience_does_not_use_fake_percentages():
+def test_product_ux_does_not_wrap_or_intercept_fetch():
     html = _enhance_unified_product_ux(_document())
-    assert 'fake-progress' not in html
-    assert 'data-percent' not in html
-
-
-def test_loader_tracks_dashboard_api_calls_and_timeouts():
-    html = _enhance_unified_product_ux(_document())
-    assert 'window.fetch = async function sentrixLoadingFetch' in html
-    assert 'path==="/api/me"' in html
-    assert 'path==="/api/guilds"' in html
-    assert 'LONG_WAIT_MS' in html
-    assert 'RETRY_WAIT_MS' in html
-    assert 'AbortError' in html
+    assert 'window.fetch =' not in html
+    assert 'sentrixLoadingFetch' not in html
+    # Les appels API du document source restent présents : seul le wrapper visuel bloquant disparaît.
+    assert "fetch('/api/me')" in html
+    assert "fetch('/api/guilds')" in html
