@@ -52,7 +52,7 @@ function ensureCaptcha(){
 }
 // Seul déclencheur : le contenu change (changement d'onglet). ensureCaptcha est idempotent,
 // ne déclenche aucun fetch et n'écrit rien en dehors de son propre encart.
-const content=$("content");if(content)new MutationObserver(()=>queueMicrotask(ensureCaptcha)).observe(content,{childList:true});
+const content=$("content");if(content)new MutationObserver(()=>queueMicrotask(ensureCaptcha)).observe(content,{childList:true,subtree:true});
 ensureCaptcha();
 })();
 </script>

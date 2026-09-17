@@ -173,9 +173,19 @@ def _require_csrf(request: web.Request, session: dict) -> web.Response | None:
 
 
 async def _administrator_member(guild: discord.Guild, user_id: int) -> discord.Member | None:
-    """Vérifie les permissions actuelles, sans se fier uniquement à la session OAuth."""
+    """Vérifie les permissions actuelles, sans se fier uniquement à la session OAuth.
+
+    Le cache membres est autoritaire dès que le serveur est chunké (intent ``members`` +
+    chunking au démarrage) : une absence signifie « pas membre » et ne justifie pas un
+    appel REST. ``fetch_member`` ne sert plus que pour un serveur pas encore chunké. Avant,
+    chaque appel d'API du dashboard finissait par un ``fetch_member`` REST — soumis au
+    rate-limit Discord, il pouvait échouer et transformer un membre Administrateur bien
+    réel en « accès refusé » (404) sur la route demandée.
+    """
     member = guild.get_member(user_id)
     if member is None:
+        if getattr(guild, "chunked", False):
+            return None
         try:
             member = await guild.fetch_member(user_id)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from aiohttp import web
 
@@ -52,13 +53,36 @@ def _installed_item(guild, user_id: int, previous: dict | None = None) -> dict:
     }
 
 
+# Fenêtre pendant laquelle une vérification réussie reste valable pour la même session.
+# 30 s = la cadence de re-vérification déjà retenue par le flux live du dashboard
+# (dashboard_v60_diagnostics.handle_live_stream) : une révocation d'Administrateur est
+# donc détectée dans le même délai qu'avant, sans refaire le tour des serveurs à chaque
+# requête.
+ADMIN_REFRESH_TTL_SECONDS = 30.0
+_REFRESH_STAMP_KEY = "_admin_guilds_verified_at"
+
+
 async def _refresh_admin_guilds(request: web.Request, dashboard, session: dict) -> bool:
-    """Reconstruit les accès depuis Discord au lieu de garder le snapshot OAuth du login."""
+    """Reconstruit les accès depuis Discord au lieu de garder le snapshot OAuth du login.
+
+    Ce contrôle s'exécute sur chaque requête ``/api/*``. Avant : il parcourait TOUS les
+    serveurs du bot et appelait ``_administrator_member`` pour chacun — donc un
+    ``guild.fetch_member`` REST Discord pour chaque serveur où l'utilisateur n'est PAS
+    membre, à chaque requête. Mesuré en production (20 serveurs) : 2 à 3,6 s par appel
+    d'API, 8,2 s pour ``/api/guilds``, et des 404 « accès refusé » sporadiques quand le
+    rate-limit Discord faisait échouer le ``fetch_member`` du serveur réellement demandé.
+    Deux corrections : un résultat récent (30 s) est réutilisé, et l'énumération ne fait
+    plus d'appel REST pour un serveur dont le cache membres est complet (``guild.chunked``).
+    """
     bot = request.app["bot"]
     try:
         user_id = int(session["user"]["id"])
     except (KeyError, TypeError, ValueError):
         return False
+
+    verified_at = session.get(_REFRESH_STAMP_KEY)
+    if isinstance(verified_at, (int, float)) and 0 <= time.time() - float(verified_at) < ADMIN_REFRESH_TTL_SECONDS:
+        return bool(session.get("guilds"))
 
     previous_by_id: dict[int, dict] = {}
     oauth_only: list[dict] = []
@@ -74,6 +98,11 @@ async def _refresh_admin_guilds(request: web.Request, dashboard, session: dict) 
     verified: list[dict] = []
     seen: set[int] = set()
     for guild in list(bot.guilds):
+        # Cache membres complet (intent members + chunking au démarrage) : une absence du
+        # cache signifie « pas membre », inutile d'interroger Discord. Un serveur pas encore
+        # chunké garde l'ancien chemin (fetch_member) pour ne rien refuser à tort.
+        if guild.get_member(user_id) is None and getattr(guild, "chunked", False):
+            continue
         if await dashboard._administrator_member(guild, user_id) is None:
             continue
         verified.append(_installed_item(guild, user_id, previous_by_id.get(guild.id)))
@@ -89,6 +118,7 @@ async def _refresh_admin_guilds(request: web.Request, dashboard, session: dict) 
             seen.add(guild_id)
 
     session["guilds"] = verified
+    session[_REFRESH_STAMP_KEY] = time.time()
     return bool(verified)
 
 
