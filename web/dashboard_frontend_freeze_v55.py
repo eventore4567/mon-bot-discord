@@ -74,6 +74,19 @@ _UNIFIED_PRODUCT_UX = r'''
     syncNavigationA11y();
   }
 
+  // L'état réseau reste visible sans créer d'overlay ni remplacer le fetch natif. Lors du
+  // retour en ligne on déclenche le mécanisme de récupération borné déjà fourni par le
+  // frontend, qui remet ensuite l'état Discord réel dans runtimeText.
+  window.addEventListener("offline", () => {
+    const text = byId("runtimeText");
+    if (text) text.textContent = "Hors ligne";
+  });
+  window.addEventListener("online", () => {
+    const text = byId("runtimeText");
+    if (text) text.textContent = "Reconnexion…";
+    window.dispatchEvent(new Event("sentrix:recovery-needed"));
+  });
+
   const paletteInput = byId("paletteInput");
   const paletteResults = byId("paletteResults");
   const paletteItems = () => [...document.querySelectorAll("#paletteResults [data-palette-tab]")];
