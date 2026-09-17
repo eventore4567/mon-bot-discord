@@ -1,4 +1,4 @@
-"""Gate V98/V99 : arborescence slash sémantique et entrypoint Railway HA."""
+"""Gate V98/V99 : arborescence slash sémantique et bootstrap Railway HA canonique."""
 from __future__ import annotations
 
 import sys
@@ -93,14 +93,8 @@ def main() -> int:
     if any(" page-" in path for path in report):
         fail("un chemin page-N subsiste dans le rapport", errors)
 
-    ha_source = Path("sentrix_v98_ha_product_boot.py").read_text(encoding="utf-8")
-    if "import railway_ha_product_boot as product_boot" not in ha_source:
-        fail("entrypoint V98 HA ne délègue pas au bootstrap produit existant", errors)
-    if "install_v98()" not in ha_source:
-        fail("entrypoint V98 HA n'installe pas la surface V98", errors)
-    if "product_boot.ha_boot.run()" not in ha_source:
-        fail("entrypoint V98 HA ne relance pas le moteur HA historique", errors)
-
+    # Un seul bootstrap produit HA reste autoritaire. Les anciens wrappers V98 ne doivent
+    # plus revenir dans le dépôt ni dans le Procfile.
     product_source = Path("railway_ha_product_boot.py").read_text(encoding="utf-8")
     if "from sentrix_v98_slash import install as _install_v98_grouped_slash" not in product_source:
         fail("bootstrap Railway HA produit n'importe pas explicitement V98", errors)
@@ -113,6 +107,17 @@ def main() -> int:
     if product_source.find("_install_v99_grouped_transport()") > product_source.find("_install_v98_grouped_slash()"):
         fail("transport V99 doit être installé avant la surface V98 dans le bootstrap produit", errors)
 
+    procfile = Path("Procfile").read_text(encoding="utf-8").strip()
+    if procfile != "web: python3 railway_ha_product_boot_v8.py":
+        fail(f"Procfile non canonique: {procfile!r}", errors)
+    for obsolete in (
+        "sentrix_v98_boot.py",
+        "sentrix_v98_ha_product_boot.py",
+        "sentrix_v98_ha_product_boot_v8.py",
+    ):
+        if Path(obsolete).exists():
+            fail(f"ancien entrypoint encore présent: {obsolete}", errors)
+
     if errors:
         for error in errors:
             print("[ERROR]", error)
@@ -120,8 +125,8 @@ def main() -> int:
         return 1
 
     print(
-        "OK V98/V99: racines normalisées, sous-groupes sémantiques, "
-        "aucun page-N, budget <=25, vrai bootstrap Railway HA verrouillé avec transport V99"
+        "OK V98/V99: racines normalisées, sous-groupes sémantiques, aucun page-N, "
+        "budget <=25 et bootstrap Railway HA canonique unique"
     )
     return 0
 
