@@ -35,6 +35,91 @@ REQUIRED_MARKERS = (
     'id="sentrix-dashboard-motion-audio-v27"',
 )
 
+_BACKGROUND_LOADING_GUARD_MARKER = 'id="sentrix-background-loading-guard-v3"'
+_BACKGROUND_LOADING_GUARD = r'''
+<style id="sentrix-background-loading-guard-v3">
+  html.sx-background-fetch #sentrix-progress{
+    opacity:0!important;
+    transition:none!important;
+  }
+</style>
+<script id="sentrix-background-loading-guard-v3-js">
+(() => {
+  "use strict";
+  if (window.__sentrixBackgroundLoadingGuardV3) return;
+  window.__sentrixBackgroundLoadingGuardV3 = true;
+
+  const previousFetch = window.fetch.bind(window);
+  let silentInFlight = 0;
+  let releaseTimer = null;
+
+  const isSilentBackgroundRequest = (input, init = {}) => {
+    const method = String(init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+    if (method !== "GET") return false;
+    let url;
+    try {
+      url = new URL(typeof input === "string" ? input : input?.url || "", location.href);
+    } catch (_) {
+      return false;
+    }
+    if (url.origin !== location.origin) return false;
+    const path = url.pathname;
+    return path === "/api/public" || path === "/health" || path.includes("/live/");
+  };
+
+  const acquireSilent = () => {
+    silentInFlight += 1;
+    if (releaseTimer) {
+      clearTimeout(releaseTimer);
+      releaseTimer = null;
+    }
+    document.documentElement.classList.add("sx-background-fetch");
+  };
+
+  const releaseSilent = () => {
+    silentInFlight = Math.max(0, silentInFlight - 1);
+    if (silentInFlight) return;
+    // Les anciennes barres de progression terminent leur animation ~180 ms après fetch.
+    // On garde donc le masque un peu plus longtemps pour éviter le flash à 100 %.
+    releaseTimer = setTimeout(() => {
+      if (!silentInFlight) document.documentElement.classList.remove("sx-background-fetch");
+      releaseTimer = null;
+    }, 260);
+  };
+
+  window.fetch = async function sentrixBackgroundAwareFetch(input, init = {}) {
+    const silent = isSilentBackgroundRequest(input, init);
+    if (silent) acquireSilent();
+    try {
+      return await previousFetch(input, init);
+    } finally {
+      if (silent) releaseSilent();
+    }
+  };
+})();
+</script>
+'''
+
+
+def _stabilize_background_loading(html: str) -> str:
+    """Empêche la télémétrie de ressembler à un nouveau chargement de page.
+
+    Le frontend V2 relançait ``/api/public`` toutes les 30 secondes. En parallèle, des
+    couches UX historiques affichent une barre de progression pour *chaque* ``fetch``.
+    Résultat : même sans navigation ni action utilisateur, le dashboard semblait recharger
+    en boucle. Le statut public reste rafraîchi quand l'onglet redevient visible et les
+    appels réellement live continuent en arrière-plan, mais sans animation de chargement.
+    """
+    html = str(html or "")
+    html = html.replace(
+        "loadPublic();setInterval(loadPublic,30000);await loadSession()",
+        "loadPublic();document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadPublic()});await loadSession()",
+        1,
+    )
+    if _BACKGROUND_LOADING_GUARD_MARKER not in html and "</body>" in html:
+        html = html.replace("</body>", _BACKGROUND_LOADING_GUARD + "\n</body>", 1)
+    return html
+
 
 def install() -> bool:
     from web import dashboard
@@ -136,6 +221,12 @@ def install() -> bool:
     if not dashboard_motion_audio_v27.install(dashboard):
         raise RuntimeError("Dashboard Motion + Audio V27 could not be finalized")
 
+    # Dernière autorité visuelle : les sondages de télémétrie restent silencieux et le
+    # rafraîchissement public périodique n'est plus assimilé à une nouvelle navigation.
+    dashboard.INDEX_HTML = _stabilize_background_loading(
+        str(getattr(dashboard, "INDEX_HTML", "") or "")
+    )
+
     final_html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in final_html]
     if missing:
@@ -188,6 +279,10 @@ def install() -> bool:
         raise RuntimeError("Visible Motion V26 markers are missing from the final dashboard response")
     if not motion_audio_v27:
         raise RuntimeError("Motion + Audio V27 markers are missing from the final dashboard response")
+    if _BACKGROUND_LOADING_GUARD_MARKER not in final_html:
+        raise RuntimeError("Background loading guard V3 is missing from the final dashboard response")
+    if "setInterval(loadPublic,30000)" in final_html:
+        raise RuntimeError("Legacy 30s public polling is still present in the final dashboard response")
 
     logger.warning(
         "Dashboard V7 final authority active after legacy freeze: stable V16 + advanced product layer + V23 visual finish + V24 buttons + V25 motion + V26 visible motion + V27 real motion/audio "
@@ -215,4 +310,4 @@ def install() -> bool:
     return True
 
 
-__all__ = ["install", "REQUIRED_MARKERS"]
+__all__ = ["install", "REQUIRED_MARKERS", "_stabilize_background_loading"]
