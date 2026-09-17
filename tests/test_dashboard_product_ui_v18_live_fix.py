@@ -159,3 +159,10 @@ def test_v21_final_polish_covers_keyboard_mobile_and_accessible_live_state():
     assert 'runtimeText.setAttribute("aria-live", "assertive")' in script
     assert 'loadBar.setAttribute("aria-hidden", "true")' in script
     assert 'paletteResults.setAttribute("aria-live", "polite")' in script
+
+
+def test_v19_live_metrics_backend_route_exists():
+    source = Path("web/dashboard_product_v18.py").read_text(encoding="utf-8")
+    assert 'app.router.add_get("/api/guilds/{guild_id}/live/metrics", live_metrics)' in source
+    for key in ("members", "commands_24h", "open_tickets", "warnings", "online", "latency_ms", "sanctions_revision"):
+        assert f'"{key}"' in source
