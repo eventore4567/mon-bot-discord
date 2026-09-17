@@ -134,8 +134,8 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
     document.body.dataset.sxSanctionsRevision = String(data.sanctions_revision || 0);
     document.dispatchEvent(new CustomEvent("sentrix:live", {detail:data}));
   };
-  // Métriques temps réel par polling espacé. L'ancien flux SSE (`EventSource` sur
-  // /live/stream) restait ouvert en permanence : WebKit (Safari) garde alors la barre de
+  // Métriques temps réel par polling espacé. L'ancien flux SSE (EventSource sur la route
+  // stream) restait ouvert en permanence : WebKit (Safari) garde alors la barre de
   // chargement de la page active indéfiniment, et le flux était rouvert à chaque mutation
   // du rail des serveurs. Un instantané JSON toutes les 20 s suffit aux quatre KPI et au
   // badge de statut, ne laisse aucune requête ouverte, et ne passe pas par les endpoints
