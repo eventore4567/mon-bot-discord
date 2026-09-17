@@ -108,9 +108,10 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
 
   // Live V19: the server keeps authorization and database reads authoritative. The browser
   // only reflects the authenticated SSE payload into the existing KPI/runtime elements.
-  let liveSource = null;
   let liveGuild = "";
-  let liveReconnect = null;
+  let liveTimer = null;
+  let liveInFlight = false;
+  const LIVE_INTERVAL_MS = 20000;
   const fmt = value => Number(value || 0).toLocaleString("fr-FR");
   const currentGuild = () => document.querySelector('.guild-btn.active[data-guild]')?.dataset.guild || "";
   const setText = (id, value) => {
@@ -130,74 +131,58 @@ _POLISH_JS = r'''<script id="sentrix-dashboard-v19-polish-js">
       runtimeText.textContent = data.online ? `En ligne · ${data.latency_ms ?? "—"} ms` : "Hors ligne";
     }
 
-    const kpiValues = {
-      "Membres": data.members,
-      "Commandes 24 h": data.commands_24h,
-      "Tickets ouverts": data.open_tickets,
-      "Avertissements": data.warnings
-    };
-    document.querySelectorAll("#sxUnifiedKpisV9 .sxv9-kpi").forEach(card => {
-      const label = card.querySelector("span")?.textContent?.trim();
-      if (!(label in kpiValues)) return;
-      const target = card.querySelector("strong");
-      if (target) target.textContent = fmt(kpiValues[label]);
-    });
     document.body.dataset.sxSanctionsRevision = String(data.sanctions_revision || 0);
     document.dispatchEvent(new CustomEvent("sentrix:live", {detail:data}));
   };
-  const closeLive = () => {
-    clearTimeout(liveReconnect);
-    liveReconnect = null;
-    if (liveSource) liveSource.close();
-    liveSource = null;
-  };
-  const connectLive = () => {
+  // Métriques temps réel par polling espacé. L'ancien flux SSE (EventSource sur la route
+  // stream) restait ouvert en permanence : WebKit (Safari) garde alors la barre de
+  // chargement de la page active indéfiniment, et le flux était rouvert à chaque mutation
+  // du rail des serveurs. Un instantané JSON toutes les 20 s suffit aux quatre KPI et au
+  // badge de statut, ne laisse aucune requête ouverte, et ne passe pas par les endpoints
+  // de boot (/api/me, /api/guilds, /api/guilds/<id>) que l'overlay de chargement intercepte.
+  const stopLive = () => { clearInterval(liveTimer); liveTimer = null; };
+  const pollLive = async () => {
     const guildId = currentGuild();
-    if (document.hidden || !guildId) {
-      closeLive();
-      liveGuild = guildId;
-      return;
+    if (!guildId || document.hidden || liveInFlight) return;
+    liveInFlight = true;
+    try {
+      const response = await fetch(`/api/guilds/${encodeURIComponent(guildId)}/live/metrics`, {credentials:"same-origin", cache:"no-store"});
+      if (response.status === 403 || response.status === 404) {
+        stopLive();
+        const runtimeText = document.getElementById("runtimeText");
+        if (runtimeText) {
+          runtimeText.setAttribute("aria-live", "assertive");
+          runtimeText.textContent = "Accès serveur retiré";
+        }
+        return;
+      }
+      if (!response.ok) return;
+      applyLiveMetrics(await response.json());
+    } catch (_) {
+      // réseau indisponible : le prochain tick réessaiera, sans reconnexion agressive
+    } finally {
+      liveInFlight = false;
     }
-    if (liveSource && liveGuild === guildId && liveSource.readyState !== EventSource.CLOSED) return;
-    closeLive();
-    liveGuild = guildId;
-    const source = new EventSource(`/api/guilds/${encodeURIComponent(guildId)}/live/stream`, {withCredentials:true});
-    liveSource = source;
-    source.addEventListener("metrics", event => {
-      try { applyLiveMetrics(JSON.parse(event.data || "{}")); } catch (_) {}
-    });
-    source.addEventListener("access", () => {
-      closeLive();
-      const runtimeText = document.getElementById("runtimeText");
-      if (runtimeText) {
-        runtimeText.setAttribute("aria-live", "assertive");
-        runtimeText.textContent = "Accès serveur retiré";
-      }
-    });
-    source.onerror = () => {
-      if (source !== liveSource || document.hidden) return;
-      if (source.readyState === EventSource.CLOSED) {
-        closeLive();
-        liveReconnect = setTimeout(connectLive, 2200);
-      }
-    };
   };
-  const serverRail = document.getElementById("serverRail");
-  if (serverRail) new MutationObserver(() => {
-    clearTimeout(liveReconnect);
-    liveReconnect = setTimeout(connectLive, 120);
-  }).observe(serverRail, {childList:true, subtree:true, attributes:true, attributeFilter:["class"]});
+  const startLive = () => {
+    const guildId = currentGuild();
+    if (document.hidden || !guildId) { stopLive(); liveGuild = guildId; return; }
+    if (liveTimer && liveGuild === guildId) return;
+    stopLive();
+    liveGuild = guildId;
+    pollLive();
+    liveTimer = setInterval(pollLive, LIVE_INTERVAL_MS);
+  };
   document.addEventListener("click", event => {
     if (!event.target.closest("[data-guild]")) return;
-    clearTimeout(liveReconnect);
-    liveReconnect = setTimeout(connectLive, 180);
+    setTimeout(startLive, 250);
   }, true);
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) closeLive();
-    else liveReconnect = setTimeout(connectLive, 120);
+    if (document.hidden) stopLive();
+    else startLive();
   });
-  window.addEventListener("beforeunload", closeLive);
-  liveReconnect = setTimeout(connectLive, 800);
+  window.addEventListener("beforeunload", stopLive);
+  setTimeout(startLive, 800);
 
   const loadBar = document.createElement("div");
   loadBar.className = "sx19-loading-bar";

@@ -31,6 +31,11 @@ STYLE = f'''<style id="{STYLE_MARKER}">
   transition:background var(--sx24-fast) ease,border-color var(--sx24-fast) ease,color var(--sx24-fast) ease,
              box-shadow var(--sx24-fast) ease,transform 90ms ease,opacity var(--sx24-fast) ease;
 }}
+/* Les entrées du menu latéral sont marquées data-sx24-intent="ghost" par le JS ci-dessous et
+   héritaient donc du justify-content:center des boutons génériques : dans un bouton de 238 px,
+   « Niveaux » ou « Logs » paraissaient décalés. Un menu se lit aligné à gauche : on restaure la
+   composition native de .nav button (gauche, compact) sans toucher aux autres boutons. */
+.nav button[data-sx24-intent]{{justify-content:flex-start;text-align:left;padding:0 10px;min-height:36px}}
 :where(.btn,button[data-sx24-intent],.p18-tab,[data-sx12-tab],[data-sx12-go],[data-p18-tab],[data-p18-go],[data-page]):focus-visible{{
   outline:2px solid var(--sx24-focus)!important;outline-offset:2px;box-shadow:0 0 0 4px rgba(120,185,237,.16),0 7px 18px rgba(0,0,0,.16)!important;
 }}

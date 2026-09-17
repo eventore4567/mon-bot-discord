@@ -368,12 +368,34 @@ def install(dashboard) -> bool:
                 pass
         return response
 
+    async def handle_live_metrics(request: web.Request) -> web.Response:
+        """Instantané JSON unique des mêmes métriques que le flux SSE.
+
+        Le dashboard interrogeait le flux ``/live/stream`` via un ``EventSource`` gardé
+        ouvert en permanence : WebKit (Safari) laisse alors la barre de chargement de la
+        page active indéfiniment, et le client rouvrait le flux à chaque mutation du rail
+        des serveurs. Le frontend interroge désormais cet instantané par polling espacé ;
+        le flux SSE reste disponible pour les clients qui l'utilisent encore.
+        """
+        try:
+            guild_id = int(request.match_info["guild_id"])
+        except (TypeError, ValueError):
+            return dashboard._json_error("Identifiant de serveur invalide.", 400)
+        _session, guild, error = await dashboard._manageable_guild(request, guild_id)
+        if error:
+            return error
+        metrics = await _live_metrics(dashboard, request.app["bot"], guild)
+        response = web.json_response(metrics)
+        response.headers["Cache-Control"] = "private, no-store, no-cache, must-revalidate, max-age=0"
+        return response
+
     original_build_app = dashboard.build_app
 
     def build_app(bot) -> web.Application:
         app = original_build_app(bot)
         app.router.add_get("/api/guilds/{guild_id}/diagnostics", handle_diagnostics)
         app.router.add_get("/api/guilds/{guild_id}/live/stream", handle_live_stream)
+        app.router.add_get("/api/guilds/{guild_id}/live/metrics", handle_live_metrics)
         return app
 
     dashboard.build_app = build_app

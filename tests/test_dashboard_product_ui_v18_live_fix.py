@@ -40,10 +40,14 @@ def test_v18_live_fix_patches_real_v15_v16_shape():
     assert "sx19-command-overlay" not in patched
     assert "sx19-command-hint" not in patched
 
-    # Live KPIs use one authenticated same-origin EventSource and update existing DOM.
-    assert "new EventSource(`/api/guilds/${encodeURIComponent(guildId)}/live/stream`" in patched
-    assert 'source.addEventListener("metrics"' in patched
-    assert 'source.addEventListener("access"' in patched
+    # Live KPIs : polling espacé d'un instantané JSON, jamais un EventSource permanent.
+    # Un flux SSE ouvert en continu gardait la barre de chargement de Safari active
+    # indéfiniment et était rouvert à chaque mutation du rail des serveurs.
+    assert "new EventSource(" not in patched
+    assert "/live/stream" not in patched
+    assert "/live/metrics" in patched
+    assert "const LIVE_INTERVAL_MS = 20000;" in patched
+    assert "if (document.hidden) stopLive();" in patched
     assert 'setText("metricTickets"' in patched
     assert 'setText("metricWarnings"' in patched
 
