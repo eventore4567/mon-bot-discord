@@ -153,5 +153,8 @@ def test_v21_final_polish_covers_keyboard_mobile_and_accessible_live_state():
     assert "prefers-reduced-motion:reduce" in style
     assert 'runtimeText.setAttribute("aria-live", "polite")' in script
     assert 'runtimeText.setAttribute("aria-live", "assertive")' in script
-    assert 'loadBar.setAttribute("aria-hidden", "true")' in script
+    # La fausse barre de chargement de 900 ms (.sx19-loading-bar) est retirée : elle ne
+    # reflétait aucun chargement réel et se superposait à celle de V26.
+    assert 'sx19-loading-bar' not in script
+    assert 'sx19-loading-bar' not in style
     assert 'paletteResults.setAttribute("aria-live", "polite")' in script

@@ -35,7 +35,9 @@ def test_v25_is_event_driven_and_covers_premium_motion_states():
     assert "animationend" in script
     assert "sentrix:live" in script
 
-    assert "#sx25Progress" in style
+    # Barre de progression en haut retirée (quatre couches en empilaient une chacune).
+    assert "#sx25Progress" not in style
+    assert 'String(Math.min(index, 8))' in script
     assert "sx25-page-in" in style
     assert "sx25-ripple" in style
     assert "sx25-card-in" in style

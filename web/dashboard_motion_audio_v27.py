@@ -16,13 +16,11 @@ JS_MARKER = "__sentrixDashboardMotionAudioV27"
 
 STYLE = f'''<style id="{STYLE_MARKER}">
 :root{{--sx27-blue:#60a5fa;--sx27-blue2:#2f87e5;--sx27-spring:cubic-bezier(.16,1,.3,1)}}
-#sx27Progress{{position:fixed;z-index:2147483600;left:0;top:0;width:100%;height:4px;opacity:0;pointer-events:none;transform:scaleX(0);transform-origin:left center;background:linear-gradient(90deg,#2777d8,#63b6ff 58%,#d5efff);box-shadow:0 0 20px rgba(96,165,250,.72);transition:transform 220ms cubic-bezier(.2,.8,.2,1),opacity 120ms ease}}
-#sx27Progress.show{{opacity:1}}
 #sx27Flash{{position:fixed;z-index:2147483500;inset:0;pointer-events:none;opacity:0;background:radial-gradient(circle at 52% 18%,rgba(74,158,239,.12),transparent 34%),rgba(2,6,10,.10)}}
 .sx27-ring{{position:absolute!important;z-index:8!important;left:50%;top:50%;width:18px;height:18px;border-radius:999px;pointer-events:none;border:1px solid rgba(255,255,255,.28);box-shadow:0 0 22px rgba(96,165,250,.45);transform:translate(-50%,-50%) scale(.25);opacity:0;animation:sx27-ring 440ms ease-out forwards!important}}
 @keyframes sx27-ring{{30%{{opacity:.58}}100%{{opacity:0;transform:translate(-50%,-50%) scale(4.8)}}}}
 body[data-sx27-transition="1"] #content{{transform-origin:50% 8%}}
-@media(prefers-reduced-motion:reduce){{#sx27Progress{{transition:none!important}}#sx27Flash,.sx27-ring{{display:none!important;animation:none!important}}}}
+@media(prefers-reduced-motion:reduce){{#sx27Flash,.sx27-ring{{display:none!important;animation:none!important}}}}
 </style>'''
 
 SCRIPT = r'''<script id="sentrix-dashboard-motion-audio-v27-js">
@@ -46,19 +44,16 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-audio-v27-js">
   let audioContext = null;
   let soundEnabled = localStorage.getItem("sentrix:ui-sound-v27") !== "0";
 
-  const progress = document.createElement("div");
-  progress.id = "sx27Progress";
-  progress.setAttribute("aria-hidden", "true");
-  document.body.appendChild(progress);
+  // Barre de progression fixée en haut retirée à la demande : quatre couches (V19, V25, V26,
+  // V27) empilaient chacune la leur, ce qui se lisait comme un chargement permanent.
   const flash = document.createElement("div");
   flash.id = "sx27Flash";
   flash.setAttribute("aria-hidden", "true");
   document.body.appendChild(flash);
 
-  const setProgress = value => progress.style.transform = `scaleX(${Math.max(0,Math.min(1,value))})`;
+  const setProgress = () => {};
   const startProgress = () => {
     clearTimeout(progressTimer);
-    progress.classList.add("show");
     setProgress(.06);
     requestAnimationFrame(() => setProgress(.38));
     progressTimer = setTimeout(() => setProgress(.72), 150);
@@ -67,7 +62,6 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-audio-v27-js">
     clearTimeout(progressTimer);
     setProgress(1);
     progressTimer = setTimeout(() => {
-      progress.classList.remove("show");
       setProgress(0);
     }, reduced() ? 0 : 220);
   };

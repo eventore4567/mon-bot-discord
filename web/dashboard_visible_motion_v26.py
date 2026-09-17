@@ -14,8 +14,6 @@ JS_MARKER = "__sentrixDashboardVisibleMotionV26"
 
 STYLE = f'''<style id="{STYLE_MARKER}">
 :root{{--sx26-fast:140ms;--sx26-page:340ms;--sx26-card:420ms;--sx26-ease:cubic-bezier(.2,.8,.2,1);--sx26-spring:cubic-bezier(.16,1,.3,1)}}
-#sx26Progress{{position:fixed;z-index:2147483000;left:0;top:0;width:100%;height:4px;opacity:0;pointer-events:none;transform:scaleX(0);transform-origin:left center;background:linear-gradient(90deg,#2563eb,#60a5fa 58%,#b8e0ff);box-shadow:0 0 18px rgba(96,165,250,.68);transition:transform 240ms var(--sx26-ease),opacity 120ms ease}}
-#sx26Progress.show{{opacity:1}}
 #sx26Shade{{position:fixed;z-index:2147482000;inset:0;pointer-events:none;opacity:0;background:radial-gradient(circle at 50% 10%,rgba(64,150,230,.08),transparent 35%),rgba(4,8,12,.13);backdrop-filter:blur(1px);transition:opacity 150ms ease}}
 body.sx26-loading #sx26Shade{{opacity:1}}
 #content.sx26-out{{opacity:.25!important;transform:translateY(10px) scale(.992)!important;filter:blur(1px);transition:opacity 120ms ease,transform 120ms ease,filter 120ms ease!important}}
@@ -43,7 +41,7 @@ body.sx26-loading #sx26Shade{{opacity:1}}
 @keyframes sx26-skeleton{{0%{{background-position:180% 0}}100%{{background-position:-80% 0}}}}
 .sx26-success{{animation:sx26-success 480ms var(--sx26-spring)!important}}
 @keyframes sx26-success{{0%{{transform:scale(.9);filter:brightness(1)}}45%{{transform:scale(1.08);filter:brightness(1.25)}}100%{{transform:none;filter:none}}}}
-@media(prefers-reduced-motion:reduce){{#sx26Progress,#sx26Shade,#content,.sx26-stagger,.sx26-row,.sx26-ripple,.sx26-active-pop,.sx26-toast,.sx26-dialog,.sx26-overlay,.sx26-success,:where(.sx12-skeleton,.skeleton,[data-skeleton]){{animation:none!important;transition:none!important;transform:none!important;filter:none!important}}#sx26Shade{{display:none!important}}}}
+@media(prefers-reduced-motion:reduce){{#sx26Shade,#content,.sx26-stagger,.sx26-row,.sx26-ripple,.sx26-active-pop,.sx26-toast,.sx26-dialog,.sx26-overlay,.sx26-success,:where(.sx12-skeleton,.skeleton,[data-skeleton]){{animation:none!important;transition:none!important;transform:none!important;filter:none!important}}#sx26Shade{{display:none!important}}}}
 </style>'''
 
 SCRIPT = r'''<script id="sentrix-dashboard-visible-motion-v26-js">
@@ -63,23 +61,21 @@ SCRIPT = r'''<script id="sentrix-dashboard-visible-motion-v26-js">
   let settleTimer = null;
   let lastSignature = "";
 
-  const progress = document.createElement("div");
-  progress.id = "sx26Progress";
-  progress.setAttribute("aria-hidden", "true");
-  document.body.appendChild(progress);
   const shade = document.createElement("div");
   shade.id = "sx26Shade";
   shade.setAttribute("aria-hidden", "true");
   document.body.appendChild(shade);
 
-  const setProgress = n => progress.style.transform = `scaleX(${Math.max(0,Math.min(1,n))})`;
+  // La barre de progression fixée en haut de page (#sx26Progress) est retirée à la demande :
+  // elle se superposait à celle de V18 et se lisait comme un chargement permanent. La transition
+  // du contenu (fondu sortie/entrée) reste le seul retour visuel de navigation.
+  const setProgress = () => {};
   const begin = () => {
     clearTimeout(timer);
     busy = true;
     document.body.classList.add("sx26-loading");
     content?.classList.remove("sx26-in");
     content?.classList.add("sx26-out");
-    progress.classList.add("show");
     setProgress(.1);
     requestAnimationFrame(() => setProgress(.42));
     timer = setTimeout(() => setProgress(.76), 180);
@@ -98,7 +94,6 @@ SCRIPT = r'''<script id="sentrix-dashboard-visible-motion-v26-js">
     }
     animateSurfaces();
     timer = setTimeout(() => {
-      progress.classList.remove("show");
       setProgress(0);
     }, reduced() ? 0 : 240);
   };
@@ -112,11 +107,11 @@ SCRIPT = r'''<script id="sentrix-dashboard-visible-motion-v26-js">
   const animateSurfaces = () => {
     if (!content || reduced()) return;
     [...content.querySelectorAll(surfaceSelector)].slice(0,30).forEach((node,index) => {
-      node.style.setProperty("--sx26-order", String(index));
+      node.style.setProperty("--sx26-order", String(Math.min(index, 8)));
       replay(node,"sx26-stagger");
     });
     [...content.querySelectorAll(rowSelector)].slice(0,36).forEach((node,index) => {
-      node.style.setProperty("--sx26-order", String(index));
+      node.style.setProperty("--sx26-order", String(Math.min(index, 8)));
       replay(node,"sx26-row");
     });
   };

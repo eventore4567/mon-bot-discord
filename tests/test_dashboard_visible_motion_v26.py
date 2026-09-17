@@ -36,14 +36,17 @@ def test_v26_is_clearly_visible_event_driven_and_accessible():
     assert "sentrix:live" in script
     assert "1200" in script
 
-    assert "#sx26Progress" in style
-    assert "height:4px" in style
+    # La barre de progression fixée en haut (#sx26Progress) est retirée : elle se superposait
+    # à celle de V18 et se lisait comme un chargement permanent. Le fondu du contenu reste.
+    assert "#sx26Progress" not in style
+    assert "sx26Progress" not in script.replace("(#sx26Progress)", "")
     assert "#sx26Shade" in style
     assert "translateY(18px)" in style
     assert "scale(.988)" in style
     assert "sx26-ripple" in style
     assert "scale(.955)" in style
     assert "sx26-stagger" in style
+    assert 'String(Math.min(index, 8))' in script
     assert "sx26-toast-in" in style
     assert "sx26-dialog-in" in style
     assert "@media(prefers-reduced-motion:reduce)" in style

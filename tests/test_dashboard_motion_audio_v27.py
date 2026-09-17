@@ -45,8 +45,8 @@ def test_v27_targets_real_v15_dom_with_web_animations_and_trusted_audio():
     assert "translateY(28px)" in script
     assert "scale(.90)" in script
 
-    assert "#sx27Progress" in style
-    assert "height:4px" in style
+    # Barre de progression en haut retirée (quatre couches en empilaient une chacune).
+    assert "#sx27Progress" not in style
     assert "#sx27Flash" in style
     assert "sx27-ring" in style
     assert "@media(prefers-reduced-motion:reduce)" in style

@@ -126,9 +126,19 @@ async def _ensure_tables(db) -> None:
 
 
 async def _member_for_user(guild: discord.Guild, user_id: int) -> discord.Member | None:
+    """Membre courant, sans appel REST quand le cache membres est complet.
+
+    ``guilds_with_delegation`` appelle cette fonction pour CHAQUE serveur du bot où
+    l'utilisateur n'est pas déjà listé ; avec le ``fetch_member`` systématique c'était
+    ~20 appels REST Discord (404) à chaque GET /api/guilds — 4 s au boot du dashboard,
+    mesuré en production. Un serveur chunké (intent members + chunking au démarrage) a
+    un cache autoritaire : absence = « pas membre ».
+    """
     member = guild.get_member(user_id)
     if member is not None:
         return member
+    if getattr(guild, "chunked", False):
+        return None
     try:
         return await guild.fetch_member(user_id)
     except (discord.NotFound, discord.Forbidden, discord.HTTPException):

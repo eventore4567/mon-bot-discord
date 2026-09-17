@@ -18,8 +18,6 @@ STYLE = f'''<style id="{STYLE_MARKER}">
   --sx25-fast:120ms;--sx25-ui:180ms;--sx25-page:260ms;--sx25-slow:420ms;
   --sx25-ease:cubic-bezier(.2,.8,.2,1);--sx25-spring:cubic-bezier(.16,1,.3,1);
 }}
-#sx25Progress{{position:fixed;z-index:99999;left:0;right:0;top:0;height:2px;pointer-events:none;opacity:0;transform:scaleX(0);transform-origin:left center;background:linear-gradient(90deg,#2563eb,#60a5fa 62%,#a8d7ff);box-shadow:0 0 13px rgba(96,165,250,.5);transition:transform 300ms var(--sx25-ease),opacity 160ms ease}}
-#sx25Progress.sx25-show{{opacity:1}}
 #content.sx25-page-in{{animation:sx25-page-in var(--sx25-page) var(--sx25-spring) both}}
 #content.sx25-page-out{{opacity:.72;transform:translateY(2px);transition:opacity var(--sx25-fast) ease,transform var(--sx25-fast) ease}}
 @keyframes sx25-page-in{{from{{opacity:0;transform:translateY(8px) scale(.996)}}to{{opacity:1;transform:none}}}}
@@ -50,7 +48,6 @@ STYLE = f'''<style id="{STYLE_MARKER}">
 @keyframes sx25-success{{0%{{transform:scale(.96)}}55%{{transform:scale(1.035)}}100%{{transform:none}}}}
 :where(input,select,textarea){{transition:border-color var(--sx25-ui) ease,box-shadow var(--sx25-ui) ease,background-color var(--sx25-ui) ease}}
 @media(prefers-reduced-motion:reduce){{
-  #sx25Progress{{transition:none!important}}
   #content.sx25-page-in,#content.sx25-page-out,.sx25-enter,.sx25-row-enter,.sx25-toast-enter,.sx25-dialog-enter,.sx25-overlay-enter,.sx25-state-change{{animation:none!important;transition:none!important;transform:none!important}}
   .sx25-ripple,:where(.sx12-skeleton,.skeleton,[data-skeleton])::after{{display:none!important;animation:none!important}}
   :where(.btn,button[data-sx24-intent],.p18-tab,[data-sx12-tab],[data-sx12-go],[data-p18-tab],[data-p18-go],[data-page]){{transform:none!important}}
@@ -71,17 +68,11 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-system-v25-js">
   let progressTimer = null;
   let lastHeading = content?.querySelector("h1,h2")?.textContent?.trim() || "";
 
-  const progress = document.createElement("div");
-  progress.id = "sx25Progress";
-  progress.setAttribute("aria-hidden", "true");
-  document.body.appendChild(progress);
-
-  const setProgress = value => {
-    progress.style.transform = `scaleX(${Math.max(0, Math.min(1, value))})`;
-  };
+  // Barre de progression fixée en haut retirée à la demande : quatre couches (V19, V25, V26,
+  // V27) empilaient chacune la leur, ce qui se lisait comme un chargement permanent.
+  const setProgress = () => {};
   const startProgress = () => {
     clearTimeout(progressTimer);
-    progress.classList.add("sx25-show");
     setProgress(.08);
     requestAnimationFrame(() => setProgress(.34));
     progressTimer = setTimeout(() => setProgress(.68), 180);
@@ -90,7 +81,6 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-system-v25-js">
     clearTimeout(progressTimer);
     setProgress(1);
     progressTimer = setTimeout(() => {
-      progress.classList.remove("sx25-show");
       setProgress(0);
     }, reduced() ? 0 : 190);
   };
@@ -108,12 +98,12 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-system-v25-js">
     replayClass(content, "sx25-page-in");
     const cards = [...content.querySelectorAll(".card,.p18-card,.sx12-card,.metric,.p18-kpi,.sx12-kpi,.p18-result,.sx12-item,.sx12-invite-card,.sx12-webhook-card,.sx12-flow-card")].slice(0,24);
     cards.forEach((node, index) => {
-      node.style.setProperty("--sx25-order", String(index));
+      node.style.setProperty("--sx25-order", String(Math.min(index, 8)));
       replayClass(node, "sx25-enter");
     });
     const rows = [...content.querySelectorAll(".row,.sx12-table tbody tr,.p18-table tbody tr")].slice(0,28);
     rows.forEach((node, index) => {
-      node.style.setProperty("--sx25-order", String(index));
+      node.style.setProperty("--sx25-order", String(Math.min(index, 8)));
       replayClass(node, "sx25-row-enter");
     });
   };

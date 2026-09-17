@@ -92,3 +92,13 @@ def test_refresh_admin_guilds_reuses_a_recent_verification():
 
 def test_refresh_ttl_matches_live_stream_recheck_cadence():
     assert guard.ADMIN_REFRESH_TTL_SECONDS == 30.0
+
+
+def test_v18_delegation_lookup_never_fetches_when_guild_is_chunked():
+    from web import dashboard_product_v18 as v18
+    guild = _Guild(7, member=None, chunked=True)
+    assert asyncio.run(v18._member_for_user(guild, 42)) is None
+    assert guild.fetch_calls == 0
+    not_chunked = _Guild(8, member=None, chunked=False)
+    assert asyncio.run(v18._member_for_user(not_chunked, 42)) is None
+    assert not_chunked.fetch_calls == 1
