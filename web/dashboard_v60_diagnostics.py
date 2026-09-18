@@ -156,10 +156,10 @@ async def _diagnostic_payload(dashboard, bot, guild: discord.Guild) -> dict:
         return _status("active", active_detail, configured=True)
 
     modules: dict[str, dict] = {
-        "welcome": channel_module("welcome_channel", "Le message de bienvenue a un salon valide.", "Aucun salon de bienvenue n'est choisi."),
-        "levels": channel_module("level_channel", "Les annonces de niveau ont un salon valide.", "Aucun salon de niveaux n'est choisi."),
-        "suggestions": channel_module("suggest_channel", "Les suggestions ont un salon valide.", "Aucun salon de suggestions n'est choisi."),
-        "reports": channel_module("report_channel", "Les signalements ont un salon valide.", "Aucun salon de signalements n'est choisi."),
+        "welcome": channel_module("welcome_channel", "Salon choisi.", "Aucun salon choisi."),
+        "levels": channel_module("level_channel", "Salon d'annonces choisi.", "Aucun salon d'annonces choisi."),
+        "suggestions": channel_module("suggest_channel", "Salon choisi.", "Aucun salon choisi."),
+        "reports": channel_module("report_channel", "Salon choisi.", "Aucun salon choisi."),
     }
 
     log_fields = ["log_channel", "log_messages", "log_members", "log_voice", "log_roles", "log_server", "log_automod", "log_moderation"]
@@ -169,7 +169,7 @@ async def _diagnostic_payload(dashboard, bot, guild: discord.Guild) -> dict:
     elif configured_logs:
         modules["logs"] = _status("active", f"{len(configured_logs)} type(s) de logs ont un salon valide.", configured=True)
     else:
-        modules["logs"] = _status("missing", "Aucun salon de logs n'est configuré.")
+        modules["logs"] = _status("missing", "Aucun salon de logs choisi.")
 
     configured_roles = [field for field in role_fields if _optional_id(conf.get(field)) is not None]
     if any(field in invalid_by_field for field in configured_roles):
@@ -242,7 +242,7 @@ async def _diagnostic_payload(dashboard, bot, guild: discord.Guild) -> dict:
     )
 
     # Départ et économie : deux modules distincts de la bienvenue et des niveaux.
-    modules["goodbye"] = channel_module("goodbye_channel", "Le message de départ a un salon valide.", "Aucun salon de départ n'est choisi.")
+    modules["goodbye"] = channel_module("goodbye_channel", "Salon choisi.", "Aucun salon choisi.")
     modules["economy"] = _status("active", "Le système d'argent est disponible.", configured=True)
 
     # Source unique : l'interrupteur de module (module_settings, le même que /setup et
@@ -261,17 +261,17 @@ async def _diagnostic_payload(dashboard, bot, guild: discord.Guild) -> dict:
                 continue
             switch = await core.module_state(bot, guild.id, module)
             if switch == core.MODULE_STATE_DISABLED:
-                modules[key] = _status("inactive", "Module désactivé dans la configuration ; réglages conservés.", configured=True)
+                modules[key] = _status("inactive", "Désactivé. Réglages conservés.", configured=True)
             elif switch == core.MODULE_STATE_NOT_CONFIGURED and modules[key]["code"] != "missing":
-                modules[key] = _status("missing", "Module non activé : activez-le dans /setup ou ici pour le mettre en service.")
+                modules[key] = _status("missing", "Pas encore activé.")
             elif switch == core.MODULE_STATE_ENABLED and key == "ai" and modules[key]["code"] == "inactive":
-                modules[key] = _status("active", "L'IA SentriX est autorisée sur ce serveur (réglages par défaut).", configured=True)
+                modules[key] = _status("active", "Activée avec les réglages par défaut.", configured=True)
             elif switch == core.MODULE_STATE_ENABLED and modules[key]["code"] == "missing":
                 # Activé dans la configuration mais sans ressource en base.
                 if key in ("welcome", "goodbye"):
-                    modules[key] = _status("error", "Module activé mais aucun salon n'est choisi : rien ne sera envoyé.", configured=True)
+                    modules[key] = _status("error", "Activé, mais aucun salon choisi : rien ne sera envoyé.", configured=True)
                 else:
-                    modules[key] = _status("active", "Module activé (aucune ressource dédiée n'est requise).", configured=True)
+                    modules[key] = _status("active", "Activé.", configured=True)
     except Exception:
         logger.exception("Lecture des interrupteurs de modules impossible guild=%s", guild.id)
 

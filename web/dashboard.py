@@ -40,7 +40,7 @@ ADMINISTRATOR = 1 << 3
 AUTOMOD_FIELDS = {
     "antispam", "antilink", "antiinvite", "antimention", "anticaps",
     "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
-    "antinuke", "escalation",
+    "antinuke", "antiinsult", "escalation",
 }
 
 AI_BOOL_FIELDS = {"enabled", "memory_enabled", "logs_enabled"}
