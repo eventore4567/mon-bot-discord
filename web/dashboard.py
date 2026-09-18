@@ -1332,7 +1332,7 @@ INDEX_HTML = r"""<!doctype html>
     const number=v=>Number(v||0).toLocaleString("fr-FR");
     function duration(sec){const d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60);return d?`${d} j ${h} h`:h?`${h} h ${m} min`:`${m} min`;}
     function toast(message,bad=false){const el=$("toast");el.textContent=message;el.className=`toast${bad?" bad":""}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.add("hidden"),4200);}
-    async function json(url,options={}){const res=await fetch(url,options);let data={};try{data=await res.json()}catch{}if(!res.ok){const err=new Error(data.error||"Une erreur est survenue.");err.status=res.status;throw err;}return data;}
+    async function json(url,options={}){const r=await fetch(url,options);let data={};try{data=await r.json()}catch{}if(!r.ok)throw Object.assign(new Error(data.error||"Une erreur est survenue."),{status:r.status,data});return data;}
     async function loadPublic(){state.publicData=await json("/api/public");const d=state.publicData;$("publicGuilds").textContent=number(d.guilds);$("publicMembers").textContent=number(d.members);$("publicLatency").textContent=d.latency_ms===null?"—":`${d.latency_ms} ms`;$("publicUptime").textContent=duration(d.uptime_seconds);$("publicStatus").textContent=d.online?"SentriX est opérationnel":"Connexion Discord en cours";$("publicDot").style.background=d.online?"var(--ok)":"var(--warn)";for(const id of ["inviteButton","appInvite"]){$(id).href=d.invite_url||"#";}if(d.avatar_url){for(const id of ["publicLogo","appLogo"]){$(id).innerHTML=`<img src="${esc(d.avatar_url)}" alt="">`;}}if(!d.oauth_ready){$("loginButton").classList.add("hidden");$("authMessage").textContent="La connexion Discord sera disponible après l'ajout du secret OAuth dans Railway.";}const auth=new URLSearchParams(location.search).get("auth");if(auth)$("authMessage").textContent=auth==="missing"?"La connexion Discord n'est pas encore configurée.":"La connexion Discord a été annulée ou a échoué.";}
     async function loadSession(){try{const me=await json("/api/me");state.user=me.user;state.csrf=me.csrf;$("dashboard").classList.remove("hidden");$("userName").textContent=me.user.username;if(me.user.avatar_url)$("userAvatar").innerHTML=`<img class="avatar" src="${esc(me.user.avatar_url)}" alt="">`;await loadGuilds();}catch{if(location.pathname==="/app")location.href="/";}}
     async function loadGuilds(){const data=await json("/api/guilds");state.guilds=data.guilds;const select=$("serverSelect");select.innerHTML='<option value="">Choisissez un serveur</option>'+data.guilds.map(g=>`<option value="${g.installed?esc(g.id):"invite:"+esc(g.id)}">${esc(g.name)}${g.installed?"":" — ajouter SentriX"}</option>`).join("");const first=data.guilds.find(g=>g.installed);if(first){select.value=first.id;await selectGuild(first.id);}}
@@ -1345,22 +1345,23 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       if(String(value).startsWith("invite:")){const id=String(value).slice(7),g=state.guilds.find(x=>x.id===id);if(g?.invite_url)window.open(g.invite_url,"_blank","noopener");$("serverSelect").value=state.guildId||"";return;}
+      const requested=String(value);
       // Un changement de serveur pendant qu'un chargement précédent est encore en vol
       // annule ce dernier : sans ça, une réponse tardive pour l'ANCIEN serveur peut
       // arriver après celle du nouveau et réafficher ses données par-dessus.
       if(state.guildAbort)state.guildAbort.abort();
       const controller=new AbortController();state.guildAbort=controller;
-      state.guildId=value;$("serverContent").classList.add("loading");
+      state.guildId=requested;$("serverContent").classList.add("loading");
       try{
-        const data=await json(`/api/guilds/${value}`,{signal:controller.signal});
-        if(state.guildId!==value)return;
+        const data=await json(`/api/guilds/${requested}`,{signal:controller.signal});
+        if(controller!==state.guildAbort||requested!==state.guildId)return;
         state.guildData=data;
         $("pageTitle").textContent=data.guild.name;$("pageSubtitle").textContent=`${number(data.guild.members)} membres · ${data.guild.channels_count} salons · ${data.guild.roles_count} rôles`;
         $("metricMembers").textContent=number(data.guild.members);$("metricCommands").textContent=number(data.metrics.commands_24h);$("metricTickets").textContent=number(data.metrics.open_tickets);$("metricWarnings").textContent=number(data.metrics.warnings);
         $("emptyState").classList.remove("sx-empty-premium");$("emptyState").classList.add("hidden");$("serverContent").classList.remove("hidden");
         renderTab();
       }catch(e){
-        if(e.name==="AbortError"||state.guildId!==value)return;
+        if(e.name==="AbortError"||controller!==state.guildAbort||requested!==state.guildId)return;
         if(e.status===503){
           // Le bot vient de basculer (HA) ou termine sa connexion à Discord : ce n'est
           // ni une session expirée ni un serveur introuvable — une seule nouvelle
@@ -1369,14 +1370,14 @@ INDEX_HTML = r"""<!doctype html>
           $("emptyState").classList.add("sx-empty-premium");
           $("emptyState").innerHTML='<div class="sx-load-card"><div class="sx-load-orb"></div><h3>Reconnexion Discord en cours…</h3><p>SentriX termine sa connexion à Discord. Cette page réessaie automatiquement dans quelques secondes.</p></div>';
           $("emptyState").classList.remove("hidden");
-          state.guildRetryTimer=setTimeout(()=>{if(state.guildId===value)selectGuild(value);},3000);
+          state.guildRetryTimer=setTimeout(()=>{if(state.guildId===requested)selectGuild(requested);},3000);
         }else if(e.status===401){
           history.replaceState({},"","/");location.reload();
         }else{
           toast(e.message,true);
         }
       }finally{
-        if(state.guildId===value)$("serverContent").classList.remove("loading");
+        if(state.guildId===requested)$("serverContent").classList.remove("loading");
       }
     }
     function optionList(type,current){const list=type==="role"?state.guildData.roles:state.guildData.channels.filter(c=>type!=="category"||c.type==="category");return '<option value="">Non configuré</option>'+list.map(item=>`<option value="${esc(item.id)}" ${String(current||"")===String(item.id)?"selected":""}>${esc(item.name)}${type!=="role"?` — ${esc(item.type)}`:""}</option>`).join("");}
