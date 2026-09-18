@@ -324,13 +324,74 @@ class CategorySelect(discord.ui.Select):
         await self.owner.refresh(interaction)
 
 
+# Champs pour lesquels SentriX devra AGIR sur le rôle (l'attribuer) : la hiérarchie
+# Discord doit le permettre au moment où on l'enregistre, pas au premier membre.
+_MANAGED_ROLE_FIELDS = frozenset({"autorole", "mute_role", "warn_role", "verify_role", "verification_role", "member_role", "booster_role"})
+# Champs où SentriX devra ÉCRIRE dans le salon (et souvent joindre un embed/fichier).
+_WRITABLE_CHANNEL_FIELDS = frozenset({
+    "welcome_channel", "goodbye_channel", "level_channel", "log_channel", "ticket_log_channel",
+    "suggest_channel", "announce_channel", "giveaway_channel", "rules_channel",
+})
+
+
+def validate_role_choice(guild, role, field: str) -> str | None:
+    """Motif de refus lisible, ou None si le rôle est utilisable pour ce champ."""
+    if role is None or field not in _MANAGED_ROLE_FIELDS:
+        return None
+    me = guild.me
+    if role.is_default():
+        return "Le rôle @everyone ne peut pas être utilisé ici."
+    if getattr(role, "managed", False):
+        return f"{role.mention} est géré par une intégration : SentriX ne peut pas l'attribuer."
+    if me is not None:
+        if not me.guild_permissions.manage_roles and not me.guild_permissions.administrator:
+            return "SentriX n'a pas la permission **Gérer les rôles** sur ce serveur."
+        if role >= me.top_role:
+            return (
+                f"{role.mention} est au-dessus (ou au niveau) du rôle de SentriX : "
+                "placez le rôle SentriX plus haut, puis réessayez."
+            )
+    return None
+
+
+def validate_channel_choice(guild, channel, field: str) -> str | None:
+    """Motif de refus lisible, ou None si SentriX peut réellement utiliser le salon."""
+    if channel is None or field not in _WRITABLE_CHANNEL_FIELDS:
+        return None
+    me = guild.me
+    if me is None:
+        return None
+    perms = channel.permissions_for(me)
+    missing = []
+    if not perms.view_channel:
+        missing.append("Voir le salon")
+    if not perms.send_messages:
+        missing.append("Envoyer des messages")
+    if not perms.embed_links:
+        missing.append("Intégrer des liens")
+    if field in {"log_channel", "ticket_log_channel"} and not perms.attach_files:
+        missing.append("Joindre des fichiers")
+    if missing:
+        return f"SentriX ne peut pas utiliser {channel.mention} : permission(s) manquante(s) **{', '.join(missing)}**."
+    return None
+
+
+async def _refuse(interaction, reason: str) -> None:
+    """Réponse courte et éphémère : la configuration cassée n'est PAS enregistrée."""
+    await panels.texte_court(interaction, reason, ephemere=True)
+
+
 class FieldRoleSelect(discord.ui.RoleSelect):
     def __init__(self, view, field, label, row):
         self.owner, self.field = view, field
         super().__init__(placeholder=label, min_values=0, max_values=1, row=row)
 
     async def callback(self, interaction):
-        value = self.values[0].id if self.values else None
+        role = self.values[0] if self.values else None
+        reason = validate_role_choice(self.owner.guild, role, self.field)
+        if reason:
+            return await _refuse(interaction, reason)
+        value = role.id if role else None
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, self.field, value)
         await self.owner.audit(interaction.user.id, self.field, value)
         await self.owner.refresh(interaction)
@@ -345,7 +406,14 @@ class FieldChannelSelect(discord.ui.ChannelSelect):
         )
 
     async def callback(self, interaction):
-        value = self.values[0].id if self.values else None
+        chosen = self.values[0] if self.values else None
+        # ChannelSelect renvoie un AppCommandChannel : on repasse par le cache du serveur
+        # pour obtenir les permissions réelles.
+        channel = self.owner.guild.get_channel(int(chosen.id)) if chosen else None
+        reason = validate_channel_choice(self.owner.guild, channel, self.field)
+        if reason:
+            return await _refuse(interaction, reason)
+        value = chosen.id if chosen else None
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, self.field, value)
         await self.owner.audit(interaction.user.id, self.field, value)
         await self.owner.refresh(interaction)
