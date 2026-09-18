@@ -34,6 +34,7 @@ import asyncio
 import logging
 import re
 import time
+from dataclasses import dataclass
 from datetime import timedelta
 
 import discord
@@ -98,6 +99,27 @@ MUTE_ESCALATION_SECONDS = 600  # 10 minutes
 DATASET_TIMEOUT_SECONDS = 600  # sanction directe du filtre multilingue
 ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "ban": "🔨 Bannissement"}
 
+# Une rafale de spam est traitée comme UN incident par membre : la première détection
+# supprime, sanctionne, prévient et journalise ; les détections suivantes dans la
+# fenêtre ne font que supprimer le message et incrémenter le compteur. Avant cela,
+# une rafale de 30 messages produisait ~15 avertissements publics, 15 cartes de log
+# et plusieurs escalades pour la même séquence.
+INCIDENT_WINDOW_SECONDS = 30.0
+INCIDENT_LOG_DELAY_SECONDS = 4.0
+SPAM_FILTERS = frozenset({"antispam", "antispam_duplicate", "antiemoji", "antimention"})
+SPAM_TIMEOUT_SECONDS = 600
+
+
+@dataclass
+class _Incident:
+    started: float
+    filter_name: str
+    reason: str
+    channel_id: int
+    deleted: int = 1
+    action: str | None = None
+    infractions: int = 0
+
 
 def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
     """Vérifie qu'un domaine autorisé apparaît vraiment comme domaine dans le message,
@@ -157,6 +179,7 @@ class AutoMod(commands.Cog, name="Automod"):
         self.join_tracker: dict[int, list[float]] = {}
         self.nuke_tracker: dict[tuple[int, int], list[float]] = {}
         self.infraction_tracker: dict[tuple[int, int], list[float]] = {}
+        self.incidents: dict[tuple[int, int], _Incident] = {}
         self.moderation_dataset = MultilingualModerationDataset()
         # Caches mémoire : évitent des allers-retours en base de données à CHAQUE
         # message (ce qui ralentissait le bot sur un salon actif). Invalidés dès
@@ -690,6 +713,16 @@ class AutoMod(commands.Cog, name="Automod"):
         if not conf:
             return
 
+        # Incident de spam en cours pour ce membre : tout ce qu'il envoie encore pendant
+        # la fenêtre est supprimé sans nouvel avertissement ni nouvelle carte de log.
+        incident = self.incidents.get((message.guild.id, message.author.id))
+        if (
+            incident is not None
+            and incident.filter_name in SPAM_FILTERS
+            and time.monotonic() - incident.started < INCIDENT_WINDOW_SECONDS
+        ):
+            return await self._delete_and_warn(message, incident.reason, incident.filter_name)
+
         blacklisted_users = await self.get_blacklist_users_cached(message.guild.id)
         if message.author.id in blacklisted_users:
             self._mark_xp_skip(message.id)
@@ -750,34 +783,90 @@ class AutoMod(commands.Cog, name="Automod"):
         asyncio.get_event_loop().call_later(10, skip_ids.discard, message_id)
 
     async def _delete_and_warn(self, message: discord.Message, reason: str, filter_name: str = "automod"):
+        """Supprime le message et traite la détection comme un incident par membre.
+
+        Première détection dans la fenêtre : suppression, infraction + escalade
+        éventuelle, exclusion temporaire directe pour les filtres de spam, UN avertissement
+        court dans le salon et UNE carte de log compacte (envoyée après un court délai
+        pour inclure le nombre réel de messages supprimés). Détections suivantes dans la
+        fenêtre : suppression silencieuse, compteur incrémenté.
+        """
         self._mark_xp_skip(message.id)
         try:
             await message.delete()
         except discord.HTTPException:
             pass
+
+        key = (message.guild.id, message.author.id)
+        now_ts = time.monotonic()
+        incident = self.incidents.get(key)
+        if incident is not None and now_ts - incident.started < INCIDENT_WINDOW_SECONDS:
+            incident.deleted += 1
+            return
+        incident = _Incident(started=now_ts, filter_name=filter_name, reason=reason, channel_id=message.channel.id)
+        self.incidents[key] = incident
+        if len(self.incidents) > 5000:
+            cutoff = now_ts - INCIDENT_WINDOW_SECONDS
+            for candidate, item in list(self.incidents.items()):
+                if item.started < cutoff:
+                    self.incidents.pop(candidate, None)
+
+        await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, "suppression", reason)
+        action, infraction_count = await self._maybe_escalate(message.guild, message.author, reason)
+        if action is None and filter_name in SPAM_FILTERS:
+            action = await self._spam_timeout(message.guild, message.author, reason)
+        incident.action = action
+        incident.infractions = infraction_count
+        if action:
+            await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, action, reason)
+
+        note = f"{message.author.mention}, message supprimé : {reason}"
+        if action == "mute":
+            note += f" Exclusion temporaire de {helpers.format_duration(SPAM_TIMEOUT_SECONDS)}."
         try:
-            note = await panels.envoyer(message.channel, panels.depuis_embed(embeds.warning(f'{message.author.mention}, votre message a été supprimé.\nRaison : {reason}')))
-            await note.delete(delay=6)
+            await panels.texte_court(message.channel, note, supprimer_apres=6)
         except discord.HTTPException:
             pass
 
-        await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, "suppression", reason)
-        escalation_action, infraction_count = await self._maybe_escalate(message.guild, message.author, reason)
+        asyncio.create_task(self._flush_incident_log(message.guild, message.author, key, incident))
 
-        title = "🛡️ Action AutoMod"
-        color = config.COLOR_WARNING
-        extra = {
-            "📍 Salon": f"{message.channel.mention}\n`ID: {message.channel.id}`",
-            "🔢 Infractions (1h)": str(infraction_count),
-        }
-        if escalation_action:
-            extra["⚔️ Escalade automatique"] = ESCALATION_LABELS.get(escalation_action, escalation_action)
-            title = "🚨 Action AutoMod — escalade déclenchée"
-            color = config.COLOR_ERROR if escalation_action in ("kick", "ban") else config.COLOR_WARNING
-            await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, escalation_action, reason)
+    async def _spam_timeout(self, guild: discord.Guild, member: discord.abc.User, reason: str) -> str | None:
+        """Exclusion temporaire directe pour un incident de spam (une seule par incident)."""
+        if not isinstance(member, discord.Member):
+            return None
+        me = guild.me
+        if member.id == guild.owner_id or me is None or not me.guild_permissions.moderate_members or member.top_role >= me.top_role:
+            return None
+        until = discord.utils.utcnow() + timedelta(seconds=SPAM_TIMEOUT_SECONDS)
+        current = member.timed_out_until
+        if current and current > until:
+            return "mute"
+        try:
+            await member.timeout(until, reason=f"AutoMod : {reason}")
+        except (discord.Forbidden, discord.HTTPException):
+            return None
+        return "mute"
 
-        e = embeds.log_entry(title, color, cible=message.author, cible_label="👤 Membre", raison=reason, extra=extra)
-        await self.log_action(message.guild, e)
+    async def _flush_incident_log(self, guild: discord.Guild, member: discord.abc.User, key: tuple[int, int], incident: _Incident) -> None:
+        """Une seule carte de log par incident, compacte, avec le nombre réel de messages."""
+        try:
+            await asyncio.sleep(INCIDENT_LOG_DELAY_SECONDS)
+            title = "🛡️ Action AutoMod"
+            color = config.COLOR_WARNING
+            extra = {"📍 Salon": f"<#{incident.channel_id}>", "🗑️ Messages": str(incident.deleted)}
+            if incident.action:
+                title = "🚨 Action AutoMod — sanction appliquée"
+                color = config.COLOR_ERROR if incident.action in ("kick", "ban") else config.COLOR_WARNING
+                extra["⚔️ Action"] = ESCALATION_LABELS.get(incident.action, incident.action)
+            if incident.infractions:
+                extra["🔢 Infractions (1h)"] = str(incident.infractions)
+            e = embeds.log_entry(title, color, cible=member, cible_label="👤 Membre", raison=incident.reason, extra=extra)
+            await self.log_action(guild, e)
+        except Exception:
+            logger.exception(
+                "Journal AutoMod impossible guild=%s user=%s filtre=%s",
+                guild.id, getattr(member, "id", None), incident.filter_name,
+            )
 
     async def _delete_and_timeout(
         self,
