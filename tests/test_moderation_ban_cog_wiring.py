@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from cogs.moderation import Moderation
-from utils import sentrix_panels as panels
 
 
 class _FakeRole:
@@ -78,7 +77,7 @@ def _make_cog(*, case_number=42):
 
 
 class BanCogWiringTests(unittest.IsolatedAsyncioTestCase):
-    async def test_bannissement_reussi_appelle_le_service_et_rend_le_panneau(self):
+    async def test_bannissement_reussi_appelle_le_service_et_confirme_en_une_ligne(self):
         cog = _make_cog(case_number=42)
         ctx, guild, actor, target = _fake_ctx()
 
@@ -97,7 +96,7 @@ class BanCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         guild.ban.assert_not_awaited()
         target.send.assert_not_awaited()
-        ctx.send.assert_awaited()  # le panneau de refus est bien rendu
+        ctx.send.assert_awaited()  # le refus court est bien rendu
 
     async def test_echec_de_persistance_n_empeche_pas_le_panneau_de_succes(self):
         """Le test qui compte le plus : la commande complète (pas seulement le
@@ -111,12 +110,11 @@ class BanCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         guild.ban.assert_awaited_once()
         ctx.send.assert_awaited()
-        panneau = ctx.send.await_args.kwargs.get("view")
-        self.assertIsInstance(panneau, panels.Panneau)
-        # kind="moderation" (succès) et pas "danger" (le chemin de refus) : la
-        # sanction Discord a réussi, donc le panneau affiché est un succès, même
-        # si la persistance du dossier a échoué en coulisses.
-        self.assertEqual(panneau.kind, "moderation")
+        # La sanction Discord a réussi : la confirmation courte de succès est
+        # affichée (texte brut, plus de panneau dans le salon), même si la
+        # persistance du dossier a échoué en coulisses.
+        self.assertEqual(ctx.send.await_args.kwargs.get("content"), f"{target.mention} a été banni.")
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
 
 
 if __name__ == "__main__":

@@ -5,7 +5,6 @@ sans recopier la même logique dans chaque commande.
 """
 from __future__ import annotations
 
-import functools
 import re
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -13,7 +12,6 @@ from typing import Any, Iterable
 import discord
 
 from utils import helpers
-from utils import sentrix_panels as panels
 
 import config as _config
 from discord.ext import commands
@@ -323,92 +321,6 @@ def _install_per_command_cooldown() -> None:
     commands.CooldownMapping._bucket_key = bucket_key
 
 
-def _clear_panneau(nombre: int) -> "panels.Panneau":
-    """Confirmation de purge, composee comme le reste du bot.
-
-    Ce message s'auto-detruit : il doit se lire d'un coup d'oeil, d'ou une seule
-    ligne utile plutot qu'un tableau.
-    """
-    return panels.Panneau(
-        titre="Salon nettoyé",
-        sous_titre=f"{nombre} message(s) supprimé(s).",
-        kind="moderation",
-        pied="Ce message disparaît tout seul.",
-    )
-
-
-def _patch_clear(bot: commands.Bot) -> None:
-    command = bot.get_command("clear")
-    if command is None or getattr(command, "_sentrix_clear_fixed", False):
-        return
-    params = command.params.copy()
-    old_callback = command.callback
-
-    async def callback(_cog, ctx: commands.Context, nombre: int):
-        amount = max(1, min(100, int(nombre)))
-        if ctx.interaction is not None:
-            if not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer(ephemeral=True)
-            deleted = await ctx.channel.purge(limit=amount)
-            return await panels.envoyer(ctx, _clear_panneau(len(deleted)), ephemere=True)
-
-        # +clear 10 retire d'abord le message « +clear 10 », puis exactement 10 anciens
-        # messages. La confirmation n'essaie donc jamais de répondre à un message supprimé.
-        try:
-            await ctx.message.delete()
-        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-            pass
-        try:
-            deleted = await ctx.channel.purge(limit=amount)
-        except discord.Forbidden:
-            return await panels.envoyer(
-                ctx.channel,
-                panels.Panneau(
-                    titre="Suppression impossible",
-                    sous_titre="Il manque une permission à SentriX dans ce salon.",
-                    kind="danger",
-                    sections=[
-                        panels.Section(
-                            "À VÉRIFIER",
-                            lignes=[
-                                panels.Ligne("Gérer les messages", "requise pour supprimer"),
-                                panels.Ligne("Voir l'historique des messages", "requise pour lire ce qui précède"),
-                            ],
-                        )
-                    ],
-                    pied="Aucun message n'a été supprimé.",
-                ),
-                allowed_mentions=discord.AllowedMentions.none(),
-                delete_after=6,
-            )
-        return await panels.envoyer(
-            ctx.channel,
-            _clear_panneau(len(deleted)),
-            allowed_mentions=discord.AllowedMentions.none(),
-            delete_after=4,
-        )
-
-    command.callback = functools.wraps(old_callback)(callback)
-    command.params = params
-    command._sentrix_clear_fixed = True
-
-
-def _install_cog_patches() -> None:
-    current = commands.Bot.add_cog
-    if getattr(current, "_sentrix_runtime_patch", False):
-        return
-    original = current
-
-    async def add_cog(bot, cog, *args, **kwargs):
-        result = await original(bot, cog, *args, **kwargs)
-        _patch_clear(bot)
-        return result
-
-    add_cog._sentrix_runtime_patch = True
-    add_cog._sentrix_original = original
-    commands.Bot.add_cog = add_cog
-
-
 def _install_log_transport() -> None:
     """Ne remplace plus log_service.send_log.
 
@@ -441,7 +353,6 @@ def install() -> None:
 
     _install_per_command_cooldown()
     _install_log_transport()
-    _install_cog_patches()
     _INSTALLED = True
 
 

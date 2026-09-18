@@ -12,7 +12,7 @@ import os
 import re
 import time
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Iterable
 
 import discord
 
@@ -135,6 +135,43 @@ def _is_duplicate(event_key: str | None) -> bool:
     _recent_event_keys[event_key] = current
     _recent_event_keys.move_to_end(event_key)
     return False
+
+
+# ---------------------------------------------------------------------------
+# Suppressions groupées (+clear)
+#
+# Une purge supprime N messages d'un coup ; Discord émet ensuite un évènement par
+# message (ou un bulk). Sans cette table, le journal « Messages » recevait N cartes
+# individuelles PUIS le récapitulatif du clear. Le cog Modération marque les
+# identifiants juste avant la purge ; les listeners de cogs/logs.py les ignorent.
+# ---------------------------------------------------------------------------
+_PURGE_TTL = 15.0
+_purged_message_ids: dict[int, float] = {}
+
+
+def mark_purged(message_ids: Iterable[int]) -> None:
+    """Déclare des messages comme supprimés par une purge SentriX (fenêtre courte)."""
+    now = time.monotonic()
+    expires_at = now + _PURGE_TTL
+    for message_id in message_ids:
+        _purged_message_ids[int(message_id)] = expires_at
+    if len(_purged_message_ids) > 5000:
+        for key, stamp in list(_purged_message_ids.items()):
+            if stamp <= now:
+                _purged_message_ids.pop(key, None)
+
+
+def is_purged(message_id: int | None) -> bool:
+    """Vrai si ce message vient d'être supprimé par une purge : pas de log individuel."""
+    if not message_id:
+        return False
+    stamp = _purged_message_ids.get(int(message_id))
+    if stamp is None:
+        return False
+    if stamp <= time.monotonic():
+        _purged_message_ids.pop(int(message_id), None)
+        return False
+    return True
 
 
 def _first_snowflake(text: object) -> int | None:

@@ -589,6 +589,7 @@ __all__ = [
     "depuis_embed",
     "intention_de",
     "envoyer",
+    "texte_court",
     "texte_complet",
     "fichier_banniere",
     "nom_banniere",
@@ -709,3 +710,55 @@ async def editer(cible: Any, panneau: Panneau, **extra: Any):
         if callable(methode):
             return await methode(**charge)
     raise TypeError(f"{type(cible).__name__} n'expose aucune méthode d'édition.")
+
+
+_MENTIONS_AUCUNE = discord.AllowedMentions.none()
+
+
+async def texte_court(
+    destination: Any,
+    message: str,
+    *,
+    ephemere: bool = False,
+    supprimer_apres: float | None = None,
+    **extra: Any,
+):
+    """Envoie une confirmation d'UNE ligne, en texte brut, sans bannière ni panneau.
+
+    Une information complexe mérite un panneau ; une petite confirmation
+    (« @membre a été banni. », « 15 messages supprimés. ») n'en mérite pas.
+    Cette fonction est le pendant minimal de :func:`envoyer` : mêmes surfaces
+    acceptées (Context, Interaction, InteractionResponse, salon, membre), même
+    prise en charge d'une réponse d'interaction déjà consommée (followup), et
+    aucune mention n'est jamais notifiée — la mention reste lisible sans réveiller
+    personne.
+    """
+    kwargs: dict[str, Any] = {"content": str(message), "allowed_mentions": _MENTIONS_AUCUNE}
+    kwargs.update(extra)
+
+    if isinstance(destination, discord.InteractionResponse):
+        if ephemere:
+            kwargs["ephemeral"] = True
+        if not destination.is_done():
+            return _message_envoye(await destination.send_message(**kwargs))
+        parent = getattr(destination, "_parent", None)
+        if parent is None:
+            raise RuntimeError("Reponse d'interaction deja envoyee et followup inaccessible.")
+        return await parent.followup.send(**kwargs)
+
+    interaction = getattr(destination, "interaction", None) or (
+        destination if isinstance(destination, discord.Interaction) else None
+    )
+    if interaction is not None:
+        if ephemere:
+            kwargs["ephemeral"] = True
+        if not interaction.response.is_done():
+            return _message_envoye(await interaction.response.send_message(**kwargs))
+        return await interaction.followup.send(**kwargs)
+
+    # Webhook (followup) ou Messageable (ctx préfixe, salon, membre).
+    if ephemere and isinstance(destination, discord.Webhook):
+        kwargs["ephemeral"] = True
+    if supprimer_apres is not None and not isinstance(destination, discord.Webhook):
+        kwargs["delete_after"] = float(supprimer_apres)
+    return await destination.send(**kwargs)

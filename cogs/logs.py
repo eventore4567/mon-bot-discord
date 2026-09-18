@@ -271,6 +271,9 @@ class Logs(commands.Cog, name="Logs"):
                 "SXTRACE 1 LISTENER skipped=GUILD_NONE_OR_BOT_AUTHOR message=%s", message.id
             )
             return
+        if log_service.is_purged(message.id):
+            # Supprimé par +clear : le récapitulatif de purge remplace la carte individuelle.
+            return
         fields = [
             ("Auteur", _user_ref(message.author.id), True),
             ("Salon", _channel_ref(message.channel.id), True),
@@ -308,6 +311,8 @@ class Logs(commands.Cog, name="Logs"):
             payload.message_id,
             payload.cached_message is not None,
         )
+        if log_service.is_purged(payload.message_id):
+            return
         if payload.guild_id is None or payload.cached_message is not None:
             logger.debug(
                 "SXTRACE 1 LISTENER skipped=NO_GUILD_OR_ALREADY_CACHED message=%s",
@@ -344,6 +349,8 @@ class Logs(commands.Cog, name="Logs"):
     @commands.Cog.listener()
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent):
         if payload.guild_id is None:
+            return
+        if payload.message_ids and all(log_service.is_purged(value) for value in payload.message_ids):
             return
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:

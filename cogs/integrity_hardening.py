@@ -22,7 +22,6 @@ import logging
 import secrets
 import time
 import types
-from collections import defaultdict
 
 import discord
 from discord.ext import commands
@@ -31,7 +30,6 @@ from database.db import now
 from services import economy as economy_service
 from utils import embeds, stats_service
 from utils import sentrix_panels as panels
-from utils.v22_rules import clean_reason, parse_friendly_duration
 
 logger = logging.getLogger("bot.integrity-hardening")
 
@@ -223,98 +221,9 @@ def _install_moderation(bot: commands.Bot) -> bool:
     if moderation is None:
         return False
 
-    target_locks: dict[tuple[int, int], asyncio.Lock] = getattr(
-        bot, "_sentrix_integrity_mod_locks", None
-    ) or defaultdict(asyncio.Lock)
-    bot._sentrix_integrity_mod_locks = target_locks
-
-    tempban = bot.get_command("tempban")
-    if tempban is not None:
-        async def safe_tempban(
-            cog,
-            ctx: commands.Context,
-            membre: discord.Member,
-            duree: str,
-            *,
-            raison: str = "Aucun motif",
-        ):
-            await cog._ack(ctx)
-            if ctx.guild is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-            if not await cog.check_targetable(ctx, membre):
-                return
-            seconds = parse_friendly_duration(duree)
-            if seconds is None or int(seconds) <= 0:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide. Exemple : `30m`, `2h`, `1j`.')))
-            reason = clean_reason(raison)
-            key = (ctx.guild.id, membre.id)
-            async with target_locks[key]:
-                existing = await bot.db.fetchone(
-                    "SELECT id FROM tempactions WHERE guild_id=? AND user_id=? AND action='ban' "
-                    "AND expires_at>? LIMIT 1",
-                    (ctx.guild.id, membre.id, now()),
-                )
-                if existing:
-                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Un bannissement temporaire actif existe déjà.')))
-                cur = await bot.db.execute(
-                    "INSERT INTO tempactions (guild_id,user_id,action,expires_at) "
-                    "VALUES (?,?,'ban',?)",
-                    (ctx.guild.id, membre.id, now() + int(seconds)),
-                )
-                tempaction_id = int(cur.lastrowid)
-                await cog._send_sanction_dm(ctx, membre, "tempban", reason, int(seconds))
-                try:
-                    await ctx.guild.ban(
-                        membre,
-                        reason=f"{ctx.author} (temporaire {duree}) : {reason}",
-                        delete_message_seconds=0,
-                    )
-                except discord.HTTPException:
-                    await bot.db.execute("DELETE FROM tempactions WHERE id=?", (tempaction_id,))
-                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Discord a refusé le bannissement. Aucune durée n'a été enregistrée.")))
-                result = await cog.log_sanction(
-                    ctx,
-                    "tempban",
-                    membre,
-                    reason,
-                    duration_seconds=int(seconds),
-                )
-                return await panels.envoyer(ctx, panels.depuis_embed(result))
-
-        _replace_callback(tempban, safe_tempban, "_sentrix_integrity_tempban")
-
-    for name in ("resetnick", "move", "disconnect", "clearwarnings"):
-        command = bot.get_command(name)
-        if command is None:
-            continue
-        original = command.callback
-
-        async def hierarchy_wrapper(cog, ctx, *args, __original=original, **kwargs):
-            target = kwargs.get("membre")
-            if target is None:
-                target = args[0] if args else None
-            if isinstance(target, discord.Member) and not await cog.check_targetable(ctx, target):
-                return None
-            return await __original(cog, ctx, *args, **kwargs)
-
-        _replace_callback(command, hierarchy_wrapper, "_sentrix_integrity_hierarchy")
-
-    unwarn = bot.get_command("unwarn")
-    if unwarn is not None:
-        original_unwarn = unwarn.callback
-
-        async def safe_unwarn(cog, ctx: commands.Context, warn_id: int):
-            if ctx.guild is not None:
-                row = await bot.db.fetchone(
-                    "SELECT user_id FROM warnings WHERE id=? AND guild_id=?",
-                    (int(warn_id), ctx.guild.id),
-                )
-                member = ctx.guild.get_member(int(row["user_id"])) if row else None
-                if member is not None and not await cog.check_targetable(ctx, member):
-                    return None
-            return await original_unwarn(cog, ctx, int(warn_id))
-
-        _replace_callback(unwarn, safe_unwarn, "_sentrix_integrity_hierarchy")
+    # Les garde-fous de commandes (tempban actif, hiérarchie sur resetnick/move/
+    # disconnect/clearwarnings/unwarn) sont dans cogs/moderation.py : aucun callback
+    # n'est plus remplacé ici.
 
     try:
         if moderation.check_tempactions.is_running():

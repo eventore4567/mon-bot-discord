@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import json
 import logging
 import time
@@ -27,7 +26,6 @@ from .v17_shared import (
 )
 
 logger = logging.getLogger("bot.v17-moderation-security")
-SANCTION_DUPLICATE_TTL = 5.0
 JOIN_WINDOW_SECONDS = 10.0
 JOIN_RAID_THRESHOLD = 8
 VALID_NUKE_ACTIONS = {"all", "channel_delete", "role_delete"}
@@ -43,30 +41,6 @@ def _ctx_from_args(args, kwargs):
             return value
     value = kwargs.get("ctx")
     return value if isinstance(value, commands.Context) else None
-
-
-def _target_id_from_args(args, kwargs) -> int | None:
-    for key in ("membre", "member", "user", "target", "user_id"):
-        value = kwargs.get(key)
-        if isinstance(value, (discord.Member, discord.User, discord.Object)):
-            return int(value.id)
-        if value is not None:
-            try:
-                return int(str(value).strip())
-            except (TypeError, ValueError):
-                pass
-    seen_ctx = False
-    for value in args:
-        if isinstance(value, commands.Context):
-            seen_ctx = True
-            continue
-        if not seen_ctx:
-            continue
-        if isinstance(value, (discord.Member, discord.User, discord.Object)):
-            return int(value.id)
-        if isinstance(value, str) and value.isdigit():
-            return int(value)
-    return None
 
 
 def install_moderation_guards(bot: commands.Bot) -> None:
@@ -93,35 +67,8 @@ def install_moderation_guards(bot: commands.Bot) -> None:
         targetable_v17._sentrix_original = current_targetable
         cls.check_targetable = targetable_v17
 
-    for command_name in ("ban", "tempban", "kick", "mute", "unmute", "warn", "unban"):
-        command = bot.get_command(command_name)
-        if command is None or getattr(command.callback, "_sentrix_v17_dedupe", False):
-            continue
-        original = command.callback
-
-        @functools.wraps(original)
-        async def dedupe_callback(*args, __original=original, __name=command_name, **kwargs):
-            ctx = _ctx_from_args(args, kwargs)
-            target_id = _target_id_from_args(args, kwargs)
-            if ctx is None or ctx.guild is None or target_id is None:
-                return await __original(*args, **kwargs)
-            key = (int(ctx.guild.id), str(__name), int(target_id))
-            recent = state(bot)["sanction_recent"]
-            mono = time.monotonic()
-            previous = recent.get(key)
-            if previous is not None and mono - float(previous) <= SANCTION_DUPLICATE_TTL:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("Cette sanction vient déjà d'être lancée sur la même cible. Le second appel a été annulé.", title='Double sanction bloquée')))
-            recent[key] = mono
-            if len(recent) > 5000:
-                cutoff = mono - 30.0
-                for candidate, stamp in list(recent.items()):
-                    if float(stamp) < cutoff:
-                        recent.pop(candidate, None)
-            return await __original(*args, **kwargs)
-
-        dedupe_callback._sentrix_v17_dedupe = True
-        dedupe_callback._sentrix_original = original
-        command.callback = dedupe_callback
+    # La déduplication des sanctions (double clic / double envoi) vit désormais dans
+    # cogs/moderation.py::Moderation._sanction_duplicate, appelée par chaque commande.
 
 
 def install_danger_confirmations(bot: commands.Bot) -> None:

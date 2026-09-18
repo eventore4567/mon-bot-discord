@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from cogs.moderation import Moderation
-from utils import sentrix_panels as panels
 
 
 class _FakeRole:
@@ -82,7 +81,7 @@ def _make_cog(*, case_number=11):
 
 
 class TempbanCogWiringTests(unittest.IsolatedAsyncioTestCase):
-    async def test_bannissement_temporaire_reussi_appelle_le_service_et_rend_le_panneau(self):
+    async def test_bannissement_temporaire_reussi_appelle_le_service_et_confirme_en_une_ligne(self):
         cog = _make_cog(case_number=11)
         ctx, guild, actor, target = _fake_ctx()
 
@@ -113,7 +112,7 @@ class TempbanCogWiringTests(unittest.IsolatedAsyncioTestCase):
         guild.ban.assert_not_awaited()
         ctx.send.assert_awaited()
 
-    async def test_echec_du_dossier_de_sanction_n_empeche_pas_le_panneau_de_succes(self):
+    async def test_echec_du_dossier_de_sanction_n_empeche_pas_la_confirmation_de_succes(self):
         """Le trou corrigé par cette migration, côté commande complète : une
         exception sur record_sanction() ne doit jamais faire passer un
         bannissement Discord déjà réussi pour un échec."""
@@ -125,11 +124,11 @@ class TempbanCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         guild.ban.assert_awaited_once()
         ctx.send.assert_awaited()
-        panneau = ctx.send.await_args.kwargs.get("view")
-        self.assertIsInstance(panneau, panels.Panneau)
-        self.assertEqual(panneau.kind, "moderation")
+        # Succès : confirmation courte en texte brut, plus de panneau dans le salon.
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
+        self.assertTrue(ctx.send.await_args.kwargs.get("content"))
 
-    async def test_echec_de_la_programmation_de_la_levee_n_empeche_pas_le_panneau_de_succes(self):
+    async def test_echec_de_la_programmation_de_la_levee_n_empeche_pas_la_confirmation_de_succes(self):
         """Le DEUXIÈME trou corrigé par cette migration : l'écriture dans
         tempactions (levée automatique) était tout aussi non protégée que
         record_sanction() avant l'extraction."""
@@ -141,9 +140,9 @@ class TempbanCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         guild.ban.assert_awaited_once()
         ctx.send.assert_awaited()
-        panneau = ctx.send.await_args.kwargs.get("view")
-        self.assertIsInstance(panneau, panels.Panneau)
-        self.assertEqual(panneau.kind, "moderation")
+        # Succès : confirmation courte en texte brut, plus de panneau dans le salon.
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
+        self.assertTrue(ctx.send.await_args.kwargs.get("content"))
 
 
 if __name__ == "__main__":

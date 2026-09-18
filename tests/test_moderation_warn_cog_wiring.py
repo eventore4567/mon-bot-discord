@@ -17,7 +17,6 @@ os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 import discord
 
 from cogs.moderation import Moderation
-from utils import sentrix_panels as panels
 
 
 class _FakeRole:
@@ -107,7 +106,7 @@ def _make_cog(*, case_number=5, fetchall_rows=None, guild_config=None):
 
 
 class WarnCogWiringTests(unittest.IsolatedAsyncioTestCase):
-    async def test_avertissement_reussi_appelle_le_service_et_rend_le_panneau(self):
+    async def test_avertissement_reussi_appelle_le_service_et_confirme_en_une_ligne(self):
         cog = _make_cog(case_number=5, fetchall_rows=[{"id": 1}])
         ctx, guild, actor, target = _fake_ctx()
 
@@ -127,7 +126,7 @@ class WarnCogWiringTests(unittest.IsolatedAsyncioTestCase):
         cog.bot.db.execute.assert_not_awaited()
         ctx.send.assert_awaited()
 
-    async def test_echec_du_dossier_n_empeche_pas_le_panneau_de_succes(self):
+    async def test_echec_du_dossier_n_empeche_pas_la_confirmation_de_succes(self):
         cog = _make_cog()
         cog.bot.db.record_sanction = AsyncMock(side_effect=RuntimeError("disque plein"))
         ctx, guild, actor, target = _fake_ctx()
@@ -135,11 +134,11 @@ class WarnCogWiringTests(unittest.IsolatedAsyncioTestCase):
         await Moderation.warn.callback(cog, ctx, target, raison="spam")
 
         ctx.send.assert_awaited()
-        panneau = ctx.send.await_args.kwargs.get("view")
-        self.assertIsInstance(panneau, panels.Panneau)
-        self.assertEqual(panneau.kind, "moderation")
+        # Succès : confirmation courte en texte brut, plus de panneau dans le salon.
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
+        self.assertTrue(ctx.send.await_args.kwargs.get("content"))
 
-    async def test_echec_du_comptage_n_empeche_pas_le_panneau_de_succes(self):
+    async def test_echec_du_comptage_n_empeche_pas_la_confirmation_de_succes(self):
         cog = _make_cog()
         cog.bot.db.fetchall = AsyncMock(side_effect=RuntimeError("disque plein"))
         ctx, guild, actor, target = _fake_ctx()
@@ -147,10 +146,10 @@ class WarnCogWiringTests(unittest.IsolatedAsyncioTestCase):
         await Moderation.warn.callback(cog, ctx, target, raison="spam")
 
         ctx.send.assert_awaited()
-        panneau = ctx.send.await_args.kwargs.get("view")
-        self.assertIsInstance(panneau, panels.Panneau)
-        texte = panels.texte_complet(panneau)
-        self.assertIn("inconnu", texte)
+        # Le total inconnu n'apparaît plus dans la réponse courte : il est dans la
+        # fiche envoyée aux logs (log_sanction), qui a bien été appelée.
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
+        cog.log_action.assert_awaited()
 
     async def test_ban_automatique_declenche_au_seuil_appelle_guild_ban(self):
         cog = _make_cog(
@@ -177,7 +176,7 @@ class WarnCogWiringTests(unittest.IsolatedAsyncioTestCase):
         await Moderation.warn.callback(cog, ctx, target, raison="spam")
 
         guild.ban.assert_awaited_once()
-        # Le panneau du warn ET le message d'échec du ban automatique sont envoyés.
+        # La confirmation du warn ET le message d'échec du ban automatique sont envoyés.
         self.assertGreaterEqual(ctx.send.await_count, 2)
 
 
