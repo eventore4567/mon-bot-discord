@@ -694,32 +694,6 @@ async def _on_command_completion(bot: commands.Bot, ctx: commands.Context) -> No
     await _notify_mission_rewards(ctx, rewards)
 
 
-async def _on_guild_join(bot: commands.Bot, guild: discord.Guild) -> None:
-    bot_member = guild.me
-    if bot_member is None:
-        return
-    channel = guild.system_channel
-    if channel is None or not channel.permissions_for(bot_member).send_messages:
-        channel = next(
-            (c for c in guild.text_channels if c.permissions_for(bot_member).send_messages),
-            None,
-        )
-    if channel is None:
-        return
-    embed = embeds.brand(
-        "🚀 Bienvenue sur SentriX V3",
-        (
-            "SentriX est prêt. Pour éviter une configuration compliquée, commence par **`+setup`** : l'assistant vous guide pour les rôles, salons, tickets, sécurité, niveaux et logs.\n\n**Pour les membres :** `+profile` affiche maintenant la saison, le streak, les missions et les succès.\n**IA :** écris simplement `SentriX ...` ou utilisez `+ai`.\n**Besoin d'aide :** `+help`."
-        ),
-    )
-    if config.DASHBOARD_PUBLIC_URL:
-        embed.add_field(name="🌐 Dashboard", value=config.DASHBOARD_PUBLIC_URL, inline=False)
-    try:
-        await panels.envoyer(channel, panels.depuis_embed(embed))
-    except discord.HTTPException:
-        pass
-
-
 def install(bot: commands.Bot) -> None:
     """Installe V3 une seule fois après les cogs historiques."""
     global _FLUSH_TASK
@@ -737,9 +711,6 @@ def install(bot: commands.Bot) -> None:
     async def command_listener(ctx: commands.Context):
         await _on_command_completion(bot, ctx)
 
-    async def guild_join_listener(guild: discord.Guild):
-        await _on_guild_join(bot, guild)
-
     async def ready_listener():
         await _ensure_schema(bot)
         _install_rich_profile(bot)
@@ -749,7 +720,6 @@ def install(bot: commands.Bot) -> None:
 
     bot.add_listener(message_listener, "on_message")
     bot.add_listener(command_listener, "on_command_completion")
-    bot.add_listener(guild_join_listener, "on_guild_join")
     bot.add_listener(ready_listener, "on_ready")
 
     try:

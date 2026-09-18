@@ -159,22 +159,6 @@ def _help_request_embed(guild: discord.Guild, requester: discord.abc.User, invit
     return embed
 
 
-def _target_help_channel(guild: discord.Guild) -> discord.TextChannel | None:
-    me = guild.me
-    if me is None:
-        return None
-    ordered = [guild.system_channel, guild.public_updates_channel, guild.rules_channel, *guild.text_channels]
-    seen: set[int] = set()
-    for channel in ordered:
-        if channel is None or channel.id in seen:
-            continue
-        seen.add(channel.id)
-        perms = channel.permissions_for(me)
-        if perms.view_channel and perms.send_messages and perms.embed_links:
-            return channel
-    return None
-
-
 def _invite_channel(
     guild: discord.Guild,
     preferred: discord.abc.GuildChannel | None = None,
@@ -245,50 +229,38 @@ async def _create_and_deliver_help_invite(
     return True, "La demande a été envoyée au créateur de SentriX avec une invitation temporaire."
 
 
-class SetupHelpView(discord.ui.View):
-    def __init__(self, bot: commands.Bot):
-        super().__init__(timeout=None)
-        self.bot = bot
-
-    @discord.ui.button(
-        label="Demander de l'aide",
-        style=discord.ButtonStyle.secondary,
-        custom_id="sentrix:setup-help:request:v1",
-    )
-    async def request_help(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        guild = interaction.guild
-        member = interaction.user
-        if guild is None or not isinstance(member, discord.Member):
-            return await interaction.response.send_message(
-                "Cette action doit être utilisée depuis le serveur concerné.",
-                ephemeral=True,
-            )
-
-        perms = member.guild_permissions
-        allowed = member.id == guild.owner_id or perms.administrator or perms.manage_guild
-        if not allowed:
-            return await interaction.response.send_message(
-                "Seul le propriétaire ou un administrateur du serveur peut demander cette aide.",
-                ephemeral=True,
-            )
-
-        await interaction.response.defer(ephemeral=True)
-        _ok, message = await _create_and_deliver_help_invite(
-            self.bot,
-            guild,
-            member,
-            preferred_channel=interaction.channel,
+async def request_setup_help(bot: commands.Bot, interaction: discord.Interaction) -> None:
+    """Bouton « Demander de l'aide » du message d'accueil (cogs/guild_arrival.py) :
+    crée une invitation temporaire de 24 h, un seul usage, remise au créateur."""
+    guild = interaction.guild
+    member = interaction.user
+    if guild is None or not isinstance(member, discord.Member):
+        return await interaction.response.send_message(
+            "Cette action doit être utilisée depuis le serveur concerné.",
+            ephemeral=True,
         )
-        await interaction.followup.send(message, ephemeral=True)
+
+    perms = member.guild_permissions
+    allowed = member.id == guild.owner_id or perms.administrator or perms.manage_guild
+    if not allowed:
+        return await interaction.response.send_message(
+            "Seul le propriétaire ou un administrateur du serveur peut demander cette aide.",
+            ephemeral=True,
+        )
+
+    await interaction.response.defer(ephemeral=True)
+    _ok, message = await _create_and_deliver_help_invite(
+        bot,
+        guild,
+        member,
+        preferred_channel=interaction.channel,
+    )
+    await interaction.followup.send(message, ephemeral=True)
 
 
 class OwnerLogRebuild(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-
-    async def cog_load(self) -> None:
-        # Vue persistante : le bouton continue de fonctionner après un redémarrage.
-        self.bot.add_view(SetupHelpView(self.bot))
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
@@ -298,21 +270,7 @@ class OwnerLogRebuild(commands.Cog):
         except Exception:
             logger.exception("Notification créateur impossible pour nouveau guild=%s", guild.id)
 
-        channel = _target_help_channel(guild)
-        if channel is None:
-            return
-
-        embed = embeds.brand(
-            "Besoin d'aide pour configurer SentriX ?",
-            (
-                "Le propriétaire ou un administrateur peut demander l'aide du créateur de SentriX. "
-                "Le bot créera alors une invitation temporaire de 24 h, utilisable une seule fois."
-            ),
-        )
-        try:
-            await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), SetupHelpView(self.bot)), allowed_mentions=discord.AllowedMentions.none())
-        except (discord.Forbidden, discord.HTTPException):
-            logger.warning("Carte d'assistance impossible à envoyer guild=%s", guild.id)
+        # La demande d'aide est un bouton du message d'accueil unique (guild_arrival).
 
     def _old_log_candidates(
         self,

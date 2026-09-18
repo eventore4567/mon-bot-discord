@@ -16,13 +16,11 @@ on_join = next(
     node for node in owner_cog.body
     if isinstance(node, ast.AsyncFunctionDef) and node.name == "on_guild_join"
 )
-button_view = next(
-    node for node in TREE.body
-    if isinstance(node, ast.ClassDef) and node.name == "SetupHelpView"
-)
+# Le bouton « Demander de l'aide » vit dans le message d'accueil unique
+# (cogs/guild_arrival.py) et délègue à request_setup_help ci-dessous.
 button_callback = next(
-    node for node in button_view.body
-    if isinstance(node, ast.AsyncFunctionDef) and node.name == "request_help"
+    node for node in TREE.body
+    if isinstance(node, ast.AsyncFunctionDef) and node.name == "request_setup_help"
 )
 
 join_source = ast.get_source_segment(SOURCE, on_join) or ""
