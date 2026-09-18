@@ -24,7 +24,7 @@ def test_v28_injects_v27_inside_canonical_unified_v2_program():
     assert v27.JS_MARKER in canonical
     assert 'AudioContext' in canonical
     assert 'event.isTrusted' in canonical
-    assert 'scale(.925)' in canonical
+    assert 'if (transitionPending) animateEnter();' in canonical
     assert 'sentrix:v27-page-enter' in canonical
 
 

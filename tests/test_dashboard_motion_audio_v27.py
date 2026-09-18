@@ -41,8 +41,13 @@ def test_v27_targets_real_v15_dom_with_web_animations_and_trusted_audio():
     assert '".nav button,button[data-tab]' in script
     assert '".card,.metric,.p18-card' in script
     assert '".row,.p18-table tbody tr' in script
-    assert "scale(.925)" in script
-    assert "translateY(28px)" in script
+    # Anti-clignotement : l'entrée d'une page ne part plus d'opacity 0 / flou / réduction,
+    # et un rafraîchissement de données ne rejoue jamais les cartes.
+    assert "scale(.925)" not in script
+    assert "blur(5px)" not in script
+    assert "opacity:0,transform:\"translateY(22px)" not in script
+    assert "if (transitionPending) animateEnter();" in script
+    assert "else animateSurfaceNodes()" not in script
     assert "scale(.90)" in script
 
     # Barre de progression en haut retirée (quatre couches en empilaient une chacune).
