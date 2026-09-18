@@ -52,7 +52,6 @@ async def _close_runtime(bot) -> None:
 # Chacun est retenu par un appel reel, pas par une reference defensive.
 RETENUS: dict[str, str] = {
     "command_clarity": "language_runtime appelle friendly_summary()",
-    "moderation_logs_fix": "premium_logs et premium_logs_v2 appellent _repair_log_target()",
     "command_no_emoji_runtime": "plain_response_policy appelle _clean_send_args()",
     "final_runtime_polish": "help_v8_final_guard appelle install()",
     "verification_polish_v51": "security_verification_v71 l'importe",

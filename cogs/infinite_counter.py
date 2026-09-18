@@ -178,6 +178,7 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
             "channel_id=excluded.channel_id,next_number=excluded.next_number,last_user_id=NULL,enabled=1,updated_at=excluded.updated_at",
             (guild_id, channel_id, start_number, int(time.time())),
         )
+        self._invalidate_enabled(guild_id)
 
     async def _invalid(self, message: discord.Message, text: str):
         async def delete_message():
@@ -228,6 +229,7 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
     @checks.is_owner_or_admin()
     async def infinit_stop(self, ctx: commands.Context):
         await self.bot.db.execute("UPDATE infinite_counter_config SET enabled=0,updated_at=? WHERE guild_id=?", (int(time.time()), ctx.guild.id))
+        self._invalidate_enabled(ctx.guild.id)
         await ctx.send("Compteur infini désactivé. La progression reste enregistrée.")
 
     @infinit.command(name="resume", aliases=["on", "reprendre"])
@@ -237,15 +239,34 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
         if row is None:
             return await ctx.send("Configurez d’abord le compteur avec `+infinit`.")
         await self.bot.db.execute("UPDATE infinite_counter_config SET enabled=1,updated_at=? WHERE guild_id=?", (int(time.time()), ctx.guild.id))
+        self._invalidate_enabled(ctx.guild.id)
         await ctx.send("Compteur infini réactivé avec la progression sauvegardée.")
+
+    _ENABLED_TTL = 15.0
+
+    async def _enabled_config(self, guild_id: int):
+        """Pré-filtre en cache : la plupart des serveurs n'ont pas de compteur infini."""
+        cache = self.__dict__.setdefault("_enabled_cache", {})
+        cached = cache.get(int(guild_id))
+        now_mono = time.monotonic()
+        if cached is not None and now_mono - cached[0] < self._ENABLED_TTL:
+            return cached[1]
+        row = await self.bot.db.fetchone(
+            "SELECT * FROM infinite_counter_config WHERE guild_id=? AND enabled=1", (int(guild_id),)
+        )
+        if len(cache) > 5000:
+            cache.clear()
+        cache[int(guild_id)] = (now_mono, row)
+        return row
+
+    def _invalidate_enabled(self, guild_id: int) -> None:
+        self.__dict__.setdefault("_enabled_cache", {}).pop(int(guild_id), None)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is None:
             return
-        row = await self.bot.db.fetchone(
-            "SELECT * FROM infinite_counter_config WHERE guild_id=? AND enabled=1", (message.guild.id,)
-        )
+        row = await self._enabled_config(message.guild.id)
         if row is None or int(row["channel_id"]) != message.channel.id:
             return
 

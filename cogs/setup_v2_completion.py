@@ -387,7 +387,7 @@ async def _reset_config(bot, guild: discord.Guild, target: str) -> str:
         elif item == "security":
             await bot.db.execute("INSERT INTO automod_settings (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING", (gid,))
             await bot.db.execute("UPDATE automod_settings SET antispam=0,antilink=0,antiinvite=0,antimention=0,anticaps=0,antiemoji=0,antiraid=0,antibot=0,antiaccount=0,antiscam=0,antinuke=0 WHERE guild_id=?", (gid,))
-            await bot.db.execute("DELETE FROM trusted_members WHERE guild_id=?", (gid,)); await bot.db.execute("DELETE FROM antinuke_whitelist WHERE guild_id=?", (gid,))
+            await bot.db.execute("DELETE FROM trusted_members WHERE guild_id=?", (gid,)); await bot.db.execute("DELETE FROM antinuke_whitelist WHERE guild_id=?", (gid,)); core.invalidate_trusted_cache(gid)
         elif item == "logs":
             for _category in log_service.CATEGORIES:
                 try:

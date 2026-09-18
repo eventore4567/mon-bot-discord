@@ -384,6 +384,8 @@ class AutoMod(commands.Cog, name="Automod"):
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)", (ctx.guild.id, membre.id)
         )
+        from cogs.setup_v2_core import invalidate_trusted_cache
+        invalidate_trusted_cache(ctx.guild.id, membre.id)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{membre.mention} est maintenant exempté de l'anti-nuke.")))
 
     @commands.hybrid_command(name="antinuke-whitelist-remove", description="Retirer un membre de la liste blanche anti-nuke.", with_app_command=False)
@@ -393,6 +395,8 @@ class AutoMod(commands.Cog, name="Automod"):
         await self.bot.db.execute(
             "DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
+        from cogs.setup_v2_core import invalidate_trusted_cache
+        invalidate_trusted_cache(ctx.guild.id, membre.id)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} a été retiré de la liste blanche anti-nuke.')))
 
     @commands.hybrid_command(name="antinuke-whitelist-list", description="Afficher les membres exemptés de l'anti-nuke.", with_app_command=False)

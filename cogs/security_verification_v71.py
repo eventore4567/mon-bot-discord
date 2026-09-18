@@ -121,8 +121,12 @@ def _clamp_age(value: Any) -> int:
 
 
 async def ensure_schema(bot: commands.Bot) -> None:
+    # Une fois par processus : ce CREATE TABLE s'exécutait à CHAQUE message reçu.
+    if getattr(bot, "_sentrix_security_v71_schema_ready", False):
+        return
     await bot.db.execute(SCHEMA)
     await bot.db.execute(HONEYPOT_SCHEMA)
+    bot._sentrix_security_v71_schema_ready = True
 
 
 async def settings(bot: commands.Bot, guild_id: int) -> dict[str, Any]:
@@ -585,11 +589,24 @@ class SecurityVerificationRuntimeV71:
         self._raid_until: dict[int, float] = {}
         self._patched_engine_id: int | None = None
 
+    _LEGACY_CONFIG_TTL = 10.0
+
     async def _legacy_config(self, guild_id: int):
+        # Lu à chaque message : cache court (les écrivains sont multiples, un délai de
+        # quelques secondes sur un changement de salon piège est sans conséquence).
+        cache = self.__dict__.setdefault("_legacy_config_cache", {})
+        cached = cache.get(int(guild_id))
+        now_mono = time.monotonic()
+        if cached is not None and now_mono - cached[0] < self._LEGACY_CONFIG_TTL:
+            return cached[1]
         await ensure_schema(self.bot)
-        return await self.bot.db.fetchone(
+        row = await self.bot.db.fetchone(
             "SELECT * FROM honeypot_verification WHERE guild_id = ?", (int(guild_id),)
         )
+        if len(cache) > 5000:
+            cache.clear()
+        cache[int(guild_id)] = (now_mono, row)
+        return row
 
     def _staff_bypass(self, member: discord.Member, conf: Any) -> bool:
         if member.bot or member.id == member.guild.owner_id:

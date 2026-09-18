@@ -514,23 +514,48 @@ async def set_role_command_decision(
     )
 
 
+# Chemin chaud : is_trusted est appelé par DEUX listeners on_message (AutoMod et le
+# durcissement sécurité) pour chaque message, soit deux requêtes chacun. Cache court par
+# (serveur, membre), invalidé par tous les écrivains connus des deux tables.
+_TRUSTED_CACHE: dict[tuple[int, int], tuple[float, bool]] = {}
+_TRUSTED_CACHE_TTL = 15.0
+
+
+def invalidate_trusted_cache(guild_id: int | None = None, user_id: int | None = None) -> None:
+    if guild_id is None:
+        _TRUSTED_CACHE.clear()
+        return
+    for key in [k for k in _TRUSTED_CACHE if k[0] == int(guild_id) and (user_id is None or k[1] == int(user_id))]:
+        _TRUSTED_CACHE.pop(key, None)
+
+
 async def is_trusted(bot: commands.Bot, guild_id: int, user_id: int) -> bool:
+    key = (int(guild_id), int(user_id))
+    cached = _TRUSTED_CACHE.get(key)
+    now_mono = time.monotonic()
+    if cached is not None and now_mono - cached[0] < _TRUSTED_CACHE_TTL:
+        return cached[1]
     await ensure_schema(bot)
     row = await bot.db.fetchone(
         "SELECT 1 FROM trusted_members WHERE guild_id=? AND user_id=?",
-        (int(guild_id), int(user_id)),
+        key,
     )
-    if row is not None:
-        return True
-    legacy = await bot.db.fetchone(
-        "SELECT 1 FROM antinuke_whitelist WHERE guild_id=? AND user_id=?",
-        (int(guild_id), int(user_id)),
-    )
-    return legacy is not None
+    trusted = row is not None
+    if not trusted:
+        legacy = await bot.db.fetchone(
+            "SELECT 1 FROM antinuke_whitelist WHERE guild_id=? AND user_id=?",
+            key,
+        )
+        trusted = legacy is not None
+    if len(_TRUSTED_CACHE) > 20000:
+        _TRUSTED_CACHE.clear()
+    _TRUSTED_CACHE[key] = (now_mono, trusted)
+    return trusted
 
 
 async def add_trusted(bot: commands.Bot, guild_id: int, user_id: int, actor_id: int | None) -> None:
     await ensure_schema(bot)
+    invalidate_trusted_cache(guild_id, user_id)
     await bot.db.execute(
         "INSERT OR REPLACE INTO trusted_members (guild_id,user_id,added_by,added_at) VALUES (?,?,?,?)",
         (int(guild_id), int(user_id), actor_id, int(time.time())),
@@ -542,6 +567,7 @@ async def add_trusted(bot: commands.Bot, guild_id: int, user_id: int, actor_id: 
 
 
 async def remove_trusted(bot: commands.Bot, guild_id: int, user_id: int) -> None:
+    invalidate_trusted_cache(guild_id, user_id)
     await ensure_schema(bot)
     await bot.db.execute("DELETE FROM trusted_members WHERE guild_id=? AND user_id=?", (int(guild_id), int(user_id)))
     await bot.db.execute("DELETE FROM antinuke_whitelist WHERE guild_id=? AND user_id=?", (int(guild_id), int(user_id)))

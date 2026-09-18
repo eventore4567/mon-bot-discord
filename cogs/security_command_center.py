@@ -562,6 +562,8 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             "INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)",
             (ctx.guild.id, membre.id),
         )
+        from cogs.setup_v2_core import invalidate_trusted_cache
+        invalidate_trusted_cache(ctx.guild.id, membre.id)
         await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Exemption anti-nuke ajoutée', 'Anti-nuke exemption added'), membre.mention, kind='success'))
 
     @security_whitelist.command(name="user-remove", aliases=["remove-user", "membre-remove"])
@@ -572,6 +574,8 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             "DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?",
             (ctx.guild.id, membre.id),
         )
+        from cogs.setup_v2_core import invalidate_trusted_cache
+        invalidate_trusted_cache(ctx.guild.id, membre.id)
         await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Exemption anti-nuke retirée', 'Anti-nuke exemption removed'), membre.mention, kind='success'))
 
     @security_whitelist.command(name="users", aliases=["members", "membres"])

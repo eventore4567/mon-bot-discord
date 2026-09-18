@@ -251,6 +251,8 @@ async def handle_setup_action(request: web.Request) -> web.Response:
                 (guild_id, user_id),
             )
             message = f"{member.display_name} est retiré de la liste blanche anti-nuke."
+        from cogs.setup_v2_core import invalidate_trusted_cache
+        invalidate_trusted_cache(guild_id, user_id)
 
     elif action == "manager":
         try:
@@ -368,6 +370,8 @@ async def handle_setup_action(request: web.Request) -> web.Response:
             await db.execute("DELETE FROM automod_settings WHERE guild_id = ?", (guild_id,))
             await db.execute("DELETE FROM automod_exempt_roles WHERE guild_id = ?", (guild_id,))
             await db.execute("DELETE FROM antinuke_whitelist WHERE guild_id = ?", (guild_id,))
+            from cogs.setup_v2_core import invalidate_trusted_cache
+            invalidate_trusted_cache(guild_id)
             await db.ensure_guild(guild_id)
             message = "La sécurité, les exemptions et la liste blanche ont été réinitialisées."
         elif scope == "all":
