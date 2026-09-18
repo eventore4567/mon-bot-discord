@@ -82,6 +82,8 @@ def test_final_unified_dashboard_does_not_clear_content_on_section_render():
 
     assert "$('content').innerHTML=loading();setPage()" not in html
     assert "return withBusy('Ouverture de la section" in html
+    assert "},500);state.busyTimeout" in html
+    assert ".app.sx-navigating #content{opacity:1}" in html
     assert "case'dm':await window.sentrixRenderDM();break;" in html
 
 
@@ -105,3 +107,27 @@ def test_shared_boot_keeps_single_final_pass_after_v97():
     final_call = source.index("install_dashboard_v7()", v97_call)
     build_call = source.index("_original_build_app(bot)", final_call)
     assert v97_call < final_call < build_call
+
+
+def test_motion_layers_never_fade_or_blur_whole_content_on_navigation():
+    root = Path(__file__).resolve().parents[1]
+    v23 = (root / "web/dashboard_visual_finish_v23.py").read_text(encoding="utf-8")
+    v25 = (root / "web/dashboard_motion_system_v25.py").read_text(encoding="utf-8")
+    v26 = (root / "web/dashboard_visible_motion_v26.py").read_text(encoding="utf-8")
+
+    assert 'content.setAttribute("aria-busy", "true")' not in v23
+    assert 'content?.classList.add("sx25-page-out")' not in v25
+    assert "opacity:.72" not in v25
+    assert "opacity:.25!important" not in v26
+    assert "filter:blur(1px)" not in v26
+    assert "#sx26Shade{{display:none!important}}" in v26
+
+
+def test_product_backend_is_installed_before_build_app_is_captured():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "railway_ha_product_boot.py").read_text(encoding="utf-8")
+
+    product_install = source.index("_dashboard_product_v18.install(dashboard_web)")
+    capture = source.index("_original_build_app = dashboard_web.build_app")
+    final_wrapper = source.index("def _build_app_with_final_dashboard")
+    assert product_install < capture < final_wrapper

@@ -116,7 +116,9 @@ SCRIPT = r'''<script id="sentrix-dashboard-visual-finish-v23-js">
     settleTimer = setTimeout(settle, 90);
   };
   const beginNavigation = () => {
-    if (content) content.setAttribute("aria-busy", "true");
+    // A click is not a loading state by itself. The actual request HUD owns
+    // loading feedback; marking #content busy here made V25/V26 dim/blur the
+    // whole dashboard for every navigation, even when the page rendered in ms.
     clearTimeout(settleTimer);
     settleTimer = setTimeout(settle, 1400);
   };

@@ -14,15 +14,15 @@ JS_MARKER = "__sentrixDashboardVisibleMotionV26"
 
 STYLE = f'''<style id="{STYLE_MARKER}">
 :root{{--sx26-fast:140ms;--sx26-page:340ms;--sx26-card:420ms;--sx26-ease:cubic-bezier(.2,.8,.2,1);--sx26-spring:cubic-bezier(.16,1,.3,1)}}
-#sx26Shade{{position:fixed;z-index:2147482000;inset:0;pointer-events:none;opacity:0;background:radial-gradient(circle at 50% 10%,rgba(64,150,230,.08),transparent 35%),rgba(4,8,12,.13);backdrop-filter:blur(1px);transition:opacity 150ms ease}}
-body.sx26-loading #sx26Shade{{opacity:1}}
-#content.sx26-out{{opacity:.25!important;transform:translateY(10px) scale(.992)!important;filter:blur(1px);transition:opacity 120ms ease,transform 120ms ease,filter 120ms ease!important}}
+#sx26Shade{{display:none!important}}
+body.sx26-loading #sx26Shade{{opacity:0}}
+#content.sx26-out{{opacity:1!important;transform:none!important;filter:none!important;transition:none!important}}
 #content.sx26-in{{animation:sx26-page-in var(--sx26-page) var(--sx26-spring) both}}
-@keyframes sx26-page-in{{0%{{opacity:0;transform:translateY(18px) scale(.988);filter:blur(3px)}}55%{{opacity:1;transform:translateY(-2px) scale(1.002);filter:blur(0)}}100%{{opacity:1;transform:none;filter:none}}}}
+@keyframes sx26-page-in{{0%{{opacity:1;transform:translateY(2px);filter:none}}100%{{opacity:1;transform:none;filter:none}}}}
 .sx26-stagger{{animation:sx26-surface-in var(--sx26-card) var(--sx26-spring) both;animation-delay:calc(var(--sx26-order,0) * 42ms)}}
-@keyframes sx26-surface-in{{0%{{opacity:0;transform:translateY(18px) scale(.985)}}70%{{opacity:1;transform:translateY(-1px) scale(1.001)}}100%{{opacity:1;transform:none}}}}
+@keyframes sx26-surface-in{{0%{{opacity:1;transform:translateY(4px)}}100%{{opacity:1;transform:none}}}}
 .sx26-row{{animation:sx26-row-in 300ms var(--sx26-ease) both;animation-delay:calc(var(--sx26-order,0) * 20ms)}}
-@keyframes sx26-row-in{{from{{opacity:0;transform:translateX(-12px)}}to{{opacity:1;transform:none}}}}
+@keyframes sx26-row-in{{from{{opacity:1;transform:translateX(-3px)}}to{{opacity:1;transform:none}}}}
 :where(.btn,button[data-sx24-intent],.p18-tab,[data-sx12-tab],[data-sx12-go],[data-p18-tab],[data-p18-go],[data-page]){{transform-origin:center;transition:transform 110ms var(--sx26-ease),box-shadow 160ms ease,filter 160ms ease!important}}
 @media(hover:hover) and (pointer:fine){{:where(.btn,button[data-sx24-intent],.p18-tab,[data-sx12-tab],[data-sx12-go],[data-p18-tab],[data-p18-go],[data-page]):not(:disabled):hover{{transform:translateY(-2px) scale(1.012)!important;filter:brightness(1.05)}}}}
 :where(.btn,button[data-sx24-intent],.p18-tab,[data-sx12-tab],[data-sx12-go],[data-p18-tab],[data-p18-go],[data-page]):not(:disabled):active{{transform:translateY(2px) scale(.955)!important;filter:brightness(.96);transition-duration:55ms!important}}
