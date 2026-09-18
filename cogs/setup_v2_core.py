@@ -162,12 +162,18 @@ async def migrate_warn_threshold_default(bot: commands.Bot) -> int:
         return 0
     cursor = await bot.db.execute("UPDATE guild_config SET warn_ban_threshold=0 WHERE warn_ban_threshold=3")
     changed = int(getattr(cursor, "rowcount", 0) or 0)
+    # Même logique pour l'escalade AutoMod (automod_settings.escalation avait DEFAULT 1).
+    try:
+        cursor = await bot.db.execute("UPDATE automod_settings SET escalation=0 WHERE escalation=1")
+        changed += int(getattr(cursor, "rowcount", 0) or 0)
+    except Exception:
+        logger.warning("Escalade AutoMod : remise à zéro impossible", exc_info=True)
     await bot.db.execute(
         "INSERT OR IGNORE INTO sentrix_migrations (name, applied_at) VALUES (?, ?)",
         (_WARN_THRESHOLD_MIGRATION, int(time.time())),
     )
     if changed:
-        logger.info("Seuil de ban automatique remis à 0 (désactivé) pour %s serveur(s) qui avaient le défaut historique 3.", changed)
+        logger.info("Escalades automatiques désactivées (défauts historiques) : %s ligne(s) mises à jour.", changed)
     return changed
 
 # --------------------------------------------------------------------------

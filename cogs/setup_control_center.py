@@ -43,7 +43,7 @@ AUTOMOD = (
     ("antispam", "Anti-spam"), ("antiraid", "Anti-raid"), ("antilink", "Anti-lien"),
     ("antiinvite", "Anti-invitation"), ("antimention", "Anti-ping"), ("anticaps", "Anti-majuscules"),
     ("antiemoji", "Anti-emoji"), ("antibot", "Anti-bot"), ("antiaccount", "Anti-compte récent"),
-    ("antiscam", "Anti-scam"), ("antinuke", "Anti-nuke"),
+    ("antiscam", "Anti-scam"), ("antinuke", "Anti-nuke"), ("antiinsult", "Anti-insultes"),
 )
 
 BOT_PERMS = {

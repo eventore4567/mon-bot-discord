@@ -34,6 +34,7 @@ import asyncio
 import logging
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -110,6 +111,10 @@ SPAM_FILTERS = frozenset({"antispam", "antispam_duplicate", "antiemoji", "antime
 SPAM_TIMEOUT_SECONDS = 600
 
 
+def _sans_accents(texte: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", str(texte or "")) if not unicodedata.combining(c))
+
+
 @dataclass
 class _Incident:
     started: float
@@ -133,7 +138,7 @@ def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
 
 TOGGLE_FIELDS = [
     "antispam", "antilink", "antiinvite", "antimention", "anticaps",
-    "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam", "antinuke",
+    "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam", "antinuke", "antiinsult",
 ]
 
 # Libellés lisibles des filtres AutoMod — réutilisés par /automod-status ET par la page
@@ -150,6 +155,7 @@ AUTOMOD_TOGGLE_LABELS = {
     "antiaccount": "Anti-comptes très récents",
     "antiscam": "Anti-arnaques",
     "antinuke": "Anti-nuke (compte compromis)",
+    "antiinsult": "Anti-insultes (filtre multilingue)",
 }
 
 # Préréglages du niveau de sécurité global (/security-level et page "Sécurité" de /setup).
@@ -210,6 +216,29 @@ class AutoMod(commands.Cog, name="Automod"):
             self.blacklist_words_cache[guild_id] = [r["word"] for r in rows]
         return self.blacklist_words_cache[guild_id]
 
+    @staticmethod
+    def _blacklist_hit(words: list[str], content: str) -> str | None:
+        """Mot interdit présent comme MOT ENTIER (accents et casse ignorés).
+
+        L'ancien test ``word in content_lower`` était un simple ``in`` : « con »
+        supprimait « connexion », « pute » supprimait « réputé ». Un mot terminé par
+        ``*`` garde volontairement la correspondance par préfixe (« merd* »).
+        """
+        if not words:
+            return None
+        texte = _sans_accents(content).casefold()
+        for word in words:
+            brut = _sans_accents(str(word or "")).casefold().strip()
+            if not brut:
+                continue
+            if brut.endswith("*"):
+                motif = r"(?<![\w])" + re.escape(brut[:-1]) + r"\w*"
+            else:
+                motif = r"(?<![\w])" + re.escape(brut) + r"(?![\w])"
+            if re.search(motif, texte):
+                return word
+        return None
+
     async def get_blacklist_users_cached(self, guild_id: int) -> set:
         if guild_id not in self.blacklist_users_cache:
             rows = await self.bot.db.fetchall("SELECT user_id FROM blacklist_users WHERE guild_id = ?", (guild_id,))
@@ -263,7 +292,7 @@ class AutoMod(commands.Cog, name="Automod"):
         count = len(self.infraction_tracker[key])
 
         conf = await self.get_automod_cached(guild.id)
-        if not conf.get("escalation", 1):
+        if not conf.get("escalation", 0):
             return None, count
 
         action_to_take = None
@@ -700,24 +729,26 @@ class AutoMod(commands.Cog, name="Automod"):
         content_lower = message.content.lower()
         link_content = _normalize_link_text(message.content)
         words = await self.get_blacklist_words_cached(message.guild.id)
-        for word in words:
-            if word in content_lower:
-                return await self._delete_and_warn(message, "Mot interdit détecté.", "blacklist_word")
+        if self._blacklist_hit(words, message.content):
+            return await self._delete_and_warn(message, "Mot interdit détecté.", "blacklist_word")
 
         if await self.is_automod_exempt(message.author):
             return
 
-        dataset_match = self.moderation_dataset.match(message.content)
-        if dataset_match:
-            return await self._delete_and_timeout(
-                message,
-                "Contenu offensant détecté par le filtre multilingue.",
-                detection_kind=dataset_match.kind,
-            )
-
         conf = await self.get_automod_cached(message.guild.id)
         if not conf:
             return
+
+        # Filtre multilingue d'insultes : uniquement si le serveur l'a activé. Il tournait
+        # avant pour tout le monde, sans interrupteur, et appliquait un timeout.
+        if conf.get("antiinsult"):
+            dataset_match = self.moderation_dataset.match(message.content)
+            if dataset_match:
+                return await self._delete_and_timeout(
+                    message,
+                    "Contenu offensant détecté par le filtre multilingue.",
+                    detection_kind=dataset_match.kind,
+                )
 
         # Incident de spam en cours pour ce membre : tout ce qu'il envoie encore pendant
         # la fenêtre est supprimé sans nouvel avertissement ni nouvelle carte de log.

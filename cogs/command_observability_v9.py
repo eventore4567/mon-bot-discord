@@ -105,20 +105,6 @@ async def _health(bot):
     except Exception:
         logger.warning("Étape non critique ignorée dans _health", exc_info=True)
 
-    actual = {str(command.name).casefold() for command in bot.tree.get_commands()}
-    expected = set()
-    try:
-        from . import command_catalog_cleanup
-        expected = set(command_catalog_cleanup.normal_direct_commands())
-    except Exception:
-        logger.warning("Étape non critique ignorée dans _health", exc_info=True)
-    missing = sorted(expected - actual)
-    extra = sorted(actual - expected) if expected else []
-    if missing:
-        problems.append("Commandes slash manquantes: " + ", ".join(missing[:8]))
-    if extra:
-        problems.append("Commandes slash inattendues: " + ", ".join(extra[:8]))
-
     cutoff = now() - 900
     counts = {}
     for key, condition in {
@@ -151,10 +137,7 @@ async def _health(bot):
         "openai": {"state": ai_state},
         "commands": {
             "prefix_roots": len(bot.commands),
-            "slash_roots": len(actual),
-            "expected_slash_roots": len(expected) if expected else None,
-            "missing_slash": missing,
-            "extra_slash": extra,
+            "slash_roots": len(bot.tree.get_commands()),
             "recent_errors": counts["errors"],
             "recent_slow_or_stuck": counts["slow"],
             "recent_cooldowns": counts["cooldowns"],

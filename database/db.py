@@ -184,7 +184,8 @@ CREATE TABLE IF NOT EXISTS automod_settings (
     antiaccount INTEGER DEFAULT 0,
     antiscam INTEGER DEFAULT 0,
     antinuke INTEGER DEFAULT 0,
-    escalation INTEGER DEFAULT 1
+    antiinsult INTEGER DEFAULT 0,
+    escalation INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS automod_logs (
@@ -1040,7 +1041,10 @@ GUILD_CONFIG_NEW_COLUMNS = {
 # Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"
 # a été ajoutée après la création initiale de la table.
 AUTOMOD_SETTINGS_NEW_COLUMNS = {
-    "escalation": "INTEGER DEFAULT 1",
+    # Escalade automatique OFF tant qu'un administrateur ne l'a pas activée.
+    "escalation": "INTEGER DEFAULT 0",
+    # Filtre multilingue d'insultes : un filtre comme les autres, désactivé par défaut.
+    "antiinsult": "INTEGER DEFAULT 0",
 }
 
 # Même principe, pour la table tickets : "type_id" et "locked" ont été ajoutées avec

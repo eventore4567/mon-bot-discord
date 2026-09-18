@@ -49,7 +49,7 @@ def _rendu(erreur) -> str:
 def test_rate_limit_error_a_son_propre_message_pas_acces_refuse():
     texte = _rendu(RuntimeRateLimitError(5.0))
     assert "temporairement limitée" in texte
-    assert "réessaie" in texte
+    assert "réessayez" in texte
     assert "pas autorisé" not in texte
 
 

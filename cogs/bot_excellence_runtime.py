@@ -861,7 +861,7 @@ def _install_persistent_automod(bot: commands.Bot) -> None:
         if member.id == guild.owner_id or member.id in getattr(__import__("config"), "OWNER_IDS", []):
             return None, 0
         conf = await self.get_automod_cached(guild.id)
-        if not conf.get("escalation", 1):
+        if not conf.get("escalation", 0):
             return None, 0
         if not await _ensure_schema(self.bot):
             return await current(self, guild, member, reason)

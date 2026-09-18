@@ -82,7 +82,6 @@ class SentriXV21(commands.Cog):
     async def cog_load(self):
         self._v2 = self.bot.get_cog("SentriXV2")
         self.install_policy()
-        self.install_help()
         self.install_v2_enrichment()
         self.install_market_hardening()
 
@@ -105,19 +104,6 @@ class SentriXV21(commands.Cog):
             command_catalog_cleanup.apply_surface(self.bot)
         except Exception:
             logger.warning("Étape non critique ignorée dans install_policy", exc_info=True)
-
-    def install_help(self):
-        try:
-            from . import help_complete
-            for spec in help_complete.CATEGORIES:
-                if spec.key == "v2":
-                    try:
-                        spec.command_names = frozenset(spec.command_names) | V21_DIRECT_COMMANDS
-                    except Exception:
-                        logger.warning("Étape non critique ignorée dans install_help", exc_info=True)
-                    break
-        except Exception:
-            logger.warning("Étape non critique ignorée dans install_help", exc_info=True)
 
     def install_v2_enrichment(self):
         v2 = self._v2

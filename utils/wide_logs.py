@@ -449,11 +449,26 @@ def narrative_body(
         lines.append(_strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id) or f"{member or 'Un membre'} a été déplacé en vocal.")
     elif event_type == "ticket_close":
         lines.append(_strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id) or "Le ticket a été fermé.")
-    elif event_type.startswith("automod_") or event_type == "antiraid":
+    elif event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_"):
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
         lines.append(base or f"Une protection SentriX s'est déclenchée pour {member or 'un membre'}.")
         if reason:
             lines.append(f"**Raison :** {reason}")
+        # Détails courts de l'incident (compact_fields ignore les valeurs brèves).
+        details = []
+        if channel:
+            details.append(f"Salon : {channel}")
+        supprimes = _field_value(embed, "messages")
+        if supprimes:
+            details.append(f"Messages supprimés : **{supprimes}**")
+        action = _field_value(embed, "action")
+        if action:
+            details.append(f"Sanction : **{action}**")
+        infractions = _field_value(embed, "infractions")
+        if infractions:
+            details.append(f"Infractions (1h) : {infractions}")
+        if details:
+            lines.append(" · ".join(details))
     else:
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
         if base:
