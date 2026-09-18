@@ -181,6 +181,16 @@ logger.warning(
 )
 
 
+# Le backend du Centre avancé doit faire partie de la chaîne build_app AVANT sa capture.
+# Le finalizer V7 installe aussi l'UI V18, mais il s'exécute à l'intérieur du wrapper final :
+# installé seulement à ce moment-là, son wrapper de routes arrivait trop tard et
+# /product/analytics restait en 404 alors que l'onglet était visible.
+from web import dashboard_product_v18 as _dashboard_product_v18  # noqa: E402
+
+if not _dashboard_product_v18.install(dashboard_web):
+    raise RuntimeError("Backend Centre avancé V18 absent avant build_app.")
+logger.info("Backend Centre avancé V18 installé avant la capture build_app.")
+
 # Certaines couches dashboard historiques sont importées pendant le bootstrap HA. Elles
 # peuvent encore modifier INDEX_HTML après la première réparation. On entoure donc la
 # fonction build_app réellement utilisée : juste avant que les routes aiohttp soient figées,
