@@ -309,6 +309,69 @@ async def module_statuses(bot, guild, conf):
     return result
 
 
+# Premier écran : un interrupteur par module. « Anti-spam » est le filtre AutoMod du
+# même nom ; les autres sont les modules de module_settings (source unique).
+MODULE_SWITCHES = (
+    ("levels", "Niveaux"), ("economy", "Économie"), ("welcome", "Bienvenue"), ("goodbye", "Départs"),
+    ("antispam", "Anti-spam"), ("tickets", "Tickets"), ("logs", "Logs"), ("notifications", "Notifications"),
+)
+_SWITCH_LABELS = {"enabled": "ON", "disabled": "OFF", "not_configured": "OFF (non configuré)"}
+
+
+async def module_switch_states(bot, guild_id: int) -> dict[str, str]:
+    """État ON/OFF de chaque interrupteur du premier écran."""
+    from cogs import setup_v2_core as core
+
+    states: dict[str, str] = {}
+    for key, _label in MODULE_SWITCHES:
+        if key == "antispam":
+            row = await bot.db.fetchone("SELECT antispam FROM automod_settings WHERE guild_id = ?", (guild_id,))
+            states[key] = "enabled" if row and _get(row, "antispam", 0) else ("disabled" if row else "not_configured")
+        else:
+            states[key] = await core.module_state(bot, guild_id, key)
+    return states
+
+
+async def toggle_module_switch(bot, guild_id: int, key: str, actor_id: int | None) -> bool:
+    """Bascule un interrupteur ; retourne le nouvel état (True = ON)."""
+    from cogs import setup_v2_core as core
+
+    states = await module_switch_states(bot, guild_id)
+    nouveau = states.get(key) != "enabled"
+    if key == "antispam":
+        await bot.db.set_automod(guild_id, "antispam", 1 if nouveau else 0)
+        automod = bot.get_cog("Automod")
+        cache = getattr(automod, "automod_cache", None)
+        if isinstance(cache, dict):
+            cache.pop(guild_id, None)
+    else:
+        await core.set_module_enabled(bot, guild_id, key, nouveau, actor_id=actor_id)
+    return nouveau
+
+
+class ModuleSwitchSelect(discord.ui.Select):
+    """« Niveaux — ON », « Économie — OFF »… : choisir une ligne la bascule."""
+
+    def __init__(self, view, states: dict[str, str]):
+        self.owner = view
+        options = []
+        for key, label in MODULE_SWITCHES:
+            etat = states.get(key, "not_configured")
+            options.append(discord.SelectOption(
+                label=f"{label} — {_SWITCH_LABELS.get(etat, 'OFF')}",
+                value=key,
+                description=("Cliquer pour désactiver" if etat == "enabled" else "Cliquer pour activer")[:100],
+                emoji="🟢" if etat == "enabled" else "⚪",
+            ))
+        super().__init__(placeholder="Activer / désactiver un module", options=options, row=0)
+
+    async def callback(self, interaction):
+        key = self.values[0]
+        nouveau = await toggle_module_switch(self.owner.bot, self.owner.guild.id, key, interaction.user.id)
+        await self.owner.audit(interaction.user.id, f"module:{key}", "on" if nouveau else "off")
+        await self.owner.refresh(interaction)
+
+
 class CategorySelect(discord.ui.Select):
     def __init__(self, view):
         self.owner = view
@@ -636,6 +699,10 @@ class SetupView(discord.ui.LayoutView):
         self.bot, self.guild, self.author_id = bot, guild, int(author_id)
         self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
         self._commandes: list = []
+        # Paramètres rares (ajoutés par les couches tierces via add_item / build_embed) :
+        # cachés tant que « Paramètres avancés » n'est pas activé.
+        self.avance = False
+        self._sections_base: list = []
 
     # -- collecte des composants -------------------------------------------
     def ajouter(self, item) -> None:
@@ -705,17 +772,27 @@ class SetupView(discord.ui.LayoutView):
         ]
         for item in recuperes:
             self.remove_item(item)
-        self._commandes = _sans_doublons(self._commandes + recuperes)
+        # Écran simple : on ne garde des couches tierces que la langue du serveur, qui
+        # est un réglage de premier niveau ; le reste attend « Paramètres avancés ».
+        essentiels = [
+            item for item in recuperes
+            if str(getattr(item, "custom_id", "") or "") == "sentrix:setup:official:language"
+        ]
+        self._commandes = _sans_doublons(self._commandes + (recuperes if self.avance else essentiels))
         self.clear_items()
 
         embed = await self.build_embed()
         titre = str(getattr(embed, "title", "") or "SentriX — Centre de contrôle")
         resume = _sans_barre(str(getattr(embed, "description", "") or ""))
-        sections = [
-            panels.Section(str(champ.name or "").strip(), texte=_sans_barre(str(champ.value or "")))
-            for champ in getattr(embed, "fields", ())
-            if str(champ.value or "").strip()
-        ]
+        if self.avance or not self._sections_base:
+            sections = [
+                panels.Section(str(champ.name or "").strip(), texte=_sans_barre(str(champ.value or "")))
+                for champ in getattr(embed, "fields", ())
+                if str(champ.value or "").strip()
+            ]
+        else:
+            # Écran simple : uniquement les sections du centre de contrôle lui-même.
+            sections = list(self._sections_base)
 
         conteneur = discord.ui.Container(
             accent_colour=discord.Colour(panels.INTENTIONS[self.intention()][0])
@@ -743,6 +820,16 @@ class SetupView(discord.ui.LayoutView):
         home = discord.ui.Button(label="Accueil", style=discord.ButtonStyle.secondary)
         refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary)
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
+        avance = discord.ui.Button(
+            label="Paramètres avancés" if not self.avance else "Écran simple",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        async def toggle_avance(interaction):
+            self.avance = not self.avance
+            await self.refresh(interaction)
+
+        avance.callback = toggle_avance
 
         async def go_home(interaction):
             self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
@@ -765,7 +852,7 @@ class SetupView(discord.ui.LayoutView):
             self.stop()
 
         home.callback, refresh.callback, close.callback = go_home, do_refresh, do_close
-        self.ajouter(home); self.ajouter(refresh); self.ajouter(close)
+        self.ajouter(home); self.ajouter(refresh); self.ajouter(avance); self.ajouter(close)
 
         if self.category == "moderation":
             self.ajouter(FieldRoleSelect(self, "mod_role", "Rôle staff", 2))
@@ -826,6 +913,10 @@ class SetupView(discord.ui.LayoutView):
             self.ajouter(toggle); self.ajouter(limits)
 
     async def prepare(self):
+        if self.category is None:
+            states = await module_switch_states(self.bot, self.guild.id)
+            # Placé en tête : c'est l'action principale du premier écran.
+            self._commandes.insert(0, ModuleSwitchSelect(self, states))
         if self.category == "tickets":
             rows = await self.bot.db.fetchall(
                 "SELECT id, name FROM ticket_types WHERE guild_id = ? ORDER BY id", (self.guild.id,)
@@ -856,6 +947,7 @@ class SetupView(discord.ui.LayoutView):
             titre, resume, sections = await self._contenu_accueil(statuses)
         else:
             titre, resume, sections = await self._contenu_categorie(conf, statuses)
+        self._sections_base = list(sections)
         return _embed_de_sections(titre, resume, sections)
 
     async def _contenu_accueil(self, statuses):
@@ -863,26 +955,33 @@ class SetupView(discord.ui.LayoutView):
         actifs = sum(state == ConfigState.ACTIVE for state, _, _ in statuses.values())
         pourcentage = _completion(statuses)
 
+        switch_states = await module_switch_states(self.bot, self.guild.id)
+        interrupteurs = [
+            panels.Ligne(label, "**ON**" if switch_states.get(key) == "enabled" else "OFF")
+            for key, label in MODULE_SWITCHES
+        ]
         etats = [
             panels.Ligne(
                 CATEGORIES[cle][0],
                 statuses[cle][0].value,
-                indice=statuses[cle][1] if statuses[cle][1] else None,
+                indice=statuses[cle][1] if (self.avance and statuses[cle][1]) else None,
             )
             for cle in CATEGORY_ORDER
         ]
 
-        sections = [
-            panels.Section(
-                "État général",
-                [
-                    panels.Ligne("Configuration", f"**{pourcentage} %** terminée"),
-                    panels.Ligne("Modules actifs", f"**{actifs}** sur **{len(statuses)}**"),
-                    panels.Ligne("Serveur", self.guild.name),
-                ],
-            ),
-            panels.Section("Modules", etats),
-        ]
+        sections = [panels.Section("Modules", interrupteurs)]
+        if self.avance:
+            sections += [
+                panels.Section(
+                    "État général",
+                    [
+                        panels.Ligne("Configuration", f"**{pourcentage} %** terminée"),
+                        panels.Ligne("Modules actifs", f"**{actifs}** sur **{len(statuses)}**"),
+                        panels.Ligne("Serveur", self.guild.name),
+                    ],
+                ),
+                panels.Section("Détail par catégorie", etats),
+            ]
 
         # Ce qui bloque passe AVANT le reste : c'est la raison d'ouvrir +setup.
         erreurs = [
@@ -905,7 +1004,7 @@ class SetupView(discord.ui.LayoutView):
             for cle, data in statuses.items()
             if data[0] == ConfigState.UNCONFIGURED
         ]
-        if a_configurer:
+        if a_configurer and self.avance:
             sections.append(
                 panels.Section(
                     "Jamais configuré",
@@ -915,11 +1014,12 @@ class SetupView(discord.ui.LayoutView):
             )
 
         resume = (
-            f"**{pourcentage} %** configuré · **{actifs}/{len(statuses)}** modules actifs"
+            "Activez ou désactivez un module dans le premier menu ; choisissez une catégorie "
+            "pour la configurer. Les réglages rares sont sous « Paramètres avancés »."
         )
         if erreurs:
-            resume += f" · **{len(erreurs)}** à corriger"
-        return "SentriX — Centre de contrôle", resume, sections
+            resume += f"\n**{len(erreurs)}** point(s) à corriger."
+        return "SentriX — Configuration", resume, sections
 
     async def _contenu_categorie(self, conf, statuses):
         """Une categorie : son etat, sa configuration reelle, ce qui manque."""

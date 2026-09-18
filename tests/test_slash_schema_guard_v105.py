@@ -98,11 +98,11 @@ def test_direct_root_bridge_removes_internal_context_from_ping():
 async def test_setup_v103_has_zero_user_options_and_uses_configuration_authority():
     bot = commands.Bot(command_prefix="+", intents=discord.Intents.none(), help_command=None)
 
-    class Configuration(commands.Cog):
-        async def _open_setup_panel(self, interaction: discord.Interaction, *, author=None) -> None:
+    class SentriXSetup(commands.Cog):
+        async def send_setup(self, target) -> None:
             return None
 
-    await bot.add_cog(Configuration())
+    await bot.add_cog(SentriXSetup())
     assert v103._replace_setup_slash(bot) is True
 
     setup = bot.tree.get_command("setup")

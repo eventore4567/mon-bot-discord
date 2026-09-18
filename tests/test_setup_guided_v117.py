@@ -95,7 +95,7 @@ def test_v117_is_kept_in_repo_but_not_installed_as_public_setup():
     assert "install_setup_v116(bot)" in prepare
     assert "install_setup_v117" not in prepare
     assert "configuration-v116" in source
-    assert "/setup V116 restauré" in source
+    assert "moteur unique" in source
 
 
 def test_v117_does_not_reintroduce_visual_bars_or_technical_status_blocks():

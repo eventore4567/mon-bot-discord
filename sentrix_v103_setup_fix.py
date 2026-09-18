@@ -51,57 +51,27 @@ async def _is_setup_authorized(bot, interaction: discord.Interaction) -> bool:
 
 
 async def _send_setup_v114(bot, interaction: discord.Interaction) -> None:
-    """Ouvre l'unique setup officiel : Configuration.SetupView patché jusqu'à V116."""
-    configuration = bot.get_cog("Configuration")
-    opener = getattr(configuration, "_open_setup_panel", None) if configuration is not None else None
-    if not callable(opener):
-        raise RuntimeError("Le module Configuration / Smart Setup n'est pas chargé.")
+    """Ouvre LE centre de configuration : le même que ``+setup``.
 
+    ``/setup`` et ``+setup`` ouvraient deux interfaces différentes (Configuration.SetupView
+    d'un côté, setup_control_center.SetupView de l'autre). Il n'y a plus qu'un moteur :
+    cogs/setup_control_center.OfficialSetup.send_setup, qui accepte un Context comme une
+    Interaction et applique la même autorisation.
+    """
     if interaction.guild is None:
         return await interaction.response.send_message(
             "Cette commande doit être utilisée dans un serveur.", ephemeral=True
         )
-    if not await _is_setup_authorized(bot, interaction):
-        return await interaction.response.send_message(
-            "Vous devez être administrateur du serveur pour utiliser `/setup`.",
-            ephemeral=True,
-        )
-
-    existing = getattr(configuration, "active_by_guild", {}).get(interaction.guild.id)
-    if existing and existing[1] != interaction.user.id:
-        locked_message_id, locked_author_id, locked_author_name = existing
-        from cogs.configuration import SetupLockPromptView
-
-        view = SetupLockPromptView(
-            configuration,
-            interaction.guild.id,
-            locked_message_id,
-            locked_author_id,
-            locked_author_name,
-            interaction.user.id,
-        )
-        return await panels.envoyer(
-            interaction,
-            panels.avec_composants(
-                panels.depuis_embed(
-                    embeds.warning(
-                        f"Une configuration est déjà en cours par **{locked_author_name}**.",
-                        title="Configuration déjà ouverte",
-                    )
-                ),
-                view,
-            ),
-            ephemere=True,
-        )
-
-    await opener(interaction, author=interaction.user)
+    setup_cog = bot.get_cog("SentriXSetup")
+    if setup_cog is None or not callable(getattr(setup_cog, "send_setup", None)):
+        raise RuntimeError("Le centre de configuration (cogs.setup_control_center) n'est pas chargé.")
+    await setup_cog.send_setup(interaction)
 
 
 def _replace_setup_slash(bot) -> bool:
     """Réinstalle /setup avec une signature native, dirigée vers Configuration.SetupView."""
-    configuration = bot.get_cog("Configuration")
-    if configuration is None or not callable(getattr(configuration, "_open_setup_panel", None)):
-        logger.error("V103 : cog Configuration/Smart Setup introuvable ; /setup non remplacé.")
+    if bot.get_cog("SentriXSetup") is None:
+        logger.error("V103 : cog SentriXSetup (setup_control_center) introuvable ; /setup non remplacé.")
         return False
 
     tree = bot.tree
@@ -133,12 +103,12 @@ def _replace_setup_slash(bot) -> bool:
     tree.add_command(
         app_commands.Command(
             name="setup",
-            description="Configurer SentriX avec Smart Setup",
+            description="Ouvrir le centre de configuration SentriX (le même que +setup)",
             callback=setup_callback,
         ),
         override=True,
     )
-    logger.info("V103 : /setup V116 restauré — Configuration reste l'unique autorité.")
+    logger.info("V103 : /setup ouvre le centre de configuration de +setup (moteur unique).")
     return True
 
 
