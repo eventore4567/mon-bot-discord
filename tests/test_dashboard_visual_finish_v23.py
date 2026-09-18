@@ -33,7 +33,8 @@ def test_v23_is_event_driven_accessible_and_mobile_hardened():
     assert 'addEventListener("offline"' in script
     assert 'addEventListener("pageshow"' in script
     assert 'addEventListener("sentrix:live"' in script
-    assert 'setAttribute("aria-busy", "true")' in script
+    assert 'setAttribute("aria-busy", "true")' not in script
+    assert 'setAttribute("aria-busy", "false")' in script
     assert 'setAttribute("aria-current", "page")' in script
     assert 'setAttribute("aria-live", "polite")' in script
 
