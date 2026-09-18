@@ -134,71 +134,6 @@ async def _set_optional_role(view: "SentriXSetupV74", field: str, role: discord.
     await view.bot.db.set_guild_config(view.guild.id, field, role.id if role else None)
 
 
-async def _sync_sanction_badge(
-    bot: commands.Bot,
-    guild: discord.Guild,
-    member: discord.Member,
-    *,
-    action: str,
-) -> None:
-    """Applique les badges optionnels après une sanction réellement exécutée."""
-    conf = await bot.db.get_guild_config(guild.id)
-    field = None
-    add = True
-    if action == "mute":
-        field = "mute_role"
-    elif action == "unmute":
-        field = "mute_role"
-        add = False
-    elif action == "warn":
-        field = "warn_role"
-
-    if field is None:
-        return
-    role = _role_from_config(guild, setup_ui._get(conf, field))
-    if role is None:
-        return
-
-    me = guild.me
-    if me is None or not me.guild_permissions.manage_roles or role >= me.top_role:
-        return
-    try:
-        if add and role not in member.roles:
-            await member.add_roles(role, reason=f"SentriX V74 : badge automatique {action}")
-        elif not add and role in member.roles:
-            await member.remove_roles(role, reason=f"SentriX V74 : retrait badge automatique {action}")
-    except discord.HTTPException:
-        logger.debug("Impossible de synchroniser le badge %s", field, exc_info=True)
-
-
-def _install_moderation_badge_sync(bot: commands.Bot) -> None:
-    cog = bot.get_cog("Moderation")
-    if cog is None:
-        return
-    cls = cog.__class__
-    current = getattr(cls, "log_sanction", None)
-    if current is None or getattr(current, "_sentrix_v74_badges", False):
-        return
-
-    async def log_sanction_v74(self, ctx, action, target, reason, duration_seconds=None, extra_fields=None):
-        result = await current(
-            self,
-            ctx,
-            action,
-            target,
-            reason,
-            duration_seconds=duration_seconds,
-            extra_fields=extra_fields,
-        )
-        if isinstance(target, discord.Member) and ctx.guild is not None:
-            await _sync_sanction_badge(self.bot, ctx.guild, target, action=action)
-        return result
-
-    log_sanction_v74._sentrix_v74_badges = True
-    log_sanction_v74._sentrix_previous = current
-    cls.log_sanction = log_sanction_v74
-
-
 class SentriXSetupV74(v73.SentriXSetupV73):
     """Dernière façade du Setup : simple pour la sécurité, complète pour les tickets."""
 
@@ -754,7 +689,6 @@ def install(bot: commands.Bot) -> None:
         _send_setup_v74._sentrix_previous = current
         setup_ui.OfficialSetup.send_setup = _send_setup_v74
 
-    _install_moderation_badge_sync(bot)
     bot._sentrix_setup_experience_v74 = True
     logger.info(
         "%s installé : sécurité simple, permissions Discord natives, tickets complets et modération claire.",

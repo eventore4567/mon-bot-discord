@@ -37,13 +37,22 @@ def main() -> int:
             errors.append("V2.2 déclare une nouvelle commande alors que cette phase doit uniquement améliorer l'existant")
         markers = (
             "status='ouvert' AND claimed_by IS NULL",
-            "check_targetable", "asyncio.wait_for", "AI_SETTINGS_TTL", "GAME_SETTINGS_TTL",
+            "asyncio.wait_for", "AI_SETTINGS_TTL", "GAME_SETTINGS_TTL",
             "TICKET_BUTTON_SETTINGS_TTL", "PRAGMA busy_timeout=5000", '"new_commands": 0',
             "_ticket_create_locks", "await conn.commit()",
         )
         for marker in markers:
             if marker not in text:
                 errors.append(f"invariant V2.2 absent: {marker}")
+        # La garde de hiérarchie (check_targetable) vit dans le cog canonique : les
+        # remplacements de callbacks V2.2 (unmute/warn/ban…) ont été retirés parce que
+        # leurs fermetures partageaient une variable réassignée (+unmute exécutait mute).
+        moderation = (ROOT / "cogs/moderation.py").read_text(encoding="utf-8")
+        if "check_targetable" not in moderation:
+            errors.append("invariant V2.2 absent: check_targetable (cogs/moderation.py)")
+        for marker in ("guarded_unmute", "serial_warn", "reason_duration_wrapper"):
+            if marker in text:
+                errors.append(f"V2.2 réintroduit un remplacement de callback de sanction: {marker}")
 
     # Core V2, Phase 4 : atomic_rob() (la garantie last_rob/_economy_lock/cash>=?)
     # a été extraite de cogs/sentrix_v22.py vers services/economy.py — comportement

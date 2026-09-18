@@ -110,10 +110,18 @@ class CoreDiagnostics(commands.Cog, name="CoreDiagnostics"):
         ]
 
         # DISCORD
-        expected = int(getattr(self.bot, "expected_extension_count", 0) or 0)
+        # « attendues » = la liste main.EXTENSIONS ; le total chargé peut être plus grand
+        # (extensions ajoutées par les couches runtime, ex. cogs.help). On n'affiche donc
+        # jamais « 52 / 50 » : on compte ce qui MANQUE dans la liste attendue.
         loaded = len(self.bot.extensions)
-        if expected and loaded < expected:
-            problems.append(f"{expected - loaded} extension(s) non chargée(s)")
+        try:
+            import main as _main
+            attendues = list(getattr(_main, "EXTENSIONS", []))
+        except Exception:
+            attendues = []
+        manquantes = [name for name in attendues if name not in self.bot.extensions]
+        if manquantes:
+            problems.append(f"{len(manquantes)} extension(s) non chargée(s) : {', '.join(manquantes[:3])}")
         ready = self.bot.is_ready() and not self.bot.is_closed()
         if not ready:
             problems.append("gateway non prête")
@@ -124,7 +132,7 @@ class CoreDiagnostics(commands.Cog, name="CoreDiagnostics"):
         discord_section = [
             panels.Ligne("Connecté", "Oui" if ready else "Non"),
             panels.Ligne("Serveurs", str(len(self.bot.guilds))),
-            panels.Ligne("Extensions", f"{loaded}" + (f" / {expected}" if expected else "")),
+            panels.Ligne("Extensions", f"{loaded} chargées" + (f" · {len(manquantes)} manquante(s)" if manquantes else "")),
             panels.Ligne("Commandes", f"{len(list(self.bot.walk_commands()))} texte · {slash_roots} racines slash"),
         ]
 

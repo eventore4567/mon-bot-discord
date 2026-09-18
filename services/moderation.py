@@ -67,7 +67,7 @@ from typing import Any
 import discord
 
 from database.db import now
-from utils import checks, helpers
+from utils import checks, helpers, log_service
 
 logger = logging.getLogger("services.moderation")
 
@@ -179,6 +179,33 @@ async def persist_tempaction(
         return str(exc)
 
 
+# action persistée -> événement Discord observé par cogs/logs.py
+_EVENT_KIND = {"mute": "timeout", "unmute": "timeout", "ban": "ban", "kick": "kick", "unban": "unban", "tempban": "ban"}
+
+
+async def _apply_mute_role(bot: Any, guild: discord.Guild, target: discord.Member, *, add: bool, reason: str) -> None:
+    """Badge optionnel « rôle pendant un mute » (+setup › Modération) : ajouté au mute,
+    retiré à l'unmute. Best-effort : jamais bloquant pour la sanction elle-même."""
+    try:
+        conf = await bot.db.get_guild_config(guild.id)
+        role_id = int(conf["mute_role"] or 0) if conf and "mute_role" in conf.keys() else 0
+    except Exception:
+        return
+    role = guild.get_role(role_id) if role_id else None
+    if role is None or role.is_default() or role.managed:
+        return
+    me = guild.me
+    if me is None or not me.guild_permissions.manage_roles or role >= me.top_role:
+        return
+    try:
+        if add and role not in target.roles:
+            await target.add_roles(role, reason=reason)
+        elif not add and role in target.roles:
+            await target.remove_roles(role, reason=reason)
+    except discord.HTTPException:
+        logger.debug("Badge de mute non synchronisé (guild=%s membre=%s).", guild.id, target.id, exc_info=True)
+
+
 async def _run_sanction_pipeline(
     bot: Any,
     *,
@@ -229,6 +256,7 @@ async def _run_sanction_pipeline(
     if not dm_after:
         dm_sent = await _send_dm()
 
+    log_service.mark_sanction(guild.id, target.id, _EVENT_KIND.get(action, action))
     await execute()
 
     if dm_after:
@@ -314,6 +342,10 @@ async def unmute(
     l'exécution — un membre qu'on démute reste sur le serveur, la
     délivrabilité n'est pas en jeu, et c'est l'ordre du code existant.
     """
+    async def _execute() -> None:
+        await target.timeout(None, reason=f"{actor} : {reason}")
+        await _apply_mute_role(bot, guild, target, add=False, reason=f"Fin du mute par {actor}")
+
     return await _run_sanction_pipeline(
         bot,
         guild=guild,
@@ -322,7 +354,7 @@ async def unmute(
         reason=reason,
         dm_text=dm_text,
         action="unmute",
-        execute=lambda: target.timeout(None, reason=f"{actor} : {reason}"),
+        execute=_execute,
         dm_after=True,
     )
 
@@ -364,7 +396,9 @@ async def mute(
         )
 
     until = discord.utils.utcnow() + timedelta(seconds=seconds)
+    log_service.mark_sanction(guild.id, target.id, "timeout")
     await target.timeout(until, reason=f"{actor} : {reason}")
+    await _apply_mute_role(bot, guild, target, add=True, reason=f"Mute par {actor} : {reason}")
 
     dm_sent = False
     dm_text = render_dm_text(seconds) if render_dm_text else None
@@ -437,6 +471,7 @@ async def tempban(
         except discord.HTTPException:
             dm_sent = False
 
+    log_service.mark_sanction(guild.id, target.id, "ban")
     await guild.ban(target, reason=f"{actor} (temporaire {duree}) : {reason}", delete_message_seconds=0)
 
     tempaction_error = await persist_tempaction(
@@ -614,6 +649,7 @@ async def unban(
     l'appel."""
     try:
         user = await fetch_user(user_id)
+        log_service.mark_sanction(guild.id, user.id, "unban")
         await guild.unban(user, reason=f"{actor} : {reason}")
     except discord.NotFound:
         return SanctionOutcome(

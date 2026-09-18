@@ -334,7 +334,10 @@ def narrative_body(
         if reason:
             lines.append(f"**Raison :** {reason}")
     elif event_type == "member_ban":
-        lines.append(f"{member or 'Un membre'} a été banni" + (f" par {moderator}" if moderator else "") + ".")
+        lines.append(
+            f"{member or 'Un membre'} a été banni" + (f" par {moderator}" if moderator else "")
+            + (f" pour **{duration}**" if duration else "") + "."
+        )
         if reason:
             lines.append(f"**Raison :** {reason}")
     elif event_type == "member_unban":
@@ -356,6 +359,9 @@ def narrative_body(
         lines.append(f"{member or 'Un membre'} a reçu un avertissement" + (f" de {moderator}" if moderator else "") + ".")
         if reason:
             lines.append(f"**Raison :** {reason}")
+        details = _field_value(embed, "détails", "details")
+        if details:
+            lines.append(details)
     elif event_type in {"role_add", "role_remove"}:
         # Ces logs n'avaient AUCUNE branche narrative : le corps restait
         # entièrement vide, y compris le membre concerné. Le salon de logs

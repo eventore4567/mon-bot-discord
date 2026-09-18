@@ -36,6 +36,7 @@ import config
 from utils import embeds, checks, helpers, design_system, log_service
 from utils import sentrix_panels as panels
 from utils.helpers import parse_duration
+from utils.v22_rules import clean_reason
 from database.db import now
 from services import moderation as moderation_service
 
@@ -151,10 +152,18 @@ class Moderation(commands.Cog):
         logger.error("Boucle check_tempactions interrompue (%r) ; relance immédiate.", error)
         self.check_tempactions.restart()
 
-    async def log_action(self, guild: discord.Guild, embed: discord.Embed):
+    # Type d'événement du journal par action : c'est lui qui pilote la phrase narrative
+    # de la carte (« X a été mis en timeout par Y pour 1 minute »). Avec le type générique
+    # « moderation », la carte perdait modérateur et durée.
+    SANCTION_EVENT_TYPES = {
+        "ban": "member_ban", "tempban": "member_ban", "kick": "member_kick", "mute": "member_timeout",
+        "unmute": "member_untimeout", "warn": "member_warn", "unban": "member_unban",
+    }
+
+    async def log_action(self, guild: discord.Guild, embed: discord.Embed, event_type: str = "moderation"):
         # Utilise le salon "logs-moderation" dédié s'il existe (via /create-logs), sinon
         # retombe sur le salon de logs général — jamais de log perdu.
-        await helpers.send_log(self.bot, guild, "moderation", embed)
+        await helpers.send_log(self.bot, guild, event_type, embed)
 
     # "kind" détermine seulement la couleur de la fiche (succès/avertissement/danger) —
     # l'action elle-même (ce qui a réellement été fait) reste toujours le texte exact.
@@ -241,7 +250,7 @@ class Moderation(commands.Cog):
         e.add_field(name="📝 Raison", value=reason or "Aucune raison fournie", inline=False)
         for name, value in (extra_fields or {}).items():
             e.add_field(name=name, value=value, inline=False)
-        await self.log_action(ctx.guild, e)
+        await self.log_action(ctx.guild, e, self.SANCTION_EVENT_TYPES.get(action, "moderation"))
         return e
 
     # Deux appels identiques (même serveur, même action, même cible) en moins de
@@ -485,6 +494,7 @@ class Moderation(commands.Cog):
         la correction d'un vrai trou trouvé pendant l'extraction : une exception de
         persistance ne fait plus jamais passer une sanction réellement appliquée
         pour un échec de commande."""
+        raison = clean_reason(raison)
         if self._sanction_duplicate(ctx, "ban", membre.id):
             return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
@@ -524,6 +534,7 @@ class Moderation(commands.Cog):
         déjà en place sur ban/kick/mute/unmute — même famille de commandes,
         même garde-fou : le bot doit réellement posséder la permission
         Discord avant l'exécution."""
+        raison = clean_reason(raison)
         if ctx.interaction is None:
             duree, raison = self._normalise_prefix_duration(duree, raison)
         if self._sanction_duplicate(ctx, "tempban", membre.id):
@@ -575,6 +586,7 @@ class Moderation(commands.Cog):
         Corrige le même trou que les six précédentes : record_sanction()
         n'était protégé par aucun try/except alors que le débannissement
         Discord avait déjà réellement réussi."""
+        raison = clean_reason(raison)
         try:
             uid = int(user_id)
         except ValueError:
@@ -615,6 +627,7 @@ class Moderation(commands.Cog):
         sanction migrée vers services/moderation.py — voir le docstring de
         ban() ci-dessus pour le détail de la migration et du trou de
         persistance corrigé en l'extrayant."""
+        raison = clean_reason(raison)
         if self._sanction_duplicate(ctx, "kick", membre.id):
             return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
@@ -662,6 +675,7 @@ class Moderation(commands.Cog):
         après l'exécution) — voir services/moderation.py::mute()."""
         if ctx.interaction is None:
             duree, raison = self._normalise_prefix_duration(duree, raison)
+        raison = clean_reason(raison)
         if self._sanction_duplicate(ctx, "mute", membre.id):
             return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
@@ -702,6 +716,7 @@ class Moderation(commands.Cog):
     async def unmute(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
         """Core V2, Phase 2 (docs/core-v2-plan.md) : quatrième commande de
         sanction migrée — voir services/moderation.py::unmute()."""
+        raison = clean_reason(raison)
         if self._sanction_duplicate(ctx, "unmute", membre.id):
             return await self._reply(ctx, "Cette action vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
@@ -745,6 +760,7 @@ class Moderation(commands.Cog):
         record_sanction() non protégé) et sur le comptage total (une lecture
         qui ne doit plus jamais faire passer un avertissement déjà enregistré
         pour un échec)."""
+        raison = clean_reason(raison)
         if self._sanction_duplicate(ctx, "warn", membre.id):
             return await self._reply(ctx, "Cet avertissement vient déjà d'être lancé sur ce membre.", ephemere=True)
         await self._ack(ctx)
@@ -936,7 +952,7 @@ class Moderation(commands.Cog):
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_messages",), target="channel_target")
-    async def clear(self, ctx: commands.Context, nombre: app_commands.Range[int, 1, 100]):
+    async def clear(self, ctx: commands.Context, nombre: commands.Range[int, 1, 100]):
         """Implémentation UNIQUE de +clear / /clear.
 
         Historique : trois implémentations coexistaient (ce corps, cogs/help_clear_fix_v80
@@ -1141,19 +1157,41 @@ class Moderation(commands.Cog):
     @checks.has_permission_or_modrole("manage_channels")
     async def hide(self, ctx: commands.Context):
         await self._ack(ctx)
-        overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
-        overwrite.view_channel = False
-        await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-        await self._reply(ctx, f"{ctx.channel.mention} est maintenant caché aux membres.")
+        if await self._set_everyone_visibility(ctx, visible=False):
+            await self._reply(ctx, f"{ctx.channel.mention} est maintenant caché aux membres.")
 
     @commands.hybrid_command(name="show", description="Rendre le salon à nouveau visible.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def show(self, ctx: commands.Context):
         await self._ack(ctx)
+        if await self._set_everyone_visibility(ctx, visible=True):
+            await self._reply(ctx, f"{ctx.channel.mention} est à nouveau visible.")
+
+    # Code d'erreur Discord renvoyé quand on tente de cacher un salon déclaré dans
+    # l'onboarding communautaire (« Onboarding channels must be readable by everyone »).
+    _ONBOARDING_CHANNEL_ERROR = 350003
+
+    async def _set_everyone_visibility(self, ctx: commands.Context, *, visible: bool) -> bool:
+        """Applique la permission « voir le salon » de @everyone ; retourne False (après
+        une phrase courte) quand Discord refuse — ce n'est pas une erreur technique."""
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
-        overwrite.view_channel = None
-        await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-        await self._reply(ctx, f"{ctx.channel.mention} est à nouveau visible.")
+        overwrite.view_channel = None if visible else False
+        try:
+            await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=f"{ctx.author} : {'show' if visible else 'hide'}")
+        except discord.Forbidden:
+            await self._reply(ctx, "Il manque à SentriX la permission **Gérer les salons** ici.", ephemere=True)
+            return False
+        except discord.HTTPException as exc:
+            if getattr(exc, "code", None) == self._ONBOARDING_CHANNEL_ERROR:
+                await self._reply(
+                    ctx,
+                    f"{ctx.channel.mention} fait partie de l'onboarding du serveur : Discord impose qu'il reste visible par tous. "
+                    "Retirez-le de l'onboarding (Paramètres du serveur › Onboarding) pour pouvoir le cacher.",
+                    ephemere=True,
+                )
+                return False
+            raise
+        return True
 
     # ---------------------------------------------------------------- DIVERS
 

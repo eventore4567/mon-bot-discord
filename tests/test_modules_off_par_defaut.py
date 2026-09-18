@@ -146,7 +146,7 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         # Idempotente : une seconde exécution ne réécrit rien.
         self.assertEqual(await core.migrate_module_defaults(self.bot), {})
         rows = await self.db.fetchall("SELECT name FROM sentrix_migrations")
-        self.assertEqual([r["name"] for r in rows], [core._MODULE_DEFAULTS_MIGRATION])
+        self.assertEqual(sorted(r["name"] for r in rows), sorted([core._MODULE_DEFAULTS_MIGRATION, core._WARN_THRESHOLD_MIGRATION]))
 
     async def test_une_configuration_absente_ne_devient_jamais_vraie_apres_migration(self):
         await core.module_enabled(self.bot, NEW_GUILD, "levels")  # déclenche la migration

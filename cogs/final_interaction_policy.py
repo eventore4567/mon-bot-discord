@@ -618,6 +618,9 @@ def _install_followups() -> None:
         if token and token in _PLAIN_WEBHOOK_TOKENS:
             return await base(self, *args, **kwargs)
         root = _COMMAND_ROOT.get()
+        if _plain_root(root):
+            # texte_court() (confirmation/erreur courte) : le followup reste du texte.
+            return await base(self, *args, **kwargs)
         pages = _payload_pages(args, kwargs, root=root)
         return await _send_pages_with_callable(base, self, pages)
 

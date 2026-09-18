@@ -42,7 +42,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import embeds, checks, helpers
+from utils import embeds, checks, helpers, log_service
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
 
@@ -278,6 +278,8 @@ class AutoMod(commands.Cog, name="Automod"):
             return None, count  # hors de portée du bot, inutile d'essayer
 
         try:
+            # La carte d'incident AutoMod est le seul log : pas de doublon « Timeout appliqué ».
+            log_service.mark_sanction(guild.id, member.id, {"mute": "timeout", "kick": "kick", "ban": "ban"}[action_to_take])
             if action_to_take == "mute":
                 until = discord.utils.utcnow() + timedelta(seconds=MUTE_ESCALATION_SECONDS)
                 await member.timeout(until, reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}")
@@ -846,6 +848,7 @@ class AutoMod(commands.Cog, name="Automod"):
         if current and current > until:
             return "mute"
         try:
+            log_service.mark_sanction(guild.id, member.id, "timeout")
             await member.timeout(until, reason=f"AutoMod : {reason}")
         except (discord.Forbidden, discord.HTTPException):
             return None

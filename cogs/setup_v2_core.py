@@ -139,7 +139,36 @@ async def ensure_schema(bot: commands.Bot) -> None:
             await migrate_module_defaults(bot)
         except Exception:
             logger.exception("Migration des modules par défaut impossible ; elle sera retentée au prochain démarrage.")
+        try:
+            await migrate_warn_threshold_default(bot)
+        except Exception:
+            logger.exception("Migration du seuil d'avertissements impossible ; elle sera retentée au prochain démarrage.")
 
+
+
+# Escalade automatique OFF par défaut : la colonne guild_config.warn_ban_threshold avait
+# DEFAULT 3, donc TOUT serveur bannissait automatiquement au 3e avertissement sans que
+# personne ne l'ait choisi. La valeur 3 n'a jamais été posée explicitement (c'était le
+# défaut du schéma) : on la remet à 0 une fois ; un serveur qui la veut la reconfigure.
+_WARN_THRESHOLD_MIGRATION = "warn_ban_threshold_default_off_v1"
+
+
+async def migrate_warn_threshold_default(bot: commands.Bot) -> int:
+    await bot.db.execute(
+        "CREATE TABLE IF NOT EXISTS sentrix_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
+    )
+    done = await bot.db.fetchone("SELECT name FROM sentrix_migrations WHERE name=?", (_WARN_THRESHOLD_MIGRATION,))
+    if done is not None:
+        return 0
+    cursor = await bot.db.execute("UPDATE guild_config SET warn_ban_threshold=0 WHERE warn_ban_threshold=3")
+    changed = int(getattr(cursor, "rowcount", 0) or 0)
+    await bot.db.execute(
+        "INSERT OR IGNORE INTO sentrix_migrations (name, applied_at) VALUES (?, ?)",
+        (_WARN_THRESHOLD_MIGRATION, int(time.time())),
+    )
+    if changed:
+        logger.info("Seuil de ban automatique remis à 0 (désactivé) pour %s serveur(s) qui avaient le défaut historique 3.", changed)
+    return changed
 
 # --------------------------------------------------------------------------
 # Cache des interrupteurs de modules

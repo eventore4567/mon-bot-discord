@@ -161,6 +161,41 @@ def mark_purged(message_ids: Iterable[int]) -> None:
                 _purged_message_ids.pop(key, None)
 
 
+# ---------------------------------------------------------------------------
+# Sanctions exécutées par une commande SentriX (mute, unmute, kick, ban, unban…) : le cog
+# de modération journalise son propre dossier (modérateur réel, durée, raison). Le marqueur
+# est posé AVANT l'appel Discord pour que le listener d'événement (on_member_update,
+# on_member_ban…), qui arrive quelques millisecondes après, sache qu'il ne doit pas
+# produire une seconde carte « Timeout appliqué / Modérateur : SentriX ».
+# ---------------------------------------------------------------------------
+_SANCTION_TTL = 20.0
+_recent_sanctions: dict[tuple[int, int, str], float] = {}
+
+
+def mark_sanction(guild_id: int, user_id: int, kind: str) -> None:
+    """Déclare qu'une sanction ``kind`` (timeout, ban, unban, kick) part d'une commande."""
+    now = time.monotonic()
+    _recent_sanctions[(int(guild_id), int(user_id), str(kind))] = now + _SANCTION_TTL
+    if len(_recent_sanctions) > 2000:
+        for key, stamp in list(_recent_sanctions.items()):
+            if stamp <= now:
+                _recent_sanctions.pop(key, None)
+
+
+def is_recent_sanction(guild_id: int | None, user_id: int | None, kind: str) -> bool:
+    """Vrai si une commande SentriX vient d'appliquer cette sanction : pas de carte générique."""
+    if not guild_id or not user_id:
+        return False
+    key = (int(guild_id), int(user_id), str(kind))
+    stamp = _recent_sanctions.get(key)
+    if stamp is None:
+        return False
+    if stamp <= time.monotonic():
+        _recent_sanctions.pop(key, None)
+        return False
+    return True
+
+
 def is_purged(message_id: int | None) -> bool:
     """Vrai si ce message vient d'être supprimé par une purge : pas de log individuel."""
     if not message_id:

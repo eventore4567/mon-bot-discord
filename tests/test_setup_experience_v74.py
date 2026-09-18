@@ -45,8 +45,11 @@ class SetupExperienceV74Tests(unittest.TestCase):
         self.assertIn("MODERATION_PROFILES", source)
         self.assertIn("Rôle à donner pendant un mute", source)
         self.assertIn("Rôle à donner après un warn", source)
-        self.assertIn("_sync_sanction_badge", source)
-        self.assertIn('action == "unmute"', source)
+        # Les badges sont appliqués par le service canonique (services/moderation.py),
+        # plus par une surcharge de Moderation.log_sanction dont la signature divergeait.
+        self.assertNotIn("_sync_sanction_badge", source)
+        service = (V74_PATH.parent.parent / "services" / "moderation.py").read_text(encoding="utf-8")
+        self.assertIn("_apply_mute_role", service)
 
     def test_v74_is_installed_after_v73(self):
         source = INIT_PATH.read_text(encoding="utf-8")

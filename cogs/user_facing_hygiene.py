@@ -391,8 +391,9 @@ def apply(bot: commands.Bot) -> None:
     _patch_main_usage_and_cooldown()
     _patch_help_renderers()
     _patch_raw_technical_errors()
-    _patch_slash_error_ux(bot)
-    _patch_prefix_error_ux(bot)
+    # Les erreurs de commande (préfixe ET slash) ont un seul propriétaire :
+    # cogs/final_error_embed_v5 (phrase courte pour une erreur simple, carte compacte
+    # seulement pour une erreur technique). Les surcouches V2.5 ont été retirées.
     _repair_gamble_parser(bot)
     _install_runtime_quality(bot)
     # Les modules de qualité peuvent remplacer des callbacks pendant cette passe ; leur

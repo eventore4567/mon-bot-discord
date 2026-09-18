@@ -44,6 +44,16 @@ def _short(value: object, limit: int = 1000) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+def _active_timeout(member: discord.Member):
+    """Timeout réellement en cours (None si absent ou déjà expiré). Discord conserve
+    l'ancien horodatage après expiration : sans ce filtre, un simple changement de pseudo
+    ou de rôle produisait une fausse carte « Timeout retiré » signée SentriX."""
+    until = getattr(member, "timed_out_until", None)
+    if until is None or until <= discord.utils.utcnow():
+        return None
+    return until
+
+
 def _user_ref(user_id: int) -> str:
     return f"<@{int(user_id)}>"
 
@@ -428,6 +438,8 @@ class Logs(commands.Cog, name="Logs"):
             member.id,
         )
         if audit is not None:
+            if log_service.is_recent_sanction(member.guild.id, member.id, "kick"):
+                return  # +kick : le dossier de modération est le seul log
             fields = [("Membre", _user_ref(member.id), True)]
             if actor:
                 fields.append(("Modérateur", _user_ref(actor.id), True))
@@ -542,7 +554,11 @@ class Logs(commands.Cog, name="Logs"):
                     event_key=key,
                 )
 
-        if before.timed_out_until != after.timed_out_until:
+        if _active_timeout(before) != _active_timeout(after):
+            if log_service.is_recent_sanction(after.guild.id, after.id, "timeout"):
+                # +mute / +unmute : le dossier de modération est LE log (modérateur réel,
+                # durée, raison). Pas de seconde carte « Modérateur : SentriX ».
+                return
             actor, audit = await self._audit_actor(
                 after.guild,
                 discord.AuditLogAction.member_update,
@@ -551,10 +567,11 @@ class Logs(commands.Cog, name="Logs"):
             fields = [("Membre", _user_ref(after.id), True)]
             if actor:
                 fields.append(("Modérateur", _user_ref(actor.id), True))
-            if after.timed_out_until:
-                fields.append(("Fin prévue", discord.utils.format_dt(after.timed_out_until, "F"), True))
+            fin = _active_timeout(after)
+            if fin:
+                fields.append(("Fin prévue", discord.utils.format_dt(fin, "F"), True))
             panel = self._embed(
-                "Timeout appliqué" if after.timed_out_until else "Timeout retiré",
+                "Timeout appliqué" if fin else "Timeout retiré",
                 identity=after,
                 fields=fields,
             )
@@ -567,7 +584,7 @@ class Logs(commands.Cog, name="Logs"):
                 target_id=after.id,
                 executor_id=getattr(actor, "id", None),
                 audit_log_id=getattr(audit, "id", None),
-                discriminator=int(after.timed_out_until.timestamp()) if after.timed_out_until else 0,
+                discriminator=int(fin.timestamp()) if fin else 0,
             )
             await self._send(
                 after.guild,
@@ -579,6 +596,8 @@ class Logs(commands.Cog, name="Logs"):
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User | discord.Member):
+        if log_service.is_recent_sanction(guild.id, user.id, "ban"):
+            return  # +ban / +tempban : le dossier de modération est le seul log
         actor, audit = await self._audit_actor(guild, discord.AuditLogAction.ban, user.id)
         fields = [("Membre", _user_ref(user.id), True)]
         if actor:
@@ -606,6 +625,8 @@ class Logs(commands.Cog, name="Logs"):
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
+        if log_service.is_recent_sanction(guild.id, user.id, "unban"):
+            return  # +unban : le dossier de modération est le seul log
         actor, audit = await self._audit_actor(guild, discord.AuditLogAction.unban, user.id)
         fields = [("Utilisateur", _user_ref(user.id), True)]
         if actor:

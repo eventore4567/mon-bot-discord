@@ -102,7 +102,7 @@ PUBLIC_COMMANDS = frozenset({
     "voice-limit", "voice-lock", "voice-name", "voice-transfer", "voice-unlock",
     # Commandes membre qui tombaient en fail-closed faute d'etre declarees ici :
     # elles n'ont aucun check local et affichent seulement des informations.
-    "leaderboard", "serverinfo", "gameseason",
+    "leaderboard", "serverinfo", "roleinfo", "gameseason",
 })
 
 OWNER_ONLY_COMMANDS = frozenset({

@@ -200,6 +200,16 @@ def _unwrap_optional(annotation):
 
 def _native_annotation(annotation):
     annotation = _unwrap_optional(annotation)
+    # commands.Range[int, 1, 100] (forme hybride) et app_commands.Range : natifs, avec
+    # bornes — sans cette conversion, /clear exposait une option texte puis reparsait la
+    # commande hybride avec le parseur d'interaction, qui n'alimente jamais ctx.args.
+    if isinstance(annotation, commands.Range):
+        try:
+            return app_commands.Range[annotation.annotation, annotation.min, annotation.max]
+        except Exception:
+            return annotation.annotation
+    if isinstance(annotation, app_commands.transformers.RangeTransformer):
+        return annotation
     supported = {
         str, int, float, bool,
         discord.Member, discord.User, discord.Role, discord.Attachment,

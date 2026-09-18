@@ -5,7 +5,6 @@ Ce module corrige des risques transversaux confirmés pendant l'audit A→Z :
 - transactions économie sérialisées (vente, casino, banque) ;
 - remboursement d'un achat si l'inventaire ne peut pas être crédité ;
 - hiérarchie uniforme sur les actions de modération restantes ;
-- tempban persistant et réessayé si Discord refuse temporairement l'unban ;
 - boutons de tickets réellement réservés au staff ;
 - suppression de ticket marquée en base uniquement après suppression Discord ;
 - verrous de mini-jeux auto-récupérables après une exception.
@@ -225,65 +224,9 @@ def _install_moderation(bot: commands.Bot) -> bool:
     # disconnect/clearwarnings/unwarn) sont dans cogs/moderation.py : aucun callback
     # n'est plus remplacé ici.
 
-    try:
-        if moderation.check_tempactions.is_running():
-            moderation.check_tempactions.cancel()
-    except Exception:
-        logger.debug("Impossible d'arrêter le worker tempactions historique.", exc_info=True)
-
-    old_task = getattr(bot, "_sentrix_integrity_tempaction_task", None)
-    if old_task is None or old_task.done():
-        async def tempaction_worker():
-            await bot.wait_until_ready()
-            while not bot.is_closed():
-                try:
-                    rows = await bot.db.fetchall(
-                        "SELECT * FROM tempactions WHERE expires_at<=? ORDER BY expires_at,id",
-                        (now(),),
-                    )
-                    for row in rows:
-                        if row["action"] != "ban":
-                            logger.warning("Tempaction inconnue conservée id=%s action=%s", row["id"], row["action"])
-                            continue
-                        guild = bot.get_guild(int(row["guild_id"]))
-                        if guild is None:
-                            continue
-                        unbanned = False
-                        try:
-                            await guild.unban(
-                                discord.Object(id=int(row["user_id"])),
-                                reason="Fin du bannissement temporaire",
-                            )
-                            unbanned = True
-                        except discord.NotFound:
-                            unbanned = True
-                        except (discord.Forbidden, discord.HTTPException):
-                            logger.warning(
-                                "Unban temporaire à réessayer (guild=%s user=%s).",
-                                row["guild_id"],
-                                row["user_id"],
-                            )
-                            continue
-                        if unbanned:
-                            try:
-                                await bot.db.record_sanction(
-                                    int(row["guild_id"]),
-                                    int(row["user_id"]),
-                                    int(getattr(bot.user, "id", 0) or 0),
-                                    "unban",
-                                    "Fin du bannissement temporaire (automatique)",
-                                )
-                            except Exception:
-                                logger.exception("Journalisation de fin de tempban impossible.")
-                            await bot.db.execute("DELETE FROM tempactions WHERE id=?", (row["id"],))
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception("Worker tempactions sécurisé en échec; nouvel essai dans 60 s.")
-                await asyncio.sleep(60)
-
-        bot._sentrix_integrity_tempaction_task = asyncio.create_task(tempaction_worker())
-
+    # La levée des sanctions temporaires est assurée par Moderation.check_tempactions
+    # (cogs/moderation.py), boucle résiliente et visible dans +health. L'ancien worker
+    # parallèle qui l'annulait au démarrage a été supprimé.
     bot._sentrix_integrity_moderation = True
     return True
 

@@ -38,7 +38,7 @@ def main() -> int:
 
         required_markers = (
             "root_name.casefold() != str(requested_name).casefold()",
-            "_sentrix_integrity_tempaction_task",
+            "Moderation.check_tempactions",
             "Cette action est réservée au staff du ticket.",
             "status='supprime' WHERE id=? AND status='ferme'",
             "_ExpiringPlayLockRegistry",
