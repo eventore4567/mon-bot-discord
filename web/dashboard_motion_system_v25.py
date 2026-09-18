@@ -19,8 +19,8 @@ STYLE = f'''<style id="{STYLE_MARKER}">
   --sx25-ease:cubic-bezier(.2,.8,.2,1);--sx25-spring:cubic-bezier(.16,1,.3,1);
 }}
 #content.sx25-page-in{{animation:sx25-page-in var(--sx25-page) var(--sx25-spring) both}}
-#content.sx25-page-out{{opacity:.72;transform:translateY(2px);transition:opacity var(--sx25-fast) ease,transform var(--sx25-fast) ease}}
-@keyframes sx25-page-in{{from{{opacity:0;transform:translateY(8px) scale(.996)}}to{{opacity:1;transform:none}}}}
+#content.sx25-page-out{{opacity:1;transform:none;transition:none}}
+@keyframes sx25-page-in{{from{{opacity:1;transform:translateY(2px)}}to{{opacity:1;transform:none}}}}
 :where(.btn,button[data-sx24-intent],.p18-tab,[data-sx12-tab],[data-sx12-go],[data-p18-tab],[data-p18-go],[data-page]){{position:relative;overflow:hidden;isolation:isolate;transform-origin:center;will-change:auto}}
 @media(hover:hover) and (pointer:fine){{
   :where(.btn,button[data-sx24-intent],.p18-tab,[data-sx12-tab],[data-sx12-go],[data-p18-tab],[data-p18-go],[data-page]):not(:disabled):hover{{transform:translateY(-1px)}}
@@ -29,9 +29,9 @@ STYLE = f'''<style id="{STYLE_MARKER}">
 .sx25-ripple{{position:absolute;z-index:-1;width:16px;height:16px;border-radius:999px;pointer-events:none;background:rgba(255,255,255,.24);transform:translate(-50%,-50%) scale(0);animation:sx25-ripple 520ms ease-out forwards}}
 @keyframes sx25-ripple{{70%{{opacity:.16}}to{{opacity:0;transform:translate(-50%,-50%) scale(15)}}}}
 :where(.card,.p18-card,.sx12-card,.metric,.p18-kpi,.sx12-kpi,.p18-result,.sx12-item,.sx12-invite-card,.sx12-webhook-card,.sx12-flow-card).sx25-enter{{animation:sx25-card-in 360ms var(--sx25-spring) both;animation-delay:calc(var(--sx25-order,0) * 24ms)}}
-@keyframes sx25-card-in{{from{{opacity:0;transform:translateY(8px)}}to{{opacity:1;transform:none}}}}
+@keyframes sx25-card-in{{from{{opacity:1;transform:translateY(3px)}}to{{opacity:1;transform:none}}}}
 :where(.row,.sx12-table tbody tr,.p18-table tbody tr).sx25-row-enter{{animation:sx25-row-in 260ms var(--sx25-ease) both;animation-delay:calc(var(--sx25-order,0) * 14ms)}}
-@keyframes sx25-row-in{{from{{opacity:0;transform:translateX(-4px)}}to{{opacity:1;transform:none}}}}
+@keyframes sx25-row-in{{from{{opacity:1;transform:translateX(-2px)}}to{{opacity:1;transform:none}}}}
 :where(.toast,[data-toast],.snackbar).sx25-toast-enter{{animation:sx25-toast-in 300ms var(--sx25-spring) both}}
 @keyframes sx25-toast-in{{from{{opacity:0;transform:translateY(12px) scale(.97)}}to{{opacity:1;transform:none}}}}
 :where([role="dialog"],.modal,.drawer,.sheet).sx25-dialog-enter{{animation:sx25-dialog-in 300ms var(--sx25-spring) both}}
@@ -133,7 +133,6 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-system-v25-js">
     const target = event.target.closest(navSelector);
     if (!target) return;
     navigationPending = true;
-    content?.classList.add("sx25-page-out");
     startProgress();
   }, true);
 
