@@ -36,13 +36,13 @@ def test_v26_is_clearly_visible_event_driven_and_accessible():
     assert "sentrix:live" in script
     assert "1200" in script
 
-    # La barre de progression fixée en haut (#sx26Progress) est retirée : elle se superposait
-    # à celle de V18 et se lisait comme un chargement permanent. Le fondu du contenu reste.
+    # La barre de progression et le fondu plein écran sont retirés : le feedback de
+    # chargement est désormais le HUD macOS borné du frontend unifié.
     assert "#sx26Progress" not in style
     assert "sx26Progress" not in script.replace("(#sx26Progress)", "")
-    assert "#sx26Shade" in style
-    assert "translateY(18px)" in style
-    assert "scale(.988)" in style
+    assert "#sx26Shade{{display:none!important}}" in style
+    assert "opacity:.25!important" not in style
+    assert "filter:blur(1px)" not in style
     assert "sx26-ripple" in style
     assert "scale(.955)" in style
     assert "sx26-stagger" in style
