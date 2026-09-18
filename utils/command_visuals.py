@@ -306,6 +306,10 @@ async def _styled_context_send(self: commands.Context, *args: Any, **kwargs: Any
 
     if kwargs.pop("_sentrix_native", False):
         return await _ORIGINAL_CONTEXT_SEND(self, *args, **kwargs)
+    # Envoi volontairement en texte brut (panels.texte_court) : aucune carte.
+    from . import sentrix_panels as _panels
+    if _panels.TEXTE_BRUT.get():
+        return await _ORIGINAL_CONTEXT_SEND(self, *args, **kwargs)
 
     content = args[0] if args else kwargs.pop("content", None)
     embed = kwargs.get("embed")

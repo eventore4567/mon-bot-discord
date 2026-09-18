@@ -263,7 +263,6 @@ def _install_health_patch(bot: commands.Bot) -> None:
 async def setup(bot: commands.Bot) -> None:
     # Réapplique les protections V2 utiles, puis ferme le trou d'exécution préfixée.
     invariant.install(bot)
-    v2._force_all_command_embeds()
     v2._install_direct_prefix_transport(bot)
     _install_prefix_execution_context(bot)
     runtime_fix_v1._install_log_producer_fix()

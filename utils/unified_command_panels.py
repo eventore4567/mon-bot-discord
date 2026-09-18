@@ -22,6 +22,7 @@ import discord
 from discord.ext import commands
 
 from . import command_visuals as visuals
+from . import sentrix_panels as panels
 
 logger = logging.getLogger("bot.unified-command-panels")
 
@@ -257,7 +258,7 @@ def _incompatible(kwargs: dict[str, Any], *, content: object, embed: discord.Emb
 async def _context_send(self: commands.Context, *args: Any, **kwargs: Any):
     assert _PREVIOUS_CONTEXT_SEND is not None
 
-    if kwargs.get("_sentrix_native", False) or getattr(self, "command", None) is None:
+    if kwargs.get("_sentrix_native", False) or getattr(self, "command", None) is None or panels.TEXTE_BRUT.get():
         return await _PREVIOUS_CONTEXT_SEND(self, *args, **kwargs)
 
     if _root_command_name(self) in _NATIVE_COMMAND_EXCEPTIONS:
@@ -302,7 +303,7 @@ async def _interaction_send(self, *args: Any, **kwargs: Any):
     assert _PREVIOUS_INTERACTION_SEND is not None
 
     interaction = getattr(self, "_parent", None)
-    if getattr(interaction, "type", None) is not discord.InteractionType.application_command:
+    if getattr(interaction, "type", None) is not discord.InteractionType.application_command or panels.TEXTE_BRUT.get():
         return await _PREVIOUS_INTERACTION_SEND(self, *args, **kwargs)
 
     content = args[0] if args else kwargs.get("content")
@@ -339,7 +340,7 @@ async def _webhook_send(self, *args: Any, **kwargs: Any):
 
     # Application webhooks are interaction followups. Ordinary webhooks (including log
     # transports/integrations) are never touched.
-    if getattr(self, "type", None) is not discord.WebhookType.application:
+    if getattr(self, "type", None) is not discord.WebhookType.application or panels.TEXTE_BRUT.get():
         return await _PREVIOUS_WEBHOOK_SEND(self, *args, **kwargs)
 
     content = args[0] if args else kwargs.get("content")

@@ -41,18 +41,19 @@ class ProductionEmbedLogRepairTests(unittest.TestCase):
         intents = discord.Intents.none()
         bot = commands.Bot(command_prefix="+", intents=intents)
         try:
-            repair._force_all_command_embeds()
             repair._install_direct_prefix_transport(bot)
             self.assertTrue(getattr(main.SentriXContext.send, "_sentrix_direct_embed_transport_v2", False))
+            # Une seule règle, dans final_interaction_policy : rien n'est « plain » sauf
+            # la vérification et les envois texte_court.
             self.assertFalse(policy._plain_root("sentrix"))
             self.assertFalse(policy._plain_root("ping"))
+            self.assertTrue(policy._plain_root("verification"))
         finally:
             pass
 
     def test_command_payload_is_embed_even_for_sentrix_root(self):
         from cogs import command_embed_invariant as invariant
 
-        repair._force_all_command_embeds()
         args, kwargs = invariant._normalize_command_payload(
             ("Réponse de commande.",),
             {},

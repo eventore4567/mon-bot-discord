@@ -47,14 +47,7 @@ def _install_verification_transport_bypass() -> None:
         logger.exception("Impossible d'installer le transport direct de la vérification V96.")
         return
 
-    current_plain = policy._plain_root
-    if not getattr(current_plain, "_sentrix_verification_v96", False):
-        def plain_root_with_verification(root: str) -> bool:
-            return str(root or "").casefold() == "verification" or current_plain(root)
-
-        plain_root_with_verification._sentrix_verification_v96 = True
-        plain_root_with_verification._sentrix_original = current_plain
-        policy._plain_root = plain_root_with_verification
+    # « verification » est déclarée dans final_interaction_policy.PLAIN_ROOTS.
 
     current_root = policy._root_from_interaction
     if not getattr(current_root, "_sentrix_verification_v96", False):

@@ -30,6 +30,7 @@ message (``attachment://``). Elles ne dépendent donc pas du dépôt distant.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import re as _re
 from dataclasses import dataclass, field
@@ -589,6 +590,7 @@ __all__ = [
     "depuis_embed",
     "intention_de",
     "envoyer",
+    "TEXTE_BRUT",
     "texte_court",
     "texte_complet",
     "fichier_banniere",
@@ -714,6 +716,10 @@ async def editer(cible: Any, panneau: Panneau, **extra: Any):
 
 _MENTIONS_AUCUNE = discord.AllowedMentions.none()
 
+# Signal lu par les transports qui promeuvent le texte en carte (final_interaction_policy,
+# unified_command_panels) : pendant un envoi de texte_court, le texte reste du texte.
+TEXTE_BRUT: contextvars.ContextVar[bool] = contextvars.ContextVar("sentrix_texte_brut", default=False)
+
 
 async def texte_court(
     destination: Any,
@@ -736,6 +742,14 @@ async def texte_court(
     kwargs: dict[str, Any] = {"content": str(message), "allowed_mentions": _MENTIONS_AUCUNE}
     kwargs.update(extra)
 
+    jeton = TEXTE_BRUT.set(True)
+    try:
+        return await _envoyer_texte(destination, kwargs, ephemere=ephemere, supprimer_apres=supprimer_apres)
+    finally:
+        TEXTE_BRUT.reset(jeton)
+
+
+async def _envoyer_texte(destination: Any, kwargs: dict[str, Any], *, ephemere: bool, supprimer_apres: float | None):
     if isinstance(destination, discord.InteractionResponse):
         if ephemere:
             kwargs["ephemeral"] = True
