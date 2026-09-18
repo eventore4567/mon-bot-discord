@@ -144,6 +144,22 @@ async def _permission_error(target):
     return await panels.envoyer(target.response, panels.depuis_embed(panel), ephemere=True)
 
 
+async def _apply_module_switch(bot, guild_id: int, module: str, state, summary: str, errors):
+    """Croise l'état « ressources » avec l'interrupteur du module (source unique :
+    module_settings). Désactivé explicitement → INACTIF quoi qu'il y ait en base ;
+    jamais configuré → NON CONFIGURÉ, même si des données existent."""
+    from cogs import setup_v2_core as core
+
+    switch = await core.module_state(bot, guild_id, module)
+    if switch == core.MODULE_STATE_DISABLED:
+        return ConfigState.INACTIVE, f"Désactivé. {summary}", errors
+    if switch == core.MODULE_STATE_NOT_CONFIGURED:
+        if state in (ConfigState.ACTIVE, ConfigState.ERROR):
+            return ConfigState.UNCONFIGURED, f"{summary} Module non activé.", errors
+        return ConfigState.UNCONFIGURED, summary, errors
+    return state, summary, errors
+
+
 async def module_statuses(bot, guild, conf):
     result = {}
 
@@ -173,16 +189,19 @@ async def module_statuses(bot, guild, conf):
         channel_id = setting.get("channel_id")
         if channel_id:
             configured_logs += 1
-        if setting.get("enabled"):
+        # Un type « activé » sans salon n'est pas actif : la ligne par défaut de
+        # log_config porte enabled=1 sans destination.
+        if setting.get("enabled") and channel_id:
             active_logs += 1
-            channel = guild.get_channel(int(channel_id)) if channel_id else None
+            channel = guild.get_channel(int(channel_id))
             if channel is None:
                 log_errors.append(f"{meta['category']} : salon introuvable.")
             else:
                 ok, reason = log_service.validate_channel(guild, channel.id, needs_file=True)
                 if not ok:
                     log_errors.append(f"{meta['category']} : {reason}.")
-    result["logs"] = (
+    result["logs"] = await _apply_module_switch(
+        bot, guild.id, "logs",
         ConfigState.ERROR if log_errors else ConfigState.ACTIVE if active_logs else ConfigState.INACTIVE if configured_logs else ConfigState.UNCONFIGURED,
         f"{active_logs} type(s) actif(s).",
         tuple(log_errors),
@@ -205,7 +224,8 @@ async def module_statuses(bot, guild, conf):
             ticket_errors.append("Un salon de logs tickets n’existe plus.")
     has_tickets = bool(panels or types or _get(conf, "ticket_category") or _get(conf, "ticket_log_channel"))
     enabled_panels = any(bool(_get(row, "enabled", 1)) for row in panels)
-    result["tickets"] = (
+    result["tickets"] = await _apply_module_switch(
+        bot, guild.id, "tickets",
         ConfigState.ERROR if ticket_errors else ConfigState.ACTIVE if (types or enabled_panels) else ConfigState.INACTIVE if has_tickets else ConfigState.UNCONFIGURED,
         f"{len(panels)} panel(s) • {len(types)} type(s).",
         tuple(ticket_errors),
@@ -213,14 +233,23 @@ async def module_statuses(bot, guild, conf):
 
     welcome_values = [
         (_get(conf, "welcome_channel"), False, "Salon de bienvenue"),
-        (_get(conf, "goodbye_channel"), False, "Salon de départ"),
         (_get(conf, "autorole"), True, "Autorole"),
     ]
     welcome_errors = [f"{label} introuvable." for value, role, label in welcome_values if _missing_resource(guild, value, role)]
-    result["welcome"] = (
-        ConfigState.ERROR if welcome_errors else ConfigState.ACTIVE if any(v for v, _, _ in welcome_values) else ConfigState.UNCONFIGURED,
-        "Accueil, départ et autorole.",
+    result["welcome"] = await _apply_module_switch(
+        bot, guild.id, "welcome",
+        ConfigState.ERROR if welcome_errors else ConfigState.ACTIVE if _get(conf, "welcome_channel") else ConfigState.UNCONFIGURED,
+        "Salon, message et image d'accueil.",
         tuple(welcome_errors),
+    )
+
+    goodbye_channel = _get(conf, "goodbye_channel")
+    goodbye_errors = ["Salon de départ introuvable."] if _missing_resource(guild, goodbye_channel, False) else []
+    result["goodbye"] = await _apply_module_switch(
+        bot, guild.id, "goodbye",
+        ConfigState.ERROR if goodbye_errors else ConfigState.ACTIVE if goodbye_channel else ConfigState.UNCONFIGURED,
+        "Salon et message de départ.",
+        tuple(goodbye_errors),
     )
 
     role_values = [(_get(conf, key), key) for key in ("autorole", "verify_role", "verification_role", "member_role", "booster_role")]
@@ -230,7 +259,8 @@ async def module_statuses(bot, guild, conf):
         f"Récompense niveau {_get(row, 'level')} introuvable."
         for row in level_roles if _missing_resource(guild, _get(row, "role_id"), True)
     ]
-    result["roles"] = (
+    result["roles"] = await _apply_module_switch(
+        bot, guild.id, "roles",
         ConfigState.ERROR if role_errors else ConfigState.ACTIVE if any(v for v, _ in role_values) or level_roles else ConfigState.UNCONFIGURED,
         f"{len(level_roles)} récompense(s) de niveau.",
         tuple(role_errors),
@@ -241,9 +271,14 @@ async def module_statuses(bot, guild, conf):
     shop_count = await bot.db.fetchone("SELECT COUNT(*) AS n FROM shop_items WHERE guild_id = ?", (guild.id,))
     level_error = _missing_resource(guild, _get(conf, "level_channel"))
     used = _get(level_count, "n", 0) or _get(economy_count, "n", 0) or _get(shop_count, "n", 0) or _get(conf, "level_channel")
-    result["levels"] = (
+    from cogs import setup_v2_core as core
+
+    economy_switch = await core.module_state(bot, guild.id, "economy")
+    economy_label = {"enabled": "Économie : ACTIVE", "disabled": "Économie : INACTIVE"}.get(economy_switch, "Économie : NON CONFIGURÉE")
+    result["levels"] = await _apply_module_switch(
+        bot, guild.id, "levels",
         ConfigState.ERROR if level_error else ConfigState.ACTIVE if used else ConfigState.UNCONFIGURED,
-        f"{_get(level_count, 'n', 0)} niveau(x) • {_get(economy_count, 'n', 0)} compte(s) • {_get(shop_count, 'n', 0)} article(s).",
+        f"{_get(level_count, 'n', 0)} niveau(x) • {_get(economy_count, 'n', 0)} compte(s) • {_get(shop_count, 'n', 0)} article(s) • {economy_label}.",
         ("Le salon de level-up n’existe plus.",) if level_error else (),
     )
 
@@ -258,7 +293,8 @@ async def module_statuses(bot, guild, conf):
                 notif_errors.append(f"{_get(row, 'platform', 'Notification')} : salon introuvable.")
             if _missing_resource(guild, _get(row, "role_id"), True):
                 notif_errors.append(f"{_get(row, 'platform', 'Notification')} : rôle introuvable.")
-    result["notifications"] = (
+    result["notifications"] = await _apply_module_switch(
+        bot, guild.id, "notifications",
         ConfigState.ERROR if notif_errors else ConfigState.ACTIVE if active_notifs else ConfigState.INACTIVE if notifications else ConfigState.UNCONFIGURED,
         f"{active_notifs}/{len(notifications)} source(s) active(s).",
         tuple(notif_errors),

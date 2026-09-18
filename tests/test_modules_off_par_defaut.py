@@ -97,6 +97,20 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await core.module_enabled(self.bot, NEW_GUILD, "welcome"))
         self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, "goodbye"))
 
+    # ------------------------------------------------------------ configurer = activer
+    async def test_poser_une_ressource_active_le_module_non_configure(self):
+        await self.db.set_guild_config(NEW_GUILD, "welcome_channel", 555)
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "welcome"), core.MODULE_STATE_ENABLED)
+        # Le départ reste non configuré : ce sont deux modules.
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "goodbye"), core.MODULE_STATE_NOT_CONFIGURED)
+        await self.db.set_guild_config(NEW_GUILD, "goodbye_channel", 556)
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "goodbye"), core.MODULE_STATE_ENABLED)
+
+    async def test_un_module_desactive_explicitement_n_est_pas_rallume_par_une_ressource(self):
+        await core.set_module_enabled(self.bot, NEW_GUILD, "levels", False)
+        await self.db.set_guild_config(NEW_GUILD, "level_channel", 777)
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "levels"), core.MODULE_STATE_DISABLED)
+
     # ------------------------------------------------------------ migration
     async def test_la_migration_materialise_les_modules_deja_utilises_une_seule_fois(self):
         # Données « historiques » écrites AVANT la première lecture de module.

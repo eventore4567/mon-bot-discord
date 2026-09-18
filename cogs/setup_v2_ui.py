@@ -523,18 +523,9 @@ def _patch_statuses() -> None:
         return
     async def statuses_v2(bot, guild, conf):
         await core.ensure_schema(bot)
+        # L'interrupteur des modules (désactivé / non configuré) est déjà croisé dans
+        # setup_control_center.module_statuses ; cette couche n'ajoute que Permissions.
         result = await current(bot, guild, conf)
-        for category, module in MODULE_BY_CATEGORY.items():
-            if category not in result:
-                continue
-            enabled = await core.module_enabled(bot, guild.id, module)
-            state, summary, problems = result[category]
-            if not enabled:
-                result[category] = (
-                    setup_ui.ConfigState.INACTIVE,
-                    summary + " Module désactivé ; configuration conservée.",
-                    (),
-                )
         count = await bot.db.fetchone(
             "SELECT COUNT(*) AS n FROM command_role_permissions WHERE guild_id=?",
             (guild.id,),

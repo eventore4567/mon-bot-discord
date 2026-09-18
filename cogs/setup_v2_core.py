@@ -238,6 +238,45 @@ async def reset_module(bot: commands.Bot, guild_id: int, module: str) -> None:
     invalidate_module_cache(guild_id, module)
 
 
+# Configurer une ressource, c'est activer le module : choisir un salon de bienvenue
+# dans /setup ou le Dashboard doit rendre la bienvenue active sans second clic. Un
+# module explicitement DÉSACTIVÉ (ligne enabled=0) n'est jamais rallumé par ce chemin.
+GUILD_CONFIG_FIELD_MODULE: dict[str, str] = {
+    "welcome_channel": "welcome",
+    "welcome_message": "welcome",
+    "welcome_image_url": "welcome",
+    "goodbye_channel": "goodbye",
+    "goodbye_message": "goodbye",
+    "autorole": "roles",
+    "level_channel": "levels",
+    "ticket_category": "tickets",
+    "ticket_log_channel": "tickets",
+    "log_channel": "logs",
+}
+
+
+async def enable_module_if_unset(bot: commands.Bot, guild_id: int, module: str, *, actor_id: int | None = None) -> bool:
+    """Active un module NON CONFIGURÉ (aucune ligne). Retourne True si une ligne a été créée."""
+    if module not in MODULES:
+        return False
+    await ensure_schema(bot)
+    if await module_row_value(bot, guild_id, module) is not None:
+        return False
+    await set_module_enabled(bot, guild_id, module, True, actor_id=actor_id)
+    return True
+
+
+async def note_guild_config_change(bot: commands.Bot, guild_id: int, field: str, value) -> None:
+    """Appelé par Database.set_guild_config : une ressource posée active son module."""
+    module = GUILD_CONFIG_FIELD_MODULE.get(str(field))
+    if module is None or value in (None, "", 0):
+        return
+    try:
+        await enable_module_if_unset(bot, guild_id, module)
+    except Exception:
+        logger.exception("Activation implicite du module %s impossible guild=%s", module, guild_id)
+
+
 # --------------------------------------------------------------------------
 # Migration : serveurs déjà présents avant le passage à « absent = non configuré »
 #

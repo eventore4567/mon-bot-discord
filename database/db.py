@@ -1527,6 +1527,22 @@ class Database:
         )
         # Invalide le cache : la prochaine lecture ira chercher la ligne à jour.
         self._guild_config_cache.pop(guild_id, None)
+        # Poser une ressource (salon de bienvenue, autorôle...) active le module
+        # correspondant s'il n'était pas encore configuré — même règle pour /setup, le
+        # Dashboard et les commandes. Import paresseux : database ne dépend pas de cogs.
+        try:
+            from types import SimpleNamespace
+
+            from cogs.setup_v2_core import GUILD_CONFIG_FIELD_MODULE, note_guild_config_change
+
+            if field in GUILD_CONFIG_FIELD_MODULE:
+                holder = getattr(self, "_sentrix_module_holder", None) or SimpleNamespace(db=self)
+                self._sentrix_module_holder = holder
+                await note_guild_config_change(holder, int(guild_id), field, value)
+        except Exception:
+            logging.getLogger("bot.database").warning(
+                "Activation implicite du module liée à %s impossible", field, exc_info=True
+            )
 
     def invalidate_guild_config(self, guild_id: int):
         """À appeler après toute modification de guild_config qui ne passe pas par
