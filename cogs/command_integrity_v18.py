@@ -33,13 +33,11 @@ logger = logging.getLogger("bot.command-integrity-v18")
 
 _RESERVED_USER_PARAMS = frozenset({"self", "ctx", "context", "interaction", "bot", "_bot"})
 # Chaque commande essentielle, avec l'extension qui la fournit. Sans ce lien,
-# l'audit signalait +create-server absente a chaque passe intermediaire, alors
-# que cogs.server_builder n'etait tout simplement pas encore charge.
+# l'audit signalait une commande absente a chaque passe intermediaire, alors que
+# son module n'etait tout simplement pas encore charge. La famille +create /
+# +create-server a ete retiree du bot : elle n'est plus exigee ici.
 _CREATE_REQUIRED = {
-    "create": "cogs.create_command_router",
-    "create sentrix": "cogs.create_command_router",
-    "create server": "cogs.create_command_router",
-    "create-server": "cogs.server_builder",
+    "setup": "cogs.configuration",
 }
 
 

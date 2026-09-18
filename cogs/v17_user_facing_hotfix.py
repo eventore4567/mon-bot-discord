@@ -160,18 +160,6 @@ def _disable_separate_language_join_prompt() -> None:
     _LANGUAGE_JOIN_PATCHED = True
 
 
-async def _ensure_create_sentrix(bot: commands.Bot) -> None:
-    """Installe/répare le routeur canonique ``+create``.
-
-    L'ancienne V3 pouvait rester enregistrée sous le même nom de Cog et reprendre
-    ``+create sentrix``. Le routeur sait retirer proprement cette ancienne racine avant de
-    remettre ``sentrix`` et ``server`` sous un seul groupe.
-    """
-    from .create_command_router import install as install_create_router
-
-    await install_create_router(bot)
-
-
 async def install(bot: commands.Bot, extension_name: str = "") -> None:
     del extension_name
     _patch_error_dispatch()
@@ -179,7 +167,6 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     _apply_error_context_transport()
     _patch_duplicate_mention()
     _disable_separate_language_join_prompt()
-    await _ensure_create_sentrix(bot)
 
 
 __all__ = ["install"]

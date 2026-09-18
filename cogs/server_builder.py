@@ -1,12 +1,14 @@
 """
 Configuration complète d'un serveur Discord existant.
 
-+create-server installe un modèle complet dans le serveur courant : rôles, catégories,
-salons, permissions, règlement, annonce d'ouverture et panneau de tickets. L'opération
-est idempotente : les éléments portant déjà le même nom sont réutilisés et mis à jour.
+``ServerBuilder.build_server`` installe un modèle complet dans le serveur courant :
+rôles, catégories, salons, permissions, règlement, annonce d'ouverture et panneau de
+tickets. L'opération est idempotente : les éléments portant déjà le même nom sont
+réutilisés et mis à jour.
 
-Un bot Discord ne peut pas créer un nouveau serveur Discord. Cette commande configure
-donc toujours le serveur dans lequel elle est lancée.
+La commande ``+create-server`` (et ses alias) a été retirée du bot : le moteur n'est plus
+exposé que par le dashboard (web/dashboard_server_tools.py). Un bot Discord ne peut pas
+créer un nouveau serveur Discord ; le moteur configure toujours le serveur courant.
 """
 
 import asyncio
@@ -1031,142 +1033,6 @@ TICKET_TYPES_BY_TEMPLATE = {
 }
 
 
-class TemplateSelect(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(
-                label=data["label"],
-                value=key,
-                description=data["description"][:100],
-            )
-            for key, data in SERVER_TEMPLATES.items()
-        ]
-        super().__init__(
-            placeholder="Choisissez le type de serveur à configurer",
-            options=options,
-            min_values=1,
-            max_values=1,
-            row=0,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        view: "ServerBuilderView" = self.view
-        view.selected_template = self.values[0]
-        view.confirm_btn.disabled = False
-        await interaction.response.edit_message(embed=view.build_preview_embed(), view=view)
-
-
-class ServerBuilderView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, author_id: int):
-        super().__init__(timeout=180)
-        self.bot = bot
-        self.author_id = author_id
-        self.selected_template: str | None = None
-        self.add_item(TemplateSelect())
-        self.confirm_btn = discord.ui.Button(
-            label="Configurer le serveur",
-            style=discord.ButtonStyle.success,
-            disabled=True,
-            row=1,
-        )
-        self.confirm_btn.callback = self.confirm
-        self.add_item(self.confirm_btn)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                "Seule la personne ayant lancé la commande peut utiliser ce menu.",
-                ephemeral=True,
-            )
-            return False
-        return True
-
-    def build_preview_embed(self) -> discord.Embed:
-        if not self.selected_template:
-            return embeds.neutral(
-                "Configuration complète du serveur",
-                "Choisissez un modèle. La commande configure le serveur actuel ; un bot Discord "
-                "ne peut pas créer un nouveau serveur à votre place.",
-            )
-
-        data = SERVER_TEMPLATES[self.selected_template]
-        total_channels = sum(len(category["channels"]) for category in data["categories"])
-        role_names = [role[0] for role in data["roles"]]
-        category_names = [
-            _category_display_name(category["name"])
-            for category in data["categories"]
-        ]
-        preview = embeds.neutral(
-            f"Aperçu — {data['label']}",
-            f"Installation dans **{len(data['roles'])} rôles**, "
-            f"**{len(data['categories'])} catégories** et **{total_channels} salons**. "
-            "Le règlement, l'annonce d'ouverture et le panneau de tickets seront publiés automatiquement.\n\n"
-            "Les éléments existants portant le même nom seront réutilisés et mis à jour, sans doublons. "
-            "Seul le rôle Fondateur possède Administrateur. Les éléments d'un ancien modèle ne sont "
-            "jamais supprimés automatiquement.",
-        )
-        preview.add_field(
-            name="Identité du modèle",
-            value=data["description"],
-            inline=False,
-        )
-        for index in range(0, len(role_names), 20):
-            preview.add_field(
-                name=f"Rôles {index + 1} à {min(index + 20, len(role_names))}",
-                value=", ".join(role_names[index:index + 20])[:1024],
-                inline=False,
-            )
-        preview.add_field(
-            name="Catégories",
-            value=", ".join(category_names)[:1024],
-            inline=False,
-        )
-        return preview
-
-    async def confirm(self, interaction: discord.Interaction):
-        for child in self.children:
-            child.disabled = True
-        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.neutral('Configuration en cours', 'Création des rôles, salons, permissions et tickets. Cette opération peut prendre une à trois minutes selon les limites de Discord.')), self))
-        cog = self.bot.get_cog("ServerBuilder")
-        if cog is None:
-            await panels.editer(interaction, panels.depuis_embed(embeds.error('Le module de configuration est indisponible.')))
-            return
-        try:
-            summary = await cog.build_server(
-                interaction.guild,
-                self.selected_template,
-                interaction.user,
-            )
-        except discord.Forbidden:
-            logger.exception("Permission Discord refusée pendant create-server")
-            step = cog._build_steps.get(interaction.guild.id, "initialisation")
-            summary = embeds.error(
-                f"Discord a refusé l'étape **{step}**. "
-                "Placez le rôle SentriX au-dessus des rôles "
-                "qu'il doit gérer et accordez-lui Administrateur, puis relancez +create-server."
-            )
-        except discord.HTTPException as exc:
-            logger.exception("Erreur HTTP Discord pendant create-server")
-            step = cog._build_steps.get(interaction.guild.id, "initialisation")
-            summary = embeds.error(
-                f"Discord a interrompu l'étape **{step}** ({exc}). "
-                "Les éléments déjà créés sont "
-                "conservés : relancez +create-server pour reprendre sans doublons."
-            )
-        except Exception as exc:
-            logger.exception("Erreur inattendue pendant create-server")
-            step = cog._build_steps.get(interaction.guild.id, "initialisation")
-            detail = (str(exc) or exc.__class__.__name__).replace("`", "'")[:300]
-            summary = embeds.error(
-                f"L'installation s'est arrêtée pendant **{step}**. "
-                f"Détail : `{exc.__class__.__name__}: {detail}`\n\n"
-                "Les éléments déjà créés sont conservés. Relancez la commande après correction : "
-                "elle reprend sans doublons."
-            )
-        await panels.editer(interaction, panels.depuis_embed(summary))
-        self.stop()
-
-
 class ServerBuilder(commands.Cog, name="ServerBuilder"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -1915,22 +1781,6 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
             logger.exception("Réparation d'accès aux logs ignorée après create-server.")
 
         return result
-
-    @commands.hybrid_command(
-        name="create-server",
-        description="Configurer le serveur actuel avec rôles, salons, règlement, annonce et tickets.",
-    )
-    @checks.is_owner_or_admin_for("configuration")
-    async def create_server(self, ctx: commands.Context):
-        if ctx.guild is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être lancée dans un serveur.')))
-        if ctx.interaction:
-            await ctx.defer()
-        me = ctx.guild.me
-        if not me.guild_permissions.administrator:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Pour installer plus de 50 rôles avec leurs permissions, les salons privés et les tickets, SentriX doit avoir la permission **Administrateur**. Placez aussi son rôle au-dessus des rôles qu'il doit gérer, puis relancez +create-server.")))
-        view = ServerBuilderView(self.bot, ctx.author.id)
-        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(view.build_preview_embed()), view))
 
     @commands.hybrid_command(
         name="delete-channel",

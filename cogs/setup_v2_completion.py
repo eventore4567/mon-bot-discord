@@ -544,7 +544,7 @@ def _install_managed_mode_command(bot) -> None:
         normalized = str(mode or "status").casefold().strip()
         if normalized in {"status","etat","état"}:
             enabled = await managed_builder.is_managed(bot, ctx.guild.id)
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"Maintenance automatique create-server : **{('ACTIVE' if enabled else 'INACTIVE')}**.\nINACTIVE signifie qu’aucun redémarrage de SentriX ne modifiera la structure du serveur.", title='Mode serveur géré')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"Maintenance automatique de la structure du serveur : **{('ACTIVE' if enabled else 'INACTIVE')}**.\nINACTIVE signifie qu’aucun redémarrage de SentriX ne modifiera la structure du serveur.", title='Mode serveur géré')))
         if normalized not in {"on","off","actif","inactif","enable","disable"}: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez `+server-managed on`, `off` ou `status`.')))
         enabled = normalized in {"on","actif","enable"}; await managed_builder.set_managed(bot, ctx.guild.id, enabled, actor_id=ctx.author.id)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Maintenance automatique : **{('ACTIVE' if enabled else 'INACTIVE')}**.\n" + ('SentriX pourra entretenir uniquement sa structure déjà créée.' if enabled else 'Aucun redémarrage ne modifiera automatiquement les salons/rôles.'))))

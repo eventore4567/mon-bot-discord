@@ -1,4 +1,4 @@
-"""V86 — branchement final de V84/V85 avant l'installation du Setup V75."""
+"""V86 — branchement final de V84 avant l'installation du Setup V75."""
 from __future__ import annotations
 
 import logging
@@ -9,7 +9,6 @@ from discord.ext import commands
 from utils import embeds
 from utils import sentrix_panels as panels
 from . import runtime_finish_v84 as v84
-from . import runtime_finish_v85 as v85
 from . import setup_security_choice_v75 as v75
 
 logger = logging.getLogger("bot.runtime-finish-v86")
@@ -103,9 +102,9 @@ def install(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_runtime_finish_v86", False):
         return
     _patch_v75_builder()
-    v85.install(bot)
+    v84.install(bot)
     bot._sentrix_runtime_finish_v86 = True
-    logger.info("Runtime Finish V86 préparé : ticket, logs Setup et +create manox.")
+    logger.info("Runtime Finish V86 préparé : ticket et logs Setup.")
 
 
 __all__ = ["install"]

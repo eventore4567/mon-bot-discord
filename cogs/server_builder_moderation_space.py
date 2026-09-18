@@ -185,15 +185,6 @@ def install(bot: commands.Bot) -> None:
     _install_names_and_topics(server_builder)
     initial_changes = _ensure_required_spaces(server_builder)
 
-    original_preview = server_builder.ServerBuilderView.build_preview_embed
-    if not getattr(original_preview, "_sentrix_required_spaces_v3", False):
-        def build_preview_embed(self, *args, **kwargs):
-            _ensure_required_spaces(server_builder)
-            return original_preview(self, *args, **kwargs)
-
-        build_preview_embed._sentrix_required_spaces_v3 = True
-        server_builder.ServerBuilderView.build_preview_embed = build_preview_embed
-
     original_build = server_builder.ServerBuilder.build_server
     if not getattr(original_build, "_sentrix_required_spaces_v3", False):
         async def build_server(self, guild, template_key, author, *args, **kwargs):
@@ -213,7 +204,7 @@ def install(bot: commands.Bot) -> None:
                     author,
                 )
                 logger.info(
-                    "+create-server audit réel sur %s : +%s catégorie(s), +%s salon(s), %s/%s mis à jour.",
+                    "build_server audit réel sur %s : +%s catégorie(s), +%s salon(s), %s/%s mis à jour.",
                     guild.id,
                     repaired["categories_created"],
                     repaired["channels_created"],
@@ -234,7 +225,7 @@ def install(bot: commands.Bot) -> None:
                     except Exception:
                         pass
             except Exception:
-                logger.exception("Audit/réparation réel de +create-server impossible sur %s", getattr(guild, "id", "?"))
+                logger.exception("Audit/réparation réel de build_server impossible sur %s", getattr(guild, "id", "?"))
 
             if build_error is not None:
                 raise build_error
@@ -247,6 +238,6 @@ def install(bot: commands.Bot) -> None:
     bot._sentrix_server_builder_moderation_space_v2 = True
     bot._sentrix_server_builder_moderation_space = True
     logger.info(
-        "+create-server V3 : STAFF, MODÉRATION et LOGS garantis dans les modèles ET audités sur le serveur réel (%s correction(s) initiale(s)).",
+        "ServerBuilder V3 : STAFF, MODÉRATION et LOGS garantis dans les modèles ET audités sur le serveur réel (%s correction(s) initiale(s)).",
         initial_changes,
     )

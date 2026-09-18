@@ -195,7 +195,7 @@ async def _install_release_and_official_server(bot: commands.Bot) -> None:
             from .official_server import install as install_official_server
             from .official_server_command_fix import install as install_official_server_command_fix
             await _run_installer("serveur officiel", install_official_server, bot)
-            await _run_installer("signature serveur officiel", install_official_server_command_fix, bot)
+            await _run_installer("identification serveur officiel", install_official_server_command_fix, bot)
         except Exception:
             logger.exception("Impossible de préparer le constructeur officiel.")
 

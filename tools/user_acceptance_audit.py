@@ -49,7 +49,7 @@ MEMBER_JOURNEYS = {
 
 STAFF_JOURNEYS = {
     "moderation": ("ban", "unban", "mute", "warn"),
-    "configuration": ("setup", "create-server", "rolepanel", "logs"),
+    "configuration": ("setup", "rolepanel", "logs"),
     "securite": ("security", "health"),
     "evenements": ("giveaway-create", "notifs-ping"),
     "jeux": ("gamesetup",),

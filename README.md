@@ -87,13 +87,11 @@ Le module IA possède un interrupteur principal et des sous-fonctions indépenda
 
 Les niveaux et l’économie peuvent être coupés sans effacer les données des membres. Les récompenses de niveaux peuvent être ajoutées/modifiées dans le setup. La monnaie de l’économie peut avoir un nom singulier, un nom pluriel et un symbole personnalisés.
 
-## `+create-server` / `/create-server`
+## Configuration de la structure du serveur (dashboard)
 
-`create-server` configure **le serveur Discord actuel** ; un bot Discord ne peut pas créer un nouveau serveur à la place de l’utilisateur.
+Les commandes de création de serveur (`+create`, `+create sentrix`, `+create server`, `+create manox`, `+create-server` et leurs alias) ont été retirées du bot. Le moteur de configuration reste disponible depuis le **dashboard** (outils serveur) : il configure **le serveur Discord actuel** — un bot Discord ne peut pas créer un nouveau serveur à la place de l’utilisateur — et réutilise les éléments déjà présents.
 
-La commande affiche toujours un aperçu puis demande une confirmation avant de créer/modifier des éléments. Le profil **Essentiel / Minimal** est proposé en premier : il crée une structure courte avec seulement les rôles et salons utiles. Les anciens profils Communauté, Professionnel et Support restent disponibles lorsqu’une structure plus grande est réellement souhaitée.
-
-Une création explicite peut configurer les éléments du modèle sélectionné, mais un simple redémarrage de SentriX ne doit pas modifier un serveur. La maintenance automatique est donc **INACTIVE par défaut** et ne peut être activée qu’explicitement avec :
+Un simple redémarrage de SentriX ne doit pas modifier un serveur. La maintenance automatique est donc **INACTIVE par défaut** et ne peut être activée qu’explicitement avec :
 
 ```text
 +server-managed on
