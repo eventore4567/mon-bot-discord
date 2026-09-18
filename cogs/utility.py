@@ -1225,7 +1225,7 @@ class Utility(commands.Cog, name="Utility"):
     async def roleinfo(self, ctx: commands.Context, role: discord.Role):
         await self.info_role(ctx, role)
 
-    @commands.command(name="serverinfo", hidden=True)
+    @commands.command(name="serverinfo", help="Afficher la fiche complète du serveur (raccourci de +info serveur).")
     async def serverinfo(self, ctx: commands.Context):
         await self.info_serveur(ctx)
 

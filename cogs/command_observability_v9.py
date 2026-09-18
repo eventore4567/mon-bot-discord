@@ -1,6 +1,7 @@
 """Production V9: télémétrie des commandes et diagnostic santé unifié."""
 
 import logging
+import math
 import inspect
 import json
 import time
@@ -54,7 +55,10 @@ async def _record(bot, guild_id, user_id, name, kind, duration, status, detail="
 async def _health(bot):
     problems = []
     ready = bool(bot.is_ready())
-    latency = round(float(getattr(bot, "latency", 0.0) or 0.0) * 1000) if ready else None
+    raw_latency = float(getattr(bot, "latency", 0.0) or 0.0)
+    # discord.py renvoie NaN tant qu'aucun heartbeat n'a été mesuré : round(NaN) levait
+    # ValueError et tuait health_loop pour toute la vie du processus.
+    latency = round(raw_latency * 1000) if ready and math.isfinite(raw_latency) else None
     db_ok = False
     try:
         row = await bot.db.fetchone("SELECT 1 AS ok")
