@@ -897,7 +897,7 @@ class OperationsCenter(commands.Cog, name=_COG_NAME):
     async def on_command_completion(self, ctx: commands.Context):
         if ctx.guild and ctx.command:
             root = (ctx.command.root_parent or ctx.command).name.casefold()
-            if root in {"create-server", "setup"}:
+            if root == "setup":
                 asyncio.create_task(self.run_diagnostics(ctx.guild, deep=True))
 
     @commands.Cog.listener()

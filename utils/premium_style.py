@@ -276,7 +276,7 @@ def infer_category(*, command: Any = None, embed: discord.Embed | None = None, h
         # « SentriX » apparaît dans presque tous les titres : l'utiliser comme indice IA
         # classait à tort +avatar, +status et d'autres commandes dans cette catégorie.
         ("ai", (" ai", "intelligence", "openai", "génération d'image", "generation d'image")),
-        ("configuration", ("configuration", "setup", "config", "rôle", "salon", "serveur", "create-server", "wipe-server")),
+        ("configuration", ("configuration", "setup", "config", "rôle", "salon", "serveur", "wipe-server")),
         ("logs", ("log", "journal", "audit")),
     )
     for category, words in rules:

@@ -26,11 +26,14 @@ def test_server_counter_is_not_refreshed_by_heartbeat() -> None:
     assert "server_counter" not in refresh
 
 
-def test_join_feed_is_installed_before_signature_early_return() -> None:
+def test_join_feed_is_installed_without_the_retired_create_server_command() -> None:
+    """L'installateur dépendait de la commande ``create-server`` (retirée avec toutes les
+    commandes de création de serveur) : le journal V62 doit rester installé sans elle."""
     source = INSTALLER.read_text(encoding="utf-8")
-    install_pos = source.index("install_join_feed_v62(bot)")
-    early_return_pos = source.index('if getattr(current, "_sentrix_signature_safe", False):')
-    assert install_pos < early_return_pos
+    assert "install_join_feed_v62(bot)" in source
+    assert "install_binding_fix(bot)" in source
+    assert 'get_command("create-server")' not in source
+    assert "OFFICIAL_ALIASES" not in source
 
 
 def test_old_static_counter_cleanup_is_narrow() -> None:

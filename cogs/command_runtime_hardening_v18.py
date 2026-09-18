@@ -204,12 +204,8 @@ def repair_wrapped_signatures(bot: commands.Bot) -> int:
 
 
 def register_missing_policy() -> None:
-    """Les sous-commandes +create héritent de la racine `create` dans le check global."""
-    try:
-        from .v17_shared import register_command_policy
-        register_command_policy(configuration={"create"})
-    except Exception:
-        logger.debug("V18 : politique +create pas encore enregistrable.", exc_info=True)
+    """Plus rien à enregistrer : la racine +create (constructeur de serveur) a été retirée."""
+    return None
 
 
 def _is_registration_collision(error: BaseException) -> bool:

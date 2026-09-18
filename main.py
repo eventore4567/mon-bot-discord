@@ -196,7 +196,7 @@ CATEGORY_COMMANDS = {
         "disablecommand", "enablecommand", "ignorechannel", "unignorechannel",
         "setlevelchannel", "setsuggestchannel", "setannouncechannel",
         "setgiveawaychannel", "config-view", "config-reset", "setup",
-        "create-server", "delete-channel", "verify-setup", "verify-panel",
+        "delete-channel", "verify-setup", "verify-panel",
         "rolepanel", "rolepanel-refresh", "reactionrole-add",
         "reactionrole-remove", "reactionrole-list", "set-level-role",
         "remove-level-role", "set-xp", "add-xp", "reset-levels", "levelcheck",

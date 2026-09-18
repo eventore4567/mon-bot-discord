@@ -59,11 +59,9 @@ if "cogs.emoji_name_lookup" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.emoji_name_lookup")
 if "cogs.emoji_unicode_asset_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.emoji_unicode_asset_fix")
-# Ancienne V2 chargée d'abord pour la compatibilité avec les données déjà présentes.
-if "cogs.create_sentrix" not in bot_main.EXTENSIONS:
-    bot_main.EXTENSIONS.append("cogs.create_sentrix")
-# V3 retire proprement le Cog V2 puis réenregistre +create sentrix avec la structure
-# professionnelle, les salons emoji et les logs automatiques séparés.
+# V3 : catalogue et transport des logs, ressources de sécurité, journal des invitations.
+# Les commandes de création de serveur (+create, +create sentrix, +create manox) ont été
+# retirées ; ce module ne fait plus que le routage des logs.
 if "cogs.create_sentrix_v3" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.create_sentrix_v3")
 if "cogs.canonical_interactions" not in bot_main.EXTENSIONS:
@@ -124,7 +122,6 @@ _SENTRIX_PRO_ADMIN_COMMANDS = frozenset({
 
 bot_main.CATEGORY_COMMANDS["configuration"] = (
     bot_main.CATEGORY_COMMANDS.get("configuration", frozenset())
-    | frozenset({"create", "create sentrix"})
     | _SENTRIX_PLUS_CONFIG_COMMANDS
     | _SENTRIX_PRO_ADMIN_COMMANDS
 )
@@ -135,7 +132,7 @@ bot_main.PUBLIC_COMMANDS = (
 )
 bot_main.KNOWN_PERMISSION_COMMANDS = (
     bot_main.KNOWN_PERMISSION_COMMANDS
-    | frozenset({"drop", "create", "create sentrix"})
+    | frozenset({"drop"})
     | _SENTRIX_PLUS_CONFIG_COMMANDS
     | _SENTRIX_PLUS_MEMBER_COMMANDS
     | _SENTRIX_PRO_PUBLIC_COMMANDS

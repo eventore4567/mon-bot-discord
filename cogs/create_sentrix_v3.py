@@ -1,13 +1,13 @@
-"""SentriX V3 — correctifs finaux création, logs, sécurité et emojis.
+"""SentriX V3 — correctifs finaux logs, sécurité et emojis.
 
-Cette couche est volontairement additive : railway_boot charge déjà
-``cogs.create_sentrix_v3`` en fin de chaîne de création. Elle répare les anciens
-runtimes sans dupliquer les commandes ni effacer les configurations existantes.
+Cette couche est volontairement additive : railway_boot charge ``cogs.create_sentrix_v3``
+en fin de chaîne. Elle répare les anciens runtimes sans dupliquer les commandes ni effacer
+les configurations existantes. Les commandes de création de serveur (``+create <nom>``)
+qui vivaient ici ont été retirées ; le nom du module est conservé pour les imports.
 
 Points garantis :
 - aucun fallback silencieux des catégories de logs vers ``logs-serveur`` ;
 - routage séparé salons / rôles / membres / dossiers / protection / vocal ;
-- salons de logs dédiés créés et reliés par ``+create <nom>`` (dont ``+create manox``) ;
 - création idempotente des ressources honeypot / vérification ;
 - ``+addemoji <a:...>`` refuse de convertir silencieusement un GIF en emoji statique.
 """
@@ -25,7 +25,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from utils import checks, embeds, log_categories, log_service
+from utils import embeds, log_categories, log_service
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.create-sentrix-v3")
@@ -37,7 +37,6 @@ logger = logging.getLogger("bot.create-sentrix-v3")
 _DELAI_REGROUPEMENT_POSITIONS = 3.0
 
 RUNTIME_MARKER = "Create SentriX V3"
-_CREATE_LOCKS: dict[int, asyncio.Lock] = {}
 _VOICE_JOINED_AT: dict[tuple[int, int], tuple[int, float]] = {}
 
 LOG_CHANNEL_SPECS: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -430,57 +429,6 @@ def _install_log_transport(bot: commands.Bot) -> None:
     logger.info("V3: routage final des logs réaffirmé après V83.")
 
 
-async def _ensure_standard_log_channels(
-    bot: commands.Bot,
-    guild: discord.Guild,
-) -> dict[str, discord.TextChannel]:
-    category = _find_category(guild)
-    overwrites = _log_overwrites(guild)
-    reason = "SentriX V3 : configuration idempotente des journaux"
-
-    if category is None:
-        category = await guild.create_category(
-            "💾・Logs",
-            overwrites=overwrites,
-            reason=reason,
-        )
-    else:
-        try:
-            merged = dict(category.overwrites)
-            merged.update(overwrites)
-            if merged != category.overwrites:
-                await category.edit(overwrites=merged, reason=reason)
-        except discord.HTTPException:
-            logger.debug("V3: permissions de la catégorie logs non modifiées", exc_info=True)
-
-    result: dict[str, discord.TextChannel] = {}
-    for log_type, (canonical_name, aliases) in LOG_CHANNEL_SPECS.items():
-        channel = _find_text_channel(guild, (canonical_name, *aliases))
-        if channel is None:
-            channel = await guild.create_text_channel(
-                canonical_name,
-                category=category,
-                topic=f"Journaux SentriX — {log_type}.",
-                overwrites=overwrites,
-                reason=reason,
-            )
-            await asyncio.sleep(0.08)
-        else:
-            try:
-                # On ne force pas le renommage d'un salon existant du serveur ; on répare
-                # uniquement sa catégorie si nécessaire.
-                if channel.category_id != category.id:
-                    await channel.edit(category=category, reason=reason)
-            except discord.HTTPException:
-                logger.debug("V3: déplacement de %s impossible", channel.id, exc_info=True)
-
-        await log_service.set_log_channel(bot, guild.id, log_type, channel.id)
-        await log_service.set_log_enabled(bot, guild.id, log_type, True)
-        result[log_type] = channel
-
-    return result
-
-
 async def _find_or_create_role(
     guild: discord.Guild,
     name: str,
@@ -696,40 +644,6 @@ async def _ensure_honeypot_resources(
     }
 
 
-async def _enable_security_stack(
-    bot: commands.Bot,
-    guild: discord.Guild,
-    actor_id: int,
-) -> dict[str, int]:
-    from cogs import security_verification_v71 as security_v71
-    from cogs import setup_control_center as setup_ui
-    from cogs import setup_v2_core as core
-
-    await bot.db.execute(
-        "INSERT INTO automod_settings(guild_id) VALUES(?) ON CONFLICT(guild_id) DO NOTHING",
-        (guild.id,),
-    )
-    columns = ", ".join(f"{field} = ?" for field, _label in setup_ui.AUTOMOD)
-    await bot.db.execute(
-        f"UPDATE automod_settings SET {columns} WHERE guild_id = ?",
-        (*tuple(1 for _ in setup_ui.AUTOMOD), guild.id),
-    )
-
-    await security_v71.ensure_schema(bot)
-    await security_v71.update_setting(bot, guild.id, "honeypot_enabled", 1, actor_id)
-    await security_v71.update_setting(bot, guild.id, "verification_enabled", 1, actor_id)
-    await security_v71.update_setting(bot, guild.id, "raid_intensity", "normal", actor_id)
-    await core.set_module_enabled(
-        bot,
-        guild.id,
-        "security",
-        True,
-        actor_id=actor_id,
-    )
-    security_v71._invalidate_automod(bot, guild.id)
-    return await _ensure_honeypot_resources(bot, guild)
-
-
 def _patch_security_setup() -> None:
     try:
         from cogs import setup_security_choice_v75 as v75
@@ -925,196 +839,6 @@ def _patch_addemoji_direct_copy(bot: commands.Bot) -> None:
     logger.info("V3: +addemoji conserve strictement GIF animé / image statique.")
 
 
-async def _can_create(ctx: commands.Context) -> bool:
-    if not isinstance(ctx.author, discord.Member) or ctx.guild is None:
-        return False
-    if ctx.author.guild_permissions.administrator:
-        return True
-    try:
-        return bool(await checks.is_verified_bot_owner(ctx))
-    except Exception:
-        return False
-
-
-async def _verify_installation(
-    bot: commands.Bot,
-    guild: discord.Guild,
-) -> list[str]:
-    problems: list[str] = []
-    for log_type in LOG_CHANNEL_SPECS:
-        try:
-            setting = await log_service.get_log_setting(bot, guild.id, log_type)
-        except Exception:
-            problems.append(f"{log_type}: configuration illisible")
-            continue
-        channel_id = setting.get("channel_id")
-        channel = guild.get_channel(int(channel_id)) if channel_id else None
-        if not isinstance(channel, discord.TextChannel):
-            problems.append(f"{log_type}: salon manquant")
-            continue
-        valid, reason = log_service.validate_channel(
-            guild,
-            channel.id,
-            needs_file=(log_type == "tickets"),
-        )
-        if not valid:
-            problems.append(f"{log_type}: {reason}")
-
-    try:
-        row = await bot.db.fetchone(
-            "SELECT category_id,trap_channel_id,verify_channel_id,unverified_role_id,verified_role_id "
-            "FROM honeypot_verification WHERE guild_id = ?",
-            (guild.id,),
-        )
-        if row is None:
-            problems.append("sécurité: configuration honeypot absente")
-        else:
-            for key in ("category_id", "trap_channel_id", "verify_channel_id"):
-                value = row[key]
-                if not value or guild.get_channel(int(value)) is None:
-                    problems.append(f"sécurité: {key} introuvable")
-            for key in ("unverified_role_id", "verified_role_id"):
-                value = row[key]
-                if not value or guild.get_role(int(value)) is None:
-                    problems.append(f"sécurité: {key} introuvable")
-    except Exception:
-        problems.append("sécurité: vérification DB impossible")
-
-    return problems
-
-
-async def _run_manox_builder(
-    bot: commands.Bot,
-    ctx: commands.Context,
-    requested_name: str,
-) -> None:
-    guild = ctx.guild
-    assert guild is not None
-
-    if not await _can_create(ctx):
-        await ctx.send("Cette commande est réservée aux administrateurs du serveur.")
-        return
-
-    me = guild.me
-    if me is None or not me.guild_permissions.administrator:
-        await ctx.send(
-            f'Donnez temporairement la permission **Administrateur** à SentriX puis relancez `+create {requested_name}`.'
-        )
-        return
-
-    builder = bot.get_cog("ServerBuilder")
-    if builder is None or not hasattr(builder, "build_server"):
-        await ctx.send("Le constructeur de serveur SentriX n'est pas chargé.")
-        return
-
-    lock = _CREATE_LOCKS.setdefault(guild.id, asyncio.Lock())
-    if lock.locked():
-        await ctx.send("Une création/réparation est déjà en cours sur ce serveur.")
-        return
-
-    async with lock:
-        progress = await ctx.send(
-            f"Création/réparation **{requested_name}** en cours… "
-            "rôles, permissions, salons, tickets, logs et sécurité."
-        )
-        stage = "structure du serveur"
-        try:
-            result = await builder.build_server(guild, "communaute", ctx.author)
-            if (result.title or "").casefold() != "configuration terminée":
-                await progress.edit(content=None, embed=result)
-                return
-
-            stage = "routage complet des logs"
-            channels = await _ensure_standard_log_channels(bot, guild)
-
-            stage = "sécurité et honeypot"
-            security = await _enable_security_stack(bot, guild, ctx.author.id)
-
-            stage = "vérification finale"
-            problems = await _verify_installation(bot, guild)
-
-            result.add_field(
-                name="Logs configurés",
-                value=(
-                    f"{len(channels)}/{len(LOG_CHANNEL_SPECS)} catégories reliées à un salon dédié. "
-                    "Aucun fallback forcé vers logs-serveur."
-                ),
-                inline=False,
-            )
-            result.add_field(
-                name="Sécurité",
-                value=(
-                    f"Honeypot <#{security['trap_channel_id']}> et vérification "
-                    f"<#{security['verify_channel_id']}> créés/réparés automatiquement."
-                ),
-                inline=False,
-            )
-            result.add_field(
-                name="Vérification finale",
-                value=(
-                    "Tout est prêt."
-                    if not problems
-                    else "À vérifier : " + " • ".join(problems[:8])
-                )[:1024],
-                inline=False,
-            )
-            result.set_footer(
-                text=(
-                    f"SentriX V3 • +create {requested_name} est relançable : "
-                    "les ressources existantes sont réutilisées."
-                )
-            )
-            await progress.edit(content=None, embed=result)
-        except discord.Forbidden:
-            logger.exception("V3: +create %s interdit guild=%s étape=%s", requested_name, guild.id, stage)
-            await progress.edit(
-                content=(
-                    f'Création arrêtée pendant **{stage}** : Discord a refusé une permission. Corrige le rôle de SentriX puis relancez `+create {requested_name}` ; les éléments déjà créés seront réutilisés.'
-                )
-            )
-        except Exception as exc:
-            logger.exception("V3: +create %s erreur guild=%s étape=%s", requested_name, guild.id, stage)
-            detail = str(exc).replace("\n", " ")[:180]
-            await progress.edit(
-                content=(
-                    f'Erreur pendant **{stage}**. La création reste relançable et ne repart pas de zéro. Relancez `+create {requested_name}` après correction. `{type(exc).__name__}: {detail}`'
-                )
-            )
-
-
-def _patch_create_command(bot: commands.Bot) -> None:
-    command = bot.get_command("create")
-    if command is None:
-        logger.warning("V3: commande +create introuvable")
-        return
-    current = command.callback
-    if getattr(current, "_sentrix_create_v3", False):
-        return
-
-    params = command.params.copy()
-
-    @functools.wraps(current)
-    async def create_v3(cog_self, ctx: commands.Context, *, template: str = ""):
-        requested = (template or "").strip()
-        if requested.casefold() == "sentrix":
-            return await current(cog_self, ctx, template=template)
-        if not requested:
-            return await ctx.send(
-                'Utilisez `+create sentrix` pour le serveur officiel, ou `+create <nom>` (ex. `+create manox`) pour installer/réparer le modèle communauté complet.'
-            )
-        return await _run_manox_builder(bot, ctx, requested[:100])
-
-    create_v3._sentrix_create_v3 = True
-    create_v3._sentrix_previous = current
-    command.callback = create_v3
-    command.params = params
-    command.help = (
-        "Crée ou répare une configuration complète et relançable. "
-        "Exemples : +create sentrix, +create manox."
-    )
-    logger.info("V3: +create accepte désormais les modèles nommés comme +create manox.")
-
-
 class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -1141,7 +865,6 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
         _install_log_transport(self.bot)
         _patch_security_setup()
         _patch_addemoji_direct_copy(self.bot)
-        _patch_create_command(self.bot)
         self._runtime_ready = True
 
     @commands.Cog.listener()

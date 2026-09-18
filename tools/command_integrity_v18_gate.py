@@ -14,7 +14,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 _RESERVED = {"self", "ctx", "context", "interaction", "bot", "_bot"}
-_REQUIRED_CREATE = ("create", "create sentrix", "create server", "create-server")
+# Les commandes de création de serveur (+create, +create-server) ont été retirées du
+# bot ; la gate vérifie désormais les racines qui restent essentielles.
+_REQUIRED_ROOTS = ("help", "ping", "setup")
 
 
 async def run() -> int:
@@ -76,27 +78,15 @@ async def run() -> int:
             if leaked:
                 errors.append(f"parametre interne expose {name}: {', '.join(leaked)}")
 
-        # Les quatre routes create qui ont déjà régressé doivent être présentes ensemble.
-        for qualified in _REQUIRED_CREATE:
+        for qualified in _REQUIRED_ROOTS:
             if bot.get_command(qualified) is None:
-                errors.append(f"commande create essentielle absente: {qualified}")
+                errors.append(f"commande essentielle absente: {qualified}")
 
-        create_root = bot.get_command("create")
-        if not isinstance(create_root, __import__("discord.ext.commands", fromlist=["Group"]).Group):
-            errors.append("+create n'est plus un groupe discord.py")
-        else:
-            child_names = {child.name.casefold() for child in create_root.commands}
-            if not {"sentrix", "server"} <= child_names:
-                errors.append(
-                    "+create incomplet: sous-commandes attendues sentrix/server absentes"
-                )
-
-        # Le verrou global de main décide sur la RACINE d'un groupe : create doit donc
-        # appartenir à la catégorie configuration, sinon les gestionnaires configurateurs
-        # sont refusés même si la sous-commande possède son propre check.
-        configuration = set(main.CATEGORY_COMMANDS.get("configuration", ()))
-        if "create" not in configuration:
-            errors.append("racine create absente de CATEGORY_COMMANDS[configuration]")
+        # Une commande de création de serveur ne doit pas réapparaître par une couche
+        # de runtime oubliée.
+        for retired in ("create", "create-server", "setupserver", "creer-serveur", "sentrix-server", "setup-sentrix"):
+            if bot.get_command(retired) is not None:
+                errors.append(f"commande de création de serveur retirée mais présente: {retired}")
 
         # Une vraie commande canonique ne doit jamais être masquée par l'alias d'une autre.
         root_canonical = {
@@ -174,7 +164,7 @@ async def run() -> int:
     if errors:
         print(f"ECHEC V18: {len(errors)} regression(s) de commande detectee(s)")
         return 1
-    print("OK V18: registre, signatures, create, alias, permissions et slash coherents")
+    print("OK V18: registre, signatures, alias, permissions et slash coherents")
     return 0
 
 

@@ -9,7 +9,7 @@ from discord.ext import commands
 
 from utils import embeds
 from utils import sentrix_panels as panels
-from . import runtime_finish_v91 as v91
+from . import runtime_finish_v90 as v90
 from . import setup_experience_v74 as v74
 
 logger = logging.getLogger("bot.runtime-finish-v92")
@@ -396,7 +396,7 @@ def _post_v83_hook() -> None:
 async def install(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_runtime_finish_v92", False):
         return
-    await v91.install(bot)
+    await v90.install(bot)
     _apply()
     _post_v83_hook()
     bot._sentrix_runtime_finish_v92 = True

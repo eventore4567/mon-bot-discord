@@ -47,7 +47,7 @@ async def run() -> int:
             "cogs.drop", "cogs.interaction_transport_guard",
             "cogs.legacy_observability_conflict_guard", "cogs.slash_reliability_v7",
             "cogs.automod_enable_all", "cogs.setup_auto_fix", "cogs.setup_experience_v2",
-            "cogs.emoji_name_lookup", "cogs.emoji_unicode_asset_fix", "cogs.create_sentrix",
+            "cogs.emoji_name_lookup", "cogs.emoji_unicode_asset_fix",
             "cogs.create_sentrix_v3", "cogs.canonical_interactions", "cogs.sentrix_plus",
             "cogs.sentrix_ultimate", "cogs.plain_text_all_extension",
             "cogs.profile_oxyde_runtime", "cogs.deferred_context_response_guard",

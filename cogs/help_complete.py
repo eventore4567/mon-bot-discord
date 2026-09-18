@@ -206,10 +206,10 @@ CATEGORIES: tuple[CategorySpec, ...] = (
     ),
     CategorySpec(
         "server", "🏗️", "Serveur et structure",
-        "Création, suppression et gestion massive de la structure.",
+        "Suppression et gestion massive de la structure.",
         "staff",
         frozenset({
-            "create-server", "delete-channel", "wipe-server",
+            "delete-channel", "wipe-server",
         }),
         frozenset({"ServerBuilder"}),
     ),

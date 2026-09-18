@@ -125,8 +125,6 @@ OWNER_ONLY_COMMANDS = frozenset({
 GUILD_OWNER_COMMANDS = frozenset({
     # Structure du serveur
     "wipe-server",          # supprime tous les salons et tous les roles
-    "create-server",        # reconstruit entierement le serveur
-    "create",               # racine du constructeur (+create server / sentrix / manox)
     "server-restore",       # ecrase le serveur vivant avec une sauvegarde
     # Donnees de tous les membres
     "config-reset",         # efface toute la configuration SentriX
@@ -255,7 +253,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "disablecommand", "enablecommand", "ignorechannel", "unignorechannel",
         "setlevelchannel", "setsuggestchannel", "setannouncechannel",
         "setgiveawaychannel", "config-view", "config-reset", "setup",
-        "create-server", "delete-channel", "verify-setup", "verify-panel",
+        "delete-channel", "verify-setup", "verify-panel",
         "rolepanel", "rolepanel-refresh", "reactionrole-add",
         "reactionrole-remove", "reactionrole-list", "set-level-role",
         "remove-level-role", "set-xp", "add-xp", "reset-levels", "levelcheck",
@@ -270,7 +268,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "set-nickname", "alias", "diagnostic",
         # Anciennement fail-closed par oubli
         "suivi-bot", "setup-auto", "server-audit", "health", "healthcheck",
-        "create", "level-system", "security-repair",
+        "level-system", "security-repair",
         # Vérification par preuve (administration)
         "proofsetup", "proofexample", "proofexample-remove", "proofexamples",
         "proofpanel", "proofreset",

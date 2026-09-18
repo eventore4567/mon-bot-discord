@@ -18,7 +18,7 @@ from discord.ext import commands
 logger = logging.getLogger("bot.live-command-gate-v19")
 
 _RESERVED = frozenset({"self", "ctx", "context", "interaction", "bot", "_bot"})
-_REQUIRED = ("help", "ping", "create", "create sentrix", "create server", "create-server")
+_REQUIRED = ("help", "ping", "setup")
 
 
 def _state(bot: commands.Bot) -> dict[str, Any]:
