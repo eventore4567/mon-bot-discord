@@ -33,7 +33,9 @@ def test_v25_is_event_driven_and_covers_premium_motion_states():
     assert "aria-busy" in script
     assert "pointerdown" in script
     assert "animationend" in script
-    assert "sentrix:live" in script
+    # Le tick temps réel (sentrix:live) ne rejoue plus aucune animation : c'était un
+    # clignotement périodique des badges toutes les 20 s.
+    assert "sentrix:live" not in script
 
     # Barre de progression en haut retirée (quatre couches en empilaient une chacune).
     assert "#sx25Progress" not in style

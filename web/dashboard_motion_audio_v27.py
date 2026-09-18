@@ -211,17 +211,16 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-audio-v27-js">
     if (records.some(r => r.type === "childList" && (r.addedNodes.length || r.removedNodes.length))) settleFromDom();
   }).observe(content,{childList:true,subtree:true});
 
-  new MutationObserver(() => {
+  // Seul un VRAI changement d'onglet est une navigation : un setAttribute avec la même
+  // valeur (l'adaptateur V9 réécrivait data-sx-tab toutes les 1,5 s) produit aussi un
+  // enregistrement de mutation, et relançait l'entrée de page + des cartes en boucle.
+  new MutationObserver(records => {
+    const changed = records.some(r => r.oldValue !== document.body.getAttribute("data-sx-tab"));
+    if (!changed) return;
     beginTransition();
     settleFromDom();
-  }).observe(document.body,{attributes:true,attributeFilter:["data-sx-tab"]});
+  }).observe(document.body,{attributes:true,attributeOldValue:true,attributeFilter:["data-sx-tab"]});
 
-  document.addEventListener("sentrix:live", () => {
-    if (reduced()) return;
-    content.querySelectorAll(".badge.ok,.notice.ok,.sx12-badge.ok").forEach(node => {
-      node.animate([{transform:"scale(.88)"},{transform:"scale(1.09)",offset:.58},{transform:"scale(1)"}],{duration:360,easing:"cubic-bezier(.16,1,.3,1)"});
-    });
-  });
 
   window.__sentrixMotionV27 = {
     get soundEnabled(){return soundEnabled},

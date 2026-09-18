@@ -172,10 +172,6 @@ SCRIPT = r'''<script id="sentrix-dashboard-visible-motion-v26-js">
   };
   new MutationObserver(records => records.forEach(r => r.addedNodes.forEach(decorateAdded))).observe(document.body,{childList:true,subtree:true});
 
-  document.addEventListener("sentrix:live", () => {
-    if (reduced() || !content) return;
-    content.querySelectorAll(".notice.ok,.badge.ok,.sx12-badge.ok").forEach(node => replay(node,"sx26-success"));
-  });
   window.addEventListener("pageshow", () => requestAnimationFrame(() => { lastSignature = signature(); animateSurfaces(); }));
   requestAnimationFrame(() => { lastSignature = signature(); animateSurfaces(); });
 })();
