@@ -2,7 +2,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from web import dashboard_focus_loading_v1 as focus
-from web.dashboard_frontend_freeze_v55 import _enhance_unified_product_ux
+from web.dashboard_frontend_freeze_v55 import (
+    _enhance_unified_product_ux,
+    _install_unified_document,
+)
 
 
 FORBIDDEN = (
@@ -36,6 +39,50 @@ def test_focus_module_only_relocates_server_tools():
     assert "sxServerToolsOverlay" in dashboard.INDEX_HTML
     assert "sxDirectLoader" not in dashboard.INDEX_HTML
     assert "window.addEventListener(\"load\"" not in dashboard.INDEX_HTML
+
+
+def test_final_unified_dashboard_uses_bounded_macos_style_loader():
+    dashboard = SimpleNamespace()
+
+    assert _install_unified_document(dashboard)
+    html = dashboard.INDEX_HTML
+
+    assert 'id="sentrixProgressHud"' in html
+    assert 'role="status"' in html
+    assert "function beginBusy" in html
+    assert "state.busyTimeout=setTimeout" in html
+    assert "function endBusy" in html
+    assert "prefers-reduced-motion:reduce" in html
+    assert "Chargement du serveur" in html
+    assert "Ouverture de la section" in html
+    assert "sxLoadingExperience" not in html
+    assert "sxDirectLoader" not in html
+    assert "sentrixLoadingFetch" not in html
+
+
+def test_final_unified_dashboard_excludes_background_polls_from_loader():
+    dashboard = SimpleNamespace()
+
+    assert _install_unified_document(dashboard)
+    html = dashboard.INDEX_HTML
+
+    assert "function isBackgroundRequest" in html
+    assert "path==='/health'" in html
+    assert "path==='/api/public'" in html
+    assert "path==='/live/metrics'" in html
+    assert "api('/api/public')" in html
+    assert "window.fetch =" not in html
+
+
+def test_final_unified_dashboard_does_not_clear_content_on_section_render():
+    dashboard = SimpleNamespace()
+
+    assert _install_unified_document(dashboard)
+    html = dashboard.INDEX_HTML
+
+    assert "$('content').innerHTML=loading();setPage()" not in html
+    assert "return withBusy('Ouverture de la section" in html
+    assert "case'dm':await window.sentrixRenderDM();break;" in html
 
 
 def test_railway_entrypoints_do_not_stack_dashboard_finalizers():
