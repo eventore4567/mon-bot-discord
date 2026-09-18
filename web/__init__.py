@@ -211,7 +211,7 @@ _ticket_buttons_editor_v53.install(_dashboard)
 
 # Panneau DM : installe APRES la restauration de INDEX_HTML, sinon son interface
 # serait effacee comme les anciennes couches visuelles. Aucune logique d'envoi ici,
-# il appelle le moteur de +dmall avec verification des droits cote serveur.
+# il appelle le moteur de +dm avec verification des droits cote serveur.
 _dm_panel.installer(_dashboard)
 
 # Community Growth doit être branché AVANT build_app()/le bind HTTP. Auparavant il était

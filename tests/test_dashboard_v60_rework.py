@@ -59,8 +59,6 @@ def test_unified_v2_keeps_real_api_wiring_inside_one_app():
         '/setup-tools`',
         '/v62`',
         '/dm/apercu',
-        '/dm/all',
-        '/dm/job',
         '/dm/user',
         "action==='warn'?'clear-warnings':",
     )

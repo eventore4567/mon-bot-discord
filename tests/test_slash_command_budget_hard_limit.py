@@ -1,4 +1,4 @@
-"""cogs/embed_builder.py et sentrix_broadcast_dmall_visual.py ont échoué au
+"""cogs/embed_builder.py et l'ancienne extension de diffusion privée ont échoué au
 chargement en production (2026-09-06) avec :
 
     discord.app_commands.errors.CommandLimitReached: maximum number of slash

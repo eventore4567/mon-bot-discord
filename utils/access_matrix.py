@@ -133,7 +133,6 @@ GUILD_OWNER_COMMANDS = frozenset({
     "represet",             # remet a zero la reputation de TOUS les membres
     "proofreset",           # efface toutes les preuves de verification
     # Diffusion privee a l'ensemble du serveur
-    "dmall",                # envoie un MP a tous les membres non-bot
     "dm",                   # ecrit a UN membre au nom du serveur
 })
 
@@ -871,11 +870,10 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
     if name in GUILD_OWNER_COMMANDS:
         if _is_guild_owner(author, guild):
             return AccessDecision(True, policy="guild-owner-only")
-        if name == "dmall":
+        if name == "dm":
             return _deny(
                 "Cette commande est reservee au **proprietaire du serveur**.\n"
-                "Elle envoie un message prive a l'ensemble des membres non-bot : "
-                "le role Administrateur ne suffit pas.",
+                "Elle ecrit a un membre au nom du serveur : le role Administrateur ne suffit pas.",
                 "guild-owner-only",
             )
         return _deny(

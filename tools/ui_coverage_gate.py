@@ -240,7 +240,7 @@ async def analyser() -> list[dict]:
     compte: dict[str, int] = {}
     sources: dict[str, str] = {}
     # Une extension peut vivre a la RACINE et pas dans cogs/ : c'est ainsi que
-    # +dmall a echappe a cette porte. On suit donc la liste reelle d'extensions
+    # une ancienne extension racine a echappe a cette porte. On suit donc la liste reelle d'extensions
     # plutot que deux dossiers supposes complets.
     a_lire = [f for d in ("cogs", "utils") for f in sorted((RACINE / d).glob("*.py"))]
     try:
