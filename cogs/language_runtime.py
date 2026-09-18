@@ -335,7 +335,7 @@ def localized_component(command: commands.Command, language: str) -> str:
                 if preferred:
                     return _slug(preferred)
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans localized_component", exc_info=True)
         return _translate_tokens(name, EN_TOKEN_MAP)
 
     if name in FR_COMMAND_NAMES:

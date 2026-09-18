@@ -5,10 +5,13 @@ live health, alerts, incident aggregation, real permission simulation, per-modul
 action feedback and cross-server configuration comparison.
 """
 from __future__ import annotations
+import logging
 
 import time
 from types import MethodType
 from aiohttp import web
+
+logger = logging.getLogger("bot.dashboard-control-center-v3")
 
 MODULES = ("tickets", "automod", "ai", "economy", "games", "notifications")
 
@@ -134,13 +137,13 @@ def _install_runtime_guard(bot) -> None:
             try:
                 await ctx.send(message, delete_after=8)
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans prefix_check", exc_info=True)
         return ok
 
     try:
         bot.add_check(prefix_check)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans prefix_check", exc_info=True)
 
     tree = getattr(bot, "tree", None)
     if tree is not None and not getattr(tree, "_sentrix_module_maintenance_guard", False):
@@ -163,14 +166,14 @@ def _install_runtime_guard(bot) -> None:
                     else:
                         await interaction.response.send_message(message, ephemeral=True)
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans interaction_check", exc_info=True)
             return ok
 
         try:
             tree.interaction_check = MethodType(interaction_check, tree)
             tree._sentrix_module_maintenance_guard = True
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans interaction_check", exc_info=True)
 
 
 def install(dashboard) -> bool:

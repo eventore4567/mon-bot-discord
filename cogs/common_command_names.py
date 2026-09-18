@@ -302,7 +302,7 @@ async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
                 if conf and conf["prefix"]:
                     prefix = conf["prefix"]
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans _mention_help", exc_info=True)
 
     try:
         await panels.envoyer(message.channel, panels.depuis_embed(embeds.neutral("👋 Besoin d'aide ?", f'Mon préfixe sur ce serveur est **`{prefix}`**.\nTapez **`{prefix}help`** pour voir les commandes ou **`{prefix}setup`** pour configurer le serveur.')), allowed_mentions=discord.AllowedMentions.none())
@@ -379,7 +379,7 @@ def _patch_help_renderers() -> None:
 
         help_complete._command_usage = command_usage
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans command_usage", exc_info=True)
 
     _HELP_PATCHED = True
     logger.info("+help affiche désormais les noms de commandes familiers.")

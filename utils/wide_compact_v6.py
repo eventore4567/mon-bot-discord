@@ -5,6 +5,7 @@ volontairement fixe et suffisamment courte pour ne jamais se couper sur une seco
 Les anciennes lignes décoratives sont supprimées avant rendu afin d'éviter les doublons.
 """
 from __future__ import annotations
+import logging
 
 import re
 from datetime import datetime, timezone
@@ -15,6 +16,8 @@ import discord
 from utils import helpers
 
 from . import embeds as sx
+
+logger = logging.getLogger("bot.wide-compact-v6")
 
 
 # 42 caractères : grande visuellement, mais sans débordement sur les cartes compactes.
@@ -194,7 +197,7 @@ def _avatar_from_description(embed: discord.Embed, bot: Any) -> str | None:
     try:
         asset = asset.replace(size=1024)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _avatar_from_description", exc_info=True)
     return str(getattr(asset, "url", "") or "") or None
 
 
@@ -233,7 +236,7 @@ def enrich_ping(embed: discord.Embed, bot: Any) -> discord.Embed:
     try:
         embed.remove_image()
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans enrich_ping", exc_info=True)
     if latency_ms <= 80:
         colour = sx.COLOR_SUCCESS
     elif latency_ms <= 140:
@@ -265,7 +268,7 @@ def style_existing(
         try:
             embed.remove_image()
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans style_existing", exc_info=True)
 
     if root_key == "ping":
         return enrich_ping(embed, bot)

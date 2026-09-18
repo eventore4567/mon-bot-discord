@@ -172,7 +172,7 @@ async def _persist_target(bot: commands.Bot, guild: discord.Guild, log_type: str
         try:
             await bot.db.set_guild_config(guild.id, "log_channel", channel_id)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _persist_target", exc_info=True)
 
 
 async def _repair_log_target(

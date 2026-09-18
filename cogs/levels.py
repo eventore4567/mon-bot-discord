@@ -10,6 +10,7 @@ une seule source de vérité. Il ne peut plus y avoir deux chiffres différents 
 même membre entre deux commandes.
 """
 
+import logging
 import asyncio
 import random
 import time
@@ -21,6 +22,8 @@ from services import levels as levels_service
 from utils import embeds, checks, stats_service, design_system, visual_v5
 from utils import sentrix_panels as panels
 from database.db import now, DEFAULT_STATS_SETTINGS
+
+logger = logging.getLogger("bot.levels")
 
 XP_COOLDOWN_FALLBACK = 60
 XP_MIN_FALLBACK, XP_MAX_FALLBACK = 10, 25
@@ -706,7 +709,7 @@ class Levels(commands.Cog, name="Levels"):
                 if ctx.valid:
                     return
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans on_message", exc_info=True)
 
         conf = await self.bot.db.get_guild_config(message.guild.id)
         disabled_channels = set()

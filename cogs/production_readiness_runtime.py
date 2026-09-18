@@ -272,7 +272,7 @@ async def audit_guild_configuration(bot: commands.Bot, guild: discord.Guild) -> 
         row = await bot.db.fetchone("SELECT COUNT(*) AS n FROM tickets WHERE guild_id=? AND status='ouvert'", (guild.id,))
         open_tickets = int(row["n"] if row else 0)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans role_ok", exc_info=True)
     if open_tickets and not (conf.get("ticket_category") or conf.get("ticket_log_channel")):
         findings.append(_finding("warning", "Tickets", "Des tickets sont utilisés mais leur catégorie/log n'est pas entièrement configuré.", 5))
 
@@ -425,7 +425,7 @@ async def _privacy_purge(bot: commands.Bot, guild_id: int, user_id: int) -> int:
             )
             total += max(0, int(cur.rowcount if cur.rowcount is not None else 0))
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _privacy_purge", exc_info=True)
     return total
 
 

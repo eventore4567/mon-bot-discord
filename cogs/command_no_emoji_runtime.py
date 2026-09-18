@@ -9,6 +9,7 @@ Il reste volontairement un nettoyeur léger : espaces multiples, lignes vides ex
 et limites Discord. La logique des commandes et des composants n'est jamais modifiée.
 """
 from __future__ import annotations
+import logging
 
 import re
 import sys
@@ -16,6 +17,8 @@ from typing import Any
 
 import discord
 from discord.ext import commands
+
+logger = logging.getLogger("bot.command-no-emoji-runtime")
 
 _MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
 _MANY_BLANKS_RE = re.compile(r"\n{3,}")
@@ -91,25 +94,25 @@ def clean_view(view):
             try:
                 item.label = clean_text(label, fallback="Action")[:80]
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans clean_view", exc_info=True)
         placeholder = getattr(item, "placeholder", None)
         if placeholder is not None:
             try:
                 item.placeholder = clean_text(placeholder, fallback="Choisir une option…")[:150]
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans clean_view", exc_info=True)
         options = getattr(item, "options", None)
         if options:
             for option in options:
                 try:
                     option.label = clean_text(option.label, fallback="Option")[:100]
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans clean_view", exc_info=True)
                 try:
                     if option.description is not None:
                         option.description = clean_text(option.description)[:100] or None
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans clean_view", exc_info=True)
     return view
 
 

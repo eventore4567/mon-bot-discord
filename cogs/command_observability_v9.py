@@ -1,5 +1,6 @@
 """Production V9: télémétrie des commandes et diagnostic santé unifié."""
 
+import logging
 import inspect
 import json
 import time
@@ -11,6 +12,8 @@ from discord.ext import commands, tasks
 
 import config
 from database.db import now
+
+logger = logging.getLogger("bot.command-observability-v9")
 
 COG_NAME = "CommandObservabilityV9"
 SLOW_SECONDS = 3.0
@@ -57,7 +60,7 @@ async def _health(bot):
         row = await bot.db.fetchone("SELECT 1 AS ok")
         db_ok = bool(row and int(row["ok"]) == 1)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _health", exc_info=True)
     if not ready:
         problems.append("Discord n'est pas prêt.")
     if not db_ok:
@@ -100,7 +103,7 @@ async def _health(bot):
             ai_state = "circuit_ouvert"
             problems.append("Le service IA est temporairement dégradé.")
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _health", exc_info=True)
 
     actual = {str(command.name).casefold() for command in bot.tree.get_commands()}
     expected = set()
@@ -108,7 +111,7 @@ async def _health(bot):
         from . import command_catalog_cleanup
         expected = set(command_catalog_cleanup.normal_direct_commands())
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _health", exc_info=True)
     missing = sorted(expected - actual)
     extra = sorted(actual - expected) if expected else []
     if missing:
@@ -348,4 +351,4 @@ async def setup(bot):
     try:
         await runtime.refresh_health()
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans setup", exc_info=True)

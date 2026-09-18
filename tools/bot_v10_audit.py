@@ -36,9 +36,9 @@ def main() -> None:
     assert "@commands.hybrid_command" not in bot
     assert "@app_commands.command" not in bot
     for marker in (
-        'name="setup-auto"', 'name="health"', 'name="server-audit"',
+        'name="setup-auto"', 'name="server-audit"',
         'name="economy-audit"', 'name="privacy-policy"',
-        "_sentrix_setup_auto_v10", "_sentrix_ai_context_v10",
+        "_sentrix_ai_context_v10",
         "_sentrix_restore_safety_v10", "v10_operational_signals",
         "privacy_cleanup_loop", "economy_insights", "server_audit_data",
         "recent_signals", "overview",

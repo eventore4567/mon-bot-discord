@@ -8,6 +8,7 @@ Components V2 ``Container`` containing the banner, profile content and navigatio
 /stats and every other command keep their existing rendering path.
 """
 from __future__ import annotations
+import logging
 
 import time
 from typing import Any
@@ -16,6 +17,8 @@ import discord
 from discord.ext import commands
 
 from . import command_visuals as visuals
+
+logger = logging.getLogger("bot.me-single-panel")
 
 _INSTALLED = False
 _PREVIOUS_CONTEXT_SEND = None
@@ -146,7 +149,7 @@ class MeSinglePanel(discord.ui.LayoutView):
                 unix = int(timestamp.timestamp())
                 footer = f"{footer} • <t:{unix}:t>"
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans _rebuild", exc_info=True)
         container.add_item(_small_separator())
         container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
 
@@ -177,7 +180,7 @@ class MeSinglePanel(discord.ui.LayoutView):
             if interaction.user.id in OWNER_IDS:
                 is_staff = True
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans interaction_check", exc_info=True)
 
         if is_staff:
             return True
@@ -256,7 +259,7 @@ async def _single_panel_me_send(self: commands.Context, *args: Any, **kwargs: An
     try:
         source_view.message = message
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _single_panel_me_send", exc_info=True)
     return message
 
 

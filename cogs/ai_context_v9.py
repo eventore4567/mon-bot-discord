@@ -52,7 +52,7 @@ async def build_server_context(bot: commands.Bot, guild_id: int | None, channel_
         if rows:
             lines.append("Problèmes support fréquents: " + ", ".join(f"{row['issue_label']} ({row['occurrences']})" for row in rows))
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans build_server_context", exc_info=True)
 
     return "\n".join(lines)[:1200]
 

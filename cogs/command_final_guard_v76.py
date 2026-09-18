@@ -93,11 +93,11 @@ def _remove_old_verification_commands(bot: commands.Bot) -> None:
     try:
         bot.tree.remove_command("verify-setup", type=discord.AppCommandType.chat_input)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _remove_old_verification_commands", exc_info=True)
     try:
         bot.tree.remove_command("verify-panel", type=discord.AppCommandType.chat_input)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _remove_old_verification_commands", exc_info=True)
 
     async def verify_setup(ctx: commands.Context):
         if ctx.guild is None:

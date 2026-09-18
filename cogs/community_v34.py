@@ -391,7 +391,7 @@ def _install_fast_ai(bot: commands.Bot) -> None:
             if server_context and "CONTEXTE PUBLIC DU SERVEUR DISCORD" not in instructions:
                 instructions += server_context
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans fast_prepare", exc_info=True)
 
         prompt = question + suffix
         result = await ai_service.generate(

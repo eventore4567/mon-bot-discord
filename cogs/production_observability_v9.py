@@ -138,7 +138,7 @@ async def build_health_snapshot(bot: commands.Bot) -> dict:
         row = await bot.db.fetchone("SELECT 1 AS ok")
         db_ok = bool(row and int(row["ok"]) == 1)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans build_health_snapshot", exc_info=True)
     if not db_ok:
         problems.append("La base SQLite ne répond pas.")
 
@@ -189,7 +189,7 @@ async def build_health_snapshot(bot: commands.Bot) -> dict:
         from . import command_catalog_cleanup
         expected_slash = set(command_catalog_cleanup.normal_direct_commands())
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans build_health_snapshot", exc_info=True)
     missing = sorted(expected_slash - actual_slash)
     extra = sorted(actual_slash - expected_slash) if expected_slash else []
     if missing:
@@ -230,7 +230,7 @@ async def build_health_snapshot(bot: commands.Bot) -> dict:
             (now() - 7 * 86400,),
         )
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans build_health_snapshot", exc_info=True)
     avg_response = (
         round(float(ticket_response["avg_seconds"]))
         if ticket_response and ticket_response["avg_seconds"] is not None

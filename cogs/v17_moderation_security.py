@@ -722,7 +722,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             # Le convertisseur garde les arguments déjà analysés dans ctx.args.
             member = next((value for value in ctx.args if isinstance(value, discord.Member) and value.id != ctx.author.id), None)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans on_command_completion", exc_info=True)
         if member is None:
             return
         policy = await self._policy(ctx.guild.id)

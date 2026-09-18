@@ -367,7 +367,7 @@ async def _styled_context_send(self: commands.Context, *args: Any, **kwargs: Any
         try:
             banner_file.close()
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _styled_context_send", exc_info=True)
         native_content, native_kwargs = _native_payload(self, content, embed, kwargs)
         return await _ORIGINAL_CONTEXT_SEND(self, native_content, **native_kwargs)
 

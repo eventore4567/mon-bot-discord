@@ -392,7 +392,7 @@ class VerifySetupView(discord.ui.View):
                 f"salon={channel.id}; rôle={role.id}; captcha={self.captcha_enabled}",
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans publish", exc_info=True)
 
         self.message_id = int(published.id)
         self.previous_channel_id = int(channel.id)
@@ -447,11 +447,11 @@ def install(bot: commands.Bot) -> bool:
     try:
         bot.tree.remove_command("verify-setup", type=discord.AppCommandType.chat_input)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans install", exc_info=True)
     try:
         bot.tree.remove_command("verify-panel", type=discord.AppCommandType.chat_input)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans install", exc_info=True)
 
     command = commands.Command(
         _open_setup,

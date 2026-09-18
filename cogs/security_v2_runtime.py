@@ -568,7 +568,7 @@ def _patch_rollback(bot: commands.Bot) -> None:
             try:
                 result.update(extra[2])
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans rollback_with_v2", exc_info=True)
         return result
 
     rollback_with_v2._sentrix_v2_role_rollback = True
@@ -627,7 +627,7 @@ def _patch_dynamic_counter(bot: commands.Bot) -> None:
                         ),
                     )
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans dynamic_record", exc_info=True)
                 return True
         except Exception:
             logger.exception("Security V2 : compteur dynamique indisponible, fallback précédent.")
@@ -679,7 +679,7 @@ async def _write_incident(bot: commands.Bot, guild: discord.Guild, actor_id: int
                 ),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _write_incident", exc_info=True)
     return incident_id
 
 

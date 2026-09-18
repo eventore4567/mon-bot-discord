@@ -111,13 +111,13 @@ def _repair_help_categories() -> None:
         from . import language_runtime
         language_runtime.CATEGORY_I18N.setdefault("v2", ("SentriX V2", "SentriX V2"))
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans safe_category_for", exc_info=True)
 
     try:
         from . import help_category_rework
         help_category_rework.COG_DEFAULT_CATEGORY.setdefault("SentriXV2", "v2")
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans safe_category_for", exc_info=True)
 
 
 def _patch_main_usage_and_cooldown() -> None:
@@ -166,7 +166,7 @@ def _patch_help_renderers() -> None:
             language_usage._sentrix_original = current_usage
             language_runtime._command_usage = language_usage
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans language_usage", exc_info=True)
 
     try:
         from . import help_complete
@@ -179,7 +179,7 @@ def _patch_help_renderers() -> None:
             compact_line._sentrix_original = current_compact
             help_complete._compact_command_line = compact_line
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans compact_line", exc_info=True)
 
     # V2.3 a importé usage_line directement. On nettoie son global local plutôt que les
     # paramètres réels de la commande.
@@ -194,7 +194,7 @@ def _patch_help_renderers() -> None:
             accessibility_usage_line._sentrix_original = current_usage_line
             sentrix_accessibility.usage_line = accessibility_usage_line
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans accessibility_usage_line", exc_info=True)
 
 
 def _patch_raw_technical_errors() -> None:

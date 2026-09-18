@@ -878,7 +878,7 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
                 await ops.record_runtime_error(guild_id, source, exc)
                 return
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans _record_error", exc_info=True)
         logger.exception("Enterprise error %s: %s", source, exc)
 
     async def _flush_message_activity(self) -> None:
@@ -926,7 +926,7 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
                 for sid, lat in self.bot.latencies
             ]
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans monitoring_summary", exc_info=True)
         return {
             "current": {
                 "online": self.bot.is_ready(),

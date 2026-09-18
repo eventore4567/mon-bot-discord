@@ -50,7 +50,7 @@ def install(bot: commands.Bot | None = None, extension_name: str = "") -> None:
                     if interaction.response.is_done():
                         return None
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans defer_safe", exc_info=True)
             return await current_defer(self, *args, **kwargs)
 
         # Ne pas publier `_sentrix_original` ici : certaines anciennes couches déroulent
@@ -67,7 +67,7 @@ def install(bot: commands.Bot | None = None, extension_name: str = "") -> None:
                     if interaction.response.is_done():
                         return _CompletedInteractionTyping()
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans typing_safe", exc_info=True)
             return current_typing(self, *args, **kwargs)
 
         typing_safe._sentrix_idempotent_typing_v21 = True

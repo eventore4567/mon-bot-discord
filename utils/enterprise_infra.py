@@ -119,12 +119,12 @@ class EnterpriseInfra:
             try:
                 await self.redis.aclose()
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans close", exc_info=True)
         if self.pg_pool is not None:
             try:
                 await self.pg_pool.close()
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans close", exc_info=True)
         self.redis = None
         self.pg_pool = None
 
@@ -175,7 +175,7 @@ class EnterpriseInfra:
         try:
             await self.redis.eval(script, 1, key, value)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans release_lease", exc_info=True)
 
     async def publish(self, channel: str, payload: dict[str, Any]) -> None:
         if self.redis is None:
@@ -186,7 +186,7 @@ class EnterpriseInfra:
                 json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans publish", exc_info=True)
 
     async def mirror_event(self, event_type: str, guild_id: int | None, payload: dict[str, Any], created_at: int) -> None:
         if self.pg_pool is None:
@@ -202,7 +202,7 @@ class EnterpriseInfra:
                 int(created_at),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans mirror_event", exc_info=True)
 
     async def mirror_metric(self, name: str, guild_id: int | None, value: float, labels: dict[str, Any], created_at: int) -> None:
         if self.pg_pool is None:
@@ -219,7 +219,7 @@ class EnterpriseInfra:
                 int(created_at),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans mirror_metric", exc_info=True)
 
     async def health(self) -> dict[str, Any]:
         pg_ok = False

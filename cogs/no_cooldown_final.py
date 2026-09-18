@@ -111,7 +111,7 @@ def _remove_sentrix_global_checks(bot: commands.Bot) -> int:
     try:
         bot._cooldown_bucket = _empty_buckets()
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _remove_sentrix_global_checks", exc_info=True)
     state = getattr(bot, "cooldown_isolation_state", None)
     if isinstance(state, dict):
         state["mappings"] = {}

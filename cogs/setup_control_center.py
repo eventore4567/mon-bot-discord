@@ -4,6 +4,7 @@ Le nouveau +setup et /setup utilisent le même contrôleur, modifient toujours l
 message et lisent les configurations historiques au lieu de les recréer.
 """
 from __future__ import annotations
+import logging
 
 import re
 from enum import Enum
@@ -13,6 +14,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import checks, embeds, log_service, sentrix_panels as panels
+
+logger = logging.getLogger("bot.setup-control-center")
 
 
 class ConfigState(str, Enum):
@@ -552,7 +555,7 @@ class SetupView(discord.ui.LayoutView):
                 (self.guild.id, user_id, self.category or "home", action, None if value is None else str(value)),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans audit", exc_info=True)
 
     async def ensure_ai(self):
         await self.bot.db.execute(

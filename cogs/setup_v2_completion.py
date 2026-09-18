@@ -393,7 +393,7 @@ async def _reset_config(bot, guild: discord.Guild, target: str) -> str:
                 try:
                     await log_service.set_log_config(bot, gid, _category, channel_id=None, enabled=False)
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans _reset_config", exc_info=True)
             for key in ("log_channel","log_messages","log_members","log_voice","log_roles","log_server","log_automod","log_moderation","ticket_log_channel"): await bot.db.set_guild_config(gid, key, None)
         elif item == "notifications": await bot.db.execute("DELETE FROM social_notifications WHERE guild_id=?", (gid,))
         elif item == "welcome":

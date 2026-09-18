@@ -727,7 +727,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 (interaction.guild.id, member.id),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans complete_human_challenge", exc_info=True)
 
         self._challenges.pop(key, None)
         self._failures.pop(key, None)
@@ -776,7 +776,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         try:
             await self._clear_pending(member.guild.id, member.id)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans on_member_remove", exc_info=True)
         key = (member.guild.id, member.id)
         self._challenges.pop(key, None)
         self._last_start.pop(key, None)
@@ -903,7 +903,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                     "Message envoyé dans le salon piège anti-bot SentriX",
                 )
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans on_message", exc_info=True)
 
             await self._log(
                 message.guild,
@@ -1007,7 +1007,7 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                         new_value="off",
                     )
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans callback", exc_info=True)
                 self.render_page()
                 await self._refresh_message(interaction)
                 return await interaction.followup.send(message, ephemeral=True)
@@ -1026,7 +1026,7 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                     new_value=sanction,
                 )
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans callback", exc_info=True)
 
             self.security_touched = True
             self.render_page()

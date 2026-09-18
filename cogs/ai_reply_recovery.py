@@ -6,6 +6,7 @@ those failures with a minimal direct generation/send path. No user prompt conten
 credentials are written to diagnostics.
 """
 from __future__ import annotations
+import logging
 
 import asyncio
 import re
@@ -15,6 +16,8 @@ import discord
 from discord.ext import commands
 
 from utils import ai_service
+
+logger = logging.getLogger("bot.ai-reply-recovery")
 
 _NATURAL_TRIGGER = re.compile(r"^(?:sentrix|ssentrix|sentri|snetri|snentrix)\b", re.IGNORECASE)
 _UNSET = object()
@@ -123,7 +126,7 @@ async def _direct_reply(
     try:
         model_key = ai_service.pick_model(question)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _direct_reply", exc_info=True)
     try:
         effort = ai_service.pick_reasoning_effort(model_key, "medium")
     except Exception:
@@ -178,7 +181,7 @@ async def setup(bot: commands.Bot) -> None:
         try:
             bot.remove_listener(previous_listener, "on_message")
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans setup", exc_info=True)
 
     ai_cog = bot.get_cog("Ai")
     in_progress: set[int] = set()

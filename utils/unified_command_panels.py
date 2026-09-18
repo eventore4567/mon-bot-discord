@@ -78,7 +78,7 @@ def _semantic(embed: discord.Embed) -> discord.Embed:
         if callable(helper):
             return helper(embed)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _semantic", exc_info=True)
 
     clone = embed.copy()
     image_url = getattr(getattr(clone, "image", None), "url", None)

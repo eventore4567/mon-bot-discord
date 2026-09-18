@@ -225,7 +225,7 @@ async def _maintenance(db, guild_id: int) -> dict:
         if row:
             item=dict(row);item["enabled"]=bool(item.get("enabled"));return item
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _maintenance", exc_info=True)
     return {"enabled":False,"reason":""}
 
 

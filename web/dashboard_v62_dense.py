@@ -257,7 +257,7 @@ async def handle_v62_post(request: web.Request) -> web.Response:
         try:
             await db.add_setup_history(guild.id, actor_id, "verification", "Règlement / vérification", f"salon={channel_id}; rôle={role_id}; captcha={captcha_enabled}")
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans handle_v62_post", exc_info=True)
         return web.json_response({"ok": True, "message": f"Vérification {publication}e dans #{channel.name}.", "message_id": str(message_id or "")})
 
     if action == "ticket_panel_save":

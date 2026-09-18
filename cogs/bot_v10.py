@@ -105,7 +105,7 @@ class BotV10(commands.Cog, name="BotV10"):
 
  async def ensure_integrations(self):
   async with self._integration_lock:
-   self._patch_setup_auto(); self._patch_ai_context(); self._patch_backup_restore(); self._patch_custom_commands(); self._install_security_subcommands()
+   self._patch_ai_context(); self._patch_backup_restore(); self._patch_custom_commands(); self._install_security_subcommands()
 
  @tasks.loop(seconds=60)
  async def integration_loop(self): await self.ensure_integrations()
@@ -113,23 +113,9 @@ class BotV10(commands.Cog, name="BotV10"):
  @integration_loop.before_loop
  async def before_integration_loop(self): await self.bot.wait_until_ready()
 
- def _patch_setup_auto(self):
-  command = self.bot.get_command("setup")
-  if command is None or getattr(command.callback, "_sentrix_setup_auto_v10", False): return
-  original = command.callback
-  async def wrapped(cog_self, ctx: commands.Context, *args, **kwargs):
-   if ctx.interaction is None and ctx.message:
-    content = (ctx.message.content or "").strip(); prefix = str(getattr(ctx, "clean_prefix", "+") or "+"); marker = f"{prefix}setup"
-    if content.casefold().startswith(marker.casefold()):
-     parts = content[len(marker):].strip().split()
-     if parts and parts[0].casefold() == "auto":
-      profile = parts[1].casefold() if len(parts) > 1 else "community"; return await self.run_auto_setup(ctx, profile)
-   return await original(cog_self, ctx, *args, **kwargs)
-  # _sentrix_original est la convention du depot pour rendre une enveloppe
-  # tracable : sans elle, les portes d'analyse s'arretent ici et croient que
-  # +setup n'a pas de rendu.
-  wrapped._sentrix_setup_auto_v10 = True; wrapped._sentrix_original = original
-  command.callback = wrapped
+ # `+setup auto <profil>` est routé par cogs/setup_auto_fix.py au niveau de Command.invoke ;
+ # l'ancienne enveloppe du callback (sans functools.wraps) exposait ctx/args/kwargs
+ # dans la signature publique de +setup.
 
  def _patch_ai_context(self):
   try: from cogs import ai_context_v9

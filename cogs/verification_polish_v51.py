@@ -20,7 +20,7 @@ def _brand_avatar(bot) -> str | None:
         if bot.user:
             return str(bot.user.display_avatar.url)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _brand_avatar", exc_info=True)
     return None
 
 
@@ -404,7 +404,7 @@ async def _patched_complete(self, interaction, token: str, typed_code: str, type
             (guild.id, member.id),
         )
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _patched_complete", exc_info=True)
 
     self._challenges.pop(key, None)
     self._failures.pop(key, None)

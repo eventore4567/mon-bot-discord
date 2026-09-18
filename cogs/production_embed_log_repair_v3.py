@@ -122,7 +122,7 @@ async def _ensure_logs_cog(bot: commands.Bot) -> tuple[bool, int]:
         try:
             listeners = len(cog.get_listeners())
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _ensure_logs_cog", exc_info=True)
     return cog is not None, listeners
 
 

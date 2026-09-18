@@ -48,7 +48,7 @@ async def _discord_avatar_url(request: web.Request, session: dict) -> str | None
                     try:
                         avatar = avatar.with_size(128)
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans _discord_avatar_url", exc_info=True)
                 value = str(getattr(avatar, "url", avatar) or "").strip()
                 if value:
                     return value

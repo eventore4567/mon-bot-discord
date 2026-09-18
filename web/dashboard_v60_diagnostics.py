@@ -365,7 +365,7 @@ def install(dashboard) -> bool:
             try:
                 await response.write_eof()
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans handle_live_stream", exc_info=True)
         return response
 
     async def handle_live_metrics(request: web.Request) -> web.Response:

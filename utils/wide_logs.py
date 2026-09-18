@@ -719,7 +719,7 @@ def _rewind_file(file: discord.File | None) -> None:
     try:
         file.fp.seek(0)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _rewind_file", exc_info=True)
 
 
 async def send_wide_log(

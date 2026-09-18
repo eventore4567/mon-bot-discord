@@ -55,7 +55,7 @@ def _preferred_name(command: commands.Command) -> str:
         if value:
             return str(value)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _preferred_name", exc_info=True)
     return str(getattr(command, "qualified_name", "") or getattr(command, "name", "commande"))
 
 

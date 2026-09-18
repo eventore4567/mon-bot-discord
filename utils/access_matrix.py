@@ -778,7 +778,7 @@ def backend_for(bot) -> Backend:
     try:
         bot.sentrix_access_backend = backend
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans backend_for", exc_info=True)
     return backend
 
 

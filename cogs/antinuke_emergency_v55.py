@@ -978,7 +978,7 @@ class AntiNukeEmergencyV55(commands.Cog, name=_COG_NAME):
                 remaining = int(row["n"] if row else 0)
                 total["failed"] = max(total["failed"], remaining)
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans restore_burst", exc_info=True)
 
             await self._send_summary(guild, int(actor_id), reason, total)
             return total
@@ -1022,7 +1022,7 @@ def _patch_punishment(bot: commands.Bot) -> None:
             try:
                 automod.nuke_tracker[(guild.id, int(actor_id))] = []
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans punish_v55", exc_info=True)
 
             rollback = bot.get_cog(_COG_NAME)
             if rollback is not None:

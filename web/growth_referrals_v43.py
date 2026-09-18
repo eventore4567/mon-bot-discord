@@ -5,11 +5,14 @@ aucun identifiant Discord et aucun cookie marketing n'est collecté. Les liens /
 peuvent être utilisés sur Top.gg, TikTok, YouTube, DiscordBotList, bots.gg et partenariats.
 """
 from __future__ import annotations
+import logging
 
 import html
 import time
 
 from aiohttp import web
+
+logger = logging.getLogger("bot.growth-referrals-v43")
 
 _INSTALLED = False
 _ALLOWED = {
@@ -101,7 +104,7 @@ def install(dashboard) -> None:
             try:
                 await _ensure_table(bot)
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans prepare_referrals", exc_info=True)
 
         app.on_startup.append(prepare_referrals)
         return app

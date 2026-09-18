@@ -429,7 +429,7 @@ async def envoyer(
             if isinstance(destination, discord.Webhook):
                 kwargs["ephemeral"] = True
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans envoyer", exc_info=True)
     return await destination.send(**kwargs)
 
 

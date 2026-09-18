@@ -535,7 +535,7 @@ async def _server_context(bot: commands.Bot, guild_id: int | None, channel_id: i
             if commands_channel:
                 lines.append(f"- Salon conseillé pour les commandes : #{commands_channel.name}")
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _server_context", exc_info=True)
     lines.append(
         "Quand la personne demande comment utiliser SentriX ou le serveur, donne une réponse concrète avec le préfixe réel. "
         "N'invente jamais un rôle, une règle, un salon ou une action non présent dans ce contexte."

@@ -107,7 +107,7 @@ class AutoVerifyActionSelect(discord.ui.Select):
         try:
             await self.owner.refresh_from_followup(interaction)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans callback", exc_info=True)
 
 
 class AutoThresholdSelect(discord.ui.Select):
@@ -386,7 +386,7 @@ async def _build_embed_v4(self):
             settings = await get_button_settings(self.bot, self.guild.id)
             buttons = sum(1 for cfg in settings.values() if cfg.get("enabled"))
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _build_embed_v4", exc_info=True)
         conf = await self.bot.db.get_guild_config(self.guild.id)
         panel.title = "SentriX — Tickets • Ticket Center"
         panel.description = "Gestion complète des tickets, basée sur le moteur Ticket V2 existant — pas un simple résumé."

@@ -389,7 +389,7 @@ async def handle_setup_action(request: web.Request) -> web.Response:
     try:
         await db.log_setup_history(guild_id, actor_id, "dashboard", action, None, message)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans handle_setup_action", exc_info=True)
     logger.info(
         "Dashboard Setup : %s (%s) a exécuté %s sur %s (%s).",
         session["user"]["username"], actor_id, action, guild.name, guild_id,

@@ -286,7 +286,7 @@ async def _register_official_help(bot: commands.Bot) -> None:
     try:
         bot.tree.remove_command("help", type=discord.AppCommandType.chat_input)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _register_official_help", exc_info=True)
 
     # Le Cog fournit les builders, vues, recherche et /help.
     await bot.add_cog(OfficialHelp(bot))

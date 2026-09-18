@@ -5,6 +5,7 @@ Discord. Les modifications d'un message riche effacent aussi l'ancien contenu te
 d'éviter qu'une même commande apparaisse parfois avec un cadre et parfois sans cadre.
 """
 from __future__ import annotations
+import logging
 
 import asyncio
 from contextvars import ContextVar
@@ -14,6 +15,8 @@ import discord
 from discord.ext import commands
 
 from utils import premium_style
+
+logger = logging.getLogger("bot.plain-response-policy")
 
 
 _COMMAND_CONTEXT: ContextVar[commands.Context | None] = ContextVar(
@@ -232,7 +235,7 @@ def install(bot: commands.Bot | None = None) -> None:
                     if root not in community_v34.SHARED_SLASH_ROOTS:
                         kwargs.setdefault("ephemeral", True)
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans absolute_context_send", exc_info=True)
             result = await raw_context_send(self, *args, **kwargs)
             # command_response_guard est volontairement contourné avec les vieux wrappers.
             # On conserve donc explicitement son marqueur anti-réponse de secours/doublon.
@@ -318,7 +321,7 @@ def install(bot: commands.Bot | None = None) -> None:
                     if root not in community_v34.SHARED_SLASH_ROOTS:
                         kwargs.setdefault("ephemeral", True)
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans absolute_response_send", exc_info=True)
             return await raw_response_send(self, *args, **kwargs)
 
         absolute_response_send._sentrix_absolute_rich = True
@@ -392,7 +395,7 @@ def install(bot: commands.Bot | None = None) -> None:
                 from . import final_interaction_policy
                 final_interaction_policy._disable_legacy_embed_flattening()
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans reassert_rich_transports_after_ready", exc_info=True)
             install(bot)
 
         bot.add_listener(reassert_rich_transports_after_ready, "on_ready")

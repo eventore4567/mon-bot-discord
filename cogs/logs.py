@@ -188,7 +188,7 @@ class Logs(commands.Cog, name="Logs"):
                     (int(time.time()) - MESSAGE_CACHE_RETENTION_SECONDS,),
                 )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _cache_message", exc_info=True)
 
     async def _cached_message_row(self, guild_id: int, message_id: int):
         try:
@@ -206,7 +206,7 @@ class Logs(commands.Cog, name="Logs"):
                 (message_id,),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _forget_cached_message", exc_info=True)
 
     async def _log_deleted_from_row(
         self,

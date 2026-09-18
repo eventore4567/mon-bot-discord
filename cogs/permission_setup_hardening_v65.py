@@ -595,7 +595,7 @@ def _patch_setup_surface() -> None:
                 )
                 count = int(row["n"] if row else 0)
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans build_embed_v66", exc_info=True)
 
             panel = embeds.brand(
                 "SentriX — Permissions",

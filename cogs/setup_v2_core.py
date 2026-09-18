@@ -326,7 +326,7 @@ async def migrate_module_defaults(bot: commands.Bot) -> dict[str, int]:
         for row in await bot.db.fetchall("SELECT guild_id, module FROM module_settings") or ():
             existing.add((int(row["guild_id"]), str(row["module"])))
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans migrate_module_defaults", exc_info=True)
 
     async def _materialise(guild_id: int, module: str, enabled: int) -> None:
         if (guild_id, module) in existing:
@@ -761,7 +761,7 @@ def _patch_logs(bot: commands.Bot) -> None:
                 (int(message_id),),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans forget_v2", exc_info=True)
 
     logs_cog._forget_cached_message = MethodType(forget_v2, logs_cog)
     logs_cog._sentrix_setup_v2 = True

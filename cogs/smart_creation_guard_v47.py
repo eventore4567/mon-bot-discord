@@ -185,7 +185,7 @@ async def install(bot: commands.Bot) -> None:
                         ),
                     )
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans smart_record_created_resource", exc_info=True)
             return
 
         # Anti-doublon : une même rafale ne doit pas lancer plusieurs sanctions simultanées.
@@ -215,7 +215,7 @@ async def install(bot: commands.Bot) -> None:
                 ),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans smart_record_created_resource", exc_info=True)
 
         await automod_local.punish_nuker(guild, actor.id, final_reason)
         history[key] = []
