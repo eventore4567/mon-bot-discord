@@ -32,13 +32,27 @@ def _enregistrement(message: str, niveau: int = logging.WARNING, *args, nom: str
     return logging.LogRecord(nom, niveau, __file__, 1, message, args or None, None)
 
 
-def test_les_erreurs_ne_sont_jamais_compressees():
-    """Exigence non négociable : une ERROR répétée reste intégralement visible."""
-    filtre = FiltreAntiRepetition(fenetre=60.0, occurrences=1)
-    for _ in range(50):
-        assert filtre.filter(_enregistrement("panne critique", logging.ERROR)) is True
+def test_une_erreur_repetee_en_boucle_est_regroupee_mais_jamais_critical():
+    """Les premières occurrences d'une ERROR passent (plus que pour un WARNING) ; la
+    même erreur répétée 500 fois est ensuite retenue et résumée. CRITICAL passe toujours."""
+    filtre = FiltreAntiRepetition(fenetre=60.0, occurrences=1, occurrences_erreur=5)
+    passes = sum(1 for _ in range(500) if filtre.filter(_enregistrement("panne", logging.ERROR)))
+    assert passes == 5
     for _ in range(50):
         assert filtre.filter(_enregistrement("tout est perdu", logging.CRITICAL)) is True
+
+
+def test_deux_exceptions_differentes_sous_le_meme_message_restent_distinctes():
+    filtre = FiltreAntiRepetition(fenetre=60.0, occurrences=1, occurrences_erreur=1)
+
+    def _avec_exc(exc):
+        rec = _enregistrement("Erreur inattendue", logging.ERROR)
+        rec.exc_info = (type(exc), exc, None)
+        return rec
+
+    assert filtre.filter(_avec_exc(ValueError("a"))) is True
+    assert filtre.filter(_avec_exc(KeyError("b"))) is True  # autre type : passe
+    assert filtre.filter(_avec_exc(ValueError("c"))) is False  # même type : compressé
 
 
 def test_un_warning_repete_est_compresse():

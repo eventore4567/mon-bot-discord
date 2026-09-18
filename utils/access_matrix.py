@@ -110,9 +110,9 @@ OWNER_ONLY_COMMANDS = frozenset({
     "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
     # Diagnostics globaux (checks.is_bot_owner dans les cogs d'origine)
     "logs-diag", "reset-logs-all",
-    # Core V2, Phase 1 (docs/core-v2-plan.md) : observabilité globale au
-    # processus, jamais scopée par serveur.
-    "corediag",
+    # Diagnostic technique compact (+health, alias corediag) : métriques globales au
+    # processus, jamais scopées par serveur.
+    "health", "corediag",
 })
 
 # ---------------------------------------------------------------- NIVEAU 4
@@ -266,7 +266,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "notifs-ping", "notifs-list", "notifs-remove", "welcome-config",
         "set-nickname", "alias", "diagnostic",
         # Anciennement fail-closed par oubli
-        "suivi-bot", "setup-auto", "server-audit", "health", "healthcheck",
+        "suivi-bot", "setup-auto", "server-audit", "healthcheck",
         "level-system", "security-repair",
         # Vérification par preuve (administration)
         "proofsetup", "proofexample", "proofexample-remove", "proofexamples",

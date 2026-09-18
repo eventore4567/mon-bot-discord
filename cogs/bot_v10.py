@@ -238,14 +238,6 @@ class BotV10(commands.Cog, name="BotV10"):
   missing = self.missing_bot_permissions(guild)
   return {"status": str(v9.get("status") or ("healthy" if not missing else "degraded")), "discord": v9.get("discord", {"ready": self.bot.is_ready(), "latency_ms": helpers.latence_ms(self.bot)}), "database": v9.get("database", {}), "openai": v9.get("openai", {}), "commands": v9.get("commands", {}), "platform": platform_health, "backups": await _count(self.bot,"SELECT COUNT(*) c FROM server_backups WHERE guild_id=?",(guild.id,)), "missing_permissions": missing}
 
- @commands.command(name="health")
- @checks.is_owner_or_admin_for("configuration")
- async def health_command(self, ctx: commands.Context):
-  state = await self.health_data(ctx.guild); db = state.get("database") or {}; command_state = state.get("commands") or {}
-  lines = [f"Discord: **{'OK' if state['discord'].get('ready') else 'ERREUR'}** — {state['discord'].get('latency_ms','?')} ms", f"SQLite: **{db.get('sqlite','inconnu')}** · PostgreSQL: **{db.get('postgres','inconnu')}** · Redis: **{db.get('redis','inconnu')}**", f"IA: **{(state.get('openai') or {}).get('state','inconnu')}**", f"Commandes: **{command_state.get('prefix_roots',len(self.bot.commands))}** préfixées · **{command_state.get('slash_roots',len(self.bot.tree.get_commands()))}** slash", f"Sauvegardes: **{state['backups']}**"]
-  if state["missing_permissions"]: lines.append("Permissions manquantes: " + ", ".join(state["missing_permissions"]))
-  await panels.envoyer(ctx, panels.depuis_embed(embeds.brand('Diagnostic complet — Bot V10', '\n'.join(lines))))
-
  async def server_audit_data(self, guild: discord.Guild, actor_id: int | None = None, *, persist: bool = False) -> dict:
   conf = await self.bot.db.get_guild_config(guild.id); automod = await self.bot.db.get_automod(guild.id); missing = self.missing_bot_permissions(guild)
   fields = ("antispam","antilink","antiinvite","antimention","anticaps","antiemoji","antiraid","antibot","antiaccount","antiscam","antinuke")

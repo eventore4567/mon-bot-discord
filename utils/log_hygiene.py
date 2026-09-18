@@ -5,11 +5,13 @@ des WARNING et **aucune** n'était une ERROR. Une seule boucle morte y répétai
 même message toutes les 60 secondes, et chaque log Discord réussi produisait six à
 dix lignes de trace. Une vraie panne n'y aurait pas été vue.
 
-Ce filtre compresse les répétitions d'un MÊME message sans jamais toucher aux
-erreurs :
+Ce filtre compresse les répétitions d'un MÊME message :
 
-- ``ERROR`` et ``CRITICAL`` passent toujours, sans compteur ni fenêtre — un
-  incident ne doit jamais être masqué par du volume ;
+- ``CRITICAL`` passe toujours ;
+- ``ERROR`` passe pour ses premières occurrences (plus nombreuses que pour un
+  WARNING : une erreur doit se voir), puis la même erreur répétée en boucle est
+  retenue pendant la fenêtre et résumée à sa réouverture — 500 fois la même trace
+  n'aide personne et noie la suivante ;
 - en dessous, les premières occurrences passent, puis les suivantes sont retenues
   pendant la fenêtre ;
 - à la réouverture de la fenêtre, le message repasse en indiquant combien de
@@ -29,6 +31,10 @@ from dataclasses import dataclass, field
 
 # Au-delà, le message est retenu jusqu'à la fin de la fenêtre.
 OCCURRENCES_AVANT_COMPRESSION = 2
+# Une erreur a droit à plus d'occurrences avant compression : elle est rare et
+# importante ; mais la même erreur en boucle (une tâche cassée, une permission
+# manquante sur chaque message) est compressée comme le reste.
+OCCURRENCES_ERREUR_AVANT_COMPRESSION = 5
 FENETRE_SECONDES = 120.0
 # Garde-fou mémoire : un bot qui tourne des semaines ne doit pas accumuler de clés.
 MAX_CLES_SUIVIES = 2000
@@ -43,17 +49,19 @@ class _Fenetre:
 
 
 class FiltreAntiRepetition(logging.Filter):
-    """Compresse les journaux répétitifs, jamais les erreurs."""
+    """Compresse les journaux répétitifs (erreurs comprises), jamais CRITICAL."""
 
     def __init__(
         self,
         fenetre: float = FENETRE_SECONDES,
         occurrences: int = OCCURRENCES_AVANT_COMPRESSION,
         max_cles: int = MAX_CLES_SUIVIES,
+        occurrences_erreur: int = OCCURRENCES_ERREUR_AVANT_COMPRESSION,
     ) -> None:
         super().__init__()
         self.fenetre = float(fenetre)
         self.occurrences = max(1, int(occurrences))
+        self.occurrences_erreur = max(self.occurrences, int(occurrences_erreur))
         self.max_cles = max(16, int(max_cles))
         self._fenetres: dict[tuple, _Fenetre] = {}
         self._verrou = threading.Lock()
@@ -70,11 +78,17 @@ class FiltreAntiRepetition(logging.Filter):
             self._fenetres.clear()
 
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003 - API logging
-        # Une erreur n'est JAMAIS compressée : c'est précisément ce qu'on cherche à voir.
-        if record.levelno >= logging.ERROR:
+        # CRITICAL n'est jamais compressé.
+        if record.levelno >= logging.CRITICAL:
             return True
+        seuil = self.occurrences_erreur if record.levelno >= logging.ERROR else self.occurrences
 
-        cle = (record.name, record.levelno, str(record.msg))
+        # Une exception est regroupée par son gabarit de message ET son type d'exception :
+        # deux erreurs différentes sous le même « Erreur inattendue » restent distinctes.
+        exc_type = ""
+        if record.exc_info and record.exc_info[0] is not None:
+            exc_type = getattr(record.exc_info[0], "__name__", "")
+        cle = (record.name, record.levelno, str(record.msg), exc_type)
         maintenant = time.monotonic()
 
         with self._verrou:
@@ -92,7 +106,7 @@ class FiltreAntiRepetition(logging.Filter):
 
             fenetre.vues += 1
             fenetre.derniere = maintenant
-            if fenetre.vues <= self.occurrences:
+            if fenetre.vues <= seuil:
                 return True
             fenetre.masquees += 1
             return False
