@@ -331,24 +331,28 @@ class V3CategorySelect(discord.ui.Select):
 
 
 class ModuleToggle(discord.ui.Button):
-    def __init__(self, owner, module: str, enabled: bool):
+    """Interrupteur d'UN module. Niveaux et économie sont deux modules indépendants :
+    couper les niveaux ne coupe plus l'argent (et inversement)."""
+
+    def __init__(self, owner, module: str, enabled: bool, *, prefix: str = ""):
         self.owner = owner
         self.module = module
+        self.prefix = prefix
         super().__init__(
-            label="Désactiver" if enabled else "Activer",
+            label=self.label_for(enabled),
             style=discord.ButtonStyle.secondary if enabled else discord.ButtonStyle.success,
             row=1,
         )
+
+    def label_for(self, enabled: bool) -> str:
+        action = "Désactiver" if enabled else "Activer"
+        return f"{self.prefix}{action}" if self.prefix else action
 
     async def callback(self, interaction: discord.Interaction):
         enabled = await setup_v2_core.module_enabled(self.owner.bot, self.owner.guild.id, self.module)
         await setup_v2_core.set_module_enabled(
             self.owner.bot, self.owner.guild.id, self.module, not enabled, actor_id=interaction.user.id
         )
-        if self.module == "levels":
-            await setup_v2_core.set_module_enabled(
-                self.owner.bot, self.owner.guild.id, "economy", not enabled, actor_id=interaction.user.id
-            )
         await self.owner.refresh(interaction)
 
 
@@ -700,10 +704,12 @@ async def _v3_build_embed(self) -> discord.Embed:
         )
         panel.add_field(name="Récompenses de niveau", value="\n".join(f"Niveau **{row['level']}** → {setup_ui._role(self.guild, row['role_id'])}" for row in rewards[:15]) or "Aucune récompense configurée.", inline=False)
     elif self.category == "welcome":
-        panel.add_field(name="Bienvenue", value=setup_ui._channel(self.guild, setup_ui._get(conf, "welcome_channel")), inline=True)
-        panel.add_field(name="Départ", value=setup_ui._channel(self.guild, setup_ui._get(conf, "goodbye_channel")), inline=True)
+        panel.add_field(name="Salon de bienvenue", value=setup_ui._channel(self.guild, setup_ui._get(conf, "welcome_channel")), inline=True)
         panel.add_field(name="Autorole", value=setup_ui._role(self.guild, setup_ui._get(conf, "autorole")), inline=True)
         panel.add_field(name="Variables", value="`{mention}` `{member}` `{user}` `{username}` `{display_name}` `{server}` `{member_count}`", inline=False)
+    elif self.category == "goodbye":
+        panel.add_field(name="Salon de départ", value=setup_ui._channel(self.guild, setup_ui._get(conf, "goodbye_channel")), inline=True)
+        panel.add_field(name="Variables", value="`{username}` `{display_name}` `{server}` `{member_count}`", inline=False)
     elif self.category == "moderation":
         panel.add_field(name="Rôle staff", value=setup_ui._role(self.guild, setup_ui._get(conf, "mod_role")), inline=True)
         panel.add_field(name="Rôle mute", value=setup_ui._role(self.guild, setup_ui._get(conf, "mute_role")), inline=True)
@@ -759,8 +765,11 @@ def _v3_render(self) -> None:
     # Le seul bouton permanent sous une page est le petit toggle du module.
     # Les autres configurations utilisent des selects.
     # État chargé de façon asynchrone dans build_embed ; le callback relit toujours la DB.
-    toggle = ModuleToggle(self, self.category, True)
+    toggle = ModuleToggle(self, self.category, True, prefix="Niveaux : " if self.category == "levels" else "")
     self.add_item(toggle)
+    if self.category == "levels":
+        # Deux interrupteurs distincts : XP et argent ne se commandent plus ensemble.
+        self.add_item(ModuleToggle(self, "economy", True, prefix="Économie : "))
 
     subpage = getattr(self, "_v3_subpage", None)
     if self.category == "moderation":
@@ -773,8 +782,9 @@ def _v3_render(self) -> None:
         self.add_item(setup_ui.AutomodSelect(self))
     elif self.category == "welcome":
         self.add_item(setup_ui.FieldChannelSelect(self, "welcome_channel", "Salon de bienvenue", 2))
-        self.add_item(setup_ui.FieldChannelSelect(self, "goodbye_channel", "Salon de départ", 3))
-        self.add_item(setup_ui.FieldRoleSelect(self, "autorole", "Rôle automatique", 4))
+        self.add_item(setup_ui.FieldRoleSelect(self, "autorole", "Rôle automatique", 3))
+    elif self.category == "goodbye":
+        self.add_item(setup_ui.FieldChannelSelect(self, "goodbye_channel", "Salon de départ", 2))
     elif self.category == "roles" and subpage == "panel":
         self.add_item(RolePanelChannelSelect(self))
         self.add_item(RolePanelRolesSelect(self))
@@ -802,10 +812,10 @@ async def _v3_refresh(self, interaction: discord.Interaction):
     self.render()
     # Corrige le libellé du petit toggle avec l'état DB réel juste avant l'envoi.
     if self.category in setup_v2_core.MODULES:
-        enabled = await _module_state(self.bot, self.guild.id, self.category)
         for child in self.children:
             if isinstance(child, ModuleToggle):
-                child.label = "Désactiver" if enabled else "Activer"
+                enabled = await setup_v2_core.module_enabled(self.bot, self.guild.id, child.module)
+                child.label = child.label_for(enabled)
                 child.style = discord.ButtonStyle.secondary if enabled else discord.ButtonStyle.success
     if self.category == "roles" and getattr(self, "_v3_subpage", None) == "rules":
         conf = await self.bot.db.get_guild_config(self.guild.id)

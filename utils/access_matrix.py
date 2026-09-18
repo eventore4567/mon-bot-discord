@@ -454,7 +454,8 @@ MODULE_LABELS = {
     "security": "Sécurité",
     "logs": "Logs",
     "tickets": "Tickets",
-    "welcome": "Bienvenue & départ",
+    "welcome": "Bienvenue",
+    "goodbye": "Départs",
     "roles": "Rôles",
     "levels": "Niveaux",
     "economy": "Économie",
@@ -675,7 +676,8 @@ class Backend:
         return str(reason or "Aucune raison fournie")
 
     async def module_enabled(self, guild_id: int, module: str) -> bool:
-        """Meme semantique qu'avant : aucune ligne = module actif.
+        """Aucune ligne = non configuré : inactif pour un module configurable (voir
+        setup_v2_core.CONFIGURABLE_MODULES), actif pour une protection.
 
         La LECTURE passe par le cache de cogs.setup_v2_core, proprietaire canonique de
         module_settings, pour que les trois lecteurs du chemin chaud partagent une seule
@@ -683,20 +685,10 @@ class Backend:
         de fichier : utils ne doit pas dependre de cogs au chargement.
         """
         try:
-            from cogs.setup_v2_core import module_row_value
-        except Exception:
-            module_row_value = None
-        try:
-            if module_row_value is not None:
-                value = await module_row_value(self.bot, int(guild_id), str(module))
-                return True if value is None else bool(value)
-            row = await self.bot.db.fetchone(
-                "SELECT enabled FROM module_settings WHERE guild_id=? AND module=?",
-                (int(guild_id), str(module)),
-            )
+            from cogs.setup_v2_core import module_enabled as core_module_enabled
+            return await core_module_enabled(self.bot, int(guild_id), str(module))
         except Exception:
             return True  # table absente : ne casse pas un serveur existant
-        return True if row is None else bool(row["enabled"])
 
     async def explicit_rule(self, guild_id: int, author: Any, name: str):
         """Read the exact role rules persisted by Setup V2.
@@ -845,8 +837,8 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
     if module and not await backend.module_enabled(guild_id, module):
         label = MODULE_LABELS.get(module, module)
         return _deny(
-            f"Le module **{label}** est désactivé sur ce serveur. "
-            "Un administrateur peut le réactiver dans `+setup` ou `/setup`.",
+            f"Le module **{label}** n'est pas activé sur ce serveur. "
+            "Un administrateur peut l'activer dans `+setup` ou `/setup`.",
             f"module:{module}:off",
         )
 

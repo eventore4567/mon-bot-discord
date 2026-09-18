@@ -74,8 +74,13 @@ def test_module_inconnu_reste_autorise(bot):
     assert run(core.module_enabled(bot, 1, "module-qui-n-existe-pas")) is True
 
 
-def test_absence_de_ligne_signifie_actif(bot):
-    assert run(core.module_enabled(bot, 1, MODULE)) is True
+def test_absence_de_ligne_signifie_non_configure_donc_inactif(bot):
+    # Un module configurable sans ligne n'est pas configuré : inactif.
+    assert run(core.module_enabled(bot, 1, MODULE)) is False
+    assert run(core.module_state(bot, 1, MODULE)) == core.MODULE_STATE_NOT_CONFIGURED
+    # Les protections restent actives tant qu'on ne les coupe pas.
+    assert run(core.module_enabled(bot, 1, "moderation")) is True
+    assert run(core.module_state(bot, 1, "moderation")) == core.MODULE_STATE_ENABLED
 
 
 def test_valeur_enregistree_est_respectee(bot):
@@ -90,6 +95,7 @@ def test_valeur_enregistree_est_respectee(bot):
 
 def test_une_ecriture_est_immediatement_visible(bot):
     """LE test critique : couper un module doit prendre effet tout de suite."""
+    run(core.set_module_enabled(bot, 1, MODULE, True))
     assert run(core.module_enabled(bot, 1, MODULE)) is True
     run(core.set_module_enabled(bot, 1, MODULE, False))
     assert run(core.module_enabled(bot, 1, MODULE)) is False, "valeur perimee apres coupure"
@@ -134,4 +140,5 @@ def test_la_reinitialisation_du_setup_est_visible(bot):
     invalidate = getattr(core, "invalidate_module_cache", None)
     if invalidate:
         invalidate(1, MODULE)
-    assert run(core.module_enabled(bot, 1, MODULE)) is True, "suppression non repercutee"
+    # Ligne supprimée = module de nouveau NON CONFIGURÉ (donc inactif), et le cache suit.
+    assert run(core.module_state(bot, 1, MODULE)) == core.MODULE_STATE_NOT_CONFIGURED, "suppression non repercutee"

@@ -20,7 +20,7 @@ def test_new_setup_is_real_runtime_owner():
 def test_setup_has_requested_categories_and_states():
     source = _source("cogs/setup_control_center.py")
     for category in (
-        "Modération", "Sécurité", "Logs", "Tickets", "Bienvenue & départ",
+        "Modération", "Sécurité", "Logs", "Tickets", "Bienvenue", "Départs",
         "Rôles", "Niveaux & économie", "Notifications", "IA",
     ):
         assert category in source

@@ -93,9 +93,10 @@ def _format_welcome(value: str, member: discord.Member) -> str:
 async def _welcome_destination(bot, guild: discord.Guild):
     conf = await bot.db.get_guild_config(guild.id)
     channel_id = _conf_value(conf, "welcome_channel")
-    channel = guild.get_channel(int(channel_id)) if channel_id else guild.system_channel
+    # Pas de repli sur le salon système : la bienvenue n'existe que si un salon est configuré.
+    channel = guild.get_channel(int(channel_id)) if channel_id else None
     if not isinstance(channel, (discord.TextChannel, discord.Thread)):
-        return None, "Aucun salon de bienvenue n’est configuré et le salon système n’est pas utilisable."
+        return None, "Aucun salon de bienvenue n’est configuré (ou il a été supprimé)."
     me = guild.me
     if me is None:
         return None, "SentriX n’est pas disponible dans le cache du serveur."
@@ -142,7 +143,7 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
 async def _send_goodbye(bot, member: discord.Member) -> discord.abc.Messageable | None:
     """Renvoie le salon utilisé en cas d'envoi réussi (None sinon) : sert au filet de
     sécurité anti-doublon après coup, voir cogs/bot_tracker.py::_cleanup_presence_duplicates."""
-    if not await core.module_enabled(bot, member.guild.id, "welcome"):
+    if not await core.module_enabled(bot, member.guild.id, "goodbye"):
         return None
     conf = await bot.db.get_guild_config(member.guild.id)
     channel_id = _conf_value(conf, "goodbye_channel")
@@ -373,7 +374,7 @@ async def _module_enable_errors(bot, guild: discord.Guild, category: str) -> lis
 
 
 async def _reset_config(bot, guild: discord.Guild, target: str) -> str:
-    aliases = {"modération":"moderation","moderation":"moderation","sécurité":"security","securite":"security","security":"security","logs":"logs","tickets":"tickets","bienvenue":"welcome","welcome":"welcome","rôles":"roles","roles":"roles","niveaux":"levels","levels":"levels","économie":"economy","economie":"economy","economy":"economy","notifications":"notifications","ia":"ai","ai":"ai","permissions":"permissions","tout":"all","all":"all"}
+    aliases = {"modération":"moderation","moderation":"moderation","sécurité":"security","securite":"security","security":"security","logs":"logs","tickets":"tickets","bienvenue":"welcome","welcome":"welcome","départ":"goodbye","depart":"goodbye","goodbye":"goodbye","rôles":"roles","roles":"roles","niveaux":"levels","levels":"levels","économie":"economy","economie":"economy","economy":"economy","notifications":"notifications","ia":"ai","ai":"ai","permissions":"permissions","tout":"all","all":"all"}
     target = aliases.get(target.casefold().strip(), target.casefold().strip())
     if target not in set(core.MODULES) | {"permissions", "all"}: raise ValueError("module_inconnu")
     targets = list(core.MODULES) + ["permissions"] if target == "all" else [target]; gid = guild.id
@@ -396,8 +397,10 @@ async def _reset_config(bot, guild: discord.Guild, target: str) -> str:
             for key in ("log_channel","log_messages","log_members","log_voice","log_roles","log_server","log_automod","log_moderation","ticket_log_channel"): await bot.db.set_guild_config(gid, key, None)
         elif item == "notifications": await bot.db.execute("DELETE FROM social_notifications WHERE guild_id=?", (gid,))
         elif item == "welcome":
-            for key in ("welcome_channel","welcome_message","welcome_image_url","goodbye_channel","goodbye_message"): await bot.db.set_guild_config(gid, key, None)
+            for key in ("welcome_channel","welcome_message","welcome_image_url"): await bot.db.set_guild_config(gid, key, None)
             await bot.db.execute("DELETE FROM welcome_presentation_v2 WHERE guild_id=?", (gid,))
+        elif item == "goodbye":
+            for key in ("goodbye_channel","goodbye_message"): await bot.db.set_guild_config(gid, key, None)
         elif item == "roles":
             for key in ("autorole","verify_role","verification_role","member_role","booster_role"): await bot.db.set_guild_config(gid, key, None)
             await bot.db.execute("DELETE FROM level_roles WHERE guild_id=?", (gid,))
@@ -416,14 +419,15 @@ CIBLES_RESET = (
     ("security", "Sécurité", "AutoMod, anti-raid, listes de confiance"),
     ("logs", "Logs", "Toutes les catégories de journalisation"),
     ("tickets", "Tickets", "Panels, types et rôles support"),
-    ("welcome", "Bienvenue & départ", "Messages, image et rôle automatique"),
+    ("welcome", "Bienvenue", "Salon, message et image d'accueil"),
+    ("goodbye", "Départs", "Salon et message de départ"),
     ("roles", "Rôles", "Autorôles, vérification, rôles de niveau"),
     ("levels", "Niveaux", "Salon d'annonce des niveaux"),
     ("economy", "Économie", "Réglages de monnaie et de boutique"),
     ("notifications", "Notifications", "YouTube, Twitch et TikTok"),
     ("ai", "IA", "Limites et permissions de l'assistant"),
     ("permissions", "Permissions", "Rôles autorisés par commande"),
-    ("all", "Tout réinitialiser", "Les onze modules ci-dessus, d'un coup"),
+    ("all", "Tout réinitialiser", "Les douze modules ci-dessus, d'un coup"),
 )
 
 

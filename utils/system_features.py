@@ -1,108 +1,81 @@
-"""Interrupteurs persistants des grands systèmes SentriX.
+"""Interrupteurs Économie / Niveaux : façade sur ``module_settings``.
 
-Deux fonctions peuvent être coupées séparément par serveur :
-- économie : monnaie + boutiques + récompenses monétaires ;
-- niveaux : gains d'XP + commandes/paliers de niveau.
+Historique : ces deux interrupteurs vivaient dans une table ``system_features``
+séparée (économie et niveaux « activés par défaut »), pendant que /setup et la matrice
+d'accès lisaient ``module_settings``. Deux sources de vérité : le Dashboard pouvait dire
+ON quand Discord disait OFF. Il n'y en a plus qu'une : ``module_settings`` via
+``cogs.setup_v2_core`` (absence de ligne = non configuré = inactif). Cette façade garde
+l'API historique (``get_system_features``/``set_system_feature``/``is_system_enabled``)
+pour les appelants qui ne manipulent qu'un ``db``.
 
-Les données existantes ne sont jamais supprimées quand un système est désactivé. Un serveur
-peut donc le réactiver plus tard et reprendre exactement avec ses anciens soldes/niveaux.
+L'ancienne table n'est plus écrite ; ses valeurs explicites ont été reprises une fois
+par ``setup_v2_core.migrate_module_defaults``.
 """
 from __future__ import annotations
 
-import time
+from types import SimpleNamespace
 
-FEATURE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS system_features (
-    guild_id INTEGER PRIMARY KEY,
-    economy_enabled INTEGER NOT NULL DEFAULT 1,
-    levels_enabled INTEGER NOT NULL DEFAULT 1,
-    updated_at INTEGER NOT NULL DEFAULT 0
-)
-"""
-
-_DEFAULTS = {
-    "economy_enabled": True,
-    "levels_enabled": True,
+_FEATURE_MODULES = {
+    "economy": "economy", "money": "economy", "argent": "economy", "economy_enabled": "economy",
+    "levels": "levels", "level": "levels", "xp": "levels", "niveaux": "levels", "levels_enabled": "levels",
 }
-_CACHE_TTL = 4.0
-_READY_DB_IDS: set[int] = set()
-_CACHE: dict[tuple[int, int], tuple[float, dict[str, bool]]] = {}
+_COLUMN_FOR_MODULE = {"economy": "economy_enabled", "levels": "levels_enabled"}
+
+
+def _module_for(feature: str) -> str:
+    module = _FEATURE_MODULES.get(str(feature).strip().lower())
+    if module is None:
+        raise ValueError(f"Système inconnu : {feature}")
+    return module
+
+
+def _bot_like(db):
+    # setup_v2_core n'utilise que ``bot.db`` et des attributs de verrou posés sur l'objet.
+    holder = getattr(db, "_sentrix_module_holder", None)
+    if holder is None:
+        holder = SimpleNamespace(db=db)
+        try:
+            db._sentrix_module_holder = holder
+        except Exception:
+            pass
+    return holder
 
 
 async def ensure_feature_table(db) -> None:
-    db_id = id(db)
-    if db_id in _READY_DB_IDS:
-        return
-    await db.execute(FEATURE_TABLE_SQL)
-    _READY_DB_IDS.add(db_id)
+    """Conservé pour compatibilité : le schéma des modules est géré par setup_v2_core."""
+    from cogs import setup_v2_core
+
+    await setup_v2_core.ensure_schema(_bot_like(db))
 
 
 async def get_system_features(db, guild_id: int, *, fresh: bool = False) -> dict[str, bool]:
-    """Retourne les deux interrupteurs d'un serveur, activés par défaut."""
-    await ensure_feature_table(db)
-    key = (id(db), int(guild_id))
-    now_mono = time.monotonic()
-    cached = _CACHE.get(key)
-    if not fresh and cached and now_mono - cached[0] <= _CACHE_TTL:
-        return dict(cached[1])
+    """``{"economy_enabled": bool, "levels_enabled": bool}`` depuis module_settings."""
+    from cogs import setup_v2_core
 
-    await db.execute(
-        "INSERT OR IGNORE INTO system_features (guild_id, economy_enabled, levels_enabled, updated_at) "
-        "VALUES (?, 1, 1, 0)",
-        (int(guild_id),),
-    )
-    row = await db.fetchone(
-        "SELECT economy_enabled, levels_enabled FROM system_features WHERE guild_id = ?",
-        (int(guild_id),),
-    )
-    values = dict(_DEFAULTS)
-    if row is not None:
-        values["economy_enabled"] = bool(row["economy_enabled"])
-        values["levels_enabled"] = bool(row["levels_enabled"])
-    _CACHE[key] = (now_mono, values)
-    return dict(values)
+    holder = _bot_like(db)
+    if fresh:
+        setup_v2_core.invalidate_module_cache(int(guild_id))
+    return {
+        column: await setup_v2_core.module_enabled(holder, int(guild_id), module)
+        for module, column in _COLUMN_FOR_MODULE.items()
+    }
 
 
 async def is_system_enabled(db, guild_id: int, feature: str) -> bool:
     """feature accepte ``economy``/``economy_enabled`` ou ``levels``/``levels_enabled``."""
-    normalized = str(feature).strip().lower()
-    if normalized in {"economy", "money", "argent", "economy_enabled"}:
-        key = "economy_enabled"
-    elif normalized in {"levels", "level", "xp", "niveaux", "levels_enabled"}:
-        key = "levels_enabled"
-    else:
-        raise ValueError(f"Système inconnu : {feature}")
-    return (await get_system_features(db, guild_id)).get(key, True)
+    from cogs import setup_v2_core
+
+    return await setup_v2_core.module_enabled(_bot_like(db), int(guild_id), _module_for(feature))
 
 
 async def set_system_feature(db, guild_id: int, feature: str, enabled: bool) -> dict[str, bool]:
-    normalized = str(feature).strip().lower()
-    if normalized in {"economy", "money", "argent", "economy_enabled"}:
-        column = "economy_enabled"
-    elif normalized in {"levels", "level", "xp", "niveaux", "levels_enabled"}:
-        column = "levels_enabled"
-    else:
-        raise ValueError(f"Système inconnu : {feature}")
+    from cogs import setup_v2_core
 
-    await ensure_feature_table(db)
-    guild_id = int(guild_id)
-    await db.execute(
-        "INSERT OR IGNORE INTO system_features (guild_id, economy_enabled, levels_enabled, updated_at) "
-        "VALUES (?, 1, 1, ?)",
-        (guild_id, int(time.time())),
-    )
-    await db.execute(
-        f"UPDATE system_features SET {column} = ?, updated_at = ? WHERE guild_id = ?",
-        (1 if enabled else 0, int(time.time()), guild_id),
-    )
-    _CACHE.pop((id(db), guild_id), None)
+    await setup_v2_core.set_module_enabled(_bot_like(db), int(guild_id), _module_for(feature), bool(enabled))
     return await get_system_features(db, guild_id, fresh=True)
 
 
 def invalidate_system_feature_cache(db, guild_id: int | None = None) -> None:
-    db_id = id(db)
-    if guild_id is not None:
-        _CACHE.pop((db_id, int(guild_id)), None)
-        return
-    for key in [key for key in _CACHE if key[0] == db_id]:
-        _CACHE.pop(key, None)
+    from cogs import setup_v2_core
+
+    setup_v2_core.invalidate_module_cache(None if guild_id is None else int(guild_id))

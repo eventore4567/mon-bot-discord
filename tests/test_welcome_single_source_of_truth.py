@@ -130,7 +130,13 @@ class _FakeDB:
     async def fetchone(self, query, params=()):
         if "welcome_presentation_v2" in query:
             return self._presentation
+        if "module_settings" in query:
+            # Le module Bienvenue est configuré et actif sur ce serveur de test.
+            return {"enabled": 1}
         return None
+
+    async def fetchall(self, query, params=()):
+        return []
 
     async def execute(self, *a, **k):
         return None
