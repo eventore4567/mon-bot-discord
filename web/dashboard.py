@@ -86,7 +86,7 @@ CHANNEL_FIELDS = {
 
 BOOL_FIELDS = {"ticket_transcript_dm", "ticket_rating_enabled"}
 INT_FIELDS = {
-    "warn_ban_threshold": (1, 20),
+    "warn_ban_threshold": (0, 20),  # 0 = jamais de ban automatique (défaut)
     "ticket_delete_delay": (0, 3600),
 }
 
@@ -407,7 +407,13 @@ async def handle_me(request: web.Request):
     session, error = _require_session(request)
     if error:
         return error
-    return web.json_response({"user": session["user"], "csrf": session["csrf"]})
+    developer = False
+    try:
+        bot = request.app["bot"]
+        developer = bool(await bot.is_owner(discord.Object(id=int(session["user"]["id"]))))
+    except Exception:
+        developer = False
+    return web.json_response({"user": session["user"], "csrf": session["csrf"], "developer": developer})
 
 
 async def handle_guilds(request: web.Request):

@@ -25,32 +25,32 @@ def test_selectGuild_annule_la_requete_obsolete():
     html = dashboard.INDEX_HTML
     assert "state.guildAbort" in html
     assert "new AbortController()" in html
-    assert "if(state.guildAbort)state.guildAbort.abort();" in html
-    assert "controller!==state.guildAbort" in html
-    assert "requested!==state.guildId" in html
+    assert "if (state.guildAbort) state.guildAbort.abort();" in html
+    assert "controller !== state.guildAbort" in html
+    assert "requested !== state.guildId" in html
 
 
 def test_selectGuild_distingue_les_etats_d_erreur():
     html = dashboard.INDEX_HTML
-    assert "e.status===503" in html
+    assert "e.status === 503" in html
     assert "Reconnexion Discord en cours" in html
-    assert "e.status===401" in html
+    assert "e.status === 401" in html
     assert "Votre session Discord a expiré" in html
 
 
 def test_navigation_invalide_retombe_sur_overview():
     html = dashboard.INDEX_HTML
-    assert "if(!META[state.tab])state.tab='overview';" in html, (
+    assert "state.page = META[page] ? page : 'overview';" in html, (
         "un onglet inconnu doit retomber sur la vue d'ensemble"
     )
-    assert "function go(tab){if(!META[tab])tab='overview';" in html
+    assert "if (!META[page]) page = 'overview';" in html
 
 
 def test_api_conserve_le_code_http_et_le_payload_de_l_erreur():
     html = dashboard.INDEX_HTML
-    assert "status:r.status" in html
+    assert "status: r.status" in html
     assert "Object.assign(new Error" in html
-    assert "data});return data" in html
+    assert "{ status: r.status, data }" in html
 
 
 def test_oxyde_hotfix_n_a_plus_de_boucle_de_recuperation_concurrente():

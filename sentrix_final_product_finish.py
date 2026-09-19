@@ -138,6 +138,10 @@ def _install_embed_dashboard_finish() -> bool:
         return False
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
+    if 'id="sentrix-dashboard-unified-v2"' in html:
+        # La page « Envoyer un embed » du programme unique couvre ces champs ; l'ancien
+        # runtime ciblait le DOM pré-V55 et ne s'affichait plus.
+        return True
     css_marker = 'id="sentrix-embed-runtime-finish-css"'
     js_marker = 'id="sentrix-embed-runtime-finish"'
 

@@ -191,6 +191,19 @@ if not _dashboard_product_v18.install(dashboard_web):
     raise RuntimeError("Backend Centre avancé V18 absent avant build_app.")
 logger.info("Backend Centre avancé V18 installé avant la capture build_app.")
 
+# Même contrainte pour les deux autres backends encore appelés par le frontend unique :
+# /verification-v6 (publication CAPTCHA V96) et /ops/maintenance/modules, permissions/simulate,
+# compare (Control Center V3). Leur injection HTML historique est annulée par le finalizer,
+# qui remet le programme unique juste avant la construction aiohttp.
+from web import dashboard_verification_v6 as _dashboard_verification_v6  # noqa: E402
+from web import dashboard_control_center_v3 as _dashboard_control_center_v3  # noqa: E402
+
+if not _dashboard_verification_v6.install(dashboard_web):
+    raise RuntimeError("Backend vérification V6 absent avant build_app.")
+if not _dashboard_control_center_v3.install(dashboard_web):
+    raise RuntimeError("Backend Control Center V3 absent avant build_app.")
+logger.info("Backends vérification V6 et Control Center V3 installés avant la capture build_app.")
+
 # Certaines couches dashboard historiques sont importées pendant le bootstrap HA. Elles
 # peuvent encore modifier INDEX_HTML après la première réparation. On entoure donc la
 # fonction build_app réellement utilisée : juste avant que les routes aiohttp soient figées,
@@ -205,11 +218,11 @@ def _build_app_with_final_dashboard(bot):
     if not _install_v97_dashboard(dashboard_web):
         raise RuntimeError("Dashboard Tickets V97 absent avant build_app.")
     if not install_dashboard_v7():
-        raise RuntimeError("Dashboard V7/V18/V25-V28 absent avant build_app.")
+        raise RuntimeError("Dashboard : programme unique non servi avant build_app.")
     app = _original_build_app(bot)
     from web.http_surfaces import apply as apply_http_surfaces
     apply_http_surfaces(app, dashboard_web)
-    logger.info("Dashboard HA final confirmé au build_app aiohttp (Embeds + Tickets V97 + Ops Suite + V25-V28).")
+    logger.info("Dashboard HA final confirmé au build_app aiohttp (programme unique + backends de routes).")
     return app
 
 

@@ -35,11 +35,11 @@ def test_unified_v2_is_the_final_prestart_frontend():
         assert legacy not in document
 
     for tab in (
-        "overview", "welcome", "levels", "security", "moderation", "logs",
-        "verification", "roles", "economy", "notifications", "tickets", "ai",
-        "embeds", "config", "access", "dm", "diagnostic",
+        "overview", "welcome", "levels", "economy", "roles", "security", "logs", "tickets",
+        "notifications", "automation", "settings", "access", "embeds", "ai", "invites",
+        "backups", "dm", "advanced", "diagnostic",
     ):
-        assert f'["{tab}",' in document or f"['{tab}'," in document or f'data-tab="{tab}"' in document, tab
+        assert f"['{tab}', '" in document, tab
 
 
 def test_unified_v2_keeps_real_api_wiring_inside_one_app():
@@ -51,16 +51,16 @@ def test_unified_v2_keeps_real_api_wiring_inside_one_app():
         "api('/api/public')",
         "api('/api/me')",
         "api('/api/guilds')",
-        '/settings`,{method:',
-        '/notifications`,{method:',
-        '/embeds`,{method:',
-        '/sanctions`',
-        '/diagnostics`',
-        '/setup-tools`',
-        '/v62`',
+        "guildUrl('/settings'), { method: 'PUT'",
+        "gpost('/notifications'",
+        "gpost('/embeds'",
+        "gget('/sanctions')",
+        "gget('/diagnostics')",
+        "gget('/setup-tools')",
+        "gget('/v62')",
         '/dm/apercu',
         '/dm/user',
-        "action==='warn'?'clear-warnings':",
+        "'clear-warnings'",
     )
     for marker in required:
         assert marker in document, marker
@@ -69,27 +69,27 @@ def test_unified_v2_keeps_real_api_wiring_inside_one_app():
 def test_unified_v2_has_complete_primary_navigation():
     document = _prestart_html()
     for marker in (
-        "Général",
-        "Sécurité & modération",
+        "Accueil",
         "Communauté",
-        "Outils",
-        "Administration",
-        "Vue d’ensemble",
-        "Arrivées & départs",
-        "Sécurité",
         "Modération",
-        "Tickets",
-        "Logs",
-        "Vérification",
-        "Rôles",
+        "Support",
+        "Automatisation",
+        "Plus d’outils",
+        "Vue d’ensemble",
+        "Accueil & Départs",
         "Niveaux",
         "Économie",
-        "Intelligence artificielle",
+        "Rôles",
+        "Sécurité",
+        "Logs",
+        "Tickets",
         "Notifications",
-        "Embeds & design",
-        "Configuration",
-        "Accès & commandes",
-        "Messages privés",
+        "Paramètres",
+        "Commandes & accès",
+        "Envoyer un embed",
+        "Intelligence artificielle",
+        "Sauvegardes & historique",
+        "Message privé",
         "Diagnostic",
     ):
         assert marker in document, marker
@@ -98,10 +98,8 @@ def test_unified_v2_has_complete_primary_navigation():
 def test_unified_v2_has_mobile_tablet_and_accessibility_contracts():
     document = _prestart_html()
     for marker in (
-        "@media(max-width:1180px)",
-        "@media(max-width:840px)",
-        "@media(max-width:620px)",
-        "@media(max-width:560px)",
+        "@media (max-width:1100px)",
+        "@media (max-width:900px)",
         "prefers-reduced-motion:reduce",
         'class="skip" href="#main"',
         'aria-live="polite"',

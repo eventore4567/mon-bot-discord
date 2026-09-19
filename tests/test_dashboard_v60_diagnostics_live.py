@@ -86,7 +86,7 @@ def test_l_interface_propose_activer_desactiver_par_module():
     from web import dashboard_unified_v2
 
     html = dashboard_unified_v2.INDEX_HTML
-    assert "async function toggleModule(module,action)" in html
-    assert "/modules`,{method:'POST'" in html
+    assert "async function toggleModule(module, action)" in html
+    assert "gpost('/modules', { module, action })" in html
     assert 'data-action="enable"' in html and 'data-action="disable"' in html
-    assert "goodbye:'Départs'" in html and "economy:'Économie'" in html
+    assert "title: 'Accueil & Départs'" in html and "title: 'Économie'" in html

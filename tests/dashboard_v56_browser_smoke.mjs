@@ -66,6 +66,15 @@ const dom = new JSDOM(html, {
       if(url.pathname==="/api/guilds/1/embeds") return response({ok:true,message:"Embed envoyé."});
       if(url.pathname==="/api/guilds/1/dm/apercu") return response({guild:{id:"1",name:"Serveur Test"},longueur_max:3500});
       if(url.pathname==="/api/guilds/1/dm/user") return response({resultat:"envoye",message:"Message envoyé.",bilan:{envoyes:1}});
+      if(url.pathname==="/api/guilds/1/verification-v6") return response({ok:true,configured:true,published:false,captcha_enabled:true,channel_id:"22",role_id:"15",title:"Vérification",rules_text:"1. Respectez les membres.",image_url:null,jump_url:null});
+      if(url.pathname==="/api/guilds/1/automation/reactions") return response({ok:true,items:[{id:1,channel_id:"22",channel_name:"général",mode:"all",keyword:"",emojis:["👍"],enabled:1}]});
+      if(url.pathname==="/api/guilds/1/ops/overview") return response({ok:true,status:{discord_ready:true,latency_ms:42},diagnostics:[],history:[{id:1,changed_keys:["prefix"],created_at:1700000000,username:"Owner"}],staff:[],maintenance:{enabled:false,reason:""},policies:[]});
+      if(url.pathname==="/api/guilds/1/ops/access") return response({ok:true,roles:[],tier:"admin"});
+      if(url.pathname==="/api/guilds/1/ops/health") return response({ok:true,discord_ready:true,latency_ms:42,db_latency_ms:1});
+      if(url.pathname==="/api/guilds/1/growth/invitations") return response({ok:true,items:[],total_uses:0});
+      if(url.pathname==="/api/guilds/1/growth/webhooks") return response({ok:true,items:[]});
+      if(url.pathname==="/api/guilds/1/product/analytics") return response({ok:true,analytics:{members:1000,commands_24h:3,open_tickets:0,automation_runs_24h:0,top_commands:[]}});
+      if(url.pathname==="/api/guilds/1/live/metrics") return response({ok:true,online:true,latency_ms:42,members:1000,warnings:0,open_tickets:0,commands_24h:3});
       return response({error:`Route mock inconnue: ${url.pathname}`},404);
     };
     window.confirm=()=>true;window.prompt=()=>"Test dashboard";window.scrollTo=()=>{};
@@ -75,7 +84,7 @@ const dom = new JSDOM(html, {
 const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms));
 await sleep(1200);
 const bootstrapPaths=requests.map(x=>x.path);
-for(const required of ["/api/public","/api/me","/api/guilds","/api/guilds/1"]){
+for(const required of ["/api/me","/api/guilds","/api/guilds/1"]){
   if(!bootstrapPaths.includes(required)) throw new Error(`Bootstrap manquant: ${required}`);
 }
 
@@ -85,42 +94,62 @@ if(!dom.window.document.getElementById("sentrix-dashboard-unified-v2")) throw ne
 if(!dom.window.document.getElementById("sentrix-unified-runtime-v2")) throw new Error("Runtime unifié absent.");
 if(dom.window.document.querySelector("#sxFeaturesFrame,.sx-features-shell,#sentrix-v64-final")) throw new Error("Une ancienne couche frontend est encore embarquée.");
 
-const expectedTabs=["overview","welcome","levels","security","moderation","logs","verification","roles","economy","notifications","tickets","ai","embeds","config","access","dm","diagnostic"];
+// Programme unique : un seul <script> exécutable, un seul <style>, aucune ancienne couche.
+const executableScripts=[...dom.window.document.querySelectorAll("script")].filter(s=>s.type!=="application/json");
+if(executableScripts.length!==1) throw new Error(`${executableScripts.length} scripts exécutables au lieu de 1.`);
+if(dom.window.document.querySelectorAll("style").length!==1) throw new Error("Plusieurs feuilles de style embarquées.");
+
+const expectedTabs=["overview","welcome","levels","economy","roles","security","logs","tickets","notifications","automation","settings","access","embeds","ai","invites","backups","dm","advanced"];
 const actualTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
 for(const tab of expectedTabs) if(!actualTabs.includes(tab)) throw new Error(`Page unifiée absente: ${tab}`);
+if(actualTabs.length>20) throw new Error(`Sidebar trop longue : ${actualTabs.length} entrées.`);
 
-const checks={
-  overview:".score", welcome:'[data-setting="welcome_message"]', levels:'[data-setting="level_message"]',
-  security:"[data-automod]", moderation:"#sanctionList", logs:'[data-setting="log_channel"]',
-  verification:"#verifyRules", roles:'[data-setting="mod_role"]', economy:"#goAccess", notifications:"#notifAdd",
-  tickets:"#ticketSave", ai:"[data-ai]", embeds:"#embedSend", config:'[data-setting="prefix"]',
-  access:"#commandList", dm:"#dmOneMessage", diagnostic:".permission-grid",
-};
-for(const tab of expectedTabs){
+// [page, sous-section, sélecteur attendu]
+const checks=[
+  ["overview","",".module-card"], ["welcome","bienvenue",'[data-setting="welcome_message"]'], ["welcome","departs",'[data-setting="goodbye_message"]'],
+  ["levels","",'[data-setting="level_message"]'], ["economy","",'[data-go="access"]'], ["roles","",'[data-setting="mod_role"]'],
+  ["security","protections","[data-automod]"], ["security","verification","#verifyRules"], ["security","sanctions","#sanctionList"],
+  ["logs","",'[data-setting="log_channel"]'], ["tickets","","#ticketSave"], ["notifications","","#notifAdd"], ["automation","","#reactCreate"],
+  ["settings","",'[data-setting="prefix"]'], ["access","","#commandList"], ["embeds","","#embedSend"], ["ai","","[data-ai]"],
+  ["invites","invites",".card"], ["backups","backups","#opsExport"], ["backups","history","[data-rollback]"], ["dm","","#dmOneMessage"], ["advanced","actions","#advSearch"],
+];
+for(const [tab,sub,selector] of checks){
   const button=dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
   button.click();
-  await sleep(["overview","security","moderation","verification","economy","tickets","access","dm","diagnostic"].includes(tab)?130:35);
+  await sleep(120);
+  if(sub){ const sb=dom.window.document.querySelector(`#subnav [data-sub="${sub}"]`); if(!sb) throw new Error(`Sous-section absente: ${tab}/${sub}`); sb.click(); await sleep(120); }
   const currentButton=dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
   if(!currentButton?.classList.contains("active")) throw new Error(`L'onglet ${tab} ne devient pas actif.`);
   if(!dom.window.document.getElementById("pageTitle")?.textContent?.trim()) throw new Error(`Titre vide: ${tab}`);
-  if(!dom.window.document.querySelector(checks[tab])) throw new Error(`Contenu fonctionnel absent: ${tab} (${checks[tab]})`);
+  if(!dom.window.document.querySelector(selector)) throw new Error(`Contenu fonctionnel absent: ${tab}/${sub||"-"} (${selector})`);
 }
 
 const interactivePaths=requests.map(x=>x.path);
-for(const required of ["/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/dm/apercu"]){
+for(const required of ["/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/dm/apercu","/api/guilds/1/verification-v6","/api/guilds/1/automation/reactions","/api/guilds/1/ops/overview"]){
   if(!interactivePaths.includes(required)) throw new Error(`Route réelle jamais chargée: ${required}`);
 }
+// Le cache par serveur évite les rechargements : le diagnostic n'est demandé qu'une poignée de fois malgré 22 navigations.
+const diagCalls=interactivePaths.filter(p=>p==="/api/guilds/1/diagnostics").length;
+if(diagCalls>4) throw new Error(`Diagnostics rechargé ${diagCalls} fois : le cache front ne fonctionne pas.`);
+
 
 const paletteInput=dom.window.document.getElementById("paletteInput");
 dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown",{key:"k",metaKey:true,bubbles:true}));
 await sleep(20);
 if(dom.window.document.getElementById("paletteBackdrop").classList.contains("hidden")) throw new Error("Palette ⌘K inaccessible.");
-paletteInput.value="messages privés";paletteInput.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
-if(!dom.window.document.querySelector('[data-palette-tab="dm"]')) throw new Error("Recherche globale Messages privés absente.");
+paletteInput.value="message privé";paletteInput.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
+if(!dom.window.document.querySelector('[data-palette-page="dm"]')) throw new Error("Recherche globale Message privé absente.");
 
 if(runtimeErrors.some(message=>/SyntaxError|ReferenceError|TypeError/.test(message))){
   console.error(runtimeErrors.join("\n"));throw new Error("Erreur JavaScript dans le dashboard unifié.");
 }
+// Ancienne adresse ?tab=moderation → Sécurité › Sanctions (liens déjà partagés).
+const legacy = new JSDOM(html, { url:"https://sentrix.test/app?tab=moderation", runScripts:"dangerously", pretendToBeVisual:true, virtualConsole, beforeParse(window){ window.fetch = dom.window.fetch; window.scrollTo=()=>{}; } });
+await sleep(900);
+if(!legacy.window.document.querySelector("#sanctionList")) throw new Error("La redirection de l'ancien onglet moderation ne fonctionne pas.");
+if(!legacy.window.document.querySelector('#subnav [data-sub="sanctions"].active')) throw new Error("La sous-section Sanctions n'est pas active après redirection.");
+legacy.window.close();
+
 console.log("Dashboard unified-v2 browser smoke OK:",interactivePaths.join(" -> "));
 console.log("Pages unified-v2 OK:",expectedTabs.join(", "));
 dom.window.close();

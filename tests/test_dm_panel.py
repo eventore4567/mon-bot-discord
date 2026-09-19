@@ -164,10 +164,10 @@ def _html() -> str:
 
 def test_l_onglet_dm_est_servi_sans_diffusion_globale():
     html = _html()
-    assert '["dm","Messages privés","DM"]' in html
-    assert "case'dm':await window.sentrixRenderDM();break;" in html
-    assert "window.sentrixRenderDM=async function renderDM" in html
-    for element in ("dmOneUser", "dmOneMessage", "dmOnePreview", "dmOneSend", "dmOneResult"):
+    assert "['dm', 'Message privé']" in html
+    assert "dm: renderDM" in html
+    assert "async function renderDM()" in html
+    for element in ("dmOneUser", "dmOneMessage", "dmPreview", "dmOneSend"):
         assert element in html, f"élément d'interface manquant : {element}"
     assert "/dm/apercu" in html and "/dm/user" in html
     assert "/dm/all" not in html and "/dm/job" not in html and "dmAll" not in html
@@ -176,5 +176,5 @@ def test_l_onglet_dm_est_servi_sans_diffusion_globale():
 
 def test_l_envoi_est_neutralise_avant_le_premier_aller_retour():
     html = _html()
-    bloc = html.split("async function envoyerUn")[1].split("window.sentrixRenderDM")[0]
-    assert bloc.index("bouton.disabled=true") < bloc.index("await dmCall(")
+    bloc = html.split("$('dmOneSend').onclick = async () => {")[1].split("};")[0]
+    assert bloc.index("b.disabled = true") < bloc.index("await gpost('/dm/user'")

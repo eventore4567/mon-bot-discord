@@ -88,19 +88,15 @@ def run() -> int:
     if not v97.install_dashboard(dashboard):
         fail("installation dashboard V97 a retourné False", errors)
     html = dashboard.INDEX_HTML
-    # Les numéros sont assemblés dynamiquement dans JS (`${n}. ...`), on valide donc les
-    # libellés et les marqueurs réellement présents dans la source injectée.
-    for marker in (
-        'id="sentrix-ticket-simple-v97-js"',
-        'id="sentrix-ticket-simple-v97-css"',
-        "Général",
-        "Équipe",
-        "Panel",
-        "Publication",
-        "Réglages avancés du serveur",
-    ):
+    # Depuis la refonte (lot 1), /app est un programme unique : la couche V97 ne s'injecte
+    # plus (elle visait un DOM disparu). La page Tickets est rendue nativement.
+    if 'id="sentrix-dashboard-unified-v2"' not in html:
+        fail("programme unifié absent du dashboard", errors)
+    if 'id="sentrix-ticket-simple-v97-js"' in html:
+        fail("la couche Tickets V97 est encore injectée dans le programme unique", errors)
+    for marker in ("async function renderTickets()", "ticket_panel_save", "ticket_send", "Types de tickets"):
         if marker not in html:
-            fail(f"dashboard Tickets V97 incomplet: {marker}", errors)
+            fail(f"page Tickets native incomplète: {marker}", errors)
 
     # Garde statique : la couche runtime doit explicitement réinjecter les attachments et
     # remplacer le /setup historique plutôt que de laisser ctx dans Discord.
@@ -114,7 +110,7 @@ def run() -> int:
             print("[ERROR]", error)
         print(f"ECHEC V97: {len(errors)} problème(s)")
         return 1
-    print("OK V97: slash fiables (gaps/attachments/setup concret) + dashboard Tickets guidé")
+    print("OK V97: slash fiables (gaps/attachments/setup concret) + page Tickets native du programme unique")
     return 0
 
 

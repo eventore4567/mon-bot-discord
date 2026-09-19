@@ -79,6 +79,8 @@ def _install_dashboard_loader_fix() -> bool:
 
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     marker = 'id="sentrix-final-loader-guard"'
+    if 'id="sentrix-dashboard-unified-v2"' in html:
+        return True  # aucun #emptyState hérité dans le programme unique
     if marker not in html:
         guard = (
             '\n<style id="sentrix-final-loader-guard">'
