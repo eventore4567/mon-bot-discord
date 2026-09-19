@@ -18,6 +18,7 @@ import asyncio
 import logging
 import os
 import secrets
+import sys
 import time
 from urllib.parse import urlencode, urlparse, urlunparse
 
@@ -768,6 +769,7 @@ async def handle_welcome_get(request: web.Request):
         "show_avatar": bool(presentation["show_avatar"]),
         "show_member_count": bool(presentation["show_member_count"]),
         "mode": presentation.get("mode", "embed"),
+        "goodbye_mode": presentation.get("goodbye_mode", "embed"),
         "default_title": welcome.WELCOME_DEFAULT_TITLE,
         "default_text": welcome.WELCOME_DEFAULT_TEXT,
         "variables": ["{member}", "{username}", "{display_name}", "{server}", "{member_count}"],
@@ -798,6 +800,7 @@ async def handle_welcome_put(request: web.Request):
         show_member_count=bool(payload.get("show_member_count", True)),
         actor_id=int(session["user"]["id"]),
         mode="text" if str(payload.get("mode") or "embed") == "text" else "embed",
+        goodbye_mode="text" if str(payload.get("goodbye_mode") or "embed") == "text" else "embed",
     )
     return web.json_response({"ok": True, "message": "Présentation de la bienvenue enregistrée."})
 
@@ -1281,6 +1284,9 @@ def build_app(bot) -> web.Application:
         "/api/guilds/{guild_id}/sanctions/{user_id}/{action}",
         handle_sanction_action,
     )
+    # Routes Niveaux / Économie / Rôles du dashboard refondu : mêmes tables que les commandes.
+    from web.dashboard_api_community import register as register_community_routes
+    register_community_routes(app, sys.modules[__name__])
     return app
 
 

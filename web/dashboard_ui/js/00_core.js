@@ -134,7 +134,7 @@ async function saveDirty() {
     if (Object.values(settings).some(x => Object.keys(x).length)) await api(guildUrl('/settings'), { method: 'PUT', body: JSON.stringify(settings) });
     if (Object.keys(welcome || {}).length) {
       const current = state.cache.get(`${state.guildId}:welcome`)?.value || {};
-      await api(guildUrl('/welcome'), { method: 'PUT', body: JSON.stringify({ title: current.title, show_avatar: current.show_avatar, show_member_count: current.show_member_count, mode: current.mode, ...welcome }) });
+      await api(guildUrl('/welcome'), { method: 'PUT', body: JSON.stringify({ title: current.title, show_avatar: current.show_avatar, show_member_count: current.show_member_count, mode: current.mode, goodbye_mode: current.goodbye_mode, ...welcome }) });
       invalidate('welcome');
     }
     clearDirty();

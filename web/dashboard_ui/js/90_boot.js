@@ -6,18 +6,32 @@ const PAGES = {
   dm: renderDM, advanced: renderAdvanced, diagnostic: renderDiagnostic,
 };
 let renderToken = 0;
-async function render() {
+const REDUCED_MOTION = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SKELETON = '<div class="grid" aria-hidden="true"><div class="skeleton full" style="min-height:72px"></div><div class="skeleton" style="min-height:180px"></div><div class="skeleton" style="min-height:180px"></div></div>';
+/* render({navigation:true}) = vraie navigation utilisateur (go) : légère sortie, squelette si
+   la page met plus de 150 ms, puis entrée (160 ms). Tout autre appel (enregistrement,
+   Actualiser, tick live) redessine sans transition et garde le contenu visible. */
+async function render({ navigation = false } = {}) {
   if (!state.guild) return;
   const token = ++renderToken;
   setHead(); renderNav(); renderSubnav(); syncUrl();
   const el = content();
+  const animate = navigation && !REDUCED_MOTION();
+  el.classList.remove('page-enter');
+  if (animate && el.children.length) el.classList.add('page-leave');
+  let painted = false;
+  const skeleton = navigation ? setTimeout(() => { if (!painted && token === renderToken) { el.classList.remove('page-leave'); el.innerHTML = SKELETON; } }, 150) : null;
   el.setAttribute('aria-busy', 'true');
   try {
     await (PAGES[state.page] || renderOverview)();
+    painted = true; clearTimeout(skeleton);
     if (token !== renderToken) return;
     el.querySelectorAll('[data-go]').forEach(b => { if (!b.onclick) b.onclick = () => go(b.dataset.go, b.dataset.goSub || ''); });
+    el.classList.remove('page-leave');
+    if (animate) { el.classList.add('page-enter'); const clear = () => el.classList.remove('page-enter'); el.addEventListener('animationend', clear, { once: true }); setTimeout(clear, 260); }
   } catch (e) {
-    if (token === renderToken) errorView(e);
+    painted = true; clearTimeout(skeleton);
+    if (token === renderToken) { el.classList.remove('page-leave'); errorView(e); }
   } finally {
     if (token === renderToken) el.setAttribute('aria-busy', 'false');
   }
@@ -65,7 +79,7 @@ async function selectGuild(value) {
     state.guild = data;
     try { localStorage.setItem('sentrix:guild', requested); } catch (_) {}
     updateChrome(); renderServerRail();
-    await render();
+    await render({ navigation: true });
     startLive();
   } catch (e) {
     if (e?.name === 'AbortError' || controller !== state.guildAbort) return;

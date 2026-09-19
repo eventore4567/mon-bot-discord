@@ -71,7 +71,8 @@ def test_default_and_legacy_rows_stay_in_embed_mode():
 def test_goodbye_text_mode_sends_plain_content():
     channel = _fake_channel()
     guild = _guild(channel)
-    bot = _FakeBot({"goodbye_channel": 42, "goodbye_message": "{username} a quitté {server}."}, {"title": "x", "show_avatar": 1, "show_member_count": 1, "mode": "text"})
+    # Le mode des départs est indépendant de celui de la bienvenue.
+    bot = _FakeBot({"goodbye_channel": 42, "goodbye_message": "{username} a quitté {server}."}, {"title": "x", "show_avatar": 1, "show_member_count": 1, "mode": "embed", "goodbye_mode": "text"})
     result = asyncio.run(setup_v2_completion._send_goodbye(bot, _member(guild)))
     assert result is channel
     kwargs = channel.send.call_args.kwargs

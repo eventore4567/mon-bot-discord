@@ -164,7 +164,7 @@ def _html() -> str:
 
 def test_l_onglet_dm_est_servi_sans_diffusion_globale():
     html = _html()
-    assert "['dm', 'Message privé']" in html
+    assert "dm: ['Message privé'" in html  # META : page atteinte depuis Sécurité › Sanctions
     assert "dm: renderDM" in html
     assert "async function renderDM()" in html
     for element in ("dmOneUser", "dmOneMessage", "dmPreview", "dmOneSend"):

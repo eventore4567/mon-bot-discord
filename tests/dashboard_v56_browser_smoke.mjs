@@ -66,8 +66,13 @@ const dom = new JSDOM(html, {
       if(url.pathname==="/api/guilds/1/embeds") return response({ok:true,message:"Embed envoyé."});
       if(url.pathname==="/api/guilds/1/dm/apercu") return response({guild:{id:"1",name:"Serveur Test"},longueur_max:3500});
       if(url.pathname==="/api/guilds/1/dm/user") return response({resultat:"envoye",message:"Message envoyé.",bilan:{envoyes:1}});
-      if(url.pathname==="/api/guilds/1/welcome") return method==="PUT" ? response({ok:true,message:"Présentation enregistrée."}) : response({ok:true,title:"Bienvenue sur {server}",show_avatar:true,show_member_count:true,mode:"embed",default_title:"Bienvenue sur {server}",default_text:"Bienvenue {member} !",variables:["{member}","{username}","{display_name}","{server}","{member_count}"]});
+      if(url.pathname==="/api/guilds/1/welcome") return method==="PUT" ? response({ok:true,message:"Présentation enregistrée."}) : response({ok:true,title:"Bienvenue sur {server}",show_avatar:true,show_member_count:true,mode:"embed",goodbye_mode:"embed",default_title:"Bienvenue sur {server}",default_text:"Bienvenue {member} !",variables:["{member}","{username}","{display_name}","{server}","{member_count}"]});
       if(url.pathname==="/api/guilds/1/welcome/test") return response({ok:true,message:"Test envoyé."});
+      if(url.pathname==="/api/guilds/1/levels") return method==="PUT" ? response({ok:true,message:"Réglages des niveaux enregistrés."}) : response({ok:true,xp_min:10,xp_max:25,xp_cooldown:60,level_announce_enabled:true,level_keep_old_roles:false,xp_disabled_on_commands:false,xp_excluded_role_ids:[],xp_channel_disabled:[],roles:[{level:5,role_id:"15"}]});
+      if(url.pathname==="/api/guilds/1/economy") return method==="PUT" ? response({ok:true,message:"Monnaie enregistrée."}) : response({ok:true,currency_singular:"Pièce",currency_plural:"Pièces",currency_symbol:"🪙",shop:[{id:1,name:"VIP",price:500,description:"",role_id:"15"}],panels:[],gains:{daily:200,weekly:1000,work_cooldown:3600,daily_cooldown:86400}});
+      if(url.pathname==="/api/guilds/1/economy/games") return method==="PUT" ? response({ok:true,message:"Réglages des jeux enregistrés."}) : response({ok:true,settings:{enabled:true,disabled_games:[],allowed_channel_ids:[],blocked_channel_ids:[],allowed_role_ids:[],blocked_role_ids:[],daily_limit:50,logs_enabled:true,leaderboard_enabled:true,dm_results:false,compact_mode:false},catalog:[{key:"slots",label:"🎰 Machine à sous",kind:"rapide"}]});
+      if(url.pathname==="/api/guilds/1/roles/messages") return response({ok:true,items:[{id:"555",author:"SentriX",mine:true,text:"Choisissez vos rôles",created_at:1700000000,reactions:2}]});
+      if(url.pathname==="/api/guilds/1/roles") return response({ok:true,notification_roles:[{id:"15",name:"Ping annonces"}],notification_panels:[],reaction_panels:[],reaction_roles:[]});
       if(url.pathname==="/api/guilds/1/verification-v6") return response({ok:true,configured:true,published:false,captcha_enabled:true,channel_id:"22",role_id:"15",title:"Vérification",rules_text:"1. Respectez les membres.",image_url:null,jump_url:null});
       if(url.pathname==="/api/guilds/1/automation/reactions") return response({ok:true,items:[{id:1,channel_id:"22",channel_name:"général",mode:"all",keyword:"",emojis:["👍"],enabled:1}]});
       if(url.pathname==="/api/guilds/1/ops/overview") return response({ok:true,status:{discord_ready:true,latency_ms:42},diagnostics:[],history:[{id:1,changed_keys:["prefix"],created_at:1700000000,username:"Owner"}],staff:[],maintenance:{enabled:false,reason:""},policies:[]});
@@ -101,7 +106,7 @@ const executableScripts=[...dom.window.document.querySelectorAll("script")].filt
 if(executableScripts.length!==1) throw new Error(`${executableScripts.length} scripts exécutables au lieu de 1.`);
 if(dom.window.document.querySelectorAll("style").length!==1) throw new Error("Plusieurs feuilles de style embarquées.");
 
-const expectedTabs=["overview","welcome","levels","economy","roles","security","logs","tickets","notifications","automation","settings","access","embeds","ai","invites","backups","dm","advanced"];
+const expectedTabs=["overview","welcome","levels","economy","roles","security","logs","tickets","notifications","automation","settings","access","embeds","ai","invites","backups"];
 const actualTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
 for(const tab of expectedTabs) if(!actualTabs.includes(tab)) throw new Error(`Page unifiée absente: ${tab}`);
 if(actualTabs.length>20) throw new Error(`Sidebar trop longue : ${actualTabs.length} entrées.`);
@@ -109,14 +114,16 @@ if(actualTabs.length>20) throw new Error(`Sidebar trop longue : ${actualTabs.len
 // [page, sous-section, sélecteur attendu]
 const checks=[
   ["overview","",".module-card"], ["welcome","bienvenue",'[data-setting="welcome_message"]'], ["welcome","departs",'[data-setting="goodbye_message"]'],
-  ["levels","",'[data-setting="level_message"]'], ["economy","",'[data-go="access"]'], ["roles","",'[data-setting="mod_role"]'],
+  ["levels","general","#lvSave"], ["levels","levelup",'[data-setting="level_channel"]'], ["levels","roles","#lvRoleAdd"], ["levels","avance","#lvExRoles"],
+  ["economy","general","#ecSave"], ["economy","boutique","#shopAdd"], ["economy","jeux","#gmEnabled"], ["economy","gains",".kpi"], ["roles","autoroles",'[data-setting="autorole"]'], ["roles","interactifs","#reactionPanelCreate"], ["roles","avance",'[data-setting="mod_role"]'],
   ["security","protections","[data-automod]"], ["security","verification","#verifyRules"], ["security","sanctions","#sanctionList"],
   ["logs","",'[data-setting="log_channel"]'], ["tickets","","#ticketSave"], ["notifications","","#notifAdd"], ["automation","","#reactCreate"],
   ["settings","",'[data-setting="prefix"]'], ["access","","#commandList"], ["embeds","","#embedSend"], ["ai","","[data-ai]"],
-  ["invites","invites",".card"], ["backups","backups","#opsExport"], ["backups","history","[data-rollback]"], ["dm","","#dmOneMessage"], ["advanced","actions","#advSearch"],
+  ["invites","invites",".card"], ["backups","backups","#opsExport"], ["backups","history","[data-rollback]"],
 ];
 for(const [tab,sub,selector] of checks){
   const button=dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
+  if(!button) throw new Error(`Bouton de navigation absent: ${tab}`);
   button.click();
   await sleep(120);
   if(sub){ const sb=dom.window.document.querySelector(`#subnav [data-sub="${sub}"]`); if(!sb) throw new Error(`Sous-section absente: ${tab}/${sub}`); sb.click(); await sleep(120); }
@@ -126,8 +133,9 @@ for(const [tab,sub,selector] of checks){
   if(!dom.window.document.querySelector(selector)) throw new Error(`Contenu fonctionnel absent: ${tab}/${sub||"-"} (${selector})`);
 }
 
+const interactivePathsNow=()=>requests.map(x=>x.path);
 const interactivePaths=requests.map(x=>x.path);
-for(const required of ["/api/guilds/1/welcome","/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/dm/apercu","/api/guilds/1/verification-v6","/api/guilds/1/automation/reactions","/api/guilds/1/ops/overview"]){
+for(const required of ["/api/guilds/1/welcome","/api/guilds/1/levels","/api/guilds/1/economy","/api/guilds/1/economy/games","/api/guilds/1/roles","/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/verification-v6","/api/guilds/1/automation/reactions","/api/guilds/1/ops/overview"]){
   if(!interactivePaths.includes(required)) throw new Error(`Route réelle jamais chargée: ${required}`);
 }
 // Le cache par serveur évite les rechargements : le diagnostic n'est demandé qu'une poignée de fois malgré 22 navigations.
@@ -135,12 +143,26 @@ const diagCalls=interactivePaths.filter(p=>p==="/api/guilds/1/diagnostics").leng
 if(diagCalls>4) throw new Error(`Diagnostics rechargé ${diagCalls} fois : le cache front ne fonctionne pas.`);
 
 
+// Message privé : plus dans la sidebar, mais accessible depuis Sanctions.
+dom.window.document.querySelector('#navigation button[data-tab="security"]').click(); await sleep(120);
+dom.window.document.querySelector('#subnav [data-sub="sanctions"]').click(); await sleep(150);
+dom.window.document.querySelector('[data-go="dm"]').click(); await sleep(150);
+if(!dom.window.document.getElementById("dmOneMessage")) throw new Error("La page Message privé doit rester accessible depuis Sanctions.");
+if(!interactivePathsNow().includes("/api/guilds/1/dm/apercu")) throw new Error("Route DM jamais chargée.");
+
+// Tickets : « Publier » ne regarde que le panneau sélectionné (1 type sur le panneau 1 du mock → activé).
+dom.window.document.querySelector('#navigation button[data-tab="tickets"]').click(); await sleep(150);
+if(dom.window.document.getElementById("ticketPublish").disabled) throw new Error("Panneau avec un type : Publier devrait être actif.");
+if(!/1 type/.test(dom.window.document.getElementById("ticketPanelPick").selectedOptions[0].textContent)) throw new Error("Le nombre de types du panneau doit être visible.");
+// Liens de migration : jamais visibles pour un non-développeur.
+if(dom.window.document.querySelector('#navigation a[href="/setup-center"]')) throw new Error("Les anciens liens ne doivent pas apparaître pour un utilisateur normal.");
+
 const paletteInput=dom.window.document.getElementById("paletteInput");
 dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown",{key:"k",metaKey:true,bubbles:true}));
 await sleep(20);
 if(dom.window.document.getElementById("paletteBackdrop").classList.contains("hidden")) throw new Error("Palette ⌘K inaccessible.");
-paletteInput.value="message privé";paletteInput.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
-if(!dom.window.document.querySelector('[data-palette-page="dm"]')) throw new Error("Recherche globale Message privé absente.");
+paletteInput.value="sauvegardes";paletteInput.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
+if(!dom.window.document.querySelector('[data-palette-page="backups"]')) throw new Error("Recherche globale absente.");
 
 if(runtimeErrors.some(message=>/SyntaxError|ReferenceError|TypeError/.test(message))){
   console.error(runtimeErrors.join("\n"));throw new Error("Erreur JavaScript dans le dashboard unifié.");
@@ -170,6 +192,12 @@ if(!g500.boot||!g500.retry||!g500.login||!/serveurs/.test(g500.title)) throw new
 const gEmpty=await bootWith(p=>p==="/api/guilds"?response({ok:true,guilds:[]}):null);
 if(!gEmpty.dashboard||!/Aucun serveur disponible/.test(gEmpty.content)) throw new Error("Aucune guild doit afficher un empty state: "+JSON.stringify(gEmpty));
 const stale=await bootWith(p=>null,"https://sentrix.test/app?guild=999999");
+// Développeur : le groupe Migration (anciennes interfaces) n'existe que pour lui.
+const devDom=new JSDOM(html,{url:"https://sentrix.test/app",runScripts:"dangerously",pretendToBeVisual:true,virtualConsole,beforeParse(w){ w.fetch=async(input,options={})=>{ const u=new URL(typeof input==="string"?input:input.url,w.location.href); if(u.pathname==="/api/me") return response({ok:true,user:{id:"42",username:"Dev",avatar_url:null},csrf:"t",developer:true}); return dom.window.fetch(input,options); }; w.scrollTo=()=>{}; }});
+await sleep(700);
+if(!devDom.window.document.querySelector('#navigation a[href="/setup-center"]')) throw new Error("Le développeur doit voir le groupe Migration.");
+if(!devDom.window.document.querySelector('#navigation button[data-tab="advanced"]')) throw new Error("Le développeur doit voir le Centre avancé.");
+devDom.window.close();
 if(!stale.dashboard||stale.boot) throw new Error("Une guild mémorisée invalide ne doit pas casser le démarrage: "+JSON.stringify(stale));
 
 console.log("Dashboard unified-v2 browser smoke OK:",interactivePaths.join(" -> "));

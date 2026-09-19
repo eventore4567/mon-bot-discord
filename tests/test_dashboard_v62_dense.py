@@ -39,7 +39,7 @@ def test_unified_sidebar_does_not_restore_empty_secondary_navigation():
     _dashboard, document = _document()
     for removed in ('["recurring"', '["community"', '["features"', '["infinity"'):
         assert removed not in document
-    for present in ("['verification', 'Vérification']", "['economy', 'Économie']", "['tickets', 'Tickets']", "['dm', 'Message privé']"):
+    for present in ("['verification', 'Vérification']", "['economy', 'Économie']", "['tickets', 'Tickets']", "dm: renderDM"):
         assert present in document
     assert "Messages récurrents" not in document
 

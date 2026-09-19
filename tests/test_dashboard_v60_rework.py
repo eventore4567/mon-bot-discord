@@ -37,9 +37,11 @@ def test_unified_v2_is_the_final_prestart_frontend():
     for tab in (
         "overview", "welcome", "levels", "economy", "roles", "security", "logs", "tickets",
         "notifications", "automation", "settings", "access", "embeds", "ai", "invites",
-        "backups", "dm", "advanced", "diagnostic",
+        "backups", "advanced", "diagnostic",
     ):
         assert f"['{tab}', '" in document, tab
+    # Message privé : page conservée (action depuis Sanctions), plus d'entrée de menu.
+    assert "dm: renderDM" in document and "['dm', 'Message privé']" not in document
 
 
 def test_unified_v2_keeps_real_api_wiring_inside_one_app():

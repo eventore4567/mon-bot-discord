@@ -65,6 +65,9 @@ def test_no_periodic_dom_loop():
     assert intervals == [("() => liveTick(false)", "30000")], intervals
     assert "data-sx-tab" not in program
     assert "Element.prototype.animate" not in program
+    # L'entrée de page n'est posée que par une navigation utilisateur (go → render({navigation:true})).
+    assert program.count("render({ navigation: true })") == 2  # go() et première page d'un serveur
+    assert "el.classList.add('page-enter')" in program and "if (animate)" in program
 
 
 def test_navigation_is_short_and_grouped():
@@ -74,8 +77,10 @@ def test_navigation_is_short_and_grouped():
     assert pages == ["overview", "welcome", "levels", "economy", "roles", "security", "logs", "tickets", "notifications", "automation"]
     groups = re.findall(r"\['([^']+)', \[\[", nav)
     assert groups == ["Accueil", "Communauté", "Modération", "Support", "Automatisation"]
-    tools = re.search(r"const TOOLS = \[(.*?)\n\];", program, re.S).group(1)
+    tools = re.search(r"const TOOL_GROUPS = \[(.*?)\n\];", program, re.S).group(1)
     assert len(re.findall(r"\['([a-z]+)', '", tools)) <= 10
+    assert "(ancien)" not in program
+    assert "MIGRATION_LINKS" in program and "state.developer" in program
 
 
 def test_legacy_tab_links_are_redirected():

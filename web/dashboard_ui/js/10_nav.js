@@ -8,13 +8,16 @@ const NAV = [
   ['Support', [['tickets', 'Tickets']]],
   ['Automatisation', [['notifications', 'Notifications'], ['automation', 'Automatisation']]],
 ];
-const TOOLS = [
-  ['settings', 'Paramètres'], ['access', 'Commandes & accès'], ['embeds', 'Envoyer un embed'], ['ai', 'Intelligence artificielle'],
-  ['invites', 'Invitations & webhooks'], ['backups', 'Sauvegardes & historique'], ['dm', 'Message privé'], ['advanced', 'Centre avancé'], ['diagnostic', 'Diagnostic'],
+/* Plus d'outils : trois groupes courts. Le groupe Développeur n'apparaît que pour le
+   propriétaire du bot (/api/me.developer) ; il porte aussi, le temps de la migration, les
+   anciennes interfaces dont toutes les fonctions ne sont pas encore reprises ici. */
+const TOOL_GROUPS = [
+  ['Outils', [['embeds', 'Envoyer un embed'], ['ai', 'Intelligence artificielle'], ['invites', 'Invitations & webhooks']]],
+  ['Administration', [['settings', 'Paramètres'], ['access', 'Commandes & accès'], ['backups', 'Sauvegardes & historique'], ['diagnostic', 'Diagnostic']]],
+  ['Développeur', [['advanced', 'Centre avancé']]],
 ];
-/* Anciennes interfaces encore servies : reliées discrètement tant que leurs fonctions
-   n'ont pas toutes été reprises ici (voir lot 7). */
-const EXTERNAL_TOOLS = [['/setup-center', 'Centre Setup (ancien)'], ['/operations', 'Opérations (ancien)'], ['/feature-suite', 'Fonctions avancées (ancien)'], ['/enterprise', 'Enterprise (ancien)']];
+const TOOLS = TOOL_GROUPS.flatMap(([, items]) => items);
+const MIGRATION_LINKS = [['/setup-center', 'Centre Setup'], ['/operations', 'Opérations'], ['/feature-suite', 'Fonctions avancées'], ['/enterprise', 'Enterprise']];
 
 const META = {
   overview: ['Configuration du serveur', 'Gérez les principales fonctionnalités de SentriX.'],
@@ -39,6 +42,9 @@ const META = {
 };
 const SUBS = {
   welcome: [['bienvenue', 'Bienvenue'], ['departs', 'Départs']],
+  levels: [['general', 'Général'], ['levelup', 'Message de niveau'], ['roles', 'Récompenses'], ['avance', 'Avancé']],
+  economy: [['general', 'Général'], ['boutique', 'Boutique'], ['jeux', 'Jeux'], ['gains', 'Gains'], ['avance', 'Avancé']],
+  roles: [['autoroles', 'Autorôle'], ['interactifs', 'Rôles interactifs'], ['niveau', 'Rôles de niveau'], ['avance', 'Avancé']],
   security: [['protections', 'Protections'], ['verification', 'Vérification'], ['sanctions', 'Sanctions']],
   advanced: [['actions', 'Actions'], ['members', 'Membres'], ['automations', 'Automations'], ['templates', 'Templates'], ['audit', 'Audit'], ['access', 'Accès dashboard']],
   invites: [['invites', 'Invitations'], ['webhooks', 'Webhooks']],
@@ -61,8 +67,13 @@ function renderNav() {
   const nav = $('navigation');
   const inTools = TOOLS.some(([p]) => p === state.page);
   let html = NAV.map(([group, items]) => `<div class="nav-group">${esc(group)}</div>` + items.map(([p, l]) => navButton(p, l)).join('')).join('');
-  const tools = TOOLS.filter(([p]) => p !== 'diagnostic' || state.developer || state.guildOwner);
-  html += `<details id="navMore" ${inTools || state.navMore ? 'open' : ''}><summary>Plus d’outils</summary>${tools.map(([p, l]) => navButton(p, l)).join('')}${EXTERNAL_TOOLS.map(([href, l]) => `<a class="nav-link ext" href="${href}" target="_blank" rel="noopener">${esc(l)}</a>`).join('')}</details>`;
+  const groups = TOOL_GROUPS.map(([g, items]) => {
+    if (g === 'Développeur' && !state.developer) return '';
+    const visible = items.filter(([p]) => p !== 'diagnostic' || state.developer || state.guildOwner);
+    const links = g === 'Développeur' ? `<div class="nav-group">Migration</div>${MIGRATION_LINKS.map(([href, l]) => `<a class="nav-link ext" href="${href}" target="_blank" rel="noopener">${esc(l)}</a>`).join('')}` : '';
+    return visible.length || links ? `<div class="nav-group">${esc(g)}</div>${visible.map(([p, l]) => navButton(p, l)).join('')}${links}` : '';
+  }).join('');
+  html += `<details id="navMore" ${inTools || state.navMore ? 'open' : ''}><summary>Plus d’outils</summary>${groups}</details>`;
   nav.innerHTML = html;
   nav.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   const more = $('navMore');
@@ -101,7 +112,7 @@ async function go(page, sub = '') {
   state.sub = sub || (SUBS[page] ? SUBS[page][0][0] : '');
   try { localStorage.setItem('sentrix:page', page); } catch (_) {}
   closeSidebar();
-  await render();
+  await render({ navigation: true });
 }
 function openSidebar() { $('sidebar').classList.add('open'); $('mobileOverlay').classList.remove('hidden'); $('mobileMenu').setAttribute('aria-expanded', 'true'); }
 function closeSidebar() { $('sidebar').classList.remove('open'); $('mobileOverlay').classList.add('hidden'); $('mobileMenu').setAttribute('aria-expanded', 'false'); }
@@ -111,7 +122,7 @@ function paletteItems(q = '') {
   const n = q.toLocaleLowerCase('fr').trim();
   const items = [];
   for (const [group, pages] of NAV) for (const [p, l] of pages) items.push({ page: p, label: l, group });
-  for (const [p, l] of TOOLS) items.push({ page: p, label: l, group: 'Plus d’outils' });
+  for (const [g, pages] of TOOL_GROUPS) { if (g === 'Développeur' && !state.developer) continue; for (const [p, l] of pages) items.push({ page: p, label: l, group: g }); }
   for (const [p, subs] of Object.entries(SUBS)) for (const [k, l] of subs) items.push({ page: p, sub: k, label: `${pageMeta(p)[0]} › ${l}`, group: pageMeta(p)[0] });
   return items.filter(x => !n || `${x.label} ${x.group}`.toLocaleLowerCase('fr').includes(n));
 }

@@ -58,8 +58,8 @@ def api(monkeypatch):
             return saved.get(guild_id, {"title": "Bienvenue sur {server}", "show_avatar": True, "show_member_count": True})
 
         @staticmethod
-        async def _save_welcome_presentation(bot, guild_id, *, title, show_avatar, show_member_count, actor_id, mode=None):
-            saved[guild_id] = {"title": title, "show_avatar": show_avatar, "show_member_count": show_member_count, "actor": actor_id, "mode": mode}
+        async def _save_welcome_presentation(bot, guild_id, *, title, show_avatar, show_member_count, actor_id, mode=None, goodbye_mode=None):
+            saved[guild_id] = {"title": title, "show_avatar": show_avatar, "show_member_count": show_member_count, "actor": actor_id, "mode": mode, "goodbye_mode": goodbye_mode}
 
         @staticmethod
         async def _send_welcome(bot, member, *, test=False):
@@ -93,7 +93,7 @@ def test_put_saves_through_the_cog_function(api):
     req, guild = _request("PUT", "/api/guilds/1/welcome", {"title": "Salut {display_name}", "show_avatar": False, "show_member_count": True, "mode": "text"})
     status, data = _run(dashboard.handle_welcome_put, req, guild)
     assert status == 200 and data["ok"] is True
-    assert saved[1] == {"title": "Salut {display_name}", "show_avatar": False, "show_member_count": True, "actor": 42, "mode": "text"}
+    assert saved[1] == {"title": "Salut {display_name}", "show_avatar": False, "show_member_count": True, "actor": 42, "mode": "text", "goodbye_mode": "embed"}
     # Valeur inconnue → embed (jamais d'état intermédiaire).
     req, guild = _request("PUT", "/api/guilds/1/welcome", {"title": "x", "mode": "n'importe quoi"})
     _run(dashboard.handle_welcome_put, req, guild)

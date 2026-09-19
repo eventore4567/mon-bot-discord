@@ -94,7 +94,7 @@ def run() -> int:
         fail("programme unifié absent du dashboard", errors)
     if 'id="sentrix-ticket-simple-v97-js"' in html:
         fail("la couche Tickets V97 est encore injectée dans le programme unique", errors)
-    for marker in ("async function renderTickets()", "ticket_panel_save", "ticket_send", "Types de tickets"):
+    for marker in ("async function renderTickets()", "ticket_panel_save", "ticket_send", "Types de ce panneau"):
         if marker not in html:
             fail(f"page Tickets native incomplète: {marker}", errors)
 
