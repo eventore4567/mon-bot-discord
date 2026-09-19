@@ -343,3 +343,44 @@ function renderPreferences() {
   };
 }
 
+
+
+/* Premium global home enhancement */
+const _renderProfileSentrixBase = renderProfile;
+renderProfile = function renderProfilePremium() {
+  _renderProfileSentrixBase();
+  const home = content().querySelector('.global-home');
+  const hero = home?.querySelector('.global-hero');
+  if (!home || !hero || home.querySelector('.global-quick-hub')) return;
+
+  let theme='sentrix',accent='#4da3ff',density='comfortable';
+  try {
+    theme=localStorage.getItem('sentrix:theme')||'sentrix';
+    accent=normalizeAccent(localStorage.getItem('sentrix:accent')||'#4da3ff');
+    density=localStorage.getItem('sentrix:density')||'comfortable';
+  } catch (_) {}
+  const names={sentrix:'Sombre SentriX',oled:'OLED',midnight:'Midnight',graphite:'Graphite'};
+  const lastId=(()=>{try{return localStorage.getItem('sentrix:guild')||'';}catch(_){return '';}})();
+  const last=state.guilds.find(g=>g.installed&&String(g.id)===String(lastId));
+  const hub=document.createElement('section');
+  hub.className='global-quick-hub';
+  hub.innerHTML=`
+    <article class="global-quick-card accent">
+      <div class="global-quick-icon" style="--quick-accent:${esc(accent)}">S</div>
+      <div><span class="eyebrow">Apparence</span><h3>${esc(names[theme]||'SentriX')}</h3><p>${esc(accent)} · ${density==='compact'?'compacte':'confortable'}</p></div>
+      <button class="btn sm" type="button" data-go="preferences">Personnaliser</button>
+    </article>
+    <article class="global-quick-card">
+      <div class="global-quick-icon">#</div>
+      <div><span class="eyebrow">Dernier espace</span><h3>${esc(last?.name||'Aucun serveur récent')}</h3><p>${last?'Reprendre votre configuration.':'Choisissez un serveur pour commencer.'}</p></div>
+      ${last? `<button class="btn sm primary" type="button" data-global-guild="${esc(last.id)}">Continuer</button>` : '<button class="btn sm primary" type="button" data-go="servers">Choisir</button>'}
+    </article>
+    <article class="global-quick-card">
+      <div class="global-quick-icon">⌘</div>
+      <div><span class="eyebrow">Recherche</span><h3>Commande rapide</h3><p>Une fois dans un serveur, utilisez ⌘K pour trouver tickets, anti-spam, Compteur Infini…</p></div>
+      <button class="btn sm" type="button" data-go="servers">Mes serveurs</button>
+    </article>`;
+  hero.insertAdjacentElement('afterend',hub);
+  bindGlobalServerCards(hub);
+  hub.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go,b.dataset.goSub||''));
+};
