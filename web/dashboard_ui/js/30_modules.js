@@ -11,15 +11,43 @@ function bindPreviews(root = content()) {
   });
 }
 
-/* Accueil & Départs */
+/* Accueil & Départs — même moteur que le bouton « Bienvenue » de /setup :
+   guild_config (salon, message, image) + welcome_presentation_v2 (titre, avatar, compteur). */
+const welcomePresentation = (force = false) => cached('welcome', () => gget('/welcome'), { force });
 async function renderWelcome() {
   const s = settings();
+  let pres = { title: 'Bienvenue sur {server}', show_avatar: true, show_member_count: true, default_text: 'Bienvenue {member} !' };
+  try { pres = await welcomePresentation(); } catch (_) {}
   if (state.sub === 'departs') {
-    content().innerHTML = `<div class="grid">${await moduleHead('goodbye', 'Message envoyé quand un membre quitte le serveur.', 'Départs')}${card('', '', `<div class="fields">${field('Salon', 'goodbye_channel', '', { select: channelOptions(s.goodbye_channel), hint: 'Choisissez le salon où SentriX enverra le message.' })}${field('Message', 'goodbye_message', s.goodbye_message || '', { textarea: true, full: true, max: 1000, placeholder: '{user.username} a quitté le serveur.' })}${messagePreviewBlock('goodbye_message', '{user.username} a quitté le serveur.')}</div>`, 'full')}${advanced(card('Variables', 'À écrire dans le message.', `<div class="chips"><span class="chip">{user}</span><span class="chip">{user.username}</span><span class="chip">{server}</span><span class="chip">{member_count}</span></div>`))}</div>`;
-  } else {
-    content().innerHTML = `<div class="grid">${await moduleHead('welcome', 'Message envoyé quand un membre arrive.', 'Bienvenue')}${card('', '', `<div class="fields">${field('Salon', 'welcome_channel', '', { select: channelOptions(s.welcome_channel), hint: 'Choisissez le salon où SentriX enverra le message.' })}${field('Message', 'welcome_message', s.welcome_message || '', { textarea: true, full: true, max: 2000, placeholder: 'Bienvenue {user} sur {server} !' })}${messagePreviewBlock('welcome_message', 'Bienvenue {user} sur {server} !')}</div>`, 'full')}${advanced(card('Image de bienvenue', 'Adresse HTTPS publique d’une image jointe au message.', `<div class="fields">${field('Image HTTPS', 'welcome_image_url', s.welcome_image_url || '', { type: 'url', full: true, placeholder: 'https://…' })}</div>`) + card('Variables', 'À écrire dans le message.', `<div class="chips"><span class="chip">{user}</span><span class="chip">{user.username}</span><span class="chip">{server}</span><span class="chip">{member_count}</span></div>`))}</div>`;
+    content().innerHTML = `<div class="grid">${await moduleHead('goodbye', 'Message envoyé quand un membre quitte le serveur.', 'Départs')}${card('', '', `<div class="fields">${channelField('Salon', 'goodbye_channel', s.goodbye_channel, { full: true, hint: 'Le message de départ est envoyé dans ce salon.' })}<div class="field full"><div class="label-row"><label for="f-goodbye_message">Message</label><span class="counter"></span>${variablesButton('f-goodbye_message')}</div><textarea id="f-goodbye_message" data-setting="goodbye_message" maxlength="1000" rows="4" placeholder="**{username}** a quitté **{server}**.">${esc(s.goodbye_message || '')}</textarea></div>${previewBlock('goodbyePreview')}</div>`, 'full')}${advanced(card('Présentation', 'Partagée avec la bienvenue.', `<label class="switch-row"><span class="switch-copy"><b>Afficher l’avatar du membre</b><span>En miniature du message.</span></span><input class="switch" id="presAvatar" type="checkbox" ${pres.show_avatar ? 'checked' : ''}></label>`))}</div>`;
+    bindEditable(); bindModuleButtons(); bindVariables(); bindChannelWarnings();
+    bindPreview(content(), 'goodbyePreview', () => ({ embed: { title: 'Départ d’un membre', description: $('f-goodbye_message').value || '**{username}** a quitté **{server}**.', color: '#6b7280', thumbnail: $('presAvatar').checked ? 'avatar' : '', footer: 'SentriX' } }));
+    $('presAvatar').onchange = () => savePresentation({ ...pres, show_avatar: $('presAvatar').checked });
+    return;
   }
-  bindEditable(); bindModuleButtons(); bindPreviews();
+  content().innerHTML = `<div class="grid">${await moduleHead('welcome', 'Message envoyé quand un membre arrive.', 'Bienvenue')}${card('', '', `<div class="fields">${channelField('Salon de bienvenue', 'welcome_channel', s.welcome_channel, { full: true, hint: 'Choisissez le salon où SentriX enverra le message.' })}<div class="field full"><div class="label-row"><label for="presTitle">Titre</label></div><input id="presTitle" maxlength="256" value="${esc(pres.title || '')}" placeholder="Bienvenue sur {server}"></div><div class="field full"><div class="label-row"><label for="f-welcome_message">Message</label><span class="counter"></span>${variablesButton('f-welcome_message')}</div><textarea id="f-welcome_message" data-setting="welcome_message" maxlength="2000" rows="4" placeholder="${esc(pres.default_text || '')}">${esc(s.welcome_message || '')}</textarea></div>${previewBlock('welcomePreview')}</div><div class="toolbar"><button class="btn" type="button" id="welcomeTest">Envoyer un message test</button><small>Envoyé dans le salon choisi, adressé à vous seulement.</small></div>`, 'full')}${advanced(card('Image et présentation', '', `<div class="fields">${field('Grande image (HTTPS)', 'welcome_image_url', s.welcome_image_url || '', { type: 'url', full: true, placeholder: 'https://…', hint: 'Affichée sous le message.' })}</div><label class="switch-row"><span class="switch-copy"><b>Afficher l’avatar du membre</b><span>En miniature du message.</span></span><input class="switch" id="presAvatar" type="checkbox" ${pres.show_avatar ? 'checked' : ''}></label><label class="switch-row"><span class="switch-copy"><b>Afficher le nombre de membres</b><span>Un champ « Membres » sous le message.</span></span><input class="switch" id="presCount" type="checkbox" ${pres.show_member_count ? 'checked' : ''}></label>`))}</div>`;
+  bindEditable(); bindModuleButtons(); bindVariables(); bindChannelWarnings();
+  const compute = () => ({
+    content: '{member}',
+    embed: { title: $('presTitle').value || pres.default_title || 'Bienvenue sur {server}', description: $('f-welcome_message').value || pres.default_text || '', image: $('f-welcome_image_url').value, thumbnail: $('presAvatar').checked ? 'avatar' : '', fields: $('presCount').checked ? [{ name: 'Membres', value: '{member_count} membre(s)' }] : [], footer: 'SentriX' },
+  });
+  bindPreview(content(), 'welcomePreview', compute);
+  /* Titre / avatar / compteur ont leur propre table : enregistrés à part, sans passer par la barre. */
+  const persistPresentation = () => savePresentation({ title: $('presTitle').value, show_avatar: $('presAvatar').checked, show_member_count: $('presCount').checked });
+  $('presTitle').addEventListener('change', persistPresentation);
+  $('presAvatar').onchange = persistPresentation; $('presCount').onchange = persistPresentation;
+  $('welcomeTest').onclick = async () => {
+    if (hasDirty()) return toast('Enregistrez d’abord vos modifications.', true);
+    const channel = channelName(s.welcome_channel);
+    if (!channel) return toast('Choisissez d’abord un salon de bienvenue.', true);
+    if (!(await confirmDialog({ title: 'Envoyer un message test ?', body: `Le message de bienvenue sera envoyé dans ${channel}, adressé à vous.`, confirm: 'Envoyer' }))) return;
+    const b = $('welcomeTest'); b.disabled = true;
+    try { const r = await gpost('/welcome/test', {}); toast(r.message || 'Test envoyé.'); } catch (e) { toast(e.message, true); } finally { b.disabled = false; }
+  };
+}
+async function savePresentation(values) {
+  try { await gpost('/welcome', { title: values.title, show_avatar: values.show_avatar, show_member_count: values.show_member_count }, 'PUT'); invalidate('welcome'); toast('Présentation enregistrée.'); }
+  catch (e) { toast(e.message, true); }
 }
 
 /* Niveaux */

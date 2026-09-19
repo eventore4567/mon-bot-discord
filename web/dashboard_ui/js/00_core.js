@@ -213,22 +213,22 @@ function errorView(e, retry) {
   $('retryPage').onclick = retry || (() => render(true));
 }
 function previewText(text) {
+  /* Même table que cogs/control_center_v3.render_member_template, plus {level}/{xp} (Niveaux). */
   const g = state.guild?.guild || {}, u = state.user || {};
-  const name = u.username || 'Membre';
+  const name = u.username || 'membre';
   return String(text || '')
-    .replace(/\{user\.mention\}|\{user\}|\{mention\}|\{member\}/g, '@' + name)
-    .replace(/\{user\.username\}|\{username\}|\{user\.name\}|\{display_name\}/g, name)
-    .replace(/\{user_id\}|\{user\.id\}/g, String(u.id || '123456789012345678'))
-    .replace(/\{server\}|\{guild\}|\{server\.name\}|\{guild\.name\}/g, g.name || 'Mon serveur')
-    .replace(/\{server_id\}|\{guild_id\}/g, String(g.id || ''))
-    .replace(/\{member_count\}|\{count\}|\{members\}/g, String(g.members || 42))
-    .replace(/\{level\}/g, '5').replace(/\{xp\}/g, '1 250')
-    .replace(/\{date\}/g, new Date().toLocaleDateString('fr-FR')).replace(/\{time\}/g, new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
+    .replace(/\{member\}|\{membre\}|\{mention\}|\{user\}|\(user\)|\[user\]|<user>/g, '@' + name)
+    .replace(/\{username\}/g, name).replace(/\{display_name\}/g, u.global_name || name)
+    .replace(/\{server\}|\{serveur\}/g, g.name || 'Mon serveur')
+    .replace(/\{member_count\}/g, String(g.members || 42))
+    .replace(/\{level\}/g, '5').replace(/\{xp\}/g, '1 250');
 }
 function discordMessage({ content: text = '', embed = null } = {}) {
   let embedHtml = '';
-  if (embed && (embed.title || embed.description || embed.image || embed.footer)) {
-    embedHtml = `<div class="d-embed" style="border-left-color:${esc(embed.color || '#4da3ff')}">${embed.author ? `<div class="d-foot">${esc(embed.author)}</div>` : ''}${embed.title ? `<div class="d-title">${esc(previewText(embed.title))}</div>` : ''}${embed.description ? `<div class="d-desc">${esc(previewText(embed.description))}</div>` : ''}${embed.image ? `<img class="d-image" src="${esc(embed.image)}" alt="">` : ''}${embed.footer || embed.timestamp ? `<div class="d-foot">${esc(embed.footer || '')}${embed.timestamp ? (embed.footer ? ' • ' : '') + 'Aujourd’hui à ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : ''}</div>` : ''}</div>`;
+  if (embed && (embed.title || embed.description || embed.image || embed.footer || (embed.fields || []).length)) {
+    const fields = (embed.fields || []).filter(f => f && (f.name || f.value)).map(f => `<div class="d-field"><b>${esc(previewText(f.name))}</b><div>${esc(previewText(f.value))}</div></div>`).join('');
+    const stamp = embed.timestamp ? 'Aujourd’hui à ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+    embedHtml = `<div class="d-embed" style="border-left-color:${esc(embed.color || '#4da3ff')}"><div class="d-embed-main">${embed.author ? `<div class="d-foot">${esc(embed.author)}</div>` : ''}${embed.title ? `<div class="d-title">${esc(previewText(embed.title))}</div>` : ''}${embed.description ? `<div class="d-desc">${esc(previewText(embed.description))}</div>` : ''}${fields ? `<div class="d-fields">${fields}</div>` : ''}${embed.image ? `<img class="d-image" src="${esc(embed.image)}" alt="">` : ''}${embed.footer || stamp ? `<div class="d-foot">${esc(embed.footer || '')}${embed.footer && stamp ? ' • ' : ''}${stamp}</div>` : ''}</div>${embed.thumbnail ? `<div class="d-thumb">${embed.thumbnail === 'avatar' ? '<span class="d-avatar-thumb">' + esc((state.user?.username || 'M').slice(0, 1).toUpperCase()) + '</span>' : `<img src="${esc(embed.thumbnail)}" alt="">`}</div>` : ''}</div>`;
   }
   const body = text ? `<div class="d-text">${esc(previewText(text))}</div>` : (embedHtml ? '' : `<div class="d-empty">Message vide.</div>`);
   return `<div class="discord-preview"><div class="d-avatar">S</div><div class="d-body"><span class="d-name">SentriX</span><span class="d-tag">APP</span><span class="d-time">Aujourd’hui</span>${body}${embedHtml}</div></div>`;

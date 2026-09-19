@@ -467,11 +467,22 @@ async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
         for role in sorted(guild.roles, key=lambda role: role.position, reverse=True)
         if not role.is_default() and not role.managed
     ]
-    channels = [
-        {"id": str(channel.id), "name": channel.name, "type": str(channel.type)}
-        for channel in guild.channels
-        if isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel))
-    ]
+    me = guild.me
+    channels = []
+    for channel in guild.channels:
+        if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel)):
+            continue
+        item = {"id": str(channel.id), "name": channel.name, "type": str(channel.type)}
+        if isinstance(channel, discord.TextChannel) and me is not None:
+            # Permet au dashboard d'avertir sous le champ (« SentriX ne peut pas envoyer de
+            # messages dans ce salon ») sans appel supplémentaire.
+            perms = channel.permissions_for(me)
+            item["perms"] = {
+                "view": bool(perms.view_channel),
+                "send": bool(perms.send_messages),
+                "embed": bool(perms.embed_links),
+            }
+        channels.append(item)
     return {
         "guild": {
             "id": str(guild.id),
@@ -667,6 +678,86 @@ def _validate_ai(values: dict) -> tuple[dict, str | None]:
         else:
             return {}, f"Le réglage IA {field} n'est pas modifiable depuis le dashboard."
     return clean, None
+
+
+async def _welcome_module():
+    from cogs import setup_v2_completion as welcome
+    return welcome
+
+
+async def handle_welcome_get(request: web.Request):
+    """Présentation de la bienvenue : mêmes valeurs que le bouton « Bienvenue » de /setup."""
+    try:
+        guild_id = int(request.match_info["guild_id"])
+    except ValueError:
+        return _json_error("Identifiant de serveur invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+    welcome = await _welcome_module()
+    presentation = await welcome._welcome_presentation(request.app["bot"], guild.id)
+    return web.json_response({
+        "ok": True,
+        "title": presentation["title"],
+        "show_avatar": bool(presentation["show_avatar"]),
+        "show_member_count": bool(presentation["show_member_count"]),
+        "default_title": welcome.WELCOME_DEFAULT_TITLE,
+        "default_text": welcome.WELCOME_DEFAULT_TEXT,
+        "variables": ["{member}", "{username}", "{display_name}", "{server}", "{member_count}"],
+    })
+
+
+async def handle_welcome_put(request: web.Request):
+    try:
+        guild_id = int(request.match_info["guild_id"])
+    except ValueError:
+        return _json_error("Identifiant de serveur invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+    csrf_error = _require_csrf(request, session)
+    if csrf_error:
+        return csrf_error
+    try:
+        payload = await request.json()
+    except Exception:
+        return _json_error("Le formulaire envoyé est invalide.", 400)
+    title = str(payload.get("title") or "").strip()[:256]
+    welcome = await _welcome_module()
+    await welcome._save_welcome_presentation(
+        request.app["bot"], guild.id,
+        title=title or None,
+        show_avatar=bool(payload.get("show_avatar", True)),
+        show_member_count=bool(payload.get("show_member_count", True)),
+        actor_id=int(session["user"]["id"]),
+    )
+    return web.json_response({"ok": True, "message": "Présentation de la bienvenue enregistrée."})
+
+
+async def handle_welcome_test(request: web.Request):
+    """Envoie la bienvenue réelle (même fonction que le bouton de test de /setup) à la personne connectée."""
+    try:
+        guild_id = int(request.match_info["guild_id"])
+    except ValueError:
+        return _json_error("Identifiant de serveur invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+    csrf_error = _require_csrf(request, session)
+    if csrf_error:
+        return csrf_error
+    rate_key = (request.cookies.get(SESSION_COOKIE), guild_id, "welcome-test")
+    if time.time() - request.app["write_limits"].get(rate_key, 0) < 5:
+        return _json_error("Attendez quelques secondes avant un nouveau test.", 429)
+    member = guild.get_member(int(session["user"]["id"]))
+    if member is None:
+        return _json_error("Votre compte n'est pas visible dans ce serveur pour SentriX.", 409)
+    welcome = await _welcome_module()
+    ok, message = await welcome._send_welcome(request.app["bot"], member, test=True)
+    request.app["write_limits"][rate_key] = time.time()
+    if not ok:
+        return _json_error(message, 409)
+    return web.json_response({"ok": True, "message": message})
 
 
 async def handle_create_social_notification(request: web.Request):
@@ -1100,6 +1191,9 @@ def build_app(bot) -> web.Application:
     app.router.add_get("/api/guilds", handle_guilds)
     app.router.add_get("/api/guilds/{guild_id}", handle_guild)
     app.router.add_put("/api/guilds/{guild_id}/settings", handle_update_guild)
+    app.router.add_get("/api/guilds/{guild_id}/welcome", handle_welcome_get)
+    app.router.add_put("/api/guilds/{guild_id}/welcome", handle_welcome_put)
+    app.router.add_post("/api/guilds/{guild_id}/welcome/test", handle_welcome_test)
     app.router.add_post("/api/guilds/{guild_id}/notifications", handle_create_social_notification)
     app.router.add_delete(
         "/api/guilds/{guild_id}/notifications/{notification_id}",
