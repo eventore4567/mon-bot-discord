@@ -198,13 +198,16 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         ),
         inline=True,
     )
+    account_lines = [
+        f"Créé {_date(member.created_at)}",
+        f"Arrivé {_date(member.joined_at)}",
+        f"Réputation **{_fmt(stats.get('reputation'))}**",
+    ]
+    if data.get("birthday"):
+        account_lines.append(f"Anniversaire **{data['birthday']}**")
     embed.add_field(
         name="Compte",
-        value=(
-            f"Créé {_date(member.created_at)}\n"
-            f"Arrivé {_date(member.joined_at)}\n"
-            f"Réputation **{_fmt(stats.get('reputation'))}**"
-        ),
+        value="\n".join(account_lines),
         inline=True,
     )
     badges = profile_service.compute_badges(member, stats, progression)
@@ -213,6 +216,8 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         value=" · ".join(badges) if badges else "Aucun badge",
         inline=True,
     )
+    if data.get("background") and str(data["background"]).startswith("https://"):
+        embed.set_image(url=str(data["background"]))
     return embed
 
 
