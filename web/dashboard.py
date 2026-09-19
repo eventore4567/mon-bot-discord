@@ -369,6 +369,21 @@ async def handle_login(request: web.Request):
 
 async def handle_callback(request: web.Request):
     state = request.query.get("state", "")
+    code = request.query.get("code", "")
+    oauth_error = request.query.get("error", "")
+
+    # Un callback OAuth valide contient toujours au moins state + (code|error).
+    # Après une bascule HA, un navigateur peut néanmoins revisiter l'URL nue
+    # /oauth/callback alors qu'une session dashboard valide existe déjà. Dans ce cas,
+    # on ne valide AUCUN nouveau flux OAuth : on réutilise simplement la session
+    # existante et on ramène l'utilisateur au dashboard.
+    if not state and not code and not oauth_error and _session(request):
+        logger.info(
+            "OAuth : callback vide sur %s avec session déjà valide → retour dashboard.",
+            _request_host(request),
+        )
+        raise web.HTTPFound("/app")
+
     cookie_state = request.cookies.get(OAUTH_STATE_COOKIE, "")
     expires_at = request.app["oauth_states"].pop(state, 0)
     if not state or not secrets.compare_digest(state, cookie_state) or expires_at <= time.time():
@@ -379,7 +394,6 @@ async def handle_callback(request: web.Request):
     if request.query.get("error"):
         raise web.HTTPFound("/?auth=denied")
 
-    code = request.query.get("code")
     if not code:
         return web.Response(text=OAUTH_ERROR_HTML, content_type="text/html", status=400)
 
@@ -1310,7 +1324,7 @@ async def start_dashboard(bot):
 OAUTH_ERROR_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8"><title>SentriX</title>
 <style>body{background:#090b12;color:#eef1ff;font:16px system-ui;display:grid;place-items:center;height:100vh;margin:0}
 main{max-width:520px;padding:36px;background:#111522;border:1px solid #242b42;border-radius:20px}a{color:#9b8cff}</style>
-<main><h1>Connexion impossible</h1><p>La demande de connexion Discord a expiré ou n'est pas valide.</p><a href="/">Revenir au dashboard</a></main></html>"""
+<main><h1>Connexion impossible</h1><p>La demande de connexion Discord a expiré ou n'est pas valide.</p><p><a href="/app">Revenir au dashboard</a> · <a href="/login">Se reconnecter avec Discord</a></p></main></html>"""
 
 
 INDEX_HTML = r"""<!doctype html>
