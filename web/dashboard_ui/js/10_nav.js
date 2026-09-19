@@ -69,7 +69,10 @@ function pageMeta(page) { return META[page] || META.overview; }
 function moduleDot(key) {
   const d = state.cache.get(`${state.guildId}:diagnostics`)?.value;
   const m = d?.modules?.[key]; if (!m) return '';
-  return `<span class="state-dot ${m.code === 'active' ? 'on' : m.code === 'error' ? 'err' : ''}" aria-hidden="true"></span>`;
+  const code = String(m.code || 'inactive');
+  const cls = code === 'active' ? 'on' : code === 'error' ? 'err' : code === 'partial' ? 'partial' : '';
+  const label = code === 'active' ? 'Activé' : code === 'error' ? 'Erreur' : code === 'partial' ? 'Partiellement configuré' : 'Désactivé';
+  return `<span class="state-dot ${cls}" title="${esc(label)}" aria-label="${esc(label)}"></span>`;
 }
 const NAV_MODULE = { welcome: 'welcome', levels: 'levels', economy: 'economy', games: 'economy', roles: 'roles', security: 'automod', logs: 'logs', tickets: 'tickets', notifications: 'notifications' };
 function navButton(page, label) {
