@@ -13,6 +13,7 @@ const state = {
   guildAbort: null,
   progressCount: 0, progressTimer: null,
   live: null,
+  reduceMotion: false,
 };
 
 /* ---------- utilitaires ---------- */
@@ -65,7 +66,14 @@ async function api(url, options = {}) {
     const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store', ...request, headers });
     let data = {};
     try { data = await r.json(); } catch (_) {}
-    if (!r.ok) throw Object.assign(new Error(data.error || data.message || `Erreur HTTP ${r.status}`), { status: r.status, data });
+    if (!r.ok) {
+      const servedBy = r.headers.get('X-SentriX-HA-Served-By') || '';
+      const branchSkew = r.status === 404 && servedBy === 'peer' && new URL(String(url), location.origin).pathname.startsWith('/api/guilds/');
+      const message = branchSkew
+        ? 'Le serveur de test n’est pas encore l’instance Discord active. La bascule HA est nécessaire pour tester cette nouvelle page.'
+        : (data.error || data.message || `Erreur HTTP ${r.status}`);
+      throw Object.assign(new Error(message), { status: branchSkew ? 503 : r.status, upstreamStatus: r.status, servedBy, data });
+    }
     return data;
   } finally { if (!background) progressEnd(); }
 }
@@ -312,7 +320,15 @@ $('modalBackdrop').onclick = e => { if (e.target === $('modalBackdrop')) closeMo
 
 /* ---------- chrome (barre latérale, en-tête) ---------- */
 function updateChrome() {
-  const d = state.guild; if (!d) return;
+  const d = state.guild;
+  if (!d) {
+    const user = state.user || {};
+    $('sideGuildName').textContent = 'Mon espace';
+    $('sideGuildMeta').textContent = 'Choisissez un serveur pour le configurer';
+    if (user.avatar_url) $('sideGuildIcon').innerHTML = `<img src="${esc(user.avatar_url)}" alt="">`;
+    else $('sideGuildIcon').textContent = String(user.global_name || user.username || 'ME').slice(0, 2).toUpperCase();
+    return;
+  }
   const g = d.guild || {};
   $('sideGuildName').textContent = g.name || 'Serveur';
   $('sideGuildMeta').textContent = `${plural(g.members, 'membre')} · ${plural(g.channels_count, 'salon')}`;
