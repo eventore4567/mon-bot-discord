@@ -106,9 +106,10 @@ const dom = new JSDOM(html, {
 const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms));
 await sleep(1200);
 const bootstrapPaths=requests.map(x=>x.path);
-for(const required of ["/api/me","/api/guilds","/api/guilds/1"]){
+for(const required of ["/api/me","/api/guilds"]){
   if(!bootstrapPaths.includes(required)) throw new Error(`Bootstrap manquant: ${required}`);
 }
+if(bootstrapPaths.includes("/api/guilds/1")) throw new Error("Le dashboard ne doit plus auto-charger un serveur à l'ouverture.");
 
 const dashboard=dom.window.document.getElementById("dashboard");
 if(!dashboard||dashboard.classList.contains("hidden")) throw new Error("Dashboard masqué après session.");
@@ -121,9 +122,23 @@ const executableScripts=[...dom.window.document.querySelectorAll("script")].filt
 if(executableScripts.length!==1) throw new Error(`${executableScripts.length} scripts exécutables au lieu de 1.`);
 if(dom.window.document.querySelectorAll("style").length!==1) throw new Error("Plusieurs feuilles de style embarquées.");
 
-const expectedTabs=["overview","welcome","levels","economy","roles","security","logs","tickets","notifications","automation","settings","access","embeds","ai","invites","backups"];
+// Mode global : profil / serveurs / préférences uniquement. La configuration serveur
+// n'apparaît qu'après un clic explicite sur une pastille de la colonne gauche.
+const globalTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
+for(const tab of ["profile","servers","preferences"]) if(!globalTabs.includes(tab)) throw new Error(`Page globale absente: ${tab}`);
+for(const tab of ["overview","levels","economy","security","tickets"]) if(globalTabs.includes(tab)) throw new Error(`Page serveur visible avant sélection: ${tab}`);
+if(!/Mon espace SentriX|Continuer sur un serveur/.test(dom.window.document.getElementById("content").textContent)) throw new Error("La page d'ouverture n'est pas le profil global.");
+
+const railServer=dom.window.document.querySelector('#serverRail [data-guild="1"]');
+if(!railServer) throw new Error("Serveur absent de la colonne de sélection.");
+railServer.click();
+await sleep(300);
+if(!requests.map(x=>x.path).includes("/api/guilds/1")) throw new Error("Le clic serveur ne charge pas sa configuration.");
+
+const expectedTabs=["overview","welcome","levels","economy","roles","security","logs","tickets","games","notifications","automation","embeds","ai","settings","access","invites","backups"];
 const actualTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
-for(const tab of expectedTabs) if(!actualTabs.includes(tab)) throw new Error(`Page unifiée absente: ${tab}`);
+for(const tab of expectedTabs) if(!actualTabs.includes(tab)) throw new Error(`Page unifiée absente après sélection serveur: ${tab}`);
+if(actualTabs.includes("profile")||actualTabs.includes("servers")||actualTabs.includes("preferences")) throw new Error("Les pages globales ne doivent pas encombrer la navigation serveur.");
 if(actualTabs.length>20) throw new Error(`Sidebar trop longue : ${actualTabs.length} entrées.`);
 
 // [page, sous-section, sélecteur attendu]
@@ -183,7 +198,7 @@ if(runtimeErrors.some(message=>/SyntaxError|ReferenceError|TypeError/.test(messa
   console.error(runtimeErrors.join("\n"));throw new Error("Erreur JavaScript dans le dashboard unifié.");
 }
 // Ancienne adresse ?tab=moderation → Sécurité › Sanctions (liens déjà partagés).
-const legacy = new JSDOM(html, { url:"https://sentrix.test/app?tab=moderation", runScripts:"dangerously", pretendToBeVisual:true, virtualConsole, beforeParse(window){ window.fetch = dom.window.fetch; window.scrollTo=()=>{}; } });
+const legacy = new JSDOM(html, { url:"https://sentrix.test/app?tab=moderation&guild=1", runScripts:"dangerously", pretendToBeVisual:true, virtualConsole, beforeParse(window){ window.fetch = dom.window.fetch; window.scrollTo=()=>{}; } });
 await sleep(900);
 if(!legacy.window.document.querySelector("#sanctionList")) throw new Error("La redirection de l'ancien onglet moderation ne fonctionne pas.");
 if(!legacy.window.document.querySelector('#subnav [data-sub="sanctions"].active')) throw new Error("La sous-section Sanctions n'est pas active après redirection.");
@@ -210,8 +225,11 @@ const stale=await bootWith(p=>null,"https://sentrix.test/app?guild=999999");
 // Développeur : le groupe Migration (anciennes interfaces) n'existe que pour lui.
 const devDom=new JSDOM(html,{url:"https://sentrix.test/app",runScripts:"dangerously",pretendToBeVisual:true,virtualConsole,beforeParse(w){ w.fetch=async(input,options={})=>{ const u=new URL(typeof input==="string"?input:input.url,w.location.href); if(u.pathname==="/api/me") return response({ok:true,user:{id:"42",username:"Dev",avatar_url:null},csrf:"t",developer:true}); return dom.window.fetch(input,options); }; w.scrollTo=()=>{}; }});
 await sleep(700);
-if(!devDom.window.document.querySelector('#navigation a[href="/setup-center"]')) throw new Error("Le développeur doit voir le groupe Migration.");
-if(!devDom.window.document.querySelector('#navigation button[data-tab="advanced"]')) throw new Error("Le développeur doit voir le Centre avancé.");
+if(devDom.window.document.querySelector('#navigation a[href="/setup-center"]')) throw new Error("Migration ne doit pas apparaître dans l'espace global.");
+devDom.window.document.querySelector('#serverRail [data-guild="1"]').click();
+await sleep(250);
+if(!devDom.window.document.querySelector('#navigation a[href="/setup-center"]')) throw new Error("Le développeur doit voir le groupe Migration dans un serveur.");
+if(!devDom.window.document.querySelector('#navigation button[data-tab="advanced"]')) throw new Error("Le développeur doit voir le Centre avancé dans un serveur.");
 devDom.window.close();
 if(!stale.dashboard||stale.boot) throw new Error("Une guild mémorisée invalide ne doit pas casser le démarrage: "+JSON.stringify(stale));
 
