@@ -41,8 +41,8 @@ renderProfile = async function renderEditableProfile() {
   <div class="fields" style="margin-top:16px">
     <div class="field full">
       <label for="profileBio">Bio</label>
-      <textarea id="profileBio" maxlength="500" rows="4" placeholder="Présentez-vous en quelques lignes…">${esc(p.bio || '')}</textarea>
-      <small>500 caractères maximum.</small>
+      <textarea id="profileBio" maxlength="200" rows="4" placeholder="Présentez-vous en quelques lignes…">${esc(p.bio || '')}</textarea>
+      <small>200 caractères maximum.</small>
     </div>
     <div class="field">
       <label for="profileBirthday">Anniversaire</label>
