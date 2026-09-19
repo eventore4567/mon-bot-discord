@@ -141,17 +141,50 @@ function openSidebar() { $('sidebar').classList.add('open'); $('mobileOverlay').
 function closeSidebar() { $('sidebar').classList.remove('open'); $('mobileOverlay').classList.add('hidden'); $('mobileMenu').setAttribute('aria-expanded', 'false'); }
 
 /* ---------- palette ⌘K ---------- */
+const PALETTE_KEYWORDS = {
+  profile: 'profil compte avatar préférences apparence thème couleur',
+  servers: 'serveur guild choisir sélectionner ajouter bot',
+  preferences: 'thème theme couleur accent hex apparence animation densité glow oled midnight graphite',
+  overview: 'accueil dashboard santé modules configuration résumé',
+  welcome: 'bienvenue départ arrivée leave join message accueil',
+  levels: 'niveau xp expérience récompense role rank classement',
+  economy: 'économie argent monnaie banque boutique shop daily weekly work',
+  roles: 'rôle role autorole réaction reaction notification niveau',
+  moderation: 'modération warn mute timeout kick ban sanction membre dossier',
+  security: 'sécurité antispam anti spam antilink anti lien antiraid anti raid automod verification',
+  logs: 'logs journal audit message supprimé vocal rôle modération',
+  tickets: 'ticket support panneau formulaire transcript staff bouton',
+  games: 'jeu jeux compteur infini infinite number guess mini-jeu',
+  notifications: 'notification youtube twitch tiktok kick live vidéo',
+  automation: 'automation automatisation reaction auto starboard sticky programmé voicehub vocal',
+  embeds: 'embed message annonce aperçu discord builder',
+  ai: 'ia ai modèle mémoire intelligence artificielle',
+  diagnostic: 'diagnostic santé permissions erreur debug',
+  backups: 'backup sauvegarde historique restaurer export import',
+  settings: 'paramètre configuration serveur préfixe',
+  access: 'accès commande permission staff',
+  invites: 'invitation webhook croissance',
+  advanced: 'avancé automation template audit accès',
+};
 function paletteItems(q = '') {
   const n = q.toLocaleLowerCase('fr').trim();
   const items = [];
   const globalMode = !state.guildId || !state.guild;
   const activeNav = globalMode ? NAV_GLOBAL : NAV_SERVER;
-  for (const [group, pages] of activeNav) for (const [p, l] of pages) items.push({ page: p, label: l, group });
+  for (const [group, pages] of activeNav) for (const [p, l] of pages) items.push({ page: p, label: l, group, keywords: PALETTE_KEYWORDS[p] || '' });
   if (!globalMode) {
-    for (const [g, pages] of TOOL_GROUPS) { if (g === 'Développeur' && !state.developer) continue; for (const [p, l] of pages) items.push({ page: p, label: l, group: g }); }
-    for (const [p, subs] of Object.entries(SUBS)) for (const [k, l] of subs) items.push({ page: p, sub: k, label: `${pageMeta(p)[0]} › ${l}`, group: pageMeta(p)[0] });
+    for (const [g, pages] of TOOL_GROUPS) {
+      if (g === 'Développeur' && !state.developer) continue;
+      for (const [p, l] of pages) items.push({ page: p, label: l, group: g, keywords: PALETTE_KEYWORDS[p] || '' });
+    }
+    for (const [p, subs] of Object.entries(SUBS)) {
+      for (const [k, l] of subs) items.push({
+        page: p, sub: k, label: `${pageMeta(p)[0]} › ${l}`, group: pageMeta(p)[0],
+        keywords: `${PALETTE_KEYWORDS[p] || ''} ${k} ${l}`,
+      });
+    }
   }
-  return items.filter(x => !n || `${x.label} ${x.group}`.toLocaleLowerCase('fr').includes(n));
+  return items.filter(x => !n || `${x.label} ${x.group} ${x.keywords || ''}`.toLocaleLowerCase('fr').includes(n));
 }
 function drawPalette() {
   const items = paletteItems($('paletteInput').value);
