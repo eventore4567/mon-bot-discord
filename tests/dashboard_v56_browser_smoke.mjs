@@ -129,6 +129,26 @@ for(const tab of ["profile","servers","preferences"]) if(!globalTabs.includes(ta
 for(const tab of ["overview","levels","economy","security","tickets"]) if(globalTabs.includes(tab)) throw new Error(`Page serveur visible avant sélection: ${tab}`);
 if(!/Mon espace SentriX|Continuer sur un serveur/.test(dom.window.document.getElementById("content").textContent)) throw new Error("La page d'ouverture n'est pas le profil global.");
 
+// Préférences globales : éditeur complet de thème + persistance locale.
+dom.window.document.querySelector('#navigation button[data-tab="preferences"]').click();
+await sleep(120);
+for(const selector of ['#prefTheme','[data-theme-color-picker="bg"]','[data-theme-color-picker="sidebar"]','[data-theme-color-picker="text"]','#themeSaveName','#themeSaveButton']){
+  if(!dom.window.document.querySelector(selector)) throw new Error(`Éditeur de thème incomplet: ${selector}`);
+}
+const bgPicker=dom.window.document.querySelector('[data-theme-color-picker="bg"]');
+bgPicker.value="#112233";bgPicker.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
+const themeColors=JSON.parse(dom.window.localStorage.getItem("sentrix:theme-colors")||"{}");
+if(themeColors.bg!=="#112233") throw new Error("La couleur de fond personnalisée n'est pas persistée.");
+dom.window.document.getElementById("themeSaveName").value="Smoke Theme";
+dom.window.document.getElementById("themeSaveButton").click();
+await sleep(30);
+const savedThemes=JSON.parse(dom.window.localStorage.getItem("sentrix:saved-themes")||"[]");
+if(!savedThemes.some(x=>x.name==="Smoke Theme")) throw new Error("La sauvegarde d'un thème personnalisé ne fonctionne pas.");
+if(!dom.window.document.querySelector('[data-load-theme]')) throw new Error("Un thème enregistré doit être rechargeable.");
+dom.window.localStorage.removeItem("sentrix:theme-colors");
+dom.window.localStorage.removeItem("sentrix:saved-themes");
+dom.window.applyGlobalPreferences();
+
 const railServer=dom.window.document.querySelector('#serverRail [data-guild="1"]');
 if(!railServer) throw new Error("Serveur absent de la colonne de sélection.");
 railServer.click();
