@@ -156,6 +156,9 @@ function applyGlobalPreferences() {
   root.dataset.radius=allowedRadius.has(radius)?radius:'rounded';
   root.dataset.banner=allowedBanner.has(banner)?banner:'aurora';
   for(const [key,,cssVar] of DASHBOARD_COLOR_FIELDS) root.style.setProperty(cssVar,colors[key]);
+  root.style.setProperty('--green-bg',accentAlpha(colors.success,.16));
+  root.style.setProperty('--amber-bg',accentAlpha(colors.warning,.16));
+  root.style.setProperty('--red-bg',accentAlpha(colors.danger,.16));
   root.style.setProperty('--blue',accent);
   root.style.setProperty('--blue2',accentMix(accent,255,.30));
   root.style.setProperty('--blue-bg',accentAlpha(accent,.16));
