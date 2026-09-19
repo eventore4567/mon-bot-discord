@@ -2,7 +2,7 @@
 
 Les invariants historiques restent obligatoires : aucune landing ne flashe pendant /api/me,
 une ancienne requête serveur ne peut pas gagner après la nouvelle, les codes HTTP restent
-disponibles et un onglet invalide retombe sur la vue d'ensemble.
+disponibles et un onglet invalide retombe sur l'espace adapté au contexte.
 """
 from __future__ import annotations
 
@@ -38,19 +38,24 @@ def test_selectGuild_distingue_les_etats_d_erreur():
     assert "Votre session Discord a expiré" in html
 
 
-def test_navigation_invalide_retombe_sur_overview():
+def test_navigation_invalide_retombe_sur_le_bon_contexte():
     html = dashboard.INDEX_HTML
-    assert "state.page = META[page] ? page : 'overview';" in html, (
-        "un onglet inconnu doit retomber sur la vue d'ensemble"
+    assert "state.page = META[page] ? page : 'profile';" in html, (
+        "au boot, un onglet inconnu doit retomber sur Mon profil"
     )
-    assert "if (!META[page]) page = 'overview';" in html
+    assert "if (!META[page]) page = state.guildId ? 'overview' : 'profile';" in html, (
+        "pendant la navigation, le fallback doit respecter le contexte global/serveur"
+    )
 
 
 def test_api_conserve_le_code_http_et_le_payload_de_l_erreur():
     html = dashboard.INDEX_HTML
-    assert "status: r.status" in html
     assert "Object.assign(new Error" in html
-    assert "{ status: r.status, data }" in html
+    assert "upstreamStatus: r.status" in html
+    assert "data });" in html
+    assert "branchSkew ? 503 : r.status" in html, (
+        "seul un 404 relayé au peer est présenté comme indisponibilité HA"
+    )
 
 
 def test_oxyde_hotfix_n_a_plus_de_boucle_de_recuperation_concurrente():
