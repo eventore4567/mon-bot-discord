@@ -113,8 +113,8 @@ def register(app: web.Application, dashboard) -> None:
         birthday = str(payload.get("birthday") or "").strip()
         background = str(payload.get("background") or "").strip()
 
-        if len(bio) > 500:
-            return dashboard._json_error("La bio ne peut pas dépasser 500 caractères.", 400)
+        if len(bio) > 200:
+            return dashboard._json_error("La bio ne peut pas dépasser 200 caractères.", 400)
         if birthday and (len(birthday) > 20 or not _BIRTHDAY.fullmatch(birthday)):
             return dashboard._json_error(
                 "Anniversaire invalide. Utilisez AAAA-MM-JJ ou JJ/MM.", 400
