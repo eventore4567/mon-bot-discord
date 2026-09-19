@@ -35,6 +35,10 @@ _ALLOWED = discord.AllowedMentions(everyone=False, users=False, roles=False, rep
 # 30 secondes laissent le temps de lire une erreur détaillée (syntaxe,
 # permissions, sections explicatives) sans devenir un déchet permanent.
 _DUREE_AFFICHAGE = 30
+# Une simple faute de frappe ne doit pas polluer le salon aussi longtemps qu'une
+# vraie erreur détaillée. Les réponses "commande introuvable" restent juste assez
+# longtemps pour être lues puis disparaissent automatiquement.
+_DUREE_COMMANDE_INTROUVABLE = 8
 
 
 async def _effacer_plus_tard(message: discord.Message | None) -> None:
@@ -392,18 +396,36 @@ async def _raw_prefix_send(ctx: commands.Context, panneau: panels.Panneau) -> No
         ctx._sentrix_last_response = sent
 
 
-async def _texte_prefix_send(ctx: commands.Context, texte: str) -> None:
+async def _texte_prefix_send(
+    ctx: commands.Context,
+    texte: str,
+    *,
+    supprimer_apres: float = _DUREE_AFFICHAGE,
+) -> None:
     """Erreur simple = une ligne de texte dans le salon de la commande (jamais de carte)."""
     raw_send = policy._unwrap(discord.abc.Messageable.send)
     message = getattr(ctx, "_sentrix_last_response", None)
     if isinstance(message, discord.Message) and getattr(message.channel, "id", None) == getattr(ctx.channel, "id", None):
         raw_edit = policy._unwrap(discord.Message.edit)
         try:
-            await raw_edit(message, content=texte[:1900], embeds=[], view=None, attachments=[], allowed_mentions=_ALLOWED)
+            await raw_edit(
+                message,
+                content=texte[:1900],
+                embeds=[],
+                view=None,
+                attachments=[],
+                allowed_mentions=_ALLOWED,
+                delete_after=supprimer_apres,
+            )
             return
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             logger.debug("Impossible de remplacer la réponse préfixée par le texte d'erreur.", exc_info=True)
-    sent = await raw_send(ctx.channel, content=texte[:1900], allowed_mentions=_ALLOWED, delete_after=_DUREE_AFFICHAGE)
+    sent = await raw_send(
+        ctx.channel,
+        content=texte[:1900],
+        allowed_mentions=_ALLOWED,
+        delete_after=supprimer_apres,
+    )
     ctx._sentrix_response_sent = True
     if sent is not None:
         ctx._sentrix_last_response = sent
@@ -519,7 +541,8 @@ def install(bot: commands.Bot) -> None:
         texte = _texte_erreur_prefix(ctx, error)
         try:
             if texte is not None:
-                await _texte_prefix_send(ctx, texte)
+                duree = _DUREE_COMMANDE_INTROUVABLE if isinstance(base, commands.CommandNotFound) else _DUREE_AFFICHAGE
+                await _texte_prefix_send(ctx, texte, supprimer_apres=duree)
                 return
             panel = _prefix_error_panel(ctx, error)
             if getattr(ctx, "_sentrix_response_sent", False):
