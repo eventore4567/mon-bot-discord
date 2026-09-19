@@ -152,6 +152,26 @@ if(!legacy.window.document.querySelector("#sanctionList")) throw new Error("La r
 if(!legacy.window.document.querySelector('#subnav [data-sub="sanctions"].active')) throw new Error("La sous-section Sanctions n'est pas active après redirection.");
 legacy.window.close();
 
+// États de démarrage : jamais une page réduite au bandeau.
+async function bootWith(mock, url="https://sentrix.test/app"){
+  const vc=new VirtualConsole(); const errs=[]; vc.on("jsdomError",e=>errs.push(String(e?.stack||e)));
+  const d=new JSDOM(html,{url,runScripts:"dangerously",pretendToBeVisual:true,virtualConsole:vc,beforeParse(w){ w.fetch=async(input,options={})=>{ const u=new URL(typeof input==="string"?input:input.url,w.location.href); return mock(u.pathname,(options.method||"GET").toUpperCase()) ?? dom.window.fetch(input,options); }; w.scrollTo=()=>{}; }});
+  await sleep(700);
+  const doc=d.window.document; const visible=id=>!doc.getElementById(id).classList.contains("hidden");
+  const out={landing:visible("landing"),boot:visible("bootState"),dashboard:visible("dashboard"),title:doc.getElementById("bootTitle").textContent,retry:!doc.getElementById("bootRetry").classList.contains("hidden"),login:!doc.getElementById("bootLogin").classList.contains("hidden"),content:doc.getElementById("content").textContent.trim().slice(0,80),errs};
+  d.window.close(); return out;
+}
+const s401=await bootWith(p=>p==="/api/me"?response({error:"Connectez-vous"},401):null);
+if(!s401.landing||s401.boot||s401.dashboard) throw new Error("401 sur /api/me doit afficher la page de connexion, pas une page vide: "+JSON.stringify(s401));
+const s503=await bootWith(p=>p==="/api/me"?response({error:"Reconnexion Discord en cours"},503):null);
+if(!s503.boot||!s503.retry||!/reconnecte/.test(s503.title)) throw new Error("503 sur /api/me doit afficher un état explicite avec Réessayer: "+JSON.stringify(s503));
+const g500=await bootWith(p=>p==="/api/guilds"?response({error:"Base indisponible"},500):null);
+if(!g500.boot||!g500.retry||!g500.login||!/serveurs/.test(g500.title)) throw new Error("Échec /api/guilds doit afficher un état explicite: "+JSON.stringify(g500));
+const gEmpty=await bootWith(p=>p==="/api/guilds"?response({ok:true,guilds:[]}):null);
+if(!gEmpty.dashboard||!/Aucun serveur disponible/.test(gEmpty.content)) throw new Error("Aucune guild doit afficher un empty state: "+JSON.stringify(gEmpty));
+const stale=await bootWith(p=>null,"https://sentrix.test/app?guild=999999");
+if(!stale.dashboard||stale.boot) throw new Error("Une guild mémorisée invalide ne doit pas casser le démarrage: "+JSON.stringify(stale));
+
 console.log("Dashboard unified-v2 browser smoke OK:",interactivePaths.join(" -> "));
 console.log("Pages unified-v2 OK:",expectedTabs.join(", "));
 dom.window.close();

@@ -287,14 +287,48 @@ async def handle_public(request: web.Request):
     return web.json_response({**payload, **_public_champs_vivants(bot)})
 
 
+def _request_host(request: web.Request) -> str:
+    """Hôte vu par le navigateur (le proxy HA transmet X-Forwarded-Host)."""
+    return (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip().casefold()
+
+
+def _canonical_host() -> str:
+    configured = (config.DASHBOARD_PUBLIC_URL or "").strip()
+    return (urlparse(configured).hostname or "").casefold() if configured else ""
+
+
+def _canonical_redirect(request: web.Request) -> web.HTTPFound | None:
+    """Le cookie de state OAuth et le cookie de session sont liés à l'hôte du navigateur,
+    alors que Discord renvoie toujours sur DASHBOARD_PUBLIC_URL. Un parcours commencé sur un
+    autre hôte (domaine du standby, domaine interne) ne peut donc jamais aboutir : on le
+    ramène d'abord sur l'hôte canonique, sans créer de state."""
+    canonical = _canonical_host()
+    if not canonical:
+        return None
+    seen = _request_host(request)
+    if not seen or seen == canonical:
+        return None
+    # Environnements locaux (harnais, audits, CI) : pas d'hôte public, donc pas de bascule.
+    bare = seen.rsplit(":", 1)[0] if seen.count(":") == 1 else seen.split("]")[0].lstrip("[")
+    if bare in {"127.0.0.1", "localhost", "::1"}:
+        return None
+    target = f"{config.DASHBOARD_PUBLIC_URL.strip().rstrip('/')}{request.rel_url}"
+    logger.info("Dashboard : %s demandé sur %s → redirigé vers l'hôte canonique %s.", request.path, seen, canonical)
+    return web.HTTPFound(target)
+
+
 async def handle_login(request: web.Request):
     bot = request.app["bot"]
     if not _oauth_ready(bot):
         raise web.HTTPFound("/?auth=missing")
+    redirect = _canonical_redirect(request)
+    if redirect is not None:
+        raise redirect
 
     state = secrets.token_urlsafe(32)
     request.app["oauth_states"][state] = time.time() + OAUTH_STATE_TTL
     redirect_uri = f"{_public_url(request)}/oauth/callback"
+    logger.info("OAuth : demande de connexion depuis %s, callback %s, state créé (%s).", _request_host(request), redirect_uri, state[:6])
     params = {
         "response_type": "code",
         "client_id": _client_id(bot),
@@ -320,7 +354,10 @@ async def handle_callback(request: web.Request):
     cookie_state = request.cookies.get(OAUTH_STATE_COOKIE, "")
     expires_at = request.app["oauth_states"].pop(state, 0)
     if not state or not secrets.compare_digest(state, cookie_state) or expires_at <= time.time():
+        reason = "state absent" if not state else "cookie de state absent" if not cookie_state else "cookie de state différent" if not secrets.compare_digest(state, cookie_state) else "state inconnu de cette instance" if not expires_at else "state expiré"
+        logger.warning("OAuth : callback refusé sur %s (%s, state %s).", _request_host(request), reason, state[:6] or "—")
         return web.Response(text=OAUTH_ERROR_HTML, content_type="text/html", status=403)
+    logger.info("OAuth : callback accepté sur %s (state %s).", _request_host(request), state[:6])
     if request.query.get("error"):
         raise web.HTTPFound("/?auth=denied")
 
@@ -1172,6 +1209,15 @@ async def handle_update_guild(request: web.Request):
 
 
 @web.middleware
+async def canonical_host(request: web.Request, handler):
+    if request.method == "GET" and request.path in {"/app", "/login"}:
+        redirect = _canonical_redirect(request)
+        if redirect is not None:
+            raise redirect
+    return await handler(request)
+
+
+@web.middleware
 async def security_headers(request: web.Request, handler):
     response = await handler(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -1189,7 +1235,7 @@ async def security_headers(request: web.Request, handler):
 
 
 def build_app(bot) -> web.Application:
-    app = web.Application(middlewares=[security_headers], client_max_size=64 * 1024)
+    app = web.Application(middlewares=[canonical_host, security_headers], client_max_size=64 * 1024)
     app["bot"] = bot
     app["sessions"] = {}
     app["oauth_states"] = {}

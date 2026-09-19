@@ -58,6 +58,13 @@ kbd{font:11px/1 ui-monospace,Menlo,monospace;border:1px solid var(--line2);borde
 .landing-kpis div{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
 .landing-kpis strong{font-size:20px;font-variant-numeric:tabular-nums}
 
+/* ---------- état de démarrage (session / serveurs indisponibles) ---------- */
+.boot-state{min-height:calc(100vh - var(--top));display:grid;place-items:center;padding:32px 16px}
+.boot-card{width:min(520px,100%);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow)}
+.boot-card h1{font-size:20px}
+.boot-card p{color:var(--soft)}
+.boot-card small{color:var(--muted);font-family:ui-monospace,Menlo,monospace;font-size:11px}
+
 /* ---------- structure ---------- */
 .app{display:grid;grid-template-columns:var(--rail) var(--sidebar) minmax(0,1fr);min-height:calc(100vh - var(--top))}
 .server-rail{position:sticky;top:var(--top);height:calc(100vh - var(--top));overflow:auto;border-right:1px solid var(--line);background:var(--bg2);padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:8px;scrollbar-width:none}

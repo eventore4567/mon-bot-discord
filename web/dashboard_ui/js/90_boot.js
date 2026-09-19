@@ -77,17 +77,61 @@ async function selectGuild(value) {
 async function loadGuilds() {
   const payload = await api('/api/guilds');
   state.guilds = payload.guilds || [];
+  showOnly('dashboard');
   renderServerRail();
   const installed = state.guilds.filter(g => g.installed);
   let wanted = new URLSearchParams(location.search).get('guild');
   if (!wanted) { try { wanted = localStorage.getItem('sentrix:guild') || ''; } catch (_) {} }
-  if (!installed.some(g => String(g.id) === String(wanted))) wanted = installed.length === 1 ? installed[0].id : '';
-  if (wanted) await selectGuild(wanted);
-  else if (installed.length) { content().innerHTML = emptyState('Choisissez un serveur', 'Sélectionnez le serveur à configurer.', { id: 'pickGuild', label: 'Choisir un serveur' }); content().querySelector('[data-empty-action="pickGuild"]').onclick = openServerPicker; openServerPicker(); }
-  else content().innerHTML = emptyState('Aucun serveur administrable', 'Vous devez être administrateur d’un serveur où SentriX est installé.');
+  if (!installed.some(g => String(g.id) === String(wanted))) {
+    // Sélection mémorisée périmée (serveur quitté, SentriX retiré) : on l'oublie.
+    try { localStorage.removeItem('sentrix:guild'); } catch (_) {}
+    wanted = installed.length === 1 ? installed[0].id : '';
+  }
+  if (wanted) { await selectGuild(wanted); return; }
+  if (installed.length) {
+    content().innerHTML = emptyState('Choisissez un serveur', 'Sélectionnez le serveur à configurer.', { id: 'pickGuild', label: 'Choisir un serveur' });
+    content().querySelector('[data-empty-action="pickGuild"]').onclick = openServerPicker;
+    openServerPicker();
+    return;
+  }
+  const invite = state.guilds.find(g => g.invite_url)?.invite_url;
+  content().innerHTML = emptyState('Aucun serveur disponible', 'Ajoutez SentriX à un serveur dont vous êtes administrateur, ou vérifiez vos permissions.', invite ? { id: 'inviteBot', label: 'Ajouter SentriX à un serveur' } : null);
+  const b = content().querySelector('[data-empty-action="inviteBot"]'); if (b) b.onclick = () => { location.href = invite; };
 }
 
-/* ---------- session ---------- */
+/* ---------- session & états de démarrage ----------
+   booting → auth_required | error | loading_guilds → ready.
+   Aucun état intermédiaire ne laisse la page vide : soit le dashboard, soit la page de
+   connexion, soit un panneau d'erreur avec « Réessayer » / « Se reconnecter ». */
+const boot = { state: 'booting', watchdog: null };
+function showOnly(id) {
+  for (const k of ['landing', 'bootState', 'dashboard']) $(k).classList.toggle('hidden', k !== id);
+}
+function setBootState(state, { title, message, ref, retry = true, reconnect = false } = {}) {
+  boot.state = state;
+  if (state === 'ready') { clearTimeout(boot.watchdog); showOnly('dashboard'); return; }
+  if (state === 'auth_required') { clearTimeout(boot.watchdog); showOnly('landing'); loadPublic(); return; }
+  if (state === 'error') {
+    clearTimeout(boot.watchdog);
+    $('bootTitle').textContent = title || 'Une erreur empêche le dashboard de charger.';
+    $('bootMessage').textContent = message || '';
+    $('bootRef').textContent = ref ? `Référence : ${ref}` : '';
+    $('bootRetry').classList.toggle('hidden', !retry);
+    $('bootLogin').classList.toggle('hidden', !reconnect);
+    showOnly('bootState');
+  }
+}
+function bootError(e, context) {
+  const status = Number(e?.status || 0);
+  if (status === 401) return setBootState('auth_required');
+  if (status === 503) return setBootState('error', { title: 'SentriX se reconnecte à Discord.', message: 'Le dashboard sera de nouveau disponible dans quelques secondes.', ref: `SXD-${context}-503` });
+  setBootState('error', {
+    title: context === 'GUILDS' ? 'Impossible de charger vos serveurs.' : 'Impossible de charger votre session.',
+    message: e?.message || 'Erreur inconnue.',
+    ref: `SXD-${context}-${status || 'JS'}`,
+    reconnect: true,
+  });
+}
 async function loadPublic() {
   try {
     const p = await api('/api/public');
@@ -97,23 +141,25 @@ async function loadPublic() {
     setRuntime(Boolean(p.online), p.latency_ms);
   } catch (_) { $('publicBadge').textContent = 'Indisponible'; $('publicBadge').className = 'badge bad'; }
 }
-function showLanding() { $('landing').classList.remove('hidden'); $('dashboard').classList.add('hidden'); loadPublic(); }
+function showLanding() { setBootState('auth_required'); }
 async function loadSession() {
-  try {
-    const me = await api('/api/me');
-    state.user = me.user; state.csrf = me.csrf; state.developer = Boolean(me.developer);
-    $('landing').classList.add('hidden'); $('dashboard').classList.remove('hidden'); $('profileButton').classList.remove('hidden');
-    $('userName').textContent = me.user?.username || 'Compte';
-    if (me.user?.avatar_url) $('userAvatar').innerHTML = `<img src="${esc(me.user.avatar_url)}" alt="">`;
-    renderNav();
-    await loadGuilds();
-    return true;
-  } catch (e) {
-    if (e.status === 503) { $('landing').classList.add('hidden'); $('dashboard').classList.add('hidden'); setRuntime(false); return false; }
-    if (e.status === 401 && location.pathname.startsWith('/app')) { showLanding(); const n = $('authMessage'); n.textContent = 'Connectez-vous avec Discord pour ouvrir le dashboard.'; n.classList.remove('hidden'); return false; }
-    showLanding();
+  let me;
+  try { me = await api('/api/me'); }
+  catch (e) {
+    if (e.status === 401 && location.pathname.startsWith('/app')) { const n = $('authMessage'); n.textContent = 'Connectez-vous avec Discord pour ouvrir le dashboard.'; n.classList.remove('hidden'); }
+    bootError(e, 'AUTH');
     return false;
   }
+  state.user = me.user; state.csrf = me.csrf; state.developer = Boolean(me.developer);
+  $('profileButton').classList.remove('hidden');
+  $('userName').textContent = me.user?.username || 'Compte';
+  if (me.user?.avatar_url) $('userAvatar').innerHTML = `<img src="${esc(me.user.avatar_url)}" alt="">`;
+  renderNav();
+  boot.state = 'loading_guilds';
+  try { await loadGuilds(); }
+  catch (e) { bootError(e, 'GUILDS'); return false; }
+  setBootState('ready');
+  return true;
 }
 
 /* ---------- métriques live : texte seul, jamais de re-rendu ---------- */
@@ -150,7 +196,7 @@ window.addEventListener('offline', () => $('netNotice').classList.remove('hidden
 window.addEventListener('online', () => $('netNotice').classList.add('hidden'));
 window.addEventListener('popstate', () => { const q = new URLSearchParams(location.search); const p = q.get('tab'); if (p && p !== state.page) go(p, q.get('sub') || ''); });
 
-async function boot() {
+async function bootstrap() {
   const q = new URLSearchParams(location.search);
   let page = q.get('tab') || '';
   if (!page) { try { page = localStorage.getItem('sentrix:page') || ''; } catch (_) {} }
@@ -160,7 +206,12 @@ async function boot() {
   try { state.navMore = localStorage.getItem('sentrix:nav:more') === '1'; } catch (_) {}
   if (q.get('auth') === 'missing') { const n = $('authMessage'); n.textContent = 'Connexion Discord indisponible pour le moment. Réessayez dans quelques instants ou contactez le support.'; n.classList.remove('hidden'); history.replaceState(null, '', location.pathname); }
   renderNav();
+  // Filet : si rien n'a abouti après 20 s (réseau muet, exception avalée), on le dit.
+  boot.watchdog = setTimeout(() => { if (boot.state === 'booting' || boot.state === 'loading_guilds') setBootState('error', { title: 'Le dashboard met trop de temps à charger.', message: 'Le serveur ne répond pas. Réessayez, ou reconnectez-vous si le problème persiste.', ref: 'SXD-BOOT-TIMEOUT', reconnect: true }); }, 20000);
   await loadSession();
 }
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
-else boot();
+$('bootRetry').onclick = () => { boot.state = 'booting'; showOnly('bootState'); $('bootTitle').textContent = 'Nouvelle tentative…'; $('bootMessage').textContent = ''; $('bootRef').textContent = ''; loadSession(); };
+window.addEventListener('error', e => { if (boot.state !== 'ready') setBootState('error', { title: 'Une erreur empêche le dashboard de charger.', message: String(e?.message || 'Erreur JavaScript.'), ref: 'SXD-BOOT-JS', reconnect: true }); });
+window.addEventListener('unhandledrejection', e => { if (boot.state !== 'ready') setBootState('error', { title: 'Une erreur empêche le dashboard de charger.', message: String(e?.reason?.message || e?.reason || 'Erreur inattendue.'), ref: 'SXD-BOOT-PROMISE', reconnect: true }); });
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootstrap, { once: true });
+else bootstrap();

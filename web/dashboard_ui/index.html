@@ -42,6 +42,14 @@
   </div>
 </section>
 
+<section class="boot-state hidden" id="bootState" role="alert" aria-live="assertive">
+  <div class="boot-card">
+    <h1 id="bootTitle">Une erreur empêche le dashboard de charger.</h1>
+    <p id="bootMessage"></p>
+    <div class="toolbar"><button class="btn primary" id="bootRetry" type="button">Réessayer</button><a class="btn" id="bootLogin" href="/login">Se reconnecter avec Discord</a></div>
+    <small id="bootRef"></small>
+  </div>
+</section>
 <section class="app hidden" id="dashboard">
   <aside class="server-rail" id="serverRail" aria-label="Vos serveurs"></aside>
   <div class="mobile-overlay hidden" id="mobileOverlay"></div>
