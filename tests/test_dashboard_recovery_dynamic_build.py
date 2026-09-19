@@ -129,5 +129,13 @@ def test_recovery_core_app_keeps_native_dashboard_api_routes():
         ("GET", "/api/guilds/{guild_id}/games/infinite"),
         ("PUT", "/api/guilds/{guild_id}/games/infinite"),
         ("POST", "/api/guilds/{guild_id}/games/infinite/action"),
+        ("GET", "/api/guilds/{guild_id}/logs/config"),
+        ("PUT", "/api/guilds/{guild_id}/logs/config"),
+        ("PUT", "/api/guilds/{guild_id}/logs/events"),
+        ("GET", "/api/guilds/{guild_id}/automation/plus"),
+        ("PUT", "/api/guilds/{guild_id}/automation/starboard"),
+        ("POST", "/api/guilds/{guild_id}/automation/sticky"),
+        ("POST", "/api/guilds/{guild_id}/automation/scheduled"),
+        ("PUT", "/api/guilds/{guild_id}/automation/voicehub"),
     }
     assert expected <= paths
