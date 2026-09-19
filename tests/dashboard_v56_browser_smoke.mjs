@@ -147,7 +147,6 @@ if(!savedThemes.some(x=>x.name==="Smoke Theme")) throw new Error("La sauvegarde 
 if(!dom.window.document.querySelector('[data-load-theme]')) throw new Error("Un thème enregistré doit être rechargeable.");
 dom.window.localStorage.removeItem("sentrix:theme-colors");
 dom.window.localStorage.removeItem("sentrix:saved-themes");
-dom.window.applyGlobalPreferences();
 
 const railServer=dom.window.document.querySelector('#serverRail [data-guild="1"]');
 if(!railServer) throw new Error("Serveur absent de la colonne de sélection.");
