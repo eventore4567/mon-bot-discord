@@ -100,13 +100,28 @@ renderSanctions = async function renderModerationCenter() {
           <b>${esc(caseNo + String(x.action || 'action'))} · ${esc(who)}</b>
           <small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''} · par ${esc(mod)}${active ? ' · ' + esc(active) : ''}</small>
         </div>
-        <div class="row-actions"><button class="btn sm" type="button" data-open-member="${esc(x.user_id)}">Dossier</button></div>
+        <div class="row-actions">
+          ${x.current_banned ? `<button class="btn sm" type="button" data-reverse-sanction="unban" data-reverse-user="${esc(x.user_id)}">Débannir</button>` : ''}
+          ${x.current_muted ? `<button class="btn sm" type="button" data-reverse-sanction="unmute" data-reverse-user="${esc(x.user_id)}">Lever le mute</button>` : ''}
+          ${Number(x.warn_count || 0) > 0 ? `<button class="btn sm" type="button" data-reverse-sanction="clear-warnings" data-reverse-user="${esc(x.user_id)}">Effacer warns</button>` : ''}
+          <button class="btn sm" type="button" data-open-member="${esc(x.user_id)}">Dossier</button>
+        </div>
       </div>`;
     }).join('') : emptyState('Aucune sanction trouvée', 'Modifiez les filtres pour afficher d’autres résultats.');
     $('moderationHistory').querySelectorAll('[data-open-member]').forEach(b => b.onclick = async () => {
       state.moderationMemberId = b.dataset.openMember;
       await paintMember();
       $('moderationMemberCard').scrollIntoView({ behavior: REDUCED_MOTION() ? 'auto' : 'smooth', block: 'start' });
+    });
+    $('moderationHistory').querySelectorAll('[data-reverse-sanction]').forEach(b => b.onclick = async () => {
+      const label = b.textContent;
+      const reason = await promptDialog({ title: label, label: 'Raison', value: 'Action depuis le dashboard SentriX', confirm: label });
+      if (!reason) return;
+      try {
+        const r = await gpost(`/sanctions/${encodeURIComponent(b.dataset.reverseUser)}/${encodeURIComponent(b.dataset.reverseSanction)}`, { reason });
+        toast(r.message || 'Action appliquée.');
+        await renderSanctions();
+      } catch (e) { toast(e.message, true); }
     });
   };
   $('historySearch').oninput = renderHistory;
@@ -165,6 +180,8 @@ renderSanctions = async function renderModerationCenter() {
     </div>
     <div class="toolbar" style="margin-top:14px">
       ${m.bot ? '<span class="notice warn">Les bots ne peuvent pas être sanctionnés depuis ce centre.</span>' : ['warn','mute','kick','ban'].map(a => `<button class="btn ${moderationActionClass(a)}" type="button" data-mod-action="${a}">${moderationActionLabel(a)}</button>`).join('')}
+      ${muted ? '<button class="btn" type="button" data-member-reverse="unmute">Lever le mute</button>' : ''}
+      ${Number(d.warnings || 0) > 0 ? '<button class="btn" type="button" data-member-reverse="clear-warnings">Effacer les avertissements</button>' : ''}
     </div>
     <div style="margin-top:16px">
       <h3>Dernières sanctions de ce membre</h3>
@@ -177,6 +194,16 @@ renderSanctions = async function renderModerationCenter() {
       holder.innerHTML = emptyState('Aucun membre sélectionné', 'Recherchez un membre ci-dessus pour ouvrir son dossier et afficher les actions disponibles.');
     };
     holder.querySelectorAll('[data-mod-action]').forEach(b => b.onclick = () => openModerationAction(m, b.dataset.modAction));
+    holder.querySelectorAll('[data-member-reverse]').forEach(b => b.onclick = async () => {
+      const label = b.textContent;
+      const reason = await promptDialog({ title: label, label: 'Raison', value: 'Action depuis le dashboard SentriX', confirm: label });
+      if (!reason) return;
+      try {
+        const r = await gpost(`/sanctions/${encodeURIComponent(m.id)}/${encodeURIComponent(b.dataset.memberReverse)}`, { reason });
+        toast(r.message || 'Action appliquée.');
+        await renderSanctions();
+      } catch (e) { toast(e.message, true); }
+    });
   }
 
   if (selectedId) await paintMember();
