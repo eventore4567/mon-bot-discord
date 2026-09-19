@@ -81,7 +81,7 @@ def test_navigation_is_short_and_grouped():
 
     pages = re.findall(r"\['([a-z]+)', '", server_nav)
     assert pages == [
-        "overview", "welcome", "roles", "levels", "economy", "security",
+        "overview", "welcome", "roles", "levels", "economy", "moderation", "security",
         "logs", "tickets", "games", "notifications", "automation", "embeds", "ai",
     ]
     groups = re.findall(r"\['([^']+)', \[\[", server_nav)
@@ -99,8 +99,9 @@ def test_navigation_is_short_and_grouped():
 def test_legacy_tab_links_are_redirected():
     program = _program()
     legacy = re.search(r"const LEGACY = \{(.*?)\};", program, re.S).group(1)
-    for old, target in (("moderation", "security"), ("verification", "security"), ("config", "settings"), ("product", "advanced"), ("autoreact", "automation")):
+    for old, target in (("verification", "security"), ("config", "settings"), ("product", "advanced"), ("autoreact", "automation")):
         assert f"{old}: ['{target}'" in legacy
+    assert "moderation:" not in legacy
 
 
 def test_user_facing_strings_use_vouvoiement():
