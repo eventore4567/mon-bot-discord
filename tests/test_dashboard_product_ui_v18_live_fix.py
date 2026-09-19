@@ -7,6 +7,7 @@ from web import dashboard_product_ui_v18
 from web import dashboard_product_ui_v18_live_fix
 from web import dashboard_ui_hotfix_v16
 from web import dashboard_unified_v2
+import pytest
 
 
 def _live_v16_html():
@@ -14,6 +15,7 @@ def _live_v16_html():
     return dashboard_ui_hotfix_v16.patch_html(html)
 
 
+@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
 def test_v18_live_fix_patches_real_v15_v16_shape():
     live_html = _live_v16_html()
 
@@ -70,6 +72,7 @@ def test_v21_recovery_has_no_permanent_browser_polling():
     assert "[250, 900, 2000, 4500]" in _DASHBOARD_RECOVERY_JS
 
 
+@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
 def test_v21_uses_one_canonical_v18_finalizer():
     source = Path("sentrix_dashboard_finalizer_v7.py").read_text(encoding="utf-8")
     assert "dashboard_product_ui_v18.install(dashboard)" not in source

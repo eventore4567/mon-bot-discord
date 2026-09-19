@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from web import dashboard_visual_finish_v23 as v23
+import pytest
 
 
 def _dashboard():
@@ -49,6 +50,7 @@ def test_v23_is_event_driven_accessible_and_mobile_hardened():
     assert "touch-action:manipulation" in style
 
 
+@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
 def test_v23_runs_after_product_ui_in_final_authority():
     source = open("sentrix_dashboard_finalizer_v7.py", encoding="utf-8").read()
     assert "from web import dashboard_visual_finish_v23" in source

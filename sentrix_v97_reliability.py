@@ -335,6 +335,10 @@ def install_dashboard(dashboard) -> bool:
     html = str(getattr(dashboard, "INDEX_HTML", "") or "")
     if 'id="sentrix-ticket-simple-v97-js"' in html:
         return True
+    if 'id="sentrix-dashboard-unified-v2"' in html:
+        # Le programme unique rend la page Tickets nativement ; cette couche visait le DOM
+        # de l'ancien éditeur (.sx-ticket-editor) qui n'existe plus.
+        return True
     payload = DASHBOARD_CSS + "\n" + DASHBOARD_JS
     dashboard.INDEX_HTML = html.replace("</body>", payload + "\n</body>", 1) if "</body>" in html else html + payload
     logger.info("V97 dashboard Tickets simplifié installé.")

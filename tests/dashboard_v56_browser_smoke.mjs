@@ -66,6 +66,37 @@ const dom = new JSDOM(html, {
       if(url.pathname==="/api/guilds/1/embeds") return response({ok:true,message:"Embed envoyé."});
       if(url.pathname==="/api/guilds/1/dm/apercu") return response({guild:{id:"1",name:"Serveur Test"},longueur_max:3500});
       if(url.pathname==="/api/guilds/1/dm/user") return response({resultat:"envoye",message:"Message envoyé.",bilan:{envoyes:1}});
+      if(url.pathname==="/api/guilds/1/welcome") return method==="PUT" ? response({ok:true,message:"Présentation enregistrée."}) : response({ok:true,title:"Bienvenue sur {server}",show_avatar:true,show_member_count:true,mode:"embed",goodbye_mode:"embed",default_title:"Bienvenue sur {server}",default_text:"Bienvenue {member} !",variables:["{member}","{username}","{display_name}","{server}","{member_count}"]});
+      if(url.pathname==="/api/guilds/1/welcome/test") return response({ok:true,message:"Test envoyé."});
+      if(url.pathname==="/api/guilds/1/levels") return method==="PUT" ? response({ok:true,message:"Réglages des niveaux enregistrés."}) : response({ok:true,xp_min:10,xp_max:25,xp_cooldown:60,level_announce_enabled:true,level_keep_old_roles:false,xp_disabled_on_commands:false,xp_excluded_role_ids:[],xp_channel_disabled:[],roles:[{level:5,role_id:"15"}]});
+      if(url.pathname==="/api/guilds/1/economy") return method==="PUT" ? response({ok:true,message:"Monnaie enregistrée."}) : response({ok:true,currency_singular:"Pièce",currency_plural:"Pièces",currency_symbol:"🪙",shop:[{id:1,name:"VIP",price:500,description:"",role_id:"15"}],panels:[],gains:{daily:200,weekly:1000,work_cooldown:3600,daily_cooldown:86400}});
+      if(url.pathname==="/api/guilds/1/economy/games") return method==="PUT" ? response({ok:true,message:"Réglages des jeux enregistrés."}) : response({ok:true,settings:{enabled:true,disabled_games:[],allowed_channel_ids:[],blocked_channel_ids:[],allowed_role_ids:[],blocked_role_ids:[],daily_limit:50,logs_enabled:true,leaderboard_enabled:true,dm_results:false,compact_mode:false},catalog:[{key:"slots",label:"🎰 Machine à sous",kind:"rapide"}]});
+      if(url.pathname==="/api/guilds/1/roles/messages") return response({ok:true,items:[{id:"555",author:"SentriX",mine:true,text:"Choisissez vos rôles",created_at:1700000000,reactions:2}]});
+      if(url.pathname==="/api/guilds/1/roles") return response({ok:true,notification_roles:[{id:"15",name:"Ping annonces"}],notification_panels:[],reaction_panels:[],reaction_roles:[]});
+      if(url.pathname==="/api/guilds/1/verification-v6") return response({ok:true,configured:true,published:false,captcha_enabled:true,channel_id:"22",role_id:"15",title:"Vérification",rules_text:"1. Respectez les membres.",image_url:null,jump_url:null});
+      if(url.pathname==="/api/guilds/1/logs/config") return response({ok:true,routes:[
+        {key:"moderation",label:"Modération",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"messages",label:"Messages",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"members",label:"Membres",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"channels",label:"Salons",channel_id:null,enabled:false,valid:false,problem:"aucun salon configuré"},
+        {key:"roles",label:"Rôles",channel_id:null,enabled:false,valid:false,problem:"aucun salon configuré"},
+        {key:"voice",label:"Vocal",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"server",label:"Serveur",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"tickets",label:"Tickets",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"automod",label:"AutoMod",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"spam",label:"Anti-Spam",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"raid",label:"Anti-Raid",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"resources",label:"Ressources",channel_id:null,enabled:false,valid:false,problem:"aucun salon configuré"},
+        {key:"files",label:"Fichiers",channel_id:null,enabled:false,valid:false,problem:"aucun salon configuré"}
+      ],events:[]});
+      if(url.pathname==="/api/guilds/1/automation/reactions") return response({ok:true,items:[{id:1,channel_id:"22",channel_name:"général",mode:"all",keyword:"",emojis:["👍"],enabled:1}]});
+      if(url.pathname==="/api/guilds/1/ops/overview") return response({ok:true,status:{discord_ready:true,latency_ms:42},diagnostics:[],history:[{id:1,changed_keys:["prefix"],created_at:1700000000,username:"Owner"}],staff:[],maintenance:{enabled:false,reason:""},policies:[]});
+      if(url.pathname==="/api/guilds/1/ops/access") return response({ok:true,roles:[],tier:"admin"});
+      if(url.pathname==="/api/guilds/1/ops/health") return response({ok:true,discord_ready:true,latency_ms:42,db_latency_ms:1});
+      if(url.pathname==="/api/guilds/1/growth/invitations") return response({ok:true,items:[],total_uses:0});
+      if(url.pathname==="/api/guilds/1/growth/webhooks") return response({ok:true,items:[]});
+      if(url.pathname==="/api/guilds/1/product/analytics") return response({ok:true,analytics:{members:1000,commands_24h:3,open_tickets:0,automation_runs_24h:0,top_commands:[]}});
+      if(url.pathname==="/api/guilds/1/live/metrics") return response({ok:true,online:true,latency_ms:42,members:1000,warnings:0,open_tickets:0,commands_24h:3});
       return response({error:`Route mock inconnue: ${url.pathname}`},404);
     };
     window.confirm=()=>true;window.prompt=()=>"Test dashboard";window.scrollTo=()=>{};
@@ -75,9 +106,10 @@ const dom = new JSDOM(html, {
 const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms));
 await sleep(1200);
 const bootstrapPaths=requests.map(x=>x.path);
-for(const required of ["/api/public","/api/me","/api/guilds","/api/guilds/1"]){
+for(const required of ["/api/me","/api/guilds"]){
   if(!bootstrapPaths.includes(required)) throw new Error(`Bootstrap manquant: ${required}`);
 }
+if(bootstrapPaths.includes("/api/guilds/1")) throw new Error("Le dashboard ne doit plus auto-charger un serveur à l'ouverture.");
 
 const dashboard=dom.window.document.getElementById("dashboard");
 if(!dashboard||dashboard.classList.contains("hidden")) throw new Error("Dashboard masqué après session.");
@@ -85,42 +117,129 @@ if(!dom.window.document.getElementById("sentrix-dashboard-unified-v2")) throw ne
 if(!dom.window.document.getElementById("sentrix-unified-runtime-v2")) throw new Error("Runtime unifié absent.");
 if(dom.window.document.querySelector("#sxFeaturesFrame,.sx-features-shell,#sentrix-v64-final")) throw new Error("Une ancienne couche frontend est encore embarquée.");
 
-const expectedTabs=["overview","welcome","levels","security","moderation","logs","verification","roles","economy","notifications","tickets","ai","embeds","config","access","dm","diagnostic"];
-const actualTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
-for(const tab of expectedTabs) if(!actualTabs.includes(tab)) throw new Error(`Page unifiée absente: ${tab}`);
+// Programme unique : un seul <script> exécutable, un seul <style>, aucune ancienne couche.
+const executableScripts=[...dom.window.document.querySelectorAll("script")].filter(s=>s.type!=="application/json");
+if(executableScripts.length!==1) throw new Error(`${executableScripts.length} scripts exécutables au lieu de 1.`);
+if(dom.window.document.querySelectorAll("style").length!==1) throw new Error("Plusieurs feuilles de style embarquées.");
 
-const checks={
-  overview:".score", welcome:'[data-setting="welcome_message"]', levels:'[data-setting="level_message"]',
-  security:"[data-automod]", moderation:"#sanctionList", logs:'[data-setting="log_channel"]',
-  verification:"#verifyRules", roles:'[data-setting="mod_role"]', economy:"#goAccess", notifications:"#notifAdd",
-  tickets:"#ticketSave", ai:"[data-ai]", embeds:"#embedSend", config:'[data-setting="prefix"]',
-  access:"#commandList", dm:"#dmOneMessage", diagnostic:".permission-grid",
-};
-for(const tab of expectedTabs){
+// Mode global : profil / serveurs / préférences uniquement. La configuration serveur
+// n'apparaît qu'après un clic explicite sur une pastille de la colonne gauche.
+const globalTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
+for(const tab of ["profile","servers","preferences"]) if(!globalTabs.includes(tab)) throw new Error(`Page globale absente: ${tab}`);
+for(const tab of ["overview","levels","economy","security","tickets"]) if(globalTabs.includes(tab)) throw new Error(`Page serveur visible avant sélection: ${tab}`);
+if(!/Mon espace SentriX|Continuer sur un serveur/.test(dom.window.document.getElementById("content").textContent)) throw new Error("La page d'ouverture n'est pas le profil global.");
+
+const railServer=dom.window.document.querySelector('#serverRail [data-guild="1"]');
+if(!railServer) throw new Error("Serveur absent de la colonne de sélection.");
+railServer.click();
+await sleep(300);
+if(!requests.map(x=>x.path).includes("/api/guilds/1")) throw new Error("Le clic serveur ne charge pas sa configuration.");
+
+const expectedTabs=["overview","welcome","levels","economy","roles","moderation","security","logs","tickets","games","notifications","automation","embeds","ai","settings","access","invites","backups"];
+const actualTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
+for(const tab of expectedTabs) if(!actualTabs.includes(tab)) throw new Error(`Page unifiée absente après sélection serveur: ${tab}`);
+if(actualTabs.includes("profile")||actualTabs.includes("servers")||actualTabs.includes("preferences")) throw new Error("Les pages globales ne doivent pas encombrer la navigation serveur.");
+if(actualTabs.length>20) throw new Error(`Sidebar trop longue : ${actualTabs.length} entrées.`);
+
+// [page, sous-section, sélecteur attendu]
+const checks=[
+  ["overview","",".module-card"], ["welcome","bienvenue",'[data-setting="welcome_message"]'], ["welcome","departs",'[data-setting="goodbye_message"]'],
+  ["levels","general","#lvSave"], ["levels","levelup",'[data-setting="level_channel"]'], ["levels","roles","#lvRoleAdd"], ["levels","avance","#lvExRoles"],
+  ["economy","general","#ecSave"], ["economy","boutique","#shopAdd"], ["economy","jeux","#gmEnabled"], ["economy","gains",".kpi"], ["roles","autoroles",'[data-setting="autorole"]'], ["roles","interactifs","#reactionPanelCreate"], ["roles","avance",'[data-setting="mod_role"]'],
+  ["moderation","","#sanctionList"], ["security","protections","[data-automod]"], ["security","verification","#verifyRules"],
+  ["logs","",'[data-log-channel]'], ["tickets","","#ticketSave"], ["notifications","","#notifAdd"], ["automation","","#reactCreate"],
+  ["settings","",'[data-setting="prefix"]'], ["access","","#commandList"], ["embeds","","#embedSend"], ["ai","","[data-ai]"],
+  ["invites","invites",".card"], ["backups","backups","#opsExport"], ["backups","history","[data-rollback]"],
+];
+for(const [tab,sub,selector] of checks){
   const button=dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
+  if(!button) throw new Error(`Bouton de navigation absent: ${tab}`);
   button.click();
-  await sleep(["overview","security","moderation","verification","economy","tickets","access","dm","diagnostic"].includes(tab)?130:35);
+  await sleep(120);
+  if(sub){ const sb=dom.window.document.querySelector(`#subnav [data-sub="${sub}"]`); if(!sb) throw new Error(`Sous-section absente: ${tab}/${sub}`); sb.click(); await sleep(120); }
   const currentButton=dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
   if(!currentButton?.classList.contains("active")) throw new Error(`L'onglet ${tab} ne devient pas actif.`);
   if(!dom.window.document.getElementById("pageTitle")?.textContent?.trim()) throw new Error(`Titre vide: ${tab}`);
-  if(!dom.window.document.querySelector(checks[tab])) throw new Error(`Contenu fonctionnel absent: ${tab} (${checks[tab]})`);
+  if(!dom.window.document.querySelector(selector)) throw new Error(`Contenu fonctionnel absent: ${tab}/${sub||"-"} (${selector})`);
 }
 
+const interactivePathsNow=()=>requests.map(x=>x.path);
 const interactivePaths=requests.map(x=>x.path);
-for(const required of ["/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/dm/apercu"]){
+for(const required of ["/api/guilds/1/welcome","/api/guilds/1/levels","/api/guilds/1/economy","/api/guilds/1/economy/games","/api/guilds/1/roles","/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/verification-v6","/api/guilds/1/logs/config","/api/guilds/1/automation/reactions","/api/guilds/1/ops/overview"]){
   if(!interactivePaths.includes(required)) throw new Error(`Route réelle jamais chargée: ${required}`);
 }
+// Le cache par serveur évite les rechargements : le diagnostic n'est demandé qu'une poignée de fois malgré 22 navigations.
+const diagCalls=interactivePaths.filter(p=>p==="/api/guilds/1/diagnostics").length;
+if(diagCalls>4) throw new Error(`Diagnostics rechargé ${diagCalls} fois : le cache front ne fonctionne pas.`);
+
+
+// Message privé : plus dans la sidebar, mais accessible depuis le Centre de modération.
+dom.window.document.querySelector('#navigation button[data-tab="moderation"]').click(); await sleep(150);
+dom.window.document.querySelector('[data-go="dm"]').click(); await sleep(150);
+if(!dom.window.document.getElementById("dmOneMessage")) throw new Error("La page Message privé doit rester accessible depuis Sanctions.");
+if(!interactivePathsNow().includes("/api/guilds/1/dm/apercu")) throw new Error("Route DM jamais chargée.");
+
+// Tickets : « Publier » ne regarde que le panneau sélectionné (1 type sur le panneau 1 du mock → activé).
+dom.window.document.querySelector('#navigation button[data-tab="tickets"]').click(); await sleep(150);
+if(dom.window.document.getElementById("ticketPublish").disabled) throw new Error("Panneau avec un type : Publier devrait être actif.");
+if(!/1 type/.test(dom.window.document.getElementById("ticketPanelPick").selectedOptions[0].textContent)) throw new Error("Le nombre de types du panneau doit être visible.");
+// Liens de migration : jamais visibles pour un non-développeur.
+if(dom.window.document.querySelector('#navigation a[href="/setup-center"]')) throw new Error("Les anciens liens ne doivent pas apparaître pour un utilisateur normal.");
 
 const paletteInput=dom.window.document.getElementById("paletteInput");
 dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown",{key:"k",metaKey:true,bubbles:true}));
 await sleep(20);
 if(dom.window.document.getElementById("paletteBackdrop").classList.contains("hidden")) throw new Error("Palette ⌘K inaccessible.");
-paletteInput.value="messages privés";paletteInput.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
-if(!dom.window.document.querySelector('[data-palette-tab="dm"]')) throw new Error("Recherche globale Messages privés absente.");
+paletteInput.value="sauvegardes";paletteInput.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
+if(!dom.window.document.querySelector('[data-palette-page="backups"]')) throw new Error("Recherche globale absente.");
+
+// Le bouton de compte doit quitter réellement le contexte serveur, sans déconnexion.
+dom.window.document.getElementById("paletteBackdrop").classList.add("hidden");
+dom.window.document.getElementById("profileButton").click();
+await sleep(180);
+const afterProfileTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
+if(!afterProfileTabs.includes("profile")||!afterProfileTabs.includes("servers")||!afterProfileTabs.includes("preferences")) throw new Error("Retour vers l'espace global impossible.");
+if(afterProfileTabs.includes("levels")||afterProfileTabs.includes("tickets")) throw new Error("La configuration serveur reste visible après retour au profil.");
+if(new URL(dom.window.location.href).searchParams.get("guild")) throw new Error("L'URL conserve une guild après retour au profil.");
 
 if(runtimeErrors.some(message=>/SyntaxError|ReferenceError|TypeError/.test(message))){
   console.error(runtimeErrors.join("\n"));throw new Error("Erreur JavaScript dans le dashboard unifié.");
 }
+// Adresse ?tab=moderation → Centre de modération.
+const legacy = new JSDOM(html, { url:"https://sentrix.test/app?tab=moderation&guild=1", runScripts:"dangerously", pretendToBeVisual:true, virtualConsole, beforeParse(window){ window.fetch = dom.window.fetch; window.scrollTo=()=>{}; } });
+await sleep(900);
+if(!legacy.window.document.querySelector("#sanctionList")) throw new Error("Le Centre de modération ne fonctionne pas via ?tab=moderation.");
+legacy.window.close();
+
+// États de démarrage : jamais une page réduite au bandeau.
+async function bootWith(mock, url="https://sentrix.test/app"){
+  const vc=new VirtualConsole(); const errs=[]; vc.on("jsdomError",e=>errs.push(String(e?.stack||e)));
+  const d=new JSDOM(html,{url,runScripts:"dangerously",pretendToBeVisual:true,virtualConsole:vc,beforeParse(w){ w.fetch=async(input,options={})=>{ const u=new URL(typeof input==="string"?input:input.url,w.location.href); return mock(u.pathname,(options.method||"GET").toUpperCase()) ?? dom.window.fetch(input,options); }; w.scrollTo=()=>{}; }});
+  await sleep(700);
+  const doc=d.window.document; const visible=id=>!doc.getElementById(id).classList.contains("hidden");
+  const out={landing:visible("landing"),boot:visible("bootState"),dashboard:visible("dashboard"),title:doc.getElementById("bootTitle").textContent,retry:!doc.getElementById("bootRetry").classList.contains("hidden"),login:!doc.getElementById("bootLogin").classList.contains("hidden"),content:doc.getElementById("content").textContent.trim().slice(0,80),errs};
+  d.window.close(); return out;
+}
+const s401=await bootWith(p=>p==="/api/me"?response({error:"Connectez-vous"},401):null);
+if(!s401.landing||s401.boot||s401.dashboard) throw new Error("401 sur /api/me doit afficher la page de connexion, pas une page vide: "+JSON.stringify(s401));
+const s503=await bootWith(p=>p==="/api/me"?response({error:"Reconnexion Discord en cours"},503):null);
+if(!s503.boot||!s503.retry||!/reconnecte/.test(s503.title)) throw new Error("503 sur /api/me doit afficher un état explicite avec Réessayer: "+JSON.stringify(s503));
+const g500=await bootWith(p=>p==="/api/guilds"?response({error:"Base indisponible"},500):null);
+if(!g500.boot||!g500.retry||!g500.login||!/serveurs/.test(g500.title)) throw new Error("Échec /api/guilds doit afficher un état explicite: "+JSON.stringify(g500));
+const gEmpty=await bootWith(p=>p==="/api/guilds"?response({ok:true,guilds:[]}):null);
+if(!gEmpty.dashboard||!/Mon espace SentriX|Mes serveurs/.test(gEmpty.content)) throw new Error("Aucune guild doit afficher l'espace profil global: "+JSON.stringify(gEmpty));
+const stale=await bootWith(p=>null,"https://sentrix.test/app?guild=999999");
+// Développeur : le groupe Migration (anciennes interfaces) n'existe que pour lui.
+const devDom=new JSDOM(html,{url:"https://sentrix.test/app",runScripts:"dangerously",pretendToBeVisual:true,virtualConsole,beforeParse(w){ w.fetch=async(input,options={})=>{ const u=new URL(typeof input==="string"?input:input.url,w.location.href); if(u.pathname==="/api/me") return response({ok:true,user:{id:"42",username:"Dev",avatar_url:null},csrf:"t",developer:true}); return dom.window.fetch(input,options); }; w.scrollTo=()=>{}; }});
+await sleep(700);
+if(devDom.window.document.querySelector('#navigation a[href="/setup-center"]')) throw new Error("Migration ne doit pas apparaître dans l'espace global.");
+devDom.window.document.querySelector('#serverRail [data-guild="1"]').click();
+await sleep(250);
+if(!devDom.window.document.querySelector('#navigation a[href="/setup-center"]')) throw new Error("Le développeur doit voir le groupe Migration dans un serveur.");
+if(!devDom.window.document.querySelector('#navigation button[data-tab="advanced"]')) throw new Error("Le développeur doit voir le Centre avancé dans un serveur.");
+devDom.window.close();
+if(!stale.dashboard||stale.boot) throw new Error("Une guild mémorisée invalide ne doit pas casser le démarrage: "+JSON.stringify(stale));
+
 console.log("Dashboard unified-v2 browser smoke OK:",interactivePaths.join(" -> "));
 console.log("Pages unified-v2 OK:",expectedTabs.join(", "));
 dom.window.close();

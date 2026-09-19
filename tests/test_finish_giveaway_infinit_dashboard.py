@@ -58,9 +58,9 @@ def test_dashboard_uses_single_canonical_switch_loader():
 
     assert "new AbortController()" in html
     assert "state.guildAbort" in html
-    assert "if(state.guildAbort)state.guildAbort.abort();" in html
-    assert "controller!==state.guildAbort" in html
-    assert "{signal:controller.signal}" in html
+    assert "if (state.guildAbort) state.guildAbort.abort();" in html
+    assert "controller !== state.guildAbort" in html
+    assert "{ signal: controller.signal }" in html
     assert "guildLoadToken" not in runtime_source
     assert "Les données précédentes ont été retirées" not in runtime_source
     assert "dashboard.INDEX_HTML =" not in runtime_source

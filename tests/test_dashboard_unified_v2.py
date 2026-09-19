@@ -27,7 +27,7 @@ def test_unified_dashboard_is_single_frontend_document():
         '/notifications',
         '/embeds',
         '/sanctions',
-        'class="loading-screen"',
+        'class="skeleton"',
         'class="error-state"',
         'class="empty"',
     ):
@@ -42,26 +42,19 @@ def test_unified_dashboard_accessibility_and_responsive_contract():
         'aria-live="polite"',
         'aria-modal="true"',
         'prefers-reduced-motion:reduce',
-        '@media(max-width:840px)',
-        '@media(max-width:560px)',
-        '⌘ K',
+        '@media (max-width:900px)',
+        '⌘K',
     ):
         assert marker in html
 
 
 def test_finalizer_uses_real_sanction_route_and_blocks_legacy_recovery_injection():
     source = unified.INDEX_HTML
-    assert "action==='warn'?'clearwarnings':" in source
-
-    html = freeze._finalize_unified_html(source)
-
-    assert "action==='warn'?'clear-warnings':" in html
-    assert "action==='warn'?'clearwarnings':" not in html
-    assert 'id="sentrix-product-dashboard-recovery"' in html
-    assert html.count('id="sentrix-product-dashboard-recovery"') == 1
-
-    # L'opération est idempotente : le préstart ou les tests peuvent la rejouer.
-    assert freeze._finalize_unified_html(html) == html
+    # La route réelle est écrite à la source : le finalizer n'a plus rien à corriger.
+    assert "'clear-warnings'" in source
+    assert "'clearwarnings'" not in source
+    assert source.count('id="sentrix-product-dashboard-recovery"') == 1
+    assert freeze._finalize_unified_html(source) == source
 
 
 def test_freeze_accepts_finalized_unified_snapshot():

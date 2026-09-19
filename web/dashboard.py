@@ -16,7 +16,9 @@ Aucun token utilisateur, token du bot ou secret OAuth n'est envoyé au navigateu
 
 import asyncio
 import logging
+import os
 import secrets
+import sys
 import time
 from urllib.parse import urlencode, urlparse, urlunparse
 
@@ -86,7 +88,7 @@ CHANNEL_FIELDS = {
 
 BOOL_FIELDS = {"ticket_transcript_dm", "ticket_rating_enabled"}
 INT_FIELDS = {
-    "warn_ban_threshold": (1, 20),
+    "warn_ban_threshold": (0, 20),  # 0 = jamais de ban automatique (défaut)
     "ticket_delete_delay": (0, 3600),
 }
 
@@ -98,7 +100,22 @@ def _client_id(bot) -> str:
     return str(bot.user.id) if bot.user else ""
 
 
+def _own_public_host() -> str:
+    """Domaine public Railway de CETTE instance (primary ou standby)."""
+    return (os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip().strip("/").casefold()
+
+
 def _public_url(request: web.Request) -> str:
+    """URL publique servant de base à OAuth (redirect_uri) et aux cookies.
+
+    Chaque instance HA répond à OAuth sur son propre domaine public quand le navigateur
+    l'utilise : le cookie de state, le callback Discord et le cookie de session restent
+    alors sur le même hôte. Sinon, l'URL publique configurée (domaine principal).
+    """
+    seen = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip().casefold()
+    own = _own_public_host()
+    if own and seen == own:
+        return f"https://{own}"
     configured = (config.DASHBOARD_PUBLIC_URL or "").strip().rstrip("/")
     if configured:
         return configured
@@ -287,14 +304,49 @@ async def handle_public(request: web.Request):
     return web.json_response({**payload, **_public_champs_vivants(bot)})
 
 
+def _request_host(request: web.Request) -> str:
+    """Hôte vu par le navigateur (le proxy HA transmet X-Forwarded-Host)."""
+    return (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip().casefold()
+
+
+def _canonical_host() -> str:
+    configured = (config.DASHBOARD_PUBLIC_URL or "").strip()
+    return (urlparse(configured).hostname or "").casefold() if configured else ""
+
+
+def _canonical_redirect(request: web.Request) -> web.HTTPFound | None:
+    """Le cookie de state OAuth et le cookie de session sont liés à l'hôte du navigateur ;
+    Discord ne renvoie que sur une URL enregistrée. Les hôtes qui savent répondre à OAuth
+    sont l'hôte canonique (DASHBOARD_PUBLIC_URL) et le domaine public de cette instance
+    (RAILWAY_PUBLIC_DOMAIN, callback à enregistrer dans le portail Discord). Tout autre
+    hôte (alias, hostname interne) est ramené sur l'hôte canonique sans créer de state."""
+    canonical = _canonical_host()
+    if not canonical:
+        return None
+    seen = _request_host(request)
+    if not seen or seen == canonical or seen == _own_public_host():
+        return None
+    # Environnements locaux (harnais, audits, CI) : pas d'hôte public, donc pas de bascule.
+    bare = seen.rsplit(":", 1)[0] if seen.count(":") == 1 else seen.split("]")[0].lstrip("[")
+    if bare in {"127.0.0.1", "localhost", "::1"}:
+        return None
+    target = f"{config.DASHBOARD_PUBLIC_URL.strip().rstrip('/')}{request.rel_url}"
+    logger.info("Dashboard : %s demandé sur %s → redirigé vers l'hôte canonique %s.", request.path, seen, canonical)
+    return web.HTTPFound(target)
+
+
 async def handle_login(request: web.Request):
     bot = request.app["bot"]
     if not _oauth_ready(bot):
         raise web.HTTPFound("/?auth=missing")
+    redirect = _canonical_redirect(request)
+    if redirect is not None:
+        raise redirect
 
     state = secrets.token_urlsafe(32)
     request.app["oauth_states"][state] = time.time() + OAUTH_STATE_TTL
     redirect_uri = f"{_public_url(request)}/oauth/callback"
+    logger.info("OAuth : demande de connexion depuis %s, callback %s, state créé (%s).", _request_host(request), redirect_uri, state[:6])
     params = {
         "response_type": "code",
         "client_id": _client_id(bot),
@@ -317,14 +369,31 @@ async def handle_login(request: web.Request):
 
 async def handle_callback(request: web.Request):
     state = request.query.get("state", "")
+    code = request.query.get("code", "")
+    oauth_error = request.query.get("error", "")
+
+    # Un callback OAuth valide contient toujours au moins state + (code|error).
+    # Après une bascule HA, un navigateur peut néanmoins revisiter l'URL nue
+    # /oauth/callback alors qu'une session dashboard valide existe déjà. Dans ce cas,
+    # on ne valide AUCUN nouveau flux OAuth : on réutilise simplement la session
+    # existante et on ramène l'utilisateur au dashboard.
+    if not state and not code and not oauth_error and _session(request):
+        logger.info(
+            "OAuth : callback vide sur %s avec session déjà valide → retour dashboard.",
+            _request_host(request),
+        )
+        raise web.HTTPFound("/app")
+
     cookie_state = request.cookies.get(OAUTH_STATE_COOKIE, "")
     expires_at = request.app["oauth_states"].pop(state, 0)
     if not state or not secrets.compare_digest(state, cookie_state) or expires_at <= time.time():
+        reason = "state absent" if not state else "cookie de state absent" if not cookie_state else "cookie de state différent" if not secrets.compare_digest(state, cookie_state) else "state inconnu de cette instance" if not expires_at else "state expiré"
+        logger.warning("OAuth : callback refusé sur %s (%s, state %s).", _request_host(request), reason, state[:6] or "—")
         return web.Response(text=OAUTH_ERROR_HTML, content_type="text/html", status=403)
+    logger.info("OAuth : callback accepté sur %s (state %s).", _request_host(request), state[:6])
     if request.query.get("error"):
         raise web.HTTPFound("/?auth=denied")
 
-    code = request.query.get("code")
     if not code:
         return web.Response(text=OAUTH_ERROR_HTML, content_type="text/html", status=400)
 
@@ -407,7 +476,13 @@ async def handle_me(request: web.Request):
     session, error = _require_session(request)
     if error:
         return error
-    return web.json_response({"user": session["user"], "csrf": session["csrf"]})
+    developer = False
+    try:
+        bot = request.app["bot"]
+        developer = bool(await bot.is_owner(discord.Object(id=int(session["user"]["id"]))))
+    except Exception:
+        developer = False
+    return web.json_response({"user": session["user"], "csrf": session["csrf"], "developer": developer})
 
 
 async def handle_guilds(request: web.Request):
@@ -433,6 +508,33 @@ async def handle_guilds(request: web.Request):
 
 
 _guild_payload_inflight: dict[int, "asyncio.Future"] = {}
+
+
+def _channel_items(guild: discord.Guild) -> list[dict]:
+    """Salons exposés au dashboard, avec les permissions de SentriX sur chaque salon texte.
+
+    Source unique partagée avec le repli fail-soft de ``dashboard_oxyde_hotfix`` : le
+    dashboard avertit sous le champ (« SentriX ne peut pas envoyer de messages dans ce
+    salon ») sans appel supplémentaire.
+    """
+    me = guild.me
+    channels = []
+    for channel in guild.channels:
+        if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel)):
+            continue
+        item = {"id": str(channel.id), "name": channel.name, "type": str(channel.type)}
+        if isinstance(channel, discord.TextChannel) and me is not None:
+            try:
+                perms = channel.permissions_for(me)
+                item["perms"] = {
+                    "view": bool(perms.view_channel),
+                    "send": bool(perms.send_messages),
+                    "embed": bool(perms.embed_links),
+                }
+            except Exception:
+                pass
+        channels.append(item)
+    return channels
 
 
 async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
@@ -461,11 +563,7 @@ async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
         for role in sorted(guild.roles, key=lambda role: role.position, reverse=True)
         if not role.is_default() and not role.managed
     ]
-    channels = [
-        {"id": str(channel.id), "name": channel.name, "type": str(channel.type)}
-        for channel in guild.channels
-        if isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel))
-    ]
+    channels = _channel_items(guild)
     return {
         "guild": {
             "id": str(guild.id),
@@ -661,6 +759,90 @@ def _validate_ai(values: dict) -> tuple[dict, str | None]:
         else:
             return {}, f"Le réglage IA {field} n'est pas modifiable depuis le dashboard."
     return clean, None
+
+
+async def _welcome_module():
+    from cogs import setup_v2_completion as welcome
+    return welcome
+
+
+async def handle_welcome_get(request: web.Request):
+    """Présentation de la bienvenue : mêmes valeurs que le bouton « Bienvenue » de /setup."""
+    try:
+        guild_id = int(request.match_info["guild_id"])
+    except ValueError:
+        return _json_error("Identifiant de serveur invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+    welcome = await _welcome_module()
+    presentation = await welcome._welcome_presentation(request.app["bot"], guild.id)
+    return web.json_response({
+        "ok": True,
+        "title": presentation["title"],
+        "show_avatar": bool(presentation["show_avatar"]),
+        "show_member_count": bool(presentation["show_member_count"]),
+        "mode": presentation.get("mode", "embed"),
+        "goodbye_mode": presentation.get("goodbye_mode", "embed"),
+        "default_title": welcome.WELCOME_DEFAULT_TITLE,
+        "default_text": welcome.WELCOME_DEFAULT_TEXT,
+        "variables": ["{member}", "{username}", "{display_name}", "{server}", "{member_count}"],
+    })
+
+
+async def handle_welcome_put(request: web.Request):
+    try:
+        guild_id = int(request.match_info["guild_id"])
+    except ValueError:
+        return _json_error("Identifiant de serveur invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+    csrf_error = _require_csrf(request, session)
+    if csrf_error:
+        return csrf_error
+    try:
+        payload = await request.json()
+    except Exception:
+        return _json_error("Le formulaire envoyé est invalide.", 400)
+    title = str(payload.get("title") or "").strip()[:256]
+    welcome = await _welcome_module()
+    await welcome._save_welcome_presentation(
+        request.app["bot"], guild.id,
+        title=title or None,
+        show_avatar=bool(payload.get("show_avatar", True)),
+        show_member_count=bool(payload.get("show_member_count", True)),
+        actor_id=int(session["user"]["id"]),
+        mode="text" if str(payload.get("mode") or "embed") == "text" else "embed",
+        goodbye_mode="text" if str(payload.get("goodbye_mode") or "embed") == "text" else "embed",
+    )
+    return web.json_response({"ok": True, "message": "Présentation de la bienvenue enregistrée."})
+
+
+async def handle_welcome_test(request: web.Request):
+    """Envoie la bienvenue réelle (même fonction que le bouton de test de /setup) à la personne connectée."""
+    try:
+        guild_id = int(request.match_info["guild_id"])
+    except ValueError:
+        return _json_error("Identifiant de serveur invalide.", 400)
+    session, guild, error = await _manageable_guild(request, guild_id)
+    if error:
+        return error
+    csrf_error = _require_csrf(request, session)
+    if csrf_error:
+        return csrf_error
+    rate_key = (request.cookies.get(SESSION_COOKIE), guild_id, "welcome-test")
+    if time.time() - request.app["write_limits"].get(rate_key, 0) < 5:
+        return _json_error("Attendez quelques secondes avant un nouveau test.", 429)
+    member = guild.get_member(int(session["user"]["id"]))
+    if member is None:
+        return _json_error("Votre compte n'est pas visible dans ce serveur pour SentriX.", 409)
+    welcome = await _welcome_module()
+    ok, message = await welcome._send_welcome(request.app["bot"], member, test=True)
+    request.app["write_limits"][rate_key] = time.time()
+    if not ok:
+        return _json_error(message, 409)
+    return web.json_response({"ok": True, "message": message})
 
 
 async def handle_create_social_notification(request: web.Request):
@@ -1061,6 +1243,15 @@ async def handle_update_guild(request: web.Request):
 
 
 @web.middleware
+async def canonical_host(request: web.Request, handler):
+    if request.method == "GET" and request.path in {"/app", "/login"}:
+        redirect = _canonical_redirect(request)
+        if redirect is not None:
+            raise redirect
+    return await handler(request)
+
+
+@web.middleware
 async def security_headers(request: web.Request, handler):
     response = await handler(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -1078,7 +1269,7 @@ async def security_headers(request: web.Request, handler):
 
 
 def build_app(bot) -> web.Application:
-    app = web.Application(middlewares=[security_headers], client_max_size=64 * 1024)
+    app = web.Application(middlewares=[canonical_host, security_headers], client_max_size=64 * 1024)
     app["bot"] = bot
     app["sessions"] = {}
     app["oauth_states"] = {}
@@ -1094,6 +1285,9 @@ def build_app(bot) -> web.Application:
     app.router.add_get("/api/guilds", handle_guilds)
     app.router.add_get("/api/guilds/{guild_id}", handle_guild)
     app.router.add_put("/api/guilds/{guild_id}/settings", handle_update_guild)
+    app.router.add_get("/api/guilds/{guild_id}/welcome", handle_welcome_get)
+    app.router.add_put("/api/guilds/{guild_id}/welcome", handle_welcome_put)
+    app.router.add_post("/api/guilds/{guild_id}/welcome/test", handle_welcome_test)
     app.router.add_post("/api/guilds/{guild_id}/notifications", handle_create_social_notification)
     app.router.add_delete(
         "/api/guilds/{guild_id}/notifications/{notification_id}",
@@ -1104,6 +1298,9 @@ def build_app(bot) -> web.Application:
         "/api/guilds/{guild_id}/sanctions/{user_id}/{action}",
         handle_sanction_action,
     )
+    # Routes Niveaux / Économie / Rôles du dashboard refondu : mêmes tables que les commandes.
+    from web.dashboard_api_community import register as register_community_routes
+    register_community_routes(app, sys.modules[__name__])
     return app
 
 
@@ -1127,7 +1324,7 @@ async def start_dashboard(bot):
 OAUTH_ERROR_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8"><title>SentriX</title>
 <style>body{background:#090b12;color:#eef1ff;font:16px system-ui;display:grid;place-items:center;height:100vh;margin:0}
 main{max-width:520px;padding:36px;background:#111522;border:1px solid #242b42;border-radius:20px}a{color:#9b8cff}</style>
-<main><h1>Connexion impossible</h1><p>La demande de connexion Discord a expiré ou n'est pas valide.</p><a href="/">Revenir au dashboard</a></main></html>"""
+<main><h1>Connexion impossible</h1><p>La demande de connexion Discord a expiré ou n'est pas valide.</p><p><a href="/app">Revenir au dashboard</a> · <a href="/login">Se reconnecter avec Discord</a></p></main></html>"""
 
 
 INDEX_HTML = r"""<!doctype html>

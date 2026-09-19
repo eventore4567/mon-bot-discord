@@ -2,7 +2,7 @@
 
 Les invariants historiques restent obligatoires : aucune landing ne flashe pendant /api/me,
 une ancienne requête serveur ne peut pas gagner après la nouvelle, les codes HTTP restent
-disponibles et un onglet invalide retombe sur la vue d'ensemble.
+disponibles et un onglet invalide retombe sur l'espace adapté au contexte.
 """
 from __future__ import annotations
 
@@ -25,32 +25,37 @@ def test_selectGuild_annule_la_requete_obsolete():
     html = dashboard.INDEX_HTML
     assert "state.guildAbort" in html
     assert "new AbortController()" in html
-    assert "if(state.guildAbort)state.guildAbort.abort();" in html
-    assert "controller!==state.guildAbort" in html
-    assert "requested!==state.guildId" in html
+    assert "if (state.guildAbort) state.guildAbort.abort();" in html
+    assert "controller !== state.guildAbort" in html
+    assert "requested !== state.guildId" in html
 
 
 def test_selectGuild_distingue_les_etats_d_erreur():
     html = dashboard.INDEX_HTML
-    assert "e.status===503" in html
+    assert "e.status === 503" in html
     assert "Reconnexion Discord en cours" in html
-    assert "e.status===401" in html
+    assert "e.status === 401" in html
     assert "Votre session Discord a expiré" in html
 
 
-def test_navigation_invalide_retombe_sur_overview():
+def test_navigation_invalide_retombe_sur_le_bon_contexte():
     html = dashboard.INDEX_HTML
-    assert "if(!META[state.tab])state.tab='overview';" in html, (
-        "un onglet inconnu doit retomber sur la vue d'ensemble"
+    assert "state.page = META[page] ? page : 'profile';" in html, (
+        "au boot, un onglet inconnu doit retomber sur Mon profil"
     )
-    assert "function go(tab){if(!META[tab])tab='overview';" in html
+    assert "if (!META[page]) page = state.guildId ? 'overview' : 'profile';" in html, (
+        "pendant la navigation, le fallback doit respecter le contexte global/serveur"
+    )
 
 
 def test_api_conserve_le_code_http_et_le_payload_de_l_erreur():
     html = dashboard.INDEX_HTML
-    assert "status:r.status" in html
     assert "Object.assign(new Error" in html
-    assert "data});return data" in html
+    assert "upstreamStatus: r.status" in html
+    assert "data });" in html
+    assert "branchSkew ? 503 : r.status" in html, (
+        "seul un 404 relayé au peer est présenté comme indisponibilité HA"
+    )
 
 
 def test_oxyde_hotfix_n_a_plus_de_boucle_de_recuperation_concurrente():

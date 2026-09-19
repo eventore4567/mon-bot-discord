@@ -37,7 +37,7 @@ def test_prestart_dashboard_contains_the_authenticated_boot_chain():
     assert "api('/api/public')" in document
     assert "api('/api/me')" in document
     assert "api('/api/guilds')" in document
-    assert 'async function boot()' in document
+    assert 'async function bootstrap()' in document
     assert 'await loadSession()' in document
     assert 'id="sentrix-product-dashboard-recovery"' in document
 

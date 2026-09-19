@@ -117,7 +117,7 @@ _APP_POLISH = r'''
 
 
 def _polish_app_html(source: str) -> str:
-    if "sentrix-app-motion-v55" in source:
+    if "sentrix-app-motion-v55" in source or 'id="sentrix-dashboard-unified-v2"' in source:
         return source
     return source.replace("</head>", _APP_POLISH + "\n</head>", 1)
 

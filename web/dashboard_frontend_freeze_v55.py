@@ -237,12 +237,16 @@ def install(dashboard) -> bool:
 
     async def frozen_handle_index(request: web.Request):
         if request.path == "/app":
-            response = web.Response(text=snapshot, content_type="text/html")
+            # Le snapshot est relu sur l'attribut du module : le finalizer peut ainsi
+            # remettre le programme unique après les installations de routes tardives.
+            body = str(getattr(dashboard, "_sentrix_frontend_snapshot_v55", None) or snapshot)
+            sha = str(getattr(dashboard, "_sentrix_frontend_snapshot_sha_v55", None) or digest)
+            response = web.Response(text=body, content_type="text/html")
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
             response.headers["X-SentriX-Dashboard"] = f"{version}-frozen"
-            response.headers["X-SentriX-Frontend-SHA"] = digest
+            response.headers["X-SentriX-Frontend-SHA"] = sha
             return response
         return await current(request)
 
@@ -281,13 +285,13 @@ def _install_unified_document(dashboard) -> bool:
     """Pose le document unifié puis ses contrats runtime sans empiler les anciennes UIs."""
     try:
         from .dashboard_unified_v2 import INDEX_HTML
-        from .dashboard_unified_runtime_v2 import enhance_html
     except Exception:
         logger.exception("Dashboard unifié V2 : source frontend impossible à importer.")
         return False
 
-    html = enhance_html(_finalize_unified_html(str(INDEX_HTML or "")))
-    html = _enhance_unified_product_ux(html)
+    # Le programme unique embarque déjà ses contrats runtime (erreurs HTTP, garde des
+    # modifications non enregistrées, changement de serveur sûr) : aucune retouche.
+    html = str(INDEX_HTML or "")
     usable, missing = _snapshot_is_usable(html)
     forbidden = ("sxLoadingExperience", "sxDirectLoader", "sentrixLoadingFetch")
     present = [marker for marker in forbidden if marker in html]

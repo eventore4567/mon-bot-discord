@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<title>SentriX — Dashboard</title>
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="SentriX"><span class="brand-mark">S</span><span class="brand-copy">SentriX<small>Dashboard</small></span></a>
+  <button class="top-search" id="globalSearch" type="button" aria-label="Rechercher une page ou un réglage"><span>Rechercher…</span><kbd>⌘K</kbd></button>
+  <div class="top-right">
+    <span class="runtime" id="runtimePill" title="État de SentriX"><i class="dot" id="runtimeDot"></i><span id="runtimeText">Connexion…</span></span>
+    <button class="icon-btn mobile-menu" id="mobileMenu" type="button" aria-label="Ouvrir le menu" aria-controls="sidebar" aria-expanded="false">≡</button>
+    <button class="profile hidden" id="profileButton" type="button" title="Ouvrir mon espace"><span id="userAvatar" class="avatar"></span><span id="userName">Compte</span></button>
+  </div>
+</header>
+
+<section class="landing hidden" id="landing">
+  <div class="landing-inner">
+    <div>
+      <span class="eyebrow">Administration Discord</span>
+      <h1>Configurez votre serveur avec <span>SentriX</span>.</h1>
+      <p>Accueil, niveaux, économie, rôles, sécurité, logs, tickets et notifications : tout se règle ici, sans commande à retenir.</p>
+      <div class="landing-actions"><a class="btn primary" href="/login">Se connecter avec Discord</a><a class="btn" href="#publicStatus">État du service</a></div>
+      <p class="landing-note hidden" id="authMessage"></p>
+    </div>
+    <aside class="landing-card" id="publicStatus">
+      <div class="landing-card-head"><strong>État du service</strong><span class="badge" id="publicBadge">Chargement</span></div>
+      <div class="landing-kpis">
+        <div><small>Serveurs</small><strong id="publicGuilds">—</strong></div>
+        <div><small>Membres</small><strong id="publicMembers">—</strong></div>
+        <div><small>Latence</small><strong id="publicLatency">—</strong></div>
+        <div><small>Uptime</small><strong id="publicUptime">—</strong></div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<section class="boot-state hidden" id="bootState" role="alert" aria-live="assertive">
+  <div class="boot-card">
+    <h1 id="bootTitle">Une erreur empêche le dashboard de charger.</h1>
+    <p id="bootMessage"></p>
+    <div class="toolbar"><button class="btn primary" id="bootRetry" type="button">Réessayer</button><a class="btn" id="bootLogin" href="/login">Se reconnecter avec Discord</a></div>
+    <small id="bootRef"></small>
+  </div>
+</section>
+<section class="app hidden" id="dashboard">
+  <aside class="server-rail" id="serverRail" aria-label="Vos serveurs"></aside>
+  <div class="mobile-overlay hidden" id="mobileOverlay"></div>
+  <aside class="sidebar" id="sidebar" aria-label="Navigation du dashboard">
+    <button class="server-head" id="serverSwitch" type="button" title="Changer de serveur">
+      <span id="sideGuildIcon" class="server-icon"></span>
+      <span class="server-copy"><strong id="sideGuildName">Choisissez un serveur</strong><small id="sideGuildMeta">SentriX</small></span>
+    </button>
+    <nav class="nav" id="navigation"></nav>
+  </aside>
+  <main class="workspace" id="main" tabindex="-1">
+    <div class="workspace-head">
+      <div class="head-copy"><h1 id="pageTitle">Vue d’ensemble</h1><p id="pageSubtitle">Chargez un serveur pour commencer.</p></div>
+      <div class="head-actions"><button class="btn ghost" id="refreshButton" type="button">Actualiser</button></div>
+    </div>
+    <nav class="subnav hidden" id="subnav" aria-label="Sections"></nav>
+    <section id="content" aria-live="polite" aria-busy="false"></section>
+  </main>
+</section>
+
+<div class="save-bar hidden" id="saveBar" role="region" aria-label="Modifications non enregistrées">
+  <span id="saveState">Modifications non enregistrées</span>
+  <div class="save-actions"><button class="btn" id="discardButton" type="button">Annuler</button><button class="btn primary" id="saveButton" type="button">Enregistrer</button></div>
+</div>
+<div class="progress" id="progress" aria-hidden="true"></div>
+<div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+<div class="net-notice hidden" id="netNotice" role="status">Connexion perdue. Les modifications seront envoyées quand la connexion reviendra.</div>
+<div class="modal-backdrop hidden" id="modalBackdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-head"><h2 id="modalTitle"></h2><button class="icon-btn" id="modalClose" type="button" aria-label="Fermer">×</button></div><div class="modal-body" id="modalBody"></div><div class="modal-actions" id="modalActions"></div></div></div>
+<div class="modal-backdrop hidden" id="paletteBackdrop"><div class="palette" role="dialog" aria-modal="true" aria-label="Aller à une page"><input id="paletteInput" type="search" placeholder="Aller à…" autocomplete="off"><div class="palette-results" id="paletteResults"></div></div></div>
+
+<script id="sentrix-dashboard-unified-v2">
+/*__JS__*/
+</script>
+<script id="sentrix-product-dashboard-recovery" type="application/json">{"owner":"unified-v2"}</script>
+<script id="sentrix-unified-runtime-v2" type="application/json">{"runtime":"unified-v2"}</script>
+</body>
+</html>

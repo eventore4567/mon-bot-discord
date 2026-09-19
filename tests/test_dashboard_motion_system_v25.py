@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from web import dashboard_motion_system_v25 as v25
+import pytest
 
 
 def _dashboard():
@@ -51,6 +52,7 @@ def test_v25_is_event_driven_and_covers_premium_motion_states():
     assert "@media(prefers-reduced-motion:reduce)" in style
 
 
+@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
 def test_v25_runs_after_v23_and_v24_in_final_authority():
     source = open("sentrix_dashboard_finalizer_v7.py", encoding="utf-8").read()
     assert "from web import dashboard_motion_system_v25" in source

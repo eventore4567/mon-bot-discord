@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from web import dashboard_button_system_v24 as v24
+import pytest
 
 
 def _dashboard():
@@ -71,6 +72,7 @@ def test_v24_classifies_dynamic_buttons_by_real_action_intent_without_polling():
     assert "créer" in script and "enregistrer" in script and "réparer" in script
 
 
+@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
 def test_v24_is_last_visual_authority_after_v23():
     source = open("sentrix_dashboard_finalizer_v7.py", encoding="utf-8").read()
     assert "from web import dashboard_button_system_v24" in source

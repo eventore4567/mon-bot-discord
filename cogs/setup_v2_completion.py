@@ -39,11 +39,24 @@ async def ensure_schema(bot) -> None:
             title TEXT,
             show_avatar INTEGER NOT NULL DEFAULT 1,
             show_member_count INTEGER NOT NULL DEFAULT 1,
+            mode TEXT NOT NULL DEFAULT 'embed',
+            goodbye_mode TEXT NOT NULL DEFAULT 'embed',
             updated_by INTEGER,
             updated_at INTEGER NOT NULL
         )
         """
     )
+    # « mode » : 'embed' (panneau, historique) ou 'text' (message simple, choisi depuis le
+    # dashboard). Colonne ajoutée après coup sur les bases existantes.
+    try:
+        columns = await bot.db.fetchall("PRAGMA table_info(welcome_presentation_v2)")
+        names = {str(c["name"]) for c in columns}
+        if "mode" not in names:
+            await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN mode TEXT NOT NULL DEFAULT 'embed'")
+        if "goodbye_mode" not in names:
+            await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN goodbye_mode TEXT NOT NULL DEFAULT 'embed'")
+    except Exception:
+        logger.debug("Colonne mode de welcome_presentation_v2 non vérifiable", exc_info=True)
     await managed_builder.ensure_managed_schema(bot)
 
 
@@ -58,26 +71,43 @@ def _conf_value(conf, key, default=None):
 async def _welcome_presentation(bot, guild_id: int) -> dict:
     await ensure_schema(bot)
     row = await bot.db.fetchone(
-        "SELECT title,show_avatar,show_member_count FROM welcome_presentation_v2 WHERE guild_id=?",
+        "SELECT title,show_avatar,show_member_count,mode,goodbye_mode FROM welcome_presentation_v2 WHERE guild_id=?",
         (guild_id,),
     )
     if row is None:
-        return {"title": WELCOME_DEFAULT_TITLE, "show_avatar": True, "show_member_count": True}
+        return {"title": WELCOME_DEFAULT_TITLE, "show_avatar": True, "show_member_count": True, "mode": "embed", "goodbye_mode": "embed"}
+
+    def _mode(key: str) -> str:
+        try:
+            value = str(row[key] or "embed")
+        except (KeyError, IndexError, TypeError):
+            value = "embed"
+        return "text" if value == "text" else "embed"
+
     return {
         "title": str(row["title"] or WELCOME_DEFAULT_TITLE),
         "show_avatar": bool(row["show_avatar"]),
         "show_member_count": bool(row["show_member_count"]),
+        "mode": _mode("mode"),
+        "goodbye_mode": _mode("goodbye_mode"),
     }
 
 
-async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, show_avatar: bool, show_member_count: bool, actor_id: int) -> None:
+async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, show_avatar: bool, show_member_count: bool, actor_id: int, mode: str | None = None, goodbye_mode: str | None = None) -> None:
     await ensure_schema(bot)
+    if mode is None or goodbye_mode is None:
+        # Appel historique (modale /setup) : les modes déjà enregistrés sont conservés.
+        current = await _welcome_presentation(bot, guild_id)
+        mode = current["mode"] if mode is None else mode
+        goodbye_mode = current["goodbye_mode"] if goodbye_mode is None else goodbye_mode
+    mode = "text" if str(mode) == "text" else "embed"
+    goodbye_mode = "text" if str(goodbye_mode) == "text" else "embed"
     await bot.db.execute(
         "INSERT INTO welcome_presentation_v2 "
-        "(guild_id,title,show_avatar,show_member_count,updated_by,updated_at) VALUES (?,?,?,?,?,?) "
+        "(guild_id,title,show_avatar,show_member_count,mode,goodbye_mode,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?) "
         "ON CONFLICT(guild_id) DO UPDATE SET title=excluded.title,show_avatar=excluded.show_avatar,"
-        "show_member_count=excluded.show_member_count,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
-        (guild_id, title or None, int(show_avatar), int(show_member_count), actor_id, int(time.time())),
+        "show_member_count=excluded.show_member_count,mode=excluded.mode,goodbye_mode=excluded.goodbye_mode,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
+        (guild_id, title or None, int(show_avatar), int(show_member_count), mode, goodbye_mode, actor_id, int(time.time())),
     )
 
 
@@ -118,14 +148,26 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
         return False, error or "Salon de bienvenue indisponible."
     conf = await bot.db.get_guild_config(member.guild.id)
     presentation = await _welcome_presentation(bot, member.guild.id)
+    body = _format_welcome(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT), member)
+    if presentation.get("mode") == "text":
+        # Message simple : le texte seul, la mention en tête (sauf en test).
+        try:
+            await channel.send(
+                content=body if test else f"{member.mention}\n{body}",
+                allowed_mentions=(discord.AllowedMentions.none() if test else discord.AllowedMentions(users=[member], roles=False, everyone=False)),
+            )
+        except discord.HTTPException as exc:
+            return False, f"Discord a refusé l’envoi : {exc}"
+        return True, f"Test envoyé dans {channel.mention}." if test else "Bienvenue envoyée."
     panel = embeds.brand(
         _format_welcome(presentation["title"], member),
-        _format_welcome(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT), member),
+        body,
     )
     if presentation["show_avatar"]:
         panel.set_thumbnail(url=member.display_avatar.url)
     if presentation["show_member_count"]:
-        panel.add_field(name="Membres", value=f"{member.guild.member_count or 0} membre(s)", inline=True)
+        count = int(member.guild.member_count or 0)
+        panel.add_field(name="Membres", value=f"{count} membre{'s' if count > 1 else ''}", inline=True)
     image_url = _conf_value(conf, "welcome_image_url")
     if image_url and str(image_url).startswith(("https://", "http://")):
         panel.set_image(url=str(image_url))
@@ -153,8 +195,14 @@ async def _send_goodbye(bot, member: discord.Member) -> discord.abc.Messageable 
     if not isinstance(channel, (discord.TextChannel, discord.Thread)):
         return None
     template = _conf_value(conf, "goodbye_message", "**{username}** a quitté **{server}**.")
-    panel = embeds.neutral("Départ d’un membre", _format_welcome(template, member))
     presentation = await _welcome_presentation(bot, member.guild.id)
+    if presentation.get("goodbye_mode") == "text":
+        try:
+            await channel.send(content=_format_welcome(template, member), allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            return None
+        return channel
+    panel = embeds.neutral("Départ d’un membre", _format_welcome(template, member))
     if presentation["show_avatar"]:
         panel.set_thumbnail(url=member.display_avatar.url)
     try:
