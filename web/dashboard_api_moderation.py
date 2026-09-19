@@ -85,11 +85,12 @@ def register(app: web.Application, dashboard) -> None:
         _session, guild, error = await _guard(request)
         if error:
             return error
-        query = str(request.query.get("q") or "").strip().casefold()
+        raw_query = str(request.query.get("q") or "").strip()
+        query = raw_query.casefold()
         if not query:
             return web.json_response({"ok": True, "members": []})
         exact_id = int(query) if query.isdigit() and len(query) <= 22 else None
-        rows = []
+        found: dict[int, discord.Member] = {}
         for member in guild.members:
             if exact_id is not None:
                 if member.id != exact_id:
@@ -98,10 +99,30 @@ def register(app: web.Application, dashboard) -> None:
                 haystack = f"{member.display_name} {member.name} {member.id}".casefold()
                 if query not in haystack:
                     continue
-            rows.append(_member_json(member))
-            if len(rows) >= 25:
+            found[member.id] = member
+            if len(found) >= 25:
                 break
-        return web.json_response({"ok": True, "members": rows})
+
+        # Sur les gros serveurs, le cache local de membres peut être partiel. Discord
+        # peut compléter une recherche par pseudo ; échec = on garde simplement le cache.
+        if exact_id is not None and exact_id not in found:
+            member = await _target(guild, exact_id)
+            if member is not None:
+                found[member.id] = member
+        elif len(found) < 25 and len(raw_query) >= 2:
+            try:
+                queried = await guild.query_members(query=raw_query, limit=25, cache=True)
+                for member in queried:
+                    found.setdefault(member.id, member)
+                    if len(found) >= 25:
+                        break
+            except (discord.HTTPException, discord.Forbidden):
+                pass
+
+        return web.json_response({
+            "ok": True,
+            "members": [_member_json(member) for member in list(found.values())[:25]],
+        })
 
     async def member_get(request: web.Request):
         _session, guild, error = await _guard(request)
