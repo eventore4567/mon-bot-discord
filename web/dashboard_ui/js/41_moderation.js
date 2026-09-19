@@ -51,7 +51,7 @@ renderSanctions = async function renderModerationCenter() {
     <section class="card full">
       <div class="card-head">
         <div><h2>Centre de modération</h2><p>Recherchez un membre, consultez son dossier puis appliquez une action réelle avec confirmation.</p></div>
-        <span class="badge blue">${plural(Number(history.total ?? rows.length), 'sanction')}</span>
+        <div class="toolbar"><button class="btn ghost" type="button" data-go="dm">Envoyer un message privé</button><span class="badge blue">${plural(Number(history.total ?? rows.length), 'sanction')}</span></div>
       </div>
       <div class="field full" style="margin-top:12px">
         <label for="moderationSearch">Rechercher un membre</label>
@@ -76,7 +76,7 @@ renderSanctions = async function renderModerationCenter() {
           </select>
         </div>
       </div>
-      <div class="list" id="moderationHistory"></div>
+      <div class="list" id="sanctionList"></div>
     </section>
   </div>`;
 
@@ -88,7 +88,7 @@ renderSanctions = async function renderModerationCenter() {
       if (!q) return true;
       return JSON.stringify(x).toLowerCase().includes(q);
     });
-    $('moderationHistory').innerHTML = items.length ? items.map(x => {
+    $('sanctionList').innerHTML = items.length ? items.map(x => {
       const member = x.user || {};
       const moderator = x.moderator || {};
       const who = member.display_name || member.username || x.user_id || 'Utilisateur';
@@ -108,12 +108,12 @@ renderSanctions = async function renderModerationCenter() {
         </div>
       </div>`;
     }).join('') : emptyState('Aucune sanction trouvée', 'Modifiez les filtres pour afficher d’autres résultats.');
-    $('moderationHistory').querySelectorAll('[data-open-member]').forEach(b => b.onclick = async () => {
+    $('sanctionList').querySelectorAll('[data-open-member]').forEach(b => b.onclick = async () => {
       state.moderationMemberId = b.dataset.openMember;
       await paintMember();
       $('moderationMemberCard').scrollIntoView({ behavior: REDUCED_MOTION() ? 'auto' : 'smooth', block: 'start' });
     });
-    $('moderationHistory').querySelectorAll('[data-reverse-sanction]').forEach(b => b.onclick = async () => {
+    $('sanctionList').querySelectorAll('[data-reverse-sanction]').forEach(b => b.onclick = async () => {
       const label = b.textContent;
       const reason = await promptDialog({ title: label, label: 'Raison', value: 'Action depuis le dashboard SentriX', confirm: label });
       if (!reason) return;
