@@ -26,7 +26,9 @@ def test_unified_matches_requested_sentrix_shell_with_blue_details():
     assert 'class="server-rail"' in document
     assert 'class="sidebar"' in document
     assert 'class="workspace"' in document
-    assert "const NAV = [" in document
+    assert "const NAV_GLOBAL = [" in document
+    assert "const NAV_SERVER = [" in document
+    assert "const NAV = NAV_SERVER;" in document
     assert 'id="sentrix-dashboard-unified-v2"' in document
 
 
