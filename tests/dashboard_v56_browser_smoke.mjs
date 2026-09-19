@@ -193,6 +193,15 @@ if(dom.window.document.getElementById("paletteBackdrop").classList.contains("hid
 paletteInput.value="sauvegardes";paletteInput.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
 if(!dom.window.document.querySelector('[data-palette-page="backups"]')) throw new Error("Recherche globale absente.");
 
+// Le bouton de compte doit quitter réellement le contexte serveur, sans déconnexion.
+dom.window.document.getElementById("paletteBackdrop").classList.add("hidden");
+dom.window.document.getElementById("profileButton").click();
+await sleep(180);
+const afterProfileTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
+if(!afterProfileTabs.includes("profile")||!afterProfileTabs.includes("servers")||!afterProfileTabs.includes("preferences")) throw new Error("Retour vers l'espace global impossible.");
+if(afterProfileTabs.includes("levels")||afterProfileTabs.includes("tickets")) throw new Error("La configuration serveur reste visible après retour au profil.");
+if(new URL(dom.window.location.href).searchParams.get("guild")) throw new Error("L'URL conserve une guild après retour au profil.");
+
 if(runtimeErrors.some(message=>/SyntaxError|ReferenceError|TypeError/.test(message))){
   console.error(runtimeErrors.join("\n"));throw new Error("Erreur JavaScript dans le dashboard unifié.");
 }
