@@ -237,7 +237,12 @@ function badge(code, label) {
 function notice(text, kind = '') { return `<div class="notice ${kind}">${esc(text)}</div>`; }
 function kpi(label, value) { return `<div class="kpi"><small>${esc(label)}</small><strong>${esc(value)}</strong></div>`; }
 function errorView(e, retry) {
-  content().innerHTML = `<div class="error-state"><h2>Impossible de charger cette page</h2><p>${esc(e?.message || 'Erreur inconnue')}</p><button class="btn primary" id="retryPage" type="button">Réessayer</button></div>`;
+  const haPreview = Number(e?.status || 0) === 503 && e?.servedBy === 'peer';
+  const title = haPreview ? 'Le serveur de test attend la bascule HA' : 'Impossible de charger cette page';
+  const copy = haPreview
+    ? 'Le dashboard affiché vient bien du standby, mais les données Discord sont encore servies par le primary. Cette page deviendra disponible dès que le standby sera l’instance active.'
+    : (e?.message || 'Erreur inconnue');
+  content().innerHTML = `<div class="error-state"><h2>${esc(title)}</h2><p>${esc(copy)}</p>${haPreview ? '<span class="badge warn">Standby passif</span>' : ''}<button class="btn primary" id="retryPage" type="button">Réessayer</button></div>`;
   $('retryPage').onclick = retry || (() => render(true));
 }
 function previewText(text) {
