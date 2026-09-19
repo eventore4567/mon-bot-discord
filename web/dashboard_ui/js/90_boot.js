@@ -29,6 +29,7 @@ async function render({ navigation = false } = {}) {
   el.setAttribute('aria-busy', 'true');
   try {
     await (PAGES[state.page] || renderOverview)();
+    if (typeof enhanceSentrixExperience === 'function') await enhanceSentrixExperience();
     painted = true; clearTimeout(skeleton);
     if (token !== renderToken) return;
     el.querySelectorAll('[data-go]').forEach(b => { if (!b.onclick) b.onclick = () => go(b.dataset.go, b.dataset.goSub || ''); });
