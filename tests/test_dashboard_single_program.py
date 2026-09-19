@@ -73,17 +73,23 @@ def test_no_periodic_dom_loop():
 
 def test_navigation_is_short_and_grouped():
     program = _program()
-    nav = re.search(r"const NAV = \[(.*?)\n\];", program, re.S).group(1)
-    pages = re.findall(r"\['([a-z]+)', '", nav)
+    global_nav = re.search(r"const NAV_GLOBAL = \[(.*?)\n\];", program, re.S).group(1)
+    server_nav = re.search(r"const NAV_SERVER = \[(.*?)\n\];", program, re.S).group(1)
+
+    assert re.findall(r"\['([a-z]+)', '", global_nav) == ["profile", "servers", "preferences"]
+    assert re.findall(r"\['([^']+)', \[\[", global_nav) == ["Mon espace"]
+
+    pages = re.findall(r"\['([a-z]+)', '", server_nav)
     assert pages == [
-        "profile", "overview", "welcome", "roles", "levels", "economy", "security",
+        "overview", "welcome", "roles", "levels", "economy", "security",
         "logs", "tickets", "games", "notifications", "automation", "embeds", "ai",
     ]
-    groups = re.findall(r"\['([^']+)', \[\[", nav)
+    groups = re.findall(r"\['([^']+)', \[\[", server_nav)
     assert groups == [
-        "Mon espace", "Communauté", "Progression", "Modération", "Jeux",
+        "Accueil", "Communauté", "Progression", "Modération", "Jeux",
         "Automatisation", "Création & personnalisation",
     ]
+
     tools = re.search(r"const TOOL_GROUPS = \[(.*?)\n\];", program, re.S).group(1)
     assert len(re.findall(r"\['([a-z]+)', '", tools)) <= 10
     assert "(ancien)" not in program
