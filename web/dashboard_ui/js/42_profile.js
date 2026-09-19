@@ -30,7 +30,7 @@ function globalServerCard(g, add = false) {
     <div class="toolbar">
       ${add
         ? `<a class="btn sm" href="${esc(g.invite_url || '#')}">Ajouter SentriX</a>`
-        : `<button class="btn sm primary" type="button" data-global-guild="${esc(g.id)}">Configurer</button>`}
+        : `<span class="desktop-rail-hint">Sélectionnez-le à gauche</span><button class="btn sm primary mobile-server-select" type="button" data-global-guild="${esc(g.id)}">Ouvrir</button>`}
     </div>
   </article>`;
 }
@@ -57,8 +57,8 @@ function renderProfile() {
           <h2>${esc(display)}</h2>
           <p>@${esc(user.username || display)} · compte Discord connecté</p>
           <div class="toolbar">
-            <button class="btn primary" type="button" id="profileChooseServer">Configurer un serveur</button>
-            <button class="btn" type="button" data-go="servers">Mes serveurs</button>
+            <button class="btn primary" type="button" data-go="servers">Mes serveurs</button>
+            <span class="profile-rail-tip">Pour configurer : choisissez un serveur dans la colonne à gauche.</span>
           </div>
         </div>
       </div>
@@ -111,7 +111,6 @@ function renderProfile() {
     </section>
   </div>`;
 
-  $('profileChooseServer').onclick = openServerPicker;
   bindGlobalServerCards();
   $('profileLogout').onclick = async () => {
     if (!(await confirmDialog({ title: 'Se déconnecter ?', body: 'Vous devrez vous reconnecter avec Discord pour revenir au dashboard.', confirm: 'Se déconnecter' }))) return;
