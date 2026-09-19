@@ -93,7 +93,9 @@ async function exitGuildToGlobal(page = 'profile') {
   await render({ navigation: true });
 }
 
-async function selectGuild(value, { preservePage = false } = {}) {
+async function selectGuild(value) {
+  const preservePage = Boolean(state.preserveGuildPage);
+  state.preserveGuildPage = false;
   if (!value || String(value) === String(state.guildId) && state.guild) return;
   if (!(await guardDirty())) return;
   if (!preservePage || GLOBAL_PAGES.has(state.page)) {
@@ -133,7 +135,8 @@ async function loadGuilds() {
   renderServerRail();
 
   if (wanted && installed.some(g => String(g.id) === String(wanted))) {
-    await selectGuild(wanted, { preservePage: true });
+    state.preserveGuildPage = true;
+    await selectGuild(wanted);
     return;
   }
 
