@@ -2,7 +2,7 @@
 const PAGES = {
   profile: renderProfile, servers: renderServers, preferences: renderPreferences,
   overview: renderOverview, welcome: renderWelcome, levels: renderLevels, economy: renderEconomy, games: renderGames, roles: renderRoles,
-  security: renderSecurity, logs: renderLogs, tickets: renderTickets, notifications: renderNotifications, automation: renderAutomation,
+  moderation: renderSanctions, security: renderSecurity, logs: renderLogs, tickets: renderTickets, notifications: renderNotifications, automation: renderAutomation,
   settings: renderSettings, access: renderAccess, embeds: renderEmbeds, ai: renderAI, invites: renderInvites, backups: renderBackups,
   dm: renderDM, advanced: renderAdvanced, diagnostic: renderDiagnostic,
 };
