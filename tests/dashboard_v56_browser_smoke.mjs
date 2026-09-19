@@ -74,6 +74,21 @@ const dom = new JSDOM(html, {
       if(url.pathname==="/api/guilds/1/roles/messages") return response({ok:true,items:[{id:"555",author:"SentriX",mine:true,text:"Choisissez vos rôles",created_at:1700000000,reactions:2}]});
       if(url.pathname==="/api/guilds/1/roles") return response({ok:true,notification_roles:[{id:"15",name:"Ping annonces"}],notification_panels:[],reaction_panels:[],reaction_roles:[]});
       if(url.pathname==="/api/guilds/1/verification-v6") return response({ok:true,configured:true,published:false,captcha_enabled:true,channel_id:"22",role_id:"15",title:"Vérification",rules_text:"1. Respectez les membres.",image_url:null,jump_url:null});
+      if(url.pathname==="/api/guilds/1/logs/config") return response({ok:true,routes:[
+        {key:"moderation",label:"Modération",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"messages",label:"Messages",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"members",label:"Membres",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"channels",label:"Salons",channel_id:null,enabled:false,valid:false,problem:"aucun salon configuré"},
+        {key:"roles",label:"Rôles",channel_id:null,enabled:false,valid:false,problem:"aucun salon configuré"},
+        {key:"voice",label:"Vocal",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"server",label:"Serveur",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"tickets",label:"Tickets",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"automod",label:"AutoMod",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"spam",label:"Anti-Spam",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"raid",label:"Anti-Raid",channel_id:"21",enabled:true,valid:true,problem:null},
+        {key:"resources",label:"Ressources",channel_id:null,enabled:false,valid:false,problem:"aucun salon configuré"},
+        {key:"files",label:"Fichiers",channel_id:null,enabled:false,valid:false,problem:"aucun salon configuré"}
+      ],events:[]});
       if(url.pathname==="/api/guilds/1/automation/reactions") return response({ok:true,items:[{id:1,channel_id:"22",channel_name:"général",mode:"all",keyword:"",emojis:["👍"],enabled:1}]});
       if(url.pathname==="/api/guilds/1/ops/overview") return response({ok:true,status:{discord_ready:true,latency_ms:42},diagnostics:[],history:[{id:1,changed_keys:["prefix"],created_at:1700000000,username:"Owner"}],staff:[],maintenance:{enabled:false,reason:""},policies:[]});
       if(url.pathname==="/api/guilds/1/ops/access") return response({ok:true,roles:[],tier:"admin"});
@@ -117,7 +132,7 @@ const checks=[
   ["levels","general","#lvSave"], ["levels","levelup",'[data-setting="level_channel"]'], ["levels","roles","#lvRoleAdd"], ["levels","avance","#lvExRoles"],
   ["economy","general","#ecSave"], ["economy","boutique","#shopAdd"], ["economy","jeux","#gmEnabled"], ["economy","gains",".kpi"], ["roles","autoroles",'[data-setting="autorole"]'], ["roles","interactifs","#reactionPanelCreate"], ["roles","avance",'[data-setting="mod_role"]'],
   ["security","protections","[data-automod]"], ["security","verification","#verifyRules"], ["security","sanctions","#sanctionList"],
-  ["logs","",'[data-setting="log_channel"]'], ["tickets","","#ticketSave"], ["notifications","","#notifAdd"], ["automation","","#reactCreate"],
+  ["logs","",'[data-log-channel]'], ["tickets","","#ticketSave"], ["notifications","","#notifAdd"], ["automation","","#reactCreate"],
   ["settings","",'[data-setting="prefix"]'], ["access","","#commandList"], ["embeds","","#embedSend"], ["ai","","[data-ai]"],
   ["invites","invites",".card"], ["backups","backups","#opsExport"], ["backups","history","[data-rollback]"],
 ];
@@ -135,7 +150,7 @@ for(const [tab,sub,selector] of checks){
 
 const interactivePathsNow=()=>requests.map(x=>x.path);
 const interactivePaths=requests.map(x=>x.path);
-for(const required of ["/api/guilds/1/welcome","/api/guilds/1/levels","/api/guilds/1/economy","/api/guilds/1/economy/games","/api/guilds/1/roles","/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/verification-v6","/api/guilds/1/automation/reactions","/api/guilds/1/ops/overview"]){
+for(const required of ["/api/guilds/1/welcome","/api/guilds/1/levels","/api/guilds/1/economy","/api/guilds/1/economy/games","/api/guilds/1/roles","/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/verification-v6","/api/guilds/1/logs/config","/api/guilds/1/automation/reactions","/api/guilds/1/ops/overview"]){
   if(!interactivePaths.includes(required)) throw new Error(`Route réelle jamais chargée: ${required}`);
 }
 // Le cache par serveur évite les rechargements : le diagnostic n'est demandé qu'une poignée de fois malgré 22 navigations.
