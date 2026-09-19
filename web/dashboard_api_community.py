@@ -530,5 +530,9 @@ def register(app: web.Application, dashboard) -> None:
     from .dashboard_api_logs import register as register_log_routes
     register_log_routes(app, dashboard)
 
+    # Automatisations SentriX Plus : Starboard, sticky, annonces programmées, VoiceHub.
+    from .dashboard_api_automation import register as register_automation_routes
+    register_automation_routes(app, dashboard)
+
 
 __all__ = ["register", "LEVEL_SETTING_KEYS"]
