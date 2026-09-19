@@ -101,3 +101,46 @@ def test_callback_refuses_without_state_cookie(canonical):
     response = asyncio.run(dashboard.handle_callback(req))
     assert response.status == 403
     assert "Connexion impossible" in response.text
+
+
+def test_bare_callback_with_valid_session_returns_to_dashboard(canonical):
+    """Une ancienne URL /oauth/callback nue ne doit pas afficher une fausse erreur si la session existe."""
+    now = __import__("time").time()
+    app = {
+        "oauth_states": {},
+        "bot": None,
+        "sessions": {
+            "session-ok": {
+                "user": {"id": "42", "username": "Tomioka", "avatar_url": None},
+                "guilds": [],
+                "csrf": "csrf",
+                "expires_at": now + 3600,
+            }
+        },
+    }
+    req = make_mocked_request(
+        "GET",
+        "/oauth/callback",
+        headers={
+            "Host": "sentrix-standby-production.up.railway.app",
+            "Cookie": f"{dashboard.SESSION_COOKIE}=session-ok",
+        },
+        app=app,
+    )
+    with pytest.raises(web.HTTPFound) as redirect:
+        asyncio.run(dashboard.handle_callback(req))
+    assert redirect.value.location == "/app"
+
+
+def test_bare_callback_without_session_still_fails_closed(canonical):
+    """Pas de state + pas de session = toujours refusé ; le correctif ne contourne pas CSRF/OAuth."""
+    app = {"oauth_states": {}, "bot": None, "sessions": {}}
+    req = make_mocked_request(
+        "GET",
+        "/oauth/callback",
+        headers={"Host": "sentrix-standby-production.up.railway.app"},
+        app=app,
+    )
+    response = asyncio.run(dashboard.handle_callback(req))
+    assert response.status == 403
+    assert "Connexion impossible" in response.text
