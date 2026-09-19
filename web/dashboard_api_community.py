@@ -534,5 +534,11 @@ def register(app: web.Application, dashboard) -> None:
     from .dashboard_api_automation import register as register_automation_routes
     register_automation_routes(app, dashboard)
 
+    # Centre de modération et profil communautaire : mêmes moteurs que les commandes.
+    from .dashboard_api_moderation import register as register_moderation_routes
+    register_moderation_routes(app, dashboard)
+    from .dashboard_api_profile import register as register_profile_routes
+    register_profile_routes(app, dashboard)
+
 
 __all__ = ["register", "LEVEL_SETTING_KEYS"]
