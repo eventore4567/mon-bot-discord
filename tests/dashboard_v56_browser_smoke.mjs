@@ -190,7 +190,7 @@ if(!s503.boot||!s503.retry||!/reconnecte/.test(s503.title)) throw new Error("503
 const g500=await bootWith(p=>p==="/api/guilds"?response({error:"Base indisponible"},500):null);
 if(!g500.boot||!g500.retry||!g500.login||!/serveurs/.test(g500.title)) throw new Error("Échec /api/guilds doit afficher un état explicite: "+JSON.stringify(g500));
 const gEmpty=await bootWith(p=>p==="/api/guilds"?response({ok:true,guilds:[]}):null);
-if(!gEmpty.dashboard||!/Aucun serveur disponible/.test(gEmpty.content)) throw new Error("Aucune guild doit afficher un empty state: "+JSON.stringify(gEmpty));
+if(!gEmpty.dashboard||!/Votre espace SentriX|Mes serveurs/.test(gEmpty.content)) throw new Error("Aucune guild doit afficher l'espace profil global: "+JSON.stringify(gEmpty));
 const stale=await bootWith(p=>null,"https://sentrix.test/app?guild=999999");
 // Développeur : le groupe Migration (anciennes interfaces) n'existe que pour lui.
 const devDom=new JSDOM(html,{url:"https://sentrix.test/app",runScripts:"dangerously",pretendToBeVisual:true,virtualConsole,beforeParse(w){ w.fetch=async(input,options={})=>{ const u=new URL(typeof input==="string"?input:input.url,w.location.href); if(u.pathname==="/api/me") return response({ok:true,user:{id:"42",username:"Dev",avatar_url:null},csrf:"t",developer:true}); return dom.window.fetch(input,options); }; w.scrollTo=()=>{}; }});

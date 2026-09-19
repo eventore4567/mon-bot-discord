@@ -1,10 +1,11 @@
 /* ---------- rendu ---------- */
 const PAGES = {
-  overview: renderOverview, welcome: renderWelcome, levels: renderLevels, economy: renderEconomy, roles: renderRoles,
+  profile: renderProfile, overview: renderOverview, welcome: renderWelcome, levels: renderLevels, economy: renderEconomy, games: renderGames, roles: renderRoles,
   security: renderSecurity, logs: renderLogs, tickets: renderTickets, notifications: renderNotifications, automation: renderAutomation,
   settings: renderSettings, access: renderAccess, embeds: renderEmbeds, ai: renderAI, invites: renderInvites, backups: renderBackups,
   dm: renderDM, advanced: renderAdvanced, diagnostic: renderDiagnostic,
 };
+const GLOBAL_PAGES = new Set(['profile']);
 let renderToken = 0;
 const REDUCED_MOTION = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const SKELETON = '<div class="grid" aria-hidden="true"><div class="skeleton full" style="min-height:72px"></div><div class="skeleton" style="min-height:180px"></div><div class="skeleton" style="min-height:180px"></div></div>';
@@ -12,7 +13,7 @@ const SKELETON = '<div class="grid" aria-hidden="true"><div class="skeleton full
    la page met plus de 150 ms, puis entrée (160 ms). Tout autre appel (enregistrement,
    Actualiser, tick live) redessine sans transition et garde le contenu visible. */
 async function render({ navigation = false } = {}) {
-  if (!state.guild) return;
+  if (!state.guild && !GLOBAL_PAGES.has(state.page)) return;
   const token = ++renderToken;
   setHead(); renderNav(); renderSubnav(); syncUrl();
   const el = content();
@@ -103,13 +104,15 @@ async function loadGuilds() {
   }
   if (wanted) { await selectGuild(wanted); return; }
   if (installed.length) {
-    content().innerHTML = emptyState('Choisissez un serveur', 'Sélectionnez le serveur à configurer.', { id: 'pickGuild', label: 'Choisir un serveur' });
-    content().querySelector('[data-empty-action="pickGuild"]').onclick = openServerPicker;
-    openServerPicker();
+    state.page = 'profile';
+    state.sub = '';
+    await render({ navigation: true });
     return;
   }
   const invite = state.guilds.find(g => g.invite_url)?.invite_url;
-  content().innerHTML = emptyState('Aucun serveur disponible', 'Ajoutez SentriX à un serveur dont vous êtes administrateur, ou vérifiez vos permissions.', invite ? { id: 'inviteBot', label: 'Ajouter SentriX à un serveur' } : null);
+  state.page = 'profile';
+  state.sub = '';
+  await render({ navigation: true });
   const b = content().querySelector('[data-empty-action="inviteBot"]'); if (b) b.onclick = () => { location.href = invite; };
 }
 

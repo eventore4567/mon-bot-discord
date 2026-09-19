@@ -2,17 +2,19 @@
    NAV : groupes visibles. Chaque page a un titre, un sous-titre court et, si besoin,
    des sous-sections. « Plus d'outils » regroupe ce qui sert rarement. */
 const NAV = [
-  ['Accueil', [['overview', 'Vue d’ensemble']]],
-  ['Communauté', [['welcome', 'Accueil & Départs'], ['levels', 'Niveaux'], ['economy', 'Économie'], ['roles', 'Rôles']]],
-  ['Modération', [['security', 'Sécurité'], ['logs', 'Logs']]],
-  ['Support', [['tickets', 'Tickets']]],
+  ['Mon espace', [['profile', 'Mon profil'], ['overview', 'Vue d’ensemble']]],
+  ['Communauté', [['welcome', 'Accueil & Départs'], ['roles', 'Rôles']]],
+  ['Progression', [['levels', 'Niveaux'], ['economy', 'Économie']]],
+  ['Modération', [['security', 'Sécurité'], ['logs', 'Logs'], ['tickets', 'Tickets']]],
+  ['Jeux', [['games', 'Jeux']]],
   ['Automatisation', [['notifications', 'Notifications'], ['automation', 'Automatisation']]],
+  ['Création & personnalisation', [['embeds', 'Embeds'], ['ai', 'Intelligence artificielle']]],
 ];
 /* Plus d'outils : trois groupes courts. Le groupe Développeur n'apparaît que pour le
    propriétaire du bot (/api/me.developer) ; il porte aussi, le temps de la migration, les
    anciennes interfaces dont toutes les fonctions ne sont pas encore reprises ici. */
 const TOOL_GROUPS = [
-  ['Outils', [['embeds', 'Envoyer un embed'], ['ai', 'Intelligence artificielle'], ['invites', 'Invitations & webhooks']]],
+  ['Outils', [['invites', 'Invitations & webhooks']]],
   ['Administration', [['settings', 'Paramètres'], ['access', 'Commandes & accès'], ['backups', 'Sauvegardes & historique'], ['diagnostic', 'Diagnostic']]],
   ['Développeur', [['advanced', 'Centre avancé']]],
 ];
@@ -20,10 +22,12 @@ const TOOLS = TOOL_GROUPS.flatMap(([, items]) => items);
 const MIGRATION_LINKS = [['/setup-center', 'Centre Setup'], ['/operations', 'Opérations'], ['/feature-suite', 'Fonctions avancées'], ['/enterprise', 'Enterprise']];
 
 const META = {
+  profile: ['Mon profil', 'Vos serveurs, votre compte et vos préférences dashboard.'],
   overview: ['Configuration du serveur', 'Gérez les principales fonctionnalités de SentriX.'],
   welcome: ['Accueil & Départs', 'Messages envoyés quand un membre arrive ou quitte le serveur.'],
   levels: ['Niveaux', 'XP gagné en discutant, annonces et récompenses.'],
   economy: ['Économie', 'Monnaie du serveur, gains et boutique.'],
+  games: ['Jeux', 'Mini-jeux, récompenses et accès.'],
   roles: ['Rôles', 'Rôles donnés automatiquement ou choisis par les membres.'],
   security: ['Sécurité', 'Protections automatiques, vérification et sanctions.'],
   logs: ['Logs', 'Ce qui se passe sur le serveur, écrit dans vos salons.'],
@@ -44,6 +48,7 @@ const SUBS = {
   welcome: [['bienvenue', 'Bienvenue'], ['departs', 'Départs']],
   levels: [['general', 'Général'], ['levelup', 'Message de niveau'], ['roles', 'Récompenses'], ['avance', 'Avancé']],
   economy: [['general', 'Général'], ['boutique', 'Boutique'], ['jeux', 'Jeux'], ['gains', 'Gains'], ['avance', 'Avancé']],
+  games: [['jeux', 'Catalogue & accès']],
   roles: [['autoroles', 'Autorôle'], ['interactifs', 'Rôles interactifs'], ['niveau', 'Rôles de niveau'], ['avance', 'Avancé']],
   security: [['protections', 'Protections'], ['verification', 'Vérification'], ['sanctions', 'Sanctions']],
   advanced: [['actions', 'Actions'], ['members', 'Membres'], ['automations', 'Automations'], ['templates', 'Templates'], ['audit', 'Audit'], ['access', 'Accès dashboard']],
@@ -59,7 +64,7 @@ function moduleDot(key) {
   const m = d?.modules?.[key]; if (!m) return '';
   return `<span class="state-dot ${m.code === 'active' ? 'on' : m.code === 'error' ? 'err' : ''}" aria-hidden="true"></span>`;
 }
-const NAV_MODULE = { welcome: 'welcome', levels: 'levels', economy: 'economy', roles: 'roles', security: 'automod', logs: 'logs', tickets: 'tickets', notifications: 'notifications' };
+const NAV_MODULE = { welcome: 'welcome', levels: 'levels', economy: 'economy', games: 'economy', roles: 'roles', security: 'automod', logs: 'logs', tickets: 'tickets', notifications: 'notifications' };
 function navButton(page, label) {
   return `<button type="button" data-tab="${page}" class="${state.page === page ? 'active' : ''}" ${state.page === page ? 'aria-current="page"' : ''}>${esc(label)}${NAV_MODULE[page] ? moduleDot(NAV_MODULE[page]) : ''}</button>`;
 }

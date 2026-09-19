@@ -37,6 +37,27 @@ function bindModuleButtons(root = content()) {
   root.querySelectorAll('[data-module]').forEach(b => b.onclick = () => toggleModule(b.dataset.module, b.dataset.action));
   root.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go, b.dataset.goSub || ''));
 }
+
+function renderProfile() {
+  const installed = state.guilds.filter(g => g.installed);
+  const missing = state.guilds.filter(g => !g.installed);
+  const user = state.user || {};
+  const display = user.global_name || user.username || 'Compte Discord';
+  const avatar = user.avatar_url ? `<img src="${esc(user.avatar_url)}" alt="">` : esc(String(display).slice(0, 2).toUpperCase());
+  const details = [
+    ['Identifiant', user.id],
+    ['Nom Discord', user.username],
+    ['Bio', user.bio],
+    ['Anniversaire', user.birthday],
+    ['Localisation', user.location],
+  ].filter(([, value]) => value != null && String(value).trim() !== '');
+  const serverItem = (g, add = false) => `<div class="row"><span class="server-icon">${g.icon_url ? `<img src="${esc(g.icon_url)}" alt="">` : esc((g.name || 'S').slice(0, 2).toUpperCase())}</span><div class="row-main"><b>${esc(g.name)}</b><small>${add ? 'SentriX n’est pas encore installé' : (g.owner ? 'Propriétaire' : 'Administrateur')}</small></div>${add ? `<a class="btn sm" href="${esc(g.invite_url || '#')}">Ajouter</a>` : `<button class="btn sm primary" type="button" data-profile-guild="${esc(g.id)}">Configurer</button>`}</div>`;
+  content().innerHTML = `<div class="grid"><section class="card full"><div class="profile-line"><span class="avatar big">${avatar}</span><div><h2>${esc(display)}</h2><p>Votre espace SentriX avant de configurer un serveur.</p></div></div>${details.length ? `<div class="list compact" style="margin-top:14px">${details.map(([k, v]) => `<div class="row"><div class="row-main"><b>${esc(k)}</b><small>${esc(v)}</small></div></div>`).join('')}</div>` : `<p class="info" style="margin-top:12px">Aucune donnée de profil étendue n’est fournie par le backend actuel.</p>`}</section><section class="card full"><div class="card-head"><div><h2>Mes serveurs</h2><p>Choisissez où travailler. Aucun identifiant à coller.</p></div><button class="btn" type="button" id="profilePickServer">Choisir un serveur</button></div><div class="list">${installed.length ? installed.map(g => serverItem(g)).join('') : emptyState('Aucun serveur avec SentriX', 'Ajoutez SentriX à un serveur dont vous êtes administrateur.')}</div></section><section class="card"><h2>Préférences dashboard</h2><div class="list compact"><label class="switch-row"><span class="switch-copy"><b>Ouvrir le dernier serveur utilisé</b><span>Cette préférence reste dans ce navigateur.</span></span><input class="switch" id="prefLastGuild" type="checkbox" ${localStorage.getItem('sentrix:guild') ? 'checked' : ''}></label><label class="switch-row"><span class="switch-copy"><b>Garder “Plus d’outils” ouvert</b><span>Utile si vous utilisez souvent les pages avancées.</span></span><input class="switch" id="prefMoreTools" type="checkbox" ${state.navMore ? 'checked' : ''}></label></div></section><section class="card"><h2>Ajouter SentriX</h2><div class="list">${missing.length ? missing.slice(0, 6).map(g => serverItem(g, true)).join('') : '<p class="info">Tous les serveurs visibles ont déjà SentriX, ou Discord ne fournit pas d’autre serveur administrable.</p>'}</div></section></div>`;
+  $('profilePickServer').onclick = openServerPicker;
+  content().querySelectorAll('[data-profile-guild]').forEach(b => b.onclick = () => selectGuild(b.dataset.profileGuild));
+  $('prefLastGuild').onchange = () => { if (!$('prefLastGuild').checked) localStorage.removeItem('sentrix:guild'); else if (state.guildId) localStorage.setItem('sentrix:guild', state.guildId); };
+  $('prefMoreTools').onchange = () => { state.navMore = $('prefMoreTools').checked; localStorage.setItem('sentrix:nav:more', state.navMore ? '1' : '0'); renderNav(); };
+}
 function moduleCard({ key, title, page, info }, m) {
   const code = moduleStatus(m);
   const sw = MODULE_SWITCH[key];

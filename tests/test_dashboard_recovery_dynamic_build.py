@@ -7,7 +7,12 @@ le PRIMARY passif au lieu d'être proxyfié vers le leader Discord.
 from __future__ import annotations
 
 import asyncio
+import os
 from types import SimpleNamespace
+
+from aiohttp import web
+
+os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from web import dashboard_recovery_v54 as recovery
 
@@ -77,3 +82,49 @@ def test_recovery_uses_build_app_installed_after_recovery(monkeypatch):
 
     assert calls == ["late-wrapper"]
     assert bot._sentrix_dashboard_mode_v54 == "complet"
+
+
+def test_recovery_core_app_keeps_native_dashboard_api_routes():
+    async def handler(_request):
+        return web.json_response({"ok": True})
+
+    dashboard = SimpleNamespace(
+        security_headers=lambda request, handler: handler(request),
+        handle_index=handler,
+        handle_health=handler,
+        handle_login=handler,
+        handle_callback=handler,
+        handle_logout=handler,
+        handle_public=handler,
+        handle_me=handler,
+        handle_guilds=handler,
+        handle_guild=handler,
+        handle_update_guild=handler,
+        handle_welcome_get=handler,
+        handle_welcome_put=handler,
+        handle_welcome_test=handler,
+        handle_create_social_notification=handler,
+        handle_delete_social_notification=handler,
+        handle_sanctions=handler,
+        handle_sanction_action=handler,
+        _manageable_guild=lambda _request, _guild_id: None,
+        _require_csrf=lambda _request, _session: None,
+        _json_error=lambda message, status: web.json_response({"ok": False, "error": message}, status=status),
+    )
+    bot = SimpleNamespace(db=None)
+
+    app = recovery._build_core_app(dashboard, bot)
+    paths = {(route.method, route.resource.canonical) for route in app.router.routes()}
+
+    expected = {
+        ("GET", "/api/guilds/{guild_id}/welcome"),
+        ("PUT", "/api/guilds/{guild_id}/welcome"),
+        ("POST", "/api/guilds/{guild_id}/welcome/test"),
+        ("GET", "/api/guilds/{guild_id}/levels"),
+        ("PUT", "/api/guilds/{guild_id}/levels"),
+        ("GET", "/api/guilds/{guild_id}/economy"),
+        ("PUT", "/api/guilds/{guild_id}/economy"),
+        ("GET", "/api/guilds/{guild_id}/roles"),
+        ("GET", "/api/guilds/{guild_id}/roles/messages"),
+    }
+    assert expected <= paths
