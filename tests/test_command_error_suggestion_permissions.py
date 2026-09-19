@@ -39,7 +39,7 @@ def test_unknown_command_handler_uses_permission_filtered_suggestions(monkeypatc
 
     assert handled is True
     filtered.assert_called_once_with(bot, ctx, "kik")
-    sender.assert_awaited_once_with(ctx, "Commande introuvable. Essayez `+kick`.")
+    sender.assert_awaited_once_with(ctx, "Commande introuvable. Essayez `+kick`.", delete_after=8)
 
 
 def test_command_suggestions_hide_commands_without_required_permission(monkeypatch):
